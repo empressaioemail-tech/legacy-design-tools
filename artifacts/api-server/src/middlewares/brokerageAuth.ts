@@ -36,8 +36,8 @@ export function brokerageAuth(
   const keys = loadBrokerageApiKeys();
   if (keys.size === 0) {
     res.status(503).json({
-      error: "brokerage_api_unconfigured",
-      message: "BROKERAGE_DEV_API_KEY is not configured on this server",
+      error: "property_brief_api_unconfigured",
+      message: "Property Brief API key is not configured on this server",
     });
     return;
   }

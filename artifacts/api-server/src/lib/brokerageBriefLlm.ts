@@ -11,9 +11,16 @@ import {
   formatSiteContextForLlm,
   type BrokerageSiteContext,
 } from "./brokerageSiteContext";
+import {
+  stripInlineCitations,
+  type PresentationMode,
+} from "./propertyBriefLaySummary";
 
-export const BROKERAGE_DISCLAIMER =
-  "Reasoning summary from Hauska municipal code catalog. Not legal advice. Verify with city staff and applicable zoning before client representations.";
+export const PROPERTY_BRIEF_DISCLAIMER =
+  "Property intel from Hauska municipal code catalog. Not legal advice. Verify with city staff and applicable zoning before client representations.";
+
+/** @deprecated Use PROPERTY_BRIEF_DISCLAIMER */
+export const BROKERAGE_DISCLAIMER = PROPERTY_BRIEF_DISCLAIMER;
 
 export interface BriefAtomInput {
   atomDid: string;
@@ -49,11 +56,15 @@ export interface SummarizeResult {
 export interface ResearchChatResult {
   message: string;
   messageHtml: string;
+  /** Pro-mode inline citations (backward compatible). */
   citations: NumberedCitation[];
+  /** Consumer contract: technical sources for “See sources” / “For your agent”. */
+  sources: NumberedCitation[];
   disclaimer: string;
   confidence: number;
   generatedAt: string;
   method: "grok" | "rules-v1";
+  presentationMode: PresentationMode;
 }
 
 function escapeHtml(s: string): string {
@@ -164,7 +175,7 @@ export function buildRulesReasoningSummary(input: {
     headline,
     paragraphsHtml: paragraphs.join(""),
     citations,
-    disclaimer: BROKERAGE_DISCLAIMER,
+    disclaimer: PROPERTY_BRIEF_DISCLAIMER,
     generatedAt: input.finishedAt,
     method: "rules-v1",
   };
@@ -220,7 +231,7 @@ export async function generateReasoningSummary(input: {
         `Property brief for ${input.address} (${jurisdictionLabel(input.jurisdiction)}).`,
       paragraphsHtml: textToHtmlParagraphs(body),
       citations,
-      disclaimer: BROKERAGE_DISCLAIMER,
+      disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       generatedAt: input.finishedAt,
       method: "grok",
     };
@@ -230,7 +241,7 @@ export async function generateReasoningSummary(input: {
       headline: `Property brief for ${input.address}.`,
       paragraphsHtml: textToHtmlParagraphs(raw),
       citations,
-      disclaimer: BROKERAGE_DISCLAIMER,
+      disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       generatedAt: input.finishedAt,
       method: "grok",
     };
@@ -287,7 +298,7 @@ export async function generateSummarize(input: {
       html: textToHtmlParagraphs(body),
       summary: body.split(/\n\n+/)[0]?.trim() || parsed.headline?.trim() || "",
       citations: parseInlineCitations(body, atoms),
-      disclaimer: BROKERAGE_DISCLAIMER,
+      disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       method: "grok",
     };
   } catch {
@@ -296,10 +307,33 @@ export async function generateSummarize(input: {
       html: textToHtmlParagraphs(raw),
       summary: raw.slice(0, 280),
       citations: parseInlineCitations(raw, atoms),
-      disclaimer: BROKERAGE_DISCLAIMER,
+      disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       method: "grok",
     };
   }
+}
+
+function finalizeResearchChatAnswer(
+  answer: string,
+  atoms: BriefAtomInput[],
+  presentationMode: PresentationMode,
+  generatedAt: string,
+  method: "grok" | "rules-v1",
+): ResearchChatResult {
+  const citations = parseInlineCitations(answer, atoms);
+  const consumer = presentationMode === "consumer";
+  const plain = consumer ? stripInlineCitations(answer) : answer;
+  return {
+    message: plain,
+    messageHtml: textToHtmlParagraphs(plain),
+    citations,
+    sources: citations,
+    disclaimer: PROPERTY_BRIEF_DISCLAIMER,
+    confidence: citations.length > 0 ? 0.75 : 0.5,
+    generatedAt,
+    method,
+    presentationMode,
+  };
 }
 
 export async function generateResearchChat(input: {
@@ -309,7 +343,9 @@ export async function generateResearchChat(input: {
   history: Array<{ role: string; content: string }>;
   atoms: BriefAtomInput[];
   siteContext?: BrokerageSiteContext;
+  presentationMode?: PresentationMode;
 }): Promise<ResearchChatResult> {
+  const presentationMode = input.presentationMode ?? "consumer";
   const atoms = input.atoms.slice(0, 16);
   const historyBlock = input.history
     .slice(-8)
@@ -317,9 +353,11 @@ export async function generateResearchChat(input: {
     .join("\n");
 
   const system = [
-    "You are a Texas real estate research assistant for buyer/agent diligence.",
-    "Answer using ONLY the numbered code atom sources. Cite with [n] inline.",
-    "Do not invent code. No compliance guarantees.",
+    "You are a Texas property intel assistant (lay-friendly Carfax-for-property).",
+    presentationMode === "consumer"
+      ? "Answer in plain English for a homebuyer. Do NOT include [n] citation markers or statute numbers in the answer text."
+      : "Answer for a real estate professional. Cite with [n] inline matching source numbers.",
+    "Use ONLY the numbered code atom sources. Do not invent code. No compliance guarantees.",
     "Respond with JSON only: {\"answer\": string (plain text)}.",
   ].join(" ");
 
@@ -353,10 +391,12 @@ export async function generateResearchChat(input: {
       message: msg,
       messageHtml: `<p>${escapeHtml(msg)}</p>`,
       citations: [],
-      disclaimer: BROKERAGE_DISCLAIMER,
+      sources: [],
+      disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       confidence: atoms.length > 0 ? 0.4 : 0.1,
       generatedAt,
       method: "rules-v1",
+      presentationMode,
     };
   }
 
@@ -364,26 +404,20 @@ export async function generateResearchChat(input: {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { answer?: string };
     const answer = (parsed.answer ?? raw).trim();
-    const citations = parseInlineCitations(answer, atoms);
-    return {
-      message: answer,
-      messageHtml: textToHtmlParagraphs(answer),
-      citations,
-      disclaimer: BROKERAGE_DISCLAIMER,
-      confidence: citations.length > 0 ? 0.75 : 0.5,
+    return finalizeResearchChatAnswer(
+      answer,
+      atoms,
+      presentationMode,
       generatedAt,
-      method: "grok",
-    };
+      "grok",
+    );
   } catch {
-    const citations = parseInlineCitations(raw, atoms);
-    return {
-      message: raw.trim(),
-      messageHtml: textToHtmlParagraphs(raw),
-      citations,
-      disclaimer: BROKERAGE_DISCLAIMER,
-      confidence: citations.length > 0 ? 0.7 : 0.45,
+    return finalizeResearchChatAnswer(
+      raw.trim(),
+      atoms,
+      presentationMode,
       generatedAt,
-      method: "grok",
-    };
+      "grok",
+    );
   }
 }

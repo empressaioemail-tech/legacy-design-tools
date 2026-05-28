@@ -31,6 +31,13 @@ import {
   generateResearchChat,
   type BriefAtomInput,
 } from "../lib/brokerageBriefLlm";
+import { generateLaySummary } from "../lib/propertyBriefLaySummary";
+import {
+  PERSONA_BUCKETS,
+  STARTER_PROMPT_IDS,
+  type PersonaBucket,
+  type StarterPromptId,
+} from "../lib/propertyBriefStarters";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
 import { fetchBrokerageSiteContext } from "../lib/brokerageSiteContext";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
@@ -53,11 +60,20 @@ export const BROKERAGE_CODE_QUERIES = [
   "major addition permit",
 ] as const;
 
+const presentationModeSchema = z.enum(["consumer", "pro"]).default("consumer");
+
+const starterFields = {
+  starterPromptId: z.enum(STARTER_PROMPT_IDS).optional(),
+  personaBucket: z.enum(PERSONA_BUCKETS).optional(),
+};
+
 const BRIEF_BODY = z.object({
   address: z.string().min(1),
   mls_id: z.string().optional(),
   source: z.string().optional(),
   page_url: z.string().optional(),
+  presentationMode: presentationModeSchema.optional(),
+  ...starterFields,
 });
 
 const SUMMARIZE_BODY = z.object({
@@ -83,6 +99,8 @@ const RESEARCH_CHAT_BODY = z.object({
       }),
     )
     .default([]),
+  presentationMode: presentationModeSchema.optional(),
+  ...starterFields,
 });
 
 const router: IRouter = Router();
@@ -94,6 +112,29 @@ brokerageV1.use("/gtm", brokerageGtmRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
+
+function logStarterPromptSelected(input: {
+  installId: string | null;
+  starterPromptId: StarterPromptId;
+  personaBucket?: PersonaBucket;
+  runId: string;
+  address: string;
+  mlsId?: string | null;
+}) {
+  if (!input.installId) return;
+  const addressHash = listingKeyFromAddress(input.address, input.mlsId);
+  recordGtmEvent({
+    installId: input.installId,
+    eventType: "starter_prompt_selected",
+    runId: input.runId,
+    listingKey: addressHash,
+    payload: {
+      starterPromptId: input.starterPromptId,
+      personaBucket: input.personaBucket ?? null,
+      addressHash,
+    },
+  });
+}
 
 function sectionTitle(query: string): string {
   const first = query.split(" ")[0] ?? query;
@@ -190,7 +231,15 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     return;
   }
 
-  const { address, mls_id, source, page_url } = parse.data;
+  const {
+    address,
+    mls_id,
+    source,
+    page_url,
+    presentationMode = "consumer",
+    starterPromptId,
+    personaBucket,
+  } = parse.data;
   const runId = randomUUID();
   const startedAt = new Date().toISOString();
   const installId = installIdFromRequest(req);
@@ -207,6 +256,17 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       });
       return;
     }
+  }
+
+  if (installId && starterPromptId) {
+    logStarterPromptSelected({
+      installId,
+      starterPromptId,
+      personaBucket,
+      runId,
+      address,
+      mlsId: mls_id,
+    });
   }
 
   if (installId) {
@@ -310,10 +370,21 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     siteContext,
   });
 
+  const laySummary = await generateLaySummary({
+    address,
+    jurisdiction: jurisdictionKey,
+    corpusStatus,
+    atoms: briefAtoms,
+    siteContext,
+    presentationMode,
+    finishedAt,
+  });
+
   const responseBody = {
     runId,
     startedAt,
     finishedAt,
+    presentationMode,
     property: {
       address,
       source: source ?? null,
@@ -328,10 +399,11 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     sections,
     citations,
     reasoningSummary,
+    laySummary,
     meta: {
       disclaimer:
         "Not legal advice. Code layer only where jurisdiction is in corpus. Verify with city staff.",
-      tool: "brokerage-brief-v1",
+      tool: "property-brief-v1",
     },
   };
 
@@ -418,7 +490,8 @@ brokerageV1.post(
       return;
     }
 
-    const { runId, message, history } = parse.data;
+    const { runId, message, history, presentationMode = "consumer", starterPromptId, personaBucket } =
+      parse.data;
 
     const installId = installIdFromRequest(req);
     if (installId) {
@@ -456,6 +529,16 @@ brokerageV1.post(
 
     const jurisdictionKey = payload.jurisdiction ?? null;
     const address = payload.property?.address ?? run.address;
+
+    if (installId && starterPromptId) {
+      logStarterPromptSelected({
+        installId,
+        starterPromptId,
+        personaBucket,
+        runId,
+        address,
+      });
+    }
 
     const atomMap = new Map<string, BriefAtomInput>();
 
@@ -511,6 +594,7 @@ brokerageV1.post(
       history,
       atoms,
       siteContext: storedSiteContext,
+      presentationMode,
     });
 
     if (installId) {

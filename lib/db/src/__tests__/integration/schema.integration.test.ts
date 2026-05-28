@@ -140,6 +140,9 @@ describe("lib/db schema integration", () => {
         // `findings.citations` jsonb per recon decision Ask #2).
         "finding_runs",
         "findings",
+        // GTM observation layer — Property Brief extension consent + events.
+        "gtm_consent",
+        "gtm_events",
         "materializable_elements",
         "package_share_comments",
         "package_shares",
