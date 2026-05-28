@@ -204,6 +204,72 @@ CREATE TABLE @@SCHEMA@@.brokerage_brief_runs (
 );
 
 
+-- Name: brokerage_wallet_ledger; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_wallet_ledger (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    install_id text NOT NULL,
+    amount_cents integer NOT NULL,
+    kind text NOT NULL,
+    reference text,
+    balance_after_cents integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: brokerage_wallets; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_wallets (
+    install_id text NOT NULL,
+    balance_cents integer DEFAULT 0 NOT NULL,
+    auto_refill_enabled boolean DEFAULT false NOT NULL,
+    auto_refill_failed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: brokerage_workspace_attachments; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_workspace_attachments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    workspace_id uuid NOT NULL,
+    kind text NOT NULL,
+    uri text,
+    body text,
+    title text,
+    created_by_install_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: brokerage_workspace_shares; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_workspace_shares (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    workspace_id uuid NOT NULL,
+    owner_install_id text NOT NULL,
+    share_token text NOT NULL,
+    collaborator_install_id text,
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: brokerage_workspaces; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_workspaces (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    install_id text NOT NULL,
+    listing_key text NOT NULL,
+    address text NOT NULL,
+    source_listing_url text,
+    latest_run_id uuid,
+    opened_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: canned_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.canned_findings (
@@ -1224,6 +1290,36 @@ ALTER TABLE ONLY @@SCHEMA@@.brokerage_brief_runs
     ADD CONSTRAINT brokerage_brief_runs_pkey PRIMARY KEY (id);
 
 
+-- Name: brokerage_wallet_ledger brokerage_wallet_ledger_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_wallet_ledger
+    ADD CONSTRAINT brokerage_wallet_ledger_pkey PRIMARY KEY (id);
+
+
+-- Name: brokerage_wallets brokerage_wallets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_wallets
+    ADD CONSTRAINT brokerage_wallets_pkey PRIMARY KEY (install_id);
+
+
+-- Name: brokerage_workspace_attachments brokerage_workspace_attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_attachments
+    ADD CONSTRAINT brokerage_workspace_attachments_pkey PRIMARY KEY (id);
+
+
+-- Name: brokerage_workspace_shares brokerage_workspace_shares_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_shares
+    ADD CONSTRAINT brokerage_workspace_shares_pkey PRIMARY KEY (id);
+
+
+-- Name: brokerage_workspaces brokerage_workspaces_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspaces
+    ADD CONSTRAINT brokerage_workspaces_pkey PRIMARY KEY (id);
+
+
 -- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.canned_findings
@@ -1667,6 +1763,31 @@ CREATE UNIQUE INDEX briefing_sources_current_layer_uniq ON @@SCHEMA@@.briefing_s
 CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at);
 
 
+-- Name: brokerage_wallet_ledger_install_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_wallet_ledger_install_created_idx ON @@SCHEMA@@.brokerage_wallet_ledger USING btree (install_id, created_at DESC);
+
+
+-- Name: brokerage_workspace_attachments_workspace_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_workspace_attachments_workspace_idx ON @@SCHEMA@@.brokerage_workspace_attachments USING btree (workspace_id, created_at DESC);
+
+
+-- Name: brokerage_workspace_shares_token_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX brokerage_workspace_shares_token_uidx ON @@SCHEMA@@.brokerage_workspace_shares USING btree (share_token);
+
+
+-- Name: brokerage_workspaces_install_listing_key_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX brokerage_workspaces_install_listing_key_uidx ON @@SCHEMA@@.brokerage_workspaces USING btree (install_id, listing_key);
+
+
+-- Name: brokerage_workspaces_install_opened_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_workspaces_install_opened_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (install_id, opened_at DESC);
+
+
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX canned_findings_tenant_discipline_idx ON @@SCHEMA@@.canned_findings USING btree (tenant_id, discipline);
@@ -2093,6 +2214,18 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
 
 ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
     ADD CONSTRAINT briefing_sources_superseded_by_id_briefing_sources_id_fk FOREIGN KEY (superseded_by_id) REFERENCES @@SCHEMA@@.briefing_sources(id) ON DELETE SET NULL;
+
+
+-- Name: brokerage_workspace_attachments brokerage_workspace_attachments_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_attachments
+    ADD CONSTRAINT brokerage_workspace_attachments_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES @@SCHEMA@@.brokerage_workspaces(id) ON DELETE CASCADE;
+
+
+-- Name: brokerage_workspace_shares brokerage_workspace_shares_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_shares
+    ADD CONSTRAINT brokerage_workspace_shares_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES @@SCHEMA@@.brokerage_workspaces(id) ON DELETE CASCADE;
 
 
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_source_id_code_atom_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

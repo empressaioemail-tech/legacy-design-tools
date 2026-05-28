@@ -52,5 +52,7 @@ export * from "./canva";
 export * from "./collateral";
 export * from "./encumbrances";
 export * from "./brokerageBriefRuns";
+export * from "./brokerageWorkspaces";
+export * from "./brokerageWallets";
 export * from "./gtmEvents";
 export * from "./gtmConsent";
