@@ -81,6 +81,22 @@ export interface RetrieveOptions {
 export async function retrieveAtomsForQuestion(
   opts: RetrieveOptions,
 ): Promise<RetrievedAtom[]> {
+  const mode = (process.env.BRIEF_CODE_RETRIEVAL ?? "neon").toLowerCase();
+  if (mode === "mcp") {
+    opts.logger?.warn?.(
+      {
+        jurisdictionKey: opts.jurisdictionKey,
+        mode,
+      },
+      "BRIEF_CODE_RETRIEVAL=mcp not wired in @workspace/codes — falling back to neon",
+    );
+  }
+  return retrieveAtomsFromNeon(opts);
+}
+
+async function retrieveAtomsFromNeon(
+  opts: RetrieveOptions,
+): Promise<RetrievedAtom[]> {
   const limit = opts.limit ?? 8;
   const applyMinScore = opts.applyMinScore ?? true;
   const log = opts.logger;

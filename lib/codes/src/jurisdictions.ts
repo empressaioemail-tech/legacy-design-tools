@@ -1,3 +1,8 @@
+import {
+  BLOCKED_CITY_STATE_KEYS,
+  CENTRAL_TEXAS_CITY_STATE_TO_KEY,
+} from "./centralTexasPilot";
+
 /**
  * Jurisdiction registry — what code books we can warm up, per jurisdiction.
  *
@@ -144,14 +149,28 @@ export function keyFromEngagement(input: {
   const city = (input.jurisdictionCity ?? "").trim().toLowerCase();
   const state = (input.jurisdictionState ?? "").trim().toLowerCase();
   if (city && state) {
-    const k = CITY_STATE_TO_KEY[`${city}|${state}`];
+    const pair = `${city}|${state}`;
+    if (BLOCKED_CITY_STATE_KEYS[pair as keyof typeof BLOCKED_CITY_STATE_KEYS]) {
+      return null;
+    }
+    const k =
+      CITY_STATE_TO_KEY[pair] ?? CENTRAL_TEXAS_CITY_STATE_TO_KEY[pair];
     if (k) return k;
   }
 
   // 2) Freeform "City, ST" jurisdiction string.
   const fromJurisdiction = parseCityState(input.jurisdiction);
   if (fromJurisdiction) {
-    const k = CITY_STATE_TO_KEY[fromJurisdiction];
+    if (
+      BLOCKED_CITY_STATE_KEYS[
+        fromJurisdiction as keyof typeof BLOCKED_CITY_STATE_KEYS
+      ]
+    ) {
+      return null;
+    }
+    const k =
+      CITY_STATE_TO_KEY[fromJurisdiction] ??
+      CENTRAL_TEXAS_CITY_STATE_TO_KEY[fromJurisdiction];
     if (k) return k;
   }
 
@@ -159,7 +178,11 @@ export function keyFromEngagement(input: {
   //    known key by substring match — cheap because the registry is tiny.
   const addr = (input.address ?? "").toLowerCase();
   if (addr) {
-    for (const [pair, key] of Object.entries(CITY_STATE_TO_KEY)) {
+    const merged = {
+      ...CENTRAL_TEXAS_CITY_STATE_TO_KEY,
+      ...CITY_STATE_TO_KEY,
+    };
+    for (const [pair, key] of Object.entries(merged)) {
       const [c, s] = pair.split("|");
       // Require both city and state to appear, to avoid e.g. "Moab" matching
       // "Moab, OK". Use a comma-aware test for the typical "City, ST" form.

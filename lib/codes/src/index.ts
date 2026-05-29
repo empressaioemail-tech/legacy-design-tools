@@ -8,6 +8,15 @@ export {
 } from "./jurisdictions";
 
 export {
+  ENGINE_CORPUS_JURISDICTION_KEYS,
+  CENTRAL_TEXAS_CITY_STATE_TO_KEY,
+  listPilotJurisdictionManifest,
+  getPilotCoverageTier,
+  type PilotCoverageTier,
+  type EngineCorpusJurisdictionKey,
+} from "./centralTexasPilot";
+
+export {
   enqueueWarmupForJurisdiction,
   drainQueue,
   runWarmupForJurisdiction,
