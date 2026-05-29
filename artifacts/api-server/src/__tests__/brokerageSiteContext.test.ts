@@ -365,3 +365,44 @@ describe("fetchBrokerageSiteContext", () => {
     expect(keys).toHaveLength(6);
   });
 });
+
+describe("stripSiteContextForClient", () => {
+  const fatPayload = { geo: "x".repeat(8000) };
+
+  it("removes layer payloads while keeping summary fields", async () => {
+    const { stripSiteContextForClient, stripBriefPayloadForClient } =
+      await import("../lib/brokerageSiteContext");
+
+    const ctx = {
+      placeKey: "coord:30.50000:-97.60000",
+      layers: [
+        {
+          layerKind: "regrid-parcel",
+          adapterKey: "regrid:parcels",
+          tier: "national",
+          status: "ok" as const,
+          provider: "regrid",
+          summary: "APN R123 · 0.25 ac",
+          payload: fatPayload,
+        },
+      ],
+    };
+
+    const slim = stripSiteContextForClient(ctx);
+    expect(slim.layers[0]).not.toHaveProperty("payload");
+    expect(slim.layers[0]?.summary).toBe("APN R123 · 0.25 ac");
+    expect(slim.layers[0]?.provider).toBe("regrid");
+
+    const brief = stripBriefPayloadForClient({
+      runId: "abc",
+      siteContext: ctx,
+    });
+    expect(
+      (brief.siteContext as typeof slim).layers[0],
+    ).not.toHaveProperty("payload");
+
+    const fullBytes = Buffer.byteLength(JSON.stringify({ siteContext: ctx }), "utf8");
+    const slimBytes = Buffer.byteLength(JSON.stringify({ siteContext: slim }), "utf8");
+    expect(slimBytes).toBeLessThan(fullBytes * 0.05);
+  });
+});

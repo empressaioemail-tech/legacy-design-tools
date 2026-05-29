@@ -44,10 +44,14 @@ import {
 } from "../lib/propertyBriefStarters";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { fetchBrokerageSiteContext } from "../lib/brokerageSiteContext";
+import {
+  fetchBrokerageSiteContext,
+  stripSiteContextForClient,
+} from "../lib/brokerageSiteContext";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { assertComputeAllowed } from "../lib/brokerageWallet";
 import {
+  findWorkspaceByListingKey,
   listingKeyFromAddress,
   upsertWorkspaceFromBrief,
 } from "../lib/brokerageWorkspace";
@@ -523,6 +527,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     citationCount: citations.length,
   });
 
+  let workspaceId: string | undefined;
+
   if (installId) {
     await upsertWorkspaceFromBrief({
       installId,
@@ -534,6 +540,9 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       latitude: geocode?.lat,
       longitude: geocode?.lon,
     });
+
+    const ws = await findWorkspaceByListingKey(installId, lk);
+    workspaceId = ws?.id;
 
     if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
       recordGtmEvent({
@@ -558,7 +567,13 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     });
   }
 
-  res.json(responseBody);
+  res.json({
+    ...responseBody,
+    siteContext: stripSiteContextForClient(siteContext),
+    ...(workspaceId
+      ? { workspaceId, workspaceDid }
+      : {}),
+  });
 });
 
 brokerageV1.post(
@@ -756,7 +771,21 @@ brokerageV1.post(
       });
     }
 
-    res.json(result);
+    let workspaceId: string | undefined;
+    if (installId) {
+      const ws = await findWorkspaceByListingKey(installId, run.listingKey);
+      workspaceId = ws?.id;
+    }
+
+    res.json({
+      ...result,
+      ...(workspaceId
+        ? {
+            workspaceId,
+            workspaceDid: buildPropertyWorkspaceDid(run.listingKey),
+          }
+        : {}),
+    });
   },
 );
 

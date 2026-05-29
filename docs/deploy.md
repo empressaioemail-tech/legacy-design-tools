@@ -237,6 +237,68 @@ Plan review citations require **cortex-local warmup**, not substrate browse alon
 
 ---
 
+## Property Brief — Regrid on prod
+
+Regrid parcel and zoning layers on `POST /api/brokerage/v1/brief` require
+`REGRID_API_KEY` mounted on the **`cortex-api`** Cloud Run service. Without
+it, `siteContext.layers` omits usable `regrid-parcel` / `regrid-zoning`
+summaries (live adapter calls fail; archived snapshots may still serve if
+present).
+
+### 1. Verify secret exists (GCP Secret Manager)
+
+```powershell
+gcloud secrets describe REGRID_API_KEY --project=legacy-design-tools-prod
+```
+
+If missing, create and seed from the operator vault (not git):
+
+```powershell
+gcloud secrets create REGRID_API_KEY --replication-policy=automatic --project=legacy-design-tools-prod
+# echo -n "<key>" | gcloud secrets versions add REGRID_API_KEY --data-file=-
+```
+
+### 2. Mount on Cloud Run
+
+```powershell
+gcloud run services update cortex-api `
+  --region us-central1 `
+  --project legacy-design-tools-prod `
+  --update-secrets REGRID_API_KEY=REGRID_API_KEY:latest
+```
+
+No code change required — the adapters read `process.env.REGRID_API_KEY` at
+runtime. Redeploy or update secrets only; traffic shift follows the normal
+[canary sequence](#operator-deploy-lifecycle-workflow_dispatch-actions).
+
+### 3. Smoke (Round Rock pilot address)
+
+After deploy, authenticated brief should include Regrid layers with
+`status: "ok"` when the key is valid:
+
+```powershell
+$headers = @{
+  Authorization = "Bearer <BROKERAGE_DEV_API_KEY>"
+  "X-Hauska-Install-Id" = "<install-uuid>"
+  "Content-Type" = "application/json"
+}
+$body = '{"address":"1904 Heathwood Cir, Round Rock, TX 78664"}'
+Invoke-RestMethod -Method POST `
+  -Uri "https://cortex-api-tds7av26va-uc.a.run.app/api/brokerage/v1/brief" `
+  -Headers $headers -Body $body | ConvertTo-Json -Depth 6
+```
+
+Expect `siteContext.layers[]` entries with `layerKind` of `regrid-parcel` or
+`regrid-zoning` and `status` `"ok"`. Extension-facing responses omit
+`layers[].payload` (summaries only); operator smoke may use the same slim
+shape post–PR #138.
+
+Permanent layer retention uses `place_layer_snapshots` (migration `0030`).
+Migration `0032` (GTM / related) is independent — do not block this mount on
+unrelated merges.
+
+---
+
 ## Env var inventory
 
 Derived from `process.env.*` in `artifacts/api-server/src/` plus the
@@ -262,6 +324,7 @@ Manager. `Class = config` → Cloud Run env var.
 | `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings and brokerage brief/research Grok calls. Default `grok-3-mini`. |
 | `BROKERAGE_DEV_API_KEY` | secret | required for extension API | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Comma-separated keys accepted. Extension sends `Authorization: Bearer <key>` or `X-Hauska-Key`. Also reads `BROKERAGE_API_KEYS` (alias). |
 | `BROKERAGE_API_KEYS` | secret | optional alias | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Same as `BROKERAGE_DEV_API_KEY` when multiple pilot keys are needed. |
+| `REGRID_API_KEY` | secret | required for Regrid parcel/zoning layers | `@workspace/adapters/national/regrid` | Property Brief `siteContext` adapters (`regrid-parcel`, `regrid-zoning`). Without it, live fetches fail and layers stay empty on prod. Mount via Secret Manager — never commit the value. See [Property Brief — Regrid on prod](#property-brief--regrid-on-prod). |
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
 | `MNML_API_URL` | config | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
 | `MNML_API_KEY` | secret | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |

@@ -97,6 +97,28 @@ export interface BrokerageSiteContext {
   placeKey: string;
 }
 
+/** Extension / workspace read — omits GeoJSON-scale `payload` blobs. */
+export function stripSiteContextForClient(
+  ctx: BrokerageSiteContext,
+): BrokerageSiteContext {
+  return {
+    placeKey: ctx.placeKey,
+    layers: ctx.layers.map(({ payload: _payload, ...layer }) => layer),
+  };
+}
+
+/** Strip layer payloads from a stored brief run payload before API response. */
+export function stripBriefPayloadForClient<T extends Record<string, unknown>>(
+  brief: T,
+): T {
+  const raw = brief.siteContext;
+  if (!raw || typeof raw !== "object") return brief;
+  return {
+    ...brief,
+    siteContext: stripSiteContextForClient(raw as BrokerageSiteContext),
+  };
+}
+
 export interface FetchBrokerageSiteContextInput {
   latitude: number;
   longitude: number;
