@@ -1986,14 +1986,14 @@ CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING
 CREATE INDEX gtm_events_install_id_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (install_id, created_at);
 
 
--- Name: gtm_events_source_surface_created_at_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX gtm_events_source_surface_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (source_surface, created_at DESC);
-
-
 -- Name: gtm_events_mcp_tool_payload_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX gtm_events_mcp_tool_payload_idx ON @@SCHEMA@@.gtm_events USING btree (((payload_json ->> 'tool_name'::text))) WHERE (event_type = 'mcp_tool_call'::text);
+
+
+-- Name: gtm_events_source_surface_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_events_source_surface_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (source_surface, created_at);
 
 
 -- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -
