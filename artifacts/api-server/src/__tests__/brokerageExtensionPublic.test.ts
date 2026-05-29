@@ -80,6 +80,7 @@ const {
   gtmPayloadWithClientTier,
   EXTENSION_PUBLIC_CLIENT_TIER,
 } = await import("../lib/brokerageExtensionPublic");
+const { gtmEvents } = await import("@workspace/db");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
