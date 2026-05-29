@@ -16,10 +16,21 @@ import {
   FEDERAL_ADAPTERS,
   ALL_ADAPTERS,
   isFccEnabled,
+  isTceqEdwardsEnabled,
 } from "../registry";
 import { fccBroadbandAdapter } from "../federal/fcc-broadband";
 
 describe("registry — QA-22 SCOPE B FCC gating", () => {
+  describe("isTceqEdwardsEnabled", () => {
+    it("is off unless TCEQ_EDWARDS_ENABLED is the literal string true", () => {
+      expect(isTceqEdwardsEnabled({})).toBe(false);
+      expect(isTceqEdwardsEnabled({ TCEQ_EDWARDS_ENABLED: "1" })).toBe(false);
+      expect(isTceqEdwardsEnabled({ TCEQ_EDWARDS_ENABLED: "true" })).toBe(
+        true,
+      );
+    });
+  });
+
   describe("isFccEnabled", () => {
     it("returns false when FCC_ENABLED is unset", () => {
       expect(isFccEnabled({})).toBe(false);

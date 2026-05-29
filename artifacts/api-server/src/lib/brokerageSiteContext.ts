@@ -1,9 +1,15 @@
 /**
- * Property Brief site-context layers — FEMA flood + Regrid parcel/zoning
- * for the Chrome extension wedge (no engagement / briefing_sources row).
+ * Property Brief site-context layers — federal environmental + Regrid
+ * parcel/zoning for the Chrome extension wedge (no engagement /
+ * briefing_sources row).
  *
  * Read order: permanent place_layer_snapshots → adapter_response_cache
  * (via runAdapters cache) → live upstream.
+ *
+ * Federal set mirrors `FEDERAL_ADAPTERS` minus FCC (QA-22) and matches
+ * the nationwide generate-layers federal trio: FEMA, USGS NED, EPA
+ * EJScreen, plus Regrid parcel/zoning. USDA / USFWS adapters are not
+ * yet in `@workspace/adapters` — track under PB-003 follow-up.
  */
 
 import {
@@ -13,15 +19,21 @@ import {
   PARCEL_ID_KEYS,
   ZONING_CODE_KEYS,
   ZONING_DESC_KEYS,
+  isTceqEdwardsEnabled,
+  type Adapter,
   type AdapterRunOutcome,
   type AdapterResult,
 } from "@workspace/adapters";
 import { femaNfhlAdapter } from "@workspace/adapters/federal/fema-nfhl";
+import { usgsNedAdapter } from "@workspace/adapters/federal/usgs-ned";
+import { epaEjscreenAdapter } from "@workspace/adapters/federal/epa-ejscreen";
 import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
 import {
   regridParcelsAdapter,
   regridZoningAdapter,
 } from "@workspace/adapters/national/regrid";
+import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
+import { texasEdwardsAquiferAdapter } from "@workspace/adapters/state/texas";
 import { createAdapterResponseCache } from "./adapterCache";
 import { placeKeyFromCoords } from "./placeLayerUtils";
 import {
@@ -29,15 +41,43 @@ import {
   writePlaceLayerSnapshot,
 } from "./placeLayerSnapshots";
 
-const BROKERAGE_SITE_CONTEXT_ADAPTERS = [
-  femaNfhlAdapter,
-  regridParcelsAdapter,
-  regridZoningAdapter,
+/** Wall-clock budget for one brief site-context fetch (all adapters). */
+export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 30_000;
+
+/** Premium Regrid `fields` keys beyond pilot GIS column names. */
+const REGRID_PARCEL_ID_KEYS = [
+  ...PARCEL_ID_KEYS,
+  "parcelnumb",
+  "parcelnum",
+  "state_parcelnum",
+  "account_num",
 ] as const;
 
-const SNAPSHOT_ADAPTER_KEYS = BROKERAGE_SITE_CONTEXT_ADAPTERS.map(
-  (a) => a.adapterKey,
-);
+const REGRID_ZONING_CODE_KEYS = [
+  ...ZONING_CODE_KEYS,
+  "zoning",
+  "zoning_code",
+] as const;
+
+const REGRID_ZONING_DESC_KEYS = [
+  ...ZONING_DESC_KEYS,
+  "zoning_description",
+  "zoning_desc",
+] as const;
+
+function brokerageSiteContextAdapters(): readonly Adapter[] {
+  const adapters: Adapter[] = [
+    femaNfhlAdapter,
+    usgsNedAdapter,
+    epaEjscreenAdapter,
+    regridParcelsAdapter,
+    regridZoningAdapter,
+  ];
+  if (isTceqEdwardsEnabled()) {
+    adapters.push(texasEdwardsAquiferAdapter);
+  }
+  return adapters;
+}
 
 export interface BrokerageSiteContextLayer {
   layerKind: string;
@@ -75,7 +115,7 @@ function summarizeRegridPayload(
       | undefined;
     const fields = parcel?.properties?.fields;
     if (!fields) return null;
-    const apn = pickFirstString(fields, PARCEL_ID_KEYS);
+    const apn = pickFirstString(fields, REGRID_PARCEL_ID_KEYS);
     const acres =
       typeof fields.ll_gisacre === "number" ? fields.ll_gisacre : null;
     const owner = pickFirstString(fields, ["owner", "ownername", "ownfrst"]);
@@ -98,8 +138,8 @@ function summarizeRegridPayload(
       | undefined;
     const fields = zoning?.properties?.fields;
     if (!fields) return null;
-    const code = pickFirstString(fields, ZONING_CODE_KEYS);
-    const desc = pickFirstString(fields, ZONING_DESC_KEYS);
+    const code = pickFirstString(fields, REGRID_ZONING_CODE_KEYS);
+    const desc = pickFirstString(fields, REGRID_ZONING_DESC_KEYS);
     const subtype = pickFirstString(fields, ["zoning_subtype", "zoning_type"]);
     if (code && desc) {
       return subtype ? `${code} — ${desc} (${subtype})` : `${code} — ${desc}`;
@@ -113,10 +153,17 @@ function layerSummary(
   layerKind: string,
   payload: Record<string, unknown>,
 ): string | null {
-  if (layerKind === "fema-nfhl-flood-zone") {
-    return summarizeFederalPayload(layerKind, payload);
-  }
-  return summarizeRegridPayload(layerKind, payload);
+  return (
+    summarizeFederalPayload(layerKind, payload) ??
+    summarizeStatePayload(layerKind, payload) ??
+    summarizeRegridPayload(layerKind, payload)
+  );
+}
+
+function adapterSourceKind(adapter: Adapter): AdapterResult["sourceKind"] {
+  if (adapter.adapterKey.startsWith("regrid:")) return "national-aggregator";
+  if (adapter.tier === "state") return "state-adapter";
+  return "federal-adapter";
 }
 
 function outcomeToLayer(
@@ -158,7 +205,7 @@ function outcomeToLayer(
 }
 
 function snapshotToOutcome(
-  adapter: (typeof BROKERAGE_SITE_CONTEXT_ADAPTERS)[number],
+  adapter: Adapter,
   snap: {
     payload: Record<string, unknown>;
     snapshotAt: string;
@@ -182,12 +229,8 @@ function snapshotToOutcome(
     adapterKey: adapter.adapterKey,
     tier: adapter.tier,
     layerKind: adapter.layerKind,
-    sourceKind:
-      adapter.adapterKey.startsWith("regrid:")
-        ? "national-aggregator"
-        : "federal-adapter",
-    provider:
-      adapter.adapterKey.startsWith("regrid:") ? "Regrid" : "FEMA NFHL",
+    sourceKind: adapterSourceKind(adapter),
+    provider: adapter.provider,
     snapshotDate: snap.snapshotAt,
     payload: snap.payload,
   };
@@ -201,12 +244,13 @@ function snapshotToOutcome(
 }
 
 async function loadArchivedOutcomes(
+  adapters: readonly Adapter[],
   latitude: number,
   longitude: number,
   placeKey: string,
 ): Promise<Map<string, AdapterRunOutcome>> {
   const found = new Map<string, AdapterRunOutcome>();
-  for (const adapter of BROKERAGE_SITE_CONTEXT_ADAPTERS) {
+  for (const adapter of adapters) {
     const snap = await readPlaceLayerSnapshot({
       adapterKey: adapter.adapterKey,
       latitude,
@@ -228,6 +272,18 @@ async function loadArchivedOutcomes(
   return found;
 }
 
+function emptyArchiveResult(adapter: Adapter, archivedAt: string): AdapterResult {
+  return {
+    adapterKey: adapter.adapterKey,
+    tier: adapter.tier,
+    layerKind: adapter.layerKind,
+    sourceKind: adapterSourceKind(adapter),
+    provider: adapter.provider,
+    snapshotDate: archivedAt,
+    payload: {},
+  };
+}
+
 export async function fetchBrokerageSiteContext(
   input: FetchBrokerageSiteContextInput,
 ): Promise<BrokerageSiteContext> {
@@ -236,6 +292,8 @@ export async function fetchBrokerageSiteContext(
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return { layers: [], placeKey };
   }
+
+  const adapters = brokerageSiteContextAdapters();
 
   const jurisdiction = resolveJurisdiction({
     jurisdictionCity: input.jurisdictionCity,
@@ -248,28 +306,44 @@ export async function fetchBrokerageSiteContext(
     jurisdiction.localKey === "grand-county-ut" ||
     jurisdiction.localKey === "lemhi-county-id";
 
-  const archived = await loadArchivedOutcomes(latitude, longitude, placeKey);
-  const missingAdapters = BROKERAGE_SITE_CONTEXT_ADAPTERS.filter(
-    (a) => !archived.has(a.adapterKey),
+  const archived = await loadArchivedOutcomes(
+    adapters,
+    latitude,
+    longitude,
+    placeKey,
   );
+  const missingAdapters = adapters.filter((a) => !archived.has(a.adapterKey));
 
   let liveOutcomes: AdapterRunOutcome[] = [];
   if (missingAdapters.length > 0) {
     const cache = createAdapterResponseCache();
-    liveOutcomes = await runAdapters({
-      adapters: [...missingAdapters],
-      context: {
-        parcel: {
-          latitude,
-          longitude,
-          address: input.address ?? null,
+    const budgetAc = new AbortController();
+    const budgetTimer = setTimeout(
+      () => budgetAc.abort(),
+      BROKERAGE_SITE_CONTEXT_TIMEOUT_MS,
+    );
+    try {
+      liveOutcomes = await runAdapters({
+        adapters: [...missingAdapters],
+        context: {
+          parcel: {
+            latitude,
+            longitude,
+            address: input.address ?? null,
+          },
+          jurisdiction: { ...jurisdiction, partnerCity },
+          signal: budgetAc.signal,
         },
-        jurisdiction: { ...jurisdiction, partnerCity },
-      },
-      cache,
-    });
+        cache,
+      });
+    } finally {
+      clearTimeout(budgetTimer);
+    }
 
     for (const outcome of liveOutcomes) {
+      const adapter = adapters.find((a) => a.adapterKey === outcome.adapterKey);
+      if (!adapter) continue;
+
       if (outcome.status === "ok" && outcome.result) {
         await writePlaceLayerSnapshot({
           adapterKey: outcome.adapterKey,
@@ -280,50 +354,34 @@ export async function fetchBrokerageSiteContext(
         });
         continue;
       }
-      // Archive negative results so a repeat brief at the same coords does
-      // not re-hit Regrid/FEMA for adapters that already returned no-coverage.
       if (outcome.status === "no-coverage") {
-        const archivedAt = new Date().toISOString();
         await writePlaceLayerSnapshot({
           adapterKey: outcome.adapterKey,
           latitude,
           longitude,
           placeKey,
-          result: {
-            adapterKey: outcome.adapterKey,
-            tier: outcome.tier,
-            layerKind: outcome.layerKind,
-            sourceKind: outcome.adapterKey.startsWith("regrid:")
-              ? "national-aggregator"
-              : "federal-adapter",
-            provider:
-              outcome.adapterKey.startsWith("regrid:") ? "Regrid" : "FEMA NFHL",
-            snapshotDate: archivedAt,
-            payload: {},
-          },
+          result: emptyArchiveResult(adapter, new Date().toISOString()),
         });
       }
     }
   }
 
-  const mergedOutcomes: AdapterRunOutcome[] = BROKERAGE_SITE_CONTEXT_ADAPTERS.map(
-    (a) => {
-      const archivedOutcome = archived.get(a.adapterKey);
-      if (archivedOutcome) return archivedOutcome;
-      return (
-        liveOutcomes.find((o) => o.adapterKey === a.adapterKey) ?? {
-          adapterKey: a.adapterKey,
-          tier: a.tier,
-          layerKind: a.layerKind,
-          status: "failed" as const,
-          error: {
-            code: "unknown" as const,
-            message: "No layer outcome",
-          },
-        }
-      );
-    },
-  );
+  const mergedOutcomes: AdapterRunOutcome[] = adapters.map((a) => {
+    const archivedOutcome = archived.get(a.adapterKey);
+    if (archivedOutcome) return archivedOutcome;
+    return (
+      liveOutcomes.find((o) => o.adapterKey === a.adapterKey) ?? {
+        adapterKey: a.adapterKey,
+        tier: a.tier,
+        layerKind: a.layerKind,
+        status: "failed" as const,
+        error: {
+          code: "unknown" as const,
+          message: "No layer outcome",
+        },
+      }
+    );
+  });
 
   return {
     placeKey,
@@ -333,14 +391,92 @@ export async function fetchBrokerageSiteContext(
   };
 }
 
-/** Plain-text block for Grok prompts (ok layers with summaries only). */
+function regridParcelDetailLines(
+  payload: Record<string, unknown>,
+): string[] {
+  const parcel = payload.parcel as
+    | { properties?: { fields?: Record<string, unknown> } }
+    | undefined;
+  const fields = parcel?.properties?.fields;
+  if (!fields) return [];
+
+  const lines: string[] = [];
+  const apn = pickFirstString(fields, REGRID_PARCEL_ID_KEYS);
+  const llUuid = pickFirstString(fields, ["ll_uuid", "llUuid"]);
+  const owner = pickFirstString(fields, ["owner", "ownername", "ownfrst"]);
+  const landUse = pickFirstString(fields, [
+    "usecode",
+    "usedesc",
+    "landuse",
+    "land_use",
+  ]);
+  const acres =
+    typeof fields.ll_gisacre === "number" ? fields.ll_gisacre : null;
+  const parcelZoning = pickFirstString(fields, REGRID_ZONING_CODE_KEYS);
+
+  if (apn) lines.push(`APN: ${apn}`);
+  if (llUuid) lines.push(`Regrid ll_uuid: ${llUuid}`);
+  if (acres !== null) lines.push(`Area: ${acres.toFixed(2)} acres`);
+  if (landUse) lines.push(`Land use: ${landUse}`);
+  if (owner) lines.push(`Owner: ${owner}`);
+  if (parcelZoning) lines.push(`Zoning (parcel field): ${parcelZoning}`);
+  return lines;
+}
+
+function regridZoningDetailLines(
+  payload: Record<string, unknown>,
+): string[] {
+  const zoning = payload.zoning as
+    | { properties?: { fields?: Record<string, unknown> } }
+    | undefined;
+  const fields = zoning?.properties?.fields;
+  if (!fields) return [];
+
+  const lines: string[] = [];
+  const code = pickFirstString(fields, REGRID_ZONING_CODE_KEYS);
+  const desc = pickFirstString(fields, REGRID_ZONING_DESC_KEYS);
+  const subtype = pickFirstString(fields, ["zoning_subtype", "zoning_type"]);
+  const llUuid = pickFirstString(fields, ["ll_uuid", "llUuid"]);
+
+  if (code) lines.push(`Zoning code: ${code}`);
+  if (desc) lines.push(`Zoning description: ${desc}`);
+  if (subtype) lines.push(`Zoning subtype: ${subtype}`);
+  if (llUuid) lines.push(`Regrid ll_uuid: ${llUuid}`);
+  return lines;
+}
+
+function layerDetailLines(layer: BrokerageSiteContextLayer): string[] {
+  if (layer.status !== "ok" || !layer.payload) {
+    return layer.summary ? [layer.summary] : [];
+  }
+
+  if (layer.layerKind === "regrid-parcel") {
+    const detail = regridParcelDetailLines(layer.payload);
+    return detail.length ? detail : layer.summary ? [layer.summary] : [];
+  }
+  if (layer.layerKind === "regrid-zoning") {
+    const detail = regridZoningDetailLines(layer.payload);
+    return detail.length ? detail : layer.summary ? [layer.summary] : [];
+  }
+  const summary =
+    summarizeFederalPayload(layer.layerKind, layer.payload) ??
+    summarizeStatePayload(layer.layerKind, layer.payload);
+  return summary ? [summary] : layer.summary ? [layer.summary] : [];
+}
+
+/** Plain-text block for Grok prompts (ok layers with field-level Regrid detail). */
 export function formatSiteContextForLlm(ctx: BrokerageSiteContext): string {
-  const lines = ctx.layers
-    .filter((l) => l.status === "ok" && l.summary)
-    .map(
-      (l) =>
-        `- ${l.layerKind} (${l.provider ?? l.adapterKey}): ${l.summary}`,
-    );
+  const lines: string[] = [];
+  for (const layer of ctx.layers) {
+    if (layer.status !== "ok") continue;
+    const detail = layerDetailLines(layer);
+    if (!detail.length) continue;
+    const header = `${layer.layerKind} (${layer.provider ?? layer.adapterKey})`;
+    lines.push(`- ${header}:`);
+    for (const row of detail) {
+      lines.push(`  · ${row}`);
+    }
+  }
   if (!lines.length) return "";
   return ["Site context layers:", ...lines].join("\n");
 }

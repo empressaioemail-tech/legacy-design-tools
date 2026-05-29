@@ -82,6 +82,17 @@ export function isFccEnabled(
   return env.FCC_ENABLED === "true";
 }
 
+/**
+ * PB-008 — optional TCEQ Edwards Aquifer on the Property Brief site-
+ * context path. Default off; set `TCEQ_EDWARDS_ENABLED=true` on the
+ * api-server env to include the state-tier adapter for Texas parcels.
+ */
+export function isTceqEdwardsEnabled(
+  env: NodeJS.ProcessEnv = defaultProcessEnv(),
+): boolean {
+  return env.TCEQ_EDWARDS_ENABLED === "true";
+}
+
 export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   femaNfhlAdapter,
   usgsNedAdapter,

@@ -55,6 +55,20 @@ function floodLayerSummary(siteContext?: BrokerageSiteContext): string | null {
   return layer?.summary ?? null;
 }
 
+function siteLayerSummary(
+  siteContext: BrokerageSiteContext | undefined,
+  pattern: RegExp,
+): string | null {
+  const layer = siteContext?.layers.find(
+    (l) =>
+      l.status === "ok" &&
+      (pattern.test(l.layerKind) ||
+        pattern.test(l.adapterKey) ||
+        pattern.test(l.summary ?? "")),
+  );
+  return layer?.summary ?? null;
+}
+
 function hasAtomTopic(atoms: BriefAtomInput[], needles: RegExp): boolean {
   return atoms.some(
     (a) =>
@@ -74,6 +88,14 @@ export function buildRulesLaySummary(input: {
   finishedAt: string;
 }): LaySummaryResult {
   const floodSummary = floodLayerSummary(input.siteContext);
+  const wetlandsSummary = siteLayerSummary(
+    input.siteContext,
+    /wetland|usfws|nwi|regulated.?water/i,
+  );
+  const soilsSummary = siteLayerSummary(
+    input.siteContext,
+    /soil|usda|ssurgo/i,
+  );
   const inCorpus =
     input.corpusStatus === "in_corpus" || input.corpusStatus === "partial";
   const aduHit = hasAtomTopic(input.atoms, /adu|accessory|dwelling/i);
@@ -95,6 +117,28 @@ export function buildRulesLaySummary(input: {
         : aduHit
           ? "Adopted code snippets reference accessory dwelling rules. Lot size, zoning district, and utility capacity still matter — confirm with Bastrop planning before promising a guest house."
           : "Our standard property-intel scan did not pull strong ADU provisions. That does not prove ADUs are banned — only that we did not find a clear hit.",
+    },
+    {
+      id: "wetlands",
+      label: "Wetlands / habitat",
+      status: wetlandsSummary ? "maybe" : "unknown",
+      oneLine: wetlandsSummary
+        ? wetlandsSummary
+        : "Wetlands data was not available for this lookup.",
+      detailParagraph: wetlandsSummary
+        ? `Federal habitat / wetlands screening: ${wetlandsSummary}. Confirm with USACE / USFWS before disturbing soils or waterways.`
+        : "We could not retrieve a wetlands or habitat overlay for this pin. Your agent can order a wetland delineation if the lot is near water.",
+    },
+    {
+      id: "soils",
+      label: "Soils",
+      status: soilsSummary ? "maybe" : "unknown",
+      oneLine: soilsSummary
+        ? soilsSummary
+        : "Soil survey data was not available for this lookup.",
+      detailParagraph: soilsSummary
+        ? `USDA soil survey: ${soilsSummary}. Septic suitability and foundation design still need a site-specific soils test.`
+        : "We could not retrieve a soil class summary for this pin. Order a geotechnical / perc test before assuming septic or slab design.",
     },
     {
       id: "flood",
