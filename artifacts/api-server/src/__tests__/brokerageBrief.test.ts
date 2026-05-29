@@ -55,6 +55,29 @@ vi.mock("../lib/brokerageSiteContext", () => ({
     ].filter(Boolean);
     return parts.join("\n\n");
   },
+  stripSiteContextForClient: (ctx: {
+    placeKey: string;
+    layers: Array<{ payload?: unknown; [key: string]: unknown }>;
+  }) => ({
+    placeKey: ctx.placeKey,
+    layers: ctx.layers.map(({ payload: _payload, ...layer }) => layer),
+  }),
+  stripBriefPayloadForClient: (brief: Record<string, unknown>) => {
+    const raw = brief.siteContext as
+      | {
+          placeKey: string;
+          layers: Array<{ payload?: unknown; [key: string]: unknown }>;
+        }
+      | undefined;
+    if (!raw) return brief;
+    return {
+      ...brief,
+      siteContext: {
+        placeKey: raw.placeKey,
+        layers: raw.layers.map(({ payload: _payload, ...layer }) => layer),
+      },
+    };
+  },
 }));
 
 vi.mock("../lib/recordGtmEvent", () => ({
