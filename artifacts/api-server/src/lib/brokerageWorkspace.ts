@@ -7,6 +7,7 @@ import {
   brokerageBriefRuns,
 } from "@workspace/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import { stripBriefPayloadForClient } from "./brokerageSiteContext";
 
 export function listingKeyFromAddress(
   address: string,
@@ -67,6 +68,23 @@ export async function upsertWorkspaceFromBrief(input: {
       target: [brokerageWorkspaces.installId, brokerageWorkspaces.listingKey],
       set: conflictSet,
     });
+}
+
+export async function findWorkspaceByListingKey(
+  installId: string,
+  listingKey: string,
+) {
+  const [ws] = await db
+    .select({ id: brokerageWorkspaces.id })
+    .from(brokerageWorkspaces)
+    .where(
+      and(
+        eq(brokerageWorkspaces.installId, installId),
+        eq(brokerageWorkspaces.listingKey, listingKey),
+      ),
+    )
+    .limit(1);
+  return ws ?? null;
 }
 
 export async function touchWorkspaceOpen(
@@ -130,7 +148,7 @@ export function serializeWorkspacePackage(
     llUuid: pkg.workspace.llUuid,
     latitude: pkg.workspace.latitude,
     longitude: pkg.workspace.longitude,
-    brief: payload ?? null,
+    brief: payload ? stripBriefPayloadForClient(payload) : null,
     attachments: pkg.attachments.map((a) => ({
       id: a.id,
       kind: a.kind,
