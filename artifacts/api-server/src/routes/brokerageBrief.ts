@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -143,14 +143,48 @@ router.use(
   brokerageCoverageRouter,
 );
 
-const briefCoverageHtml = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "../../public/brief-coverage.html"),
-  "utf8",
-);
+/** Bundled entry is `dist/index.mjs`; `../public` is `artifacts/api-server/public`. */
+const BRIEF_COVERAGE_HTML_CANDIDATES = [
+  join(process.cwd(), "artifacts/api-server/public/brief-coverage.html"),
+  join(process.cwd(), "public/brief-coverage.html"),
+  join(dirname(fileURLToPath(import.meta.url)), "../public/brief-coverage.html"),
+];
+
+let briefCoverageHtmlCache: string | null | undefined;
+
+function loadBriefCoverageHtml(): string | null {
+  if (briefCoverageHtmlCache !== undefined) return briefCoverageHtmlCache;
+
+  const path = BRIEF_COVERAGE_HTML_CANDIDATES.find((candidate) =>
+    existsSync(candidate),
+  );
+  if (!path) {
+    logger.warn(
+      { candidates: BRIEF_COVERAGE_HTML_CANDIDATES },
+      "brief-coverage: static HTML not found",
+    );
+    briefCoverageHtmlCache = null;
+    return null;
+  }
+
+  try {
+    briefCoverageHtmlCache = readFileSync(path, "utf8");
+    return briefCoverageHtmlCache;
+  } catch (err) {
+    logger.warn({ err, path }, "brief-coverage: failed to read static HTML");
+    briefCoverageHtmlCache = null;
+    return null;
+  }
+}
 
 /** Static host for brief.hauska.dev/coverage (same origin as cortex-api). */
 router.get("/brief-coverage", (_req: Request, res: Response) => {
-  res.type("html").send(briefCoverageHtml);
+  const html = loadBriefCoverageHtml();
+  if (!html) {
+    res.status(503).type("text/plain").send("Coverage page unavailable");
+    return;
+  }
+  res.type("html").send(html);
 });
 
 brokerageV1.use(brokerageCors);
