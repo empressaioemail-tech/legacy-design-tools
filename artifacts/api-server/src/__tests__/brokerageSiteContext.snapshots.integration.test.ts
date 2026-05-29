@@ -3,7 +3,16 @@
  * Requires DATABASE_URL or TEST_DATABASE_URL.
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import {
   createTestSchema,
   dropTestSchema,
@@ -107,15 +116,18 @@ describe.skipIf(!hasDb)("fetchBrokerageSiteContext snapshots (integration)", () 
     testCtx = null;
   });
 
-  afterEach(async () => {
-    if (!testCtx) return;
-    await truncateAll(testCtx.pool, ["place_layer_snapshots"]);
-    runAdaptersMock.mockReset();
+  beforeEach(() => {
     createAdapterResponseCacheMock.mockReturnValue(undefined);
     resolveJurisdictionMock.mockReturnValue({
       stateKey: "texas",
       localKey: "round-rock-tx",
     });
+  });
+
+  afterEach(async () => {
+    if (!testCtx) return;
+    await truncateAll(testCtx.pool, ["place_layer_snapshots"]);
+    runAdaptersMock.mockReset();
   });
 
   it("second fetch at same coords does not call runAdapters when snapshots exist", async () => {
