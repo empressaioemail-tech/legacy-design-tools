@@ -707,7 +707,7 @@ CREATE TABLE @@SCHEMA@@.gtm_events (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     install_id text NOT NULL,
     event_type text NOT NULL,
-    source_surface text DEFAULT 'extension'::text NOT NULL,
+    source_surface text DEFAULT 'api'::text NOT NULL,
     run_id uuid,
     listing_key text,
     persona_inferred text,
@@ -1984,6 +1984,16 @@ CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING
 -- Name: gtm_events_install_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX gtm_events_install_id_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (install_id, created_at);
+
+
+-- Name: gtm_events_source_surface_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_events_source_surface_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (source_surface, created_at DESC);
+
+
+-- Name: gtm_events_mcp_tool_payload_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_events_mcp_tool_payload_idx ON @@SCHEMA@@.gtm_events USING btree (((payload_json ->> 'tool_name'::text))) WHERE (event_type = 'mcp_tool_call'::text);
 
 
 -- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -

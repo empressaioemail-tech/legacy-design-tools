@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hauska Property Brief — Central TX coverage</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 52rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 0.4rem 0.6rem;
+        text-align: left;
+      }
+      th {
+        background: #f4f4f4;
+      }
+      .error {
+        color: #a00;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Central TX pilot coverage</h1>
+    <p id="meta">Loading manifest from cortex-api…</p>
+    <table id="table" hidden>
+      <thead>
+        <tr>
+          <th>Jurisdiction</th>
+          <th>Status</th>
+          <th>Atoms</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="error" id="err" hidden></p>
+    <p><small>Not legal advice. Source: <code>GET /api/brokerage/v1/coverage</code></small></p>
+    <script>
+      const apiBase =
+        document.querySelector('meta[name="coverage-api"]')?.content ||
+        "/api/brokerage/v1/coverage";
+      async function load() {
+        try {
+          const res = await fetch(apiBase);
+          if (!res.ok) throw new Error(res.status + " " + res.statusText);
+          const data = await res.json();
+          document.getElementById("meta").textContent =
+            "Pilot: " +
+            data.pilot +
+            " · generated " +
+            new Date(data.generatedAt).toLocaleString();
+          const tbody = document.querySelector("#table tbody");
+          for (const j of data.jurisdictions || []) {
+            const tr = document.createElement("tr");
+            const status =
+              j.tier === "blocked_partnership" ? "blocked" : j.tier;
+            tr.innerHTML =
+              "<td><code>" +
+              j.key +
+              "</code><br>" +
+              j.displayName +
+              "</td><td>" +
+              status +
+              "</td><td>" +
+              (j.atomCount ?? "—") +
+              "</td>";
+            tbody.appendChild(tr);
+          }
+          document.getElementById("table").hidden = false;
+        } catch (e) {
+          document.getElementById("err").textContent = String(e.message || e);
+          document.getElementById("err").hidden = false;
+        }
+      }
+      load();
+    </script>
+  </body>
+</html>

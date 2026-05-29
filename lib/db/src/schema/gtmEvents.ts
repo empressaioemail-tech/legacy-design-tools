@@ -15,7 +15,7 @@ export const gtmEvents = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     installId: text("install_id").notNull(),
     eventType: text("event_type").notNull(),
-    sourceSurface: text("source_surface").notNull().default("extension"),
+    sourceSurface: text("source_surface").notNull().default("api"),
     runId: uuid("run_id"),
     listingKey: text("listing_key"),
     personaInferred: text("persona_inferred"),
