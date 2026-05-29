@@ -142,6 +142,36 @@ describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
     retrieveAtomsForQuestionMock.mockResolvedValue([]);
     runAdaptersMock.mockResolvedValue([
       femaOutcome,
+      {
+        adapterKey: "usgs:ned-elevation",
+        tier: "federal",
+        layerKind: "usgs-ned-elevation",
+        status: "ok" as const,
+        result: {
+          adapterKey: "usgs:ned-elevation",
+          tier: "federal",
+          layerKind: "usgs-ned-elevation",
+          sourceKind: "federal-adapter",
+          provider: "USGS",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: { kind: "elevation-point", elevationFeet: 700, units: "Feet" },
+        },
+      },
+      {
+        adapterKey: "epa:ejscreen",
+        tier: "federal",
+        layerKind: "epa-ejscreen-blockgroup",
+        status: "ok" as const,
+        result: {
+          adapterKey: "epa:ejscreen",
+          tier: "federal",
+          layerKind: "epa-ejscreen-blockgroup",
+          sourceKind: "federal-adapter",
+          provider: "EPA",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: { kind: "ejscreen-blockgroup", demographicIndexPercentile: 55 },
+        },
+      },
       regridOutcome,
       {
         adapterKey: "regrid:zoning",
