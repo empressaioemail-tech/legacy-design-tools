@@ -3,16 +3,24 @@
  *
  *   POST /api/brokerage/v1/gtm/consent
  *   POST /api/brokerage/v1/gtm/events
+ *   POST /api/brokerage/v1/gtm/mcp-event
  *   GET  /api/brokerage/v1/gtm/consent/:installId
+ *   GET  /api/brokerage/v1/gtm/digest
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { db, gtmConsent, gtmEvents } from "@workspace/db";
-import { eq, sql, gte, desc } from "drizzle-orm";
+import { eq, sql, gte, desc, and } from "drizzle-orm";
 import { brokerageAuth } from "../middlewares/brokerageAuth";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { GTM_CONSENT_VERSION } from "../lib/recordGtmEvent";
+import {
+  GTM_MCP_EVENT_TYPES,
+  hashApiKeyPrefix,
+  isInternalApiKeyHash,
+} from "../lib/gtmMcpEvents";
+import { isGtmErrorClass, type GtmErrorClass } from "../lib/gtmErrorClass";
 
 const CONSENT_BODY = z.object({
   installId: z.string().min(8).max(128),
@@ -161,11 +169,83 @@ brokerageGtmRouter.post("/events", async (req: Request, res: Response) => {
   res.status(201).json({ ok: true, eventId: inserted?.id });
 });
 
+const MCP_EVENT_BODY = z.object({
+  eventType: z.enum(GTM_MCP_EVENT_TYPES),
+  sourceSurface: z.enum(["mcp", "api", "docs"]).default("mcp"),
+  installId: z.string().min(8).max(128).optional(),
+  tool_name: z.string().max(128).optional(),
+  error_class: z.string().max(64).optional(),
+  jurisdiction_key: z.string().max(128).optional(),
+  latency_ms: z.number().int().nonnegative().optional(),
+});
+
+function loadBrokerageKeyHashes(): string[] {
+  const keys: string[] = [];
+  for (const envName of ["BROKERAGE_DEV_API_KEY", "BROKERAGE_API_KEYS"]) {
+    const raw = process.env[envName]?.trim();
+    if (!raw) continue;
+    for (const part of raw.split(",")) {
+      const k = part.trim();
+      if (k) keys.push(hashApiKeyPrefix(k));
+    }
+  }
+  return keys;
+}
+
+brokerageGtmRouter.post("/mcp-event", async (req: Request, res: Response) => {
+  const parse = MCP_EVENT_BODY.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: "invalid_request", message: "Invalid MCP event body" });
+    return;
+  }
+
+  const data = parse.data;
+  const authHeader = req.headers.authorization;
+  const rawKey =
+    authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : typeof req.headers["x-hauska-key"] === "string"
+        ? req.headers["x-hauska-key"].trim()
+        : "";
+  const api_key_hash = rawKey ? hashApiKeyPrefix(rawKey) : undefined;
+  const error_class =
+    data.error_class && isGtmErrorClass(data.error_class)
+      ? (data.error_class as GtmErrorClass)
+      : data.error_class;
+
+  const installId = data.installId ?? `mcp-server-${api_key_hash ?? "anon"}`;
+
+  const [inserted] = await db
+    .insert(gtmEvents)
+    .values({
+      installId,
+      eventType: data.eventType,
+      sourceSurface: data.sourceSurface,
+      payloadJson: {
+        tool_name: data.tool_name ?? null,
+        error_class: error_class ?? null,
+        jurisdiction_key: data.jurisdiction_key ?? null,
+        api_key_hash: api_key_hash ?? null,
+        latency_ms: data.latency_ms ?? null,
+        external_caller: api_key_hash
+          ? !isInternalApiKeyHash(api_key_hash, [
+              ...(process.env.BROKERAGE_DEV_API_KEY?.split(",") ?? []),
+              ...(process.env.BROKERAGE_API_KEYS?.split(",") ?? []),
+            ].map((k) => k.trim()).filter(Boolean))
+          : null,
+      },
+    })
+    .returning({ id: gtmEvents.id });
+
+  res.status(201).json({ ok: true, eventId: inserted?.id });
+});
+
 /** Steward digest helper (7-day window). */
 brokerageGtmRouter.get(
   "/digest",
   async (req: Request, res: Response) => {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const internalHashes = loadBrokerageKeyHashes();
 
     const counts = await db
       .select({
@@ -175,6 +255,57 @@ brokerageGtmRouter.get(
       .from(gtmEvents)
       .where(gte(gtmEvents.createdAt, since))
       .groupBy(gtmEvents.eventType);
+
+    const surfaceCounts = await db
+      .select({
+        sourceSurface: gtmEvents.sourceSurface,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(gtmEvents)
+      .where(gte(gtmEvents.createdAt, since))
+      .groupBy(gtmEvents.sourceSurface);
+
+    const mcpToolRows = await db
+      .select({
+        toolName: sql<string>`payload_json ->> 'tool_name'`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(gtmEvents)
+      .where(
+        and(
+          gte(gtmEvents.createdAt, since),
+          eq(gtmEvents.eventType, "mcp_tool_call"),
+        ),
+      )
+      .groupBy(sql`payload_json ->> 'tool_name'`)
+      .orderBy(desc(sql`count(*)`))
+      .limit(10);
+
+    const mcpEvents = await db
+      .select({
+        payloadJson: gtmEvents.payloadJson,
+      })
+      .from(gtmEvents)
+      .where(
+        and(
+          gte(gtmEvents.createdAt, since),
+          eq(gtmEvents.sourceSurface, "mcp"),
+        ),
+      );
+
+    let externalMcpCalls = 0;
+    let internalMcpCalls = 0;
+    for (const row of mcpEvents) {
+      const hash = row.payloadJson?.api_key_hash;
+      if (typeof hash === "string" && isInternalApiKeyHash(hash, [
+        ...(process.env.BROKERAGE_DEV_API_KEY?.split(",") ?? []),
+        ...(process.env.BROKERAGE_API_KEYS?.split(",") ?? []),
+      ].map((k) => k.trim()).filter(Boolean))) {
+        internalMcpCalls += 1;
+      } else if (typeof hash === "string") {
+        externalMcpCalls += 1;
+      }
+    }
 
     const recent = await db
       .select({
@@ -196,6 +327,14 @@ brokerageGtmRouter.get(
       since: since.toISOString(),
       consentRecords: consentTotal[0]?.count ?? 0,
       eventCounts: counts,
+      sourceSurfaceCounts: surfaceCounts,
+      mcpTopTools: mcpToolRows
+        .filter((r) => r.toolName)
+        .map((r) => ({ tool_name: r.toolName, count: r.count })),
+      mcpCallerSplit: {
+        external: externalMcpCalls,
+        internal: internalMcpCalls,
+      },
       recentEvents: recent.map((r) => ({
         eventType: r.eventType,
         installId: r.installId.slice(0, 8) + "…",

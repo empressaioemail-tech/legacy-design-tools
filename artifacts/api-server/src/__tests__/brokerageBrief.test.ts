@@ -213,6 +213,15 @@ describe("POST /api/brokerage/v1/brief", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns validation_error errorClass on invalid body", async () => {
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.errorClass).toBe("validation_error");
+  });
+
   it("runs brief with grok reasoning for Bastrop address", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")

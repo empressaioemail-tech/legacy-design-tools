@@ -12,6 +12,9 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { geocodeAddress } from "@workspace/site-context/server";
@@ -40,6 +43,7 @@ import {
   type StarterPromptId,
 } from "../lib/propertyBriefStarters";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
+import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { fetchBrokerageSiteContext } from "../lib/brokerageSiteContext";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { assertComputeAllowed } from "../lib/brokerageWallet";
@@ -62,20 +66,17 @@ import {
   emitPropertyWorkspaceCreatedEvent,
 } from "../lib/brokerageBriefEvents";
 import { brokerageCoverageRouter } from "./brokerageCoverage";
+import { brokerageCoveragePublicCors } from "../middlewares/brokerageCoverageCors";
 import { brokerageGtmRouter } from "./brokerageGtm";
+import { brokeragePlaceRouter } from "./brokeragePlace";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
 import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 
-/** Mirrors hauska-brief-extension/src/lib/brief-engine.js CODE_QUERIES */
-export const BROKERAGE_CODE_QUERIES = [
-  "accessory dwelling unit ADU requirements",
-  "setback requirements residential",
-  "short term rental STR",
-  "swimming pool requirements",
-  "major addition permit",
-] as const;
+import { BROKERAGE_CODE_QUERIES } from "../lib/brokerageCodeQueries";
+
+export { BROKERAGE_CODE_QUERIES };
 
 /** Extra retrieval when research chat or starter focuses on ADUs. */
 export const BROKERAGE_ADU_RESEARCH_QUERIES = [
@@ -132,10 +133,27 @@ const RESEARCH_CHAT_BODY = z.object({
 const router: IRouter = Router();
 const brokerageV1: IRouter = Router();
 
+router.use(
+  "/brokerage/v1/coverage",
+  brokerageCoveragePublicCors,
+  brokerageCoverageRouter,
+);
+
+const briefCoverageHtml = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../../public/brief-coverage.html"),
+  "utf8",
+);
+
+/** Static host for brief.hauska.dev/coverage (same origin as cortex-api). */
+router.get("/brief-coverage", (_req: Request, res: Response) => {
+  res.type("html").send(briefCoverageHtml);
+});
+
 brokerageV1.use(brokerageCors);
 brokerageV1.use(brokerageAuth);
 brokerageV1.use("/gtm", brokerageGtmRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
+brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
@@ -256,7 +274,15 @@ async function runCodeRetrieval(
 brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const parse = BRIEF_BODY.safeParse(req.body);
   if (!parse.success) {
-    res.status(400).json({ error: "invalid_request", message: "Invalid brief body" });
+    res
+      .status(400)
+      .json(
+        gtmErrorBody(
+          "validation_error",
+          "invalid_request",
+          "Invalid brief body",
+        ),
+      );
     return;
   }
 

@@ -34,11 +34,16 @@ beforeAll(async () => {
 
   if (!ctx.schema) return;
   const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(
+  const sql28 = readFileSync(
     join(here, "../../../../lib/db/drizzle/0028_gtm_observation_layer.sql"),
     "utf8",
   );
-  await ctx.schema.pool.query(sql);
+  const sql31 = readFileSync(
+    join(here, "../../../../lib/db/drizzle/0032_gtm_mcp_observation.sql"),
+    "utf8",
+  );
+  await ctx.schema.pool.query(sql28);
+  await ctx.schema.pool.query(sql31);
 });
 
 describe("brokerage GTM", () => {
@@ -101,5 +106,49 @@ describe("brokerage GTM", () => {
     expect(res.status).toBe(200);
     expect(res.body.windowDays).toBe(7);
     expect(Array.isArray(res.body.eventCounts)).toBe(true);
+    expect(Array.isArray(res.body.sourceSurfaceCounts)).toBe(true);
+    expect(res.body.mcpCallerSplit).toBeTruthy();
+  });
+
+  it("POST /gtm/mcp-event accepts sample MCP payload", async () => {
+    const app = getApp();
+    const res = await request(app)
+      .post("/api/brokerage/v1/gtm/mcp-event")
+      .set(authHeaders)
+      .send({
+        eventType: "mcp_tool_call",
+        sourceSurface: "mcp",
+        tool_name: "resolve_place",
+        jurisdiction_key: "bastrop_tx",
+        latency_ms: 42,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.eventId).toBeTruthy();
+
+    const digest = await request(app)
+      .get("/api/brokerage/v1/gtm/digest")
+      .set(authHeaders);
+    expect(digest.body.mcpTopTools.some(
+      (t: { tool_name: string }) => t.tool_name === "resolve_place",
+    )).toBe(true);
+  });
+
+  it("POST /gtm/events records mcp_docs_clicked with source_surface", async () => {
+    const app = getApp();
+    await request(app)
+      .post("/api/brokerage/v1/gtm/consent")
+      .set(authHeaders)
+      .send({ installId: INSTALL_ID, graphOptIn: false });
+
+    const ev = await request(app)
+      .post("/api/brokerage/v1/gtm/events")
+      .set(authHeaders)
+      .send({
+        installId: INSTALL_ID,
+        eventType: "mcp_docs_clicked",
+        sourceSurface: "extension",
+        payload: { utm_source: "brief-extension" },
+      });
+    expect(ev.status).toBe(201);
   });
 });
