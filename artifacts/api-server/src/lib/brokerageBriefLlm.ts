@@ -8,7 +8,7 @@ import {
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
 import {
-  formatSiteContextForLlm,
+  formatBrokerageContextForLlm,
   type BrokerageSiteContext,
 } from "./brokerageSiteContext";
 import {
@@ -188,19 +188,24 @@ export async function generateReasoningSummary(input: {
   atoms: BriefAtomInput[];
   finishedAt: string;
   siteContext?: BrokerageSiteContext;
+  privateRestrictionsBlock?: string;
 }): Promise<ReasoningSummaryResult> {
   const atoms = input.atoms.slice(0, 12);
+  const hasPrivate = Boolean(input.privateRestrictionsBlock?.trim());
   const system = [
     "You are a Texas real estate agent diligence assistant.",
-    "Write a concise property brief reasoning summary using ONLY the numbered code atom sources provided.",
+    hasPrivate
+      ? "Use numbered code atom sources AND private recorded-restriction excerpts (P1, P2, …) when relevant. Private restrictions are CC&Rs/deed limits — not municipal code."
+      : "Write a concise property brief reasoning summary using ONLY the numbered code atom sources provided.",
     "Use inline citations like [1], [2] that map to the source numbers.",
     "Do not guarantee compliance or permit outcomes.",
     "Respond with JSON only: {\"headline\": string, \"body\": string (plain text, multiple paragraphs separated by blank lines)}.",
   ].join(" ");
 
-  const siteBlock = input.siteContext
-    ? formatSiteContextForLlm(input.siteContext)
-    : "";
+  const siteBlock = formatBrokerageContextForLlm({
+    siteContext: input.siteContext,
+    privateRestrictionsBlock: input.privateRestrictionsBlock,
+  });
 
   const user = [
     `Address: ${input.address}`,
@@ -343,10 +348,12 @@ export async function generateResearchChat(input: {
   history: Array<{ role: string; content: string }>;
   atoms: BriefAtomInput[];
   siteContext?: BrokerageSiteContext;
+  privateRestrictionsBlock?: string;
   presentationMode?: PresentationMode;
 }): Promise<ResearchChatResult> {
   const presentationMode = input.presentationMode ?? "consumer";
   const atoms = input.atoms.slice(0, 16);
+  const hasPrivate = Boolean(input.privateRestrictionsBlock?.trim());
   const historyBlock = input.history
     .slice(-8)
     .map((h) => `${h.role}: ${h.content}`)
@@ -357,13 +364,17 @@ export async function generateResearchChat(input: {
     presentationMode === "consumer"
       ? "Answer in plain English for a homebuyer. Do NOT include [n] citation markers or statute numbers in the answer text."
       : "Answer for a real estate professional. Cite with [n] inline matching source numbers.",
-    "Use ONLY the numbered code atom sources. Do not invent code. No compliance guarantees.",
+    hasPrivate
+      ? "Use numbered code sources and private recorded-restriction excerpts (P1, P2, …) when the question touches HOA/CC&R/deed limits. Private restrictions are not municipal code."
+      : "Use ONLY the numbered code atom sources. Do not invent code.",
+    "No compliance guarantees.",
     "Respond with JSON only: {\"answer\": string (plain text)}.",
   ].join(" ");
 
-  const siteBlock = input.siteContext
-    ? formatSiteContextForLlm(input.siteContext)
-    : "";
+  const siteBlock = formatBrokerageContextForLlm({
+    siteContext: input.siteContext,
+    privateRestrictionsBlock: input.privateRestrictionsBlock,
+  });
 
   const user = [
     `Property: ${input.address}`,

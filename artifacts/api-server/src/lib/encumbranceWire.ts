@@ -8,7 +8,9 @@ import type { RecordedInstrument, RestrictionClause } from "@workspace/db";
 
 export interface EncumbranceInstrumentWire {
   id: string;
-  engagementId: string;
+  engagementId: string | null;
+  listingKey?: string | null;
+  installId?: string | null;
   instrument: RecordedInstrumentAtomInstance;
   sourceObjectPath: string;
   pdfUrl: string;
@@ -113,6 +115,23 @@ export function pdfServeUrl(objectPath: string): string {
     ? objectPath.slice("/objects/".length)
     : objectPath.replace(/^\/+/, "");
   return `/api/storage/objects/${entity}`;
+}
+
+export function formatPrivateRestrictionsForLlm(
+  briefing: PrivateRestrictionsBriefing | null | undefined,
+): string {
+  if (!briefing?.items.length) return "";
+
+  const lines = briefing.items.slice(0, 8).map(
+    (item, i) =>
+      `- [P${i + 1}] ${item.clausePath}: ${item.bodyText.slice(0, 400)} (${item.sourceCitation})`,
+  );
+
+  return [
+    "Private recorded restrictions (CC&Rs / deed limits — NOT municipal code):",
+    briefing.summary,
+    ...lines,
+  ].join("\n");
 }
 
 export function buildPrivateRestrictionsBriefing(

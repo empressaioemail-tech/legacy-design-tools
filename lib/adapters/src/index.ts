@@ -46,6 +46,8 @@ export {
   FEDERAL_ADAPTERS,
   STATE_ADAPTERS,
   LOCAL_ADAPTERS,
+  isFccEnabled,
+  isTceqEdwardsEnabled,
 } from "./registry";
 
 export {
