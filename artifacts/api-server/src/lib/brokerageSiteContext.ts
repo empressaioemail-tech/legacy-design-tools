@@ -480,3 +480,15 @@ export function formatSiteContextForLlm(ctx: BrokerageSiteContext): string {
   if (!lines.length) return "";
   return ["Site context layers:", ...lines].join("\n");
 }
+
+/** Site layers + uploaded private restrictions for Property Brief LLM prompts. */
+export function formatBrokerageContextForLlm(input: {
+  siteContext?: BrokerageSiteContext;
+  privateRestrictionsBlock?: string;
+}): string {
+  const parts = [
+    input.siteContext ? formatSiteContextForLlm(input.siteContext) : "",
+    input.privateRestrictionsBlock ?? "",
+  ].filter(Boolean);
+  return parts.join("\n\n");
+}

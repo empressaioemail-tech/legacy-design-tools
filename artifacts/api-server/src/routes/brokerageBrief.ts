@@ -49,8 +49,14 @@ import {
 } from "../lib/brokerageWorkspace";
 import {
   buildBriefAtomProjection,
+  buildPropertyWorkspaceDid,
   extractLlUuidFromSiteContext,
 } from "../lib/brokerageBriefAtoms";
+import {
+  buildPrivateRestrictionsBriefing,
+  formatPrivateRestrictionsForLlm,
+} from "../lib/encumbranceWire";
+import { loadEncumbrancesForBrokerageWorkspace } from "../lib/encumbranceService";
 import {
   emitBriefRunGeneratedEvent,
   emitPropertyWorkspaceCreatedEvent,
@@ -60,6 +66,7 @@ import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
+import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 
 /** Mirrors hauska-brief-extension/src/lib/brief-engine.js CODE_QUERIES */
 export const BROKERAGE_CODE_QUERIES = [
@@ -69,6 +76,15 @@ export const BROKERAGE_CODE_QUERIES = [
   "swimming pool requirements",
   "major addition permit",
 ] as const;
+
+/** Extra retrieval when research chat or starter focuses on ADUs. */
+export const BROKERAGE_ADU_RESEARCH_QUERIES = [
+  "accessory dwelling unit ADU secondary unit requirements",
+  "guest house backyard cottage zoning",
+] as const;
+
+const ADU_TOPIC_RE =
+  /\b(adu|accessory dwelling|guest house|backyard cottage|secondary unit|granny flat)\b/i;
 
 const presentationModeSchema = z.enum(["consumer", "pro"]).default("consumer");
 
@@ -120,6 +136,7 @@ brokerageV1.use(brokerageCors);
 brokerageV1.use(brokerageAuth);
 brokerageV1.use("/gtm", brokerageGtmRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
+brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
@@ -207,6 +224,7 @@ async function runCodeRetrieval(
         question: query,
         limit: 2,
         logger,
+        applyMinScore: false,
       });
     } catch (err) {
       logger.warn({ err, jurisdictionKey, query }, "brokerage: retrieval failed");
@@ -373,6 +391,20 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     }
   }
 
+  let privateRestrictions = null;
+  let privateRestrictionsBlock = "";
+  if (installId) {
+    const enc = await loadEncumbrancesForBrokerageWorkspace({
+      installId,
+      listingKey: lk,
+    });
+    privateRestrictions = buildPrivateRestrictionsBriefing(
+      enc.instruments,
+      enc.clauses,
+    );
+    privateRestrictionsBlock = formatPrivateRestrictionsForLlm(privateRestrictions);
+  }
+
   const reasoningSummary = await generateReasoningSummary({
     address,
     jurisdiction: jurisdictionKey,
@@ -380,6 +412,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     atoms: briefAtoms,
     finishedAt,
     siteContext,
+    privateRestrictionsBlock,
   });
 
   const laySummary = await generateLaySummary({
@@ -393,6 +426,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   });
 
   const llUuid = extractLlUuidFromSiteContext(siteContext);
+  const workspaceDid = buildPropertyWorkspaceDid(lk);
   const atoms = buildBriefAtomProjection({
     listingKey: lk,
     runId,
@@ -400,6 +434,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     siteContext,
     citations,
     placeKey: siteContext.placeKey,
+    privateRestrictions,
   });
 
   const responseBody = {
@@ -424,10 +459,17 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     atoms,
     reasoningSummary,
     laySummary,
+    privateRestrictions,
     meta: {
       disclaimer:
         "Not legal advice. Code layer only where jurisdiction is in corpus. Verify with city staff.",
       tool: "property-brief-v1",
+      encumbranceUploadCta: {
+        label: "Upload CC&Rs",
+        workspaceDid,
+        uploadPath: "/api/brokerage/v1/workspaces/encumbrances/upload",
+        listPath: "/api/brokerage/v1/workspaces/encumbrances",
+      },
     },
   };
 
@@ -606,23 +648,48 @@ brokerageV1.post(
     }
 
     if (jurisdictionKey) {
-      try {
-        const retrieved = await retrieveAtomsForQuestion({
-          jurisdictionKey,
-          question: message,
-          limit: 8,
-          logger,
-        });
-        for (const a of retrieved) {
-          if (!atomMap.has(a.id)) {
-            atomMap.set(a.id, toBriefAtom(a, "Research retrieval"));
+      const researchQueries = [message];
+      if (
+        starterPromptId === "adu" ||
+        ADU_TOPIC_RE.test(message) ||
+        ADU_TOPIC_RE.test(
+          (payload.citations ?? [])
+            .map((c) => c.query ?? "")
+            .join(" "),
+        )
+      ) {
+        researchQueries.push(...BROKERAGE_ADU_RESEARCH_QUERIES);
+      }
+
+      for (const query of researchQueries) {
+        try {
+          const retrieved = await retrieveAtomsForQuestion({
+            jurisdictionKey,
+            question: query,
+            limit: 8,
+            logger,
+            applyMinScore: false,
+          });
+          for (const a of retrieved) {
+            const existing = atomMap.get(a.id);
+            const snippet = atomSnippet(a);
+            if (!existing) {
+              atomMap.set(a.id, toBriefAtom(a, "Research retrieval"));
+              continue;
+            }
+            if (snippet.length > (existing.snippet?.length ?? 0)) {
+              atomMap.set(a.id, {
+                ...existing,
+                snippet,
+              });
+            }
           }
+        } catch (err) {
+          logger.warn(
+            { err, runId, jurisdictionKey, query },
+            "brokerage: research chat retrieval failed",
+          );
         }
-      } catch (err) {
-        logger.warn(
-          { err, runId, jurisdictionKey },
-          "brokerage: research chat retrieval failed",
-        );
       }
     }
 
@@ -630,6 +697,18 @@ brokerageV1.post(
     const storedSiteContext = (
       payload as { siteContext?: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> }
     ).siteContext;
+
+    let privateRestrictionsBlock = "";
+    if (installId) {
+      const enc = await loadEncumbrancesForBrokerageWorkspace({
+        installId,
+        listingKey: run.listingKey,
+      });
+      privateRestrictionsBlock = formatPrivateRestrictionsForLlm(
+        buildPrivateRestrictionsBriefing(enc.instruments, enc.clauses),
+      );
+    }
+
     const result = await generateResearchChat({
       address,
       jurisdiction: jurisdictionKey,
@@ -637,6 +716,7 @@ brokerageV1.post(
       history,
       atoms,
       siteContext: storedSiteContext,
+      privateRestrictionsBlock,
       presentationMode,
     });
 

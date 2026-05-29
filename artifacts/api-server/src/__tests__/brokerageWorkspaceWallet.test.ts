@@ -48,6 +48,7 @@ vi.mock("@workspace/codes", async () => {
 vi.mock("../lib/brokerageSiteContext", () => ({
   fetchBrokerageSiteContext: fetchBrokerageSiteContextMock,
   formatSiteContextForLlm: () => "",
+  formatBrokerageContextForLlm: () => "",
 }));
 
 vi.mock("../lib/briefingLlmClient", async () => {
