@@ -319,23 +319,31 @@ describe("extension_public client tier", () => {
 
   it("tags brief_completed GTM payload with clientTier extension_public", async () => {
     const uniqueInstall = `install-gtm-${randomBytes(4).toString("hex")}`;
-    await request(getApp())
+    const brief = await request(getApp())
       .post("/api/brokerage/v1/brief")
       .set({
         Authorization: `Bearer ${PUBLIC_API_KEY}`,
         "X-Hauska-Install-Id": uniqueInstall,
       })
       .send({ address: "1904 Heathwood Cir, Round Rock, TX 78664" });
+    expect(brief.status).toBe(200);
 
     if (!ctx.schema) throw new Error("schema missing");
     const { desc, eq: eqOp } = await import("drizzle-orm");
-    const rows = await ctx.schema.db
-      .select()
-      .from(gtmEvents)
-      .where(eqOp(gtmEvents.installId, uniqueInstall))
-      .orderBy(desc(gtmEvents.createdAt));
 
-    const completed = rows.find((r) => r.eventType === "brief_completed");
+    let completed: (typeof gtmEvents.$inferSelect) | undefined;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const rows = await ctx.schema.db
+        .select()
+        .from(gtmEvents)
+        .where(eqOp(gtmEvents.installId, uniqueInstall))
+        .orderBy(desc(gtmEvents.createdAt));
+      completed = rows.find((r) => r.eventType === "brief_completed");
+      if (completed) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
     expect(completed?.payloadJson).toMatchObject({
       clientTier: "extension_public",
     });
