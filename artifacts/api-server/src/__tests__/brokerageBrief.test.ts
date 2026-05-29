@@ -228,6 +228,15 @@ afterEach(() => {
   setBriefingLlmClient(null);
 });
 
+describe("GET /api/brief-coverage", () => {
+  it("serves static coverage HTML without auth", async () => {
+    const res = await request(getApp()).get("/api/brief-coverage");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/html/);
+    expect(res.text).toContain("Central TX coverage");
+  });
+});
+
 describe("POST /api/brokerage/v1/brief", () => {
   it("returns 401 without API key", async () => {
     const res = await request(getApp())
