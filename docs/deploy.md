@@ -299,6 +299,71 @@ unrelated merges.
 
 ---
 
+## Property Brief — extension public key (Chrome Web Store)
+
+Store installs use a **dedicated** API key (`BROKERAGE_EXTENSION_PUBLIC_KEY`),
+not the operator dev key. The extension build bakes the same value via
+`HAUSKA_EXTENSION_PUBLIC_KEY` in `hauska-brief-extension/scripts/build-release.ps1`.
+
+### 1. Mint and store (operator — never commit to git)
+
+```powershell
+# Generate 48+ char secret locally; paste into Secret Manager only.
+$key = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 56 | ForEach-Object { [char]$_ })
+
+gcloud secrets create BROKERAGE_EXTENSION_PUBLIC_KEY `
+  --replication-policy=automatic `
+  --project=legacy-design-tools-prod
+
+# From operator workstation — replace <key> with generated value:
+# echo -n "<key>" | gcloud secrets versions add BROKERAGE_EXTENSION_PUBLIC_KEY --data-file=- --project=legacy-design-tools-prod
+```
+
+Deliver the key value to Nick **out-of-band** (password manager / GCP console).
+Inbox and PR docs reference the secret **name only**.
+
+### 2. Mount on Cloud Run `cortex-api`
+
+```powershell
+gcloud run services update cortex-api `
+  --region us-central1 `
+  --project legacy-design-tools-prod `
+  --update-secrets=BROKERAGE_EXTENSION_PUBLIC_KEY=BROKERAGE_EXTENSION_PUBLIC_KEY:latest
+```
+
+`brokerageAuth` loads `BROKERAGE_EXTENSION_PUBLIC_KEY` automatically (also accepts
+it in comma-separated `BROKERAGE_API_KEYS` if you prefer a single env var).
+Keep `BROKERAGE_DEV_API_KEY` / operator keys separate — dev tier is unlimited
+wallet/workspace/share.
+
+### 3. Smoke (public tier — redact key in logs)
+
+```powershell
+$headers = @{
+  Authorization = "Bearer <from Secret Manager>"
+  "X-Hauska-Install-Id" = [guid]::NewGuid().ToString()
+  "Content-Type" = "application/json"
+}
+$body = '{"address":"1904 Heathwood Cir, Round Rock, TX 78664"}'
+Invoke-RestMethod -Method POST `
+  -Uri "https://cortex-api-tds7av26va-uc.a.run.app/api/brokerage/v1/brief" `
+  -Headers $headers -Body $body
+```
+
+Expect `200`, `jurisdiction: round_rock_tx`, `meta.clientTier: extension_public`.
+Non-pilot city (e.g. Plano) → `403 jurisdiction_not_available`.
+`POST /workspaces/.../share` with public key → `403 account_upgrade_required`.
+
+### 4. Extension release build
+
+```powershell
+cd P:\hauska-brief-extension
+$env:HAUSKA_EXTENSION_PUBLIC_KEY = "<same value as Secret Manager>"
+.\scripts\build-release.ps1
+```
+
+---
+
 ## Env var inventory
 
 Derived from `process.env.*` in `artifacts/api-server/src/` plus the
@@ -324,6 +389,10 @@ Manager. `Class = config` → Cloud Run env var.
 | `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings and brokerage brief/research Grok calls. Default `grok-3-mini`. |
 | `BROKERAGE_DEV_API_KEY` | secret | required for extension API | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Comma-separated keys accepted. Extension sends `Authorization: Bearer <key>` or `X-Hauska-Key`. Also reads `BROKERAGE_API_KEYS` (alias). |
 | `BROKERAGE_API_KEYS` | secret | optional alias | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Same as `BROKERAGE_DEV_API_KEY` when multiple pilot keys are needed. |
+| `BROKERAGE_EXTENSION_PUBLIC_KEY` | secret | required for Chrome Web Store zero-config | `artifacts/api-server/src/middlewares/brokerageAuth.ts`, `lib/brokerageExtensionPublic.ts` | Dedicated store client key (separate from dev). Rate-limited Layer-1 brief/research only. Never commit; bake into extension via `HAUSKA_EXTENSION_PUBLIC_KEY` at release build. See [Property Brief — extension public key](#property-brief--extension-public-key-chrome-web-store). |
+| `BROKERAGE_EXTENSION_PUBLIC_BRIEFS_PER_DAY` | config | optional | `lib/brokerageExtensionPublic.ts` | Default `5` per `X-Hauska-Install-Id`. |
+| `BROKERAGE_EXTENSION_PUBLIC_RESEARCH_TURNS_PER_DAY` | config | optional | `lib/brokerageExtensionPublic.ts` | Default `20` per install. |
+| `BROKERAGE_EXTENSION_PUBLIC_GLOBAL_BRIEFS_PER_DAY` | config | optional | `lib/brokerageExtensionPublic.ts` | Default `10000` global anti-scrape ceiling. |
 | `REGRID_API_KEY` | secret | required for Regrid parcel/zoning layers | `@workspace/adapters/national/regrid` | Property Brief `siteContext` adapters (`regrid-parcel`, `regrid-zoning`). Without it, live fetches fail and layers stay empty on prod. Mount via Secret Manager — never commit the value. See [Property Brief — Regrid on prod](#property-brief--regrid-on-prod). |
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
 | `MNML_API_URL` | config | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |

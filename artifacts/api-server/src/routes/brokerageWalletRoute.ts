@@ -13,6 +13,7 @@ import {
   setWalletAutoRefill,
   topUpWallet,
 } from "../lib/brokerageWallet";
+import { requireBrokerageDevClient } from "../lib/brokerageExtensionPublic";
 
 const TOP_UP_BODY = z.object({
   amountCents: z
@@ -31,6 +32,7 @@ export const brokerageWalletRouter: IRouter = Router();
 
 brokerageWalletRouter.use(brokerageCors);
 brokerageWalletRouter.use(brokerageAuth);
+brokerageWalletRouter.use(requireBrokerageDevClient);
 
 brokerageWalletRouter.get("/", async (req: Request, res: Response) => {
   const installId = requireInstallId(req, res);
