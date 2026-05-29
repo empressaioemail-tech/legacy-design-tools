@@ -4,8 +4,19 @@
  */
 
 import { createHash } from "node:crypto";
+import { pickFirstString } from "@workspace/adapters";
 import type { BrokerageSiteContext } from "./brokerageSiteContext";
 import { extractLlUuidFromPayload } from "./placeLayerUtils";
+import type { PrivateRestrictionsBriefing } from "./encumbranceWire";
+
+const REGRID_PARCEL_ID_KEYS = [
+  "PARCEL_ID",
+  "PARCELID",
+  "APN",
+  "PIN",
+  "parcelnumb",
+  "parcelnum",
+] as const;
 
 export interface BriefInlineRef {
   did: string;
@@ -68,6 +79,7 @@ export function buildBriefAtomProjection(input: {
   siteContext: BrokerageSiteContext;
   citations: Array<{ atomDid: string; query: string; snippet: string }>;
   placeKey: string;
+  privateRestrictions?: PrivateRestrictionsBriefing | null;
 }): BriefAtomProjection {
   const workspaceDid = buildPropertyWorkspaceDid(input.listingKey);
   const briefRunDid = buildBriefRunDid(input.runId);
@@ -110,14 +122,30 @@ export function buildBriefAtomProjection(input: {
   if (regridParcel?.payload) {
     const llUuid = extractLlUuidFromPayload(regridParcel.payload);
     if (llUuid) {
+      const fields = (
+        regridParcel.payload.parcel as
+          | { properties?: { fields?: Record<string, unknown> } }
+          | undefined
+      )?.properties?.fields;
+      const apn = fields ? pickFirstString(fields, REGRID_PARCEL_ID_KEYS) : null;
       inlineRefs.push({
         did: `did:hauska:parcel:${llUuid}`,
         entityType: "parcel",
         entityId: llUuid,
-        label: "Parcel record",
+        label: apn ? `Parcel APN ${apn}` : "Parcel record",
         mode: "inline",
       });
     }
+  }
+
+  for (const item of input.privateRestrictions?.items.slice(0, 2) ?? []) {
+    inlineRefs.push({
+      did: `did:hauska:restriction-clause:${item.clauseId}`,
+      entityType: "restriction-clause",
+      entityId: item.clauseId,
+      label: item.clausePath.slice(0, 48),
+      mode: "inline",
+    });
   }
 
   return {

@@ -45,6 +45,16 @@ vi.mock("../lib/brokerageSiteContext", () => ({
   fetchBrokerageSiteContext: fetchBrokerageSiteContextMock,
   formatSiteContextForLlm: (ctx: { layers: unknown[] }) =>
     ctx.layers.length ? "Site context layers:\n- mock" : "",
+  formatBrokerageContextForLlm: (input: {
+    siteContext?: { layers: unknown[] };
+    privateRestrictionsBlock?: string;
+  }) => {
+    const parts = [
+      input.siteContext?.layers.length ? "Site context layers:\n- mock" : "",
+      input.privateRestrictionsBlock ?? "",
+    ].filter(Boolean);
+    return parts.join("\n\n");
+  },
 }));
 
 vi.mock("../lib/recordGtmEvent", () => ({
@@ -230,6 +240,15 @@ describe("POST /api/brokerage/v1/brief", () => {
     expect(res.body.presentationMode).toBe("consumer");
     expect(retrieveAtomsForQuestionMock).toHaveBeenCalled();
     expect(completeChatMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(res.body.citations.length).toBeGreaterThan(0);
+    const aduCitation = res.body.citations.find(
+      (c: { snippet?: string; query?: string }) =>
+        /adu|accessory|secondary unit/i.test(
+          `${c.snippet ?? ""} ${c.query ?? ""}`,
+        ),
+    );
+    expect(aduCitation).toBeTruthy();
+    expect(res.body.atoms.inlineRefs.length).toBeGreaterThan(0);
 
     if (!ctx.schema) throw new Error("schema missing");
     const [row] = await ctx.schema.db
@@ -309,6 +328,13 @@ describe("POST /api/brokerage/v1/research/chat", () => {
     expect(Array.isArray(chatRes.body.sources)).toBe(true);
     expect(chatRes.body.presentationMode).toBe("consumer");
     expect(retrieveAtomsForQuestionMock.mock.calls.length).toBeGreaterThan(5);
+    const aduRetrievalCalls = retrieveAtomsForQuestionMock.mock.calls.filter(
+      (c) =>
+        /adu|accessory|guest house|secondary unit/i.test(
+          String(c[0]?.question ?? ""),
+        ),
+    );
+    expect(aduRetrievalCalls.length).toBeGreaterThan(0);
   });
 
   it("logs starter_prompt_selected when starterPromptId is sent", async () => {

@@ -16,9 +16,11 @@ export const recordedInstruments = pgTable(
   "recorded_instruments",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    engagementId: uuid("engagement_id")
-      .notNull()
-      .references(() => engagements.id, { onDelete: "cascade" }),
+    engagementId: uuid("engagement_id").references(() => engagements.id, {
+      onDelete: "cascade",
+    }),
+    listingKey: text("listing_key"),
+    installId: text("install_id"),
     instrumentDid: text("instrument_did").notNull(),
     instrumentType: text("instrument_type").notNull(),
     recording: jsonb("recording"),
@@ -41,6 +43,10 @@ export const recordedInstruments = pgTable(
   },
   (t) => ({
     engagementIdx: index("recorded_instruments_engagement_idx").on(t.engagementId),
+    listingInstallIdx: index("recorded_instruments_listing_install_idx").on(
+      t.installId,
+      t.listingKey,
+    ),
   }),
 );
 

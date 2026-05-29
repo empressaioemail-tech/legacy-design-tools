@@ -3,149 +3,25 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import Busboy from "busboy";
-import { and, desc, eq } from "drizzle-orm";
-import {
-  db,
-  engagements,
-  recordedInstruments,
-  restrictionClauses,
-} from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { db, engagements, recordedInstruments, restrictionClauses } from "@workspace/db";
 import { logger } from "../lib/logger";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { consumePdfUpload } from "../lib/encumbranceMultipart";
 import {
-  extractEncumbranceClausesFromPdf,
-  mintClauseDid,
-  mintInstrumentDid,
-  sourceDocumentCidFromObjectPath,
-} from "../lib/encumbranceExtract";
-import {
-  pdfServeUrl,
-  rowToRecordedInstrumentAtom,
-  rowToRestrictionClauseAtom,
-  type EncumbranceClauseWire,
-  type EncumbranceInstrumentWire,
-  type EncumbrancesListWire,
-} from "../lib/encumbranceWire";
+  ingestEncumbrancePdfUpload,
+  loadEncumbrancesForEngagement,
+} from "../lib/encumbranceService";
+
+export { loadEncumbrancesForEngagement } from "../lib/encumbranceService";
 
 const router: IRouter = Router();
-const MAX_PDF_BYTES = 25 * 1024 * 1024;
 
 const ENGAGEMENT_PARAMS = z.object({ id: z.string().uuid() });
 const CLAUSE_VERIFY_PARAMS = z.object({
   id: z.string().uuid(),
   clauseId: z.string().uuid(),
 });
-
-let cachedObjectStorage: ObjectStorageService | null = null;
-function objectStorage(): ObjectStorageService {
-  if (!cachedObjectStorage) cachedObjectStorage = new ObjectStorageService();
-  return cachedObjectStorage;
-}
-
-interface ParsedPdfUpload {
-  bytes: Buffer;
-  filename: string;
-  contentType: string;
-}
-
-function consumePdfUpload(
-  req: Request,
-): Promise<
-  | { ok: true; upload: ParsedPdfUpload }
-  | { ok: false; status: number; error: string }
-> {
-  return new Promise((resolve) => {
-    let busboy: Busboy.Busboy;
-    try {
-      busboy = Busboy({
-        headers: req.headers,
-        limits: { fileSize: MAX_PDF_BYTES, files: 1, fields: 3 },
-      });
-    } catch {
-      resolve({ ok: false, status: 400, error: "invalid_multipart" });
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let truncated = false;
-    let fileSeen = false;
-    let filename = "upload.pdf";
-    let contentType = "application/pdf";
-    let aborted = false;
-
-    function abort(status: number, error: string) {
-      if (aborted) return;
-      aborted = true;
-      try {
-        req.unpipe(busboy);
-      } catch {
-        /* ignore */
-      }
-      resolve({ ok: false, status, error });
-    }
-
-    busboy.on("field", (name, value) => {
-      if (name === "filename" && value) filename = value;
-      if (name === "contentType" && value) contentType = value;
-    });
-
-    busboy.on(
-      "file",
-      (name: string, stream: NodeJS.ReadableStream, info: { filename: string; mimeType: string }) => {
-        if (aborted) {
-          stream.resume();
-          return;
-        }
-        if (name !== "file" && name !== "pdf") {
-          stream.resume();
-          return;
-        }
-        fileSeen = true;
-        if (info.filename) filename = info.filename;
-        if (info.mimeType) contentType = info.mimeType;
-        stream.on("data", (chunk: Buffer) => {
-          total += chunk.length;
-          if (total > MAX_PDF_BYTES) {
-            truncated = true;
-            return;
-          }
-          chunks.push(chunk);
-        });
-        stream.on("limit", () => {
-          truncated = true;
-        });
-      },
-    );
-
-    busboy.on("error", () => abort(400, "multipart_parse_failed"));
-    busboy.on("finish", () => {
-      if (aborted) return;
-      if (!fileSeen) {
-        abort(400, "missing_pdf_part");
-        return;
-      }
-      if (truncated) {
-        abort(413, "pdf_too_large");
-        return;
-      }
-      resolve({
-        ok: true,
-        upload: {
-          bytes: Buffer.concat(chunks, total),
-          filename,
-          contentType: contentType.toLowerCase().includes("pdf")
-            ? contentType
-            : "application/pdf",
-        },
-      });
-    });
-
-    req.pipe(busboy);
-  });
-}
 
 async function loadEngagementOr404(
   engagementId: string,
@@ -161,55 +37,6 @@ async function loadEngagementOr404(
     return false;
   }
   return true;
-}
-
-export async function loadEncumbrancesForEngagement(
-  engagementId: string,
-): Promise<EncumbrancesListWire> {
-  const instrumentRows = await db
-    .select()
-    .from(recordedInstruments)
-    .where(eq(recordedInstruments.engagementId, engagementId))
-    .orderBy(desc(recordedInstruments.createdAt));
-
-  const allClauses =
-    instrumentRows.length === 0
-      ? []
-      : await db
-          .select()
-          .from(restrictionClauses)
-          .innerJoin(
-            recordedInstruments,
-            eq(restrictionClauses.instrumentId, recordedInstruments.id),
-          )
-          .where(eq(recordedInstruments.engagementId, engagementId))
-          .orderBy(desc(restrictionClauses.createdAt));
-
-  const instruments: EncumbranceInstrumentWire[] = instrumentRows.map((row) => {
-    const atom = rowToRecordedInstrumentAtom(row);
-    return {
-      id: row.id,
-      engagementId: row.engagementId,
-      instrument: atom,
-      sourceObjectPath: row.sourceObjectPath,
-      pdfUrl: pdfServeUrl(row.sourceObjectPath),
-      uploadOriginalFilename: row.uploadOriginalFilename,
-      uploadContentType: row.uploadContentType,
-      uploadByteSize: row.uploadByteSize,
-      extractMetadata: (row.extractMetadata ?? {}) as Record<string, unknown>,
-      createdAt: row.createdAt.toISOString(),
-    };
-  });
-
-  const clauses: EncumbranceClauseWire[] = allClauses.map(({ restriction_clauses: row }) => ({
-    id: row.id,
-    instrumentId: row.instrumentId,
-    clause: rowToRestrictionClauseAtom(row),
-    sourcePage: row.sourcePage,
-    createdAt: row.createdAt.toISOString(),
-  }));
-
-  return { instruments, clauses };
 }
 
 router.post(
@@ -236,59 +63,12 @@ router.post(
     }
 
     try {
-      const extract = await extractEncumbranceClausesFromPdf(parsed.upload.bytes);
-      const objectPath = await objectStorage().uploadObjectEntityFromBuffer(
-        parsed.upload.bytes,
-        parsed.upload.contentType,
+      res.status(201).json(
+        await ingestEncumbrancePdfUpload({
+          upload: parsed.upload,
+          scope: { kind: "engagement", engagementId },
+        }),
       );
-      const sourceDocumentCid = sourceDocumentCidFromObjectPath(objectPath);
-      const instrumentDid = mintInstrumentDid(engagementId);
-      const extractedAt = new Date(extract.metadata.extractedAt);
-
-      const [instrument] = await db
-        .insert(recordedInstruments)
-        .values({
-          engagementId,
-          instrumentDid,
-          instrumentType: "other",
-          recording: null,
-          issuerActorDid: "did:hauska:actor:engagement-upload",
-          sourceDocumentCid,
-          appliesTo: { legalDescription: `Engagement ${engagementId}` },
-          accessPolicy: "tenant-private",
-          legalWeight: "recorded",
-          verificationStatus: "machine",
-          extractedAt,
-          sourceAdapter: "R4",
-          sourceObjectPath: objectPath,
-          uploadOriginalFilename: parsed.upload.filename,
-          uploadContentType: parsed.upload.contentType,
-          uploadByteSize: parsed.upload.bytes.length,
-          extractMetadata: extract.metadata,
-        })
-        .returning();
-
-      const clauseValues = extract.clauses.map((c, index) => ({
-        instrumentId: instrument!.id,
-        clauseDid: mintClauseDid(instrumentDid, index),
-        parentInstrumentCid: sourceDocumentCid,
-        clausePath: c.clausePath,
-        bodyText: c.bodyText,
-        confidence: String(c.confidence),
-        extractedBy: extract.metadata.documentModel,
-        accessPolicy: "tenant-private",
-        legalWeight: "recorded",
-        reasoningSummary: c.reasoningSummary,
-        sourceCitation: c.sourceCitation,
-        evaluatedAt: extractedAt,
-        sourcePage: c.sourcePage,
-      }));
-
-      if (clauseValues.length > 0) {
-        await db.insert(restrictionClauses).values(clauseValues);
-      }
-
-      res.status(201).json(await loadEncumbrancesForEngagement(engagementId));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "pdf_too_large") {
