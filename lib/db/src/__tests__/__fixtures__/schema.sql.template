@@ -905,7 +905,9 @@ CREATE TABLE @@SCHEMA@@.qa_triage_items (
 
 CREATE TABLE @@SCHEMA@@.recorded_instruments (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    engagement_id uuid NOT NULL,
+    engagement_id uuid,
+    listing_key text,
+    install_id text,
     instrument_did text NOT NULL,
     instrument_type text NOT NULL,
     recording jsonb,
@@ -2062,6 +2064,11 @@ CREATE INDEX qa_triage_items_status_idx ON @@SCHEMA@@.qa_triage_items USING btre
 -- Name: recorded_instruments_engagement_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instruments USING btree (engagement_id);
+
+
+-- Name: recorded_instruments_listing_install_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX recorded_instruments_listing_install_idx ON @@SCHEMA@@.recorded_instruments USING btree (install_id, listing_key);
 
 
 -- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -
