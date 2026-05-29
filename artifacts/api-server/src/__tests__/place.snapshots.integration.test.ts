@@ -130,10 +130,7 @@ describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
     await ctx.schema.pool.query(sql);
   });
 
-  afterEach(async () => {
-    if (!ctx.schema) return;
-    await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
-    runAdaptersMock.mockReset();
+  beforeEach(() => {
     createAdapterResponseCacheMock.mockReturnValue(undefined);
     resolveJurisdictionMock.mockReturnValue({
       stateKey: "texas",
@@ -181,6 +178,12 @@ describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
         error: { code: "no-coverage", message: "none" },
       },
     ]);
+  });
+
+  afterEach(async () => {
+    if (!ctx.schema) return;
+    await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
+    runAdaptersMock.mockReset();
   });
 
   it("second GET dossier does not call runAdapters", async () => {
