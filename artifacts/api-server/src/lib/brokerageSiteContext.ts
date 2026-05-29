@@ -278,6 +278,30 @@ export async function fetchBrokerageSiteContext(
           result: outcome.result,
           placeKey,
         });
+        continue;
+      }
+      // Archive negative results so a repeat brief at the same coords does
+      // not re-hit Regrid/FEMA for adapters that already returned no-coverage.
+      if (outcome.status === "no-coverage") {
+        const archivedAt = new Date().toISOString();
+        await writePlaceLayerSnapshot({
+          adapterKey: outcome.adapterKey,
+          latitude,
+          longitude,
+          placeKey,
+          result: {
+            adapterKey: outcome.adapterKey,
+            tier: outcome.tier,
+            layerKind: outcome.layerKind,
+            sourceKind: outcome.adapterKey.startsWith("regrid:")
+              ? "national-aggregator"
+              : "federal-adapter",
+            provider:
+              outcome.adapterKey.startsWith("regrid:") ? "Regrid" : "FEMA NFHL",
+            snapshotDate: archivedAt,
+            payload: {},
+          },
+        });
       }
     }
   }
