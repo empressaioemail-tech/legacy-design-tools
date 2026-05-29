@@ -112,6 +112,21 @@ describe("keyFromEngagement: three-tier fallback", () => {
     ).toBe("cedar_hill_tx");
   });
 
+  it("resolves Central TX pilot cities from engine corpus (engine_only until Neon warmup)", () => {
+    expect(
+      keyFromEngagement({
+        jurisdictionCity: "Round Rock",
+        jurisdictionState: "TX",
+      }),
+    ).toBe("round_rock_tx");
+    expect(
+      keyFromEngagement({
+        jurisdictionCity: "Austin",
+        jurisdictionState: "TX",
+      }),
+    ).toBe("austin_tx");
+  });
+
   it("does not map Dallas or Dallas County (blocked corpora)", () => {
     expect(
       keyFromEngagement({ jurisdictionCity: "Dallas", jurisdictionState: "TX" }),

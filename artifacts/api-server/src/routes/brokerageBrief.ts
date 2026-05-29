@@ -4,6 +4,7 @@
  *   POST /api/brokerage/v1/brief
  *   POST /api/brokerage/v1/brief/summarize
  *   POST /api/brokerage/v1/research/chat
+ *   GET  /api/brokerage/v1/coverage
  *   GET  /api/brokerage/v1/workspaces/recent
  *   GET  /api/brokerage/v1/workspaces/:id
  *   GET  /api/brokerage/v1/wallet
@@ -46,6 +47,15 @@ import {
   listingKeyFromAddress,
   upsertWorkspaceFromBrief,
 } from "../lib/brokerageWorkspace";
+import {
+  buildBriefAtomProjection,
+  extractLlUuidFromSiteContext,
+} from "../lib/brokerageBriefAtoms";
+import {
+  emitBriefRunGeneratedEvent,
+  emitPropertyWorkspaceCreatedEvent,
+} from "../lib/brokerageBriefEvents";
+import { brokerageCoverageRouter } from "./brokerageCoverage";
 import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
@@ -109,6 +119,7 @@ const brokerageV1: IRouter = Router();
 brokerageV1.use(brokerageCors);
 brokerageV1.use(brokerageAuth);
 brokerageV1.use("/gtm", brokerageGtmRouter);
+brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
@@ -334,6 +345,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
 
   let siteContext: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> = {
     layers: [],
+    placeKey: "coord:0.00000:0.00000",
   };
   if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
     try {
@@ -380,6 +392,16 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     finishedAt,
   });
 
+  const llUuid = extractLlUuidFromSiteContext(siteContext);
+  const atoms = buildBriefAtomProjection({
+    listingKey: lk,
+    runId,
+    address,
+    siteContext,
+    citations,
+    placeKey: siteContext.placeKey,
+  });
+
   const responseBody = {
     runId,
     startedAt,
@@ -389,6 +411,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       address,
       source: source ?? null,
       url: page_url ?? null,
+      llUuid: llUuid ?? undefined,
     },
     jurisdiction: jurisdictionKey,
     corpusStatus,
@@ -398,6 +421,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     siteContext,
     sections,
     citations,
+    atoms,
     reasoningSummary,
     laySummary,
     meta: {
@@ -415,6 +439,22 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     payloadJson: responseBody,
   });
 
+  await emitPropertyWorkspaceCreatedEvent({
+    listingKey: lk,
+    address,
+    llUuid,
+    latitude: geocode?.lat,
+    longitude: geocode?.lon,
+  });
+  await emitBriefRunGeneratedEvent({
+    listingKey: lk,
+    runId,
+    address,
+    jurisdictionKey,
+    corpusStatus,
+    citationCount: citations.length,
+  });
+
   if (installId) {
     await upsertWorkspaceFromBrief({
       installId,
@@ -422,6 +462,9 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       address,
       sourceListingUrl: page_url ?? null,
       runId,
+      llUuid,
+      latitude: geocode?.lat,
+      longitude: geocode?.lon,
     });
 
     if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {

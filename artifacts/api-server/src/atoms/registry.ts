@@ -40,6 +40,8 @@ import { makeCommunicationEventAtom } from "./communication-event.atom";
 import { makeDecisionEventAtom } from "./decision-event.atom";
 import { makeSubmissionClassificationAtom } from "./submission-classification.atom";
 import { makeSiteTopographyAtom } from "./site-topography.atom";
+import { makePropertyWorkspaceAtom } from "./property-workspace.atom";
+import { makeBriefRunAtom } from "./brief-run.atom";
 import { setClassifierLogger } from "@workspace/submission-classifier";
 import { logger as pinoLogger } from "../lib/logger";
 
@@ -237,6 +239,12 @@ export function getAtomRegistry(): AtomRegistry {
   // long list of plan-review atoms so the boot-log tail surfaces the
   // sprint-level dependency order naturally.
   registry.register(makeSiteTopographyAtom({ history }));
+  // Property Brief brokerage atoms — shape-only until workspace DB lookup
+  // ships. Registered after plan-review catalog so boot-log tail groups
+  // brokerage domain separately. Forward-ref edges to place-layer-* and
+  // code-section until those catalog atoms register.
+  registry.register(makeBriefRunAtom({ history }));
+  registry.register(makePropertyWorkspaceAtom({ history }));
   _registry = registry;
   return registry;
 }

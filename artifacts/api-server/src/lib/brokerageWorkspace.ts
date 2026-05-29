@@ -18,51 +18,54 @@ export function listingKeyFromAddress(
     .digest("hex");
 }
 
+function formatCoordOptional(value: number | undefined): string | null {
+  if (value === undefined || !Number.isFinite(value)) return null;
+  return value.toFixed(6);
+}
+
 export async function upsertWorkspaceFromBrief(input: {
   installId: string;
   listingKey: string;
   address: string;
   sourceListingUrl?: string | null;
   runId?: string | null;
+  llUuid?: string | null;
+  latitude?: number;
+  longitude?: number;
 }) {
   const now = new Date();
+  const geo = {
+    llUuid: input.llUuid ?? null,
+    latitude: formatCoordOptional(input.latitude),
+    longitude: formatCoordOptional(input.longitude),
+  };
   const base = {
     installId: input.installId,
     listingKey: input.listingKey,
     address: input.address,
     sourceListingUrl: input.sourceListingUrl ?? null,
+    ...geo,
     openedAt: now,
     updatedAt: now,
   };
 
-  if (input.runId) {
-    await db
-      .insert(brokerageWorkspaces)
-      .values({ ...base, latestRunId: input.runId })
-      .onConflictDoUpdate({
-        target: [brokerageWorkspaces.installId, brokerageWorkspaces.listingKey],
-        set: {
-          address: input.address,
-          sourceListingUrl: input.sourceListingUrl ?? null,
-          latestRunId: input.runId,
-          openedAt: now,
-          updatedAt: now,
-        },
-      });
-    return;
-  }
+  const conflictSet: Record<string, unknown> = {
+    address: input.address,
+    sourceListingUrl: input.sourceListingUrl ?? null,
+    openedAt: now,
+    updatedAt: now,
+  };
+  if (input.runId) conflictSet.latestRunId = input.runId;
+  if (input.llUuid != null) conflictSet.llUuid = input.llUuid;
+  if (geo.latitude != null) conflictSet.latitude = geo.latitude;
+  if (geo.longitude != null) conflictSet.longitude = geo.longitude;
 
   await db
     .insert(brokerageWorkspaces)
-    .values(base)
+    .values(input.runId ? { ...base, latestRunId: input.runId } : base)
     .onConflictDoUpdate({
       target: [brokerageWorkspaces.installId, brokerageWorkspaces.listingKey],
-      set: {
-        address: input.address,
-        sourceListingUrl: input.sourceListingUrl ?? null,
-        openedAt: now,
-        updatedAt: now,
-      },
+      set: conflictSet,
     });
 }
 
@@ -124,6 +127,9 @@ export function serializeWorkspacePackage(
     openedAt: pkg.workspace.openedAt.toISOString(),
     updatedAt: pkg.workspace.updatedAt.toISOString(),
     latestRunId: pkg.workspace.latestRunId,
+    llUuid: pkg.workspace.llUuid,
+    latitude: pkg.workspace.latitude,
+    longitude: pkg.workspace.longitude,
     brief: payload ?? null,
     attachments: pkg.attachments.map((a) => ({
       id: a.id,

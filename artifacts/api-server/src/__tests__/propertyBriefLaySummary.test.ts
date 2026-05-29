@@ -15,6 +15,7 @@ describe("buildRulesLaySummary", () => {
         },
       ],
       siteContext: {
+        placeKey: "coord:30.11000:-97.32000",
         layers: [
           {
             layerKind: "fema-nfhl-flood-zone",

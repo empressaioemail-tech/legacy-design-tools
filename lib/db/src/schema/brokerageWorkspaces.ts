@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   timestamp,
+  numeric,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -17,6 +18,9 @@ export const brokerageWorkspaces = pgTable(
     address: text("address").notNull(),
     sourceListingUrl: text("source_listing_url"),
     latestRunId: uuid("latest_run_id").references(() => brokerageBriefRuns.id),
+    llUuid: text("ll_uuid"),
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
     openedAt: timestamp("opened_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

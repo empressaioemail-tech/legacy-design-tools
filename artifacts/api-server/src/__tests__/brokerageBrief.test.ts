@@ -169,6 +169,7 @@ beforeEach(() => {
   retrieveAtomsForQuestionMock.mockResolvedValue([mockAtom]);
   fetchBrokerageSiteContextMock.mockReset();
   fetchBrokerageSiteContextMock.mockResolvedValue({
+    placeKey: "coord:30.00000:-97.00000",
     layers: [
       {
         layerKind: "fema-nfhl-flood-zone",

@@ -149,6 +149,7 @@ describe("lib/db schema integration", () => {
         "parcel_briefings",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
+        "place_layer_snapshots",
         // Cortex L5 (Lane C.4 / C.4.5) — ICC-ES product-spec references.
         "product_spec_references",
         // Task #481 — QA Dashboard checklist runs and per-item results.
