@@ -49,6 +49,14 @@ import {
   stripSiteContextForClient,
 } from "../lib/brokerageSiteContext";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
+import { isExtensionPublicClient } from "../middlewares/brokerageAuth";
+import {
+  assertExtensionPublicBriefAllowed,
+  assertExtensionPublicJurisdictionAllowed,
+  assertExtensionPublicResearchChatAllowed,
+  gtmPayloadWithClientTier,
+  sendExtensionPublicRateLimitResponse,
+} from "../lib/brokerageExtensionPublic";
 import { assertComputeAllowed } from "../lib/brokerageWallet";
 import {
   findWorkspaceByListingKey,
@@ -197,14 +205,17 @@ brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
 
-function logStarterPromptSelected(input: {
-  installId: string | null;
-  starterPromptId: StarterPromptId;
-  personaBucket?: PersonaBucket;
-  runId: string;
-  address: string;
-  mlsId?: string | null;
-}) {
+function logStarterPromptSelected(
+  req: Request,
+  input: {
+    installId: string | null;
+    starterPromptId: StarterPromptId;
+    personaBucket?: PersonaBucket;
+    runId: string;
+    address: string;
+    mlsId?: string | null;
+  },
+) {
   if (!input.installId) return;
   const addressHash = listingKeyFromAddress(input.address, input.mlsId);
   recordGtmEvent({
@@ -212,11 +223,11 @@ function logStarterPromptSelected(input: {
     eventType: "starter_prompt_selected",
     runId: input.runId,
     listingKey: addressHash,
-    payload: {
+    payload: gtmPayloadWithClientTier(req, {
       starterPromptId: input.starterPromptId,
       personaBucket: input.personaBucket ?? null,
       addressHash,
-    },
+    }),
   });
 }
 
@@ -337,8 +348,23 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const startedAt = new Date().toISOString();
   const installId = installIdFromRequest(req);
   const lk = listingKeyFromAddress(address, mls_id);
+  const extensionPublic = isExtensionPublicClient(req);
 
-  if (installId) {
+  if (extensionPublic) {
+    if (!installId) {
+      res.status(400).json({
+        error: "install_id_required",
+        message: "X-Hauska-Install-Id header is required",
+      });
+      return;
+    }
+
+    const rateLimit = await assertExtensionPublicBriefAllowed(installId);
+    if (!rateLimit.ok) {
+      sendExtensionPublicRateLimitResponse(res, rateLimit);
+      return;
+    }
+  } else if (installId) {
     const debit = await assertComputeAllowed(installId);
     if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
       res.status(402).json({
@@ -352,7 +378,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   }
 
   if (installId && starterPromptId) {
-    logStarterPromptSelected({
+    logStarterPromptSelected(req, {
       installId,
       starterPromptId,
       personaBucket,
@@ -368,7 +394,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       eventType: "brief_started",
       runId,
       listingKey: lk,
-      payload: { source: source ?? null },
+      payload: gtmPayloadWithClientTier(req, { source: source ?? null }),
     });
   }
 
@@ -399,6 +425,19 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     jurisdictionState: geocode?.state ?? null,
     address,
   });
+
+  if (extensionPublic) {
+    const jurisdictionGate = assertExtensionPublicJurisdictionAllowed(jurisdictionKey);
+    if (!jurisdictionGate.ok) {
+      res.status(403).json({
+        error: "jurisdiction_not_available",
+        message: jurisdictionGate.message,
+        clientTier: "extension_public",
+        jurisdiction: jurisdictionGate.jurisdiction,
+      });
+      return;
+    }
+  }
 
   let sections: Array<{
     title: string;
@@ -457,7 +496,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
 
   let privateRestrictions = null;
   let privateRestrictionsBlock = "";
-  if (installId) {
+  if (installId && !extensionPublic) {
     const enc = await loadEncumbrancesForBrokerageWorkspace({
       installId,
       listingKey: lk,
@@ -528,12 +567,16 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       disclaimer:
         "Not legal advice. Code layer only where jurisdiction is in corpus. Verify with city staff.",
       tool: "property-brief-v1",
-      encumbranceUploadCta: {
-        label: "Upload CC&Rs",
-        workspaceDid,
-        uploadPath: "/api/brokerage/v1/workspaces/encumbrances/upload",
-        listPath: "/api/brokerage/v1/workspaces/encumbrances",
-      },
+      ...(extensionPublic
+        ? { clientTier: "extension_public" as const }
+        : {
+            encumbranceUploadCta: {
+              label: "Upload CC&Rs",
+              workspaceDid,
+              uploadPath: "/api/brokerage/v1/workspaces/encumbrances/upload",
+              listPath: "/api/brokerage/v1/workspaces/encumbrances",
+            },
+          }),
     },
   };
 
@@ -563,7 +606,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
 
   let workspaceId: string | undefined;
 
-  if (installId) {
+  if (installId && !extensionPublic) {
     await upsertWorkspaceFromBrief({
       installId,
       listingKey: lk,
@@ -584,7 +627,10 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
         eventType: "session_geo",
         runId,
         listingKey: lk,
-        payload: { lat: geocode.lat, lon: geocode.lon },
+        payload: gtmPayloadWithClientTier(req, {
+          lat: geocode.lat,
+          lon: geocode.lon,
+        }),
       });
     }
 
@@ -593,18 +639,18 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       eventType: "brief_completed",
       runId,
       listingKey: lk,
-      payload: {
+      payload: gtmPayloadWithClientTier(req, {
         corpusStatus,
         jurisdiction: jurisdictionKey,
         citationCount: citations.length,
-      },
+      }),
     });
   }
 
   res.json({
     ...responseBody,
     siteContext: stripSiteContextForClient(siteContext),
-    ...(workspaceId
+    ...(workspaceId && !extensionPublic
       ? { workspaceId, workspaceDid }
       : {}),
   });
@@ -654,7 +700,23 @@ brokerageV1.post(
       parse.data;
 
     const installId = installIdFromRequest(req);
-    if (installId) {
+    const extensionPublic = isExtensionPublicClient(req);
+
+    if (extensionPublic) {
+      if (!installId) {
+        res.status(400).json({
+          error: "install_id_required",
+          message: "X-Hauska-Install-Id header is required",
+        });
+        return;
+      }
+
+      const rateLimit = await assertExtensionPublicResearchChatAllowed(installId);
+      if (!rateLimit.ok) {
+        sendExtensionPublicRateLimitResponse(res, rateLimit);
+        return;
+      }
+    } else if (installId) {
       const debit = await assertComputeAllowed(installId);
       if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
         res.status(402).json({
@@ -690,8 +752,21 @@ brokerageV1.post(
     const jurisdictionKey = payload.jurisdiction ?? null;
     const address = payload.property?.address ?? run.address;
 
+    if (extensionPublic) {
+      const jurisdictionGate = assertExtensionPublicJurisdictionAllowed(jurisdictionKey);
+      if (!jurisdictionGate.ok) {
+        res.status(403).json({
+          error: "jurisdiction_not_available",
+          message: jurisdictionGate.message,
+          clientTier: "extension_public",
+          jurisdiction: jurisdictionGate.jurisdiction,
+        });
+        return;
+      }
+    }
+
     if (installId && starterPromptId) {
-      logStarterPromptSelected({
+      logStarterPromptSelected(req, {
         installId,
         starterPromptId,
         personaBucket,
@@ -774,7 +849,7 @@ brokerageV1.post(
     ).siteContext;
 
     let privateRestrictionsBlock = "";
-    if (installId) {
+    if (installId && !extensionPublic) {
       const enc = await loadEncumbrancesForBrokerageWorkspace({
         installId,
         listingKey: run.listingKey,
@@ -801,19 +876,21 @@ brokerageV1.post(
         eventType: "research_chat_turn",
         runId,
         listingKey: run.listingKey,
-        payload: { messageLength: message.length },
+        payload: gtmPayloadWithClientTier(req, {
+          messageLength: message.length,
+        }),
       });
     }
 
     let workspaceId: string | undefined;
-    if (installId) {
+    if (installId && !extensionPublic) {
       const ws = await findWorkspaceByListingKey(installId, run.listingKey);
       workspaceId = ws?.id;
     }
 
     res.json({
       ...result,
-      ...(workspaceId
+      ...(workspaceId && !extensionPublic
         ? {
             workspaceId,
             workspaceDid: buildPropertyWorkspaceDid(run.listingKey),

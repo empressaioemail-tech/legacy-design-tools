@@ -27,6 +27,7 @@ import {
   upsertWorkspaceFromBrief,
 } from "../lib/brokerageWorkspace";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
+import { requireBrokerageDevClient } from "../lib/brokerageExtensionPublic";
 
 const ATTACHMENT_BODY = z.object({
   kind: z.enum(["link", "image", "pdf", "note"]),
@@ -50,6 +51,42 @@ export const brokerageWorkspaceRouter: IRouter = Router();
 
 brokerageWorkspaceRouter.use(brokerageCors);
 brokerageWorkspaceRouter.use(brokerageAuth);
+
+brokerageWorkspaceRouter.get(
+  "/shared/:shareToken",
+  async (req: Request, res: Response) => {
+    const raw = req.params.shareToken;
+    const shareToken = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+    if (!shareToken) {
+      res.status(400).json({ error: "invalid_request" });
+      return;
+    }
+
+    const resolved = await resolveShareByToken(shareToken);
+    if (!resolved) {
+      res.status(404).json({ error: "not_found", message: "Share not found or revoked" });
+      return;
+    }
+
+    const viewerInstallId = installIdFromRequest(req);
+    if (viewerInstallId) {
+      recordGtmEvent({
+        installId: viewerInstallId,
+        eventType: "share_viewed",
+        listingKey: resolved.package.workspace.listingKey,
+        payload: { shareTokenPrefix: shareToken.slice(0, 8) },
+      });
+    }
+
+    res.json({
+      ...serializeWorkspacePackage(resolved.package),
+      sharedByInstallId: resolved.share.ownerInstallId.slice(0, 8) + "…",
+      shareCreatedAt: resolved.share.createdAt.toISOString(),
+    });
+  },
+);
+
+brokerageWorkspaceRouter.use(requireBrokerageDevClient);
 
 brokerageWorkspaceRouter.get(
   "/recent",
@@ -139,40 +176,6 @@ brokerageWorkspaceRouter.post("/open", async (req: Request, res: Response) => {
   const pkg = await loadWorkspacePackage(ws.id);
   res.json(serializeWorkspacePackage(pkg!));
 });
-
-brokerageWorkspaceRouter.get(
-  "/shared/:shareToken",
-  async (req: Request, res: Response) => {
-    const raw = req.params.shareToken;
-    const shareToken = (Array.isArray(raw) ? raw[0] : raw)?.trim();
-    if (!shareToken) {
-      res.status(400).json({ error: "invalid_request" });
-      return;
-    }
-
-    const resolved = await resolveShareByToken(shareToken);
-    if (!resolved) {
-      res.status(404).json({ error: "not_found", message: "Share not found or revoked" });
-      return;
-    }
-
-    const viewerInstallId = installIdFromRequest(req);
-    if (viewerInstallId) {
-      recordGtmEvent({
-        installId: viewerInstallId,
-        eventType: "share_viewed",
-        listingKey: resolved.package.workspace.listingKey,
-        payload: { shareTokenPrefix: shareToken.slice(0, 8) },
-      });
-    }
-
-    res.json({
-      ...serializeWorkspacePackage(resolved.package),
-      sharedByInstallId: resolved.share.ownerInstallId.slice(0, 8) + "…",
-      shareCreatedAt: resolved.share.createdAt.toISOString(),
-    });
-  },
-);
 
 brokerageWorkspaceRouter.get("/:id", async (req: Request, res: Response) => {
   const installId = requireInstallId(req, res);

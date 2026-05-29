@@ -1,11 +1,37 @@
 import type { Request, Response, NextFunction } from "express";
 
+export type BrokerageClientTier = "dev" | "extension_public";
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** Set by {@link brokerageAuth} after a valid API key is presented. */
+      brokerageAuth?: { tier: BrokerageClientTier };
+    }
+  }
+}
+
 let cachedKeys: Set<string> | null = null;
+let cachedExtensionPublicKey: string | null | undefined;
+
+function loadExtensionPublicKey(): string | null {
+  if (cachedExtensionPublicKey !== undefined) {
+    return cachedExtensionPublicKey;
+  }
+  const raw = process.env.BROKERAGE_EXTENSION_PUBLIC_KEY?.trim();
+  cachedExtensionPublicKey = raw || null;
+  return cachedExtensionPublicKey;
+}
 
 function loadBrokerageApiKeys(): Set<string> {
   if (cachedKeys) return cachedKeys;
   const keys = new Set<string>();
-  for (const envName of ["BROKERAGE_DEV_API_KEY", "BROKERAGE_API_KEYS"]) {
+  for (const envName of [
+    "BROKERAGE_DEV_API_KEY",
+    "BROKERAGE_API_KEYS",
+    "BROKERAGE_EXTENSION_PUBLIC_KEY",
+  ]) {
     const raw = process.env[envName]?.trim();
     if (!raw) continue;
     for (const part of raw.split(",")) {
@@ -20,12 +46,32 @@ function loadBrokerageApiKeys(): Set<string> {
 /** TEST-ONLY: reset cached keys after env changes. */
 export function resetBrokerageApiKeysForTests(): void {
   cachedKeys = null;
+  cachedExtensionPublicKey = undefined;
+}
+
+export function resolveBrokerageClientTier(providedKey: string): BrokerageClientTier {
+  const publicKey = loadExtensionPublicKey();
+  if (publicKey && providedKey === publicKey) return "extension_public";
+  return "dev";
+}
+
+export function isExtensionPublicClient(req: Request): boolean {
+  return req.brokerageAuth?.tier === "extension_public";
 }
 
 function extractBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice("Bearer ".length).trim();
   return token || null;
+}
+
+export function extractBrokerageApiKey(req: Request): string | null {
+  const fromBearer = extractBearerToken(req.headers.authorization);
+  const fromHeader =
+    typeof req.headers["x-hauska-key"] === "string"
+      ? req.headers["x-hauska-key"].trim()
+      : null;
+  return fromBearer ?? fromHeader;
 }
 
 export function brokerageAuth(
@@ -42,12 +88,7 @@ export function brokerageAuth(
     return;
   }
 
-  const fromBearer = extractBearerToken(req.headers.authorization);
-  const fromHeader =
-    typeof req.headers["x-hauska-key"] === "string"
-      ? req.headers["x-hauska-key"].trim()
-      : null;
-  const provided = fromBearer ?? fromHeader;
+  const provided = extractBrokerageApiKey(req);
 
   if (!provided || !keys.has(provided)) {
     res.status(401).json({
@@ -57,5 +98,6 @@ export function brokerageAuth(
     return;
   }
 
+  req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
   next();
 }

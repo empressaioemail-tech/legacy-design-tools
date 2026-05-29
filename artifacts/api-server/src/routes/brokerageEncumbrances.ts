@@ -13,12 +13,14 @@ import {
   loadEncumbrancesForBrokerageWorkspace,
 } from "../lib/encumbranceService";
 import { listingKeyFromWorkspaceDid, workspaceDidFromListingKey } from "../lib/encumbranceScope";
+import { requireBrokerageDevClient } from "../lib/brokerageExtensionPublic";
 import { logger } from "../lib/logger";
 
 export const brokerageEncumbrancesRouter: IRouter = Router();
 
 brokerageEncumbrancesRouter.use(brokerageCors);
 brokerageEncumbrancesRouter.use(brokerageAuth);
+brokerageEncumbrancesRouter.use(requireBrokerageDevClient);
 
 const WORKSPACE_DID_QUERY = z.object({
   workspaceDid: z.string().min(1),
