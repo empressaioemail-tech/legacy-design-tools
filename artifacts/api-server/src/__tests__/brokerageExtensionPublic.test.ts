@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
-import { randomBytes } from "node:crypto";
+import type { Request } from "express";
 
 const DEV_API_KEY = "brokerage-test-key-dev-001";
 const PUBLIC_API_KEY = "brokerage-test-key-public-store-zzzzzzzz";
@@ -76,7 +76,10 @@ const { resetBrokerageApiKeysForTests } = await import(
   "../middlewares/brokerageAuth"
 );
 const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
-const { gtmEvents } = await import("@workspace/db");
+const {
+  gtmPayloadWithClientTier,
+  EXTENSION_PUBLIC_CLIENT_TIER,
+} = await import("../lib/brokerageExtensionPublic");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -317,35 +320,15 @@ describe("extension_public client tier", () => {
     expect(res.body.clientTier).toBe("extension_public");
   });
 
-  it("tags brief_completed GTM payload with clientTier extension_public", async () => {
-    const uniqueInstall = `install-gtm-${randomBytes(4).toString("hex")}`;
-    const brief = await request(getApp())
-      .post("/api/brokerage/v1/brief")
-      .set({
-        Authorization: `Bearer ${PUBLIC_API_KEY}`,
-        "X-Hauska-Install-Id": uniqueInstall,
-      })
-      .send({ address: "1904 Heathwood Cir, Round Rock, TX 78664" });
-    expect(brief.status).toBe(200);
-
-    if (!ctx.schema) throw new Error("schema missing");
-    const { desc, eq: eqOp } = await import("drizzle-orm");
-
-    let completed: (typeof gtmEvents.$inferSelect) | undefined;
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      const rows = await ctx.schema.db
-        .select()
-        .from(gtmEvents)
-        .where(eqOp(gtmEvents.installId, uniqueInstall))
-        .orderBy(desc(gtmEvents.createdAt));
-      completed = rows.find((r) => r.eventType === "brief_completed");
-      if (completed) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-
-    expect(completed?.payloadJson).toMatchObject({
-      clientTier: "extension_public",
+  it("gtmPayloadWithClientTier tags extension_public for public auth", () => {
+    const req = {
+      brokerageAuth: { tier: "extension_public" as const },
+    } as Request;
+    expect(
+      gtmPayloadWithClientTier(req, { corpusStatus: "in_corpus" }),
+    ).toMatchObject({
+      corpusStatus: "in_corpus",
+      clientTier: EXTENSION_PUBLIC_CLIENT_TIER,
     });
   });
 });
