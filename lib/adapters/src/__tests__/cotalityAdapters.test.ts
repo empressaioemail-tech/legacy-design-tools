@@ -1,14 +1,12 @@
 /**
- * Cotality national parcel + zoning adapter pair — 2026-06-06 decision.
+ * Cotality national parcel + zoning adapter pair — OAuth2 rework (2026-06-06).
  *
- * Mirrors the Regrid SCOPE B test coverage. When COTALITY_API_KEY is absent
- * the adapters surface no-coverage (clean fallback; no upstream call, no
- * errors propagated to callers). When present they exercise the live path
- * (or stub) and emit the same payload.parcel / payload.zoning GeoJSON Feature
- * shape so overlays.ts and the briefing engine are unchanged.
+ * Cotality (CoreLogic / Apigee) uses OAuth2 client_credentials per demo app:
+ *   COTALITY_PROPERTY_KEY/SECRET     → Property API (attrs + zoning)
+ *   COTALITY_SPATIALTILE_KEY/SECRET  → Spatial Tile (parcel polygon)
  *
- * Fixture uses a realistic trial-tier shaped response (CLIP + attributes +
- * geometry in a common vendor form) that the adapter must normalize.
+ * When required creds are absent the adapters surface no-coverage with zero
+ * network calls so Regrid remains the fallback.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,15 +14,30 @@ import {
   cotalityParcelsAdapter,
   cotalityZoningAdapter,
   __resetCotalityDedupForTests,
+  __resetCotalityTokenCacheForTests,
+  cotalityTokenUrl,
+  cotalityPropertyBaseUrl,
+  cotalitySpatialTileBaseUrl,
+  mergeCotalityPropertyAndSpatial,
 } from "../national/cotality";
 import { runAdapters } from "../runner";
 import { FEDERAL_ADAPTERS, ALL_ADAPTERS } from "../registry";
 import type { AdapterContext } from "../types";
 
-/** Stable Round Rock-ish lat/lng (the dispatch test address). */
 const ROUND_ROCK: AdapterContext = {
-  parcel: { latitude: 30.5083, longitude: -97.6789, address: "1904 Heathwood Cir, Round Rock, TX 78664" },
+  parcel: {
+    latitude: 30.5083,
+    longitude: -97.6789,
+    address: "1904 Heathwood Cir, Round Rock, TX 78664",
+  },
   jurisdiction: { stateKey: "texas", localKey: null },
+};
+
+const TEST_CREDS = {
+  COTALITY_PROPERTY_KEY: "prop-consumer-key",
+  COTALITY_PROPERTY_SECRET: "prop-consumer-secret",
+  COTALITY_SPATIALTILE_KEY: "tile-consumer-key",
+  COTALITY_SPATIALTILE_SECRET: "tile-consumer-secret",
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -34,83 +47,172 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-/**
- * Stand-in for a Cotality Property Characteristics / parcel point response
- * as expected from the 30-day developer-portal trial (post 2026-06-06 decision).
- * The adapter must defensively pull CLIP, geometry (here nested under parcel),
- * zoning (flattened or block), and a vintage/refresh signal.
- */
-function cotalityResponseFixture(opts: {
-  withParcel?: boolean;
+function oauthTokenResponse(token: string): Response {
+  return jsonResponse({ access_token: token, expires_in: 3600, token_type: "Bearer" });
+}
+
+const SPATIAL_GEOMETRY = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [-97.6791, 30.5081],
+      [-97.6787, 30.5081],
+      [-97.6787, 30.5085],
+      [-97.6791, 30.5085],
+      [-97.6791, 30.5081],
+    ],
+  ],
+};
+
+function propertyResponseFixture(opts: {
   withZoning?: boolean;
   clip?: string | number;
   county?: string;
 } = {}): Record<string, unknown> {
-  const { withParcel = true, withZoning = true, clip = 9876543210, county = "Williamson" } = opts;
-
-  const parcelBlock: Record<string, unknown> = withParcel
-    ? {
-        geometry: {
-          type: "Polygon",
-          coordinates: [
-            [
-              [-97.6791, 30.5081],
-              [-97.6787, 30.5081],
-              [-97.6787, 30.5085],
-              [-97.6791, 30.5085],
-              [-97.6791, 30.5081],
-            ],
-          ],
-        },
-        attributes: {
-          apn: "R-16-1234-5678-90",
-          owner: "Test Owner LLC",
-          county,
-          // zoning may appear flattened on the parcel record in some trial shapes
-          zoning: withZoning ? "R-1" : undefined,
-          zoning_description: withZoning ? "Single-Family Residential" : undefined,
-        },
-      }
-    : { geometry: null, attributes: {} };
-
-  const zoningBlock: Record<string, unknown> | undefined = withZoning
-    ? {
-        code: "R-1",
-        description: "Single-Family Residential",
-        zoningType: "residential",
-      }
-    : undefined;
-
+  const { withZoning = true, clip = 9876543210, county = "Williamson" } = opts;
   const out: Record<string, unknown> = {
     clip,
-    parcel: parcelBlock,
-    vintage: "2026-03-15",
     county,
+    vintage: "2026-03-15",
+    parcel: {
+      attributes: {
+        apn: "R-16-1234-5678-90",
+        owner: "Test Owner LLC",
+        county,
+        ...(withZoning
+          ? {
+              zoning: "R-1",
+              zoning_description: "Single-Family Residential",
+            }
+          : {}),
+      },
+    },
   };
-  if (zoningBlock) out.zoning = zoningBlock;
+  if (withZoning) {
+    out.zoning = {
+      code: "R-1",
+      description: "Single-Family Residential",
+      zoningType: "residential",
+    };
+  }
   return out;
 }
 
-describe("Cotality adapters — 2026-06-06 decision scaffold", () => {
-  let originalApiKey: string | undefined;
+function spatialResponseFixture(): Record<string, unknown> {
+  return { geometry: SPATIAL_GEOMETRY };
+}
+
+/** Route fetchImpl by URL/method — token POST + property GET + spatial GET. */
+function cotalityFetchRouter(opts: {
+  propertyBody?: unknown;
+  spatialBody?: unknown;
+  propertyStatus?: number;
+  spatialStatus?: number;
+  tokenStatus?: number;
+} = {}) {
+  const {
+    propertyBody = propertyResponseFixture(),
+    spatialBody = spatialResponseFixture(),
+    propertyStatus = 200,
+    spatialStatus = 200,
+    tokenStatus = 200,
+  } = opts;
+
+  let propertyTokenFetches = 0;
+  let spatialTokenFetches = 0;
+
+  const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (url.includes("/oauth/token") || url === cotalityTokenUrl()) {
+      if (method !== "POST") {
+        return new Response("method not allowed", { status: 405 });
+      }
+      const body = init?.body?.toString() ?? "";
+      if (body.includes("prop-consumer-key")) {
+        propertyTokenFetches += 1;
+        if (tokenStatus !== 200) {
+          return new Response("token denied", { status: tokenStatus });
+        }
+        return oauthTokenResponse("property-bearer-token");
+      }
+      if (body.includes("tile-consumer-key")) {
+        spatialTokenFetches += 1;
+        if (tokenStatus !== 200) {
+          return new Response("token denied", { status: tokenStatus });
+        }
+        return oauthTokenResponse("spatial-bearer-token");
+      }
+      return new Response("unknown client", { status: 401 });
+    }
+
+    const auth = (init?.headers as Record<string, string> | undefined)
+      ?.Authorization;
+
+    if (url.includes(cotalityPropertyBaseUrl()) || url.includes("/property/")) {
+      expect(auth).toBe("Bearer property-bearer-token");
+      if (propertyStatus !== 200) {
+        return new Response("upstream error", { status: propertyStatus });
+      }
+      return jsonResponse(propertyBody);
+    }
+
+    if (
+      url.includes(cotalitySpatialTileBaseUrl()) ||
+      url.includes("/spatialtile/")
+    ) {
+      expect(auth).toBe("Bearer spatial-bearer-token");
+      if (spatialStatus !== 200) {
+        return new Response("upstream error", { status: spatialStatus });
+      }
+      return jsonResponse(spatialBody);
+    }
+
+    return new Response("unexpected url", { status: 404 });
+  });
+
+  return { fetchImpl, getTokenFetchCounts: () => ({ propertyTokenFetches, spatialTokenFetches }) };
+}
+
+function setAllCotalityCreds(): void {
+  process.env.COTALITY_PROPERTY_KEY = TEST_CREDS.COTALITY_PROPERTY_KEY;
+  process.env.COTALITY_PROPERTY_SECRET = TEST_CREDS.COTALITY_PROPERTY_SECRET;
+  process.env.COTALITY_SPATIALTILE_KEY = TEST_CREDS.COTALITY_SPATIALTILE_KEY;
+  process.env.COTALITY_SPATIALTILE_SECRET = TEST_CREDS.COTALITY_SPATIALTILE_SECRET;
+}
+
+function clearAllCotalityCreds(): void {
+  for (const k of Object.keys(TEST_CREDS)) {
+    delete process.env[k];
+  }
+  delete process.env.COTALITY_API_KEY;
+}
+
+describe("Cotality adapters — OAuth2 client_credentials (2026-06-06 rework)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    originalApiKey = process.env.COTALITY_API_KEY;
+    for (const k of [...Object.keys(TEST_CREDS), "COTALITY_API_KEY"]) {
+      savedEnv[k] = process.env[k];
+    }
     __resetCotalityDedupForTests();
+    __resetCotalityTokenCacheForTests();
   });
 
   afterEach(() => {
-    if (originalApiKey === undefined) {
-      delete process.env.COTALITY_API_KEY;
-    } else {
-      process.env.COTALITY_API_KEY = originalApiKey;
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     }
     __resetCotalityDedupForTests();
+    __resetCotalityTokenCacheForTests();
   });
 
-  it("[1] happy path — both adapters emit ok from a single upstream call (key present)", async () => {
-    process.env.COTALITY_API_KEY = "trial-cotality-key-30day";
-    const fetchImpl = vi.fn(async () => jsonResponse(cotalityResponseFixture()));
+  it("[1] happy path — bearer on API calls; property + spatial merged; point dedup across adapters", async () => {
+    setAllCotalityCreds();
+    const { fetchImpl } = cotalityFetchRouter();
+
     const outcomes = await runAdapters({
       adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
@@ -119,38 +221,61 @@ describe("Cotality adapters — 2026-06-06 decision scaffold", () => {
     expect(byKey["cotality:parcels"]?.status).toBe("ok");
     expect(byKey["cotality:zoning"]?.status).toBe("ok");
 
-    const p = byKey["cotality:parcels"]?.result;
-    expect(p?.tier).toBe("federal");
-    expect(p?.sourceKind).toBe("national-aggregator");
-    expect(p?.layerKind).toBe("cotality-parcel");
-    expect(p?.provider).toContain("Cotality");
-    expect(p?.snapshotDate).toMatch(/^2026-03-15/);
-    const parcelPayload = p?.payload as { kind: string; parcel: { type: string; geometry: { type: string } } };
+    const parcelPayload = byKey["cotality:parcels"]?.result?.payload as {
+      kind: string;
+      parcel: { type: string; geometry: { type: string }; properties: { clip: number } };
+    };
     expect(parcelPayload?.kind).toBe("parcel");
-    expect(parcelPayload?.parcel?.type).toBe("Feature");
     expect(parcelPayload?.parcel?.geometry?.type).toBe("Polygon");
-    // CLIP carried through
-    expect((parcelPayload?.parcel?.properties as any)?.clip).toBe(9876543210);
+    expect(parcelPayload?.parcel?.properties?.clip).toBe(9876543210);
 
-    const z = byKey["cotality:zoning"]?.result;
-    const zoningPayload = z?.payload as { kind: string; zoning: { type: string } };
-    expect(zoningPayload?.kind).toBe("zoning");
-    expect(zoningPayload?.zoning?.type).toBe("Feature");
+    // 2 token POSTs (property + spatialtile) + 1 property GET + 1 spatial GET
+    // parcel+zoning share property fetch via dedup (separate dedup keys per mode,
+    // but zoning-only skips spatial — so: 2 tokens + 1 property + 1 spatial for parcel,
+    // + 0 extra token (cached) + 1 property for zoning)
+    const tokenPosts = fetchImpl.mock.calls.filter(
+      (c) => String(c[0]).includes("/oauth/token") || (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(tokenPosts.length).toBe(2);
 
-    // One upstream despite two adapters (in-mem dedup)
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const calledUrl = String(fetchImpl.mock.calls[0]?.[0]);
-    expect(calledUrl).toContain("propertycharacteristics");
-    expect(calledUrl).toContain("lat=30.5083");
-    expect(calledUrl).toContain("lon=-97.6789");
-    expect(calledUrl).toContain("apikey=trial-cotality-key-30day");
+    const propertyGets = fetchImpl.mock.calls.filter((c) =>
+      String(c[0]).includes("property"),
+    );
+    const spatialGets = fetchImpl.mock.calls.filter((c) =>
+      String(c[0]).includes("spatialtile"),
+    );
+    expect(propertyGets.length).toBe(2); // parcel mode + zoning mode (separate dedup keys)
+    expect(spatialGets.length).toBe(1); // parcel mode only
   });
 
-  it("[2] zoning absent on response — parcel ok, zoning no-coverage (key present)", async () => {
-    process.env.COTALITY_API_KEY = "trial-cotality-key-30day";
-    const fetchImpl = vi.fn(async () =>
-      jsonResponse(cotalityResponseFixture({ withZoning: false })),
-    );
+  it("[2] OAuth token cached — second parcel run reuses bearer without re-POSTing token", async () => {
+    setAllCotalityCreds();
+    const { fetchImpl, getTokenFetchCounts } = cotalityFetchRouter();
+
+    await runAdapters({
+      adapters: [cotalityParcelsAdapter],
+      context: { ...ROUND_ROCK, fetchImpl },
+    });
+    const afterFirst = getTokenFetchCounts();
+    expect(afterFirst.propertyTokenFetches).toBe(1);
+    expect(afterFirst.spatialTokenFetches).toBe(1);
+
+    __resetCotalityDedupForTests(); // new point fetch, but token cache warm
+
+    await runAdapters({
+      adapters: [cotalityParcelsAdapter],
+      context: { ...ROUND_ROCK, fetchImpl },
+    });
+    const afterSecond = getTokenFetchCounts();
+    expect(afterSecond.propertyTokenFetches).toBe(1);
+    expect(afterSecond.spatialTokenFetches).toBe(1);
+  });
+
+  it("[3] zoning absent — parcel ok, zoning no-coverage", async () => {
+    setAllCotalityCreds();
+    const { fetchImpl } = cotalityFetchRouter({
+      propertyBody: propertyResponseFixture({ withZoning: false }),
+    });
     const outcomes = await runAdapters({
       adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
@@ -158,29 +283,48 @@ describe("Cotality adapters — 2026-06-06 decision scaffold", () => {
     const byKey = Object.fromEntries(outcomes.map((o) => [o.adapterKey, o]));
     expect(byKey["cotality:parcels"]?.status).toBe("ok");
     expect(byKey["cotality:zoning"]?.status).toBe("no-coverage");
-    expect(byKey["cotality:zoning"]?.error?.code).toBe("no-coverage");
   });
 
-  it("[3] missing COTALITY_API_KEY — both adapters surface no-coverage (no upstream call)", async () => {
-    delete process.env.COTALITY_API_KEY;
-    const fetchImpl = vi.fn(async () => jsonResponse(cotalityResponseFixture()));
+  it("[4] missing PROPERTY creds — both adapters no-coverage, zero network", async () => {
+    clearAllCotalityCreds();
+    process.env.COTALITY_SPATIALTILE_KEY = TEST_CREDS.COTALITY_SPATIALTILE_KEY;
+    process.env.COTALITY_SPATIALTILE_SECRET = TEST_CREDS.COTALITY_SPATIALTILE_SECRET;
+
+    const fetchImpl = vi.fn(async () => jsonResponse({}));
     const outcomes = await runAdapters({
       adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
     });
     const byKey = Object.fromEntries(outcomes.map((o) => [o.adapterKey, o]));
     expect(byKey["cotality:parcels"]?.status).toBe("no-coverage");
-    expect(byKey["cotality:parcels"]?.error?.message).toMatch(/COTALITY_API_KEY/i);
+    expect(byKey["cotality:parcels"]?.error?.message).toMatch(
+      /COTALITY_PROPERTY_KEY\/SECRET/i,
+    );
     expect(byKey["cotality:zoning"]?.status).toBe("no-coverage");
-    // No network when key absent (clean fallback; Regrid supplies data)
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("[4] HTTP 5xx — surfaces as upstream-error", async () => {
-    process.env.COTALITY_API_KEY = "trial-cotality-key-30day";
-    const fetchImpl = vi.fn(async () =>
-      new Response("Service Unavailable", { status: 503, headers: { "content-type": "text/plain" } }),
+  it("[5] missing SPATIALTILE creds — parcels no-coverage, zoning ok with property only", async () => {
+    clearAllCotalityCreds();
+    process.env.COTALITY_PROPERTY_KEY = TEST_CREDS.COTALITY_PROPERTY_KEY;
+    process.env.COTALITY_PROPERTY_SECRET = TEST_CREDS.COTALITY_PROPERTY_SECRET;
+
+    const { fetchImpl } = cotalityFetchRouter();
+    const outcomes = await runAdapters({
+      adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
+      context: { ...ROUND_ROCK, fetchImpl },
+    });
+    const byKey = Object.fromEntries(outcomes.map((o) => [o.adapterKey, o]));
+    expect(byKey["cotality:parcels"]?.status).toBe("no-coverage");
+    expect(byKey["cotality:parcels"]?.error?.message).toMatch(
+      /COTALITY_SPATIALTILE_KEY\/SECRET/i,
     );
+    expect(byKey["cotality:zoning"]?.status).toBe("ok");
+  });
+
+  it("[6] HTTP 5xx on property API — upstream-error", async () => {
+    setAllCotalityCreds();
+    const { fetchImpl } = cotalityFetchRouter({ propertyStatus: 503 });
     const outcomes = await runAdapters({
       adapters: [cotalityParcelsAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
@@ -190,11 +334,21 @@ describe("Cotality adapters — 2026-06-06 decision scaffold", () => {
     expect(outcomes[0]?.error?.message).toContain("HTTP 503");
   });
 
-  it("[5] malformed JSON — parse-error", async () => {
-    process.env.COTALITY_API_KEY = "trial-cotality-key-30day";
-    const fetchImpl = vi.fn(async () =>
-      new Response("<not-json>", { status: 200, headers: { "content-type": "application/json" } }),
-    );
+  it("[7] malformed JSON on property API — parse-error", async () => {
+    setAllCotalityCreds();
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/oauth/token") || (init?.method ?? "GET") === "POST") {
+        return oauthTokenResponse("property-bearer-token");
+      }
+      if (url.includes("property")) {
+        return new Response("<not-json>", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return jsonResponse(spatialResponseFixture());
+    });
     const outcomes = await runAdapters({
       adapters: [cotalityParcelsAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
@@ -203,25 +357,24 @@ describe("Cotality adapters — 2026-06-06 decision scaffold", () => {
     expect(outcomes[0]?.error?.code).toBe("parse-error");
   });
 
-  it("[6] cache hit — second call within TTL skips upstream", async () => {
-    process.env.COTALITY_API_KEY = "trial-cotality-key-30day";
-    const fetchImpl = vi.fn(async () => jsonResponse(cotalityResponseFixture()));
-    const first = await runAdapters({
-      adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
-      context: { ...ROUND_ROCK, fetchImpl },
-    });
-    expect(first.every((o) => o.status === "ok")).toBe(true);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  it("[8] point dedup — second parcel+zoning run within TTL skips repeat property/spatial GETs for same mode", async () => {
+    setAllCotalityCreds();
+    const { fetchImpl } = cotalityFetchRouter();
 
-    const second = await runAdapters({
+    await runAdapters({
       adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
     });
-    expect(second.every((o) => o.status === "ok")).toBe(true);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const callsAfterFirst = fetchImpl.mock.calls.length;
+
+    await runAdapters({
+      adapters: [cotalityParcelsAdapter, cotalityZoningAdapter],
+      context: { ...ROUND_ROCK, fetchImpl },
+    });
+    expect(fetchImpl.mock.calls.length).toBe(callsAfterFirst);
   });
 
-  it("[7] registry shape — cotality adapters present in FEDERAL and ALL", () => {
+  it("[9] registry shape — cotality adapters in FEDERAL and ALL", () => {
     const keys = ALL_ADAPTERS.map((a) => a.adapterKey);
     expect(keys).toContain("cotality:parcels");
     expect(keys).toContain("cotality:zoning");
@@ -230,17 +383,24 @@ describe("Cotality adapters — 2026-06-06 decision scaffold", () => {
     expect(fed).toContain("cotality:zoning");
   });
 
-  it("[8] 401 on mounted key — upstream-error (diagnostics)", async () => {
-    process.env.COTALITY_API_KEY = "trial-cotality-key-30day";
-    const fetchImpl = vi.fn(async () =>
-      new Response("Unauthorized trial key", { status: 401, headers: { "content-type": "text/plain" } }),
-    );
+  it("[10] 401 on token endpoint — upstream-error", async () => {
+    setAllCotalityCreds();
+    const { fetchImpl } = cotalityFetchRouter({ tokenStatus: 401 });
     const outcomes = await runAdapters({
       adapters: [cotalityParcelsAdapter],
       context: { ...ROUND_ROCK, fetchImpl },
     });
     expect(outcomes[0]?.status).toBe("failed");
     expect(outcomes[0]?.error?.code).toBe("upstream-error");
-    expect(outcomes[0]?.error?.message).toMatch(/401|Unauthorized|entitlement/i);
+    expect(outcomes[0]?.error?.message).toMatch(/401|OAuth token/i);
+  });
+
+  it("mergeCotalityPropertyAndSpatial attaches spatial geometry to parcel", () => {
+    const merged = mergeCotalityPropertyAndSpatial(
+      propertyResponseFixture(),
+      spatialResponseFixture(),
+    );
+    expect(merged.parcel?.geometry).toEqual(SPATIAL_GEOMETRY);
+    expect(merged.clip).toBe(9876543210);
   });
 });

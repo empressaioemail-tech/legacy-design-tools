@@ -1,41 +1,26 @@
 /**
- * Cotality (CoreLogic) — national parcel + zoning adapter pair.
+ * Cotality (CoreLogic Developer Platform / Apigee) — national parcel + zoning
+ * adapter pair.
  *
- * Per 2026-06-06 decision (`_decisions/2026-06-06_cotality_parcel_provider.md`):
- * Cotality is the launch provider for parcel/zoning on Property Brief /
- * Cortex. Regrid remains the interim/dev fallback and stays registered so
- * both apps remain testable end-to-end while the Cotality eval (self-serve
- * 30-day trial) and later MCP production path land.
+ * Per 2026-06-06 decision + OAuth rework (2026-06-06):
+ * Cotality uses OAuth2 client_credentials — each demo app has a consumer KEY
+ * (client_id) + consumer SECRET (client_secret) exchanged for a short-lived
+ * bearer token. Three independent demo apps; this PR uses Property + SpatialTile:
  *
- * This adapter emits the **identical** `siteContext.layers[]` / `payload`
- * contract as the Regrid adapter (`regrid:parcels` / `regrid:zoning`):
- *   - `payload.parcel` = GeoJSON Feature with `geometry: { type: "Polygon" | "MultiPolygon" }`
- *   - `payload.zoning` = GeoJSON Feature (geometry may be the parcel polygon
- *     when Cotality returns zoning as attributes on the parcel record)
- * Consumers (`overlays.ts`, briefing engine, `brokerageSiteContext.ts`)
- * are unchanged.
+ *   COTALITY_PROPERTY_KEY / COTALITY_PROPERTY_SECRET
+ *     → Property API v2.0, Property Search, Property AVM (parcel attrs + zoning)
+ *   COTALITY_SPATIALTILE_KEY / COTALITY_SPATIALTILE_SECRET
+ *     → Spatial Tile (parcel polygon geometry)
+ *   COTALITY_RISKMETER_KEY / COTALITY_RISKMETER_SECRET
+ *     → RiskMeter (climate/flood) — env vars recognized but unused until climate dispatch
  *
- * Two adapters, one upstream call (in-memory 15 min dedup, same pattern as
- * Regrid SCOPE B). CLIP is carried as the stable parcel identifier (Regrid
- * `ll_uuid` analog) per the place-graph strategy.
+ * Adapter contract unchanged from Regrid SCOPE B:
+ *   payload.parcel / payload.zoning = GeoJSON Feature (Polygon/MultiPolygon geometry)
  *
- * Key gate (no hard failure):
- *   - When `COTALITY_API_KEY` is absent, the adapters surface `no-coverage`
- *     (neutral pill) with a diagnostic message and do **not** call upstream.
- *     Regrid (also registered) supplies data (or its own no-coverage).
- *   - Live calls are only attempted when the key is present (trial or
- *     production entitlement). 30-day trial per developer.corelogic.com
- *     (100 property-data calls/day + 25 AVM/day as of 2026-06-06).
+ * Auth gate: missing KEY or SECRET for a required app → clean no-coverage, zero
+ * network (Regrid remains fallback). Tokens cached in-memory until ~60s before expiry.
  *
- * Endpoint note: The exact host/path + auth shape for the self-serve trial
- * "property-data" lane (Property Characteristics / Parcel / Zoning with
- * geometry) is obtained after signup at https://developer.corelogic.com.
- * The recon (`_research/2026-05-30_cotality_property_brief_recon.md` §2b, §3,
- * §4) distinguishes the assessor-grade lane (this adapter) from Trestle MLS
- * OData (listings only, no guaranteed polygon for off-market). Update the
- * constants + request builder from the authenticated portal docs / MCP tool
- * schema when available. The adapter defensively normalizes common geometry
- * representations (GeoJSON, Esri rings, WKT-ish) to the required payload.
+ * NOT Trestle (api.cotality.com/trestle/...) — that is MLS OData, different product.
  */
 
 import {
@@ -48,31 +33,78 @@ import { CACHE_COORDINATE_PRECISION } from "../cache";
 
 const COTALITY_PROVIDER_LABEL = "Cotality";
 
-/**
- * In-memory dedup TTL (ms). Matches Regrid and fcc:broadband.
- */
+/** In-memory point-response dedup TTL (ms). Matches Regrid / fcc:broadband. */
 const COTALITY_INMEM_TTL_MS = 15 * 60 * 1000;
 
-/**
- * Default per-adapter timeout floor (ms). Conservative-with-headroom for
- * a commercial property-data endpoint; smaller than county-GIS slow feeds.
- */
+/** Default per-adapter timeout floor (ms). */
 const COTALITY_TIMEOUT_MS = 30_000;
 
-/** Identifying UA. Same convention as sibling adapters. */
+/** Refresh bearer tokens this many ms before Apigee expires_in. */
+const COTALITY_TOKEN_EXPIRY_BUFFER_MS = 60_000;
+
 const COTALITY_USER_AGENT =
   "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
 
-/**
- * Freshness window (months). Cotality is positioned as fresher than Regrid
- * (assessor-direct vs resold). 6 months is conservative; adjust per the
- * vintage/refresh fields returned by the trial tier.
- */
 export const COTALITY_FRESHNESS_THRESHOLD_MONTHS = 6;
 
-/**
- * Structured logging (same shape as regridLogEvent for log-explorer parity).
- */
+// ---------------------------------------------------------------------------
+// Endpoint constants — OPERATOR-CONFIRM from developer.corelogic.com API DOCUMENTATION
+// ---------------------------------------------------------------------------
+
+/** OPERATOR-CONFIRM: Apigee OAuth2 token endpoint (likely api-prod.corelogic.com). */
+export const COTALITY_TOKEN_URL_DEFAULT =
+  "https://api-prod.corelogic.com/oauth/token";
+
+/** OPERATOR-CONFIRM: Property API v2 base (parcel characteristics + zoning fields). */
+export const COTALITY_PROPERTY_BASE_URL_DEFAULT =
+  "https://api-prod.corelogic.com/property/v2";
+
+/** OPERATOR-CONFIRM: Spatial Tile API base (parcel polygon geometry). */
+export const COTALITY_SPATIALTILE_BASE_URL_DEFAULT =
+  "https://api-prod.corelogic.com/spatialtile/v1";
+
+/** OPERATOR-CONFIRM: relative path on PROPERTY base for lat/lng point lookup. */
+export const COTALITY_PROPERTY_POINT_PATH_DEFAULT = "/point";
+
+/** OPERATOR-CONFIRM: relative path on SPATIALTILE base for lat/lng geometry lookup. */
+export const COTALITY_SPATIALTILE_POINT_PATH_DEFAULT = "/point";
+
+export function cotalityTokenUrl(): string {
+  return process.env.COTALITY_TOKEN_URL ?? COTALITY_TOKEN_URL_DEFAULT;
+}
+
+export function cotalityPropertyBaseUrl(): string {
+  return (
+    process.env.COTALITY_PROPERTY_BASE_URL ??
+    COTALITY_PROPERTY_BASE_URL_DEFAULT
+  );
+}
+
+export function cotalitySpatialTileBaseUrl(): string {
+  return (
+    process.env.COTALITY_SPATIALTILE_BASE_URL ??
+    COTALITY_SPATIALTILE_BASE_URL_DEFAULT
+  );
+}
+
+export function cotalityPropertyPointPath(): string {
+  return (
+    process.env.COTALITY_PROPERTY_POINT_PATH ??
+    COTALITY_PROPERTY_POINT_PATH_DEFAULT
+  );
+}
+
+export function cotalitySpatialTilePointPath(): string {
+  return (
+    process.env.COTALITY_SPATIALTILE_POINT_PATH ??
+    COTALITY_SPATIALTILE_POINT_PATH_DEFAULT
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
 type CotalityLogLevel = "info" | "warn";
 type CotalityLogFields = Record<string, unknown>;
 
@@ -96,11 +128,11 @@ function cotalityLogEvent(
   }
 }
 
-function redactKey(url: string): string {
+function redactUrl(url: string): string {
   try {
     const u = new URL(url);
-    if (u.searchParams.has("apikey")) {
-      u.searchParams.set("apikey", "<redacted>");
+    if (u.searchParams.has("client_secret")) {
+      u.searchParams.set("client_secret", "<redacted>");
     }
     return u.toString();
   } catch {
@@ -108,7 +140,218 @@ function redactKey(url: string): string {
   }
 }
 
-/** GeoJSON Feature we normalize every successful response into. */
+// ---------------------------------------------------------------------------
+// OAuth2 client_credentials — per demo-app token cache
+// ---------------------------------------------------------------------------
+
+export type CotalityOAuthApp = "property" | "spatialtile";
+
+interface CotalityAppCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+interface CotalityTokenCacheEntry {
+  accessToken: string;
+  expiresAt: number;
+}
+
+const cotalityTokenCache = new Map<
+  CotalityOAuthApp,
+  CotalityTokenCacheEntry
+>();
+
+/** In-flight token fetches deduped per app (concurrent adapters share one POST). */
+const cotalityTokenInflight = new Map<
+  CotalityOAuthApp,
+  Promise<string>
+>();
+
+export function readCotalityAppCredentials(
+  app: CotalityOAuthApp,
+): CotalityAppCredentials | null {
+  const keyVar =
+    app === "property"
+      ? "COTALITY_PROPERTY_KEY"
+      : "COTALITY_SPATIALTILE_KEY";
+  const secretVar =
+    app === "property"
+      ? "COTALITY_PROPERTY_SECRET"
+      : "COTALITY_SPATIALTILE_SECRET";
+  const clientId = process.env[keyVar];
+  const clientSecret = process.env[secretVar];
+  if (!clientId || clientId.length === 0) return null;
+  if (!clientSecret || clientSecret.length === 0) return null;
+  return { clientId, clientSecret };
+}
+
+/** Test-only — clear OAuth token cache between vitest cases. */
+export function __resetCotalityTokenCacheForTests(): void {
+  cotalityTokenCache.clear();
+  cotalityTokenInflight.clear();
+}
+
+interface GetCotalityAccessTokenArgs {
+  app: CotalityOAuthApp;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  adapterKeyForLog: string;
+}
+
+/**
+ * Exchange client_id + client_secret for a bearer token; cache until ~60s before
+ * Apigee expires_in. Uses application/x-www-form-urlencoded body per standard
+ * OAuth2 client_credentials (operator may confirm Basic-auth variant in portal).
+ */
+export async function getCotalityAccessToken(
+  args: GetCotalityAccessTokenArgs,
+): Promise<string> {
+  const { app, fetchImpl, signal, adapterKeyForLog } = args;
+  const creds = readCotalityAppCredentials(app);
+  if (!creds) {
+    const keyVar =
+      app === "property"
+        ? "COTALITY_PROPERTY_KEY/SECRET"
+        : "COTALITY_SPATIALTILE_KEY/SECRET";
+    throw new AdapterRunError(
+      "no-coverage",
+      `${keyVar} is not configured on this deployment. Regrid remains the active national parcel/zoning provider.`,
+    );
+  }
+
+  const now = Date.now();
+  const cached = cotalityTokenCache.get(app);
+  if (cached && cached.expiresAt > now) {
+    return cached.accessToken;
+  }
+
+  const inflight = cotalityTokenInflight.get(app);
+  if (inflight) return inflight;
+
+  const fetcher: typeof fetch = fetchImpl ?? fetch;
+  const tokenUrl = cotalityTokenUrl();
+
+  const promise = (async (): Promise<string> => {
+    cotalityLogEvent("info", "cotality oauth token start", adapterKeyForLog, {
+      app,
+      token_url: redactUrl(tokenUrl),
+    });
+    const startedAtMs = Date.now();
+
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+    });
+
+    let res: Response;
+    try {
+      res = await fetcher(tokenUrl, {
+        method: "POST",
+        signal,
+        headers: {
+          "User-Agent": COTALITY_USER_AGENT,
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+    } catch (err) {
+      const throwExcerpt =
+        err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      cotalityLogEvent("warn", "cotality oauth token failed", adapterKeyForLog, {
+        app,
+        error_class: "network",
+        duration_ms: Date.now() - startedAtMs,
+        throw_excerpt: throwExcerpt,
+      });
+      throw new AdapterRunError(
+        "network-error",
+        `Cotality OAuth token request failed (${app} app): ${throwExcerpt}. Use Force refresh to retry.`,
+      );
+    }
+
+    if (!res.ok) {
+      let bodyExcerpt = "";
+      try {
+        bodyExcerpt = (await res.text()).slice(0, 256);
+      } catch {
+        /* swallow */
+      }
+      cotalityLogEvent("warn", "cotality oauth token failed", adapterKeyForLog, {
+        app,
+        error_class: "status",
+        http_status: res.status,
+        duration_ms: Date.now() - startedAtMs,
+        body_excerpt: bodyExcerpt,
+      });
+      throw new AdapterRunError(
+        "upstream-error",
+        `Cotality OAuth token responded HTTP ${res.status} (${app} app).${
+          bodyExcerpt ? ` Upstream: ${bodyExcerpt}` : ""
+        } Check consumer KEY/SECRET for this demo app.`,
+      );
+    }
+
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new AdapterRunError(
+        "parse-error",
+        `Cotality OAuth token response was not JSON (${app} app): ${message}`,
+      );
+    }
+
+    const tokenObj = json as {
+      access_token?: unknown;
+      expires_in?: unknown;
+    };
+    const accessToken =
+      typeof tokenObj.access_token === "string"
+        ? tokenObj.access_token
+        : null;
+    if (!accessToken) {
+      throw new AdapterRunError(
+        "parse-error",
+        `Cotality OAuth token response missing access_token (${app} app).`,
+      );
+    }
+
+    const expiresInSec =
+      typeof tokenObj.expires_in === "number" && tokenObj.expires_in > 0
+        ? tokenObj.expires_in
+        : 3600;
+    const expiresAt =
+      Date.now() +
+      expiresInSec * 1000 -
+      COTALITY_TOKEN_EXPIRY_BUFFER_MS;
+
+    cotalityTokenCache.set(app, { accessToken, expiresAt });
+    cotalityLogEvent("info", "cotality oauth token ok", adapterKeyForLog, {
+      app,
+      duration_ms: Date.now() - startedAtMs,
+      expires_in_sec: expiresInSec,
+    });
+    return accessToken;
+  })();
+
+  // Return the tracked wrapper (not the raw promise) so a .finally cleanup
+  // handler does not leave the underlying rejection unhandled in Node 24+.
+  const tracked = promise.finally(() => {
+    const entry = cotalityTokenInflight.get(app);
+    if (entry === tracked) cotalityTokenInflight.delete(app);
+  });
+
+  cotalityTokenInflight.set(app, tracked);
+  return tracked;
+}
+
+// ---------------------------------------------------------------------------
+// Upstream response shapes + normalization
+// ---------------------------------------------------------------------------
+
 export interface NormalizedFeature {
   type: "Feature";
   geometry: {
@@ -119,11 +362,10 @@ export interface NormalizedFeature {
   id?: string | number;
 }
 
-/** Shape we return from the shared fetch (before splitting to parcel vs zoning). */
 export interface CotalityPointResponse {
   clip?: string | number;
   parcel?: {
-    geometry?: unknown; // GeoJSON | Esri rings | { wkt?: string } etc.
+    geometry?: unknown;
     attributes?: Record<string, unknown>;
     [k: string]: unknown;
   };
@@ -134,7 +376,7 @@ export interface CotalityPointResponse {
     geometry?: unknown;
     [k: string]: unknown;
   };
-  vintage?: string; // or lastUpdated, asOf, taxYear, etc.
+  vintage?: string;
   county?: string;
   error?: string | { message?: string };
   [k: string]: unknown;
@@ -145,39 +387,27 @@ interface CotalityDedupEntry {
   expiresAt: number;
 }
 
-const cotalityDedup: Map<string, CotalityDedupEntry> = new Map();
+const cotalityPointDedup: Map<string, CotalityDedupEntry> = new Map();
 
-function cotalityDedupKey(latitude: number, longitude: number): string {
+function cotalityDedupKey(
+  latitude: number,
+  longitude: number,
+  mode: "parcel" | "zoning",
+): string {
   const factor = 10 ** CACHE_COORDINATE_PRECISION;
   const lat = Math.round(latitude * factor) / factor;
   const lng = Math.round(longitude * factor) / factor;
-  return `${lat},${lng}`;
+  return `${mode}:${lat},${lng}`;
 }
 
-/** Test-only reset (mirrors Regrid). */
 export function __resetCotalityDedupForTests(): void {
-  cotalityDedup.clear();
+  cotalityPointDedup.clear();
 }
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function readApiKeyOrNull(): string | null {
-  const key = process.env.COTALITY_API_KEY;
-  if (!key || key.length === 0) return null;
-  return key;
-}
-
-/**
- * Best-effort normalizer: accepts a variety of geometry payloads from
- * Cotality trial responses and returns a GeoJSON Polygon/MultiPolygon
- * coordinate array (or null). Handles:
- *   - GeoJSON { type: "Polygon", coordinates: [...] }
- *   - Esri { rings: [...] } (wkid 4326 or 102100 assumed)
- *   - WKT-ish strings starting with POLYGON(
- * The caller wraps the result into a Feature with properties.
- */
 function normalizeGeometryToCoordinates(geom: unknown): unknown | null {
   if (!geom) return null;
   if (typeof geom === "object") {
@@ -185,22 +415,13 @@ function normalizeGeometryToCoordinates(geom: unknown): unknown | null {
     if (g.type === "Polygon" || g.type === "MultiPolygon") {
       if (Array.isArray(g.coordinates)) return g.coordinates;
     }
-    if (Array.isArray(g.rings)) {
-      // Treat as GeoJSON-style rings (already [ [lng,lat], ... ])
-      return g.rings;
-    }
-    // Some responses nest geometry under "geometry" or "shape"
+    if (Array.isArray(g.rings)) return g.rings;
     if (g.geometry) return normalizeGeometryToCoordinates(g.geometry);
     if (g.shape) return normalizeGeometryToCoordinates(g.shape);
   }
   if (typeof geom === "string") {
     const s = geom.trim().toUpperCase();
     if (s.startsWith("POLYGON") || s.startsWith("MULTIPOLYGON")) {
-      // Very light WKT → coordinates is not trivial without a parser.
-      // For the scaffold we surface the raw WKT in properties and
-      // let a later pass (or a small client-side util) parse if needed.
-      // The contract wants GeoJSON coordinates for overlays; if we hit
-      // this path on a real trial response we will extend the normalizer.
       return null;
     }
   }
@@ -210,10 +431,12 @@ function normalizeGeometryToCoordinates(geom: unknown): unknown | null {
 function snapshotDateFromResponse(resp: CotalityPointResponse): string {
   const candidates = [
     resp.vintage,
-    (resp as any).lastUpdated,
-    (resp as any).asOf,
-    (resp as any).refreshDate,
-    (resp as any).taxYear ? `${resp.taxYear}-01-01` : undefined,
+    (resp as Record<string, unknown>).lastUpdated,
+    (resp as Record<string, unknown>).asOf,
+    (resp as Record<string, unknown>).refreshDate,
+    (resp as Record<string, unknown>).taxYear
+      ? `${(resp as Record<string, unknown>).taxYear}-01-01`
+      : undefined,
   ];
   for (const c of candidates) {
     if (typeof c === "string" && c.length > 0) {
@@ -238,14 +461,42 @@ function buildFeature(
   return {
     type: "Feature",
     geometry: {
-      type: "Polygon", // overlays.ts also handles MultiPolygon via the geojson extractor
+      type: "Polygon",
       coordinates: geometry,
-    } as any,
+    } as NormalizedFeature["geometry"],
     properties: { ...baseProps },
   };
 }
 
-interface FetchCotalityArgs {
+/** Defensively merge Property API + Spatial Tile payloads into one point response. */
+export function mergeCotalityPropertyAndSpatial(
+  propertyJson: unknown,
+  spatialJson: unknown | null,
+): CotalityPointResponse {
+  const property =
+    propertyJson && typeof propertyJson === "object"
+      ? (propertyJson as CotalityPointResponse)
+      : ({} as CotalityPointResponse);
+
+  if (!spatialJson || typeof spatialJson !== "object") {
+    return property;
+  }
+
+  const spatial = spatialJson as Record<string, unknown>;
+  const spatialGeom =
+    spatial.geometry ??
+    (spatial.parcel as Record<string, unknown> | undefined)?.geometry ??
+    spatial;
+
+  const parcel = property.parcel ?? { attributes: {} };
+  property.parcel = {
+    ...parcel,
+    geometry: spatialGeom,
+  };
+  return property;
+}
+
+interface FetchCotalityPointArgs {
   latitude: number;
   longitude: number;
   address?: string | null;
@@ -253,10 +504,95 @@ interface FetchCotalityArgs {
   signal?: AbortSignal;
   adapterKeyForLog: string;
   timeoutMs: number;
+  /** parcel adapter requires SpatialTile creds + geometry fetch; zoning is property-only. */
+  mode: "parcel" | "zoning";
+}
+
+async function fetchCotalityJson(args: {
+  url: string;
+  bearerToken: string;
+  fetchImpl: typeof fetch;
+  signal?: AbortSignal;
+  adapterKeyForLog: string;
+  label: string;
+}): Promise<unknown> {
+  const { url, bearerToken, fetchImpl, signal, adapterKeyForLog, label } =
+    args;
+  const startedAtMs = Date.now();
+
+  cotalityLogEvent("info", "cotality request start", adapterKeyForLog, {
+    label,
+    url: redactUrl(url),
+  });
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      signal,
+      headers: {
+        "User-Agent": COTALITY_USER_AGENT,
+        Accept: "application/json",
+        Authorization: `Bearer ${bearerToken}`,
+      },
+    });
+  } catch (err) {
+    const throwExcerpt =
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
+      label,
+      error_class: "network",
+      duration_ms: Date.now() - startedAtMs,
+      throw_excerpt: throwExcerpt,
+    });
+    throw new AdapterRunError(
+      "network-error",
+      `Cotality ${label} did not get a response. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+    );
+  }
+
+  if (!res.ok) {
+    let bodyExcerpt = "";
+    try {
+      bodyExcerpt = (await res.text()).slice(0, 256);
+    } catch {
+      /* swallow */
+    }
+    cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
+      label,
+      error_class: "status",
+      http_status: res.status,
+      duration_ms: Date.now() - startedAtMs,
+      body_excerpt: bodyExcerpt,
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new AdapterRunError(
+        "upstream-error",
+        `Cotality ${label} responded HTTP ${res.status}. Check demo-app KEY/SECRET and token entitlement.${
+          bodyExcerpt ? ` Upstream: ${bodyExcerpt}` : ""
+        }`,
+      );
+    }
+    throw new AdapterRunError(
+      "upstream-error",
+      `Cotality ${label} responded HTTP ${res.status}.${
+        bodyExcerpt ? ` Upstream: ${bodyExcerpt}` : ""
+      } Use Force refresh to retry.`,
+    );
+  }
+
+  try {
+    return await res.json();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new AdapterRunError(
+      "parse-error",
+      `Cotality ${label} response was not JSON: ${message}`,
+    );
+  }
 }
 
 async function getOrFetchCotalityPoint(
-  args: FetchCotalityArgs,
+  args: FetchCotalityPointArgs,
 ): Promise<CotalityPointResponse> {
   const {
     latitude,
@@ -265,147 +601,99 @@ async function getOrFetchCotalityPoint(
     fetchImpl,
     signal,
     adapterKeyForLog,
-    timeoutMs,
+    mode,
   } = args;
 
-  const key = cotalityDedupKey(latitude, longitude);
+  const dedupKey = cotalityDedupKey(latitude, longitude, mode);
   const now = Date.now();
-  const existing = cotalityDedup.get(key);
+  const existing = cotalityPointDedup.get(dedupKey);
   if (existing && existing.expiresAt > now) {
     return existing.promise;
   }
 
-  const apiKey = readApiKeyOrNull();
-  if (!apiKey) {
-    // No key: surface as no-coverage (clean fallback to Regrid). Do not
-    // throw upstream-error — the caller (run) treats missing key as
-    // "this provider not configured on this deployment".
+  // Gate before any network (token or API).
+  if (!readCotalityAppCredentials("property")) {
     throw new AdapterRunError(
       "no-coverage",
-      "COTALITY_API_KEY is not configured. Regrid remains the active national parcel/zoning provider for this deployment.",
+      "COTALITY_PROPERTY_KEY/SECRET is not configured. Regrid remains the active national parcel/zoning provider for this deployment.",
+    );
+  }
+  if (mode === "parcel" && !readCotalityAppCredentials("spatialtile")) {
+    throw new AdapterRunError(
+      "no-coverage",
+      "COTALITY_SPATIALTILE_KEY/SECRET is not configured. Cotality parcel geometry requires the SpatialTile demo app; Regrid remains the fallback.",
     );
   }
 
-  // Endpoint + query shape are provisional — replace from the authenticated
-  // developer.corelogic.com trial portal docs after 2026-06-06 signup.
-  // The recon expects Lane A (Property Characteristics / Parcel / Zoning)
-  // with CLIP + geometry for arbitrary addresses (not only MLS listings).
-  const url = new URL(
-    process.env.COTALITY_PARCEL_ENDPOINT ||
-      "https://api.corelogic.com/propertycharacteristics/v1/point",
-  );
-  url.searchParams.set("lat", String(latitude));
-  url.searchParams.set("lon", String(longitude));
-  if (address) url.searchParams.set("address", address);
-  url.searchParams.set("apikey", apiKey);
-  const urlString = url.toString();
   const fetcher: typeof fetch = fetchImpl ?? fetch;
 
-  cotalityLogEvent("info", "cotality request start", adapterKeyForLog, {
-    url: redactKey(urlString),
-    lat: latitude,
-    lng: longitude,
-    has_address: !!address,
-    timeout_ms: timeoutMs,
-  });
-  const startedAtMs = Date.now();
-
   const promise = (async (): Promise<CotalityPointResponse> => {
-    let res: Response;
-    try {
-      res = await fetcher(urlString, {
-        signal,
-        headers: {
-          "User-Agent": COTALITY_USER_AGENT,
-          Accept: "application/json",
-        },
-      });
-    } catch (err) {
-      const durationMs = Date.now() - startedAtMs;
-      const throwExcerpt =
-        err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
-        error_class: "network",
-        duration_ms: durationMs,
-        throw_excerpt: throwExcerpt,
-      });
-      throw new AdapterRunError(
-        "network-error",
-        `Cotality did not get a response. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
-      );
-    }
-
-    if (!res.ok) {
-      const durationMs = Date.now() - startedAtMs;
-      let bodyExcerpt = "";
-      try {
-        bodyExcerpt = (await res.text()).slice(0, 256);
-      } catch {
-        /* swallow */
-      }
-      cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
-        error_class: "status",
-        http_status: res.status,
-        duration_ms: durationMs,
-        body_excerpt: bodyExcerpt,
-      });
-      // 401/403 on a mounted key is a real misconfig — surface hard so operator notices.
-      if (res.status === 401 || res.status === 403) {
-        throw new AdapterRunError(
-          "upstream-error",
-          `Cotality responded with HTTP ${res.status}. Check COTALITY_API_KEY entitlement and trial status.${
-            bodyExcerpt ? ` Upstream: ${bodyExcerpt}` : ""
-          }`,
-        );
-      }
-      throw new AdapterRunError(
-        "upstream-error",
-        `Cotality responded with HTTP ${res.status}.${
-          bodyExcerpt ? ` Upstream: ${bodyExcerpt}` : ""
-        } Use Force refresh to retry.`,
-      );
-    }
-
-    let json: unknown;
-    try {
-      json = await res.json();
-    } catch (err) {
-      const durationMs = Date.now() - startedAtMs;
-      const message = err instanceof Error ? err.message : String(err);
-      cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
-        error_class: "parse",
-        duration_ms: durationMs,
-        parse_error: message,
-      });
-      throw new AdapterRunError(
-        "parse-error",
-        `Cotality response was not JSON: ${message}`,
-      );
-    }
-
-    if (!json || typeof json !== "object") {
-      throw new AdapterRunError(
-        "parse-error",
-        "Cotality response was not a JSON object.",
-      );
-    }
-
-    const response = json as CotalityPointResponse;
-    const durationMs = Date.now() - startedAtMs;
-    cotalityLogEvent("info", "cotality request ok", adapterKeyForLog, {
-      duration_ms: durationMs,
-      has_clip: !!response.clip,
-      has_parcel_geom: !!response.parcel?.geometry,
-      has_zoning: !!response.zoning,
+    const propertyToken = await getCotalityAccessToken({
+      app: "property",
+      fetchImpl: fetcher,
+      signal,
+      adapterKeyForLog,
     });
-    return response;
+
+    const propertyBase = cotalityPropertyBaseUrl().replace(/\/$/, "");
+    const propertyPath = cotalityPropertyPointPath();
+    const propertyUrl = new URL(`${propertyBase}${propertyPath}`);
+    propertyUrl.searchParams.set("lat", String(latitude));
+    propertyUrl.searchParams.set("lon", String(longitude));
+    if (address) propertyUrl.searchParams.set("address", address);
+
+    const propertyJson = await fetchCotalityJson({
+      url: propertyUrl.toString(),
+      bearerToken: propertyToken,
+      fetchImpl: fetcher,
+      signal,
+      adapterKeyForLog,
+      label: "property",
+    });
+
+    let spatialJson: unknown | null = null;
+    if (mode === "parcel") {
+      const spatialToken = await getCotalityAccessToken({
+        app: "spatialtile",
+        fetchImpl: fetcher,
+        signal,
+        adapterKeyForLog,
+      });
+      const spatialBase = cotalitySpatialTileBaseUrl().replace(/\/$/, "");
+      const spatialPath = cotalitySpatialTilePointPath();
+      const spatialUrl = new URL(`${spatialBase}${spatialPath}`);
+      spatialUrl.searchParams.set("lat", String(latitude));
+      spatialUrl.searchParams.set("lon", String(longitude));
+      if (address) spatialUrl.searchParams.set("address", address);
+
+      spatialJson = await fetchCotalityJson({
+        url: spatialUrl.toString(),
+        bearerToken: spatialToken,
+        fetchImpl: fetcher,
+        signal,
+        adapterKeyForLog,
+        label: "spatialtile",
+      });
+    }
+
+    const merged = mergeCotalityPropertyAndSpatial(propertyJson, spatialJson);
+    cotalityLogEvent("info", "cotality request ok", adapterKeyForLog, {
+      mode,
+      has_clip: !!merged.clip,
+      has_parcel_geom: !!merged.parcel?.geometry,
+      has_zoning: !!merged.zoning,
+    });
+    return merged;
   })();
 
-  cotalityDedup.set(key, { promise, expiresAt: now + COTALITY_INMEM_TTL_MS });
+  cotalityPointDedup.set(dedupKey, {
+    promise,
+    expiresAt: now + COTALITY_INMEM_TTL_MS,
+  });
   promise.catch(() => {
-    const entry = cotalityDedup.get(key);
+    const entry = cotalityPointDedup.get(dedupKey);
     if (entry && entry.promise === promise) {
-      cotalityDedup.delete(key);
+      cotalityPointDedup.delete(dedupKey);
     }
   });
   return promise;
@@ -418,9 +706,6 @@ function cotalityApplies(ctx: AdapterContext): boolean {
   );
 }
 
-/**
- * `cotality:parcels` — parcel polygon + attributes (CLIP as stable id).
- */
 export const cotalityParcelsAdapter: Adapter = {
   adapterKey: "cotality:parcels",
   tier: "federal",
@@ -439,26 +724,28 @@ export const cotalityParcelsAdapter: Adapter = {
       signal: ctx.signal,
       adapterKeyForLog: this.adapterKey,
       timeoutMs: COTALITY_TIMEOUT_MS,
+      mode: "parcel",
     });
 
-    // If we reached here with a response but no parcel geometry, treat as
-    // no-coverage (Cotality may have a record but no boundary for this point).
     const parcelGeom = response.parcel?.geometry ?? null;
     const coords = normalizeGeometryToCoordinates(parcelGeom);
     if (!coords) {
       throw new AdapterRunError(
         "no-coverage",
-        "Cotality returned no parcel polygon at this lat/lng (or the trial tier response shape did not include a recognized geometry).",
+        "Cotality returned no parcel polygon at this lat/lng (SpatialTile geometry missing or unrecognized shape).",
       );
     }
 
-    const clip = response.clip ?? (response.parcel as any)?.attributes?.clip ?? null;
-    const baseProps: Record<string, unknown> = {
+    const clip =
+      response.clip ??
+      (response.parcel?.attributes as Record<string, unknown> | undefined)
+        ?.clip ??
+      null;
+    const feature = buildFeature(coords, {
       clip,
       source: "cotality",
       ...(response.parcel?.attributes ?? {}),
-    };
-    const feature = buildFeature(coords, baseProps);
+    });
 
     return {
       adapterKey: this.adapterKey,
@@ -467,19 +754,11 @@ export const cotalityParcelsAdapter: Adapter = {
       sourceKind: this.sourceKind,
       provider: providerLabelFromResponse(response),
       snapshotDate: snapshotDateFromResponse(response),
-      payload: {
-        kind: "parcel",
-        parcel: feature,
-      },
+      payload: { kind: "parcel", parcel: feature },
     };
   },
 };
 
-/**
- * `cotality:zoning` — zoning attributes (and geometry when provided).
- * Emits no-coverage when Cotality has a parcel but no zoning record/attrs,
- * without failing the parcel adapter (same contract as Regrid).
- */
 export const cotalityZoningAdapter: Adapter = {
   adapterKey: "cotality:zoning",
   tier: "federal",
@@ -498,13 +777,17 @@ export const cotalityZoningAdapter: Adapter = {
       signal: ctx.signal,
       adapterKeyForLog: this.adapterKey,
       timeoutMs: COTALITY_TIMEOUT_MS,
+      mode: "zoning",
     });
 
-    // Zoning may be delivered as a top-level block or as attributes on the
-    // parcel record. Prefer an explicit zoning geometry when present.
-    const zoningBlock = response.zoning ?? (response.parcel as any)?.attributes?.zoning ?? null;
+    const zoningBlock =
+      response.zoning ??
+      (response.parcel?.attributes as Record<string, unknown> | undefined)
+        ?.zoning ??
+      null;
     let zoningGeom: unknown = null;
     let zoningProps: Record<string, unknown> = {};
+
     if (zoningBlock && typeof zoningBlock === "object") {
       const zb = zoningBlock as Record<string, unknown>;
       zoningGeom = zb.geometry ?? zb;
@@ -515,15 +798,14 @@ export const cotalityZoningAdapter: Adapter = {
         ...zb,
       };
     } else if (response.parcel?.attributes) {
-      // Fallback: zoning fields may be flattened on the parcel attributes.
       const attrs = response.parcel.attributes as Record<string, unknown>;
       if (attrs.zoning || attrs.zoning_code || attrs.zoningCode) {
         zoningProps = {
           zoning: attrs.zoning ?? attrs.zoning_code ?? attrs.zoningCode,
-          zoning_description: attrs.zoning_description ?? attrs.zoningDescription,
+          zoning_description:
+            attrs.zoning_description ?? attrs.zoningDescription,
           zoning_type: attrs.zoning_type ?? attrs.zoningType,
         };
-        // Use parcel geometry for the zoning feature (common when zoning is attr-only).
         zoningGeom = response.parcel.geometry;
       }
     }
@@ -532,23 +814,19 @@ export const cotalityZoningAdapter: Adapter = {
     if (!coords && Object.keys(zoningProps).length === 0) {
       throw new AdapterRunError(
         "no-coverage",
-        "Cotality returned no zoning record at this lat/lng (the parcel may sit in an unzoned tract or the trial tier response did not include zoning for this record).",
+        "Cotality returned no zoning record at this lat/lng (Property API response did not include zoning fields).",
       );
     }
 
-    const parcelAttrs = (response.parcel?.attributes ?? {}) as Record<string, unknown>;
+    const parcelAttrs = (response.parcel?.attributes ?? {}) as Record<
+      string,
+      unknown
+    >;
     const clip = response.clip ?? parcelAttrs.clip ?? null;
-    const baseProps: Record<string, unknown> = {
-      clip,
-      source: "cotality",
-      ...zoningProps,
-    };
-    const feature = buildFeature(coords ?? normalizeGeometryToCoordinates(response.parcel?.geometry) ?? [], baseProps);
-
-    const snapshotDate =
-      response.vintage || (response as any).lastUpdated
-        ? snapshotDateFromResponse(response)
-        : nowIso();
+    const feature = buildFeature(
+      coords ?? normalizeGeometryToCoordinates(response.parcel?.geometry) ?? [],
+      { clip, source: "cotality", ...zoningProps },
+    );
 
     return {
       adapterKey: this.adapterKey,
@@ -556,11 +834,8 @@ export const cotalityZoningAdapter: Adapter = {
       layerKind: this.layerKind,
       sourceKind: this.sourceKind,
       provider: providerLabelFromResponse(response),
-      snapshotDate,
-      payload: {
-        kind: "zoning",
-        zoning: feature,
-      },
+      snapshotDate: snapshotDateFromResponse(response),
+      payload: { kind: "zoning", zoning: feature },
     };
   },
 };
