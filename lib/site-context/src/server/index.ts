@@ -19,3 +19,30 @@ export {
   type FetchUsgs3depDemResult,
   type Usgs3depFetchErrorCode,
 } from "./usgs3dep";
+export {
+  runHydrologyNative,
+  type HydrologyNativeInput,
+  type HydrologyNativeResult,
+  type GeoJsonFeatureCollection,
+} from "./hydrologyNative";
+export {
+  runHydrologyWorker,
+  type HydrologyWorkerRequest,
+  type HydrologyWorkerResult,
+} from "./hydrologyWorkerClient";
+export {
+  fetchNoaaAtlas14PointEstimate,
+  buildPfdsUrl,
+  parsePfdsDepthTable,
+  inchesToMm,
+  type NoaaAtlas14PointEstimate,
+  type NoaaAtlas14DesignStorm,
+} from "./noaaAtlas14";
+export {
+  resolveRainfallForcing,
+  rainfallForcingDepthMm,
+  cotalityDepthForReturnPeriod,
+  type RainfallForcingSource,
+  type CotalityFloodDepthForcing,
+  type ResolveRainfallForcingInput,
+} from "./rainfallForcing";

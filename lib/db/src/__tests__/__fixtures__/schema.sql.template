@@ -739,8 +739,8 @@ CREATE TABLE @@SCHEMA@@.materializable_elements (
     superseded_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT materializable_elements_provenance_invariants_check CHECK ((((source_kind = 'briefing-derived'::text) AND (briefing_id IS NOT NULL)) OR ((source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])) AND (source_snapshot_id IS NOT NULL) AND (engagement_id IS NOT NULL) AND (ifc_global_id IS NOT NULL) AND (ifc_type IS NOT NULL)) OR ((source_kind = 'site-topography'::text) AND (engagement_id IS NOT NULL)))),
-    CONSTRAINT materializable_elements_source_kind_check CHECK ((source_kind = ANY (ARRAY['briefing-derived'::text, 'as-built-ifc'::text, 'as-built-ifc-bundle'::text, 'site-topography'::text])))
+    CONSTRAINT materializable_elements_provenance_invariants_check CHECK ((((source_kind = 'briefing-derived'::text) AND (briefing_id IS NOT NULL)) OR ((source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])) AND (source_snapshot_id IS NOT NULL) AND (engagement_id IS NOT NULL) AND (ifc_global_id IS NOT NULL) AND (ifc_type IS NOT NULL)) OR ((source_kind = 'site-topography'::text) AND (engagement_id IS NOT NULL)) OR ((source_kind = 'site-drainage'::text) AND (engagement_id IS NOT NULL)))),
+    CONSTRAINT materializable_elements_source_kind_check CHECK ((source_kind = ANY (ARRAY['briefing-derived'::text, 'as-built-ifc'::text, 'as-built-ifc-bundle'::text, 'site-topography'::text, 'site-drainage'::text])))
 );
 
 

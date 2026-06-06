@@ -97,6 +97,8 @@ import {
 import { resolveKeepPerEngagement } from "../lib/briefingGenerationJobsSweep";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";
+import { loadActiveSiteDrainageRow } from "../lib/siteDrainageMaterializer";
+import { mergeSiteDrainageIntoBriefingSections } from "../lib/siteDrainageBriefing";
 import {
   DEFAULT_BRIEFING_PDF_HEADER,
   renderBriefingPdf,
@@ -1652,26 +1654,56 @@ async function runBriefingGeneration(args: {
           : {}),
       },
     );
+    const drainageRow = await loadActiveSiteDrainageRow(engagementId);
+    const drainagePs = drainageRow?.propertySet;
+    const mergedResult: GenerateBriefingResult = {
+      ...result,
+      sections: mergeSiteDrainageIntoBriefingSections(result.sections, drainagePs
+        ? {
+            engagementId,
+            rainfallDepthInches:
+              typeof drainagePs.rainfallDepthInches === "number"
+                ? (drainagePs.rainfallDepthInches as number)
+                : null,
+            forcingSource:
+              typeof drainagePs.rainfallForcingSource === "string"
+                ? (drainagePs.rainfallForcingSource as string)
+                : null,
+            flowLineCount:
+              typeof drainagePs.flowLineCount === "number"
+                ? (drainagePs.flowLineCount as number)
+                : null,
+            drainageZoneCount:
+              typeof drainagePs.drainageZoneCount === "number"
+                ? (drainagePs.drainageZoneCount as number)
+                : null,
+            hydrologyLibrary:
+              typeof drainagePs.hydrologyLibrary === "string"
+                ? (drainagePs.hydrologyLibrary as string)
+                : null,
+          }
+        : null),
+    };
     const { row, wasRegeneration } = await persistGenerationResult(
       briefingId,
       generationId,
-      result,
+      mergedResult,
     );
     await emitParcelBriefingGeneratedEvent(
       getHistoryService(),
       row,
-      result,
+      mergedResult,
       wasRegeneration,
       reqLog,
     );
-    if (result.invalidCitations.length > 0) {
+    if (mergedResult.invalidCitations.length > 0) {
       reqLog.warn(
         {
           engagementId,
           briefingId,
           generationId,
-          invalidCount: result.invalidCitations.length,
-          sample: result.invalidCitations.slice(0, 5),
+          invalidCount: mergedResult.invalidCitations.length,
+          sample: mergedResult.invalidCitations.slice(0, 5),
         },
         "briefing generation: engine emitted unresolved citation tokens (stripped)",
       );

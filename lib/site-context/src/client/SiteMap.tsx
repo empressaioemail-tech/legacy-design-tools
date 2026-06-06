@@ -75,6 +75,12 @@ const TIER_STYLES: Record<
     fillOpacity: 0,
     weight: 1.5,
   },
+  hydrology: {
+    color: "#0284c7",
+    fillColor: "#0ea5e9",
+    fillOpacity: 0.35,
+    weight: 2,
+  },
 };
 
 const TIER_LABELS: Record<SiteMapOverlayTier, string> = {
@@ -83,6 +89,7 @@ const TIER_LABELS: Record<SiteMapOverlayTier, string> = {
   local: "Local",
   manual: "Manual",
   topography: "Topography",
+  hydrology: "Hydrology",
 };
 
 export function SiteMap({
@@ -140,8 +147,8 @@ export function SiteMap({
                 positions={overlay.positions}
                 pathOptions={{
                   color: style.color,
-                  weight: overlay.tier === "topography" ? 1.5 : 3,
-                  opacity: overlay.tier === "topography" ? 0.85 : 1,
+                  weight: overlay.tier === "topography" ? 1.5 : overlay.layerKind === "flow-line" ? 2.5 : 3,
+                  opacity: overlay.tier === "topography" ? 0.85 : 0.9,
                 }}
               >
                 <Popup>{popupBody}</Popup>

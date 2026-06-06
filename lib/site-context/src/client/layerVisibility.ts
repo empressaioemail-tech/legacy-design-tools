@@ -47,6 +47,20 @@ export function filterOverlaysByLayerVisibility(
         initialVisibility,
       );
     }
+    if (overlay.sourceId === "site-drainage") {
+      if (overlay.layerKind === "rainfall-simulation") {
+        return isLayerRowVisible(
+          "base-rainfall-sim",
+          visibility,
+          initialVisibility,
+        );
+      }
+      return isLayerRowVisible(
+        "base-drainage-zones",
+        visibility,
+        initialVisibility,
+      );
+    }
     const source = sourceById.get(overlay.sourceId);
     const rowId = source ? layerRowIdForBriefingSource(source) : null;
     return isLayerRowVisible(rowId, visibility, initialVisibility);
