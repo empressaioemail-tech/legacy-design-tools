@@ -139,6 +139,7 @@ function flowDirection(
 }
 
 function accumulation(
+  filled: Float32Array,
   fdir: Int8Array,
   width: number,
   height: number,
@@ -146,14 +147,17 @@ function accumulation(
   const acc = new Uint32Array(width * height);
   const order: number[] = [];
   for (let i = 0; i < width * height; i++) {
-    if (fdir[i]! > 0) order.push(i);
+    if (fdir[i]! > 0 && isFiniteElev(filled[i]!)) order.push(i);
   }
+  // Process upstream (higher elevation) before downstream so D8 acc
+  // propagates correctly — the prior row+col lex sort under-counted.
   order.sort((a, b) => {
-    const ra = Math.floor(a / width);
+    const ea = filled[a]!;
+    const eb = filled[b]!;
+    if (eb !== ea) return eb - ea;
     const ca = a % width;
-    const rb = Math.floor(b / width);
     const cb = b % width;
-    return ra + ca - (rb + cb);
+    return cb - ca;
   });
   for (const i of order) {
     acc[i] = (acc[i] ?? 0) + 1;
@@ -316,7 +320,7 @@ export function runHydrologyNative(
   const threshold = input.accumulationThreshold ?? 50;
   const filled = fillDepressions(elevation, width, height);
   const fdir = flowDirection(filled, width, height);
-  const acc = accumulation(fdir, width, height);
+  const acc = accumulation(filled, fdir, width, height);
   const [pourCol, pourRow] = cellFromLngLat(
     input.pourLng,
     input.pourLat,

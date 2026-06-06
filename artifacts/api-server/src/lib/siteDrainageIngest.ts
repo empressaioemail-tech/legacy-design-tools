@@ -37,8 +37,16 @@ import {
   SITE_DRAINAGE_EVENT_TYPES,
   type SiteDrainageEventType,
 } from "../atoms/site-drainage.atom";
+import {
+  DEFAULT_ACCUMULATION_THRESHOLD,
+  resolveAccumulationThreshold,
+} from "./siteDrainageThreshold";
 
-export const DEFAULT_ACCUMULATION_THRESHOLD = 50;
+export {
+  DEFAULT_ACCUMULATION_THRESHOLD,
+  MIN_ACCUMULATION_THRESHOLD,
+  resolveAccumulationThreshold,
+} from "./siteDrainageThreshold";
 const WORKER_VERSION = "site-drainage-ingest@1.0.0";
 
 export interface SiteDrainageEventPayload {
@@ -180,8 +188,6 @@ export async function ingestSiteDrainage(
 ): Promise<SiteDrainageIngestResult> {
   const log = args.log ?? defaultLogger;
   const storage = args.storage ?? new ObjectStorageService();
-  const accThreshold =
-    args.accumulationThreshold ?? DEFAULT_ACCUMULATION_THRESHOLD;
 
   const topo = await resolveTopographyPayload(
     args.engagementId,
@@ -193,6 +199,12 @@ export async function ingestSiteDrainage(
   }
   const topoPayload = topo.payload;
   const catchmentBbox = topoPayload.catchment.bbox;
+
+  const accThreshold = resolveAccumulationThreshold(
+    topoPayload.dem.widthPx,
+    topoPayload.dem.heightPx,
+    args.accumulationThreshold,
+  );
 
   const [engagement] = await db
     .select({
