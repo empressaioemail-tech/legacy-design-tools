@@ -200,12 +200,6 @@ export async function ingestSiteDrainage(
   const topoPayload = topo.payload;
   const catchmentBbox = topoPayload.catchment.bbox;
 
-  const accThreshold = resolveAccumulationThreshold(
-    topoPayload.dem.widthPx,
-    topoPayload.dem.heightPx,
-    args.accumulationThreshold,
-  );
-
   const [engagement] = await db
     .select({
       latitude: engagementsTable.latitude,
@@ -233,6 +227,44 @@ export async function ingestSiteDrainage(
   });
   const rainfallDepthMm = rainfallForcingDepthMm(rainfallForcing);
 
+  const latestDrainage = await args.history.latestEvent({
+    kind: "atom",
+    entityType: "site-drainage",
+    entityId: args.engagementId,
+  });
+
+  let demBytes: Buffer;
+  try {
+    demBytes = await storage.getObjectEntityBytes(topoPayload.dem.gcsObjectPath);
+  } catch (err) {
+    return {
+      status: "upstream-error",
+      reason: err instanceof Error ? err.message : String(err),
+      code: "dem-download-failed",
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = await parseDemBytes(new Uint8Array(demBytes));
+  } catch (err) {
+    return {
+      status: "upstream-error",
+      reason: err instanceof Error ? err.message : String(err),
+      code: "geotiff-parse-failed",
+    };
+  }
+
+  // Threshold must reflect the parsed DEM grid — topo stores the USGS
+  // request size (bbox × resolution), which can exceed the returned raster
+  // (mocked tests, clipped tiles). Using request dims yields threshold 50
+  // on a 10×10 clip where max D8 acc ≈ 9 and no flow lines emit.
+  const accThreshold = resolveAccumulationThreshold(
+    parsed.width,
+    parsed.height,
+    args.accumulationThreshold,
+  );
+
   const signature = inputSignature({
     topoSignature: topoPayload.inputSignature,
     rainfallDepthMm,
@@ -240,11 +272,6 @@ export async function ingestSiteDrainage(
     forcing: forcingSourceLabel(rainfallForcing),
   });
 
-  const latestDrainage = await args.history.latestEvent({
-    kind: "atom",
-    entityType: "site-drainage",
-    entityId: args.engagementId,
-  });
   const latestSig =
     latestDrainage?.payload &&
     typeof latestDrainage.payload === "object" &&
@@ -284,28 +311,6 @@ export async function ingestSiteDrainage(
           ? (ps.rainfallForcingSource as string)
           : null,
       reusedExisting: true,
-    };
-  }
-
-  let demBytes: Buffer;
-  try {
-    demBytes = await storage.getObjectEntityBytes(topoPayload.dem.gcsObjectPath);
-  } catch (err) {
-    return {
-      status: "upstream-error",
-      reason: err instanceof Error ? err.message : String(err),
-      code: "dem-download-failed",
-    };
-  }
-
-  let parsed;
-  try {
-    parsed = await parseDemBytes(new Uint8Array(demBytes));
-  } catch (err) {
-    return {
-      status: "upstream-error",
-      reason: err instanceof Error ? err.message : String(err),
-      code: "geotiff-parse-failed",
     };
   }
 
