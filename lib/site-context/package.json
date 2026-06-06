@@ -9,6 +9,7 @@
     "./client": "./src/client/index.ts",
     "./client/overlays": "./src/client/overlays.ts",
     "./client/topoContours": "./src/client/topoContours.ts",
+    "./client/drainageOverlays": "./src/client/drainageOverlays.ts",
     "./client/layerVisibility": "./src/client/layerVisibility.ts",
     "./client/briefingNarrative": "./src/client/briefingNarrative.ts",
     "./client/mapPin": "./src/client/mapPin.ts"
