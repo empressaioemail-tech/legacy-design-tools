@@ -16,6 +16,7 @@
     "./federal/fcc-broadband": "./src/federal/fcc-broadband.ts",
     "./federal/summaries": "./src/federal/summaries.ts",
     "./national/regrid": "./src/national/regrid.ts",
+    "./national/cotality": "./src/national/cotality.ts",
     "./state/utah": "./src/state/utah.ts",
     "./state/idaho": "./src/state/idaho.ts",
     "./state/texas": "./src/state/texas.ts",
