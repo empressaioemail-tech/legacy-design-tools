@@ -457,6 +457,12 @@ describe("BriefingSourceHistoryPanel — per-tier filter (Tasks #184, #195, #202
   });
 
   it("stamps the oldest→newest createdAt range next to each filter pill so an architect can prioritise stale-vs-fresh tabs (Task #202)", () => {
+    // Pin "now" so fixed fixture dates (newest May 1) stay inside the
+    // 30-day stale window — otherwise this test flakes once real time
+    // passes the threshold (CI hit this on 2026-06-06).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
+    try {
     // Mixed history with two adapter prior rows of clearly different
     // createdAt days plus one manual prior row sandwiched between
     // them. The "All" pill range must span the outermost two days
@@ -532,6 +538,9 @@ describe("BriefingSourceHistoryPanel — per-tier filter (Tasks #184, #195, #202
     expect(allPill.getAttribute("title")).toBe(
       "oldest April 3, 2026 → newest May 1, 2026",
     );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("skips the date range on a tier pill that has zero prior versions (Task #202)", () => {
