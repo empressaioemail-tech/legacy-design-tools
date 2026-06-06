@@ -20,6 +20,11 @@ import {
   regridZoningAdapter,
 } from "./national/regrid";
 import {
+  cotalityParcelsAdapter,
+  cotalityZoningAdapter,
+} from "./national/cotality";
+import { COTALITY_EXTENDED_ADAPTERS } from "./national/cotalityExtended";
+import {
   utahDemAdapter,
   utahParcelsAdapter,
   utahAddressPointsAdapter,
@@ -109,6 +114,12 @@ export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   // is source_kind = "national-aggregator", which the UI reads.
   regridParcelsAdapter,
   regridZoningAdapter,
+  // 2026-06-06 cotality parcel provider decision — Cotality selected as
+  // launch provider for parcel/zoning (Regrid kept as interim fallback).
+  // COTALITY_* creds absent → clean no-coverage (Regrid fallback).
+  cotalityParcelsAdapter,
+  cotalityZoningAdapter,
+  ...COTALITY_EXTENDED_ADAPTERS,
 ];
 
 // TODO: state-tier gates on localKey not stateKey — see PL-04

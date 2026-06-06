@@ -10,6 +10,18 @@ import type {
   AdapterResult,
 } from "../types";
 
+/** All Cotality national adapters registered for geocoded engagements. */
+const COTALITY_ADAPTER_KEYS = [
+  "cotality:parcels",
+  "cotality:zoning",
+  "cotality:property",
+  "cotality:climate",
+  "cotality:hazards",
+  "cotality:replacementcost",
+  "cotality:mineral",
+  "cotality:utility",
+] as const;
+
 function ctxFor(
   stateKey: AdapterContext["jurisdiction"]["stateKey"],
   localKey: AdapterContext["jurisdiction"]["localKey"],
@@ -37,10 +49,11 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
-        // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national
-        // parcel + zoning baseline fires for every geocoded engagement.
+        // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national baseline.
         "regrid:parcels",
         "regrid:zoning",
+        // 2026-06-06 cotality full data-layer pack — all national Cotality adapters.
+        ...COTALITY_ADAPTER_KEYS,
         "tceq:edwards-aquifer",
         "bastrop-tx:parcels",
         "bastrop-tx:zoning",
@@ -66,6 +79,8 @@ describe("filterApplicableAdapters", () => {
         "usgs:ned-elevation",
         "regrid:parcels",
         "regrid:zoning",
+        // 2026-06-06 — Cotality full pack (Regrid fallback remains).
+        ...COTALITY_ADAPTER_KEYS,
         "ugrc:dem",
         "ugrc:parcels",
         "ugrc:address-points",
@@ -94,6 +109,8 @@ describe("filterApplicableAdapters", () => {
         "usgs:ned-elevation",
         "regrid:parcels",
         "regrid:zoning",
+        // 2026-06-06 — Cotality full pack.
+        ...COTALITY_ADAPTER_KEYS,
         "ugrc:dem",
         "ugrc:parcels",
         "ugrc:address-points",
@@ -115,11 +132,10 @@ describe("filterApplicableAdapters", () => {
         "epa:ejscreen",
         "usgs:ned-elevation",
         // Cortex prop-intel SCOPE B (2026-05-23) — Regrid baseline.
-        // lemhi-county-id adapters are NOT gated on partnerCity in
-        // SCOPE B (the dispatch named grand-county-ut specifically);
-        // a follow-on can widen the gate uniformly if desired.
         "regrid:parcels",
         "regrid:zoning",
+        // 2026-06-06 — Cotality full pack (interim Regrid fallback).
+        ...COTALITY_ADAPTER_KEYS,
         "inside-idaho:dem",
         "inside-idaho:parcels",
         "lemhi-county-id:parcels",
@@ -129,7 +145,7 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns the federal five (FEMA + USGS + EPA + Regrid trio + duo) for an out-of-pilot but geocoded context (PL-04 + SCOPE B)", () => {
+  it("returns the federal set (FEMA + USGS + EPA + Regrid + Cotality full pack) for an out-of-pilot but geocoded context (PL-04 + SCOPE B + 2026-06-06 cotality)", () => {
     // Boulder CO style: stateKey null, but the parcel is geocoded
     // (lat/lng baked into ctxFor's defaults). Federal adapters apply
     // to any finite-coords engagement.
@@ -151,6 +167,8 @@ describe("filterApplicableAdapters", () => {
         "usgs:ned-elevation",
         "regrid:parcels",
         "regrid:zoning",
+        // 2026-06-06 cotality full pack — registered for every geocoded engagement.
+        ...COTALITY_ADAPTER_KEYS,
       ].sort(),
     );
   });
