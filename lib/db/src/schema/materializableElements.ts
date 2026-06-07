@@ -70,12 +70,16 @@ export type MaterializableElementKind =
  *     `site-topography.ingested` / `.refreshed` event. Carries
  *     `engagement_id` only — no `briefing_id`, no IFC fields.
  *     `property_set` JSON holds `{ demRef, contoursGeoJson, ... }`.
+ *   - `site-drainage` (Phase 2D.2/2D.3 / migration 0033): hydrology
+ *     worker read model — drainage zones, flow lines, rainfall sim
+ *     GeoJSON pinned to a `site-topography` event per ADR-011.
  */
 export const MATERIALIZABLE_ELEMENT_SOURCE_KINDS = [
   "briefing-derived",
   "as-built-ifc",
   "as-built-ifc-bundle",
   "site-topography",
+  "site-drainage",
 ] as const;
 
 export type MaterializableElementSourceKind =
@@ -301,7 +305,7 @@ export const materializableElements = pgTable(
      */
     sourceKindCheck: check(
       "materializable_elements_source_kind_check",
-      sql`${t.sourceKind} IN ('briefing-derived', 'as-built-ifc', 'as-built-ifc-bundle', 'site-topography')`,
+      sql`${t.sourceKind} IN ('briefing-derived', 'as-built-ifc', 'as-built-ifc-bundle', 'site-topography', 'site-drainage')`,
     ),
     /**
      * Provenance invariants. briefing-derived rows must have a
@@ -319,6 +323,8 @@ export const materializableElements = pgTable(
             AND ${t.ifcGlobalId} IS NOT NULL
             AND ${t.ifcType} IS NOT NULL)
         OR (${t.sourceKind} = 'site-topography'
+            AND ${t.engagementId} IS NOT NULL)
+        OR (${t.sourceKind} = 'site-drainage'
             AND ${t.engagementId} IS NOT NULL)
       )`,
     ),

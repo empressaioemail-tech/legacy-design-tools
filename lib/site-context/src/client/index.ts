@@ -10,6 +10,10 @@ export {
   hasContoursGeoJson,
 } from "./topoContours";
 export {
+  extractDrainageGeoJsonOverlays,
+  hasDrainageGeoJson,
+} from "./drainageOverlays";
+export {
   filterOverlaysByLayerVisibility,
   isLayerRowVisible,
   layerRowIdForBriefingSource,

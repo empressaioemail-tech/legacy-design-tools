@@ -20,8 +20,10 @@ import {
   SiteMap,
   extractBriefingSourceOverlays,
   extractContoursGeoJsonOverlays,
+  extractDrainageGeoJsonOverlays,
   filterOverlaysByLayerVisibility,
   hasContoursGeoJson,
+  hasDrainageGeoJson,
   resolveMapPinPosition,
 } from "@workspace/site-context/client";
 import {
@@ -89,6 +91,7 @@ function buildLayerGroups(
   briefing: EngagementBriefing | null,
   hasGeocode: boolean,
   hasDemContours: boolean,
+  hasDrainage: boolean,
 ): LayerGroupSpec[] {
   const sources = briefing?.sources ?? [];
   const has = (kindPrefix: string) =>
@@ -158,6 +161,23 @@ function buildLayerGroups(
       defaultVisible: true,
     });
   }
+  if (hasDrainage) {
+    baseRows.push(
+      {
+        id: "base-drainage-zones",
+        name: "Drainage zones + flow lines",
+        source: "Hydrology engine",
+        defaultVisible: true,
+      },
+      {
+        id: "base-rainfall-sim",
+        name: "Rainfall simulation",
+        source: "NOAA Atlas 14 / manual",
+        defaultVisible: true,
+        opacity: 50,
+      },
+    );
+  }
 
   return [
     {
@@ -222,6 +242,33 @@ async function fetchSiteTopography(engagementId: string) {
   return (await res.json()) as {
     status: string;
     propertySet?: { contoursGeoJson?: unknown };
+  };
+}
+
+async function fetchSiteDrainage(engagementId: string) {
+  const res = await fetch(`/api/engagements/${engagementId}/site-drainage`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`site-drainage GET failed (${res.status})`);
+  }
+  return (await res.json()) as {
+    status: string;
+    propertySet?: Record<string, unknown>;
+  };
+}
+
+async function fetchDesignStorms(engagementId: string) {
+  const res = await fetch(
+    `/api/engagements/${engagementId}/site-drainage/design-storms`,
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as {
+    estimate?: {
+      designStorms?: Array<{
+        returnPeriodYears: number;
+        depthInches: number;
+      }>;
+    };
   };
 }
 
@@ -705,11 +752,61 @@ export function SiteTab({
     retry: false,
   });
 
+  const drainageQuery = useQuery({
+    queryKey: ["siteDrainage", engagement.id],
+    queryFn: () => fetchSiteDrainage(engagement.id),
+    enabled: !!engagement.id && !!geocode,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  const designStormsQuery = useQuery({
+    queryKey: ["siteDrainageDesignStorms", engagement.id],
+    queryFn: () => fetchDesignStorms(engagement.id),
+    enabled: !!engagement.id && !!geocode,
+    staleTime: 300_000,
+    retry: false,
+  });
+
   const hasDemContours = hasContoursGeoJson(topoQuery.data?.propertySet);
+  const hasDrainage = hasDrainageGeoJson(drainageQuery.data?.propertySet);
+
+  const [rainfallDepthInches, setRainfallDepthInches] = useState("4");
+  const [drainageBusy, setDrainageBusy] = useState(false);
+
+  const runDrainageRefresh = useCallback(async () => {
+    if (!engagement.id) return;
+    setDrainageBusy(true);
+    try {
+      const depth = Number.parseFloat(rainfallDepthInches);
+      const res = await fetch(
+        `/api/engagements/${engagement.id}/site-drainage/refresh`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            manualDepthInches: Number.isFinite(depth) ? depth : 4,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          reason?: string;
+        } | null;
+        throw new Error(body?.reason ?? `Drainage refresh failed (${res.status})`);
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["siteDrainage", engagement.id],
+      });
+      setMapRenderEpoch((epoch) => epoch + 1);
+    } finally {
+      setDrainageBusy(false);
+    }
+  }, [engagement.id, queryClient, rainfallDepthInches]);
 
   const layerGroups = useMemo(
-    () => buildLayerGroups(briefing, !!geocode, hasDemContours),
-    [briefing, geocode, hasDemContours],
+    () => buildLayerGroups(briefing, !!geocode, hasDemContours, hasDrainage),
+    [briefing, geocode, hasDemContours, hasDrainage],
   );
   const contextItems = useMemo(() => buildActiveContext(briefing), [briefing]);
 
@@ -859,8 +956,18 @@ export function SiteTab({
             topoQuery.data.propertySet.contoursGeoJson,
           )
         : [];
-    return [...fromBriefing, ...fromDem];
-  }, [briefingSources, hasDemContours, topoQuery.data]);
+    const fromDrainage =
+      hasDrainage && drainageQuery.data?.propertySet
+        ? extractDrainageGeoJsonOverlays(drainageQuery.data.propertySet)
+        : [];
+    return [...fromBriefing, ...fromDem, ...fromDrainage];
+  }, [
+    briefingSources,
+    hasDemContours,
+    topoQuery.data,
+    hasDrainage,
+    drainageQuery.data,
+  ]);
 
   const mapOverlays = useMemo(
     () =>
@@ -1241,6 +1348,70 @@ export function SiteTab({
                   )}
                 </div>
               ))}
+            </div>
+            <div
+              className="site-rainfall-panel"
+              data-testid="site-rainfall-panel"
+              aria-label="Rainfall simulation"
+            >
+              <h4 className="site-details-block-title">Rainfall simulation</h4>
+              <p className="sc-meta">
+                Enter a storm depth (e.g. 4 inches) or pick a NOAA Atlas 14
+                design-storm preset, then run the hydrology pass on the
+                catchment DEM.
+              </p>
+              <div className="site-rainfall-controls">
+                <label className="sc-meta">
+                  Depth (in)
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={50}
+                    step={0.5}
+                    value={rainfallDepthInches}
+                    onChange={(e) => setRainfallDepthInches(e.target.value)}
+                    data-testid="site-rainfall-depth-input"
+                  />
+                </label>
+                <div className="site-rainfall-presets">
+                  {(designStormsQuery.data?.estimate?.designStorms ?? []).map(
+                    (storm) => (
+                      <button
+                        key={storm.returnPeriodYears}
+                        type="button"
+                        className="sc-btn-ghost sc-btn-sm"
+                        onClick={() =>
+                          setRainfallDepthInches(String(storm.depthInches))
+                        }
+                        data-testid={`site-rainfall-preset-${storm.returnPeriodYears}yr`}
+                      >
+                        {storm.returnPeriodYears}-yr · {storm.depthInches.toFixed(1)} in
+                      </button>
+                    ),
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="sc-btn-secondary sc-btn-sm"
+                  disabled={!geocode || drainageBusy}
+                  onClick={() => void runDrainageRefresh()}
+                  data-testid="site-rainfall-run"
+                >
+                  {drainageBusy ? "Running…" : "Run drainage + rainfall sim"}
+                </button>
+              </div>
+              {drainageQuery.data?.propertySet && (
+                <p className="sc-meta" data-testid="site-rainfall-result-summary">
+                  Last run:{" "}
+                  {typeof drainageQuery.data.propertySet.rainfallDepthInches ===
+                  "number"
+                    ? `${drainageQuery.data.propertySet.rainfallDepthInches} in`
+                    : "—"}{" "}
+                  ({String(drainageQuery.data.propertySet.rainfallForcingSource ?? "—")})
+                  · {String(drainageQuery.data.propertySet.flowLineCount ?? 0)} flow
+                  lines
+                </p>
+              )}
             </div>
             <SiteContextTab
               engagement={engagement}

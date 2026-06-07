@@ -123,6 +123,13 @@ export const CLASSIFIER_ACTOR_ID = "classifier";
 export const SITE_TOPOGRAPHY_INGEST_ACTOR_ID = "site-topography-ingest";
 
 /**
+ * Phase 2D.2/2D.3 — hydrology worker path (`lib/siteDrainageIngest.ts`).
+ * Stamped on `site-drainage.computed` / `.refreshed` events when the
+ * worker runs D8 flow analysis and optional rainfall simulation.
+ */
+export const SITE_DRAINAGE_INGEST_ACTOR_ID = "site-drainage-ingest";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server
@@ -151,6 +158,7 @@ export const SERVER_ACTOR_IDS = [
   DECISION_RECORDED_ACTOR_ID,
   CLASSIFIER_ACTOR_ID,
   SITE_TOPOGRAPHY_INGEST_ACTOR_ID,
+  SITE_DRAINAGE_INGEST_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */

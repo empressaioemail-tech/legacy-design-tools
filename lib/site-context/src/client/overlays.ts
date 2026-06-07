@@ -39,7 +39,8 @@ export type SiteMapOverlayTier =
   | "state"
   | "local"
   | "manual"
-  | "topography";
+  | "topography"
+  | "hydrology";
 
 export type SiteMapOverlay =
   | {

@@ -13,6 +13,7 @@ import {
   REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
   SITE_TOPOGRAPHY_INGEST_ACTOR_ID,
+  SITE_DRAINAGE_INGEST_ACTOR_ID,
   SNAPSHOT_INGEST_ACTOR_ID,
   SUBMISSION_INGEST_ACTOR_ID,
   SUBMISSION_RESPONSE_ACTOR_ID,
@@ -86,6 +87,7 @@ export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   // events when the worker fetches a parcel-clipped DEM from USGS
   // 3DEP and derives contour lines.
   [SITE_TOPOGRAPHY_INGEST_ACTOR_ID]: "Site topography automation",
+  [SITE_DRAINAGE_INGEST_ACTOR_ID]: "Site drainage automation",
 };
 
 /**

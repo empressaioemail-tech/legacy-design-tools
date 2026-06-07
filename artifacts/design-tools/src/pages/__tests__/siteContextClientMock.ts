@@ -6,6 +6,9 @@ export async function siteContextClientMockExports() {
   const { extractContoursGeoJsonOverlays, hasContoursGeoJson } = await import(
     "@workspace/site-context/client/topoContours"
   );
+  const { extractDrainageGeoJsonOverlays, hasDrainageGeoJson } = await import(
+    "@workspace/site-context/client/drainageOverlays"
+  );
   const {
     filterOverlaysByLayerVisibility,
     isLayerRowVisible,
@@ -21,6 +24,8 @@ export async function siteContextClientMockExports() {
     extractBriefingSourceOverlays,
     extractContoursGeoJsonOverlays,
     hasContoursGeoJson,
+    extractDrainageGeoJsonOverlays,
+    hasDrainageGeoJson,
     filterOverlaysByLayerVisibility,
     isLayerRowVisible,
     layerRowIdForBriefingSource,

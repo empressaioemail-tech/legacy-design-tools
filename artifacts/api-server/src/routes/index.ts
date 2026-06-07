@@ -45,6 +45,7 @@ import detailCalloutSpecsRouter from "./detailCalloutSpecs";
 import productSpecReferencesRouter from "./productSpecReferences";
 import deliverableLetterRendersRouter from "./deliverableLetterRenders";
 import siteTopographyRouter from "./siteTopography";
+import siteDrainageRouter from "./siteDrainage";
 import encumbrancesRouter from "./encumbrances";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
@@ -74,6 +75,7 @@ router.use(generateLayersRouter);
 // engagementsRouter so the more-specific paths match first (same
 // pattern as parcelBriefingsRouter above).
 router.use(siteTopographyRouter);
+router.use(siteDrainageRouter);
 router.use(encumbrancesRouter);
 // briefingSourcesRouter exposes top-level `/briefing-sources/:id/glb`
 // for the DA-MV-1 viewer; ordering relative to engagementsRouter is
