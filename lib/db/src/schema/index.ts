@@ -29,6 +29,7 @@ export * from "./submissionComments";
 export * from "./submissionCommunications";
 export * from "./findingRuns";
 export * from "./findings";
+export * from "./planSetPieceClassifications";
 export * from "./reviewerRequests";
 export * from "./viewpointRenders";
 export * from "./renderOutputs";

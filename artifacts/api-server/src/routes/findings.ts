@@ -79,6 +79,8 @@ import {
 } from "@workspace/api-zod";
 import {
   generateFindings,
+  generateOrchestratedFindings,
+  resolveFindingOrchestratedMode,
   type BimElementInput,
   type BriefingSourceInput,
   type CodeSectionInput,
@@ -88,6 +90,7 @@ import {
 } from "@workspace/finding-engine";
 import { FINDING_ENGINE_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
+import { classifyAndPersistPlanSetPieces } from "../lib/planSetClassification";
 import { getHistoryService } from "../atoms/registry";
 import {
   FINDING_EVENT_TYPES,
@@ -232,6 +235,8 @@ interface FindingWire {
   acceptedBy: FindingActorWire | null;
   /** Track 1 — wall-clock timestamp of first acceptance (frozen). */
   acceptedAt: string | null;
+  /** WS1 — orchestrated specialist discipline tag; null on legacy rows. */
+  discipline: string | null;
 }
 
 function actorFromRequest(req: Request): FindingActorWire | null {
@@ -299,6 +304,7 @@ function toWire(
     acceptedByReviewerId: row.acceptedByReviewerId,
     acceptedBy,
     acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
+    discipline: row.discipline ?? null,
   };
 }
 
@@ -739,6 +745,7 @@ async function persistFinding(
       // semantic for forward writes.
       aiGenerated: true,
       findingRunId: generationId,
+      discipline: engineFinding.discipline ?? null,
     })
     .returning();
   return row!;
@@ -826,29 +833,61 @@ async function runFindingGeneration(args: {
       throw new Error(`submission row vanished mid-generation: ${submissionId}`);
     }
 
-    const result: GenerateFindingsResult = await generateFindings(
-      {
-        submission: {
-          id: sub.id,
-          jurisdiction: sub.jurisdiction,
-          projectName: null,
-          note: sub.note,
-        },
-        briefingNarrative: inputs.briefingNarrative,
-        sources: inputs.sources.map(toEngineSourceInput),
-        codeSections: inputs.codeSections,
-        bimElements: inputs.bimElements,
+    const orchestrated = resolveFindingOrchestratedMode();
+    const baseInput = {
+      submission: {
+        id: sub.id,
+        jurisdiction: sub.jurisdiction,
+        projectName: null,
+        note: sub.note,
       },
-      {
-        mode,
-        ...(llmClient?.kind === "grok"
-          ? { grokClient: llmClient.client }
-          : {}),
-        ...(llmClient?.kind === "anthropic"
-          ? { anthropicClient: llmClient.client }
-          : {}),
-      },
-    );
+      briefingNarrative: inputs.briefingNarrative,
+      sources: inputs.sources.map(toEngineSourceInput),
+      codeSections: inputs.codeSections,
+      bimElements: inputs.bimElements,
+    };
+    const engineOptions = {
+      mode,
+      ...(llmClient?.kind === "grok"
+        ? { grokClient: llmClient.client }
+        : {}),
+      ...(llmClient?.kind === "anthropic"
+        ? { anthropicClient: llmClient.client }
+        : {}),
+    };
+
+    let result: GenerateFindingsResult;
+    if (orchestrated) {
+      const pieceCandidates = await classifyAndPersistPlanSetPieces(
+        submissionId,
+        reqLog,
+      );
+      if (pieceCandidates.length >= 2) {
+        const orchestratedResult = await generateOrchestratedFindings(
+          { baseInput, pieceCandidates },
+          engineOptions,
+        );
+        reqLog.info(
+          {
+            submissionId,
+            generationId,
+            disciplinesRun: orchestratedResult.orchestration.disciplinesRun,
+            pieceCount: orchestratedResult.orchestration.pieceCount,
+            deduplicatedCount: orchestratedResult.orchestration.deduplicatedCount,
+          },
+          "finding generation: orchestrated pass completed",
+        );
+        result = orchestratedResult;
+      } else {
+        reqLog.info(
+          { submissionId, pieceCount: pieceCandidates.length },
+          "finding generation: orchestrated flag set but <2 pieces — legacy single-pass",
+        );
+        result = await generateFindings(baseInput, engineOptions);
+      }
+    } else {
+      result = await generateFindings(baseInput, engineOptions);
+    }
 
     // Insert findings, then emit events. Atomicity within the run is
     // preserved by the run row's pending → completed transition; the

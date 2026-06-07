@@ -15,6 +15,9 @@
  * `failed`); the empty-findings list itself is never an error.
  */
 
+import type { PlanReviewDiscipline } from "@workspace/api-zod";
+import type { PlanSetPieceInput } from "./planSet/types";
+
 /**
  * Severity rubric (`findingsMock.ts:41`):
  *   - blocker  — code violation requiring resolution before approval
@@ -154,6 +157,16 @@ export interface GenerateFindingsInput {
   sources: ReadonlyArray<BriefingSourceInput>;
   codeSections: ReadonlyArray<CodeSectionInput>;
   bimElements: ReadonlyArray<BimElementInput>;
+  /**
+   * WS1 — classified plan-set pieces scoped to this specialist pass.
+   * Populated by the orchestrated conductor; omitted on legacy single-pass.
+   */
+  planSetPieces?: ReadonlyArray<PlanSetPieceInput>;
+  /**
+   * WS1 — when set, this pass is a per-discipline specialist run.
+   * Surfaces in the prompt so the model stays within discipline scope.
+   */
+  disciplineScope?: PlanReviewDiscipline;
 }
 
 /**
@@ -189,6 +202,11 @@ export interface EngineFinding {
    * the value survives a delayed persist.
    */
   aiGeneratedAt: Date;
+  /**
+   * WS1 — discipline tag when produced by the orchestrated specialist pass.
+   * Null/omitted on legacy single-pass rows.
+   */
+  discipline?: PlanReviewDiscipline | null;
 }
 
 /** Successful engine output. */
