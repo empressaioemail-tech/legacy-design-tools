@@ -8,6 +8,7 @@ import type { Express } from "express";
 import { ctx } from "./test-context";
 
 const TEST_API_KEY = "brokerage-test-key-001";
+const TEST_SERVICE_TOKEN = "brokerage-service-token-test";
 
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
 const geocodeAddressMock = vi.hoisted(() => vi.fn());
@@ -102,6 +103,9 @@ const { setupRouteTests } = await import("./setup");
 const { resetBrokerageApiKeysForTests } = await import(
   "../middlewares/brokerageAuth"
 );
+const { __resetServiceApiKeyCacheForTests } = await import(
+  "../lib/serviceToken"
+);
 const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
 const { brokerageBriefRuns } = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
@@ -185,8 +189,10 @@ const mockAtom = {
 
 beforeEach(() => {
   process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
+  process.env.SERVICE_API_KEY = TEST_SERVICE_TOKEN;
   process.env.BROKERAGE_WALLET_BYPASS = "1";
   resetBrokerageApiKeysForTests();
+  __resetServiceApiKeyCacheForTests();
   recordGtmEventMock.mockReset();
   geocodeAddressMock.mockReset();
   geocodeAddressMock.mockResolvedValue({
@@ -223,8 +229,10 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.BROKERAGE_DEV_API_KEY;
+  delete process.env.SERVICE_API_KEY;
   delete process.env.BROKERAGE_WALLET_BYPASS;
   resetBrokerageApiKeysForTests();
+  __resetServiceApiKeyCacheForTests();
   setBriefingLlmClient(null);
 });
 
@@ -298,6 +306,50 @@ describe("POST /api/brokerage/v1/brief", () => {
       .where(eq(brokerageBriefRuns.id, res.body.runId))
       .limit(1);
     expect(row).toBeTruthy();
+  });
+
+  it("service token path skips install id and surfaces billable signal", async () => {
+    process.env.BROKERAGE_WALLET_BYPASS = "0";
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+      .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.runId).toBeTruthy();
+    expect(res.headers["x-hauska-billable"]).toBe("property-brief-v1");
+    expect(res.body.meta.metering).toEqual({
+      billable: true,
+      sku: "property-brief-v1",
+    });
+    expect(res.body.reasoningSummary.method).toBe("grok");
+    expect(res.body.laySummary.verdicts.length).toBeGreaterThan(0);
+  });
+});
+
+describe("GET /api/brokerage/v1/brief/:runId", () => {
+  it("returns persisted brief run for service token", async () => {
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+    expect(briefRes.status).toBe(200);
+
+    const getRes = await request(getApp())
+      .get(`/api/brokerage/v1/brief/${briefRes.body.runId}`)
+      .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` });
+
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.runId).toBe(briefRes.body.runId);
+    expect(getRes.body.reasoningSummary.method).toBe("grok");
+    expect(getRes.body.laySummary).toBeTruthy();
+  });
+
+  it("returns 404 for unknown runId", async () => {
+    const res = await request(getApp())
+      .get("/api/brokerage/v1/brief/00000000-0000-4000-8000-000000000001")
+      .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` });
+    expect(res.status).toBe(404);
   });
 });
 

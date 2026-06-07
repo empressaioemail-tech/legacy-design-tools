@@ -2,6 +2,7 @@
  * Hauska Property Brief — Chrome extension brokerage API.
  *
  *   POST /api/brokerage/v1/brief
+ *   GET  /api/brokerage/v1/brief/:runId
  *   POST /api/brokerage/v1/brief/summarize
  *   POST /api/brokerage/v1/research/chat
  *   GET  /api/brokerage/v1/coverage
@@ -26,7 +27,13 @@ import {
 } from "@workspace/codes";
 import { db, brokerageBriefRuns } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { brokerageAuth } from "../middlewares/brokerageAuth";
+import {
+  isExtensionPublicClient,
+} from "../middlewares/brokerageAuth";
+import {
+  isBrokerageServiceCaller,
+  requireBrokerageAuthOrServiceToken,
+} from "../middlewares/brokerageServiceAuth";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { logger } from "../lib/logger";
 import {
@@ -47,9 +54,9 @@ import { gtmErrorBody } from "../lib/gtmErrorClass";
 import {
   fetchBrokerageSiteContext,
   stripSiteContextForClient,
+  stripBriefPayloadForClient,
 } from "../lib/brokerageSiteContext";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
-import { isExtensionPublicClient } from "../middlewares/brokerageAuth";
 import {
   assertExtensionPublicBriefAllowed,
   assertExtensionPublicJurisdictionAllowed,
@@ -85,6 +92,12 @@ import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
 import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
+import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
+import {
+  BROKERAGE_BRIEF_BILLABLE_HEADER,
+  brokerageBriefMeteringMeta,
+} from "../lib/brokerageMetering";
+import { UUID_RE } from "../lib/lSurfaceRoute";
 
 import { BROKERAGE_CODE_QUERIES } from "../lib/brokerageCodeQueries";
 
@@ -196,9 +209,10 @@ router.get("/brief-coverage", (_req: Request, res: Response) => {
 });
 
 brokerageV1.use(brokerageCors);
-brokerageV1.use(brokerageAuth);
+brokerageV1.use(requireBrokerageAuthOrServiceToken);
 brokerageV1.use("/gtm", brokerageGtmRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
+brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
@@ -349,8 +363,11 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const installId = installIdFromRequest(req);
   const lk = listingKeyFromAddress(address, mls_id);
   const extensionPublic = isExtensionPublicClient(req);
+  const serviceCaller = isBrokerageServiceCaller(req);
 
-  if (extensionPublic) {
+  if (serviceCaller) {
+    // MCP service path — gate owns metering; no install id or wallet debit.
+  } else if (extensionPublic) {
     if (!installId) {
       res.status(400).json({
         error: "install_id_required",
@@ -567,6 +584,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       disclaimer:
         "Not legal advice. Code layer only where jurisdiction is in corpus. Verify with city staff.",
       tool: "property-brief-v1",
+      ...(serviceCaller ? brokerageBriefMeteringMeta() : {}),
       ...(extensionPublic
         ? { clientTier: "extension_public" as const }
         : {
@@ -647,13 +665,43 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     });
   }
 
+  if (serviceCaller) {
+    res.setHeader(BROKERAGE_BRIEF_BILLABLE_HEADER, "property-brief-v1");
+  }
+
   res.json({
     ...responseBody,
     siteContext: stripSiteContextForClient(siteContext),
-    ...(workspaceId && !extensionPublic
+    ...(workspaceId && !extensionPublic && !serviceCaller
       ? { workspaceId, workspaceDid }
       : {}),
   });
+});
+
+brokerageV1.get("/brief/:runId", async (req: Request, res: Response) => {
+  const runId =
+    typeof req.params.runId === "string" ? req.params.runId.trim() : "";
+  if (!UUID_RE.test(runId)) {
+    res.status(400).json({
+      error: "invalid_request",
+      message: "Invalid brief runId",
+    });
+    return;
+  }
+
+  const [run] = await db
+    .select()
+    .from(brokerageBriefRuns)
+    .where(eq(brokerageBriefRuns.id, runId))
+    .limit(1);
+
+  if (!run) {
+    res.status(404).json({ error: "not_found", message: "Brief run not found" });
+    return;
+  }
+
+  const payload = run.payloadJson as Record<string, unknown>;
+  res.json(stripBriefPayloadForClient(payload));
 });
 
 brokerageV1.post(
@@ -701,8 +749,11 @@ brokerageV1.post(
 
     const installId = installIdFromRequest(req);
     const extensionPublic = isExtensionPublicClient(req);
+    const serviceCaller = isBrokerageServiceCaller(req);
 
-    if (extensionPublic) {
+    if (serviceCaller) {
+      // MCP service path — gate owns metering; no install id or wallet debit.
+    } else if (extensionPublic) {
       if (!installId) {
         res.status(400).json({
           error: "install_id_required",
