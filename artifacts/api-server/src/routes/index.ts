@@ -25,6 +25,7 @@ import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
 import findingsRunsRouter from "./findingsRuns";
+import findingsEvidenceLedgerRouter from "./findingsEvidenceLedger";
 import submissionEventsRouter from "./submissionEvents";
 import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
@@ -139,6 +140,9 @@ router.use(findingsRouter);
 // per-submission `/submissions/:id/findings/runs` so ordering is
 // indifferent.
 router.use(findingsRunsRouter);
+// Arrow two Phase 1 — tier 1a adjudication-to-atom evidence ledger.
+// Internal read-model only; mounts `/findings/adjudication-evidence*`.
+router.use(findingsEvidenceLedgerRouter);
 // PLR-9 — per-submission SSE live event channel + presence. Mounts
 // `/submissions/:submissionId/events`; distinct path subtree from
 // every other router so ordering is indifferent.
