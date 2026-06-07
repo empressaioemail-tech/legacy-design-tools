@@ -1644,6 +1644,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.78.0
         version: 0.78.0(zod@4.3.6)
+      '@workspace/api-zod':
+        specifier: workspace:*
+        version: link:../api-zod
       '@workspace/briefing-engine':
         specifier: workspace:*
         version: link:../briefing-engine

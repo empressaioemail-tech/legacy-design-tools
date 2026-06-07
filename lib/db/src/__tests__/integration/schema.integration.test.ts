@@ -147,6 +147,7 @@ describe("lib/db schema integration", () => {
         "package_share_comments",
         "package_shares",
         "parcel_briefings",
+        "plan_set_piece_classifications",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
         "place_layer_snapshots",

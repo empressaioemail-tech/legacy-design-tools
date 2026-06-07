@@ -173,6 +173,7 @@ function finalizeDrafts(
       elementRef: draft.elementRef,
       sourceRef: draft.sourceRef,
       aiGeneratedAt: generatedAt,
+      discipline: input.disciplineScope ?? null,
     });
   }
 

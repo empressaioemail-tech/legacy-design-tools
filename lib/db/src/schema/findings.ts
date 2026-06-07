@@ -229,6 +229,12 @@ export const findings = pgTable(
       (): AnyPgColumn => findingRuns.id,
       { onDelete: "set null" },
     ),
+    /**
+     * WS1 — `PlanReviewDiscipline` tag when produced by the orchestrated
+     * per-discipline specialist pass. Null on legacy single-pass rows and
+     * human-authored overrides.
+     */
+    discipline: text("discipline"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -269,6 +275,10 @@ export const findings = pgTable(
     statusCheck: check(
       "findings_status_check",
       sql`${t.status} IN ('ai-produced', 'accepted', 'rejected', 'overridden', 'promoted-to-architect')`,
+    ),
+    disciplineCheck: check(
+      "findings_discipline_check",
+      sql`${t.discipline} IS NULL OR ${t.discipline} IN ('building', 'electrical', 'mechanical', 'plumbing', 'residential', 'fire-life-safety', 'accessibility')`,
     ),
   }),
 );

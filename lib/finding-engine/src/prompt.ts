@@ -112,6 +112,20 @@ function describeBimElement(e: BimElementInput): string {
   return lines.join("\n");
 }
 
+function describePlanSetPiece(
+  p: import("./planSet/types").PlanSetPieceInput,
+): string {
+  const lines: string[] = [];
+  lines.push(`- pieceId=${p.pieceId} kind=${p.kind} discipline=${p.discipline}`);
+  lines.push(`  label: ${p.label}`);
+  if (p.text && p.text.trim().length > 0) {
+    const clipped =
+      p.text.length > 1200 ? p.text.slice(0, 1199) + "…" : p.text;
+    lines.push(`  text: ${clipped.replace(/\n/g, " ").trim()}`);
+  }
+  return lines.join("\n");
+}
+
 function describeSubmission(s: SubmissionInput): string {
   const lines: string[] = [`id: ${s.id}`];
   if (s.projectName) lines.push(`projectName: ${s.projectName}`);
@@ -128,9 +142,22 @@ function describeSubmission(s: SubmissionInput): string {
 export function buildUserPrompt(input: GenerateFindingsInput): string {
   const sections: string[] = [];
 
+  if (input.disciplineScope) {
+    sections.push(
+      `<discipline_scope>\nSpecialist pass for discipline: ${input.disciplineScope}. ` +
+        `Only flag issues within this discipline's scope.\n</discipline_scope>`,
+    );
+  }
+
   sections.push(
     `<submission>\n${describeSubmission(input.submission)}\n</submission>`,
   );
+
+  if (input.planSetPieces && input.planSetPieces.length > 0) {
+    sections.push(
+      `<plan_set_pieces>\n${input.planSetPieces.map(describePlanSetPiece).join("\n")}\n</plan_set_pieces>`,
+    );
+  }
 
   if (input.briefingNarrative && input.briefingNarrative.trim().length > 0) {
     const trimmed = input.briefingNarrative.trim();

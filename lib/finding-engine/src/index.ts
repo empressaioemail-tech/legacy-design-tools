@@ -68,3 +68,16 @@ export {
   PROMPT_NARRATIVE_MAX_CHARS,
   PROMPT_CODE_SNIPPET_MAX_CHARS,
 } from "./prompt";
+
+export {
+  generateOrchestratedFindings,
+  resolveFindingOrchestratedMode,
+  classifyPlanSetPiece,
+  classifyPlanSetPieces,
+  filterCodeSectionsForDiscipline,
+  disciplineRetrievalQuery,
+  type GenerateOrchestratedFindingsInput,
+  type GenerateOrchestratedFindingsResult,
+  type PlanSetPieceCandidate,
+  type PlanSetPieceInput,
+} from "./planSet/orchestrator";
