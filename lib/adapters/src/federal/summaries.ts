@@ -42,12 +42,20 @@ import { FEMA_NFHL_FRESHNESS_THRESHOLD_MONTHS } from "./fema-nfhl";
 import { USGS_NED_FRESHNESS_THRESHOLD_MONTHS } from "./usgs-ned";
 import { EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS } from "./epa-ejscreen";
 import { FCC_BROADBAND_FRESHNESS_THRESHOLD_MONTHS } from "./fcc-broadband";
+import { USDA_SSURGO_FRESHNESS_THRESHOLD_MONTHS } from "./usda-ssurgo";
+import { USGS_GEOLOGY_FRESHNESS_THRESHOLD_MONTHS } from "./usgs-geology";
+import { USGS_GROUNDWATER_FRESHNESS_THRESHOLD_MONTHS } from "./usgs-groundwater";
+import { USGS_SEISMIC_FRESHNESS_THRESHOLD_MONTHS } from "./usgs-seismic";
 
 export type FederalLayerKind =
   | "fema-nfhl-flood-zone"
   | "usgs-ned-elevation"
   | "epa-ejscreen-blockgroup"
-  | "fcc-broadband-availability";
+  | "fcc-broadband-availability"
+  | "usda-ssurgo-soils"
+  | "usgs-geology"
+  | "usgs-groundwater"
+  | "usgs-seismic";
 
 /**
  * Per-dataset "snapshot is still trustworthy" windows, in whole months.
@@ -62,6 +70,10 @@ const FEDERAL_FRESHNESS_THRESHOLD_MONTHS: Record<FederalLayerKind, number> = {
   "usgs-ned-elevation": USGS_NED_FRESHNESS_THRESHOLD_MONTHS,
   "epa-ejscreen-blockgroup": EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS,
   "fcc-broadband-availability": FCC_BROADBAND_FRESHNESS_THRESHOLD_MONTHS,
+  "usda-ssurgo-soils": USDA_SSURGO_FRESHNESS_THRESHOLD_MONTHS,
+  "usgs-geology": USGS_GEOLOGY_FRESHNESS_THRESHOLD_MONTHS,
+  "usgs-groundwater": USGS_GROUNDWATER_FRESHNESS_THRESHOLD_MONTHS,
+  "usgs-seismic": USGS_SEISMIC_FRESHNESS_THRESHOLD_MONTHS,
 };
 
 /**
@@ -276,6 +288,74 @@ export function summarizeFccBroadbandPayload(
 }
 
 /**
+ * USDA SSURGO soils summary.
+ *
+ * Examples:
+ *   - mapped unit: "Soils: Pf — Well drained · HSG C"
+ *   - no attrs:    "Soils: Pf (Pflugerville-Rock outcrop complex)"
+ */
+export function summarizeUsdaSsurgoSoilsPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  if (payload["kind"] !== "ssurgo-soils") return null;
+  const musym = pickString(payload["musym"]);
+  const muname = pickString(payload["muname"]);
+  const drainage = pickString(payload["drainageClass"]);
+  const hsg = pickString(payload["hydrologicSoilGroup"]);
+  const parts: string[] = [];
+  if (musym) parts.push(`Soils: ${musym}`);
+  else if (muname) parts.push(`Soils: ${muname}`);
+  else return "SSURGO soils data unavailable";
+  const detail: string[] = [];
+  if (drainage) detail.push(drainage);
+  if (hsg) detail.push(`HSG ${hsg}`);
+  if (detail.length > 0) parts[0] = `${parts[0]} — ${detail.join(" · ")}`;
+  return parts[0];
+}
+
+/**
+ * USGS SGMC geology summary.
+ */
+export function summarizeUsgsGeologyPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  if (payload["kind"] !== "geology-formation") return null;
+  const unitName = pickString(payload["unitName"]);
+  const major = pickString(payload["majorLithology1"]);
+  if (unitName && major) return `Geology: ${unitName} (${major})`;
+  if (unitName) return `Geology: ${unitName}`;
+  return "Geology: unit unavailable";
+}
+
+/**
+ * USGS NWIS groundwater summary.
+ */
+export function summarizeUsgsGroundwaterPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  if (payload["kind"] !== "groundwater-monitoring") return null;
+  const wellCount = pickNumber(payload["wellCount"]) ?? 0;
+  const depth = pickNumber(payload["depthToWaterFeet"]);
+  if (wellCount <= 0) return "No USGS groundwater wells nearby";
+  if (depth !== null) {
+    return `GW depth ${Math.round(depth)} ft · ${wellCount} well${wellCount === 1 ? "" : "s"} nearby`;
+  }
+  return `${wellCount} USGS groundwater well${wellCount === 1 ? "" : "s"} nearby`;
+}
+
+/**
+ * USGS seismic design summary.
+ */
+export function summarizeUsgsSeismicPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  if (payload["kind"] !== "seismic-design") return null;
+  const sdc = pickString(payload["seismicDesignCategory"]);
+  const sds = pickNumber(payload["sds"]);
+  const parts: string[] = [];
+  if (sdc) parts.push(`SDC ${sdc}`);
+  if (sds !== null) parts.push(`SDS ${sds.toFixed(2)}g`);
+  if (parts.length === 0) return "Seismic design parameters unavailable";
+  return `Seismic: ${parts.join(" · ")}`;
+}
+
+/**
  * Single-entry-point dispatcher used by the Site Context tab. Routes
  * by `layerKind`; returns `null` for any layer kind that is not a
  * federal-tier adapter (callers should fall back to their existing
@@ -294,6 +374,14 @@ export function summarizeFederalPayload(
       return summarizeEpaEjscreenPayload(payload);
     case "fcc-broadband-availability":
       return summarizeFccBroadbandPayload(payload);
+    case "usda-ssurgo-soils":
+      return summarizeUsdaSsurgoSoilsPayload(payload);
+    case "usgs-geology":
+      return summarizeUsgsGeologyPayload(payload);
+    case "usgs-groundwater":
+      return summarizeUsgsGroundwaterPayload(payload);
+    case "usgs-seismic":
+      return summarizeUsgsSeismicPayload(payload);
     default:
       return null;
   }
@@ -416,6 +504,68 @@ const FEDERAL_PAYLOAD_FIELDS: Record<
       format: (p) => {
         const v = pickNumber(p["fastestDownstreamMbps"]);
         return v === null ? NONE : formatMbps(v);
+      },
+    },
+  ],
+  "usda-ssurgo-soils": [
+    {
+      key: "musym",
+      label: "Map symbol",
+      format: (p) => pickString(p["musym"]) ?? NONE,
+    },
+    {
+      key: "drainageClass",
+      label: "Drainage",
+      format: (p) => pickString(p["drainageClass"]) ?? NONE,
+    },
+    {
+      key: "hydrologicSoilGroup",
+      label: "HSG",
+      format: (p) => pickString(p["hydrologicSoilGroup"]) ?? NONE,
+    },
+  ],
+  "usgs-geology": [
+    {
+      key: "unitName",
+      label: "Formation",
+      format: (p) => pickString(p["unitName"]) ?? NONE,
+    },
+    {
+      key: "majorLithology1",
+      label: "Lithology",
+      format: (p) => pickString(p["majorLithology1"]) ?? NONE,
+    },
+  ],
+  "usgs-groundwater": [
+    {
+      key: "wellCount",
+      label: "Wells",
+      format: (p) => {
+        const v = pickNumber(p["wellCount"]);
+        return v === null ? NONE : String(Math.round(v));
+      },
+    },
+    {
+      key: "depthToWaterFeet",
+      label: "Depth to water",
+      format: (p) => {
+        const v = pickNumber(p["depthToWaterFeet"]);
+        return v === null ? NONE : `${Math.round(v)} ft`;
+      },
+    },
+  ],
+  "usgs-seismic": [
+    {
+      key: "seismicDesignCategory",
+      label: "SDC",
+      format: (p) => pickString(p["seismicDesignCategory"]) ?? NONE,
+    },
+    {
+      key: "sds",
+      label: "SDS",
+      format: (p) => {
+        const v = pickNumber(p["sds"]);
+        return v === null ? NONE : `${v.toFixed(2)}g`;
       },
     },
   ],

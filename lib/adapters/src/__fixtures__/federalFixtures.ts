@@ -107,3 +107,139 @@ export const fccBroadbandFeatures = {
     },
   ],
 };
+
+/**
+ * Subsurface federal adapters (Wave 1, cc-agent-C 2026-06-07).
+ */
+
+export const ssurgoMapUnitFeature = {
+  features: [
+    {
+      attributes: {
+        MUKEY: "123456",
+        MUSYM: "Pf",
+        MUNAME: "Pflugerville-Rock outcrop complex, 1 to 8 percent slopes",
+        AREASYMBOL: "TX021",
+      },
+    },
+  ],
+};
+
+export const ssurgoSdaTable = {
+  Table: [
+    {
+      mukey: "123456",
+      musym: "Pf",
+      muname: "Pflugerville-Rock outcrop complex, 1 to 8 percent slopes",
+      drainsubclass: "Well drained",
+      brockdepmin: 0,
+      brockdepmax: 20,
+      wtdepannmin: 60,
+      wtdepannmax: 72,
+      compname: "Pflugerville",
+      drainagecl: "Well drained",
+      hydgrp: "C",
+      slope_r: 5,
+      shrinkswell: "Moderate",
+    },
+  ],
+};
+
+export const sgmcGeologyFeature = {
+  features: [
+    {
+      attributes: {
+        STATE: "TX",
+        SGMC_LABEL: "Kft",
+        UNIT_NAME: "Ft. Terk Formation",
+        MAJOR1: "Sedimentary",
+        MAJOR2: null,
+        MINOR1: "Clastic",
+        AGE_MIN: 145,
+        AGE_MAX: 201,
+        ROCKTYPE1: "Sandstone",
+        ROCKTYPE2: "Clay or shale",
+      },
+    },
+  ],
+};
+
+export const nwisSiteEmpty = {
+  value: {
+    timeSeries: [],
+  },
+};
+
+export const nwisSiteWithWell = {
+  value: {
+    timeSeries: [
+      {
+        sourceInfo: {
+          siteName: "Bastrop Test Well",
+          siteCode: [
+            { value: "293801097320001", network: "NWIS", agencyCode: "USGS" },
+          ],
+          geoLocation: {
+            geogLocation: {
+              latitude: "30.1105",
+              longitude: "-97.3186",
+            },
+          },
+        },
+      },
+    ],
+  },
+};
+
+export const nwisGwIvReading = {
+  value: {
+    timeSeries: [
+      {
+        values: [
+          {
+            value: [
+              { value: "45.2", dateTime: "2026-05-01T12:00:00.000-05:00" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+export const usgsSeismicDesignSuccess = {
+  response: {
+    status: "success",
+    data: {
+      sds: 0.088,
+      sd1: 0.042,
+      sms: 0.105,
+      sm1: 0.053,
+      pga: 0.035,
+      sdc: "A",
+      tl: 12,
+    },
+  },
+};
+
+export const usgsSeismicDesignNoCoverage = {
+  response: {
+    status: "error",
+    message: "no data",
+  },
+};
+
+export const qfaultsEmpty = { features: [] };
+
+export const qfaultsFeature = {
+  features: [
+    {
+      attributes: {
+        fault_name: "Barton Springs Fault",
+        section_name: "Barton Springs section",
+        class: "A",
+        slip_rate: "0.01",
+      },
+    },
+  ],
+};

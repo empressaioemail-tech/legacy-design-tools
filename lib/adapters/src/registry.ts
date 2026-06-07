@@ -14,6 +14,10 @@ import type { Adapter } from "./types";
 import { femaNfhlAdapter } from "./federal/fema-nfhl";
 import { usgsNedAdapter } from "./federal/usgs-ned";
 import { epaEjscreenAdapter } from "./federal/epa-ejscreen";
+import { usdaSsurgoSoilsAdapter } from "./federal/usda-ssurgo";
+import { usgsGeologyAdapter } from "./federal/usgs-geology";
+import { usgsGroundwaterAdapter } from "./federal/usgs-groundwater";
+import { usgsSeismicAdapter } from "./federal/usgs-seismic";
 import { fccBroadbandAdapter } from "./federal/fcc-broadband";
 import {
   regridParcelsAdapter,
@@ -102,6 +106,12 @@ export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   femaNfhlAdapter,
   usgsNedAdapter,
   epaEjscreenAdapter,
+  // Wave 1 subsurface (2026-06-07, cc-agent-C) — free federal public-records
+  // layers for soils, geology, groundwater monitoring, and seismic design.
+  usdaSsurgoSoilsAdapter,
+  usgsGeologyAdapter,
+  usgsGroundwaterAdapter,
+  usgsSeismicAdapter,
   // QA-22 SCOPE B closeout (PR #102) — see `isFccEnabled` docstring
   // above. FCC is gated off by default; the binding is only spread
   // in when the operator flips `FCC_ENABLED=true` on the Cloud Run
