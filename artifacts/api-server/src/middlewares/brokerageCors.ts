@@ -24,4 +24,5 @@ export const brokerageCors = cors({
     "X-Hauska-Key",
     "X-Hauska-Install-Id",
   ],
+  exposedHeaders: ["X-Hauska-Billable"],
 });

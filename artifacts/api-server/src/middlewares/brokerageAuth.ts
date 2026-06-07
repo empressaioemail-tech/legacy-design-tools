@@ -24,7 +24,7 @@ function loadExtensionPublicKey(): string | null {
   return cachedExtensionPublicKey;
 }
 
-function loadBrokerageApiKeys(): Set<string> {
+export function loadBrokerageApiKeys(): Set<string> {
   if (cachedKeys) return cachedKeys;
   const keys = new Set<string>();
   for (const envName of [
