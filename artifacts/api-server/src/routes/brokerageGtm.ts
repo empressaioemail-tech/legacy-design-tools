@@ -6,6 +6,8 @@
  *   POST /api/brokerage/v1/gtm/mcp-event
  *   GET  /api/brokerage/v1/gtm/consent/:installId
  *   GET  /api/brokerage/v1/gtm/digest
+ *   GET  /api/brokerage/v1/gtm/triage
+ *   POST /api/brokerage/v1/gtm/outbound/attempt  (Tier 1 — hard-disabled in v1)
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -14,13 +16,18 @@ import { db, gtmConsent, gtmEvents } from "@workspace/db";
 import { eq, sql, gte, desc, and } from "drizzle-orm";
 import { brokerageAuth } from "../middlewares/brokerageAuth";
 import { brokerageCors } from "../middlewares/brokerageCors";
-import { GTM_CONSENT_VERSION } from "../lib/recordGtmEvent";
+import { GTM_CONSENT_VERSION, recordGtmEvent } from "../lib/recordGtmEvent";
 import {
   GTM_MCP_EVENT_TYPES,
   hashApiKeyPrefix,
   isInternalApiKeyHash,
+  loadInternalGtmApiKeys,
 } from "../lib/gtmMcpEvents";
 import { isGtmErrorClass, type GtmErrorClass } from "../lib/gtmErrorClass";
+import { classifyGtmEvents } from "../lib/gtmTriage";
+import { computeGtmScoreboardMetrics } from "../lib/gtmScoreboardMetrics";
+import { attemptOutboundSend } from "../lib/gtmOutbound";
+import { GTM_OUTBOUND_ACTIONS, isOutboundEnabled } from "../lib/gtmPolicy";
 
 const CONSENT_BODY = z.object({
   installId: z.string().min(8).max(128),
@@ -180,16 +187,7 @@ const MCP_EVENT_BODY = z.object({
 });
 
 function loadBrokerageKeyHashes(): string[] {
-  const keys: string[] = [];
-  for (const envName of ["BROKERAGE_DEV_API_KEY", "BROKERAGE_API_KEYS"]) {
-    const raw = process.env[envName]?.trim();
-    if (!raw) continue;
-    for (const part of raw.split(",")) {
-      const k = part.trim();
-      if (k) keys.push(hashApiKeyPrefix(k));
-    }
-  }
-  return keys;
+  return loadInternalGtmApiKeys().map((k) => hashApiKeyPrefix(k));
 }
 
 brokerageGtmRouter.post("/mcp-event", async (req: Request, res: Response) => {
@@ -215,6 +213,11 @@ brokerageGtmRouter.post("/mcp-event", async (req: Request, res: Response) => {
 
   const installId = data.installId ?? `mcp-server-${api_key_hash ?? "anon"}`;
 
+  const internalKeys = loadInternalGtmApiKeys();
+  const externalCaller = api_key_hash
+    ? !isInternalApiKeyHash(api_key_hash, internalKeys)
+    : null;
+
   const [inserted] = await db
     .insert(gtmEvents)
     .values({
@@ -227,25 +230,50 @@ brokerageGtmRouter.post("/mcp-event", async (req: Request, res: Response) => {
         jurisdiction_key: data.jurisdiction_key ?? null,
         api_key_hash: api_key_hash ?? null,
         latency_ms: data.latency_ms ?? null,
-        external_caller: api_key_hash
-          ? !isInternalApiKeyHash(api_key_hash, [
-              ...(process.env.BROKERAGE_DEV_API_KEY?.split(",") ?? []),
-              ...(process.env.BROKERAGE_API_KEYS?.split(",") ?? []),
-            ].map((k) => k.trim()).filter(Boolean))
-          : null,
+        external_caller: externalCaller,
       },
     })
     .returning({ id: gtmEvents.id });
 
+  if (inserted?.id && externalCaller) {
+    const triage = classifyGtmEvents([
+      {
+        eventType: data.eventType,
+        sourceSurface: data.sourceSurface,
+        toolName: data.tool_name ?? null,
+        errorClass: typeof error_class === "string" ? error_class : null,
+        externalCaller,
+        jurisdictionKey: data.jurisdiction_key ?? null,
+        eventId: inserted.id,
+      },
+    ])[0];
+    recordGtmEvent({
+      installId,
+      eventType: "triage_signal",
+      sourceSurface: "api",
+      payload: {
+        source_event_id: inserted.id,
+        triage: triage.triage,
+      },
+    });
+  }
+
   res.status(201).json({ ok: true, eventId: inserted?.id });
 });
 
-/** Steward digest helper (7-day window). */
+function parseDigestWindowDays(req: Request): number {
+  const raw = req.query.days;
+  const parsed = typeof raw === "string" ? Number.parseInt(raw, 10) : 7;
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 90) return 7;
+  return parsed;
+}
+
+/** Steward digest helper (default 7-day window). */
 brokerageGtmRouter.get(
   "/digest",
   async (req: Request, res: Response) => {
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const internalHashes = loadBrokerageKeyHashes();
+    const windowDays = parseDigestWindowDays(req);
+    const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
     const counts = await db
       .select({
@@ -297,10 +325,8 @@ brokerageGtmRouter.get(
     let internalMcpCalls = 0;
     for (const row of mcpEvents) {
       const hash = row.payloadJson?.api_key_hash;
-      if (typeof hash === "string" && isInternalApiKeyHash(hash, [
-        ...(process.env.BROKERAGE_DEV_API_KEY?.split(",") ?? []),
-        ...(process.env.BROKERAGE_API_KEYS?.split(",") ?? []),
-      ].map((k) => k.trim()).filter(Boolean))) {
+      const internalKeys = loadInternalGtmApiKeys();
+      if (typeof hash === "string" && isInternalApiKeyHash(hash, internalKeys)) {
         internalMcpCalls += 1;
       } else if (typeof hash === "string") {
         externalMcpCalls += 1;
@@ -322,12 +348,67 @@ brokerageGtmRouter.get(
       .select({ count: sql<number>`count(*)::int` })
       .from(gtmConsent);
 
+    const scoreboardMetrics = await computeGtmScoreboardMetrics(since);
+
+    const triageSourceRows = await db
+      .select({
+        id: gtmEvents.id,
+        eventType: gtmEvents.eventType,
+        sourceSurface: gtmEvents.sourceSurface,
+        payloadJson: gtmEvents.payloadJson,
+        createdAt: gtmEvents.createdAt,
+      })
+      .from(gtmEvents)
+      .where(
+        and(
+          gte(gtmEvents.createdAt, since),
+          sql`${gtmEvents.eventType} IN ('mcp_tool_call', 'mcp_connect', 'mcp_error', 'mcp_docs_clicked')`,
+        ),
+      )
+      .orderBy(desc(gtmEvents.createdAt))
+      .limit(50);
+
+    const internalKeys = loadInternalGtmApiKeys();
+
+    const triageSample = classifyGtmEvents(
+      triageSourceRows.map((row) => {
+        const payload = row.payloadJson ?? {};
+        const hash =
+          typeof payload.api_key_hash === "string" ? payload.api_key_hash : null;
+        return {
+          eventId: row.id,
+          createdAt: row.createdAt.toISOString(),
+          eventType: row.eventType,
+          sourceSurface: row.sourceSurface,
+          toolName:
+            typeof payload.tool_name === "string" ? payload.tool_name : null,
+          errorClass:
+            typeof payload.error_class === "string" ? payload.error_class : null,
+          externalCaller: hash ? !isInternalApiKeyHash(hash, internalKeys) : null,
+          jurisdictionKey:
+            typeof payload.jurisdiction_key === "string"
+              ? payload.jurisdiction_key
+              : null,
+        };
+      }),
+    );
+
     res.json({
-      windowDays: 7,
+      windowDays,
       since: since.toISOString(),
       consentRecords: consentTotal[0]?.count ?? 0,
       eventCounts: counts,
       sourceSurfaceCounts: surfaceCounts,
+      mcp: {
+        topTools: mcpToolRows
+          .filter((r) => r.toolName)
+          .map((r) => ({ tool_name: r.toolName, count: r.count })),
+        callerSplit: {
+          external: externalMcpCalls,
+          internal: internalMcpCalls,
+        },
+        scoreboard: scoreboardMetrics,
+      },
       mcpTopTools: mcpToolRows
         .filter((r) => r.toolName)
         .map((r) => ({ tool_name: r.toolName, count: r.count })),
@@ -335,11 +416,117 @@ brokerageGtmRouter.get(
         external: externalMcpCalls,
         internal: internalMcpCalls,
       },
+      scoreboardMetrics,
+      triageSample,
+      policyTier: {
+        outboundEnabled: isOutboundEnabled(),
+        tier1Held: !isOutboundEnabled(),
+      },
       recentEvents: recent.map((r) => ({
         eventType: r.eventType,
         installId: r.installId.slice(0, 8) + "…",
         createdAt: r.createdAt.toISOString(),
       })),
     });
+  },
+);
+
+/** Read-only triage classification for external MCP events. */
+brokerageGtmRouter.get("/triage", async (req: Request, res: Response) => {
+  const windowDays = parseDigestWindowDays(req);
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      id: gtmEvents.id,
+      eventType: gtmEvents.eventType,
+      sourceSurface: gtmEvents.sourceSurface,
+      payloadJson: gtmEvents.payloadJson,
+      createdAt: gtmEvents.createdAt,
+    })
+    .from(gtmEvents)
+    .where(
+      and(
+        gte(gtmEvents.createdAt, since),
+        sql`payload_json ->> 'external_caller' = 'true'`,
+      ),
+    )
+    .orderBy(desc(gtmEvents.createdAt))
+    .limit(100);
+
+  const internalKeys = loadInternalGtmApiKeys();
+
+  const classified = classifyGtmEvents(
+    rows.map((row) => {
+      const payload = row.payloadJson ?? {};
+      const hash =
+        typeof payload.api_key_hash === "string" ? payload.api_key_hash : null;
+      return {
+        eventId: row.id,
+        createdAt: row.createdAt.toISOString(),
+        eventType: row.eventType,
+        sourceSurface: row.sourceSurface,
+        toolName:
+          typeof payload.tool_name === "string" ? payload.tool_name : null,
+        errorClass:
+          typeof payload.error_class === "string" ? payload.error_class : null,
+        externalCaller: hash ? !isInternalApiKeyHash(hash, internalKeys) : true,
+        jurisdictionKey:
+          typeof payload.jurisdiction_key === "string"
+            ? payload.jurisdiction_key
+            : null,
+      };
+    }),
+  );
+
+  res.json({
+    windowDays,
+    since: since.toISOString(),
+    externalEventCount: classified.length,
+    classifications: classified,
+  });
+});
+
+const OUTBOUND_BODY = z.object({
+  action: z.enum(GTM_OUTBOUND_ACTIONS),
+  installId: z.string().min(8).max(128),
+});
+
+/** Tier 1 outbound attempt — blocked when OUTBOUND_ENABLED=false (v1 default). */
+brokerageGtmRouter.post(
+  "/outbound/attempt",
+  async (req: Request, res: Response) => {
+    const parse = OUTBOUND_BODY.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "invalid_request", message: "Invalid outbound body" });
+      return;
+    }
+
+    const { action, installId } = parse.data;
+
+    const [consent] = await db
+      .select()
+      .from(gtmConsent)
+      .where(eq(gtmConsent.installId, installId))
+      .limit(1);
+
+    const result = await attemptOutboundSend({
+      action,
+      installId,
+      hasConsent: Boolean(consent),
+      payload: req.body.payload as Record<string, unknown> | undefined,
+    });
+
+    if (!result.sent) {
+      res.status(403).json({
+        error: "outbound_blocked",
+        tier: result.tier,
+        reason: result.reason,
+        sent: false,
+      });
+      return;
+    }
+
+    res.status(200).json({ ok: true, sent: true, action: result.action });
   },
 );
