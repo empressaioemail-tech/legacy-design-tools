@@ -56,12 +56,13 @@ import {
   extractSheetContentBody,
   SHEET_CONTENT_ANTHROPIC_MODEL,
 } from "../lib/sheetContentExtractor";
+import { extractPdfPlainText } from "@workspace/codes-sources/pdf-text";
 import {
+  buildAttachedDocumentExtractedText,
   buildTextSegments,
   parseDocumentTypeFilter,
   parseUploadedDocumentType,
   isAcceptedDocumentMime,
-  isTextMime,
   resolveDocumentTitle,
 } from "./sheetContent.logic";
 
@@ -542,17 +543,38 @@ router.post(
     const documentType = typeParse.value;
     const title = resolveDocumentTitle(parts.title, parts.filename);
 
-    // `extractedText` — what the in-app agent reads. A text/* upload's
-    // own decoded body becomes the text (so a client note is readable);
-    // a PDF / image carries the operator's note, if they gave one.
-    let extractedText = parts.note.trim();
-    if (isTextMime(parts.mimeType)) {
-      const decoded = parts.fileBytes.toString("utf-8");
-      extractedText = extractedText
-        ? `${extractedText}\n\n${decoded}`
-        : decoded;
+    // `extractedText` — what the in-app agent reads. Text/* uploads
+    // decode inline; PDFs run extractPdfPlainText (P1 grounding).
+    let extractedText: string;
+    let lowTextExtraction = false;
+    try {
+      const built = await buildAttachedDocumentExtractedText({
+        mimeType: parts.mimeType,
+        note: parts.note,
+        fileBytes: parts.fileBytes,
+        maxChars: MAX_EXTRACTED_TEXT_CHARS,
+        extractPdfPlainText,
+      });
+      extractedText = built.extractedText;
+      lowTextExtraction = built.lowTextExtraction === true;
+    } catch (err) {
+      if ((err as Error).message === "pdf_too_large") {
+        res.status(413).json({ error: "pdf_too_large" });
+        return;
+      }
+      reqLog.error(
+        { err, engagementId },
+        "attached-document upload: PDF text extraction failed",
+      );
+      res.status(500).json({ error: "pdf_extract_failed" });
+      return;
     }
-    extractedText = extractedText.slice(0, MAX_EXTRACTED_TEXT_CHARS);
+    if (lowTextExtraction) {
+      reqLog.info(
+        { engagementId, title },
+        "attached-document upload: low_text_extraction — P2 vision pass recommended",
+      );
+    }
 
     // Persist the original blob first so a later DB failure still leaves
     // the bytes recoverable for triage.

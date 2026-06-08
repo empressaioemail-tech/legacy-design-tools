@@ -78,4 +78,31 @@ export const REQUIRED_CODE_ATOM_SOURCES: ReadonlyArray<RequiredCodeAtomSource> =
       notes:
         "QA-58 / QA-60. library.municode.com/tx/cedar_hill — clientId 1568, productId 11825. Shipped substrate cedar_hill_tx (~706 atoms, eval 0.913/1.0/1.0). Same adapter as bastrop_municode.",
     },
+    {
+      sourceName: "miami_beach_municode",
+      label: "Municode (Miami Beach, FL)",
+      sourceType: "api",
+      licenseType: "permitted_use",
+      baseUrl: "https://api.municode.com",
+      notes:
+        "Miami Beach plan-review bootstrap. ClientID 3289 verified 2026-06-08. Scoped warmup: existing-building valuation (FBCEB 601.2), local admin. Atoms tagged platform-internal.",
+    },
+    {
+      sourceName: "miami_dade_municode",
+      label: "Municode (Miami-Dade County, FL)",
+      sourceType: "api",
+      licenseType: "permitted_use",
+      baseUrl: "https://api.municode.com",
+      notes:
+        "Miami-Dade county overlay bootstrap. ClientID 11719 verified 2026-06-08. Product filter: Code of Ordinances. Scoped warmup: HVAC Ch.8, NOA/BORA wind-load, unit-combination / demolition thresholds.",
+    },
+    {
+      sourceName: "florida_interim_reference",
+      label: "Florida Layer-1 interim deep-link references (FBC + NEC)",
+      sourceType: "reference",
+      licenseType: "deep_link_only",
+      baseUrl: "https://codes.iccsafe.org",
+      notes:
+        "ADR-019 interim footing. FBC sections flagged ungrounded-pending-ICC; NEC articles flagged ungrounded-pending-NFPA. Seeded per jurisdiction key — not a live fetch source.",
+    },
   ];

@@ -51,6 +51,16 @@ interface MunicodeAdapterConfig {
    * (e.g. "bastrop"). If omitted, the lower-cased municipality name is used.
    */
   librarySlug?: string;
+  /**
+   * When a client exposes multiple products, pick the one whose productName
+   * contains this substring (case-insensitive). E.g. "code of ordinances".
+   */
+  productNameIncludes?: string;
+  /**
+   * When set, only enqueue TOC nodes whose chapter heading matches at least
+   * one pattern (case-insensitive substring). Scoped warmup for plan review.
+   */
+  targetChapterPatterns?: string[];
 }
 
 interface MunicodeContext {
@@ -86,10 +96,19 @@ async function resolveContext(
   }
   const content = await getClientContent(clientId);
   const codes = content.codes ?? [];
-  const product =
+  let product =
     cfg.municodeProductId != null
       ? codes.find((c) => c.productId === cfg.municodeProductId)
-      : codes[0];
+      : undefined;
+  if (!product && cfg.productNameIncludes) {
+    const needle = cfg.productNameIncludes.toLowerCase();
+    product = codes.find((c) =>
+      (c.productName ?? "").toLowerCase().includes(needle),
+    );
+  }
+  if (!product) {
+    product = codes[0];
+  }
   if (!product) {
     throw new Error(
       cfg.municodeProductId != null
@@ -129,11 +148,19 @@ export const municodeSource: CodeSource = {
     const maxNodes = cfg.maxTocNodes ?? 30;
     const { ctx } = await resolveContext(cfg);
 
+    function chapterMatchesScope(heading: string): boolean {
+      const patterns = cfg.targetChapterPatterns;
+      if (!patterns || patterns.length === 0) return true;
+      const h = heading.toLowerCase();
+      return patterns.some((p) => h.includes(p.toLowerCase()));
+    }
+
     const entries: TocEntry[] = [];
     // Depth 1: top-level chapters.
     const top = await getTocChildren(ctx.jobId, ctx.productId);
     for (const chapter of top) {
       if (entries.length >= maxNodes) break;
+      if (!chapterMatchesScope(chapter.Heading)) continue;
       // Skip cover, history, charter compare table, etc.
       if (!chapter.HasChildren) {
         entries.push({

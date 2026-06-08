@@ -70,6 +70,15 @@ export {
 } from "./prompt";
 
 export {
+  FINDING_VISION_ANTHROPIC_MODEL,
+  FINDING_VISION_MAX_SHEETS_PER_PASS,
+  runDisciplineVisionRead,
+  enrichPiecesWithVisionObservations,
+  type AttachedSheetImage,
+  type VisionSheetReadResult,
+} from "./visionSheetRead";
+
+export {
   generateOrchestratedFindings,
   resolveFindingOrchestratedMode,
   classifyPlanSetPiece,
