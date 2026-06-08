@@ -147,10 +147,11 @@ describe("lib/db schema integration", () => {
         "package_share_comments",
         "package_shares",
         "parcel_briefings",
-        "plan_set_piece_classifications",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
         "place_layer_snapshots",
+        // WS1 — per-piece discipline classification for plan-set decomposition.
+        "plan_set_piece_classifications",
         // Cortex L5 (Lane C.4 / C.4.5) — ICC-ES product-spec references.
         "product_spec_references",
         // Task #481 — QA Dashboard checklist runs and per-item results.
