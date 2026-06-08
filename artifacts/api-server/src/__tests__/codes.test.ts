@@ -99,7 +99,13 @@ describe("GET /api/codes/jurisdictions", () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     const keys = (res.body as Array<{ key: string }>).map((j) => j.key).sort();
-    expect(keys).toEqual(["bastrop_tx", "cedar_hill_tx", "grand_county_ut"]);
+    expect(keys).toEqual([
+      "bastrop_tx",
+      "cedar_hill_tx",
+      "grand_county_ut",
+      "miami_beach_fl",
+      "miami_dade_fl",
+    ]);
     const grand = (
       res.body as Array<{
         key: string;
