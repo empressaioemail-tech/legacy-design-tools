@@ -88,6 +88,17 @@ export type FindingCitation = FindingCodeCitation | FindingSourceCitation;
  * jurisdiction-scoped top-K via `lib/codes/retrieval` and hands them
  * in. Mirrors `briefing-engine`'s CodeSectionInput contract.
  */
+/** Transient web-retrieval provenance (never corpus UUID atoms). */
+export interface CodeSectionWebProvenance {
+  sourceUrl: string;
+  retrievedAt: string;
+  edition: string;
+  verified: boolean;
+  confidence: number;
+  sourceName: string;
+  unverifiedWebSource?: boolean;
+}
+
 export interface CodeSectionInput {
   /** The atom id used in `[[CODE:<atomId>]]` tokens. */
   atomId: string;
@@ -95,6 +106,8 @@ export interface CodeSectionInput {
   label: string;
   /** Optional snippet the prompt may quote. */
   snippet?: string;
+  /** Present on `websearch:` synthetic ids — live source + retrieved-at for citations. */
+  webProvenance?: CodeSectionWebProvenance;
 }
 
 /**

@@ -62,6 +62,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
+  supplementCodeSectionsFromWeb,
   type RetrievedAtom,
 } from "@workspace/codes";
 import {
@@ -600,6 +601,40 @@ async function resolveEngineInputs(
       log.warn(
         { err, submissionId, jurisdictionKey },
         "finding generation: code retrieval failed — continuing without code context",
+      );
+    }
+
+    try {
+      const webSections = await supplementCodeSectionsFromWeb({
+        jurisdictionKey,
+        existingSections: codeSections,
+        log: (msg, meta) => log.info(meta ?? {}, msg),
+      });
+      if (webSections.length > 0) {
+        codeSections = [
+          ...codeSections,
+          ...webSections.map((w) => ({
+            atomId: w.atomId,
+            label: w.label,
+            snippet: w.snippet,
+            webProvenance: w.webProvenance,
+          })),
+        ];
+        log.info(
+          {
+            submissionId,
+            jurisdictionKey,
+            webSectionCount: webSections.length,
+            verifiedCount: webSections.filter((w) => w.webProvenance.verified)
+              .length,
+          },
+          "finding generation: web code retrieval supplemented codeSections",
+        );
+      }
+    } catch (err) {
+      log.warn(
+        { err, submissionId, jurisdictionKey },
+        "finding generation: web code retrieval failed — continuing with corpus only",
       );
     }
   } else {

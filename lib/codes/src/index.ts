@@ -56,13 +56,19 @@ export {
 } from "./sourceRegistry";
 
 export {
-  FBC_INTERIM_ATOMS,
-  NEC_INTERIM_ATOMS,
-  FLORIDA_INTERIM_JURISDICTION_KEYS,
-  allInterimAtomDefs,
-  buildInterimAtomRows,
-  type InterimReferenceAtomDef,
-} from "./interimReferenceAtoms";
+  fetchCodeSection,
+  supplementCodeSectionsFromWeb,
+  websearchAtomId,
+  corpusCoversTarget,
+  WEBSEARCH_ATOM_PREFIX,
+  WEB_CODE_ALLOWLIST_HOSTS,
+  MIAMI_WHOLE_REVIEW_WEB_TARGETS,
+  reviewWebTargetsForJurisdiction,
+  type WebCodeFetchInput,
+  type WebCodeFetchResult,
+  type WebCodeSectionInput,
+  type HttpFetcher,
+} from "./webCodeFetch/index";
 
 export {
   buildChatPrompt,

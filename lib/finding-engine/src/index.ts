@@ -21,6 +21,7 @@ export {
   type BimElementInput,
   type BriefingSourceInput,
   type CodeSectionInput,
+  type CodeSectionWebProvenance,
   type EngineFinding,
   type FindingCategory,
   type FindingCitation,
