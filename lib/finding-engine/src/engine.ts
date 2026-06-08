@@ -57,8 +57,15 @@ export interface GenerateFindingsOptions {
    * `grok`).
    */
   anthropicClient?: Anthropic;
+  /**
+   * Anthropic client for P2 Opus vision read (HR-12 escalation).
+   * Used by the orchestrator before Grok synthesis when sheet images are present.
+   */
+  visionAnthropicClient?: Anthropic;
   /** xAI Grok client when `mode === "grok"`. */
   grokClient?: GrokClient;
+  /** Structured log hook for vision-read observability. */
+  visionLog?: (msg: string, meta?: Record<string, unknown>) => void;
   /** Override the engine's clock — test-only. */
   now?: () => Date;
   /**

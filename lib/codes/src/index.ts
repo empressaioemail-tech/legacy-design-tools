@@ -56,6 +56,15 @@ export {
 } from "./sourceRegistry";
 
 export {
+  FBC_INTERIM_ATOMS,
+  NEC_INTERIM_ATOMS,
+  FLORIDA_INTERIM_JURISDICTION_KEYS,
+  allInterimAtomDefs,
+  buildInterimAtomRows,
+  type InterimReferenceAtomDef,
+} from "./interimReferenceAtoms";
+
+export {
   buildChatPrompt,
   formatReferenceCodeAtoms,
   formatAtomVocabulary,

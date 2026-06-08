@@ -164,3 +164,57 @@ export function resolveDocumentTitle(
   if (fromFile) return fromFile.slice(0, MAX_DOCUMENT_TITLE_CHARS);
   return "Untitled document";
 }
+
+/** Cap aligned with encumbrance extract and dispatch acceptance criteria. */
+export const MAX_ATTACHED_PDF_BYTES = 25 * 1024 * 1024;
+
+/** Minimum extracted chars before flagging raster/low-text PDFs for P2 vision. */
+export const LOW_TEXT_EXTRACTION_THRESHOLD = 80;
+
+export interface AttachedDocumentExtractResult {
+  extractedText: string;
+  /** Present when PDF text extraction yielded little content (image-only sheet). */
+  lowTextExtraction?: boolean;
+}
+
+/**
+ * Build `extractedText` for an attached-document upload.
+ * Text MIME: operator note + decoded body. PDF: pdf-parse plain text + note.
+ */
+export async function buildAttachedDocumentExtractedText(args: {
+  mimeType: string;
+  note: string;
+  fileBytes: Buffer;
+  maxChars: number;
+  extractPdfPlainText: (
+    bytes: Buffer,
+  ) => Promise<{ text: string; numpages: number }>;
+}): Promise<AttachedDocumentExtractResult> {
+  const note = args.note.trim();
+  let body = "";
+
+  if (isTextMime(args.mimeType)) {
+    body = args.fileBytes.toString("utf-8");
+  } else if (bareMime(args.mimeType) === "application/pdf") {
+    if (args.fileBytes.length > MAX_ATTACHED_PDF_BYTES) {
+      throw new Error("pdf_too_large");
+    }
+    const parsed = await args.extractPdfPlainText(args.fileBytes);
+    body = parsed.text.trim();
+  }
+
+  let extractedText = note;
+  if (body) {
+    extractedText = extractedText ? `${extractedText}\n\n${body}` : body;
+  }
+  extractedText = extractedText.slice(0, args.maxChars);
+
+  const lowTextExtraction =
+    bareMime(args.mimeType) === "application/pdf" &&
+    body.length < LOW_TEXT_EXTRACTION_THRESHOLD;
+
+  return {
+    extractedText,
+    ...(lowTextExtraction ? { lowTextExtraction: true } : {}),
+  };
+}

@@ -167,6 +167,15 @@ export interface GenerateFindingsInput {
    * Surfaces in the prompt so the model stays within discipline scope.
    */
   disciplineScope?: PlanReviewDiscipline;
+  /**
+   * P2 — optional per-sheet PNG images for Claude Opus vision read.
+   * Threaded through the orchestrator; consumed by visionSheetRead before Grok synthesis.
+   */
+  attachedSheetImages?: ReadonlyArray<{
+    pieceId: string;
+    pngBase64: string;
+    label?: string;
+  }>;
 }
 
 /**

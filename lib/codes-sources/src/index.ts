@@ -16,6 +16,8 @@ const REGISTRY: Record<string, CodeSource> = {
   [grandCountyPdfSource.id]: grandCountyPdfSource,
   [municodeSource.id]: municodeSource,
   cedar_hill_municode: municodeSource,
+  miami_beach_municode: municodeSource,
+  miami_dade_municode: municodeSource,
 };
 
 export function getSource(sourceName: string): CodeSource | null {

@@ -126,6 +126,24 @@ export function __findingLlmClientIsFromEnvForTests(): boolean {
   return cachedFromEnv;
 }
 
+/** Lazy Anthropic client for P2 Opus vision read (HR-12 escalation). */
+let cachedVisionAnthropic: AnthropicClient | null = null;
+
+export async function getVisionAnthropicClient(): Promise<AnthropicClient | null> {
+  if (cachedVisionAnthropic) return cachedVisionAnthropic;
+  const apiKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY?.trim();
+  const baseUrl = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL?.trim();
+  if (!apiKey || !baseUrl) {
+    logger.warn(
+      "vision read: Anthropic env missing — skipping claude-opus-4-8 escalation",
+    );
+    return null;
+  }
+  const integrations = await import("@workspace/integrations-anthropic-ai");
+  cachedVisionAnthropic = integrations.createAnthropicClient();
+  return cachedVisionAnthropic;
+}
+
 export function validateFindingEngineEnvAtBoot(): void {
   const mode = resolveFindingLlmMode();
   if (mode === "grok") {

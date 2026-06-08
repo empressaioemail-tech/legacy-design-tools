@@ -103,6 +103,68 @@ export const JURISDICTIONS: Record<string, JurisdictionConfig> = {
       },
     ],
   },
+  miami_beach_fl: {
+    key: "miami_beach_fl",
+    displayName: "Miami Beach, FL",
+    books: [
+      {
+        label: "City of Miami Beach — Code of Ordinances",
+        codeBook: "MUNI_CODE",
+        edition: "Code of Ordinances (current supplement)",
+        sourceName: "miami_beach_municode",
+        config: {
+          municodeClientId: 3289,
+          municipalityName: "Miami Beach",
+          stateAbbr: "FL",
+          librarySlug: "miami_beach",
+          maxTocNodes: 25,
+          targetChapterPatterns: [
+            "existing building",
+            "building",
+            "mechanical",
+            "electrical",
+            "plumbing",
+            "fire",
+            "administration",
+            "permit",
+            "valuation",
+          ],
+        },
+      },
+    ],
+  },
+  miami_dade_fl: {
+    key: "miami_dade_fl",
+    displayName: "Miami-Dade County, FL",
+    books: [
+      {
+        label: "Miami-Dade County — Code of Ordinances",
+        codeBook: "MUNI_CODE",
+        edition: "Code of Ordinances (current supplement)",
+        sourceName: "miami_dade_municode",
+        config: {
+          municodeClientId: 11719,
+          municipalityName: "Miami-Dade County",
+          stateAbbr: "FL",
+          librarySlug: "miami_dade",
+          productNameIncludes: "code of ordinances",
+          maxTocNodes: 30,
+          targetChapterPatterns: [
+            "chapter 8",
+            "hvac",
+            "mechanical",
+            "building",
+            "product approval",
+            "bora",
+            "wind",
+            "demolition",
+            "combination",
+            "unit",
+          ],
+        },
+      },
+    ],
+  },
 };
 
 /**
@@ -122,6 +184,14 @@ const CITY_STATE_TO_KEY: Record<string, string> = {
   // Cedar Hill, TX — QA-58 / QA-60 (city municipal code; 706 atoms shipped)
   "cedar hill|tx": "cedar_hill_tx",
   "cedar hill|texas": "cedar_hill_tx",
+  // Miami Beach, FL — 5225 Collins Ave / 404 Remodel_B
+  "miami beach|fl": "miami_beach_fl",
+  "miami beach|florida": "miami_beach_fl",
+  // Miami-Dade County, FL — county overlay (HVAC Ch.8, NOA/BORA, unit-combination)
+  "miami-dade county|fl": "miami_dade_fl",
+  "miami-dade county|florida": "miami_dade_fl",
+  "miami dade county|fl": "miami_dade_fl",
+  "miami dade county|florida": "miami_dade_fl",
   // Blocked — do not map: dallas|tx (AmLegal partnership), dallas county|tx (no Municode product)
 };
 

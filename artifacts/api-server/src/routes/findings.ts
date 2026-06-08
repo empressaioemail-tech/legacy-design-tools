@@ -86,11 +86,16 @@ import {
   type CodeSectionInput,
   type EngineFinding,
   type FindingCitation,
+  type GenerateFindingsInput,
   type GenerateFindingsResult,
 } from "@workspace/finding-engine";
 import { FINDING_ENGINE_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
 import { classifyAndPersistPlanSetPieces } from "../lib/planSetClassification";
+import {
+  expandCandidatesWithPdfPages,
+  gatherPlanSetVisionImages,
+} from "../lib/planSetVision";
 import { getHistoryService } from "../atoms/registry";
 import {
   FINDING_EVENT_TYPES,
@@ -98,6 +103,7 @@ import {
 } from "../atoms/finding.atom";
 import {
   getFindingLlmClient,
+  getVisionAnthropicClient,
   getFindingLlmMode,
 } from "../lib/findingLlmClient";
 import { publishSubmissionFindingEvent } from "../lib/submissionLiveEvents";
@@ -846,6 +852,7 @@ async function runFindingGeneration(args: {
       codeSections: inputs.codeSections,
       bimElements: inputs.bimElements,
     };
+    const visionClient = await getVisionAnthropicClient();
     const engineOptions = {
       mode,
       ...(llmClient?.kind === "grok"
@@ -854,17 +861,57 @@ async function runFindingGeneration(args: {
       ...(llmClient?.kind === "anthropic"
         ? { anthropicClient: llmClient.client }
         : {}),
+      ...(visionClient
+        ? {
+            visionAnthropicClient: visionClient,
+            visionLog: (msg: string, meta?: Record<string, unknown>) =>
+              reqLog.info(meta ?? {}, msg),
+          }
+        : {}),
     };
 
     let result: GenerateFindingsResult;
     if (orchestrated) {
-      const pieceCandidates = await classifyAndPersistPlanSetPieces(
+      let pieceCandidates = await classifyAndPersistPlanSetPieces(
         submissionId,
         reqLog,
       );
+
+      const subEngRows = await db
+        .select({ engagementId: submissions.engagementId })
+        .from(submissions)
+        .where(eq(submissions.id, submissionId))
+        .limit(1);
+      const engagementId = subEngRows[0]?.engagementId;
+      let attachedSheetImages: GenerateFindingsInput["attachedSheetImages"];
+      if (engagementId && visionClient) {
+        const imageMap = await gatherPlanSetVisionImages(engagementId, (msg, meta) =>
+          reqLog.info(meta ?? {}, msg),
+        );
+        if (imageMap.allImages.length > 0) {
+          attachedSheetImages = imageMap.allImages;
+          pieceCandidates = expandCandidatesWithPdfPages(
+            pieceCandidates,
+            imageMap,
+          );
+          reqLog.info(
+            {
+              submissionId,
+              imageCount: imageMap.allImages.length,
+              expandedPieceCount: pieceCandidates.length,
+            },
+            "finding generation: plan-set vision images attached",
+          );
+        }
+      }
+
+      const visionBaseInput = attachedSheetImages?.length
+        ? { ...baseInput, attachedSheetImages }
+        : baseInput;
+
       if (pieceCandidates.length >= 2) {
         const orchestratedResult = await generateOrchestratedFindings(
-          { baseInput, pieceCandidates },
+          { baseInput: visionBaseInput, pieceCandidates },
           engineOptions,
         );
         reqLog.info(

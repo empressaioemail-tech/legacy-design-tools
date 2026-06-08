@@ -13,6 +13,10 @@ import type {
   GenerateFindingsResult,
 } from "../types";
 import {
+  enrichPiecesWithVisionObservations,
+  runDisciplineVisionRead,
+} from "../visionSheetRead";
+import {
   classifyPlanSetPieces,
   groupPiecesByDiscipline,
   toPlanSetPieceInputs,
@@ -77,10 +81,32 @@ export async function generateOrchestratedFindings(
   const generatedAt = options.now?.() ?? new Date();
 
   for (const [discipline, disciplinePieces] of byDiscipline) {
+    let piecesForPass = disciplinePieces;
+    const scopedCodeSections = filterCodeSectionsForDiscipline(
+      discipline,
+      input.baseInput.codeSections,
+    );
+    const sheetImages = input.baseInput.attachedSheetImages ?? [];
+    if (options.visionAnthropicClient && sheetImages.length > 0) {
+      const vision = await runDisciplineVisionRead(options.visionAnthropicClient, {
+        discipline,
+        pieces: disciplinePieces,
+        images: sheetImages,
+        codeSections: scopedCodeSections,
+        log: options.visionLog,
+      });
+      if (vision?.observations) {
+        piecesForPass = enrichPiecesWithVisionObservations(
+          disciplinePieces,
+          vision.observations,
+        );
+      }
+    }
+
     const specialistInput = buildSpecialistInput(
       input.baseInput,
       discipline,
-      disciplinePieces,
+      piecesForPass,
     );
     const pass = await generateFindings(specialistInput, options);
     producer = pass.producer;
