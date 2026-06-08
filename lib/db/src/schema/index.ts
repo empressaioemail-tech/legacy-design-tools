@@ -14,6 +14,7 @@ export * from "./deliverableLetterRenders";
 export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";
+export * from "./reasoningAtoms";
 export * from "./atomEvents";
 export * from "./users";
 export * from "./parcelBriefings";

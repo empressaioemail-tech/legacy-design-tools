@@ -947,6 +947,30 @@ CREATE TABLE @@SCHEMA@@.recorded_instruments (
 );
 
 
+-- Name: reasoning_atoms; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.reasoning_atoms (
+    id text NOT NULL,
+    jurisdiction_key text NOT NULL,
+    code_ref text NOT NULL,
+    edition text NOT NULL,
+    edition_slug text NOT NULL,
+    sources jsonb DEFAULT '[]'::jsonb NOT NULL,
+    reasoning text,
+    confidence numeric NOT NULL,
+    verification_state text NOT NULL,
+    snippet text,
+    display_mode text DEFAULT 'deeplink'::text NOT NULL,
+    calibrated_confidence numeric,
+    access_policy text DEFAULT 'platform-internal'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT reasoning_atoms_access_policy_check CHECK ((access_policy = ANY (ARRAY['platform-internal'::text, 'tenant-scoped'::text]))),
+    CONSTRAINT reasoning_atoms_display_mode_check CHECK ((display_mode = ANY (ARRAY['deeplink'::text, 'licensed'::text]))),
+    CONSTRAINT reasoning_atoms_verification_state_check CHECK ((verification_state = ANY (ARRAY['verified'::text, 'unverified-web-source'::text])))
+);
+
+
 -- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.render_outputs (
@@ -1607,6 +1631,12 @@ ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_pkey PRIMARY KEY (id);
 
 
+-- Name: reasoning_atoms reasoning_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.reasoning_atoms
+    ADD CONSTRAINT reasoning_atoms_pkey PRIMARY KEY (id);
+
+
 -- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
@@ -2114,6 +2144,16 @@ CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instrume
 -- Name: recorded_instruments_listing_install_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX recorded_instruments_listing_install_idx ON @@SCHEMA@@.recorded_instruments USING btree (install_id, listing_key);
+
+
+-- Name: reasoning_atoms_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX reasoning_atoms_jurisdiction_idx ON @@SCHEMA@@.reasoning_atoms USING btree (jurisdiction_key);
+
+
+-- Name: reasoning_atoms_jurisdiction_ref_edition_unique; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX reasoning_atoms_jurisdiction_ref_edition_unique ON @@SCHEMA@@.reasoning_atoms USING btree (jurisdiction_key, code_ref, edition);
 
 
 -- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -

@@ -162,6 +162,8 @@ describe("lib/db schema integration", () => {
         "qa_settings",
         // Task #503 — QA triage queue items (forwarded to planning).
         "qa_triage_items",
+        // v2 cortex reasoning/citation atoms — deeplinks + capped snippet, not corpus code_atoms.
+        "reasoning_atoms",
         // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
         "recorded_instruments",
         "render_outputs",
