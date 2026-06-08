@@ -40,7 +40,7 @@ describe("reconcileStandardPrecedence — most-stringent-governs", () => {
 });
 
 describe("reconcileStandardPrecedence — federal-preempts", () => {
-  it("federal preempts model-code A117.1 stub on accessibility topic", () => {
+  it("two federal plus model-code: federal preempt in chain, most-stringent governs", () => {
     const requirements = buildAdaFhaA117DoorClearanceRequirements();
     const result = reconcileStandardPrecedence(requirements, {
       domain: "accessibility",
@@ -48,7 +48,8 @@ describe("reconcileStandardPrecedence — federal-preempts", () => {
 
     expect(result).not.toBeNull();
     expect(result!.governing.atomId).toBe(FHA_DOOR_CLEARANCE_ATOM_ID);
-    expect(result!.ruleApplied).toBe("federal-preempts-where-applicable");
+    expect(result!.governing.numericValue).toBe(24);
+    expect(result!.ruleApplied).toBe("most-stringent-governs");
     expect(result!.compared).toHaveLength(3);
     expect(result!.citations.map((c) => (c.kind === "code-section" ? c.atomId : c.id))).toEqual(
       expect.arrayContaining([
@@ -57,8 +58,12 @@ describe("reconcileStandardPrecedence — federal-preempts", () => {
         A1171_DOOR_CLEARANCE_ATOM_ID,
       ]),
     );
+    expect(result!.confidence).toBe(0.75);
     expect(
-      result!.reasoningChain.some((s) => s.includes("federal-preempts")),
+      result!.reasoningChain.some((s) => s.includes("preempt model-code")),
+    ).toBe(true);
+    expect(
+      result!.reasoningChain.some((s) => s.includes("most-stringent-governs")),
     ).toBe(true);
     expect(
       result!.reasoningChain.some((s) => s.includes("A117.1")),
@@ -66,6 +71,23 @@ describe("reconcileStandardPrecedence — federal-preempts", () => {
     expect(result!.conflicts.every((c) => c.competingAtomIds.length === 3)).toBe(
       true,
     );
+  });
+
+  it("single federal preempts model-code when no intra-tier stringency contest", () => {
+    const requirements = buildAdaFhaA117DoorClearanceRequirements().filter(
+      (r) => r.authority !== "federal" || r.atomId === FHA_DOOR_CLEARANCE_ATOM_ID,
+    );
+    const result = reconcileStandardPrecedence(requirements, {
+      domain: "accessibility",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.governing.atomId).toBe(FHA_DOOR_CLEARANCE_ATOM_ID);
+    expect(result!.ruleApplied).toBe("federal-preempts-where-applicable");
+    expect(result!.compared).toHaveLength(2);
+    expect(
+      result!.reasoningChain.some((s) => s.includes("preempt model-code")),
+    ).toBe(true);
   });
 
   it("surfaces every compared standard in formatted finding text with citations", () => {
@@ -78,7 +100,7 @@ describe("reconcileStandardPrecedence — federal-preempts", () => {
     expect(text).toContain(`[[CODE:${ADA_DOOR_CLEARANCE_ATOM_ID}]]`);
     expect(text).toContain(`[[CODE:${FHA_DOOR_CLEARANCE_ATOM_ID}]]`);
     expect(text).toContain(`[[CODE:${A1171_DOOR_CLEARANCE_ATOM_ID}]]`);
-    expect(text).toContain("federal-preempts-where-applicable");
+    expect(text).toContain("most-stringent-governs");
     expect(text).toContain("24");
   });
 });

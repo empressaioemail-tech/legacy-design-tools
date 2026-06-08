@@ -221,6 +221,7 @@ export function reconcileStandardPrecedence(
   const reasoningSteps: string[] = [];
   let ruleApplied: PrecedenceRuleApplied = "most-stringent-governs";
   let decisionPool: ApplicableRequirement[] = [];
+  let federalPreemptApplied = false;
 
   const { effective: effectiveModel, overlayApplied, reasoning: overlayReasoning } =
     applyLocalOverlay(modelCode, localAmendments);
@@ -234,7 +235,7 @@ export function reconcileStandardPrecedence(
   }
 
   if (federal.length > 0 && federalPreempts && effectiveModel.length > 0) {
-    ruleApplied = "federal-preempts-where-applicable";
+    federalPreemptApplied = true;
     decisionPool = [...federal];
     reasoningSteps.push(
       `Federal standards (${federal.map((r) => r.standardLabel).join(", ")}) preempt model-code (${effectiveModel.map((r) => r.standardLabel).join(", ")}) for ${domain} domain.`,
@@ -253,10 +254,16 @@ export function reconcileStandardPrecedence(
     domain === "life-safety" ||
     domain === "dimensional"
   ) {
-    if (ruleApplied !== "federal-preempts-where-applicable") {
-      ruleApplied = overlayApplied
-        ? "local-amendment-overlays-model-code"
-        : "most-stringent-governs";
+    if (decisionPool.length >= 2) {
+      // Intra-tier stringency contest — including co-applicable federal standards.
+      ruleApplied = "most-stringent-governs";
+    } else if (federalPreemptApplied) {
+      // Cross-tier preemption left a single governing federal standard.
+      ruleApplied = "federal-preempts-where-applicable";
+    } else if (overlayApplied) {
+      ruleApplied = "local-amendment-overlays-model-code";
+    } else {
+      ruleApplied = "most-stringent-governs";
     }
     reasoningSteps.push(
       "Most-stringent-governs applied within the decision pool for accessibility/life-safety/dimensional limits.",
