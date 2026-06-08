@@ -30,6 +30,7 @@ const authHeaders = {
 
 beforeAll(async () => {
   process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
+  process.env.BROKERAGE_API_KEYS = "external-mcp-caller-key-01,external-mcp-caller-key-02";
   resetBrokerageApiKeysForTests();
 
   if (!ctx.schema) return;
@@ -108,6 +109,77 @@ describe("brokerage GTM", () => {
     expect(Array.isArray(res.body.eventCounts)).toBe(true);
     expect(Array.isArray(res.body.sourceSurfaceCounts)).toBe(true);
     expect(res.body.mcpCallerSplit).toBeTruthy();
+    expect(res.body.scoreboardMetrics).toMatchObject({
+      external_callers: expect.any(Number),
+      mcp_tool_calls: expect.any(Number),
+      mcp_error_rate: expect.any(Number),
+    });
+    expect(res.body.mcp.scoreboard).toEqual(res.body.scoreboardMetrics);
+    expect(Array.isArray(res.body.triageSample)).toBe(true);
+    expect(res.body.policyTier.tier1Held).toBe(true);
+  });
+
+  it("GET /gtm/digest scoreboard counts external MCP caller", async () => {
+    const app = getApp();
+    const externalKey = "external-mcp-caller-key-01";
+    await request(app)
+      .post("/api/brokerage/v1/gtm/mcp-event")
+      .set({ Authorization: `Bearer ${externalKey}` })
+      .send({
+        eventType: "mcp_tool_call",
+        sourceSurface: "mcp",
+        tool_name: "resolve_place",
+        jurisdiction_key: "bastrop_tx",
+      });
+
+    const digest = await request(app)
+      .get("/api/brokerage/v1/gtm/digest")
+      .set(authHeaders);
+    expect(digest.body.scoreboardMetrics.mcp_tool_calls).toBeGreaterThanOrEqual(1);
+    expect(digest.body.scoreboardMetrics.external_callers).toBeGreaterThanOrEqual(1);
+  });
+
+  it("GET /gtm/triage classifies external MCP events", async () => {
+    const app = getApp();
+    const externalKey = "external-mcp-caller-key-02";
+    await request(app)
+      .post("/api/brokerage/v1/gtm/mcp-event")
+      .set({ Authorization: `Bearer ${externalKey}` })
+      .send({
+        eventType: "mcp_tool_call",
+        sourceSurface: "mcp",
+        tool_name: "resolve_place",
+        jurisdiction_key: "bastrop_tx",
+      });
+
+    const triage = await request(app)
+      .get("/api/brokerage/v1/gtm/triage")
+      .set(authHeaders);
+    expect(triage.status).toBe(200);
+    expect(triage.body.externalEventCount).toBeGreaterThanOrEqual(1);
+    const hit = triage.body.classifications.find(
+      (c: { toolName?: string }) => c.toolName === "resolve_place",
+    );
+    expect(hit?.triage.dataPackage).toBe("parcel");
+    expect(hit?.triage.conversionOpportunity).toBe("high");
+  });
+
+  it("POST /gtm/outbound/attempt does not send when OUTBOUND_ENABLED=false", async () => {
+    delete process.env.OUTBOUND_ENABLED;
+    const app = getApp();
+    await request(app)
+      .post("/api/brokerage/v1/gtm/consent")
+      .set(authHeaders)
+      .send({ installId: INSTALL_ID, graphOptIn: false });
+
+    const res = await request(app)
+      .post("/api/brokerage/v1/gtm/outbound/attempt")
+      .set(authHeaders)
+      .send({ action: "email_send", installId: INSTALL_ID });
+    expect(res.status).toBe(403);
+    expect(res.body.sent).toBe(false);
+    expect(res.body.error).toBe("outbound_blocked");
+    expect(res.body.reason).toContain("OUTBOUND_ENABLED=false");
   });
 
   it("POST /gtm/mcp-event accepts sample MCP payload", async () => {

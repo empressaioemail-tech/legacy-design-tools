@@ -39,3 +39,17 @@ export function isInternalApiKeyHash(
   if (!keyHash) return false;
   return envKeys.some((k) => hashApiKeyPrefix(k) === keyHash);
 }
+
+/** Operator / service keys — customer keys in BROKERAGE_API_KEYS are external for GTM. */
+export function loadInternalGtmApiKeys(): string[] {
+  const keys: string[] = [];
+  for (const envName of ["BROKERAGE_DEV_API_KEY", "SERVICE_API_KEY"]) {
+    const raw = process.env[envName]?.trim();
+    if (!raw) continue;
+    for (const part of raw.split(",")) {
+      const k = part.trim();
+      if (k) keys.push(k);
+    }
+  }
+  return keys;
+}
