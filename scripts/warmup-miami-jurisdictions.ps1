@@ -27,4 +27,4 @@ foreach ($key in $keys) {
   $status | ConvertTo-Json -Depth 5
 }
 
-Write-Host "Seed interim atoms: node scripts/seed-florida-interim-atoms.mjs"
+Write-Host "Web code retrieval supplements Layer-1 gaps at finding-generation time (no interim seed)."

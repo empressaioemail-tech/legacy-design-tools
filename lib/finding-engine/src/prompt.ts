@@ -80,6 +80,15 @@ function describeCodeSection(c: CodeSectionInput): string {
   const lines: string[] = [];
   lines.push(`- atomId=${c.atomId}`);
   lines.push(`  label: ${c.label}`);
+  if (c.webProvenance) {
+    lines.push(`  sourceUrl: ${c.webProvenance.sourceUrl}`);
+    lines.push(`  retrievedAt: ${c.webProvenance.retrievedAt}`);
+    lines.push(`  edition: ${c.webProvenance.edition}`);
+    lines.push(`  verified: ${c.webProvenance.verified}`);
+    if (c.webProvenance.unverifiedWebSource) {
+      lines.push(`  unverified-web-source: true`);
+    }
+  }
   if (c.snippet) {
     const snippet =
       c.snippet.length > PROMPT_CODE_SNIPPET_MAX_CHARS
