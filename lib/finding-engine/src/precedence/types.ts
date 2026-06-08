@@ -13,7 +13,15 @@ export type StandardAuthority =
   | "local-amendment"
   | "private-advisory";
 
-/** Deterministic precedence rule applied by the resolver. */
+/**
+ * Deterministic precedence rule applied by the resolver.
+ *
+ * `federal-preempts-where-applicable` is cross-tier only: federal displacing
+ * model-code/state/local and leaving a single governing federal standard.
+ * Intra-tier selection among co-applicable standards of the same tier (including
+ * two federal standards) reports `most-stringent-governs`; the federal-preempt
+ * step remains in `reasoningChain` when model-code was dropped from the pool.
+ */
 export type PrecedenceRuleApplied =
   | "single-source"
   | "federal-preempts-where-applicable"
