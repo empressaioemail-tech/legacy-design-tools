@@ -546,6 +546,49 @@ describe("POST /api/engagements/:id/submissions — engagement.submitted", () =>
       jurisdictionState: null,
     });
   });
+
+  it("skips auto plan-review kickoff when deferAutoFindings is true", async () => {
+    const eng = await seedEngagement({
+      address: "789 Deferred Auto Lane",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({ deferAutoFindings: true });
+    expect(res.status).toBe(201);
+
+    const runs = await ctx.schema!.db
+      .select({ id: findingRuns.id })
+      .from(findingRuns)
+      .where(eq(findingRuns.submissionId, res.body.submissionId));
+    expect(runs).toHaveLength(0);
+  });
+
+  it("still auto-kicks plan review when deferAutoFindings is omitted", async () => {
+    const eng = await seedEngagement({
+      address: "321 Auto Kick Lane",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({});
+    expect(res.status).toBe(201);
+
+    let runs: Array<{ id: string }> = [];
+    for (let i = 0; i < 30; i++) {
+      runs = await ctx.schema!.db
+        .select({ id: findingRuns.id })
+        .from(findingRuns)
+        .where(eq(findingRuns.submissionId, res.body.submissionId));
+      if (runs.length > 0) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(runs.length).toBeGreaterThan(0);
+  });
 });
 
 describe("GET /api/engagements/:id/submissions — list past submissions", () => {

@@ -17,6 +17,7 @@ import {
   getListEngagementSubmissionsQueryKey,
   getGetSubmissionFindingsGenerationStatusQueryKey,
   getListSubmissionFindingsQueryKey,
+  ApiError,
 } from "@workspace/api-client-react";
 import { TabHeader } from "../cockpit/TabChrome";
 
@@ -29,6 +30,12 @@ export type PlanPickOption = {
 
 function describeRunError(err: unknown): string {
   return err instanceof Error ? err.message : "Could not start plan review.";
+}
+
+function isGenerationAlreadyInFlight(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  const data = err.data as { error?: string } | null;
+  return data?.error === "finding_generation_already_in_flight";
 }
 
 export function RunPlanReviewTab({
@@ -138,7 +145,20 @@ export function RunPlanReviewTab({
         });
         onNavigateToTriage?.();
       },
-      onError: (err) => setRunError(describeRunError(err)),
+      onError: (err, vars) => {
+        if (isGenerationAlreadyInFlight(err)) {
+          setRunError(null);
+          setActiveSubmissionId(vars.submissionId);
+          queryClient.invalidateQueries({
+            queryKey: getGetSubmissionFindingsGenerationStatusQueryKey(
+              vars.submissionId,
+            ),
+          });
+          onNavigateToTriage?.();
+          return;
+        }
+        setRunError(describeRunError(err));
+      },
     },
   });
 
@@ -194,6 +214,7 @@ export function RunPlanReviewTab({
       data: {
         note: "Pre-submittal self-review (architect-initiated)",
         discipline: "building",
+        deferAutoFindings: true,
       },
     });
   };

@@ -692,6 +692,13 @@ library" picker default for reviewers. Omit to leave the
 field null (the picker falls back to "All").
  */
   discipline?: CannedFindingDiscipline;
+  /** When true, skip the fire-and-forget auto plan-review kickoff
+on create. The architect self-run flow sets this and calls
+`POST .../findings/generate` explicitly (with
+`planSetPieceIds`). Omit or false for formal Submit to
+jurisdiction and other paths that rely on auto-trigger.
+ */
+  deferAutoFindings?: boolean;
 }
 
 /**
