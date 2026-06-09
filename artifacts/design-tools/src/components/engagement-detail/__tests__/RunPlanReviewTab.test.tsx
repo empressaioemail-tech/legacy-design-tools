@@ -18,6 +18,14 @@ const hoisted = vi.hoisted(() => ({
     sheetName: string;
   }>,
   findingsStatus: null as null | { state: string },
+  engagementSubmissions: [] as Array<{
+    id: string;
+    submittedAt: string;
+    findingGenerationState: string;
+    findingGenerationError: string | null;
+    openFindingCount: number;
+    status?: string;
+  }>,
   engagementStore: {
     uploadAttachedDocument: vi.fn().mockResolvedValue(undefined),
     uploadingDocumentByEngagement: {} as Record<string, boolean>,
@@ -94,6 +102,18 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       }),
     getGetSnapshotSheetsQueryKey: (snapshotId: string) =>
       ["getSnapshotSheets", snapshotId] as const,
+    useListEngagementSubmissions: (
+      _engagementId: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["listEngagementSubmissions", _engagementId] as const),
+        queryFn: async () => hoisted.engagementSubmissions,
+        enabled: opts?.query?.enabled ?? true,
+        retry: false,
+      }),
     getListEngagementSubmissionsQueryKey: (engagementId: string) =>
       ["listEngagementSubmissions", engagementId] as const,
     getListSubmissionFindingsQueryKey: (submissionId: string) =>
@@ -121,6 +141,10 @@ function renderTab(
       hoisted.snapshotSheets.map((s) => ({ ...s })),
     );
   }
+  client.setQueryData(
+    ["listEngagementSubmissions", engagementId],
+    hoisted.engagementSubmissions.map((s) => ({ ...s })),
+  );
   return render(
     <QueryClientProvider client={client}>
       <RunPlanReviewTab
@@ -136,6 +160,7 @@ beforeEach(() => {
   hoisted.attachedDocuments = [];
   hoisted.snapshotSheets = [];
   hoisted.findingsStatus = null;
+  hoisted.engagementSubmissions = [];
   createSubmission.reset();
   generateFindings.reset();
 });
@@ -266,5 +291,33 @@ describe("RunPlanReviewTab", () => {
     });
     expect(onNavigateToTriage).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/finding_generation_already_in_flight/i)).not.toBeInTheDocument();
+  });
+
+  it("disables Run when another submission already has a pending finding run", () => {
+    hoisted.attachedDocuments = [
+      {
+        entityId: "doc-plan-1",
+        title: "404 Remodel permit set.pdf",
+        documentType: "specification",
+      },
+    ];
+    hoisted.engagementSubmissions = [
+      {
+        id: "sub-inflight",
+        submittedAt: "2026-06-08T00:00:00Z",
+        findingGenerationState: "pending",
+        findingGenerationError: null,
+        openFindingCount: 0,
+        status: "pending",
+      },
+    ];
+    renderTab();
+    expect(screen.getByTestId("run-plan-review-start")).toBeDisabled();
+    expect(screen.getByTestId("run-plan-review-start")).toHaveTextContent(
+      "Review in progress…",
+    );
+    expect(screen.getByTestId("run-plan-review-running-pill")).toHaveTextContent(
+      "Running…",
+    );
   });
 });

@@ -269,6 +269,9 @@ const baseSubmission: EngagementSubmissionSummary = {
   reviewerComment: null,
   respondedAt: null,
   responseRecordedAt: null,
+  findingGenerationState: "idle",
+  findingGenerationError: null,
+  openFindingCount: 0,
 };
 
 function makeEngagement(

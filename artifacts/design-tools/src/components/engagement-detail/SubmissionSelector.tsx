@@ -1,4 +1,5 @@
 import type { EngagementSubmissionSummary } from "@workspace/api-client-react";
+import { formatSubmissionPickerLabel } from "./findingGenerationUi";
 
 /**
  * Shared submission picker for Review surfaces (Findings, cross-links).
@@ -43,8 +44,7 @@ export function SubmissionSelector({
         ) : (
           submissions.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.submittedAt}
-              {s.status ? ` · ${s.status}` : ""}
+              {formatSubmissionPickerLabel(s)}
             </option>
           ))
         )}

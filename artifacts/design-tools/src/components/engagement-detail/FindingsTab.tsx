@@ -14,6 +14,7 @@ import {
 } from "@workspace/api-client-react";
 import { TabHeader } from "../cockpit/TabChrome";
 import { SubmissionSelector } from "./SubmissionSelector";
+import { formatFindingGenerationStatusLabel } from "./findingGenerationUi";
 import {
   ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
   CodeAtomDetailModal,
@@ -334,6 +335,13 @@ export function FindingsTab({
     query: {
       enabled: !!engagementId,
       queryKey: getListEngagementSubmissionsQueryKey(engagementId),
+      refetchInterval: (q) => {
+        const subs = q.state.data;
+        if (!subs?.some((s) => s.findingGenerationState === "pending")) {
+          return false;
+        }
+        return 1500;
+      },
     },
   });
 
@@ -604,6 +612,15 @@ export function FindingsTab({
   const submissionStatusLabel = activeSubmission?.status
     ? activeSubmission.status.replace(/_/g, " ").toUpperCase()
     : null;
+  const aiRunStatusLabel =
+    activeSubmission &&
+    (activeSubmission.findingGenerationState !== "idle" ||
+      activeSubmission.openFindingCount > 0)
+      ? formatFindingGenerationStatusLabel(
+          activeSubmission.findingGenerationState,
+          activeSubmission.findingGenerationError,
+        ).toUpperCase()
+      : null;
 
   return (
     <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
@@ -826,6 +843,31 @@ export function FindingsTab({
             >
               {submissionLabelShort}
             </div>
+            {aiRunStatusLabel && (
+              <div
+                data-testid="findings-tab-ai-run-status"
+                style={{
+                  marginTop: 4,
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  width: "fit-content",
+                  background: "var(--cyan-accent-bg)",
+                  color: "var(--cyan)",
+                  border: "1px solid var(--cyan-accent-border)",
+                }}
+              >
+                AI review {aiRunStatusLabel}
+                {activeSubmission &&
+                (activeSubmission.findingGenerationState === "completed" ||
+                  activeSubmission.findingGenerationState === "failed" ||
+                  activeSubmission.openFindingCount > 0)
+                  ? ` · ${activeSubmission.openFindingCount} open`
+                  : ""}
+              </div>
+            )}
             {submissionStatusLabel && (
               <div
                 data-testid="findings-tab-submission-status"
@@ -843,7 +885,7 @@ export function FindingsTab({
                     "1px solid var(--warning-border, var(--cyan-accent-border))",
                 }}
               >
-                {submissionStatusLabel}
+                Jurisdiction {submissionStatusLabel}
               </div>
             )}
             {activeSubmission?.submittedAt && (

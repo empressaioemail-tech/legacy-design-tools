@@ -8,6 +8,7 @@ import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
 import { mountSpaStatic } from "./middlewares/spaStatic";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
+import { startFindingRunsSweep } from "./lib/findingRunsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
@@ -20,6 +21,10 @@ startQueueWorker(logger);
 // architect-driven kickoff cadence accrues completed/failed history.
 // See `lib/briefingGenerationJobsSweep.ts` for the retention contract.
 startBriefingGenerationJobsSweep(logger);
+
+// Rescue stale pending finding_runs after worker crashes / deploy
+// restarts; also one-time expire on boot for operator keystone engagement.
+startFindingRunsSweep(logger);
 
 // Sweep expired federal-adapter cache rows (Task #203). Reads filter
 // `expires_at > now()` so expired rows never serve, but the table

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CannedFindingDiscipline } from "./cannedFindingDiscipline";
+import type { FindingGenerationSummaryState } from "./findingGenerationSummaryState";
 import type { SubmissionStatus } from "./submissionStatus";
 
 /**
@@ -53,4 +54,21 @@ Null while the submission is still pending; set to the
 server clock on every response update.
  */
   responseRecordedAt: Date | null;
+  /** Latest AI plan-review run state for this submission
+(`finding_runs`), distinct from jurisdiction `status`.
+`idle` when no generation has ever been kicked off.
+ */
+  findingGenerationState: FindingGenerationSummaryState;
+  /** Terminal error token from the latest finding run when
+`findingGenerationState` is `failed` (e.g.
+`orphaned-timeout` after a stale-run sweep).
+ */
+  findingGenerationError: string | null;
+  /**
+   * Count of findings on this submission whose status is not
+`overridden` — the open triage workload for the inbox.
+
+   * @minimum 0
+   */
+  openFindingCount: number;
 }

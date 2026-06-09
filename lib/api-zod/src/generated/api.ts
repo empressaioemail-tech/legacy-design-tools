@@ -653,6 +653,8 @@ export const ListEngagementSubmissionsParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const listEngagementSubmissionsResponseOpenFindingCountMin = 0;
+
 export const ListEngagementSubmissionsResponseItem = zod
   .object({
     id: zod.string(),
@@ -677,6 +679,23 @@ export const ListEngagementSubmissionsResponseItem = zod
       .nullable()
       .describe(
         "Wall-clock timestamp the server stamped when the response\nrow was committed. Distinct from `respondedAt` so consumers\ncan distinguish a backfilled reply (where `respondedAt`\nreflects when the jurisdiction actually replied) from a\nlive one (where the two timestamps are essentially equal).\nNull while the submission is still pending; set to the\nserver clock on every response update.\n",
+      ),
+    findingGenerationState: zod
+      .enum(["idle", "pending", "completed", "failed"])
+      .describe(
+        "Latest AI plan-review run state for this submission\n(`finding_runs`), distinct from jurisdiction `status`.\n`idle` when no generation has ever been kicked off.\n",
+      ),
+    findingGenerationError: zod
+      .string()
+      .nullable()
+      .describe(
+        "Terminal error token from the latest finding run when\n`findingGenerationState` is `failed` (e.g.\n`orphaned-timeout` after a stale-run sweep).\n",
+      ),
+    openFindingCount: zod
+      .number()
+      .min(listEngagementSubmissionsResponseOpenFindingCountMin)
+      .describe(
+        "Count of findings on this submission whose status is not\n`overridden` — the open triage workload for the inbox.\n",
       ),
   })
   .describe(

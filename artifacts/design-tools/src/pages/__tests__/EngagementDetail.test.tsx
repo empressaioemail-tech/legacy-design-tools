@@ -586,6 +586,10 @@ async function submitOnce(opts?: {
       status: "pending" as const,
       reviewerComment: null,
       respondedAt: null,
+      responseRecordedAt: null,
+      findingGenerationState: "idle" as const,
+      findingGenerationError: null,
+      openFindingCount: 0,
     };
   // Push the new row first so the invalidateQueries refetch sees it.
   hoisted.submissions = [row, ...hoisted.submissions];
@@ -721,6 +725,9 @@ function seedSubmissionsWithFindings(
         reviewerComment: null,
         respondedAt: null,
         responseRecordedAt: null,
+        findingGenerationState: "completed" as const,
+        findingGenerationError: null,
+        openFindingCount: findings.length,
       },
       {
         id: "sub-latest",
@@ -731,6 +738,9 @@ function seedSubmissionsWithFindings(
         reviewerComment: null,
         respondedAt: null,
         responseRecordedAt: null,
+        findingGenerationState: "idle" as const,
+        findingGenerationError: null,
+        openFindingCount: 0,
       },
     ];
     hoisted.submissions = subs;
