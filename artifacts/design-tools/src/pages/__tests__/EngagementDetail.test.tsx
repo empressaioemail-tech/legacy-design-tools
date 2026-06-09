@@ -495,7 +495,9 @@ function renderPage(opts?: { seed?: (client: QueryClient) => void }) {
     ["listAttachedDocuments", hoisted.engagement.id],
     { attachedDocuments: hoisted.attachedDocuments.map((d) => ({ ...d })) },
   );
-  const defaultSnapshotId = hoisted.engagement.snapshots?.[0]?.id;
+  const defaultSnapshotId = (
+    hoisted.engagement.snapshots[0] as { id: string } | undefined
+  )?.id;
   if (defaultSnapshotId) {
     client.setQueryData(
       ["getSnapshotSheets", defaultSnapshotId],
@@ -1235,7 +1237,9 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     expect(rows).toEqual([
       "architect-findings-row-finding:sub-latest:concern",
     ]);
-    expect(window.location.search).toBe("?view=review&severity=concern");
+    expect(window.location.search).toBe(
+      "?view=review&segment=findings&severity=concern",
+    );
     // Active chip carries the data-active marker.
     expect(
       screen
@@ -1273,7 +1277,9 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
       .getAllByRole("listitem")
       .map((r) => r.getAttribute("data-testid"));
     expect(rows).toEqual(["architect-findings-row-finding:sub-latest:02"]);
-    expect(window.location.search).toBe("?view=review&category=setback");
+    expect(window.location.search).toBe(
+      "?view=review&segment=findings&category=setback",
+    );
   });
 
   it("hides addressed findings when the Addressed toggle is flipped off and updates the URL", () => {
@@ -1307,7 +1313,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
         .map((r) => r.getAttribute("data-testid")),
     ).toEqual(["architect-findings-row-finding:sub-latest:open"]);
     expect(window.location.search).toBe(
-      "?view=review&showAddressed=false",
+      "?view=review&segment=findings&showAddressed=false",
     );
   });
 
@@ -1315,7 +1321,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     window.history.replaceState(
       null,
       "",
-      "/?view=review&severity=concern&category=egress&showAddressed=false",
+      "/?view=review&segment=findings&severity=concern&category=egress&showAddressed=false",
     );
     renderPage({
       seed: seedSubmissionsWithFindings([
