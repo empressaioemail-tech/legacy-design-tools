@@ -25,6 +25,11 @@ import { getHistoryService } from "../atoms/registry";
 import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindingsOnSubmissionCreated";
 import { autoTriggerClassificationOnSubmissionCreated } from "../lib/autoTriggerClassificationOnSubmissionCreated";
 import {
+  findEngagementInFlightFindingRun,
+  loadLatestFindingRunStateBySubmissionIds,
+  loadOpenFindingCountBySubmissionIds,
+} from "../lib/findingRunsEngagement";
+import {
   buildIntakeSiteContextRaw,
   mergeIntakePatchIntoSiteContextRaw,
   mergeSiteContextRaw,
@@ -806,27 +811,32 @@ router.get(
         .where(eq(submissions.engagementId, params.data.id))
         .orderBy(desc(submissions.submittedAt));
 
+      const submissionIds = rows.map((r) => r.id);
+      const [runStateBySubmission, openCountBySubmission] = await Promise.all([
+        loadLatestFindingRunStateBySubmissionIds(submissionIds),
+        loadOpenFindingCountBySubmissionIds(submissionIds),
+      ]);
+
       res.json(
-        rows.map((r) => ({
-          id: r.id,
-          submittedAt: r.submittedAt.toISOString(),
-          jurisdiction: r.jurisdiction,
-          note: r.note,
-          // PLR-10 — surfaced so FindingsTab's "Add from library"
-          // picker can pre-filter to this submission's discipline.
-          discipline: r.discipline,
-          status: r.status,
-          reviewerComment: r.reviewerComment,
-          respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
-          // Server-stamped wall-clock timestamp set when the
-          // response route commits the row update (Task #106). Lets
-          // the timeline distinguish a backfilled reply (where
-          // `respondedAt` is well before this stamp) from a live
-          // one (where the two are essentially equal).
-          responseRecordedAt: r.responseRecordedAt
-            ? r.responseRecordedAt.toISOString()
-            : null,
-        })),
+        rows.map((r) => {
+          const run = runStateBySubmission.get(r.id);
+          return {
+            id: r.id,
+            submittedAt: r.submittedAt.toISOString(),
+            jurisdiction: r.jurisdiction,
+            note: r.note,
+            discipline: r.discipline,
+            status: r.status,
+            reviewerComment: r.reviewerComment,
+            respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
+            responseRecordedAt: r.responseRecordedAt
+              ? r.responseRecordedAt.toISOString()
+              : null,
+            findingGenerationState: run?.state ?? "idle",
+            findingGenerationError: run?.error ?? null,
+            openFindingCount: openCountBySubmission.get(r.id) ?? 0,
+          };
+        }),
       );
     } catch (err) {
       logger.error(
@@ -873,6 +883,18 @@ router.post(
       // PLR-10 — optional discipline tag; `undefined` from the body
       // becomes `null` on the row so the picker falls back to "All".
       const discipline = bodyParse.data.discipline ?? null;
+
+      if (bodyParse.data.deferAutoFindings) {
+        const inflight = await findEngagementInFlightFindingRun(existing.id);
+        if (inflight) {
+          res.status(409).json({
+            error: "engagement_finding_run_in_progress",
+            submissionId: inflight.submissionId,
+            generationId: inflight.generationId,
+          });
+          return;
+        }
+      }
 
       // Persist the submission row first. The row id (and its
       // `submittedAt` default) become the canonical fields surfaced on

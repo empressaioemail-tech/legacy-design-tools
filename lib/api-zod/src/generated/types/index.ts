@@ -204,6 +204,7 @@ export * from "./findingCategory";
 export * from "./findingCitation";
 export * from "./findingCodeCitation";
 export * from "./findingCodeCitationKind";
+export * from "./findingGenerationSummaryState";
 export * from "./findingResponse";
 export * from "./findingSeverity";
 export * from "./findingSourceCitation";

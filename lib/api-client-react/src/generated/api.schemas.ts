@@ -732,6 +732,23 @@ export const SubmissionStatus = {
 } as const;
 
 /**
+ * Latest AI finding-generation run state for a submission, as
+surfaced on `EngagementSubmissionSummary`. `pending` means a
+worker is expected to be processing (or the run was orphaned
+until the stale-run sweep marks it `failed`).
+
+ */
+export type FindingGenerationSummaryState =
+  (typeof FindingGenerationSummaryState)[keyof typeof FindingGenerationSummaryState];
+
+export const FindingGenerationSummaryState = {
+  idle: "idle",
+  pending: "pending",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+/**
  * One past plan-review submission for an engagement, as returned
 by `GET /engagements/{id}/submissions`. The `jurisdiction`
 label is the denormalized snapshot captured at submission time
@@ -776,6 +793,23 @@ Null while the submission is still pending; set to the
 server clock on every response update.
  */
   responseRecordedAt: string | null;
+  /** Latest AI plan-review run state for this submission
+(`finding_runs`), distinct from jurisdiction `status`.
+`idle` when no generation has ever been kicked off.
+ */
+  findingGenerationState: FindingGenerationSummaryState;
+  /** Terminal error token from the latest finding run when
+`findingGenerationState` is `failed` (e.g.
+`orphaned-timeout` after a stale-run sweep).
+ */
+  findingGenerationError: string | null;
+  /**
+   * Count of findings on this submission whose status is not
+`overridden` — the open triage workload for the inbox.
+
+   * @minimum 0
+   */
+  openFindingCount: number;
 }
 
 /**

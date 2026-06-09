@@ -566,6 +566,36 @@ describe("POST /api/engagements/:id/submissions — engagement.submitted", () =>
     expect(runs).toHaveLength(0);
   });
 
+  it("409s when deferAutoFindings and another submission already has a pending finding run", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement({
+      address: "1 In Flight Lane",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+    });
+    const [existingSub] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+        note: "First run",
+      })
+      .returning();
+    await ctx.schema.db.insert(findingRuns).values({
+      submissionId: existingSub!.id,
+      state: "pending",
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({ deferAutoFindings: true });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      error: "engagement_finding_run_in_progress",
+      submissionId: existingSub!.id,
+    });
+  });
+
   it("still auto-kicks plan review when deferAutoFindings is omitted", async () => {
     const eng = await seedEngagement({
       address: "321 Auto Kick Lane",
@@ -656,6 +686,9 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
       // server-stamped recording timestamp (Task #106) stays null
       // until the response route commits an update.
       responseRecordedAt: null,
+      findingGenerationState: "idle",
+      findingGenerationError: null,
+      openFindingCount: 0,
     });
     expect(res.body[1]).toEqual({
       id: first!.id,
@@ -667,6 +700,9 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
       reviewerComment: null,
       respondedAt: null,
       responseRecordedAt: null,
+      findingGenerationState: "idle",
+      findingGenerationError: null,
+      openFindingCount: 0,
     });
   });
 
@@ -747,6 +783,47 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
     expect(resA.status).toBe(200);
     expect(resA.body).toHaveLength(1);
     expect(resA.body[0].note).toBe("for A");
+  });
+
+  it("surfaces latest finding run state and open finding count per submission", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement({ address: "1 AI Status Way" });
+    const [sub] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+        note: "With findings",
+      })
+      .returning();
+    await ctx.schema.db.insert(findingRuns).values({
+      submissionId: sub!.id,
+      state: "completed",
+    });
+    await ctx.schema.db.insert(findings).values({
+      submissionId: sub!.id,
+      atomId: `finding:${sub!.id}:TESTFINDING00001`,
+      severity: "blocker",
+      category: "setback",
+      status: "ai-produced",
+      text: "Setback issue — too close to property line",
+      citations: [] as unknown as Record<string, unknown>[],
+      confidence: "0.9",
+      lowConfidence: false,
+      aiGeneratedAt: new Date(),
+    });
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/submissions`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({
+      id: sub!.id,
+      findingGenerationState: "completed",
+      findingGenerationError: null,
+      openFindingCount: 1,
+    });
   });
 });
 

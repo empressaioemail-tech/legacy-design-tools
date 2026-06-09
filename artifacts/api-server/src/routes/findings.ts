@@ -92,6 +92,7 @@ import {
 } from "@workspace/finding-engine";
 import { FINDING_ENGINE_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
+import { findEngagementInFlightFindingRun } from "../lib/findingRunsEngagement";
 import {
   classifyAndPersistPlanSetPieces,
   filterPlanSetPieceCandidates,
@@ -1182,6 +1183,21 @@ router.post(
       const sub = await loadSubmission(submissionId);
       if (!sub) {
         res.status(404).json({ error: "submission_not_found" });
+        return;
+      }
+
+      const engagementInflight = await findEngagementInFlightFindingRun(
+        sub.engagementId,
+      );
+      if (
+        engagementInflight &&
+        engagementInflight.submissionId !== submissionId
+      ) {
+        res.status(409).json({
+          error: "engagement_finding_run_in_progress",
+          submissionId: engagementInflight.submissionId,
+          generationId: engagementInflight.generationId,
+        });
         return;
       }
 

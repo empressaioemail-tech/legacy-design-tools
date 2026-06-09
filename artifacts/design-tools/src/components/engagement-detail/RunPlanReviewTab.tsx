@@ -11,6 +11,7 @@ import {
   useGenerateSubmissionFindings,
   useGetSubmissionFindingsGenerationStatus,
   useListAttachedDocuments,
+  useListEngagementSubmissions,
   useGetSnapshotSheets,
   getGetSnapshotSheetsQueryKey,
   getListAttachedDocumentsQueryKey,
@@ -20,6 +21,7 @@ import {
   ApiError,
 } from "@workspace/api-client-react";
 import { TabHeader } from "../cockpit/TabChrome";
+import { formatRunPlanReviewProgressLabel } from "./findingGenerationUi";
 
 export type PlanPickOption = {
   pieceId: string;
@@ -36,6 +38,12 @@ function isGenerationAlreadyInFlight(err: unknown): boolean {
   if (!(err instanceof ApiError) || err.status !== 409) return false;
   const data = err.data as { error?: string } | null;
   return data?.error === "finding_generation_already_in_flight";
+}
+
+function isEngagementFindingRunInProgress(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  const data = err.data as { error?: string; submissionId?: string } | null;
+  return data?.error === "engagement_finding_run_in_progress";
 }
 
 export function RunPlanReviewTab({
@@ -82,6 +90,37 @@ export function RunPlanReviewTab({
       queryKey: getGetSnapshotSheetsQueryKey(latestSnapshotId ?? ""),
     },
   });
+
+  const { data: engagementSubmissions, refetch: refetchSubmissions } =
+    useListEngagementSubmissions(engagementId, {
+      query: {
+        enabled: !!engagementId,
+        queryKey: getListEngagementSubmissionsQueryKey(engagementId),
+        refetchInterval: (q) => {
+          const subs = q.state.data;
+          if (!subs?.some((s) => s.findingGenerationState === "pending")) {
+            return false;
+          }
+          return 1500;
+        },
+      },
+    });
+
+  const inflightSubmission = useMemo(
+    () =>
+      engagementSubmissions?.find(
+        (s) => s.findingGenerationState === "pending",
+      ) ?? null,
+    [engagementSubmissions],
+  );
+
+  useEffect(() => {
+    if (inflightSubmission) {
+      setActiveSubmissionId((prev) =>
+        prev === inflightSubmission.id ? prev : inflightSubmission.id,
+      );
+    }
+  }, [inflightSubmission]);
 
   const planOptions = useMemo<PlanPickOption[]>(() => {
     const docs =
@@ -175,7 +214,18 @@ export function RunPlanReviewTab({
           data: { planSetPieceIds: selectedPieceIdsRef.current },
         });
       },
-      onError: (err) => setRunError(describeRunError(err)),
+      onError: (err) => {
+        if (isEngagementFindingRunInProgress(err)) {
+          setRunError(null);
+          const data = err.data as { submissionId?: string } | null;
+          if (data?.submissionId) {
+            setActiveSubmissionId(data.submissionId);
+          }
+          void refetchSubmissions();
+          return;
+        }
+        setRunError(describeRunError(err));
+      },
     },
   });
 
@@ -193,10 +243,15 @@ export function RunPlanReviewTab({
     },
   );
   const runState = statusQuery.data?.state ?? null;
+  const engagementReviewInFlight = !!inflightSubmission;
   const isRunning =
+    engagementReviewInFlight ||
     runState === "pending" ||
     createSubmission.isPending ||
     generate.isPending;
+  const progressLabel = formatRunPlanReviewProgressLabel(
+    runState ?? (engagementReviewInFlight ? "pending" : null),
+  );
 
   const togglePiece = (pieceId: string) => {
     setSelectedPieceIds((prev) =>
@@ -340,16 +395,16 @@ export function RunPlanReviewTab({
             disabled={!canRun || !hasPlanSelection || isRunning}
             onClick={handleRun}
           >
-            {isRunning ? "Running review…" : "Run plan review"}
+            {isRunning ? "Review in progress…" : "Run plan review"}
           </button>
-          {runState === "pending" && (
+          {isRunning ? (
             <span
               className="sc-meta flex items-center gap-1"
               data-testid="run-plan-review-running-pill"
             >
-              <Layers size={12} /> Review in progress…
+              <Layers size={12} /> {progressLabel}
             </span>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

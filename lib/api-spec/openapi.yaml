@@ -9118,6 +9118,25 @@ components:
             live one (where the two timestamps are essentially equal).
             Null while the submission is still pending; set to the
             server clock on every response update.
+        findingGenerationState:
+          $ref: "#/components/schemas/FindingGenerationSummaryState"
+          description: |
+            Latest AI plan-review run state for this submission
+            (`finding_runs`), distinct from jurisdiction `status`.
+            `idle` when no generation has ever been kicked off.
+        findingGenerationError:
+          type: string
+          nullable: true
+          description: |
+            Terminal error token from the latest finding run when
+            `findingGenerationState` is `failed` (e.g.
+            `orphaned-timeout` after a stale-run sweep).
+        openFindingCount:
+          type: integer
+          minimum: 0
+          description: |
+            Count of findings on this submission whose status is not
+            `overridden` — the open triage workload for the inbox.
       required:
         - id
         - submittedAt
@@ -9128,6 +9147,18 @@ components:
         - reviewerComment
         - respondedAt
         - responseRecordedAt
+        - findingGenerationState
+        - findingGenerationError
+        - openFindingCount
+
+    FindingGenerationSummaryState:
+      type: string
+      enum: [idle, pending, completed, failed]
+      description: |
+        Latest AI finding-generation run state for a submission, as
+        surfaced on `EngagementSubmissionSummary`. `pending` means a
+        worker is expected to be processing (or the run was orphaned
+        until the stale-run sweep marks it `failed`).
 
     SubmissionStatus:
       type: string
