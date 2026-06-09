@@ -20,13 +20,17 @@ export function coverageStatusLabel(status: string | undefined): string {
   return status ?? "Unknown";
 }
 
+/** True when jurisdiction resolves — corpus warmup is informational, not a gate. */
 export function canRunPlanReview(
   jurisdiction: string | null | undefined,
-  coverageStatus?: string,
+  _coverageStatus?: string,
 ): boolean {
-  if (!jurisdiction?.trim()) return false;
-  if (!coverageStatus) return true;
-  return coverageStatus === "ready";
+  return !!jurisdiction?.trim();
+}
+
+/** Coverage status is shown for context; web-grounding runs without a warmed corpus. */
+export function isCoverageInformational(coverageStatus?: string): boolean {
+  return !!coverageStatus && coverageStatus !== "ready";
 }
 
 export function shouldShowRequestCoverage(coverageStatus?: string): boolean {
