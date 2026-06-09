@@ -2,31 +2,32 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const WEBSEARCH_ATOM_PREFIX = "websearch:";
+const REASONING_ATOM_PREFIX = "reasoning:";
 
 /**
- * Proof: web-fetched verbatim model-code is NOT persisted as public-free corpus atoms.
- * Grep migration/seed/orchestrator paths for websearch persistence — must be absent.
+ * v2 boundary: web fetch persists reasoning atoms (capped snippet + deeplinks),
+ * NOT full verbatim section text and NOT public code_atoms catalog rows.
  */
-describe("web code fetch — no corpus persistence", () => {
+describe("reasoning atom grounding — persist reasoning, NOT verbatim text", () => {
   const repoRoot = join(import.meta.dirname, "../../../..");
 
-  it("orchestrator does not insert websearch rows into code_atoms", () => {
+  it("reasoningAtoms module documents persist-reasoning boundary", () => {
     const src = readFileSync(
-      join(repoRoot, "lib/codes/src/orchestrator.ts"),
+      join(repoRoot, "lib/codes/src/reasoningAtoms/types.ts"),
       "utf-8",
     );
-    expect(src).not.toContain("websearch:");
-    expect(src).not.toContain("public-free");
+    expect(src).toContain("REASONING_SNIPPET_MAX_CHARS");
+    expect(src).toContain(REASONING_ATOM_PREFIX);
+    expect(src).not.toContain("fullSection");
   });
 
-  it("web fetch module documents transient-only boundary", () => {
+  it("web fetch entry delegates persistence to reasoningAtoms", () => {
     const src = readFileSync(
       join(repoRoot, "lib/codes/src/webCodeFetch/index.ts"),
       "utf-8",
     );
-    expect(src).toContain("never persisted");
-    expect(src).toContain(WEBSEARCH_ATOM_PREFIX);
+    expect(src).toContain("reasoningAtoms");
+    expect(src).not.toContain("never persisted");
   });
 
   it("retired interim seed script is gone", () => {

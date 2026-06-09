@@ -82,9 +82,19 @@ function describeCodeSection(c: CodeSectionInput): string {
   lines.push(`  label: ${c.label}`);
   if (c.webProvenance) {
     lines.push(`  sourceUrl: ${c.webProvenance.sourceUrl}`);
+    if (c.webProvenance.sources?.length) {
+      for (const s of c.webProvenance.sources) {
+        lines.push(
+          `  source: ${s.sourceName} | ${s.url} | retrievedAt=${s.retrievedAt} | verified=${s.verified}`,
+        );
+      }
+    }
     lines.push(`  retrievedAt: ${c.webProvenance.retrievedAt}`);
     lines.push(`  edition: ${c.webProvenance.edition}`);
     lines.push(`  verified: ${c.webProvenance.verified}`);
+    if (c.webProvenance.displayMode) {
+      lines.push(`  displayMode: ${c.webProvenance.displayMode}`);
+    }
     if (c.webProvenance.unverifiedWebSource) {
       lines.push(`  unverified-web-source: true`);
     }

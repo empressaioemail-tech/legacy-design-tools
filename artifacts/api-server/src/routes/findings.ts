@@ -62,7 +62,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
-  supplementCodeSectionsFromWeb,
+  supplementCodeSectionsWithReasoningGrounding,
   type RetrievedAtom,
 } from "@workspace/codes";
 import {
@@ -605,15 +605,15 @@ async function resolveEngineInputs(
     }
 
     try {
-      const webSections = await supplementCodeSectionsFromWeb({
+      const grounding = await supplementCodeSectionsWithReasoningGrounding({
         jurisdictionKey,
         existingSections: codeSections,
         log: (msg, meta) => log.info(meta ?? {}, msg),
       });
-      if (webSections.length > 0) {
+      if (grounding.sections.length > 0) {
         codeSections = [
           ...codeSections,
-          ...webSections.map((w) => ({
+          ...grounding.sections.map((w) => ({
             atomId: w.atomId,
             label: w.label,
             snippet: w.snippet,
@@ -624,11 +624,14 @@ async function resolveEngineInputs(
           {
             submissionId,
             jurisdictionKey,
-            webSectionCount: webSections.length,
-            verifiedCount: webSections.filter((w) => w.webProvenance.verified)
-              .length,
+            reasoningRetrievedCount: grounding.reasoningRetrievedCount,
+            webFilledCount: grounding.webFilledCount,
+            sectionCount: grounding.sections.length,
+            verifiedCount: grounding.sections.filter(
+              (w) => w.webProvenance.verified,
+            ).length,
           },
-          "finding generation: web code retrieval supplemented codeSections",
+          "finding generation: reasoning grounding supplemented codeSections",
         );
       }
     } catch (err) {

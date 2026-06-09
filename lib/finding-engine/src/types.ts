@@ -88,14 +88,28 @@ export type FindingCitation = FindingCodeCitation | FindingSourceCitation;
  * jurisdiction-scoped top-K via `lib/codes/retrieval` and hands them
  * in. Mirrors `briefing-engine`'s CodeSectionInput contract.
  */
-/** Transient web-retrieval provenance (never corpus UUID atoms). */
+/** One deeplink source on a reasoning/citation atom (multi-link UPSERT). */
+export interface ReasoningSourceLink {
+  url: string;
+  sourceName: string;
+  edition: string;
+  retrievedAt: string;
+  verified: boolean;
+}
+
+/** Reasoning-atom provenance — deeplink citation UX; not corpus UUID atoms. */
 export interface CodeSectionWebProvenance {
   sourceUrl: string;
+  /** All persisted source deeplinks (read-inline citation chips). */
+  sources?: ReasoningSourceLink[];
   retrievedAt: string;
   edition: string;
   verified: boolean;
   confidence: number;
   sourceName: string;
+  verificationState?: "verified" | "unverified-web-source";
+  /** Seam for future ICC Code Connect / NFPA licensed display — default deeplink. */
+  displayMode?: "deeplink" | "licensed";
   unverifiedWebSource?: boolean;
 }
 
@@ -106,7 +120,7 @@ export interface CodeSectionInput {
   label: string;
   /** Optional snippet the prompt may quote. */
   snippet?: string;
-  /** Present on `websearch:` synthetic ids — live source + retrieved-at for citations. */
+  /** Present on `reasoning:` / legacy `websearch:` ids — deeplink citation provenance. */
   webProvenance?: CodeSectionWebProvenance;
 }
 

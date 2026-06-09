@@ -57,7 +57,6 @@ export {
 
 export {
   fetchCodeSection,
-  supplementCodeSectionsFromWeb,
   websearchAtomId,
   corpusCoversTarget,
   WEBSEARCH_ATOM_PREFIX,
@@ -69,6 +68,21 @@ export {
   type WebCodeSectionInput,
   type HttpFetcher,
 } from "./webCodeFetch/index";
+
+export {
+  REASONING_ATOM_PREFIX,
+  REASONING_SNIPPET_MAX_CHARS,
+  reasoningAtomId,
+  capReasoningSnippet,
+  mergeReasoningSources,
+  upsertReasoningAtomFromWebFetch,
+  retrieveReasoningAtomsForRefs,
+  supplementCodeSectionsWithReasoningGrounding,
+  supplementCodeSectionsFromWeb,
+  type ReasoningAtomRecord,
+  type ReasoningSourceLink,
+  type ReasoningGroundingResult,
+} from "./reasoningAtoms/index";
 
 export {
   buildChatPrompt,

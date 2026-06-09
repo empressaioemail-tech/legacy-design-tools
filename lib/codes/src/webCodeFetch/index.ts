@@ -1,8 +1,9 @@
 /**
  * Jurisdiction-agnostic web-search code retrieval (ADR-019 interim grounding).
  *
- * Transient, review-scoped, attribution-bound — never persisted as public-free
- * corpus atoms. Synthetic ids: websearch:<edition-slug>:<section>
+ * Fetches allowlisted sources for review-scoped gaps. v2 persists reasoning
+ * atoms (capped snippet + deeplinks) via reasoningAtoms/ — NOT full verbatim
+ * section text and NOT public code_atoms catalog rows.
  */
 
 import { buildDriverUrls } from "./drivers";
@@ -119,17 +120,28 @@ export async function fetchCodeSection(
   };
 }
 
+export interface WebCodeSectionSourceLink {
+  url: string;
+  sourceName: string;
+  edition: string;
+  retrievedAt: string;
+  verified: boolean;
+}
+
 export interface WebCodeSectionInput {
   atomId: string;
   label: string;
   snippet?: string;
   webProvenance: {
     sourceUrl: string;
+    sources?: WebCodeSectionSourceLink[];
     retrievedAt: string;
     edition: string;
     verified: boolean;
     confidence: number;
     sourceName: string;
+    verificationState?: "verified" | "unverified-web-source";
+    displayMode?: "deeplink" | "licensed";
     unverifiedWebSource?: boolean;
   };
 }
@@ -168,46 +180,3 @@ export function corpusCoversTarget(
   });
 }
 
-/**
- * After corpus retrieval, web-fetch gaps for review targets.
- * Does NOT persist — returns transient section rows only.
- */
-export async function supplementCodeSectionsFromWeb(args: {
-  jurisdictionKey: string;
-  existingSections: ReadonlyArray<{ atomId: string; label: string }>;
-  http?: HttpFetcher;
-  log?: (msg: string, meta?: Record<string, unknown>) => void;
-}): Promise<WebCodeSectionInput[]> {
-  const targets = reviewWebTargetsForJurisdiction(args.jurisdictionKey);
-  if (targets.length === 0) return [];
-
-  const corpusLabels = args.existingSections
-    .filter((s) => !s.atomId.startsWith(WEBSEARCH_ATOM_PREFIX))
-    .map((s) => s.label);
-
-  const appended: WebCodeSectionInput[] = [];
-  for (const target of targets) {
-    if (corpusCoversTarget(corpusLabels, target)) {
-      args.log?.("web code fetch: corpus covers section — skip", {
-        codeRef: target.codeRef,
-      });
-      continue;
-    }
-    const result = await fetchCodeSection(
-      {
-        codeRef: target.codeRef,
-        edition: target.edition,
-        jurisdictionKey: args.jurisdictionKey,
-      },
-      { http: args.http, target },
-    );
-    args.log?.("web code fetch: section retrieved", {
-      codeRef: target.codeRef,
-      verified: result.verified,
-      sourceUrl: result.sourceUrl,
-      confidence: result.confidence,
-    });
-    appended.push(webFetchResultToSectionInput(result, target));
-  }
-  return appended;
-}

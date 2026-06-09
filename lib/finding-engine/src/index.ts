@@ -22,6 +22,7 @@ export {
   type BriefingSourceInput,
   type CodeSectionInput,
   type CodeSectionWebProvenance,
+  type ReasoningSourceLink,
   type EngineFinding,
   type FindingCategory,
   type FindingCitation,

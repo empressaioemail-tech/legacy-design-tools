@@ -3,7 +3,6 @@ import { verifyAndExtract } from "../webCodeFetch/extract";
 import {
   corpusCoversTarget,
   fetchCodeSection,
-  supplementCodeSectionsFromWeb,
   websearchAtomId,
 } from "../webCodeFetch/index";
 import type { HttpFetcher } from "../webCodeFetch/types";
@@ -101,33 +100,6 @@ describe("websearch atom ids", () => {
     expect(id).not.toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
-  });
-});
-
-describe("supplementCodeSectionsFromWeb", () => {
-  it("skips targets already covered by corpus labels", async () => {
-    const http = mockHttp(FBC_2023_HTML);
-    const out = await supplementCodeSectionsFromWeb({
-      jurisdictionKey: "miami_beach_fl",
-      existingSections: [
-        { atomId: "uuid-1", label: "FBC-M601.6 — duct insulation" },
-      ],
-      http,
-    });
-    expect(out.find((s) => s.atomId.includes("m601"))).toBeUndefined();
-  });
-
-  it("appends web sections for gaps with provenance", async () => {
-    const out = await supplementCodeSectionsFromWeb({
-      jurisdictionKey: "miami_beach_fl",
-      existingSections: [],
-      http: mockHttp(NEC_2017_HTML, "https://www.nfpa.org/codes-and-standards/nfpa-70-nec"),
-    });
-    const nec = out.find((s) => s.atomId.includes("nec-art-220"));
-    expect(nec).toBeDefined();
-    expect(nec!.webProvenance.sourceUrl).toContain("nfpa.org");
-    expect(nec!.webProvenance.retrievedAt).toBeTruthy();
-    expect(nec!.atomId.startsWith("websearch:")).toBe(true);
   });
 });
 
