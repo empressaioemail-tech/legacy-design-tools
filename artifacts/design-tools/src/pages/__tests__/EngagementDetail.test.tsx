@@ -1592,6 +1592,14 @@ describe("EngagementDetail Review — run vs triage split (PL-02)", () => {
     gotoRunPlanReviewTab();
     fireEvent.click(screen.getByTestId("run-plan-review-start"));
     expect(submit.mutate).toHaveBeenCalledTimes(1);
+    expect(submit.mutate.mock.calls[0][0]).toMatchObject({
+      id: hoisted.engagement.id,
+      data: {
+        note: "Pre-submittal self-review (architect-initiated)",
+        discipline: "building",
+        deferAutoFindings: true,
+      },
+    });
     await act(async () => {
       submit.capturedOptions!.mutation!.onSuccess!(
         { submissionId: "sub-new", submittedAt: "2026-06-08T00:00:00Z" },
@@ -1600,6 +1608,7 @@ describe("EngagementDetail Review — run vs triage split (PL-02)", () => {
           data: {
             note: "Pre-submittal self-review (architect-initiated)",
             discipline: "building",
+            deferAutoFindings: true,
           },
         },
         undefined,

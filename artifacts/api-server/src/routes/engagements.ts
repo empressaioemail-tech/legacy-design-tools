@@ -912,7 +912,9 @@ router.post(
       );
 
       // Fire-and-forget — must not block the 201 response.
-      autoTriggerFindingsOnSubmissionCreated(inserted.id, reqLog);
+      if (!bodyParse.data.deferAutoFindings) {
+        autoTriggerFindingsOnSubmissionCreated(inserted.id, reqLog);
+      }
       // Track 1 — fire-and-forget auto-classification, mirrors AT-2's
       // contract: never awaited, never throws, every failure is logged
       // so the submission HTTP response is unaffected.
