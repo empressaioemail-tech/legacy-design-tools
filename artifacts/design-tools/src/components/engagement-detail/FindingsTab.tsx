@@ -1,7 +1,10 @@
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { canRunPlanReview } from "../../lib/coverageUi";
+import {
+  canRunPlanReview,
+  isCoverageInformational,
+} from "../../lib/coverageUi";
 import {
   ApiError,
   FindingCategory,
@@ -346,7 +349,7 @@ export function FindingsTab({
   initialSubmissionId: string | null;
   /** Used to gate self-run plan review when jurisdiction is unknown. */
   engagementJurisdiction?: string | null;
-  /** v2 — honest coverage gate (QA-49). */
+  /** Informational only — does not gate self-run (web-grounding covers non-warmed jurisdictions). */
   engagementCoverageStatus?: string;
   /**
    * Invoked when the architect clicks the CAD `elementRef` chip on a
@@ -688,14 +691,10 @@ export function FindingsTab({
     );
   }
   if (sortedSubmissions.length === 0) {
-    const canSelfRun = canRunPlanReview(
-      engagementJurisdiction,
+    const canSelfRun = canRunPlanReview(engagementJurisdiction);
+    const coverageInformational = isCoverageInformational(
       engagementCoverageStatus,
     );
-    const coverageBlocked =
-      engagementCoverageStatus === "not_in_catalog" ||
-      engagementCoverageStatus === "substrate_only" ||
-      engagementCoverageStatus === "warming";
     const selfRunBusy = createSubmission.isPending;
     return (
       <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
@@ -710,18 +709,25 @@ export function FindingsTab({
         >
           <div className="sc-prose opacity-80">
             {canSelfRun ? (
-              <p>
-                Start a one-click AI plan review on the current model and site
-                context. You can still{" "}
-                <strong>Submit to jurisdiction</strong> from the header when
-                ready for formal submittal.
-              </p>
-            ) : coverageBlocked ? (
-              <p>
-                No ingested code corpus for this location yet. Use{" "}
-                <strong>Request coverage</strong> on the Site tab, or wait for
-                warmup to finish.
-              </p>
+              coverageInformational ? (
+                <p data-testid="findings-tab-web-grounding-note">
+                  Start a one-click AI plan review on the current model and site
+                  context. This jurisdiction is not in the ingested code corpus
+                  yet — findings will be <strong>web-grounded</strong> from
+                  authoritative sources on demand. You can optionally{" "}
+                  <strong>Request coverage</strong> on the Site tab to warm the
+                  local corpus. You can still{" "}
+                  <strong>Submit to jurisdiction</strong> from the header when
+                  ready for formal submittal.
+                </p>
+              ) : (
+                <p>
+                  Start a one-click AI plan review on the current model and site
+                  context. You can still{" "}
+                  <strong>Submit to jurisdiction</strong> from the header when
+                  ready for formal submittal.
+                </p>
+              )
             ) : (
               <p>
                 Add a project address (so jurisdiction resolves) before running

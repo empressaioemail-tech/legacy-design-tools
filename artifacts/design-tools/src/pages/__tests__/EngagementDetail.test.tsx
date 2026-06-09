@@ -1419,6 +1419,33 @@ describe("EngagementDetail Findings tab — manual plan-review trigger (PL-02)",
     expect(screen.queryByTestId("findings-tab-rerun")).not.toBeInTheDocument();
   });
 
+  it("enables self-run with web-grounding note when jurisdiction resolves but corpus is not warmed", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      name: "404 Remodel_B",
+      jurisdiction: "Miami Beach, FL",
+      coverageStatus: "warming",
+    } as typeof hoisted.engagement & { coverageStatus: string };
+    renderPage();
+    gotoFindingsTab();
+    expect(
+      screen.getByTestId("findings-tab-web-grounding-note"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("findings-tab-web-grounding-note").textContent).toMatch(
+      /web-grounded/i,
+    );
+    expect(screen.getByTestId("findings-tab-web-grounding-note").textContent).toMatch(
+      /Request coverage/i,
+    );
+    const btn = screen.getByTestId("findings-tab-self-run");
+    expect(btn).not.toBeDisabled();
+    expect(btn.textContent).toBe("Run plan review");
+    expect(screen.queryByText(/Add a project address/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/wait for warmup to finish/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the 'Run plan review' button with no status (idle) and fires generate.mutate with the selected submissionId", () => {
     renderPage({ seed: seedSubmissionsWithFindings([]) });
     gotoFindingsTab();
