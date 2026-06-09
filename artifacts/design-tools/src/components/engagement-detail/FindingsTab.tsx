@@ -2,19 +2,11 @@ import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, SlidersHori
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  canRunPlanReview,
-  isCoverageInformational,
-} from "../../lib/coverageUi";
-import {
   ApiError,
   FindingCategory,
-  useCreateEngagementSubmission,
-  useGenerateSubmissionFindings,
-  useGetSubmissionFindingsGenerationStatus,
   useListEngagementSubmissions,
   useListSubmissionFindings,
   useOverrideFinding,
-  getGetSubmissionFindingsGenerationStatusQueryKey,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
   type EngagementSubmissionSummary,
@@ -189,29 +181,6 @@ function FindingsFilterChips({
   );
 }
 
-/**
- * Map a thrown re-run error to a user-facing string. Mirrors the
- * reviewer-side helper in
- * `artifacts/plan-review/src/pages/ComplianceEngine.tsx` — we keep
- * the architect-side surface in the same idiom so the strings stay
- * close in tone even if they diverge in wording.
- */
-function describeRerunError(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 409) {
-      return "A finding-engine run is already in flight for this submission.";
-    }
-    if (err.status === 403) {
-      return "Findings require internal audience.";
-    }
-    if (err.status === 404) {
-      return "Submission not found.";
-    }
-    return err.message ?? "Failed to start plan review run.";
-  }
-  return "Failed to start plan review run.";
-}
-
 type TriageScope = "open" | "all" | "overridden";
 
 /**
@@ -341,16 +310,10 @@ const TRIAGE_TAB_OPTIONS: { id: TriageScope; label: string }[] = [
 export function FindingsTab({
   engagementId,
   initialSubmissionId,
-  engagementJurisdiction,
-  engagementCoverageStatus,
   onElementRefClick,
 }: {
   engagementId: string;
   initialSubmissionId: string | null;
-  /** Used to gate self-run plan review when jurisdiction is unknown. */
-  engagementJurisdiction?: string | null;
-  /** Informational only — does not gate self-run (web-grounding covers non-warmed jurisdictions). */
-  engagementCoverageStatus?: string;
   /**
    * Invoked when the architect clicks the CAD `elementRef` chip on a
    * finding. The page wires this to swing the tab strip over to the
@@ -479,83 +442,6 @@ export function FindingsTab({
     },
   });
   const findings = findingsData?.findings ?? [];
-
-  // PL-02 — manual plan-review trigger. Status query polls
-  // `/findings/status` at 1.5s while a run is pending, idle otherwise,
-  // matching the reviewer-side ComplianceEngine cadence. The mutation
-  // hits POST `/findings/generate`; on success we invalidate the
-  // findings list + status so the list pops in the moment the engine
-  // settles. Error copy is mapped through `describeRerunError`.
-  const statusQuery = useGetSubmissionFindingsGenerationStatus(
-    selectedSubmissionId ?? "",
-    {
-      query: {
-        enabled: !!selectedSubmissionId,
-        queryKey: selectedSubmissionId
-          ? getGetSubmissionFindingsGenerationStatusQueryKey(
-              selectedSubmissionId,
-            )
-          : (["findings-status", "none"] as const),
-        refetchInterval: (q: { state: { data?: { state?: string } } }) =>
-          q.state.data?.state === "pending" ? 1500 : false,
-      },
-    },
-  );
-  const [rerunError, setRerunError] = useState<string | null>(null);
-  const [selfRunError, setSelfRunError] = useState<string | null>(null);
-  const createSubmission = useCreateEngagementSubmission({
-    mutation: {
-      onSuccess: async (receipt) => {
-        setSelfRunError(null);
-        await queryClient.invalidateQueries({
-          queryKey: getListEngagementSubmissionsQueryKey(engagementId),
-        });
-        setSelectedSubmissionId(receipt.submissionId);
-      },
-      onError: (err) => {
-        setSelfRunError(
-          err instanceof Error
-            ? err.message
-            : "Could not start self-run plan review.",
-        );
-      },
-    },
-  });
-  const generate = useGenerateSubmissionFindings({
-    mutation: {
-      onSuccess: () => {
-        if (!selectedSubmissionId) return;
-        queryClient.invalidateQueries({
-          queryKey: getListSubmissionFindingsQueryKey(selectedSubmissionId),
-        });
-        queryClient.invalidateQueries({
-          queryKey: getGetSubmissionFindingsGenerationStatusQueryKey(
-            selectedSubmissionId,
-          ),
-        });
-        setRerunError(null);
-      },
-      onError: (err) => {
-        setRerunError(describeRerunError(err));
-      },
-    },
-  });
-  const runState = statusQuery.data?.state ?? null;
-  const isRunning = runState === "pending" || generate.isPending;
-  const handleRerun = () => {
-    if (!selectedSubmissionId || isRunning) return;
-    if (runState === "completed" || runState === "failed") {
-      const ok =
-        typeof window === "undefined"
-          ? true
-          : window.confirm(
-              "Re-run AI plan review? Prior runs are preserved.",
-            );
-      if (!ok) return;
-    }
-    setRerunError(null);
-    generate.mutate({ submissionId: selectedSubmissionId, data: {} });
-  };
 
   // Apply the active filter chips (Task #436) before handing the list
   // to FindingsList. The "X unaddressed of Y" counter above keeps
@@ -691,85 +577,26 @@ export function FindingsTab({
     );
   }
   if (sortedSubmissions.length === 0) {
-    const canSelfRun = canRunPlanReview(engagementJurisdiction);
-    const coverageInformational = isCoverageInformational(
-      engagementCoverageStatus,
-    );
-    const selfRunBusy = createSubmission.isPending;
     return (
       <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
         <TabHeader
           overline="Review"
-          title="Findings"
-          subtitle="Run a pre-submittal compliance review on this engagement without recording a jurisdiction submission."
+          title="Triage Inbox"
+          subtitle="Work findings from a completed plan review — start a run from the Run plan review tab."
         />
         <div
           className="sc-card p-6 flex flex-col gap-4"
           data-testid="findings-tab-empty-no-submissions"
         >
-          <div className="sc-prose opacity-80">
-            {canSelfRun ? (
-              coverageInformational ? (
-                <p data-testid="findings-tab-web-grounding-note">
-                  Start a one-click AI plan review on the current model and site
-                  context. This jurisdiction is not in the ingested code corpus
-                  yet — findings will be <strong>web-grounded</strong> from
-                  authoritative sources on demand. You can optionally{" "}
-                  <strong>Request coverage</strong> on the Site tab to warm the
-                  local corpus. You can still{" "}
-                  <strong>Submit to jurisdiction</strong> from the header when
-                  ready for formal submittal.
-                </p>
-              ) : (
-                <p>
-                  Start a one-click AI plan review on the current model and site
-                  context. You can still{" "}
-                  <strong>Submit to jurisdiction</strong> from the header when
-                  ready for formal submittal.
-                </p>
-              )
-            ) : (
-              <p>
-                Add a project address (so jurisdiction resolves) before running
-                a plan review. You can also{" "}
-                <strong>Submit to jurisdiction</strong> once the address is set.
-              </p>
-            )}
-          </div>
-          {selfRunError ? (
-            <p className="text-sm" style={{ color: "var(--danger-text)" }}>
-              {selfRunError}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="sc-btn-primary"
-              data-testid="findings-tab-self-run"
-              disabled={!canSelfRun || selfRunBusy}
-              onClick={() =>
-                createSubmission.mutate({
-                  id: engagementId,
-                  data: {
-                    note: "Pre-submittal self-review (architect-initiated)",
-                    discipline: "building",
-                  },
-                })
-              }
-            >
-              {selfRunBusy ? "Starting review…" : "Run plan review"}
-            </button>
-          </div>
+          <p className="sc-prose opacity-80">
+            No submissions yet. Use the <strong>Run plan review</strong> tab to
+            pick or upload a plan and start a review; findings will appear here
+            for triage.
+          </p>
         </div>
       </div>
     );
   }
-
-  const rerunCtaLabel = isRunning
-    ? "Running…"
-    : runState
-      ? "Re-run plan review"
-      : "Run plan review";
 
   const submissionLabelShort = activeSubmission
     ? `#${activeSubmission.id.slice(-4).toUpperCase()}`
@@ -1063,90 +890,6 @@ export function FindingsTab({
             />
           </div>
 
-          {/* Plan review controls */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <span
-              className="sc-label"
-              style={{ fontSize: 9, opacity: 0.6 }}
-            >
-              PLAN REVIEW
-            </span>
-            <button
-              type="button"
-              className="sc-btn-primary"
-              onClick={handleRerun}
-              disabled={isRunning || !selectedSubmissionId}
-              data-testid="findings-tab-rerun"
-              style={{ width: "100%" }}
-            >
-              {rerunCtaLabel}
-            </button>
-            {isRunning && (
-              <span
-                data-testid="findings-tab-rerun-running-pill"
-                style={{
-                  background: "var(--info-dim)",
-                  color: "var(--info-text)",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: "0.04em",
-                  textTransform: "uppercase",
-                  padding: "2px 8px",
-                  borderRadius: 999,
-                  alignSelf: "flex-start",
-                }}
-              >
-                Running
-              </span>
-            )}
-            {rerunError && (
-              <div
-                role="alert"
-                data-testid="findings-tab-rerun-error"
-                className="sc-alert sc-alert-error"
-              >
-                {rerunError}
-              </div>
-            )}
-            {runState === "failed" && !isRunning && (
-              <div
-                role="alert"
-                data-testid="findings-tab-auto-failure-badge"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  padding: "8px 10px",
-                  border:
-                    "1px solid var(--danger-border, var(--danger-text))",
-                  background: "var(--danger-dim)",
-                  borderRadius: 6,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "var(--danger-text)",
-                  }}
-                >
-                  AI plan review failed
-                </div>
-                <div
-                  data-testid="findings-tab-auto-failure-detail"
-                  style={{
-                    fontSize: 11,
-                    color: "var(--danger-text)",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {statusQuery.data?.error
-                    ? `The most recent attempt failed: ${statusQuery.data.error}`
-                    : "The most recent automatic attempt failed. Re-run to try again."}
-                </div>
-              </div>
-            )}
-          </div>
         </aside>
         </div>
       </div>

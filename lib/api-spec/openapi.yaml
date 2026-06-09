@@ -14388,6 +14388,16 @@ components:
           description: |
             When true, signals an explicit redo. Currently
             informational — the route always runs a fresh generation.
+        planSetPieceIds:
+          type: array
+          items:
+            type: string
+          description: |
+            Optional subset of plan-set piece ids to include in
+            orchestrated decomposition (Revit sheet uuid or attached-
+            document uuid). PDF page synthetic ids (`{docId}:pageN`)
+            are matched when the parent document id is listed. Omit
+            to review all plan-set pieces on the engagement.
 
     GenerateSubmissionFindingsResponse:
       type: object

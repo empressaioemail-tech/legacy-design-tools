@@ -28,10 +28,10 @@ describe("resolveTabFromSearchParams", () => {
     ).toBe("submissions");
   });
 
-  it("defaults review view to findings", () => {
+  it("defaults review view to run plan review", () => {
     expect(
       resolveTabFromSearchParams(new URLSearchParams("view=review")),
-    ).toBe("findings");
+    ).toBe("run-plan-review");
   });
 
   it("defaults bare URL to site (Map tab)", () => {
@@ -49,8 +49,12 @@ describe("writeViewStateToUrl", () => {
     return window.location.search;
   }
 
-  it("writes view=review for findings (default review segment omitted)", () => {
-    expect(searchAfter("findings")).toBe("?view=review");
+  it("writes view=review for run plan review (default review segment omitted)", () => {
+    expect(searchAfter("run-plan-review")).toBe("?view=review");
+  });
+
+  it("writes view=review&segment=findings for triage inbox", () => {
+    expect(searchAfter("findings")).toBe("?view=review&segment=findings");
   });
 
   it("writes view=review&segment=submissions for submissions", () => {

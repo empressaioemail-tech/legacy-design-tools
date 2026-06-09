@@ -52,7 +52,6 @@ import {
   createMutationCapture,
   makeCapturingMutationHook,
   makeEngagementPageMockHooks,
-  MockApiError,
 } from "@workspace/portal-ui/test-utils";
 
 // ── Hoisted fixture state ───────────────────────────────────────────────
@@ -119,6 +118,16 @@ const hoisted = vi.hoisted(() => {
     // `useGetSubmissionFindingsGenerationStatus` hook. Tests flip this
     // to drive the re-run button's idle / pending / completed / failed
     // branches.
+    attachedDocuments: [] as Array<{
+      entityId: string;
+      title: string;
+      documentType: string;
+    }>,
+    snapshotSheets: [] as Array<{
+      id: string;
+      sheetNumber: string;
+      sheetName: string;
+    }>,
     findingsStatus: null as null | {
       generationId: string | null;
       state: "idle" | "pending" | "completed" | "failed";
@@ -128,6 +137,32 @@ const hoisted = vi.hoisted(() => {
       invalidCitationCount: number | null;
       invalidCitations: string[] | null;
       discardedFindingCount: number | null;
+    },
+    engagementStore: {
+      selectedSnapshotIdByEngagement: {} as Record<string, string | null>,
+      messagesByEngagement: {} as Record<string, unknown[]>,
+      attachedSheetsByEngagement: {} as Record<string, unknown[]>,
+      attachedDocumentsByEngagement: {} as Record<string, unknown[]>,
+      uploadingDocumentByEngagement: {} as Record<string, boolean>,
+      documentUploadErrorByEngagement: {} as Record<string, string | null>,
+      pendingChatInputByEngagement: {} as Record<string, string>,
+      focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
+      agentActionsByEngagement: {} as Record<string, unknown[]>,
+      specDraftByEngagement: {} as Record<string, null>,
+      streaming: false,
+      selectSnapshot: vi.fn(),
+      attachSheet: vi.fn(),
+      detachSheet: vi.fn(),
+      clearAttachedSheets: vi.fn(),
+      loadAttachedDocuments: vi.fn(),
+      uploadAttachedDocument: vi.fn().mockResolvedValue(undefined),
+      setPendingChatInput: vi.fn(),
+      consumePendingChatInput: vi.fn(() => null),
+      toggleFocusSnapshot: vi.fn(),
+      clearFocusSnapshots: vi.fn(),
+      consumeSpecDraft: vi.fn(() => null),
+      reverseAgentAction: vi.fn().mockResolvedValue(true),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
     },
   };
 });
@@ -182,6 +217,12 @@ vi.mock("@workspace/site-context/client", async () => {
   const { siteContextClientMockExports } = await import("./siteContextClientMock");
   return siteContextClientMockExports();
 });
+
+vi.mock("../../store/engagements", () => ({
+  useEngagementsStore: (
+    selector: (s: typeof hoisted.engagementStore) => unknown,
+  ) => selector(hoisted.engagementStore),
+}));
 
 // Mock the generated React Query hooks the page (and the dialog it
 // renders) consume.
@@ -269,6 +310,37 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       submissionId: string,
     ) =>
       [`/api/submissions/${submissionId}/findings/status`] as const,
+    useListAttachedDocuments: (
+      _engagementId: string,
+      _params?: unknown,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["listAttachedDocuments", _engagementId] as const),
+        queryFn: async () => ({
+          attachedDocuments: hoisted.attachedDocuments,
+        }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
+    getListAttachedDocumentsQueryKey: (engagementId: string) =>
+      ["listAttachedDocuments", engagementId] as const,
+    useGetSnapshotSheets: (
+      snapshotId: string,
+      opts?: {
+        query?: { enabled?: boolean; queryKey?: readonly unknown[] };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["getSnapshotSheets", snapshotId] as const),
+        queryFn: async () => hoisted.snapshotSheets,
+        enabled: opts?.query?.enabled ?? !!snapshotId,
+      }),
+    getGetSnapshotSheetsQueryKey: (snapshotId: string) =>
+      ["getSnapshotSheets", snapshotId] as const,
     // Filter chips (Task #436) consume the generated enums for the
     // URL allow-list and chip labels — re-export the literal shape
     // here so the page module's `Object.keys(FindingCategory)` /
@@ -419,6 +491,17 @@ function renderPage(opts?: { seed?: (client: QueryClient) => void }) {
     ["listEngagementRenders", hoisted.engagement.id],
     { items: [] },
   );
+  client.setQueryData(
+    ["listAttachedDocuments", hoisted.engagement.id],
+    { attachedDocuments: hoisted.attachedDocuments.map((d) => ({ ...d })) },
+  );
+  const defaultSnapshotId = hoisted.engagement.snapshots?.[0]?.id;
+  if (defaultSnapshotId) {
+    client.setQueryData(
+      ["getSnapshotSheets", defaultSnapshotId],
+      hoisted.snapshotSheets.map((s) => ({ ...s })),
+    );
+  }
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />
@@ -447,6 +530,8 @@ beforeEach(() => {
   };
   hoisted.submissions = [];
   hoisted.briefing = null;
+  hoisted.attachedDocuments = [];
+  hoisted.snapshotSheets = [];
   hoisted.findingsStatus = null;
   submit.reset();
   overrideFinding.reset();
@@ -539,6 +624,10 @@ function gotoReviewView() {
 function gotoSubmissionsTab() {
   gotoReviewView();
   fireEvent.click(screen.getByTestId("engagement-tab-submissions"));
+}
+
+function gotoRunPlanReviewTab() {
+  gotoReviewView();
 }
 
 function gotoFindingsTab() {
@@ -819,6 +908,7 @@ describe("EngagementDetail submission banner (Task #126)", () => {
 
     fireEvent.click(screen.getByTestId("engagement-view-review"));
     const reviewSegs = [
+      "engagement-tab-run-plan-review",
       "engagement-tab-findings",
       "engagement-tab-submissions",
       "engagement-tab-response-tasks",
@@ -1408,186 +1498,118 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
   });
 });
 
-describe("EngagementDetail Findings tab — manual plan-review trigger (PL-02)", () => {
-  it("shows self-run plan review in the no-submissions empty state", () => {
+describe("EngagementDetail Review — run vs triage split (PL-02)", () => {
+  it("opens the Run plan review tab by default in the Review view", () => {
+    renderPage();
+    gotoRunPlanReviewTab();
+    expect(screen.getByTestId("run-plan-review-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("engagement-tab-run-plan-review")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+  });
+
+  it("Triage Inbox empty state points to Run plan review tab", () => {
     renderPage();
     gotoFindingsTab();
     const empty = screen.getByTestId("findings-tab-empty-no-submissions");
-    expect(empty).toBeInTheDocument();
-    expect(empty.textContent ?? "").toMatch(/Submit to jurisdiction/);
-    expect(screen.getByTestId("findings-tab-self-run")).toBeInTheDocument();
+    expect(empty.textContent ?? "").toMatch(/Run plan review/);
+    expect(screen.queryByTestId("findings-tab-self-run")).not.toBeInTheDocument();
     expect(screen.queryByTestId("findings-tab-rerun")).not.toBeInTheDocument();
   });
 
-  it("enables self-run with web-grounding note when jurisdiction resolves but corpus is not warmed", () => {
+  it("lists attached PDFs and snapshot sheets in the plan pick list", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      snapshots: [
+        {
+          id: "snap-1",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          sheetCount: 1,
+        },
+      ] as typeof hoisted.engagement.snapshots,
+    };
+    hoisted.attachedDocuments = [
+      {
+        entityId: "doc-plan-1",
+        title: "404 Remodel permit set.pdf",
+        documentType: "specification",
+      },
+    ];
+    hoisted.snapshotSheets = [
+      { id: "sheet-a1", sheetNumber: "A1.0", sheetName: "Floor Plan" },
+    ];
+    renderPage();
+    gotoRunPlanReviewTab();
+    expect(screen.getByTestId("run-plan-review-plan-list")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("run-plan-review-plan-doc-plan-1"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("run-plan-review-plan-sheet-a1"),
+    ).toBeInTheDocument();
+  });
+
+  it("enables run with web-grounding note when jurisdiction resolves but corpus is not warmed", () => {
     hoisted.engagement = {
       ...hoisted.engagement,
       name: "404 Remodel_B",
       jurisdiction: "Miami Beach, FL",
       coverageStatus: "warming",
     } as typeof hoisted.engagement & { coverageStatus: string };
+    hoisted.attachedDocuments = [
+      {
+        entityId: "doc-miami",
+        title: "Miami Beach plan.pdf",
+        documentType: "specification",
+      },
+    ];
     renderPage();
-    gotoFindingsTab();
+    gotoRunPlanReviewTab();
     expect(
-      screen.getByTestId("findings-tab-web-grounding-note"),
+      screen.getByTestId("run-plan-review-web-grounding-note"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("findings-tab-web-grounding-note").textContent).toMatch(
-      /web-grounded/i,
-    );
-    expect(screen.getByTestId("findings-tab-web-grounding-note").textContent).toMatch(
-      /Request coverage/i,
-    );
-    const btn = screen.getByTestId("findings-tab-self-run");
+    const btn = screen.getByTestId("run-plan-review-start");
     expect(btn).not.toBeDisabled();
     expect(btn.textContent).toBe("Run plan review");
-    expect(screen.queryByText(/Add a project address/i)).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(/wait for warmup to finish/i),
-    ).not.toBeInTheDocument();
   });
 
-  it("renders the 'Run plan review' button with no status (idle) and fires generate.mutate with the selected submissionId", () => {
-    renderPage({ seed: seedSubmissionsWithFindings([]) });
-    gotoFindingsTab();
-    const btn = screen.getByTestId("findings-tab-rerun");
-    expect(btn).toBeInTheDocument();
-    // Idle path: server has never run for this submission, so the
-    // status payload is absent and the CTA reads as the first run.
-    expect(btn.textContent).toBe("Run plan review");
-    expect(btn).not.toBeDisabled();
-    expect(
-      screen.queryByTestId("findings-tab-rerun-running-pill"),
-    ).not.toBeInTheDocument();
-    fireEvent.click(btn);
+  it("creates a submission and kicks off generate with selected planSetPieceIds", async () => {
+    hoisted.attachedDocuments = [
+      {
+        entityId: "doc-plan-1",
+        title: "404 Remodel permit set.pdf",
+        documentType: "specification",
+      },
+    ];
+    renderPage();
+    gotoRunPlanReviewTab();
+    fireEvent.click(screen.getByTestId("run-plan-review-start"));
+    expect(submit.mutate).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      submit.capturedOptions!.mutation!.onSuccess!(
+        { submissionId: "sub-new", submittedAt: "2026-06-08T00:00:00Z" },
+        {
+          id: hoisted.engagement.id,
+          data: {
+            note: "Pre-submittal self-review (architect-initiated)",
+            discipline: "building",
+          },
+        },
+        undefined,
+      );
+    });
     expect(generateFindings.mutate).toHaveBeenCalledTimes(1);
     expect(generateFindings.mutate.mock.calls[0][0]).toEqual({
-      submissionId: "sub-latest",
-      data: {},
+      submissionId: "sub-new",
+      data: { planSetPieceIds: ["doc-plan-1"] },
     });
   });
 
-  it("re-run button shows 'Re-run plan review' when status is completed and pops a confirm before firing", () => {
-    hoisted.findingsStatus = {
-      generationId: "run-1",
-      state: "completed",
-      startedAt: "2026-05-01T00:00:00Z",
-      completedAt: "2026-05-01T00:00:30Z",
-      error: null,
-      invalidCitationCount: 0,
-      invalidCitations: [],
-      discardedFindingCount: 0,
-    };
+  it("does not expose run controls on the Triage Inbox when submissions exist", () => {
     renderPage({ seed: seedSubmissionsWithFindings([]) });
     gotoFindingsTab();
-    const btn = screen.getByTestId("findings-tab-rerun");
-    expect(btn.textContent).toBe("Re-run plan review");
-    // Decline the confirm: the mutation must not fire.
-    const confirmSpy = vi
-      .spyOn(window, "confirm")
-      .mockImplementation(() => false);
-    try {
-      fireEvent.click(btn);
-      expect(confirmSpy).toHaveBeenCalledTimes(1);
-      expect(generateFindings.mutate).not.toHaveBeenCalled();
-      // Accept the confirm: the mutation does fire.
-      confirmSpy.mockImplementation(() => true);
-      fireEvent.click(btn);
-      expect(generateFindings.mutate).toHaveBeenCalledTimes(1);
-    } finally {
-      confirmSpy.mockRestore();
-    }
-  });
-
-  it("shows the Running pill, 'Running…' label, and disables the button when status is pending", () => {
-    hoisted.findingsStatus = {
-      generationId: "run-1",
-      state: "pending",
-      startedAt: "2026-05-01T00:00:00Z",
-      completedAt: null,
-      error: null,
-      invalidCitationCount: null,
-      invalidCitations: null,
-      discardedFindingCount: null,
-    };
-    renderPage({ seed: seedSubmissionsWithFindings([]) });
-    gotoFindingsTab();
-    expect(
-      screen.getByTestId("findings-tab-rerun-running-pill"),
-    ).toBeInTheDocument();
-    const btn = screen.getByTestId("findings-tab-rerun");
-    expect(btn.textContent).toBe("Running…");
-    expect(btn).toBeDisabled();
-  });
-
-  it("renders the auto-failure badge with the server error when status is failed", () => {
-    hoisted.findingsStatus = {
-      generationId: "run-1",
-      state: "failed",
-      startedAt: "2026-05-01T00:00:00Z",
-      completedAt: "2026-05-01T00:00:10Z",
-      error: "engine timeout",
-      invalidCitationCount: null,
-      invalidCitations: null,
-      discardedFindingCount: null,
-    };
-    renderPage({ seed: seedSubmissionsWithFindings([]) });
-    gotoFindingsTab();
-    const badge = screen.getByTestId("findings-tab-auto-failure-badge");
-    expect(badge).toBeInTheDocument();
-    expect(
-      within(badge).getByTestId("findings-tab-auto-failure-detail")
-        .textContent ?? "",
-    ).toMatch(/engine timeout/);
-    // Failed counts as a runState, so the CTA flips to "Re-run".
-    expect(screen.getByTestId("findings-tab-rerun").textContent).toBe(
-      "Re-run plan review",
-    );
-  });
-
-  it("surfaces the 409 single-flight error via describeRerunError when the kickoff returns 409", async () => {
-    renderPage({ seed: seedSubmissionsWithFindings([]) });
-    gotoFindingsTab();
-    fireEvent.click(screen.getByTestId("findings-tab-rerun"));
-    expect(generateFindings.capturedOptions?.mutation?.onError).toBeDefined();
-    await act(async () => {
-      generateFindings.capturedOptions!.mutation!.onError!(
-        new MockApiError(409, {
-          error: "finding_generation_already_in_flight",
-        }),
-        { submissionId: "sub-latest", data: {} },
-        undefined,
-      );
-    });
-    const alert = screen.getByTestId("findings-tab-rerun-error");
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(
-      /already in flight for this submission/,
-    );
-  });
-
-  it("clears the rerun error on the next successful kickoff", async () => {
-    renderPage({ seed: seedSubmissionsWithFindings([]) });
-    gotoFindingsTab();
-    fireEvent.click(screen.getByTestId("findings-tab-rerun"));
-    await act(async () => {
-      generateFindings.capturedOptions!.mutation!.onError!(
-        new MockApiError(403, { error: "findings_require_internal_audience" }),
-        { submissionId: "sub-latest", data: {} },
-        undefined,
-      );
-    });
-    expect(
-      screen.getByTestId("findings-tab-rerun-error").textContent,
-    ).toMatch(/internal audience/);
-    await act(async () => {
-      generateFindings.capturedOptions!.mutation!.onSuccess!(
-        { generationId: "run-2", state: "pending" },
-        { submissionId: "sub-latest", data: {} },
-        undefined,
-      );
-    });
-    expect(
-      screen.queryByTestId("findings-tab-rerun-error"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("findings-tab-rerun")).not.toBeInTheDocument();
+    expect(screen.getByTestId("findings-tab-body")).toBeInTheDocument();
   });
 });

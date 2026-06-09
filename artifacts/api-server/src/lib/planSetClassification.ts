@@ -88,6 +88,22 @@ export async function gatherPlanSetPieceCandidates(
   return candidates;
 }
 
+/** Keep candidates whose pieceId (or PDF page expansion) matches the selection. */
+export function filterPlanSetPieceCandidates(
+  candidates: PlanSetPieceCandidate[],
+  selectedPieceIds?: ReadonlyArray<string> | null,
+): PlanSetPieceCandidate[] {
+  if (!selectedPieceIds?.length) return candidates;
+  const selected = new Set(selectedPieceIds);
+  return candidates.filter((c) => {
+    if (selected.has(c.pieceId)) return true;
+    for (const id of selectedPieceIds) {
+      if (c.pieceId.startsWith(`${id}:page`)) return true;
+    }
+    return false;
+  });
+}
+
 /** Classify and persist all plan-set pieces for a submission. */
 export async function classifyAndPersistPlanSetPieces(
   submissionId: string,

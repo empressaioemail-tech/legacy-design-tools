@@ -92,7 +92,10 @@ import {
 } from "@workspace/finding-engine";
 import { FINDING_ENGINE_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
-import { classifyAndPersistPlanSetPieces } from "../lib/planSetClassification";
+import {
+  classifyAndPersistPlanSetPieces,
+  filterPlanSetPieceCandidates,
+} from "../lib/planSetClassification";
 import {
   expandCandidatesWithPdfPages,
   gatherPlanSetVisionImages,
@@ -848,8 +851,9 @@ async function runFindingGeneration(args: {
   submissionId: string;
   generationId: string;
   reqLog: typeof logger;
+  planSetPieceIds?: string[];
 }): Promise<void> {
-  const { submissionId, generationId, reqLog } = args;
+  const { submissionId, generationId, reqLog, planSetPieceIds } = args;
   try {
     const inputs = await resolveEngineInputs(submissionId, reqLog);
     const llmClient = await getFindingLlmClient();
@@ -914,6 +918,20 @@ async function runFindingGeneration(args: {
         submissionId,
         reqLog,
       );
+      if (planSetPieceIds?.length) {
+        pieceCandidates = filterPlanSetPieceCandidates(
+          pieceCandidates,
+          planSetPieceIds,
+        );
+        reqLog.info(
+          {
+            submissionId,
+            selectedPieceCount: planSetPieceIds.length,
+            filteredPieceCount: pieceCandidates.length,
+          },
+          "finding generation: plan-set filtered to operator selection",
+        );
+      }
 
       const subEngRows = await db
         .select({ engagementId: submissions.engagementId })
@@ -927,11 +945,25 @@ async function runFindingGeneration(args: {
           reqLog.info(meta ?? {}, msg),
         );
         if (imageMap.allImages.length > 0) {
-          attachedSheetImages = imageMap.allImages;
+          attachedSheetImages = planSetPieceIds?.length
+            ? imageMap.allImages.filter(
+                (img) =>
+                  planSetPieceIds.includes(img.pieceId) ||
+                  planSetPieceIds.some((id) =>
+                    img.pieceId.startsWith(`${id}:page`),
+                  ),
+              )
+            : imageMap.allImages;
           pieceCandidates = expandCandidatesWithPdfPages(
             pieceCandidates,
             imageMap,
           );
+          if (planSetPieceIds?.length) {
+            pieceCandidates = filterPlanSetPieceCandidates(
+              pieceCandidates,
+              planSetPieceIds,
+            );
+          }
           reqLog.info(
             {
               submissionId,
@@ -1085,6 +1117,7 @@ export type FindingKickoffOutcome =
 export async function kickoffFindingGenerationForSubmission(
   submissionId: string,
   reqLog: typeof logger,
+  opts: { planSetPieceIds?: string[] } = {},
 ): Promise<FindingKickoffOutcome> {
   let kickoffRow: FindingRun;
   try {
@@ -1117,6 +1150,7 @@ export async function kickoffFindingGenerationForSubmission(
     submissionId,
     generationId,
     reqLog,
+    planSetPieceIds: opts.planSetPieceIds,
   });
 
   reqLog.info(
@@ -1154,6 +1188,9 @@ router.post(
       const outcome = await kickoffFindingGenerationForSubmission(
         submissionId,
         reqLog,
+        {
+          planSetPieceIds: bodyParse.data.planSetPieceIds,
+        },
       );
       if (outcome.kind === "already_running") {
         // Another kickoff won the single-flight race. Surface its
