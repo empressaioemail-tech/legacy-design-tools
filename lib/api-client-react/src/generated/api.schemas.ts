@@ -4579,6 +4579,13 @@ export interface GenerateSubmissionFindingsBody {
 informational — the route always runs a fresh generation.
  */
   regenerate?: boolean;
+  /** Optional subset of plan-set piece ids to include in
+orchestrated decomposition (Revit sheet uuid or attached-
+document uuid). PDF page synthetic ids (`{docId}:pageN`)
+are matched when the parent document id is listed. Omit
+to review all plan-set pieces on the engagement.
+ */
+  planSetPieceIds?: string[];
 }
 
 /**

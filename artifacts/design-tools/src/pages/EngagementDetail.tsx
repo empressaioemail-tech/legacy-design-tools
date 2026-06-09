@@ -73,6 +73,7 @@ import { ClientMaterialsTab } from "../components/engagement-detail/ClientMateri
 import { PackagesTab } from "../components/engagement-detail/packages/PackagesTab";
 import { packageTemplateForTab } from "../components/engagement-detail/engagementViews";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
+import { RunPlanReviewTab } from "../components/engagement-detail/RunPlanReviewTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
 import { DeliverableLettersTab } from "../components/engagement-detail/DeliverableLettersTab";
 import { DetailCalloutSpecsTab } from "../components/engagement-detail/DetailCalloutSpecsTab";
@@ -746,13 +747,21 @@ export function EngagementDetail() {
           />
         </TabPanel>
 
-        <TabPanel id="findings" active={tab} className="flex flex-col flex-1 min-h-0">
-          <FindingsTab
+        <TabPanel id="run-plan-review" active={tab}>
+          <RunPlanReviewTab
             engagementId={engagement.id}
             engagementJurisdiction={engagement.jurisdiction}
             engagementCoverageStatus={
               (engagement as { coverageStatus?: string }).coverageStatus
             }
+            latestSnapshotId={defaultSelected}
+            onNavigateToTriage={() => setTab("findings")}
+          />
+        </TabPanel>
+
+        <TabPanel id="findings" active={tab} className="flex flex-col flex-1 min-h-0">
+          <FindingsTab
+            engagementId={engagement.id}
             initialSubmissionId={latestSubmissionId}
             onElementRefClick={handleElementRefClick}
           />

@@ -10,6 +10,7 @@ export type TabId =
   | "site-context"
   | "property-intel"
   | "submissions"
+  | "run-plan-review"
   | "findings"
   | "response-tasks"
   | "deliverable-letters"
@@ -57,6 +58,7 @@ export const TAB_TO_VIEW: Record<TabId, EngagementViewId> = {
   "site-context": "site",
   "property-intel": "site",
   submissions: "review",
+  "run-plan-review": "review",
   findings: "review",
   "response-tasks": "review",
   "deliverable-letters": "review",
@@ -73,7 +75,7 @@ export const TAB_TO_VIEW: Record<TabId, EngagementViewId> = {
 export const VIEW_DEFAULT_TAB: Record<EngagementViewId, TabId> = {
   model: "snapshots",
   site: "site",
-  review: "findings",
+  review: "run-plan-review",
   deliver: "product-specs",
   studio: "renders",
   settings: "settings",
@@ -98,7 +100,16 @@ export const VIEW_SEGMENTS: Record<EngagementViewId, ViewSegment[]> = {
     },
   ],
   review: [
-    { tab: "findings", label: "Findings", testId: "engagement-tab-findings" },
+    {
+      tab: "run-plan-review",
+      label: "Run plan review",
+      testId: "engagement-tab-run-plan-review",
+    },
+    {
+      tab: "findings",
+      label: "Triage Inbox",
+      testId: "engagement-tab-findings",
+    },
     {
       tab: "submissions",
       label: "Submissions",

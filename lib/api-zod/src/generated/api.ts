@@ -6051,6 +6051,12 @@ export const GenerateSubmissionFindingsBody = zod
       .describe(
         "When true, signals an explicit redo. Currently\ninformational — the route always runs a fresh generation.\n",
       ),
+    planSetPieceIds: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Optional subset of plan-set piece ids to include in\norchestrated decomposition (Revit sheet uuid or attached-\ndocument uuid). PDF page synthetic ids (`{docId}:pageN`)\nare matched when the parent document id is listed. Omit\nto review all plan-set pieces on the engagement.\n",
+      ),
   })
   .describe(
     "Optional body for `POST \/submissions\/{id}\/findings\/generate`.\nForward-looking — the V1-1 baseline ignores fields and always\nruns a fresh full generation. Documented here so callers can\nadopt the wire shape before regenerate semantics land.\n",
