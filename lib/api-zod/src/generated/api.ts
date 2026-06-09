@@ -726,6 +726,12 @@ export const CreateEngagementSubmissionBody = zod
       .describe(
         'PLR-10 — optional discipline tag (`building` \/ `fire` \/\n`zoning` \/ `civil`). When supplied, gets persisted on the\nsubmission row and drives the FindingsTab \"Add from\nlibrary\" picker default for reviewers. Omit to leave the\nfield null (the picker falls back to \"All\").\n',
       ),
+    deferAutoFindings: zod
+      .boolean()
+      .optional()
+      .describe(
+        "When true, skip the fire-and-forget auto plan-review kickoff\non create. The architect self-run flow sets this and calls\n`POST ...\/findings\/generate` explicitly (with\n`planSetPieceIds`). Omit or false for formal Submit to\njurisdiction and other paths that rely on auto-trigger.\n",
+      ),
   })
   .describe(
     "Request body for `POST \/engagements\/{id}\/submissions`. The\nsubmission flow is currently a forward-ref child in the\nengagement atom's composition (no dedicated submissions table\nyet), so the body is intentionally narrow: an optional free-text\n`note` that lands in the `engagement.submitted` event payload.\nWhen the catalog atom and table land this schema can grow\nadditional fields (package label, attached document refs, etc.)\nwithout breaking existing callers.\n",

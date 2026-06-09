@@ -191,6 +191,14 @@ describe("RunPlanReviewTab", () => {
     renderTab();
     fireEvent.click(screen.getByTestId("run-plan-review-start"));
     expect(createSubmission.mutate).toHaveBeenCalledTimes(1);
+    expect(createSubmission.mutate.mock.calls[0][0]).toMatchObject({
+      id: "eng-1",
+      data: {
+        note: "Pre-submittal self-review (architect-initiated)",
+        discipline: "building",
+        deferAutoFindings: true,
+      },
+    });
     await act(async () => {
       createSubmission.capturedOptions!.mutation!.onSuccess!(
         { submissionId: "sub-new", submittedAt: "2026-06-08T00:00:00Z" },
@@ -199,6 +207,7 @@ describe("RunPlanReviewTab", () => {
           data: {
             note: "Pre-submittal self-review (architect-initiated)",
             discipline: "building",
+            deferAutoFindings: true,
           },
         },
         undefined,
@@ -209,5 +218,53 @@ describe("RunPlanReviewTab", () => {
       submissionId: "sub-new",
       data: { planSetPieceIds: ["doc-plan-1"] },
     });
+  });
+
+  it("treats 409 finding_generation_already_in_flight as in-progress, not an error", async () => {
+    const { ApiError } = await import("@workspace/api-client-react");
+    hoisted.attachedDocuments = [
+      {
+        entityId: "doc-plan-1",
+        title: "404 Remodel permit set.pdf",
+        documentType: "specification",
+      },
+    ];
+    const onNavigateToTriage = vi.fn();
+    renderTab({ onNavigateToTriage });
+    fireEvent.click(screen.getByTestId("run-plan-review-start"));
+    await act(async () => {
+      createSubmission.capturedOptions!.mutation!.onSuccess!(
+        { submissionId: "sub-new", submittedAt: "2026-06-08T00:00:00Z" },
+        {
+          id: "eng-1",
+          data: {
+            note: "Pre-submittal self-review (architect-initiated)",
+            discipline: "building",
+            deferAutoFindings: true,
+          },
+        },
+        undefined,
+      );
+    });
+    const conflict = new ApiError(
+      new Response(
+        JSON.stringify({
+          error: "finding_generation_already_in_flight",
+          generationId: "gen-existing",
+        }),
+        { status: 409 },
+      ),
+      { error: "finding_generation_already_in_flight", generationId: "gen-existing" },
+      { method: "POST", url: "/api/submissions/sub-new/findings/generate" },
+    );
+    await act(async () => {
+      generateFindings.capturedOptions!.mutation!.onError!(
+        conflict,
+        { submissionId: "sub-new", data: { planSetPieceIds: ["doc-plan-1"] } },
+        undefined,
+      );
+    });
+    expect(onNavigateToTriage).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/finding_generation_already_in_flight/i)).not.toBeInTheDocument();
   });
 });
