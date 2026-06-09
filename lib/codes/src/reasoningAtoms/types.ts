@@ -33,11 +33,13 @@ export interface ReasoningAtomRecord {
   editionSlug: string;
   sources: ReasoningSourceLink[];
   reasoning: string | null;
-  confidence: number;
+  assertedConfidence: number;
   verificationState: ReasoningVerificationState;
   snippet: string | null;
   displayMode: ReasoningDisplayMode;
   calibratedConfidence: number | null;
+  sourceSetVersion: number;
+  calibrationStale: boolean;
   accessPolicy: string;
   createdAt: Date;
   updatedAt: Date;

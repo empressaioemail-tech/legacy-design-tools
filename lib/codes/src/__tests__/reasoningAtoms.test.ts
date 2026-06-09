@@ -271,6 +271,12 @@ describe("schema boundary — no full-section verbatim column", () => {
     expect(sql).not.toMatch(/\bfull_text\b/i);
     expect(sql).not.toMatch(/\bsection_text\b/i);
     expect(sql).not.toMatch(/\bbody\b.*text/i);
+
+    const split = readFileSync(
+      join(repoRoot, "lib/db/drizzle/0036_reasoning_atoms_asserted_confidence.sql"),
+      "utf-8",
+    );
+    expect(split).toContain("asserted_confidence");
   });
 
   it("reasoning_atoms drizzle schema has no verbatim catalog field", () => {

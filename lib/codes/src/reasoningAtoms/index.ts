@@ -11,9 +11,11 @@ export {
 
 export { reasoningAtomId } from "./ids";
 export { capReasoningSnippet, reasoningSummaryFromFetch } from "./snippet";
-export { mergeReasoningSources } from "./sources";
+export { mergeReasoningSources, sourceSetChanged } from "./sources";
 export {
   upsertReasoningAtomFromWebFetch,
+  upsertReasoningAtomCorpusOverlay,
+  upsertReasoningAtomDeeplinkOnly,
   retrieveReasoningAtomsForRefs,
   webResultToSourceLink,
   verificationStateFromResult,

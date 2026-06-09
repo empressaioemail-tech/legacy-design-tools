@@ -12,3 +12,14 @@ export function mergeReasoningSources(
   }
   return [...existing, incoming];
 }
+
+/** True when the persisted source URL set changed (edition-scoped calibration stamp). */
+export function sourceSetChanged(
+  before: ReadonlyArray<ReasoningSourceLink>,
+  after: ReadonlyArray<ReasoningSourceLink>,
+): boolean {
+  const urlsBefore = [...before.map((s) => s.url)].sort();
+  const urlsAfter = [...after.map((s) => s.url)].sort();
+  if (urlsBefore.length !== urlsAfter.length) return true;
+  return urlsBefore.some((u, i) => u !== urlsAfter[i]);
+}

@@ -22,7 +22,7 @@ export function reasoningAtomToCodeSection(
       retrievedAt: primary?.retrievedAt ?? atom.updatedAt.toISOString(),
       edition: atom.edition,
       verified,
-      confidence: atom.confidence,
+      confidence: atom.assertedConfidence,
       sourceName: primary?.sourceName ?? "reasoning-atom",
       verificationState: atom.verificationState,
       displayMode: atom.displayMode,
