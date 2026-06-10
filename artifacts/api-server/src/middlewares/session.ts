@@ -230,14 +230,18 @@ function resolveVerifiedSession(req: Request): SessionUser | null {
   const cookies = (req as Request & { cookies?: Record<string, unknown> })
     .cookies;
   const cookieRaw = cookies?.[SESSION_COOKIE];
-  if (typeof cookieRaw === "string" && cookieRaw.includes(".")) {
-    const verified = verifySessionToken(cookieRaw);
-    if (verified.ok) return verified.session;
-  }
-  const bearer = bearerTokenFromRequest(req);
-  if (bearer?.includes(".")) {
-    const verified = verifySessionToken(bearer);
-    if (verified.ok) return verified.session;
+  try {
+    if (typeof cookieRaw === "string" && cookieRaw.includes(".")) {
+      const verified = verifySessionToken(cookieRaw);
+      if (verified.ok) return verified.session;
+    }
+    const bearer = bearerTokenFromRequest(req);
+    if (bearer?.includes(".")) {
+      const verified = verifySessionToken(bearer);
+      if (verified.ok) return verified.session;
+    }
+  } catch (err) {
+    logger.warn({ err }, "session token verification failed");
   }
   return null;
 }

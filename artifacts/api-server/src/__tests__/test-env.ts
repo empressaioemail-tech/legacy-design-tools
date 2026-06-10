@@ -42,3 +42,10 @@ process.env.CODE_ATOM_QUEUE_TICK_MS = "999999999";
 // this, dev mode would generate a random per-process value that the test
 // has no way to read.
 process.env.SNAPSHOT_SECRET = "test-snapshot-secret";
+
+// Task #29 — signed session tokens (Bearer + pr_session cookie). Route
+// integration tests mint/verify HMAC tokens; pin a stable secret here so
+// CI and local runs agree without per-file env setup.
+if (!process.env.SESSION_SECRET?.trim()) {
+  process.env.SESSION_SECRET = "test-session-secret";
+}
