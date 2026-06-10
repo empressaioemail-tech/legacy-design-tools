@@ -28,6 +28,7 @@ vi.mock("../../store/engagements", () => ({
     pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
     focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
     agentActionsByEngagement: {} as Record<string, unknown[]>,
+    artifactNavByEngagement: {} as Record<string, null>,
     // QA-18 — ClaudeChat reads three engagement-scoped document slices and
     // the loader/uploader. The real store inits all three records to {},
     // and `loadAttachedDocuments` fires from a mount effect, so the mock
@@ -45,6 +46,7 @@ vi.mock("../../store/engagements", () => ({
     toggleFocusSnapshot: vi.fn(),
     clearFocusSnapshots: vi.fn(),
     reverseAgentAction: vi.fn(),
+    applyArtifactNav: vi.fn(),
     consumePendingChatInput: () => null,
   }),
 }));

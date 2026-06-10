@@ -24,6 +24,10 @@ const stores = vi.hoisted(() => ({
   pendingChatInputByEngagement: {} as Record<string, string>,
   focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
   agentActionsByEngagement: {} as Record<string, unknown[]>,
+  artifactNavByEngagement: {} as Record<
+    string,
+    { tab: string; entityType: string; entityId: string; label: string } | null
+  >,
   streaming: false,
   rightCollapsed: false,
 }));
@@ -41,6 +45,7 @@ vi.mock("../../store/engagements", () => ({
       pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
       focusSnapshotIdsByEngagement: stores.focusSnapshotIdsByEngagement,
       agentActionsByEngagement: stores.agentActionsByEngagement,
+      artifactNavByEngagement: stores.artifactNavByEngagement,
       streaming: stores.streaming,
       sendMessage,
       detachSheet: vi.fn(),
@@ -50,6 +55,7 @@ vi.mock("../../store/engagements", () => ({
       toggleFocusSnapshot,
       clearFocusSnapshots,
       reverseAgentAction: vi.fn(),
+      applyArtifactNav: vi.fn(),
       consumePendingChatInput: () => null,
     }),
 }));
