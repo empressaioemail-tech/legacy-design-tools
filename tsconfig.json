@@ -46,6 +46,9 @@
       "path": "./lib/finding-engine"
     },
     {
+      "path": "./lib/engine-core"
+    },
+    {
       "path": "./lib/codewarm"
     },
     {

@@ -25,6 +25,7 @@
     "@workspace/coverage": "workspace:*",
     "@workspace/comment-letter": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/engine-core": "workspace:*",
     "@workspace/finding-engine": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
     "@workspace/integrations-xai-grok": "workspace:*",
