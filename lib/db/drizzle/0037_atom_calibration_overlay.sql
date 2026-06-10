@@ -30,5 +30,4 @@ CREATE INDEX IF NOT EXISTS "atom_calibration_overlay_tenant_idx"
   ON "atom_calibration_overlay" ("jurisdiction_tenant");
 
 CREATE INDEX IF NOT EXISTS "atom_calibration_overlay_class_idx"
-  ON "atom_calibration_overlay" ("jurisdiction_tenant", "atom_class")
-  WHERE "atom_class" IS NOT NULL;
+  ON "atom_calibration_overlay" ("jurisdiction_tenant", "atom_class");
