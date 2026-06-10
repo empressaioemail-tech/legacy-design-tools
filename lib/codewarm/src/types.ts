@@ -12,6 +12,7 @@ export type CodewarmGroundingFlag = (typeof CODEWARM_GROUNDING_FLAGS)[number];
 
 export interface CodewarmManifestSection {
   code?: string;
+  edition?: string;
   section: string;
   title: string;
   discipline?: string;

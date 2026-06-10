@@ -1,0 +1,14 @@
+groups:
+  - group: A117.1
+    grounding: web-groundable
+    edition: "2017"
+    sections:
+      - { code: A117.1, section: "302", title: "Floor and Ground Surfaces", discipline: accessibility, traffic: high }
+  - group: federal-accessibility
+    grounding: verify-existing-corpus
+    sections:
+      - { code: ADA, edition: "2010", section: "206", title: "Accessible Routes", discipline: federal-accessibility, traffic: high }
+  - group: NFPA-track
+    grounding: NFPA-license-required
+    sections:
+      - { code: NEC, edition: "2020", section: "220", title: "Load Calcs", discipline: electrical, traffic: high }
