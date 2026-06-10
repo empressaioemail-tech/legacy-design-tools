@@ -98,6 +98,11 @@ import {
   brokerageBriefMeteringMeta,
 } from "../lib/brokerageMetering";
 import { UUID_RE } from "../lib/lSurfaceRoute";
+import { buildBrokerageBriefProvenanceEnvelope } from "../lib/brokerageProvenanceEnvelope";
+import {
+  brokerageBriefRetrievalMode,
+  isBrokerageBriefViaGateEnabled,
+} from "../lib/brokerageSpineGate";
 
 import { BROKERAGE_CODE_QUERIES } from "../lib/brokerageCodeQueries";
 
@@ -281,6 +286,7 @@ async function resolveCorpusStatus(
 
 async function runCodeRetrieval(
   jurisdictionKey: string,
+  retrievalMode: "neon" | "gate" = brokerageBriefRetrievalMode(),
 ): Promise<{
   sections: Array<{
     title: string;
@@ -288,6 +294,7 @@ async function runCodeRetrieval(
     hits: Array<{ atomDid: string; snippet: string; score: number }>;
   }>;
   citations: Array<{ atomDid: string; query: string; snippet: string }>;
+  retrievedAtoms: RetrievedAtom[];
 }> {
   const sections: Array<{
     title: string;
@@ -296,7 +303,13 @@ async function runCodeRetrieval(
   }> = [];
   const citations: Array<{ atomDid: string; query: string; snippet: string }> =
     [];
+  const retrievedAtoms: RetrievedAtom[] = [];
+  const priorMode = process.env.BRIEF_CODE_RETRIEVAL;
+  if (retrievalMode === "gate") {
+    process.env.BRIEF_CODE_RETRIEVAL = "gate";
+  }
 
+  try {
   for (const query of BROKERAGE_CODE_QUERIES) {
     let hits: RetrievedAtom[] = [];
     try {
@@ -310,6 +323,8 @@ async function runCodeRetrieval(
     } catch (err) {
       logger.warn({ err, jurisdictionKey, query }, "brokerage: retrieval failed");
     }
+
+    for (const h of hits) retrievedAtoms.push(h);
 
     if (hits.length > 0) {
       const top = hits[0]!;
@@ -330,8 +345,14 @@ async function runCodeRetrieval(
       })),
     });
   }
+  } finally {
+    if (retrievalMode === "gate") {
+      if (priorMode === undefined) delete process.env.BRIEF_CODE_RETRIEVAL;
+      else process.env.BRIEF_CODE_RETRIEVAL = priorMode;
+    }
+  }
 
-  return { sections, citations };
+  return { sections, citations, retrievedAtoms };
 }
 
 brokerageV1.post("/brief", async (req: Request, res: Response) => {
@@ -363,7 +384,13 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const installId = installIdFromRequest(req);
   const lk = listingKeyFromAddress(address, mls_id);
   const extensionPublic = isExtensionPublicClient(req);
+  const authenticatedUser =
+    req.brokerageAuth?.tier === "user" &&
+    req.session?.requestor?.kind === "user"
+      ? req.session.requestor.id
+      : null;
   const serviceCaller = isBrokerageServiceCaller(req);
+  const spineViaGate = isBrokerageBriefViaGateEnabled();
 
   if (serviceCaller) {
     // MCP service path — gate owns metering; no install id or wallet debit.
@@ -461,7 +488,9 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     query: string;
     hits: Array<{ atomDid: string; snippet: string; score: number }>;
   }> = [];
-  let citations: Array<{ atomDid: string; query: string; snippet: string }> = [];
+  let citations: Array<{ atomDid: string; query: string; snippet: string }> =
+    [];
+  let retrievedAtomsForProvenance: RetrievedAtom[] = [];
 
   if (!jurisdictionKey) {
     sections = [
@@ -472,9 +501,13 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       },
     ];
   } else {
-    const retrieved = await runCodeRetrieval(jurisdictionKey);
+    const retrieved = await runCodeRetrieval(
+      jurisdictionKey,
+      brokerageBriefRetrievalMode(),
+    );
     sections = retrieved.sections;
     citations = retrieved.citations;
+    retrievedAtomsForProvenance = retrieved.retrievedAtoms;
   }
 
   const hasHits = sections.some((s) => s.hits.length > 0);
@@ -557,11 +590,27 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     privateRestrictions,
   });
 
+  const provenance = buildBrokerageBriefProvenanceEnvelope({
+    citations,
+    atoms: retrievedAtomsForProvenance.map((a) => ({
+      atomDid: a.id,
+      sourceUrl: a.sourceUrl,
+      edition: a.edition,
+      codeBook: a.codeBook,
+    })),
+    finishedAt,
+    jurisdictionKey,
+    corpusStatus,
+    reasoningMethod: reasoningSummary.method,
+    spineViaGate,
+  });
+
   const responseBody = {
     runId,
     startedAt,
     finishedAt,
     presentationMode,
+    provenance,
     property: {
       address,
       source: source ?? null,
@@ -605,6 +654,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     address,
     payloadJson: responseBody,
     installId: installId ?? null,
+    ownerUserId: authenticatedUser,
   });
 
   await emitPropertyWorkspaceCreatedEvent({
@@ -625,7 +675,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
 
   let workspaceId: string | undefined;
 
-  if (installId && !extensionPublic) {
+  if (installId && (!extensionPublic || authenticatedUser)) {
     await upsertWorkspaceFromBrief({
       installId,
       listingKey: lk,
@@ -635,6 +685,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       llUuid,
       latitude: geocode?.lat,
       longitude: geocode?.lon,
+      ownerUserId: authenticatedUser ?? undefined,
     });
 
     const ws = await findWorkspaceByListingKey(installId, lk);
