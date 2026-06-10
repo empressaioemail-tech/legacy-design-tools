@@ -45,11 +45,10 @@ import {
   type EngagementEventActor,
 } from "../lib/engagementEvents";
 import {
+  effectiveOwnerUserId,
   engagementOwnerAnd,
   engagementOwnerWhere,
   loadEngagementForSession,
-  requireAuthenticatedUser,
-  sessionOwnerUserId,
 } from "../lib/engagementOwnership";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
@@ -264,7 +263,6 @@ async function mergeCoverageIntoUpdate(
 }
 
 router.get("/engagements", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
   try {
     const ownerFilter = engagementOwnerWhere(req.session);
     const allEngagements = await db
@@ -303,9 +301,11 @@ router.get("/engagements", async (req: Request, res: Response) => {
 });
 
 router.post("/engagements", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
-  const ownerId = sessionOwnerUserId(req.session);
-  if (!ownerId) return;
+  const ownerId = effectiveOwnerUserId(req.session);
+  if (!ownerId) {
+    res.status(401).json({ error: "authentication_required" });
+    return;
+  }
   const parsed = parseCreateEngagementBody(req.body);
   if ("error" in parsed) {
     res.status(400).json({ error: parsed.error });
@@ -374,7 +374,6 @@ async function fetchEngagementDetail(id: string, session: Request["session"]) {
 }
 
 router.get("/engagements/:id", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
   const params = GetEngagementParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -395,7 +394,6 @@ router.get("/engagements/:id", async (req: Request, res: Response) => {
 });
 
 router.patch("/engagements/:id", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
   const params = GetEngagementParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -621,7 +619,6 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
 });
 
 router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
   const params = GetEngagementParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -785,7 +782,6 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
 router.get(
   "/engagements/:id/submissions",
   async (req: Request, res: Response) => {
-    if (requireAuthenticatedUser(req, res)) return;
     const params = GetEngagementParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: "Invalid id" });
@@ -855,7 +851,6 @@ router.get(
 router.post(
   "/engagements/:id/submissions",
   async (req: Request, res: Response) => {
-    if (requireAuthenticatedUser(req, res)) return;
     const params = GetEngagementParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: "Invalid id" });
