@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
-import request from "supertest";
+import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
@@ -30,10 +30,7 @@ setupRouteTests((g) => {
   getApp = g;
 });
 
-function asUser(
-  req: ReturnType<typeof request>,
-  userId: string,
-): ReturnType<typeof request> {
+function asUser(req: Test, userId: string): Test {
   return req.set("x-audience", "user").set("x-requestor", `user:${userId}`);
 }
 
