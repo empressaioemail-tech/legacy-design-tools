@@ -4874,6 +4874,12 @@ export interface OverrideFindingBody {
   category: FindingCategory;
   /** Optional explanation of why the AI's original was wrong. */
   reviewerComment: string;
+  /** Optional structured citations for the override revision.
+When omitted (or empty), the original finding's citations are
+carried forward so arrow-two lineage is never stripped.
+When provided with entries, replaces the citation set.
+ */
+  citations?: FindingCitation[];
 }
 
 /**

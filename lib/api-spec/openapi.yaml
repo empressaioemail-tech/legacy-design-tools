@@ -14775,6 +14775,15 @@ components:
         reviewerComment:
           type: string
           description: Optional explanation of why the AI's original was wrong.
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/FindingCitation"
+          description: |
+            Optional structured citations for the override revision.
+            When omitted (or empty), the original finding's citations are
+            carried forward so arrow-two lineage is never stripped.
+            When provided with entries, replaces the citation set.
       required:
         - text
         - severity
