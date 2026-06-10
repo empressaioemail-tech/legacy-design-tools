@@ -27,6 +27,7 @@ import findingsRouter from "./findings";
 import findingOutcomesRouter from "./findingOutcomes";
 import findingsRunsRouter from "./findingsRuns";
 import findingsEvidenceLedgerRouter from "./findingsEvidenceLedger";
+import findingsCalibrationOverlayRouter from "./findingsCalibrationOverlay";
 import submissionEventsRouter from "./submissionEvents";
 import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
@@ -147,6 +148,8 @@ router.use(findingsRunsRouter);
 // Arrow two Phase 1 — tier 1a adjudication-to-atom evidence ledger.
 // Internal read-model only; mounts `/findings/adjudication-evidence*`.
 router.use(findingsEvidenceLedgerRouter);
+// Arrow two Phase 3 — calibration overlay (internal Cortex surface; rail-quiet).
+router.use(findingsCalibrationOverlayRouter);
 // PLR-9 — per-submission SSE live event channel + presence. Mounts
 // `/submissions/:submissionId/events`; distinct path subtree from
 // every other router so ordering is indifferent.

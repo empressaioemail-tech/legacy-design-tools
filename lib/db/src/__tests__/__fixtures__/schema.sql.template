@@ -46,6 +46,30 @@ CREATE TABLE @@SCHEMA@@.atom_events (
 );
 
 
+-- Name: atom_calibration_overlay; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.atom_calibration_overlay (
+    atom_id text NOT NULL,
+    jurisdiction_tenant text NOT NULL,
+    partition_kind text DEFAULT 'public'::text NOT NULL,
+    access_policy text DEFAULT 'public-free'::text NOT NULL,
+    shared_with_tenants jsonb,
+    asserted_confidence numeric NOT NULL,
+    calibrated_confidence numeric,
+    code_ref text,
+    edition text,
+    source_set_version integer DEFAULT 1 NOT NULL,
+    calibration_stale boolean DEFAULT false NOT NULL,
+    calibration_grain text DEFAULT 'atom'::text NOT NULL,
+    atom_class text,
+    signal_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT atom_calibration_overlay_grain_check CHECK ((calibration_grain = ANY (ARRAY['atom'::text, 'class'::text]))),
+    CONSTRAINT atom_calibration_overlay_partition_kind_check CHECK ((partition_kind = ANY (ARRAY['public'::text, 'tenant-private'::text, 'tenant-shared'::text])))
+);
+
+
 -- Name: attached_documents; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.attached_documents (
@@ -1297,6 +1321,12 @@ ALTER TABLE ONLY @@SCHEMA@@.atom_events
     ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
 
 
+-- Name: atom_calibration_overlay atom_calibration_overlay_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.atom_calibration_overlay
+    ADD CONSTRAINT atom_calibration_overlay_pk PRIMARY KEY (atom_id, jurisdiction_tenant);
+
+
 -- Name: attached_documents attached_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.attached_documents
@@ -1771,6 +1801,16 @@ CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING 
 -- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
+
+
+-- Name: atom_calibration_overlay_class_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX atom_calibration_overlay_class_idx ON @@SCHEMA@@.atom_calibration_overlay USING btree (jurisdiction_tenant, atom_class) WHERE (atom_class IS NOT NULL);
+
+
+-- Name: atom_calibration_overlay_tenant_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX atom_calibration_overlay_tenant_idx ON @@SCHEMA@@.atom_calibration_overlay USING btree (jurisdiction_tenant);
 
 
 -- Name: attached_documents_engagement_idx; Type: INDEX; Schema: public; Owner: -
