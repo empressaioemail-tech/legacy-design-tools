@@ -8,8 +8,6 @@ import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import { db, engagements } from "@workspace/db";
-import { mintSessionToken } from "../lib/sessionToken";
-import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -32,12 +30,11 @@ setupRouteTests((g) => {
   getApp = g;
 });
 
-function userToken(userId: string): string {
-  return mintSessionToken({
-    audience: "user",
-    tenantId: DEFAULT_TENANT_ID,
-    requestor: { kind: "user", id: userId },
-  });
+function asUser(
+  req: ReturnType<typeof request>,
+  userId: string,
+): ReturnType<typeof request> {
+  return req.set("x-audience", "user").set("x-requestor", `user:${userId}`);
 }
 
 describe("engagement ownership isolation", () => {
@@ -57,9 +54,7 @@ describe("engagement ownership isolation", () => {
   });
 
   it("GET /engagements returns only the caller's engagements", async () => {
-    const res = await request(getApp())
-      .get("/api/engagements")
-      .set("Authorization", `Bearer ${userToken("user-a")}`);
+    const res = await asUser(request(getApp()).get("/api/engagements"), "user-a");
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
@@ -72,9 +67,10 @@ describe("engagement ownership isolation", () => {
       .from(engagements)
       .where(eq(engagements.ownerUserId, "user-a"));
 
-    const res = await request(getApp())
-      .get(`/api/engagements/${rowA!.id}`)
-      .set("Authorization", `Bearer ${userToken("user-b")}`);
+    const res = await asUser(
+      request(getApp()).get(`/api/engagements/${rowA!.id}`),
+      "user-b",
+    );
 
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("engagement_not_found");
