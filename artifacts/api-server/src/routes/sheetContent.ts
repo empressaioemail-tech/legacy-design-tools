@@ -57,6 +57,8 @@ import {
   SHEET_CONTENT_ANTHROPIC_MODEL,
 } from "../lib/sheetContentExtractor";
 import { extractPdfPlainText } from "@workspace/codes-sources/pdf-text";
+import { enrichExtractedTextWithVision } from "../lib/attachedDocumentVision";
+import { getVisionAnthropicClient } from "../lib/findingLlmClient";
 import {
   buildAttachedDocumentExtractedText,
   buildTextSegments,
@@ -65,6 +67,7 @@ import {
   isAcceptedDocumentMime,
   resolveDocumentTitle,
 } from "./sheetContent.logic";
+import { randomUUID } from "node:crypto";
 
 const router: IRouter = Router();
 
@@ -572,7 +575,35 @@ router.post(
     if (lowTextExtraction) {
       reqLog.info(
         { engagementId, title },
-        "attached-document upload: low_text_extraction — P2 vision pass recommended",
+        "attached-document upload: low_text_extraction — running P2 vision pass",
+      );
+    }
+
+    // P2 Opus vision read for images and low-text PDFs — reuses the
+    // finding-engine path so chat attachments carry interpreted content.
+    try {
+      const visionClient = await getVisionAnthropicClient();
+      const visionResult = await enrichExtractedTextWithVision({
+        docId: randomUUID(),
+        title,
+        mimeType: parts.mimeType,
+        fileBytes: parts.fileBytes,
+        baseExtractedText: extractedText,
+        lowTextExtraction,
+        visionClient,
+        log: (msg, meta) => reqLog.info(meta ?? {}, msg),
+      });
+      extractedText = visionResult.extractedText;
+      if (visionResult.visionApplied) {
+        reqLog.info(
+          { engagementId, title },
+          "attached-document upload: vision read applied",
+        );
+      }
+    } catch (err) {
+      reqLog.warn(
+        { err, engagementId, title },
+        "attached-document upload: vision read failed — storing text-only extraction",
       );
     }
 

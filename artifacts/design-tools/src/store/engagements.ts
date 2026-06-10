@@ -93,6 +93,8 @@ interface EngagementsUiState {
   loadAttachedDocuments: (engagementId: string) => Promise<void>;
   /** QA-18 — upload a client PDF / photo / note to the engagement. */
   uploadAttachedDocument: (engagementId: string, file: File) => Promise<void>;
+  /** QA-18 — upload multiple client documents in one picker action. */
+  uploadAttachedDocuments: (engagementId: string, files: File[]) => Promise<void>;
   setPendingChatInput: (engagementId: string, value: string) => void;
   consumePendingChatInput: (engagementId: string) => string | null;
   toggleFocusSnapshot: (engagementId: string, snapshotId: string) => void;
@@ -221,7 +223,8 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
     }
   },
 
-  uploadAttachedDocument: async (engagementId, file) => {
+  uploadAttachedDocuments: async (engagementId, files) => {
+    if (files.length === 0) return;
     set((state) => ({
       uploadingDocumentByEngagement: {
         ...state.uploadingDocumentByEngagement,
@@ -232,68 +235,70 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
         [engagementId]: null,
       },
     }));
-    try {
-      const form = new FormData();
-      // The server defaults the title to the filename and the
-      // documentType to "narrative" — a bare file upload is enough.
-      form.append("file", file);
-      const res = await fetch(
-        `${API_BASE}/engagements/${engagementId}/attached-documents`,
-        { method: "POST", body: form },
-      );
-      if (!res.ok) {
-        let code: unknown;
-        try {
-          code = (await res.json())?.error;
-        } catch {
-          // body not JSON
+    let lastError: string | null = null;
+    for (const file of files) {
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(
+          `${API_BASE}/engagements/${engagementId}/attached-documents`,
+          { method: "POST", body: form },
+        );
+        if (!res.ok) {
+          let code: unknown;
+          try {
+            code = (await res.json())?.error;
+          } catch {
+            // body not JSON
+          }
+          lastError = uploadErrorMessage(code, res.status);
+          continue;
         }
-        set((state) => ({
-          documentUploadErrorByEngagement: {
-            ...state.documentUploadErrorByEngagement,
-            [engagementId]: uploadErrorMessage(code, res.status),
-          },
-        }));
-        return;
-      }
-      const atom = (await res.json())?.attachedDocument as
-        | Record<string, unknown>
-        | undefined;
-      if (atom) {
-        const summary: AttachedDocumentSummary = {
-          id: String(atom.entityId ?? ""),
-          title: String(atom.title ?? file.name),
-          documentType: String(atom.documentType ?? "narrative"),
-        };
-        set((state) => {
-          const existing =
-            state.attachedDocumentsByEngagement[engagementId] ?? [];
-          return {
-            attachedDocumentsByEngagement: {
-              ...state.attachedDocumentsByEngagement,
-              [engagementId]: [
-                summary,
-                ...existing.filter((d) => d.id !== summary.id),
-              ],
-            },
+        const atom = (await res.json())?.attachedDocument as
+          | Record<string, unknown>
+          | undefined;
+        if (atom) {
+          const summary: AttachedDocumentSummary = {
+            id: String(atom.entityId ?? ""),
+            title: String(atom.title ?? file.name),
+            documentType: String(atom.documentType ?? "narrative"),
           };
-        });
+          set((state) => {
+            const existing =
+              state.attachedDocumentsByEngagement[engagementId] ?? [];
+            return {
+              attachedDocumentsByEngagement: {
+                ...state.attachedDocumentsByEngagement,
+                [engagementId]: [
+                  summary,
+                  ...existing.filter((d) => d.id !== summary.id),
+                ],
+              },
+            };
+          });
+        }
+      } catch {
+        lastError = "Upload failed — check your connection and retry.";
       }
-    } catch {
-      set((state) => ({
-        documentUploadErrorByEngagement: {
-          ...state.documentUploadErrorByEngagement,
-          [engagementId]: "Upload failed — check your connection and retry.",
-        },
-      }));
-    } finally {
-      set((state) => ({
-        uploadingDocumentByEngagement: {
-          ...state.uploadingDocumentByEngagement,
-          [engagementId]: false,
-        },
-      }));
     }
+    set((state) => ({
+      uploadingDocumentByEngagement: {
+        ...state.uploadingDocumentByEngagement,
+        [engagementId]: false,
+      },
+      ...(lastError
+        ? {
+            documentUploadErrorByEngagement: {
+              ...state.documentUploadErrorByEngagement,
+              [engagementId]: lastError,
+            },
+          }
+        : {}),
+    }));
+  },
+
+  uploadAttachedDocument: async (engagementId, file) => {
+    await get().uploadAttachedDocuments(engagementId, [file]);
   },
 
   setPendingChatInput: (engagementId, value) =>

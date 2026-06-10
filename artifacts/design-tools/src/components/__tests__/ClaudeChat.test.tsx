@@ -11,7 +11,7 @@ const toggleRight = vi.hoisted(() => vi.fn());
 const toggleFocusSnapshot = vi.hoisted(() => vi.fn());
 const clearFocusSnapshots = vi.hoisted(() => vi.fn());
 const loadAttachedDocuments = vi.hoisted(() => vi.fn());
-const uploadAttachedDocument = vi.hoisted(() => vi.fn());
+const uploadAttachedDocuments = vi.hoisted(() => vi.fn());
 const stores = vi.hoisted(() => ({
   messagesByEngagement: {} as Record<string, Array<{ role: string; content: string; snapshotFocusIds?: string[] }>>,
   attachedSheetsByEngagement: {} as Record<string, unknown[]>,
@@ -46,7 +46,8 @@ vi.mock("../../store/engagements", () => ({
       detachSheet: vi.fn(),
       clearAttachedSheets: vi.fn(),
       loadAttachedDocuments,
-      uploadAttachedDocument,
+      uploadAttachedDocuments,
+      uploadAttachedDocument: uploadAttachedDocuments,
       toggleFocusSnapshot,
       clearFocusSnapshots,
       reverseAgentAction: vi.fn(),
@@ -67,7 +68,7 @@ describe("ClaudeChat", () => {
     toggleFocusSnapshot.mockClear();
     clearFocusSnapshots.mockClear();
     loadAttachedDocuments.mockClear();
-    uploadAttachedDocument.mockClear();
+    uploadAttachedDocuments.mockClear();
     stores.streaming = false;
     stores.rightCollapsed = false;
     stores.messagesByEngagement = {};
@@ -139,17 +140,20 @@ describe("ClaudeChat", () => {
     stores.streaming = false;
   });
 
-  it("disables the Send button when hasSnapshots is false and shows the snapshot-required placeholder", () => {
+  it("enables Send without snapshots and shows the web-first placeholder", () => {
     sendMessage.mockClear();
     stores.streaming = false;
     stores.rightCollapsed = false;
 
     render(<ClaudeChat engagementId="eng-1" hasSnapshots={false} />);
-    const send = screen.getByRole("button", { name: /Send/i });
-    expect(send).toBeDisabled();
-    expect(
-      screen.getByPlaceholderText(/Send a snapshot from Revit first/i),
-    ).toBeInTheDocument();
+    const textarea = screen.getByPlaceholderText(/Upload plans or ask a question/i);
+    fireEvent.change(textarea, { target: { value: "review the floor plan" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/i }));
+    expect(sendMessage).toHaveBeenCalledWith(
+      "eng-1",
+      "review the floor plan",
+      { snapshotFocus: false },
+    );
   });
 
   it("renders the collapsed-rail layout (only the expand button) when rightCollapsed is true", () => {
@@ -553,14 +557,24 @@ describe("ClaudeChat", () => {
     expect(loadAttachedDocuments).toHaveBeenCalledWith("eng-1");
   });
 
-  it("uploads a selected file via uploadAttachedDocument", () => {
-    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+  it("uploads selected files via uploadAttachedDocuments (multi-select)", () => {
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={false} />);
     const input = screen.getByTestId("claude-chat-file-input");
-    const file = new File(["client note"], "site-notes.pdf", {
-      type: "application/pdf",
-    });
-    fireEvent.change(input, { target: { files: [file] } });
-    expect(uploadAttachedDocument).toHaveBeenCalledWith("eng-1", file);
+    expect(input).toHaveAttribute("multiple");
+    const fileA = new File(["sheet a"], "A1.png", { type: "image/png" });
+    const fileB = new File(["sheet b"], "A2.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [fileA, fileB] } });
+    expect(uploadAttachedDocuments).toHaveBeenCalledWith("eng-1", [
+      fileA,
+      fileB,
+    ]);
+  });
+
+  it("enables Attach without snapshots", () => {
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={false} />);
+    expect(
+      screen.getByRole("button", { name: /Attach client documents/i }),
+    ).not.toBeDisabled();
   });
 
   it("renders a chip for each attached client document", () => {
@@ -577,13 +591,6 @@ describe("ClaudeChat", () => {
     expect(screen.getByTestId("attached-document-doc-2")).toHaveTextContent(
       "Owner notes",
     );
-  });
-
-  it("disables the Attach button when there is no snapshot", () => {
-    render(<ClaudeChat engagementId="eng-1" hasSnapshots={false} />);
-    expect(
-      screen.getByRole("button", { name: /Attach a client document/i }),
-    ).toBeDisabled();
   });
 
   it("surfaces an upload error to the operator", () => {
