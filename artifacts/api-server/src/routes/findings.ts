@@ -63,6 +63,7 @@ import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
   supplementCodeSectionsWithReasoningGrounding,
+  canonicalOverlayAtomKey,
   type RetrievedAtom,
 } from "@workspace/codes";
 import {
@@ -419,7 +420,7 @@ function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
     ? `${ref} — ${a.sectionTitle}`
     : ref;
   return {
-    atomId: a.id,
+    atomId: canonicalOverlayAtomKey(a.id),
     label,
     snippet: a.body,
   };

@@ -18,7 +18,7 @@ import {
   findingRuns,
 } from "@workspace/db";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
-import { keyFromEngagement } from "@workspace/codes";
+import { keyFromEngagement, canonicalOverlayAtomKey } from "@workspace/codes";
 import {
   FINDING_EVENT_TYPES,
   type FindingEventType,
@@ -81,7 +81,9 @@ function extractCodeCitationAtomIds(citations: unknown): string[] {
   if (!Array.isArray(citations)) return [];
   const ids: string[] = [];
   for (const c of citations) {
-    if (isCodeSectionCitation(c)) ids.push(c.atomId);
+    if (isCodeSectionCitation(c)) {
+      ids.push(canonicalOverlayAtomKey(c.atomId));
+    }
   }
   return ids;
 }
