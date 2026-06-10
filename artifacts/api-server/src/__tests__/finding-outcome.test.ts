@@ -88,7 +88,7 @@ async function seedFindingWithTenant(tenantKey: string) {
 describe("POST /api/findings/:findingId/outcome", () => {
   it("403s without internal audience or service token", async () => {
     const res = await request(getApp())
-      .post("/api/findings/finding:missing:outcome")
+      .post("/api/findings/finding:missing/outcome")
       .send({ outcomeKind: "permit-approved" })
       .set({ "x-audience": "user", "x-requestor": "user:architect" });
     expect(res.status).toBe(403);
