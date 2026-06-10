@@ -64,6 +64,34 @@ describe("buildDriverUrls national/texas profiles", () => {
     expect(urls.some((u) => u.url.includes("A11712017"))).toBe(true);
   });
 
+  it("builds Austin 2024 UpCodes paths for IRC and IECC RE volume", () => {
+    const irc = buildDriverUrls({
+      codeRef: "IRC-R301.1",
+      edition: "IRC 2024",
+      editionSlug: "irc-2024",
+      jurisdictionKey: "austin_tx",
+      drivers: ["upcodes"],
+    });
+    expect(
+      irc.some((u) => u.url.includes("up.codes/viewer/austin/irc-2024/chapter/3/R301.1")),
+    ).toBe(true);
+
+    const iecc = buildDriverUrls({
+      codeRef: "IECC-R-R401.2",
+      edition: "IECC 2024",
+      editionSlug: "iecc-r-2024",
+      jurisdictionKey: "austin_tx",
+      drivers: ["upcodes"],
+    });
+    expect(
+      iecc.some((u) =>
+        u.url.includes(
+          "up.codes/viewer/austin/iecc-2024/chapter/RE_4/re-residential-energy-efficiency/R401.2",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("keeps Florida FBC 2023 paths for miami jurisdiction", () => {
     const urls = buildDriverUrls({
       codeRef: "FBC-M601.6",

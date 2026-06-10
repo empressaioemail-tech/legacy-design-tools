@@ -9,6 +9,7 @@ import {
   inferChapterNumber,
   sectionAnchorToken,
   slugConfigForTarget,
+  upcodesChapterPath,
   upcodesJurisdictionSlug,
 } from "./driverProfiles";
 
@@ -101,7 +102,12 @@ function nationalOrTexasDriverUrls(
     edition: target.edition,
   });
   const section = bareSectionFromCodeRef(target.codeRef);
-  const chapter = inferChapterNumber(section);
+  const chapter = upcodesChapterPath(
+    target.codeRef,
+    target.edition,
+    cfg?.upcodesBookSlug,
+  );
+  const iccChapter = inferChapterNumber(section);
   const anchor = sectionAnchorToken(section);
 
   if (cfg?.deeplinkOnly && cfg.deeplinkUrl) {
@@ -122,7 +128,7 @@ function nationalOrTexasDriverUrls(
       ];
     case "icc": {
       if (!cfg?.iccContentSlug) return [];
-      const chapterUrl = `https://codes.iccsafe.org/content/${cfg.iccContentSlug}/chapter-${chapter}`;
+      const chapterUrl = `https://codes.iccsafe.org/content/${cfg.iccContentSlug}/chapter-${iccChapter}`;
       return [
         {
           driver,

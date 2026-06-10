@@ -34,10 +34,52 @@ export const CODE_BOOK_SLUGS: Record<string, CodeBookSlugConfig> = {
   "IFGC-2021": { upcodesBookSlug: "ifgc-2021", iccContentSlug: "IFGC2021P1" },
   "IFC-2021": { upcodesBookSlug: "ifc-2021", iccContentSlug: "IFC2021P1" },
   "IPMC-2021": { upcodesBookSlug: "ipmc-2021", iccContentSlug: "IPMC2021P1" },
+  "IRC-2024": {
+    upcodesBookSlug: "irc-2024",
+    iccContentSlug: "IRC2024P1",
+    municipalityScoped: true,
+  },
+  "IBC-2024": {
+    upcodesBookSlug: "ibc-2024",
+    iccContentSlug: "IBC2024P1",
+    municipalityScoped: true,
+  },
+  "IECC-2024": {
+    upcodesBookSlug: "iecc-2024",
+    iccContentSlug: "IECC2024P1",
+    municipalityScoped: true,
+  },
+  "IFC-2024": {
+    upcodesBookSlug: "ifc-2024",
+    iccContentSlug: "IFC2024P1",
+    municipalityScoped: true,
+  },
+  "UMC-2024": {
+    upcodesBookSlug: "umc-2024",
+    iccContentSlug: "",
+    municipalityScoped: true,
+  },
+  "UPC-2024": {
+    upcodesBookSlug: "upc-2024",
+    iccContentSlug: "",
+    municipalityScoped: true,
+  },
   "A117.1-2017": {
     upcodesBookSlug: "icc-a117.1-2017",
     iccContentSlug: "A11712017",
     municipalityScoped: true,
+  },
+  "NEC-2023": {
+    upcodesBookSlug: "",
+    iccContentSlug: "",
+    deeplinkOnly: true,
+    deeplinkUrl: "https://www.nfpa.org/codes-and-standards/nfpa-70-nec",
+  },
+  "TAS-2012": {
+    upcodesBookSlug: "",
+    iccContentSlug: "",
+    deeplinkOnly: true,
+    deeplinkUrl: "https://www.tdlr.texas.gov/ab/abtas.htm",
   },
   "ADA-2010": {
     upcodesBookSlug: "",
@@ -95,6 +137,7 @@ export function normalizeCodeBookKey(code: string): string {
   const upper = code.toUpperCase();
   if (upper.startsWith("IECC")) return "IECC";
   if (upper.startsWith("A117")) return "A117.1";
+  if (upper.startsWith("TAS")) return "TAS";
   return upper;
 }
 
@@ -109,8 +152,29 @@ export function codeBookFromRef(codeRef: string): string | null {
   if (upper.startsWith("IECC-R-") || upper.startsWith("IECC-C-")) return "IECC";
   if (upper.startsWith("IECC-R") || upper.startsWith("IECC-C")) return "IECC";
   if (upper.startsWith("A117.1-")) return "A117.1";
+  if (upper.startsWith("TAS-")) return "TAS";
   const m = codeRef.match(/^([A-Z][A-Z0-9.]*?)-/i);
   return m?.[1] ?? null;
+}
+
+/**
+ * UpCodes chapter path segment — numeric chapter or IECC 2024 RE_/CE_ volume slug.
+ */
+export function upcodesChapterPath(
+  codeRef: string,
+  edition?: string,
+  upcodesBookSlug?: string,
+): string {
+  const year = edition?.match(/\b(20\d{2})\b/)?.[1];
+  const upper = codeRef.toUpperCase();
+  if (year === "2024" && upcodesBookSlug === "iecc-2024") {
+    if (upper.startsWith("IECC-C") || upper.includes("-C4")) {
+      return "CE_4/ce-commercial-energy-efficiency";
+    }
+    return "RE_4/re-residential-energy-efficiency";
+  }
+  const section = bareSectionFromCodeRef(codeRef);
+  return inferChapterNumber(section);
 }
 
 /** Lookup slug config from codeRef prefix + edition label. */
@@ -142,6 +206,8 @@ export function slugConfigForTarget(args: {
 
 /** Bare section token from a codeRef like `IRC-R301.1` → `R301.1`. */
 export function bareSectionFromCodeRef(codeRef: string): string {
+  const iecc = codeRef.match(/^IECC-[RC]-(.+)$/i);
+  if (iecc) return iecc[1]!;
   const prefixed = codeRef.match(/^[A-Z][A-Z0-9.]*-(.+)$/i);
   if (prefixed) return prefixed[1]!;
   return codeRef;
