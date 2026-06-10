@@ -6771,6 +6771,36 @@ export const OverrideFindingBody = zod
     reviewerComment: zod
       .string()
       .describe("Optional explanation of why the AI's original was wrong."),
+    citations: zod
+      .array(
+        zod.union([
+          zod
+            .object({
+              kind: zod.enum(["code-section"]),
+              atomId: zod
+                .string()
+                .describe(
+                  "The atom id used in `[[CODE:<atomId>]]` tokens. Must\nresolve against the engine's reference block at\ngeneration time; unresolved tokens are stripped from\n`text` and reflected on the run row's\n`invalidCitationCount`.\n",
+                ),
+            })
+            .describe("Inline citation referencing a code-section atom."),
+          zod
+            .object({
+              kind: zod.enum(["briefing-source"]),
+              id: zod.string(),
+              label: zod
+                .string()
+                .describe(
+                  "Human-readable label used inside the inline token\n`{{atom|briefing-source|<id>|<label>}}`. Echoed on the\ncitation pill the FE renders.\n",
+                ),
+            })
+            .describe("Inline citation referencing a briefing-source row."),
+        ]),
+      )
+      .optional()
+      .describe(
+        "Optional structured citations for the override revision.\nWhen omitted (or empty), the original finding's citations are\ncarried forward so arrow-two lineage is never stripped.\nWhen provided with entries, replaces the citation set.\n",
+      ),
   })
   .describe(
     "Body for `POST \/findings\/{id}\/override`. Mirrors\n`OverrideFindingPayload` at findingsMock.ts:409-415. Atomic:\nthe route stamps the original `overridden` and inserts the\nnew revision in one transaction.\n",

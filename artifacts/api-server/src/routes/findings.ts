@@ -67,6 +67,10 @@ import {
   type RetrievedAtom,
 } from "@workspace/codes";
 import {
+  buildFindingCitationsFromManualCreateBody,
+  resolveOverrideFindingCitations,
+} from "../lib/findingCitations";
+import {
   AcceptFindingParams,
   CreateSubmissionFindingBody,
   CreateSubmissionFindingParams,
@@ -1432,20 +1436,10 @@ router.post(
         Math.random().toString(36).slice(2, 10).toUpperCase();
       const atomId = `finding:${submissionId}:${newUlid}`;
 
-      const citations: FindingCitation[] = [];
-      if (body.data.codeCitation) {
-        citations.push({
-          kind: "code-section",
-          atomId: body.data.codeCitation,
-        });
-      }
-      if (body.data.sourceCitation) {
-        citations.push({
-          kind: "briefing-source",
-          id: body.data.sourceCitation.id,
-          label: body.data.sourceCitation.label,
-        });
-      }
+      const citations = buildFindingCitationsFromManualCreateBody({
+        codeCitation: body.data.codeCitation,
+        sourceCitation: body.data.sourceCitation,
+      });
 
       const now = new Date();
       const [row] = await db
@@ -1842,6 +1836,16 @@ router.post(
         Math.random().toString(36).slice(2, 10).toUpperCase();
       const revisionAtomId = `finding:${original.submissionId}:${newUlid}`;
 
+      const citationResolution = resolveOverrideFindingCitations({
+        bodyCitations: body.data.citations,
+        originalCitations: original.citations,
+      });
+      if (!citationResolution.ok) {
+        res.status(400).json({ error: "invalid_override_body" });
+        return;
+      }
+      const revisionCitations = citationResolution.citations;
+
       const revisionRow = await db.transaction(async (tx) => {
         // 1. Stamp the original row `overridden`.
         await tx
@@ -1865,11 +1869,7 @@ router.post(
             category: body.data.category,
             status: "overridden",
             text: body.data.text,
-            // Override does not re-cite; the reviewer's body may
-            // carry inline tokens but the route does not re-validate
-            // here (V1-1 baseline — the validator's resolver inputs
-            // are not available without re-running the engine).
-            citations: [] as unknown as Record<string, unknown>[],
+            citations: revisionCitations as unknown as Record<string, unknown>[],
             confidence: original.confidence,
             lowConfidence: original.lowConfidence,
             reviewerStatusBy:

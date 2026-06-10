@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FindingCategory } from "./findingCategory";
+import type { FindingCitation } from "./findingCitation";
 import type { FindingSeverity } from "./findingSeverity";
 
 /**
@@ -22,4 +23,10 @@ export interface OverrideFindingBody {
   category: FindingCategory;
   /** Optional explanation of why the AI's original was wrong. */
   reviewerComment: string;
+  /** Optional structured citations for the override revision.
+When omitted (or empty), the original finding's citations are
+carried forward so arrow-two lineage is never stripped.
+When provided with entries, replaces the citation set.
+ */
+  citations?: FindingCitation[];
 }

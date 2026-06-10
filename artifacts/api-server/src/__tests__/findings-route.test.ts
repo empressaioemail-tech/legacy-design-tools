@@ -562,6 +562,10 @@ describe("POST /api/findings/:id/override", () => {
       .set(REVIEWER_HEADERS);
     const target = list.body.findings[0];
     const originalAtomId = target.id;
+    const originalCitations = target.citations as Array<{
+      kind: string;
+      atomId?: string;
+    }>;
 
     const res = await request(getApp())
       .post(`/api/findings/${originalAtomId}/override`)
@@ -583,6 +587,7 @@ describe("POST /api/findings/:id/override", () => {
       "AI's original was wrong; here's the corrected reading.",
     );
     expect(revision.revisionOf).toBe(originalAtomId);
+    expect(revision.citations).toEqual(originalCitations);
 
     // The original is preserved in place with status="overridden".
     const refetched = await request(getApp())
@@ -673,6 +678,161 @@ describe("POST /api/findings/:id/override", () => {
       .from(findings)
       .where(eq(findings.revisionOf, originalRow!.id));
     expect(revisions).toHaveLength(1);
+  });
+
+  it("carries forward code-section citations when override body omits citations", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "override-citation-carry-engagement",
+    );
+    await seedBriefingForEngagement(engagement.id);
+
+    const citedAtomId = "22222222-2222-2222-2222-222222222222";
+    retrieveAtomsForQuestionMock.mockResolvedValueOnce([
+      {
+        id: citedAtomId,
+        sourceName: "bastrop_municode",
+        jurisdictionKey: "bastrop_tx",
+        codeBook: "MUNI_CODE",
+        edition: "Code of Ordinances (current supplement)",
+        sectionNumber: "§4.3.2.B",
+        sectionTitle: "Side Yard Setbacks",
+        body: "Side yard setback shall be 5'-0\" minimum.",
+        sourceUrl: "https://example.com/bastrop-udc-4-3-2-b",
+        score: 0.74,
+        retrievalMode: "vector",
+      },
+    ]);
+
+    await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    await waitForStatus(submission.id, "completed");
+
+    const list = await request(getApp())
+      .get(`/api/submissions/${submission.id}/findings`)
+      .set(REVIEWER_HEADERS);
+    const target = list.body.findings.find(
+      (f: { citations?: Array<{ atomId?: string }> }) =>
+        f.citations?.some((c) => c.atomId === citedAtomId),
+    );
+    expect(target).toBeTruthy();
+
+    const res = await request(getApp())
+      .post(`/api/findings/${target!.id}/override`)
+      .send({
+        text: "Reviewer-authored revision text that is comfortably long enough to survive the discard rule.",
+        severity: "concern",
+        category: "other",
+        reviewerComment: "Wording fix only — citations unchanged.",
+      })
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    expect(
+      res.body.finding.citations.some(
+        (c: { kind: string; atomId?: string }) =>
+          c.kind === "code-section" && c.atomId === citedAtomId,
+      ),
+    ).toBe(true);
+
+    const [revisionRow] = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.atomId, res.body.finding.id));
+    const stored = revisionRow!.citations as Array<{
+      kind: string;
+      atomId?: string;
+    }>;
+    expect(
+      stored.some(
+        (c) => c.kind === "code-section" && c.atomId === citedAtomId,
+      ),
+    ).toBe(true);
+  });
+
+  it("fans override adjudication evidence to cited atoms when citations carry forward", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { submission } = await seedEngagementSubmission(
+      "override-citation-ledger-engagement",
+    );
+    const originalAtomId = "finding:override-ledger:001";
+    const citedAtomId = "33333333-3333-3333-3333-333333333333";
+    await ctx.schema.db.insert(findings).values({
+      atomId: originalAtomId,
+      submissionId: submission.id,
+      severity: "concern",
+      category: "setback",
+      status: "accepted",
+      text: "Original finding with one code citation.",
+      citations: [
+        { kind: "code-section", atomId: citedAtomId },
+      ] as unknown as Record<string, unknown>[],
+      confidence: "0.77",
+      aiGeneratedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+
+    const res = await request(getApp())
+      .post(`/api/findings/${originalAtomId}/override`)
+      .send({
+        text: "Reviewer-authored revision text that is comfortably long enough to survive the discard rule.",
+        severity: "concern",
+        category: "setback",
+        reviewerComment: "Wording fix only — citations carry forward.",
+      })
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.finding.citations).toEqual([
+      { kind: "code-section", atomId: citedAtomId },
+    ]);
+
+    const ledgerRes = await request(getApp())
+      .get("/api/findings/adjudication-evidence?jurisdictionTenant=bastrop_tx")
+      .set(REVIEWER_HEADERS);
+    expect(ledgerRes.status).toBe(200);
+    const row = ledgerRes.body.rows.find(
+      (r: { citedAtomId: string }) => r.citedAtomId === citedAtomId,
+    );
+    expect(row).toBeDefined();
+    expect(row.overrideCount).toBe(1);
+    expect(row.statedConfidences).toContain(0.77);
+  });
+
+  it("accepts explicit citations on override body and persists them on the revision row", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { submission } = await seedEngagementSubmission(
+      "override-citation-replace-engagement",
+    );
+    const originalAtomId = "finding:override-replace:001";
+    const replacementAtomId = "44444444-4444-4444-4444-444444444444";
+    await ctx.schema.db.insert(findings).values({
+      atomId: originalAtomId,
+      submissionId: submission.id,
+      severity: "concern",
+      category: "setback",
+      status: "accepted",
+      text: "Original finding with one code citation.",
+      citations: [
+        { kind: "code-section", atomId: "code:old-section" },
+      ] as unknown as Record<string, unknown>[],
+      confidence: "0.77",
+      aiGeneratedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+
+    const res = await request(getApp())
+      .post(`/api/findings/${originalAtomId}/override`)
+      .send({
+        text: "Reviewer-authored revision text that is comfortably long enough to survive the discard rule.",
+        severity: "concern",
+        category: "setback",
+        reviewerComment: "Re-cited to the correct section.",
+        citations: [{ kind: "code-section", atomId: replacementAtomId }],
+      })
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.finding.citations).toEqual([
+      { kind: "code-section", atomId: replacementAtomId },
+    ]);
   });
 });
 
