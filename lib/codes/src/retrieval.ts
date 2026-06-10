@@ -82,14 +82,23 @@ export async function retrieveAtomsForQuestion(
   opts: RetrieveOptions,
 ): Promise<RetrievedAtom[]> {
   const mode = (process.env.BRIEF_CODE_RETRIEVAL ?? "neon").toLowerCase();
-  if (mode === "mcp") {
-    opts.logger?.warn?.(
-      {
-        jurisdictionKey: opts.jurisdictionKey,
-        mode,
-      },
-      "BRIEF_CODE_RETRIEVAL=mcp not wired in @workspace/codes — falling back to neon",
+  if (mode === "gate" || mode === "mcp") {
+    const { retrieveAtomsFromSubstrate } = await import(
+      "./briefRetrievalSubstrate.js"
     );
+    try {
+      const substrateHits = await retrieveAtomsFromSubstrate(opts);
+      if (substrateHits.length > 0) return substrateHits;
+      opts.logger?.warn?.(
+        { jurisdictionKey: opts.jurisdictionKey, mode },
+        "substrate retrieval returned no hits — falling back to neon",
+      );
+    } catch (err) {
+      opts.logger?.warn?.(
+        { err, jurisdictionKey: opts.jurisdictionKey, mode },
+        "substrate retrieval failed — falling back to neon",
+      );
+    }
   }
   return retrieveAtomsFromNeon(opts);
 }

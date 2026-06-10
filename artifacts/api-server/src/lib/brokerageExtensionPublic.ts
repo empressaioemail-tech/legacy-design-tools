@@ -213,7 +213,7 @@ export function sendAccountUpgradeRequired(res: Response): void {
   res.status(403).json({
     error: "account_upgrade_required",
     message:
-      "This feature requires a Hauska account. Install the extension with an operator key or sign up when accounts launch.",
+      "This feature requires a Hauska account. Sign in with Hauska in the extension, or use an operator API key.",
     clientTier: EXTENSION_PUBLIC_CLIENT_TIER,
   });
 }

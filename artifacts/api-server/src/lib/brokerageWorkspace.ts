@@ -33,6 +33,7 @@ export async function upsertWorkspaceFromBrief(input: {
   llUuid?: string | null;
   latitude?: number;
   longitude?: number;
+  ownerUserId?: string | null;
 }) {
   const now = new Date();
   const geo = {
@@ -60,10 +61,17 @@ export async function upsertWorkspaceFromBrief(input: {
   if (input.llUuid != null) conflictSet.llUuid = input.llUuid;
   if (geo.latitude != null) conflictSet.latitude = geo.latitude;
   if (geo.longitude != null) conflictSet.longitude = geo.longitude;
+  if (input.ownerUserId) conflictSet.ownerUserId = input.ownerUserId;
+
+  const insertValues = {
+    ...base,
+    ...(input.runId ? { latestRunId: input.runId } : {}),
+    ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
+  };
 
   await db
     .insert(brokerageWorkspaces)
-    .values(input.runId ? { ...base, latestRunId: input.runId } : base)
+    .values(insertValues)
     .onConflictDoUpdate({
       target: [brokerageWorkspaces.installId, brokerageWorkspaces.listingKey],
       set: conflictSet,
