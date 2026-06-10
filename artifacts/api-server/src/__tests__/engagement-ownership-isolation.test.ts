@@ -27,8 +27,6 @@ vi.mock("@workspace/db", async () => {
 
 const { setupRouteTests } = await import("./setup");
 
-process.env["SESSION_SECRET"] = "test-session-secret-isolation";
-
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;

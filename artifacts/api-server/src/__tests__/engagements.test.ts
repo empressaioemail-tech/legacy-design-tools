@@ -141,6 +141,9 @@ async function seedEngagement(overrides: Partial<{
       jurisdictionCity: overrides.jurisdictionCity ?? null,
       jurisdictionState: overrides.jurisdictionState ?? null,
       jurisdictionFips: overrides.jurisdictionFips ?? null,
+      ...(overrides.ownerUserId
+        ? { ownerUserId: overrides.ownerUserId }
+        : {}),
     })
     .returning();
   return eng;

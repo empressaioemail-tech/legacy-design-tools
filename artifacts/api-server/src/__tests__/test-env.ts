@@ -4,6 +4,14 @@
  * so anything we set here is visible to top-level singletons (e.g. the
  * `anthropic` SDK client and lib/db's Pool) when they initialize on import.
  *
+ * Pin NODE_ENV=test — some CI images export production, which would flip
+ * sessionMiddleware into fail-closed mode and break route suites that rely
+ * on dev overrides or unsigned test tokens.
+ */
+process.env.NODE_ENV = "test";
+
+/**
+ *
  * We deliberately:
  *   - point Anthropic at a bogus base URL so the singleton initializes
  *     without errors but any real outbound call fails fast (tests that

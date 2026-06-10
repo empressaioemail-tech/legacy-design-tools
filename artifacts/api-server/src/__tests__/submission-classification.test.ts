@@ -64,6 +64,7 @@ describe("auto-trigger via POST /api/engagements/:id/submissions", () => {
         nameLower: "trigger engagement",
         jurisdiction: "Bastrop, TX",
         status: "active",
+        ownerUserId: "architect-1",
       })
       .returning({ id: engagements.id });
 
