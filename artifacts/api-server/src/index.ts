@@ -5,6 +5,7 @@ import { logger } from "./lib/logger";
 import { bootstrapAtomRegistry } from "./atoms/registry";
 import { validateConverterEnvAtBoot } from "./lib/converterClient";
 import { validateHauskaSubstrateEnvAtBoot } from "./lib/hauskaSubstrateClient";
+import { validateEngineSpineEnvAtBoot } from "./lib/engineSpineClient";
 import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
 import { validateBriefingEngineEnvAtBoot } from "./lib/briefingLlmClient";
 import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
@@ -122,6 +123,16 @@ try {
   logger.error(
     { err },
     "Hauska substrate env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
+
+try {
+  validateEngineSpineEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "Engine spine env validation failed — refusing to start",
   );
   process.exit(1);
 }

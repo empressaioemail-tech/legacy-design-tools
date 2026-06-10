@@ -103,6 +103,7 @@ router.post(
       result = await ingestSiteDrainage({
         engagementId,
         history: getHistoryService(),
+        jurisdictionTenant: tenantScope.jurisdictionTenant,
         manualDepthInches: parsed.data.manualDepthInches,
         returnPeriodYears: parsed.data.returnPeriodYears,
         accumulationThreshold: parsed.data.accumulationThreshold,

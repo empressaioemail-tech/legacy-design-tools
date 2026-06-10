@@ -65,11 +65,22 @@ import {
   BRIEFING_ENGINE_ACTOR_ID,
 } from "@workspace/server-actor-ids";
 import {
-  generateBriefing,
   type BriefingSourceInput,
   type GenerateBriefingResult,
 } from "@workspace/briefing-engine";
 import { logger } from "../lib/logger";
+import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import {
+  loadEngagementTenantFields,
+  assertEngagementServiceTenantScope,
+} from "../lib/gateFrontSeamEngagement";
+import { resolveJurisdictionTenant } from "../lib/atomAdjudicationEvidenceLedger";
+import { routeGenerateBriefing } from "../lib/engineSpineRouting";
+import { engineSpineFlagSnapshot } from "../lib/engineSpineFlags";
+import {
+  buildProvenanceFromBriefing,
+  type ProvenanceEnvelope,
+} from "../lib/provenanceEnvelope";
 import { getHistoryService } from "../atoms/registry";
 import {
   BRIEFING_SOURCE_EVENT_TYPES,
@@ -220,6 +231,8 @@ interface BriefingWire {
   sources: BriefingSourceWire[];
   narrative: BriefingNarrativeWire | null;
   privateRestrictions: PrivateRestrictionsBriefing | null;
+  /** Uniform provenance envelope (moat #3); calibration grade omitted (rail-quiet). */
+  provenance: ProvenanceEnvelope;
 }
 
 /**
@@ -313,13 +326,15 @@ function toBriefingWire(
   briefing: ParcelBriefing,
   sources: BriefingSource[],
 ): Omit<BriefingWire, "privateRestrictions"> {
+  const narrative = toBriefingNarrativeWire(briefing);
   return {
     id: briefing.id,
     engagementId: briefing.engagementId,
     createdAt: briefing.createdAt.toISOString(),
     updatedAt: briefing.updatedAt.toISOString(),
     sources: sources.map(toBriefingSourceWire),
-    narrative: toBriefingNarrativeWire(briefing),
+    narrative,
+    provenance: buildProvenanceFromBriefing(briefing, sources),
   };
 }
 
@@ -1630,21 +1645,39 @@ async function runBriefingGeneration(args: {
   generationId: string;
   generatedBy: string;
   sources: BriefingSource[];
+  jurisdictionTenant: string | null;
   reqLog: typeof logger;
 }): Promise<void> {
-  const { engagementId, briefingId, generationId, generatedBy, sources, reqLog } = args;
+  const {
+    engagementId,
+    briefingId,
+    generationId,
+    generatedBy,
+    sources,
+    jurisdictionTenant,
+    reqLog,
+  } = args;
   try {
     const llmClient = await getBriefingLlmClient();
     const mode = getBriefingLlmMode();
     reqLog.info(
-      { engagementId, briefingId, generationId, mode, sourceCount: sources.length },
+      {
+        engagementId,
+        briefingId,
+        generationId,
+        mode,
+        sourceCount: sources.length,
+        spineFlags: engineSpineFlagSnapshot(),
+        jurisdictionTenant,
+      },
       "briefing generation: engine call starting",
     );
-    const result = await generateBriefing(
+    const result = await routeGenerateBriefing(
       {
         engagementId,
         sources: sources.map(toEngineSourceInput),
         generatedBy,
+        jurisdictionTenant,
       },
       {
         mode,
@@ -1830,6 +1863,10 @@ export async function kickoffBriefingGeneration(args: {
   }
   const generationId = kickoffRow.id;
 
+  const engTenant = await loadEngagementTenantFields(engagementId);
+  const jurisdictionTenant =
+    engTenant.found === true ? resolveJurisdictionTenant(engTenant) : null;
+
   // Fire-and-forget. Callers return immediately; the job row's
   // state is what the status endpoint reads.
   void (async () => {
@@ -1839,6 +1876,7 @@ export async function kickoffBriefingGeneration(args: {
       generationId,
       generatedBy: BRIEFING_ENGINE_GENERATED_BY,
       sources,
+      jurisdictionTenant,
       reqLog,
     });
     if (!onSettled) return;
@@ -1883,6 +1921,7 @@ export async function kickoffBriefingGeneration(args: {
 
 router.post(
   "/engagements/:id/briefing/generate",
+  requireGateEngineServiceAuth,
   async (req: Request, res: Response) => {
     const paramsParse = GenerateEngagementBriefingParams.safeParse(req.params);
     if (!paramsParse.success) {
@@ -1890,6 +1929,15 @@ router.post(
       return;
     }
     const engagementId = paramsParse.data.id;
+
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
+      return;
+    }
     // Body is optional — `regenerate` is informational today (the
     // route auto-detects a prior narrative). Parse defensively.
     const bodyParse = GenerateEngagementBriefingBody.safeParse(req.body ?? {});

@@ -142,6 +142,7 @@ router.post(
       result = await ingestSiteTopography({
         engagementId,
         history: getHistoryService(),
+        jurisdictionTenant: tenantScope.jurisdictionTenant,
         contourIntervalMeters: parsed.data.contourIntervalMeters,
         catchmentBufferMeters: parsed.data.catchmentBufferMeters,
         demResolutionMeters: parsed.data.demResolutionMeters,

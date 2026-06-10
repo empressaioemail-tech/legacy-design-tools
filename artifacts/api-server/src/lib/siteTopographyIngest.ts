@@ -60,11 +60,11 @@ import {
   engagements as engagementsTable,
 } from "@workspace/db";
 import {
-  fetchUsgs3depDem,
   Usgs3depFetchError,
   type BboxWgs84,
   type FetchUsgs3depDemResult,
 } from "@workspace/site-context/server";
+import { routeFetchUsgs3depDem } from "./engineSpineHydrology";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import { SITE_TOPOGRAPHY_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { ObjectStorageService } from "./objectStorage";
@@ -212,6 +212,8 @@ export type SiteTopographyIngestResult =
 export interface SiteTopographyIngestArgs {
   engagementId: string;
   history: EventAnchoringService;
+  /** ADR-005 jurisdiction partition for spine hydrology/topography calls. */
+  jurisdictionTenant?: string | null;
   contourIntervalMeters?: number;
   catchmentBufferMeters?: number;
   demResolutionMeters?: number;
@@ -814,11 +816,15 @@ export async function ingestSiteTopography(
   // 3) Fetch DEM from USGS 3DEP.
   let demResult: FetchUsgs3depDemResult;
   try {
-    demResult = await fetchUsgs3depDem(catchmentBbox, {
-      resolutionMeters: demResolutionMeters,
-      fetchImpl: args.fetchImpl,
-      signal: args.signal,
-    });
+    demResult = await routeFetchUsgs3depDem(
+      catchmentBbox,
+      {
+        resolutionMeters: demResolutionMeters,
+        fetchImpl: args.fetchImpl,
+        signal: args.signal,
+      },
+      { jurisdictionTenant: args.jurisdictionTenant ?? null },
+    );
   } catch (err) {
     const code = mapUsgs3depError(err);
     const reason = err instanceof Error ? err.message : String(err);

@@ -4,6 +4,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, codeAtoms, codeAtomSources, codeAtomFetchQueue } from "@workspace/db";
+import { buildProvenanceFromCodeAtom } from "../lib/provenanceEnvelope";
 import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { embedTexts, EMBEDDING_MODEL } from "@workspace/codes";
 import {
@@ -355,6 +356,13 @@ router.get(
         parentSection: r.parentSection,
         embeddingModel: r.embeddingModel,
         metadata: (r.metadata as Record<string, unknown>) ?? null,
+        provenance: buildProvenanceFromCodeAtom({
+          atomId: r.id,
+          sourceUrl: r.sourceUrl,
+          edition: r.edition,
+          fetchedAt: r.fetchedAt.toISOString(),
+          sourceName: r.sourceName,
+        }),
       });
     } catch (err) {
       logger.error({ err, id }, "get atom failed");
