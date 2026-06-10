@@ -29,6 +29,8 @@ export {
   A1171_DOOR_CLEARANCE_ATOM_ID,
 } from "./accessibilityDemo";
 
+export { buildPrecedenceFindingDrafts } from "./productionWire";
+
 export type {
   ApplicableRequirement,
   PrecedenceConflict,

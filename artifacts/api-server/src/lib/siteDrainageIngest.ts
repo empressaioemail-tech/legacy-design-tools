@@ -11,12 +11,14 @@ import { eq } from "drizzle-orm";
 import { db, engagements as engagementsTable } from "@workspace/db";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import {
-  runHydrologyWorker,
-  resolveRainfallForcing,
   rainfallForcingDepthMm,
   type BboxWgs84,
   type RainfallForcingSource,
 } from "@workspace/site-context/server";
+import {
+  routeResolveRainfallForcing,
+  routeRunHydrologyWorker,
+} from "./engineSpineHydrology";
 import { SITE_DRAINAGE_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { ObjectStorageService } from "./objectStorage";
 import { logger as defaultLogger } from "./logger";
@@ -110,6 +112,7 @@ export type SiteDrainageIngestResult =
 export interface SiteDrainageIngestArgs {
   engagementId: string;
   history: EventAnchoringService;
+  jurisdictionTenant?: string | null;
   manualDepthInches?: number;
   returnPeriodYears?: number;
   accumulationThreshold?: number;
@@ -217,14 +220,18 @@ export async function ingestSiteDrainage(
         }
       : bboxCenter(catchmentBbox);
 
-  const rainfallForcing = await resolveRainfallForcing({
-    lat: pour.lat,
-    lng: pour.lng,
-    manualDepthInches: args.manualDepthInches,
-    returnPeriodYears: args.returnPeriodYears,
-    useCotalityForcing: args.useCotalityForcing ?? false,
-    cotalityForcing: null,
-  });
+  const spineCtx = { jurisdictionTenant: args.jurisdictionTenant ?? null };
+  const rainfallForcing = await routeResolveRainfallForcing(
+    {
+      lat: pour.lat,
+      lng: pour.lng,
+      manualDepthInches: args.manualDepthInches,
+      returnPeriodYears: args.returnPeriodYears,
+      useCotalityForcing: args.useCotalityForcing ?? false,
+      cotalityForcing: null,
+    },
+    spineCtx,
+  );
   const rainfallDepthMm = rainfallForcingDepthMm(rainfallForcing);
 
   const latestDrainage = await args.history.latestEvent({
@@ -319,17 +326,20 @@ export async function ingestSiteDrainage(
     demBytes.byteOffset + demBytes.byteLength,
   ) as ArrayBuffer;
 
-  const hydrology = await runHydrologyWorker({
-    demBytes: demArrayBuffer,
-    pourLng: pour.lng,
-    pourLat: pour.lat,
-    catchmentBbox,
-    width: parsed.width,
-    height: parsed.height,
-    elevation: parsed.values,
-    rainfallDepthMm,
-    accumulationThreshold: accThreshold,
-  });
+  const hydrology = await routeRunHydrologyWorker(
+    {
+      demBytes: demArrayBuffer,
+      pourLng: pour.lng,
+      pourLat: pour.lat,
+      catchmentBbox,
+      width: parsed.width,
+      height: parsed.height,
+      elevation: parsed.values,
+      rainfallDepthMm,
+      accumulationThreshold: accThreshold,
+    },
+    spineCtx,
+  );
 
   if (hydrology.status !== "ok") {
     return {

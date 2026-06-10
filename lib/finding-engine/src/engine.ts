@@ -40,6 +40,7 @@ import {
   type CitationResolvers,
 } from "./citationAdapter";
 import { generateMockFindings } from "./mockGenerator";
+import { buildPrecedenceFindingDrafts } from "./precedence";
 import {
   FINDING_MIN_TEXT_LENGTH,
   type EngineFinding,
@@ -218,6 +219,10 @@ export async function generateFindings(
     isKnownCodeSectionId: (id) => knownCodeIds.has(id),
   };
 
+  // S1 — deterministic precedence for multi-standard accessibility topics
+  // before LLM synthesis (federal + model code + local amendments only).
+  const precedenceDrafts = buildPrecedenceFindingDrafts(input.codeSections);
+
   let drafts: RawFindingDraft[];
   if (mode === "grok") {
     if (!options.grokClient) {
@@ -254,5 +259,6 @@ export async function generateFindings(
     }));
   }
 
-  return finalizeDrafts(drafts, input, resolvers, generatedAt, mode, ulid);
+  const mergedDrafts = [...precedenceDrafts, ...drafts];
+  return finalizeDrafts(mergedDrafts, input, resolvers, generatedAt, mode, ulid);
 }

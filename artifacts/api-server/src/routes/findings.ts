@@ -84,8 +84,6 @@ import {
   RejectFindingParams,
 } from "@workspace/api-zod";
 import {
-  generateFindings,
-  generateOrchestratedFindings,
   resolveFindingOrchestratedMode,
   type BimElementInput,
   type BriefingSourceInput,
@@ -118,7 +116,20 @@ import {
 } from "../lib/findingLlmClient";
 import { publishSubmissionFindingEvent } from "../lib/submissionLiveEvents";
 import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
-import { assertSubmissionServiceTenantScope } from "../lib/gateFrontSeamEngagement";
+import {
+  assertSubmissionServiceTenantScope,
+  loadEngagementTenantFields,
+} from "../lib/gateFrontSeamEngagement";
+import { resolveJurisdictionTenant } from "../lib/atomAdjudicationEvidenceLedger";
+import {
+  routeGenerateFindings,
+  routeGenerateOrchestratedFindings,
+} from "../lib/engineSpineRouting";
+import { engineSpineFlagSnapshot } from "../lib/engineSpineFlags";
+import {
+  buildProvenanceFromFindingRow,
+  type ProvenanceEnvelope,
+} from "../lib/provenanceEnvelope";
 
 const router: IRouter = Router();
 
@@ -257,6 +268,8 @@ interface FindingWire {
   acceptedAt: string | null;
   /** WS1 — orchestrated specialist discipline tag; null on legacy rows. */
   discipline: string | null;
+  /** Uniform provenance envelope (moat #3); calibration grade omitted (rail-quiet). */
+  provenance: ProvenanceEnvelope;
 }
 
 function actorFromRequest(req: Request): FindingActorWire | null {
@@ -279,7 +292,7 @@ function actorFromRequest(req: Request): FindingActorWire | null {
   return wire;
 }
 
-function toWire(
+async function toWire(
   row: Finding,
   revisionOfAtomId: string | null,
   /**
@@ -289,7 +302,7 @@ function toWire(
    * to null and the FE renders the unconfirmed badge variant.
    */
   acceptedBy: FindingActorWire | null = null,
-): FindingWire {
+): Promise<FindingWire> {
   const citations = Array.isArray(row.citations)
     ? (row.citations as FindingCitation[])
     : [];
@@ -325,6 +338,7 @@ function toWire(
     acceptedBy,
     acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
     discipline: row.discipline ?? null,
+    provenance: await buildProvenanceFromFindingRow(row),
   };
 }
 
@@ -868,6 +882,19 @@ async function runFindingGeneration(args: {
     const inputs = await resolveEngineInputs(submissionId, reqLog);
     const llmClient = await getFindingLlmClient();
     const mode = getFindingLlmMode();
+    const [engRow] = await db
+      .select({ engagementId: submissions.engagementId })
+      .from(submissions)
+      .where(eq(submissions.id, submissionId))
+      .limit(1);
+    const engFields = engRow
+      ? await loadEngagementTenantFields(engRow.engagementId)
+      : { found: false as const };
+    const jurisdictionTenant =
+      engFields.found === true
+        ? resolveJurisdictionTenant(engFields)
+        : null;
+
     reqLog.info(
       {
         submissionId,
@@ -877,6 +904,8 @@ async function runFindingGeneration(args: {
         codeSectionCount: inputs.codeSections.length,
         bimElementCount: inputs.bimElements.length,
         hasNarrative: !!inputs.briefingNarrative,
+        spineFlags: engineSpineFlagSnapshot(),
+        jurisdictionTenant,
       },
       "finding generation: engine call starting",
     );
@@ -989,10 +1018,12 @@ async function runFindingGeneration(args: {
         ? { ...baseInput, attachedSheetImages }
         : baseInput;
 
+      const spineCtx = { jurisdictionTenant };
       if (pieceCandidates.length >= 2) {
-        const orchestratedResult = await generateOrchestratedFindings(
+        const orchestratedResult = await routeGenerateOrchestratedFindings(
           { baseInput: visionBaseInput, pieceCandidates },
           engineOptions,
+          spineCtx,
         );
         reqLog.info(
           {
@@ -1010,10 +1041,18 @@ async function runFindingGeneration(args: {
           { submissionId, pieceCount: pieceCandidates.length },
           "finding generation: orchestrated flag set but <2 pieces — legacy single-pass",
         );
-        result = await generateFindings(baseInput, engineOptions);
+        result = await routeGenerateFindings(
+          baseInput,
+          engineOptions,
+          spineCtx,
+        );
       }
     } else {
-      result = await generateFindings(baseInput, engineOptions);
+      result = await routeGenerateFindings(
+        baseInput,
+        engineOptions,
+        { jurisdictionTenant },
+      );
     }
 
     // Insert findings, then emit events. Atomicity within the run is
@@ -1377,17 +1416,19 @@ router.get(
         }
       }
 
-      const wire = rows.map((r) =>
-        toWire(
-          r,
-          r.revisionOf ? revisionOfMap.get(r.revisionOf) ?? null : null,
-          r.acceptedByReviewerId
-            ? acceptedByMap.get(r.acceptedByReviewerId) ?? {
-                kind: "user",
-                id: r.acceptedByReviewerId,
-                displayName: null,
-              }
-            : null,
+      const wire = await Promise.all(
+        rows.map((r) =>
+          toWire(
+            r,
+            r.revisionOf ? revisionOfMap.get(r.revisionOf) ?? null : null,
+            r.acceptedByReviewerId
+              ? acceptedByMap.get(r.acceptedByReviewerId) ?? {
+                  kind: "user",
+                  id: r.acceptedByReviewerId,
+                  displayName: null,
+                }
+              : null,
+          ),
         ),
       );
       res.json({ findings: wire });
@@ -1522,7 +1563,7 @@ router.post(
         },
         "manual finding created",
       );
-      res.status(201).json({ finding: toWire(finalRow, null) });
+      res.status(201).json({ finding: await toWire(finalRow, null) });
     } catch (err) {
       logger.error(
         { err, submissionId },
@@ -1703,7 +1744,7 @@ router.post(
         finalRow.acceptedByReviewerId,
       );
       res.json({
-        finding: toWire(finalRow, revisionOfAtomId, acceptedByActor),
+        finding: await toWire(finalRow, revisionOfAtomId, acceptedByActor),
       });
     } catch (err) {
       logger.error({ err, findingId }, "accept finding failed");
@@ -1785,7 +1826,7 @@ router.post(
         finalRow.acceptedByReviewerId,
       );
       res.json({
-        finding: toWire(finalRow, revisionOfAtomId, acceptedByActor),
+        finding: await toWire(finalRow, revisionOfAtomId, acceptedByActor),
       });
     } catch (err) {
       logger.error({ err, findingId }, "reject finding failed");
@@ -1925,7 +1966,7 @@ router.post(
           actor,
         },
       });
-      res.json({ finding: toWire(revisionRow, original.atomId) });
+      res.json({ finding: await toWire(revisionRow, original.atomId) });
     } catch (err) {
       logger.error({ err, findingId }, "override finding failed");
       res.status(500).json({ error: "Failed to override finding" });
