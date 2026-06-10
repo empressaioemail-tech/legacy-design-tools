@@ -65,6 +65,7 @@ export {
   reviewWebTargetsForJurisdiction,
   type WebCodeFetchInput,
   type WebCodeFetchResult,
+  type WebCodeReviewTarget,
   type WebCodeSectionInput,
   type HttpFetcher,
 } from "./webCodeFetch/index";
@@ -76,6 +77,8 @@ export {
   capReasoningSnippet,
   mergeReasoningSources,
   upsertReasoningAtomFromWebFetch,
+  upsertReasoningAtomCorpusOverlay,
+  upsertReasoningAtomDeeplinkOnly,
   retrieveReasoningAtomsForRefs,
   supplementCodeSectionsWithReasoningGrounding,
   supplementCodeSectionsFromWeb,

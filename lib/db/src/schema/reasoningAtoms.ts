@@ -11,6 +11,8 @@ import {
   jsonb,
   timestamp,
   numeric,
+  integer,
+  boolean,
   index,
   uniqueIndex,
   check,
@@ -46,13 +48,18 @@ export const reasoningAtoms = pgTable(
     editionSlug: text("edition_slug").notNull(),
     sources: jsonb("sources").$type<ReasoningSourceLink[]>().notNull().default([]),
     reasoning: text("reasoning"),
-    confidence: numeric("confidence").notNull(),
+    /** Cold-warm-owned asserted confidence — set on every warm/re-warm. */
+    assertedConfidence: numeric("asserted_confidence").notNull(),
     verificationState: text("verification_state").notNull(),
     /** Capped short quote only (<=600 chars enforced in application code). */
     snippet: text("snippet"),
     displayMode: text("display_mode").notNull().default("deeplink"),
-    /** Arrow-two calibration seam — populated later, not in this dispatch. */
+    /** Arrow-two calibration seam — populated in Phase 3 (migration 0037). */
     calibratedConfidence: numeric("calibrated_confidence"),
+    /** Bumped when multi-link sources[] changes; invalidates stale calibration. */
+    sourceSetVersion: integer("source_set_version").notNull().default(1),
+    /** Set true when source-set drift requires Phase 3 recompute. */
+    calibrationStale: boolean("calibration_stale").notNull().default(false),
     accessPolicy: text("access_policy").notNull().default("platform-internal"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

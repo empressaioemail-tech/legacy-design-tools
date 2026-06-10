@@ -1,0 +1,54 @@
+{
+  "family": "codewarm-fixture",
+  "edition_base": "2023",
+  "codes": [
+    {
+      "code": "FBC",
+      "edition": "2023",
+      "sections": [
+        {
+          "section": "M601.6",
+          "title": "Duct insulation",
+          "discipline": "mechanical",
+          "traffic": "high"
+        },
+        {
+          "section": "M601.6",
+          "title": "Duct insulation duplicate path",
+          "discipline": "mechanical",
+          "traffic": "low",
+          "grounding": "verify-existing-corpus"
+        }
+      ]
+    },
+    {
+      "code": "NEC",
+      "edition": "2017",
+      "sections": [
+        {
+          "section": "Art. 220",
+          "title": "Branch-Circuit Load Calculations",
+          "discipline": "electrical",
+          "traffic": "high",
+          "grounding": "NFPA-license-required"
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "group": "WRONG",
+      "grounding": "web-groundable",
+      "edition": "2018",
+      "sections": [
+        {
+          "code": "FBC",
+          "section": "M601.6",
+          "title": "Wrong edition spot check",
+          "discipline": "mechanical",
+          "traffic": "low"
+        }
+      ]
+    }
+  ]
+}
