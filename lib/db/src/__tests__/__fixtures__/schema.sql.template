@@ -221,10 +221,21 @@ CREATE TABLE @@SCHEMA@@.briefing_sources (
 CREATE TABLE @@SCHEMA@@.brokerage_brief_runs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_slug text DEFAULT 'default'::text NOT NULL,
+    install_id text,
+    owner_user_id text,
     listing_key text NOT NULL,
     address text NOT NULL,
     payload_json jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: brokerage_install_claims; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_install_claims (
+    install_id text NOT NULL,
+    owner_user_id text NOT NULL,
+    claimed_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -284,6 +295,7 @@ CREATE TABLE @@SCHEMA@@.brokerage_workspace_shares (
 CREATE TABLE @@SCHEMA@@.brokerage_workspaces (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     install_id text NOT NULL,
+    owner_user_id text,
     listing_key text NOT NULL,
     address text NOT NULL,
     source_listing_url text,
@@ -602,6 +614,8 @@ CREATE TABLE @@SCHEMA@@.engagements (
     architect_of_record_email text,
     architect_of_record_role text,
     status text DEFAULT 'active'::text NOT NULL,
+    owner_user_id text DEFAULT 'migration-owner'::text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
     latitude numeric(9,6),
     longitude numeric(9,6),
     geocoded_at timestamp with time zone,
@@ -1248,6 +1262,27 @@ CREATE TABLE @@SCHEMA@@.submissions (
 );
 
 
+-- Name: user_auth_credentials; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.user_auth_credentials (
+    user_id text NOT NULL,
+    email text NOT NULL,
+    password_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: user_usage_metering; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.user_usage_metering (
+    owner_user_id text NOT NULL,
+    meter_key text NOT NULL,
+    period_start date NOT NULL,
+    count integer DEFAULT 0 NOT NULL
+);
+
+
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.users (
@@ -1385,6 +1420,12 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
 
 ALTER TABLE ONLY @@SCHEMA@@.brokerage_brief_runs
     ADD CONSTRAINT brokerage_brief_runs_pkey PRIMARY KEY (id);
+
+
+-- Name: brokerage_install_claims brokerage_install_claims_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_install_claims
+    ADD CONSTRAINT brokerage_install_claims_pkey PRIMARY KEY (install_id);
 
 
 -- Name: brokerage_wallet_ledger brokerage_wallet_ledger_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1765,6 +1806,18 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_pkey PRIMARY KEY (id);
 
 
+-- Name: user_auth_credentials user_auth_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.user_auth_credentials
+    ADD CONSTRAINT user_auth_credentials_pkey PRIMARY KEY (user_id);
+
+
+-- Name: user_usage_metering user_usage_metering_owner_user_id_meter_key_period_start_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.user_usage_metering
+    ADD CONSTRAINT user_usage_metering_owner_user_id_meter_key_period_start_pk PRIMARY KEY (owner_user_id, meter_key, period_start);
+
+
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.users
@@ -1883,9 +1936,24 @@ CREATE INDEX briefing_sources_briefing_idx ON @@SCHEMA@@.briefing_sources USING 
 CREATE UNIQUE INDEX briefing_sources_current_layer_uniq ON @@SCHEMA@@.briefing_sources USING btree (briefing_id, layer_kind) WHERE (superseded_at IS NULL);
 
 
+-- Name: brokerage_brief_runs_install_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_brief_runs_install_id_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (install_id, created_at);
+
+
 -- Name: brokerage_brief_runs_listing_key_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at);
+
+
+-- Name: brokerage_brief_runs_owner_user_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_brief_runs_owner_user_id_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (owner_user_id, created_at);
+
+
+-- Name: brokerage_install_claims_owner_user_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_install_claims_owner_user_id_idx ON @@SCHEMA@@.brokerage_install_claims USING btree (owner_user_id);
 
 
 -- Name: brokerage_wallet_ledger_install_created_idx; Type: INDEX; Schema: public; Owner: -
@@ -1911,6 +1979,11 @@ CREATE UNIQUE INDEX brokerage_workspaces_install_listing_key_uidx ON @@SCHEMA@@.
 -- Name: brokerage_workspaces_install_opened_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX brokerage_workspaces_install_opened_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (install_id, opened_at);
+
+
+-- Name: brokerage_workspaces_owner_user_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_workspaces_owner_user_id_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (owner_user_id, opened_at);
 
 
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
@@ -2033,9 +2106,19 @@ CREATE INDEX engagement_packages_engagement_created_idx ON @@SCHEMA@@.engagement
 CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
 
 
+-- Name: engagements_owner_user_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX engagements_owner_user_id_idx ON @@SCHEMA@@.engagements USING btree (owner_user_id);
+
+
 -- Name: engagements_revit_central_guid_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX engagements_revit_central_guid_uniq ON @@SCHEMA@@.engagements USING btree (revit_central_guid) WHERE (revit_central_guid IS NOT NULL);
+
+
+-- Name: engagements_tenant_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX engagements_tenant_owner_idx ON @@SCHEMA@@.engagements USING btree (tenant_id, owner_user_id);
 
 
 -- Name: eval_baselines_fixture_component_uniq; Type: INDEX; Schema: public; Owner: -
@@ -2666,6 +2749,12 @@ ALTER TABLE ONLY @@SCHEMA@@.submission_communications
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: user_auth_credentials user_auth_credentials_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.user_auth_credentials
+    ADD CONSTRAINT user_auth_credentials_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: viewpoint_renders viewpoint_renders_bim_model_id_bim_models_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
