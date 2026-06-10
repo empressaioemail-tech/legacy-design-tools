@@ -24,6 +24,7 @@ import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
+import findingOutcomesRouter from "./findingOutcomes";
 import findingsRunsRouter from "./findingsRuns";
 import findingsEvidenceLedgerRouter from "./findingsEvidenceLedger";
 import submissionEventsRouter from "./submissionEvents";
@@ -130,6 +131,9 @@ router.use(reviewerAnnotationsRouter);
 // with the reviewer-annotations router (its parametric segment is
 // always `reviewer-annotations`) so ordering is indifferent.
 router.use(submissionCommentsRouter);
+// Arrow two Phase 2 — outcome observations. Static `/findings/outcome-observations`
+// must register before the parametric findings router.
+router.use(findingOutcomesRouter);
 // V1-1 / AIR-1 — findings surface. Mounts under
 // /submissions/:submissionId/findings* and /findings/:findingId/*;
 // no path overlap with reviewer-annotations or any other router so

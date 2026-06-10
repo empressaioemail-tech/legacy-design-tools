@@ -51,7 +51,11 @@ describe("requireServiceToken", () => {
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(res._status).toBeNull();
-    expect(req.serviceAuth).toEqual({ tenantId: DEFAULT_TENANT_ID });
+    expect(req.serviceAuth).toEqual({
+      tenantId: DEFAULT_TENANT_ID,
+      jurisdictionTenant: null,
+      platformInternal: false,
+    });
   });
 
   it("accepts a case-insensitive Bearer scheme", () => {
@@ -62,7 +66,11 @@ describe("requireServiceToken", () => {
     requireServiceToken(req, res, next);
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.serviceAuth).toEqual({ tenantId: DEFAULT_TENANT_ID });
+    expect(req.serviceAuth).toEqual({
+      tenantId: DEFAULT_TENANT_ID,
+      jurisdictionTenant: null,
+      platformInternal: false,
+    });
   });
 
   it("rejects a missing Authorization header with 401", () => {

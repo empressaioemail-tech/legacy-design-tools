@@ -20,25 +20,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getServiceApiKey } from "../lib/serviceToken";
-import { DEFAULT_TENANT_ID } from "./session";
-
-// Augment Express's Request so L-route handlers can read
-// `req.serviceAuth` without a per-call cast. Uses the global `Express`
-// namespace (the same approach `session.ts` takes) so no direct
-// dependency on `express-serve-static-core` types is needed.
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      /**
-       * Set by {@link requireServiceToken} once a request presents a
-       * valid `Authorization: Bearer` service token. Absent on requests
-       * that have not passed service-token auth.
-       */
-      serviceAuth?: { tenantId: string };
-    }
-  }
-}
+import { buildGateServiceAuth } from "../lib/gateFrontSeam";
 
 /** Extract the token from an `Authorization: Bearer <token>` header. */
 function extractBearerToken(req: Request): string | null {
@@ -81,7 +63,7 @@ export const requireServiceToken: RequestHandler = (
     res.status(401).json({ error: "unauthorized" });
     return;
   }
-  req.serviceAuth = { tenantId: DEFAULT_TENANT_ID };
+  req.serviceAuth = buildGateServiceAuth(req);
   next();
 };
 
@@ -139,7 +121,7 @@ export const requireServiceTokenOrSession: RequestHandler = (
       res.status(401).json({ error: "unauthorized" });
       return;
     }
-    req.serviceAuth = { tenantId: DEFAULT_TENANT_ID };
+    req.serviceAuth = buildGateServiceAuth(req);
     next();
     return;
   }

@@ -14,6 +14,8 @@
 | Header | Value | Required |
 |---|---|---|
 | `Authorization` | `Bearer <SERVICE_API_KEY>` | yes (service path) |
+| `X-Hauska-Jurisdiction-Tenant` | tenant slug from gate `#29` (e.g. `bastrop_tx`) | recommended on service path |
+| `X-Hauska-Platform-Internal` | `true` when Hauska operator bypass applies | optional |
 | `X-Hauska-Install-Id` | — | **no** on service path |
 | `X-Hauska-Key` | same bearer value accepted | optional alias |
 

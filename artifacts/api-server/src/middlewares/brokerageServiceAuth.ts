@@ -12,7 +12,6 @@
  */
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DEFAULT_TENANT_ID } from "./session";
 import {
   brokerageAuth,
   extractBrokerageApiKey,
@@ -20,6 +19,7 @@ import {
   resolveBrokerageClientTier,
 } from "./brokerageAuth";
 import { getServiceApiKey } from "../lib/serviceToken";
+import { buildGateServiceAuth } from "../lib/gateFrontSeam";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -54,7 +54,7 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
 
   if (provided) {
     if (timingSafeStringEqual(provided, getServiceApiKey())) {
-      req.serviceAuth = { tenantId: DEFAULT_TENANT_ID };
+      req.serviceAuth = buildGateServiceAuth(req);
       req.brokerageServiceCaller = true;
       next();
       return;
@@ -83,5 +83,18 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
     return;
   }
 
+  brokerageAuth(req, res, next);
+};
+
+/** Skip extension brokerage key check when the MCP service path already authenticated. */
+export const requireBrokerageExtensionAuthUnlessService: RequestHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (isBrokerageServiceCaller(req)) {
+    next();
+    return;
+  }
   brokerageAuth(req, res, next);
 };

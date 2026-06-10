@@ -17,6 +17,8 @@ import { eq } from "drizzle-orm";
 import { db, engagements as engagementsTable } from "@workspace/db";
 import { fetchNoaaAtlas14PointEstimate } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
+import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { getHistoryService } from "../atoms/registry";
 import {
   ingestSiteDrainage,
@@ -28,6 +30,8 @@ import {
 } from "../lib/siteDrainageMaterializer";
 
 const router: IRouter = Router();
+
+router.use(requireGateEngineServiceAuth);
 
 const REFRESH_BODY_SCHEMA = z
   .object({
@@ -86,6 +90,14 @@ router.post(
       return;
     }
     const log = reqLog(req);
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
+      return;
+    }
     let result: SiteDrainageIngestResult;
     try {
       result = await ingestSiteDrainage({
@@ -120,6 +132,14 @@ router.get(
       return;
     }
     const log = reqLog(req);
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
+      return;
+    }
     let row = await loadActiveSiteDrainageRow(engagementId);
     if (!row) {
       const replayed = await rematerializeSiteDrainageFromLatestEvent({
@@ -157,6 +177,14 @@ router.get(
     const engagementId = typeof req.params.id === "string" ? req.params.id : "";
     if (!engagementId) {
       res.status(400).json({ error: "missing_engagement_id" });
+      return;
+    }
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
       return;
     }
     const [engagement] = await db

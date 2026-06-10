@@ -109,7 +109,7 @@ async function geocodeFromPlaceKey(
 }
 
 export async function ensureMcpPlaceEngagement(
-  input: EnsureMcpPlaceEngagementInput,
+  input: EnsureMcpPlaceEngagementInput & { jurisdictionTenant?: string | null },
 ): Promise<EnsureMcpPlaceEngagementResult> {
   let placeKey: string;
   let lat: number;
@@ -185,6 +185,8 @@ export async function ensureMcpPlaceEngagement(
     .where(eq(engagementsTable.nameLower, nameLower))
     .limit(1);
 
+  const tenantKey = (input.jurisdictionTenant ?? "").trim() || null;
+
   if (existing) {
     await db
       .update(engagementsTable)
@@ -196,6 +198,7 @@ export async function ensureMcpPlaceEngagement(
         jurisdictionState: state,
         geocodedAt: new Date(),
         geocodeSource: "mcp-place",
+        ...(tenantKey ? { cortexJurisdictionKey: tenantKey } : {}),
         updatedAt: new Date(),
       })
       .where(eq(engagementsTable.id, existing.id));
@@ -228,6 +231,7 @@ export async function ensureMcpPlaceEngagement(
       geocodedAt: new Date(),
       geocodeSource: "mcp-place",
       status: "active",
+      ...(tenantKey ? { cortexJurisdictionKey: tenantKey } : {}),
       ...coverageFieldsFromResolved(coverage),
     })
     .returning({ id: engagementsTable.id });

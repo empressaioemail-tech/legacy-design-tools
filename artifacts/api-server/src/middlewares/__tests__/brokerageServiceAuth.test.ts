@@ -56,7 +56,11 @@ describe("requireBrokerageAuthOrServiceToken", () => {
     requireBrokerageAuthOrServiceToken(req, res, next);
 
     expect(next).toHaveBeenCalledOnce();
-    expect(req.serviceAuth).toEqual({ tenantId: DEFAULT_TENANT_ID });
+    expect(req.serviceAuth).toEqual({
+      tenantId: DEFAULT_TENANT_ID,
+      jurisdictionTenant: null,
+      platformInternal: false,
+    });
     expect(req.brokerageServiceCaller).toBe(true);
     expect(req.brokerageAuth).toBeUndefined();
   });
