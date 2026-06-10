@@ -46,6 +46,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "../lib/logger";
 import { ensureUserProfile } from "../lib/userProfiles";
+import { verifySessionToken } from "../lib/sessionToken";
 
 /**
  * Identity attached to every request after this middleware runs. The
@@ -214,20 +215,46 @@ function applyDevOverrides(base: SessionUser, req: Request): SessionUser {
   return next;
 }
 
+function bearerTokenFromRequest(req: Request): string | null {
+  const hdr = req.headers.authorization;
+  if (!hdr?.startsWith("Bearer ")) return null;
+  const token = hdr.slice("Bearer ".length).trim();
+  return token || null;
+}
+
+/**
+ * Resolve a verified session from signed token (cookie or Bearer).
+ * Unsigned JSON cookies are accepted only outside production.
+ */
+function resolveVerifiedSession(req: Request): SessionUser | null {
+  const cookies = (req as Request & { cookies?: Record<string, unknown> })
+    .cookies;
+  const cookieRaw = cookies?.[SESSION_COOKIE];
+  try {
+    if (typeof cookieRaw === "string" && cookieRaw.includes(".")) {
+      const verified = verifySessionToken(cookieRaw);
+      if (verified.ok) return verified.session;
+    }
+    const bearer = bearerTokenFromRequest(req);
+    if (bearer?.includes(".")) {
+      const verified = verifySessionToken(bearer);
+      if (verified.ok) return verified.session;
+    }
+  } catch (err) {
+    logger.warn({ err }, "session token verification failed");
+  }
+  return null;
+}
+
 /**
  * Express middleware that derives `req.session` from the request.
  *
- * Production: always returns the anonymous applicant default — both the
- * `pr_session` cookie and the override headers are stripped at the door
- * because neither carries a verifiable authentication signal yet (see
- * file header for the rationale). Once a real auth layer lands its
- * verifier should run *before* this middleware and replace
- * {@link ANONYMOUS_APPLICANT} with the verified identity it produced.
+ * Production: verified signed tokens (SESSION_SECRET HMAC) from the
+ * `pr_session` cookie or `Authorization: Bearer` header resolve to a
+ * real user session. Unsigned client-supplied claims are still stripped.
  *
- * Non-production: the cookie path and the dev override headers are
- * honored so local development, integration tests, and the operator CLI
- * can stand in for an authenticated session without round-tripping a
- * real login flow.
+ * Non-production: verified tokens take precedence; unsigned cookie and
+ * dev override headers remain available for tests and local development.
  *
  * Always sets `req.session` — anonymous requests get the least-privilege
  * applicant default rather than `undefined`, so downstream routes never
@@ -240,38 +267,26 @@ export const sessionMiddleware: RequestHandler = (
   _res: Response,
   next: NextFunction,
 ) => {
-  // Fail-closed in production: ignore any client-supplied audience /
-  // requestor / permission claims until a verified-auth path exists.
-  // This is the central invariant the security review insisted on —
-  // see the file header for the longer rationale.
-  if (process.env["NODE_ENV"] === "production") {
+  const verified = resolveVerifiedSession(req);
+  if (verified) {
+    req.session = verified;
+  } else if (process.env["NODE_ENV"] === "production") {
     req.session = ANONYMOUS_APPLICANT;
     next();
     return;
+  } else {
+    const cookies = (req as Request & { cookies?: Record<string, unknown> })
+      .cookies;
+    if (!cookies) {
+      logger.warn(
+        "session middleware: req.cookies is undefined — cookie-parser is not wired",
+      );
+    }
+    const fromCookie = parseSessionCookie(cookies?.[SESSION_COOKIE]);
+    const base = fromCookie ?? ANONYMOUS_APPLICANT;
+    req.session = applyDevOverrides(base, req);
   }
 
-  // `req.cookies` is populated by the cookie-parser middleware. If it's
-  // missing (e.g. someone forgot to wire cookie-parser) we still want a
-  // session attached so routes don't crash — fall back to the anonymous
-  // applicant default and log once so the misconfiguration is loud.
-  const cookies = (req as Request & { cookies?: Record<string, unknown> })
-    .cookies;
-  if (!cookies) {
-    logger.warn(
-      "session middleware: req.cookies is undefined — cookie-parser is not wired",
-    );
-  }
-  const fromCookie = parseSessionCookie(cookies?.[SESSION_COOKIE]);
-  const base = fromCookie ?? ANONYMOUS_APPLICANT;
-  req.session = applyDevOverrides(base, req);
-
-  // Best-effort profile backfill. The first time we see a given user
-  // id, insert a default `users` row so the timeline does not have to
-  // render "Unknown user" for them. `ensureUserProfile` swallows its
-  // own errors and the call is fire-and-forget — a transient DB blip
-  // must never delay a request. Only `kind === "user"` actors get a
-  // profile row; agents/system have stable code-side labels and the
-  // hydration helper passes them through unchanged.
   if (req.session.requestor && req.session.requestor.kind === "user") {
     void ensureUserProfile(req.session.requestor.id);
   }

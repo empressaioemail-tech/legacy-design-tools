@@ -4,6 +4,14 @@
  * so anything we set here is visible to top-level singletons (e.g. the
  * `anthropic` SDK client and lib/db's Pool) when they initialize on import.
  *
+ * Pin NODE_ENV=test — some CI images export production, which would flip
+ * sessionMiddleware into fail-closed mode and break route suites that rely
+ * on dev overrides or unsigned test tokens.
+ */
+process.env.NODE_ENV = "test";
+
+/**
+ *
  * We deliberately:
  *   - point Anthropic at a bogus base URL so the singleton initializes
  *     without errors but any real outbound call fails fast (tests that
@@ -42,3 +50,10 @@ process.env.CODE_ATOM_QUEUE_TICK_MS = "999999999";
 // this, dev mode would generate a random per-process value that the test
 // has no way to read.
 process.env.SNAPSHOT_SECRET = "test-snapshot-secret";
+
+// Task #29 — signed session tokens (Bearer + pr_session cookie). Route
+// integration tests mint/verify HMAC tokens; pin a stable secret here so
+// CI and local runs agree without per-file env setup.
+if (!process.env.SESSION_SECRET?.trim()) {
+  process.env.SESSION_SECRET = "test-session-secret";
+}

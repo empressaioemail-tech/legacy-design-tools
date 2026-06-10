@@ -54,10 +54,12 @@ import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
+import authRouter from "./auth";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
 // Hauska Property Brief Chrome extension — API-key auth + extension CORS.
 router.use(brokerageBriefRouter);
 // /engagements/match must register BEFORE /engagements/:id otherwise Express

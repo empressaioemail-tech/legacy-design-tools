@@ -604,6 +604,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     listingKey: lk,
     address,
     payloadJson: responseBody,
+    installId: installId ?? null,
   });
 
   await emitPropertyWorkspaceCreatedEvent({

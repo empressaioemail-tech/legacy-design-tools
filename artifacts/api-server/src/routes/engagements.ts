@@ -44,6 +44,14 @@ import {
   emitEngagementSubmittedEvent,
   type EngagementEventActor,
 } from "../lib/engagementEvents";
+import {
+  engagementOwnerAnd,
+  engagementOwnerWhere,
+  loadEngagementForSession,
+  requireAuthenticatedUser,
+  sessionOwnerUserId,
+} from "../lib/engagementOwnership";
+import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
 /**
  * Resolve the actor to attribute an engagement-edit lifecycle event to.
@@ -255,11 +263,14 @@ async function mergeCoverageIntoUpdate(
   Object.assign(update, coverageFieldsFromResolved(resolved));
 }
 
-router.get("/engagements", async (_req: Request, res: Response) => {
+router.get("/engagements", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
   try {
+    const ownerFilter = engagementOwnerWhere(req.session);
     const allEngagements = await db
       .select()
       .from(engagements)
+      .where(ownerFilter)
       .orderBy(desc(engagements.updatedAt));
 
     const result = await Promise.all(
@@ -292,6 +303,9 @@ router.get("/engagements", async (_req: Request, res: Response) => {
 });
 
 router.post("/engagements", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
+  const ownerId = sessionOwnerUserId(req.session);
+  if (!ownerId) return;
   const parsed = parseCreateEngagementBody(req.body);
   if ("error" in parsed) {
     res.status(400).json({ error: parsed.error });
@@ -325,6 +339,8 @@ router.post("/engagements", async (req: Request, res: Response) => {
         projectType: parsed.projectType ?? null,
         applicantFirm: parsed.applicantFirm ?? null,
         siteContextRaw,
+        ownerUserId: ownerId,
+        tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
       })
       .returning();
     res.status(201).json(toEngagementSummary(row!, 0, null));
@@ -334,14 +350,10 @@ router.post("/engagements", async (req: Request, res: Response) => {
   }
 });
 
-async function fetchEngagementDetail(id: string) {
-  const rows = await db
-    .select()
-    .from(engagements)
-    .where(eq(engagements.id, id))
-    .limit(1);
-  const e = rows[0];
-  if (!e) return null;
+async function fetchEngagementDetail(id: string, session: Request["session"]) {
+  const loaded = await loadEngagementForSession(id, session);
+  if (!loaded.ok) return loaded;
+  const e = loaded.engagement;
 
   const snapshotRows = await db
     .select()
@@ -353,7 +365,7 @@ async function fetchEngagementDetail(id: string) {
   const latest = summaries[0] ?? null;
 
   return {
-    e,
+    ok: true as const,
     detail: {
       ...toEngagementSummary(e, summaries.length, latest),
       snapshots: summaries,
@@ -362,6 +374,7 @@ async function fetchEngagementDetail(id: string) {
 }
 
 router.get("/engagements/:id", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
   const params = GetEngagementParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -369,9 +382,9 @@ router.get("/engagements/:id", async (req: Request, res: Response) => {
   }
 
   try {
-    const out = await fetchEngagementDetail(params.data.id);
-    if (!out) {
-      res.status(404).json({ error: "Engagement not found" });
+    const out = await fetchEngagementDetail(params.data.id, req.session);
+    if (!out.ok) {
+      res.status(out.status).json({ error: out.error });
       return;
     }
     res.json(out.detail);
@@ -382,6 +395,7 @@ router.get("/engagements/:id", async (req: Request, res: Response) => {
 });
 
 router.patch("/engagements/:id", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
   const params = GetEngagementParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -396,16 +410,12 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
   const body = bodyParse.data;
 
   try {
-    const existingRows = await db
-      .select()
-      .from(engagements)
-      .where(eq(engagements.id, params.data.id))
-      .limit(1);
-    const existing = existingRows[0];
-    if (!existing) {
-      res.status(404).json({ error: "Engagement not found" });
+    const loaded = await loadEngagementForSession(params.data.id, req.session);
+    if (!loaded.ok) {
+      res.status(loaded.status).json({ error: loaded.error });
       return;
     }
+    const existing = loaded.engagement;
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (body.name !== undefined) {
@@ -598,9 +608,9 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
       }
     }
 
-    const out = await fetchEngagementDetail(existing.id);
-    if (!out) {
-      res.status(404).json({ error: "Engagement not found" });
+    const out = await fetchEngagementDetail(existing.id, req.session);
+    if (!out.ok) {
+      res.status(out.status).json({ error: out.error });
       return;
     }
     res.json(warnings.length ? { ...out.detail, warnings } : out.detail);
@@ -611,6 +621,7 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
 });
 
 router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
   const params = GetEngagementParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -618,16 +629,12 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
   }
 
   try {
-    const existingRows = await db
-      .select()
-      .from(engagements)
-      .where(eq(engagements.id, params.data.id))
-      .limit(1);
-    const existing = existingRows[0];
-    if (!existing) {
-      res.status(404).json({ error: "Engagement not found" });
+    const loaded = await loadEngagementForSession(params.data.id, req.session);
+    if (!loaded.ok) {
+      res.status(loaded.status).json({ error: loaded.error });
       return;
     }
+    const existing = loaded.engagement;
 
     const address = (existing.address ?? "").trim();
     if (!address) {
@@ -717,9 +724,9 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
       );
     }
 
-    const out = await fetchEngagementDetail(existing.id);
-    if (!out) {
-      res.status(404).json({ error: "Engagement not found" });
+    const out = await fetchEngagementDetail(existing.id, req.session);
+    if (!out.ok) {
+      res.status(out.status).json({ error: out.error });
       return;
     }
     res.json(warnings.length ? { ...out.detail, warnings } : out.detail);
@@ -778,6 +785,7 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
 router.get(
   "/engagements/:id/submissions",
   async (req: Request, res: Response) => {
+    if (requireAuthenticatedUser(req, res)) return;
     const params = GetEngagementParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: "Invalid id" });
@@ -785,13 +793,9 @@ router.get(
     }
 
     try {
-      const existingRows = await db
-        .select({ id: engagements.id })
-        .from(engagements)
-        .where(eq(engagements.id, params.data.id))
-        .limit(1);
-      if (!existingRows[0]) {
-        res.status(404).json({ error: "Engagement not found" });
+      const loaded = await loadEngagementForSession(params.data.id, req.session);
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
         return;
       }
 
@@ -851,6 +855,7 @@ router.get(
 router.post(
   "/engagements/:id/submissions",
   async (req: Request, res: Response) => {
+    if (requireAuthenticatedUser(req, res)) return;
     const params = GetEngagementParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: "Invalid id" });
@@ -864,16 +869,12 @@ router.post(
     }
 
     try {
-      const existingRows = await db
-        .select()
-        .from(engagements)
-        .where(eq(engagements.id, params.data.id))
-        .limit(1);
-      const existing = existingRows[0];
-      if (!existing) {
-        res.status(404).json({ error: "Engagement not found" });
+      const loaded = await loadEngagementForSession(params.data.id, req.session);
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
         return;
       }
+      const existing = loaded.engagement;
 
       const rawNote = bodyParse.data.note;
       const note =

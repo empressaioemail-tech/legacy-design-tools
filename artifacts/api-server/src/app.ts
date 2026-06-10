@@ -6,6 +6,7 @@ import { startQueueWorker } from "@workspace/codes";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
+import { userRateLimitMiddleware } from "./middlewares/userRateLimit";
 import { mountSpaStatic } from "./middlewares/spaStatic";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
 import { startFindingRunsSweep } from "./lib/findingRunsSweep";
@@ -63,6 +64,7 @@ app.use(express.urlencoded({ extended: true }));
 // See `middlewares/session.ts` for the cookie shape and the
 // dev-only header overrides honored when NODE_ENV !== "production".
 app.use(sessionMiddleware);
+app.use(userRateLimitMiddleware);
 
 app.use("/api", router);
 

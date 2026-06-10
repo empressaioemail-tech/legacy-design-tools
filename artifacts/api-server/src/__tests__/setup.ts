@@ -24,6 +24,7 @@ import {
 } from "@workspace/db/testing";
 import { ctx } from "./test-context";
 import { sessionMiddleware } from "../middlewares/session";
+import { userRateLimitMiddleware } from "../middlewares/userRateLimit";
 
 /**
  * Tables that the api-server tests touch. CASCADE handles FK chains, so
@@ -173,6 +174,9 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "brokerage_wallets",
   "gtm_events",
   "gtm_consent",
+  "user_auth_credentials",
+  "brokerage_install_claims",
+  "user_usage_metering",
 ];
 
 /**
@@ -197,6 +201,7 @@ export async function buildTestApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(sessionMiddleware);
+  app.use(userRateLimitMiddleware);
   app.use("/api", router);
   return app;
 }

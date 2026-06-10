@@ -128,6 +128,7 @@ async function seedEngagement(overrides: Partial<{
   jurisdictionCity: string | null;
   jurisdictionState: string | null;
   jurisdictionFips: string | null;
+  ownerUserId: string;
 }> = {}): Promise<typeof engagements.$inferSelect> {
   if (!ctx.schema) throw new Error("schema not ready");
   const name = overrides.name ?? "Test Engagement";
@@ -140,6 +141,9 @@ async function seedEngagement(overrides: Partial<{
       jurisdictionCity: overrides.jurisdictionCity ?? null,
       jurisdictionState: overrides.jurisdictionState ?? null,
       jurisdictionFips: overrides.jurisdictionFips ?? null,
+      ...(overrides.ownerUserId
+        ? { ownerUserId: overrides.ownerUserId }
+        : {}),
     })
     .returning();
   return eng;
@@ -195,7 +199,10 @@ describe("PATCH /api/engagements/:id — lifecycle events", () => {
     // cookie/JWT, but the route handler reads from `req.session`
     // either way so the contract is identical.
     mockedGeocodeAddress.mockResolvedValueOnce(null);
-    const eng = await seedEngagement({ address: "100 Original St" });
+    const eng = await seedEngagement({
+      address: "100 Original St",
+      ownerUserId: "teammate-42",
+    });
 
     const res = await request(getApp())
       .patch(`/api/engagements/${eng.id}`)
@@ -427,6 +434,7 @@ describe("POST /api/engagements/:id/geocode — lifecycle events", () => {
       address: "1 Existing Ave",
       jurisdictionCity: null,
       jurisdictionState: null,
+      ownerUserId: "teammate-7",
     });
 
     const res = await request(getApp())

@@ -14,6 +14,8 @@ export const brokerageWorkspaces = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     installId: text("install_id").notNull(),
+    /** Set when install history is claimed by an authenticated user. */
+    ownerUserId: text("owner_user_id"),
     listingKey: text("listing_key").notNull(),
     address: text("address").notNull(),
     sourceListingUrl: text("source_listing_url"),
@@ -38,6 +40,10 @@ export const brokerageWorkspaces = pgTable(
     ),
     index("brokerage_workspaces_install_opened_idx").on(
       t.installId,
+      t.openedAt,
+    ),
+    index("brokerage_workspaces_owner_user_id_idx").on(
+      t.ownerUserId,
       t.openedAt,
     ),
   ],
