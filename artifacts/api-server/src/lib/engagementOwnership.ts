@@ -1,9 +1,11 @@
 /**
  * Per-user engagement ownership predicates (Task #29).
  *
- * Internal (`audience: internal`) callers bypass owner scoping so the
- * plan-review inbox can still cross-read engagements. Applicant sessions
- * (`audience: user`) are filtered to `engagements.owner_user_id`.
+ * Phase 1 (phased-7k): anonymous sessions scope to {@link MIGRATION_OWNER_USER_ID}
+ * — the 0038 backfill owner — so the instant demo works without login.
+ *
+ * Phase 2: signed-in users (`session.requestor`) see only their own rows;
+ * internal (`audience: internal`) callers bypass owner scoping for plan-review.
  */
 
 import type { Request, Response } from "express";
@@ -25,30 +27,25 @@ export function sessionOwnerUserId(
 }
 
 /**
- * Owner id used for access checks. Outside production, anonymous applicant
- * sessions inherit legacy `migration-owner` rows so existing route tests
- * keep working without minting a user token on every request.
+ * Demo/anonymous owner id. Migration 0038 backfilled legacy engagements here;
+ * anonymous create/read paths use the same id so existing data stays reachable.
+ */
+export function anonymousOwnerUserId(): string {
+  return MIGRATION_OWNER_USER_ID;
+}
+
+/**
+ * Owner id used for access checks. Anonymous → demo owner; signed-in → requestor id.
  */
 export function effectiveOwnerUserId(session: SessionUser): string | null {
-  const ownerId = sessionOwnerUserId(session);
-  if (ownerId) return ownerId;
-  if (process.env["NODE_ENV"] !== "production") {
-    return MIGRATION_OWNER_USER_ID;
-  }
-  return null;
+  if (isInternalSession(session)) return null;
+  return sessionOwnerUserId(session) ?? anonymousOwnerUserId();
 }
 
 /** SQL fragment scoping engagements to the session owner (or true for internal). */
 export function engagementOwnerWhere(session: SessionUser): SQL | undefined {
   if (isInternalSession(session)) return undefined;
-  const ownerId = sessionOwnerUserId(session);
-  if (!ownerId) {
-    if (process.env["NODE_ENV"] !== "production") {
-      return eq(engagements.ownerUserId, MIGRATION_OWNER_USER_ID);
-    }
-    return eq(engagements.ownerUserId, "__no_such_owner__");
-  }
-  return eq(engagements.ownerUserId, ownerId);
+  return eq(engagements.ownerUserId, effectiveOwnerUserId(session)!);
 }
 
 export function engagementOwnerAnd(
@@ -64,14 +61,14 @@ export function engagementOwnerAnd(
 }
 
 /**
- * Require an authenticated user session for applicant-scoped routes.
+ * Require a signed-in user (Phase 2 personal features — inbox, Canva, etc.).
+ * Demo engagement routes must NOT call this.
  * Returns true if a 401 was sent.
  */
 export function requireAuthenticatedUser(
   req: Request,
   res: Response,
 ): boolean {
-  if (process.env["NODE_ENV"] !== "production") return false;
   if (isInternalSession(req.session)) return false;
   if (sessionOwnerUserId(req.session)) return false;
   res.status(401).json({ error: "authentication_required" });
@@ -119,13 +116,6 @@ export async function loadEngagementForSession(
     )
     .limit(1);
   if (!row) {
-    if (
-      !isInternalSession(session) &&
-      !sessionOwnerUserId(session) &&
-      process.env["NODE_ENV"] === "production"
-    ) {
-      return { ok: false, status: 401, error: "authentication_required" };
-    }
     return { ok: false, status: 404, error: "engagement_not_found" };
   }
   return { ok: true, engagement: row };

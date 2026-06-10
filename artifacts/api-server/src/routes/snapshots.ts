@@ -42,13 +42,11 @@ import {
   streamSnapshotIfcGltf,
 } from "../lib/ifcIngest";
 import {
+  effectiveOwnerUserId,
   engagementOwnerAnd,
   loadEngagementForSession,
-  requireAuthenticatedUser,
-  sessionOwnerUserId,
 } from "../lib/engagementOwnership";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
-import { MIGRATION_OWNER_USER_ID } from "../lib/sessionToken";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -538,7 +536,6 @@ function fireGeocodeAndWarmup(
 }
 
 router.get("/snapshots", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
   try {
     const ownerFilter = engagementOwnerAnd(req.session);
     const rows = await db
@@ -656,8 +653,7 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     let outcome: SnapshotAttachOutcome;
     try {
       outcome = await db.transaction(async (tx) => {
-        const snapshotOwner =
-          sessionOwnerUserId(req.session) ?? MIGRATION_OWNER_USER_ID;
+        const snapshotOwner = effectiveOwnerUserId(req.session)!;
         const [eng] = await tx
           .insert(engagements)
           .values({
@@ -755,7 +751,6 @@ router.post("/snapshots", async (req: Request, res: Response) => {
 });
 
 router.get("/snapshots/:id", async (req: Request, res: Response) => {
-  if (requireAuthenticatedUser(req, res)) return;
   const params = GetSnapshotParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });

@@ -1,13 +1,15 @@
 /**
  * Task #29 — cross-user engagement isolation (mirrors gate tenant-isolation rigor).
+ * Phase 1: anonymous sessions scope to migration-owner demo data only.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import { db, engagements } from "@workspace/db";
+import { MIGRATION_OWNER_USER_ID } from "../lib/sessionToken";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -37,6 +39,11 @@ function asUser(req: Test, userId: string): Test {
 describe("engagement ownership isolation", () => {
   beforeEach(async () => {
     await db.insert(engagements).values([
+      {
+        name: "Demo Project",
+        nameLower: "demo project",
+        ownerUserId: MIGRATION_OWNER_USER_ID,
+      },
       {
         name: "User A Project",
         nameLower: "user a project",
@@ -73,13 +80,51 @@ describe("engagement ownership isolation", () => {
     expect(res.body.error).toBe("engagement_not_found");
   });
 
-  it("anonymous caller receives 401 on GET /engagements in production", async () => {
+  it("anonymous caller sees only migration-owner engagements in production", async () => {
     const prev = process.env["NODE_ENV"];
     process.env["NODE_ENV"] = "production";
     try {
       const res = await request(getApp()).get("/api/engagements");
-      expect(res.status).toBe(401);
-      expect(res.body.error).toBe("authentication_required");
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].name).toBe("Demo Project");
+    } finally {
+      process.env["NODE_ENV"] = prev;
+    }
+  });
+
+  it("anonymous caller cannot read user-owned engagement by id in production", async () => {
+    const prev = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
+    try {
+      const [rowA] = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.ownerUserId, "user-a"));
+
+      const res = await request(getApp()).get(`/api/engagements/${rowA!.id}`);
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("engagement_not_found");
+    } finally {
+      process.env["NODE_ENV"] = prev;
+    }
+  });
+
+  it("anonymous caller can create engagements owned by migration-owner in production", async () => {
+    const prev = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
+    try {
+      const res = await request(getApp())
+        .post("/api/engagements")
+        .send({ name: "New Anonymous Project" });
+      expect(res.status).toBe(201);
+      expect(res.body.name).toBe("New Anonymous Project");
+
+      const [row] = await db
+        .select({ ownerUserId: engagements.ownerUserId })
+        .from(engagements)
+        .where(eq(engagements.id, res.body.id));
+      expect(row?.ownerUserId).toBe(MIGRATION_OWNER_USER_ID);
     } finally {
       process.env["NODE_ENV"] = prev;
     }
