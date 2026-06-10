@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
+import { verifySessionToken } from "../lib/sessionToken";
 
-export type BrokerageClientTier = "dev" | "extension_public";
+export type BrokerageClientTier = "dev" | "extension_public" | "user";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -90,14 +91,24 @@ export function brokerageAuth(
 
   const provided = extractBrokerageApiKey(req);
 
-  if (!provided || !keys.has(provided)) {
-    res.status(401).json({
-      error: "unauthorized",
-      message: "Valid Authorization Bearer or X-Hauska-Key required",
-    });
+  if (provided && keys.has(provided)) {
+    req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
+    next();
     return;
   }
 
-  req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
-  next();
+  if (provided?.includes(".")) {
+    const verified = verifySessionToken(provided);
+    if (verified.ok && verified.session.requestor?.kind === "user") {
+      req.session = verified.session;
+      req.brokerageAuth = { tier: "user" };
+      next();
+      return;
+    }
+  }
+
+  res.status(401).json({
+    error: "unauthorized",
+    message: "Valid Authorization Bearer or X-Hauska-Key required",
+  });
 }

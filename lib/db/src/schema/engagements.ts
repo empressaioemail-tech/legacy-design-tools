@@ -43,6 +43,18 @@ export const engagements = pgTable(
     architectOfRecordRole: text("architect_of_record_role"),
     status: text("status").notNull().default("active"),
 
+    /**
+     * Task #29 — per-user ownership for Cortex self-serve isolation.
+     * Opaque text id (same shape as `users.id` / session requestor id).
+     * Legacy rows backfilled to `migration-owner`.
+     */
+    ownerUserId: text("owner_user_id").notNull().default("migration-owner"),
+    /**
+     * ADR-005 tenant scope. Defaults to `default` until a verified tenant
+     * claim is minted by the auth layer.
+     */
+    tenantId: text("tenant_id").notNull().default("default"),
+
     // Wave 1.2: site context fields (all nullable, additive)
     latitude: numeric("latitude", { precision: 9, scale: 6 }),
     longitude: numeric("longitude", { precision: 9, scale: 6 }),
@@ -80,6 +92,11 @@ export const engagements = pgTable(
   },
   (t) => ({
     nameLowerIdx: index("engagements_name_lower_idx").on(t.nameLower),
+    ownerUserIdIdx: index("engagements_owner_user_id_idx").on(t.ownerUserId),
+    tenantOwnerIdx: index("engagements_tenant_owner_idx").on(
+      t.tenantId,
+      t.ownerUserId,
+    ),
     revitCentralGuidUniq: uniqueIndex("engagements_revit_central_guid_uniq")
       .on(t.revitCentralGuid)
       .where(sql`${t.revitCentralGuid} IS NOT NULL`),

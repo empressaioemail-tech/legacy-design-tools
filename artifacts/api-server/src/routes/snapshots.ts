@@ -41,6 +41,14 @@ import {
   streamSnapshotIfcBlob,
   streamSnapshotIfcGltf,
 } from "../lib/ifcIngest";
+import {
+  engagementOwnerAnd,
+  loadEngagementForSession,
+  requireAuthenticatedUser,
+  sessionOwnerUserId,
+} from "../lib/engagementOwnership";
+import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import { MIGRATION_OWNER_USER_ID } from "../lib/sessionToken";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -529,8 +537,10 @@ function fireGeocodeAndWarmup(
   })();
 }
 
-router.get("/snapshots", async (_req: Request, res: Response) => {
+router.get("/snapshots", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
   try {
+    const ownerFilter = engagementOwnerAnd(req.session);
     const rows = await db
       .select({
         id: snapshots.id,
@@ -545,6 +555,7 @@ router.get("/snapshots", async (_req: Request, res: Response) => {
       })
       .from(snapshots)
       .innerJoin(engagements, eq(engagements.id, snapshots.engagementId))
+      .where(ownerFilter)
       .orderBy(desc(snapshots.receivedAt));
 
     res.json(
@@ -645,6 +656,8 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     let outcome: SnapshotAttachOutcome;
     try {
       outcome = await db.transaction(async (tx) => {
+        const snapshotOwner =
+          sessionOwnerUserId(req.session) ?? MIGRATION_OWNER_USER_ID;
         const [eng] = await tx
           .insert(engagements)
           .values({
@@ -655,6 +668,8 @@ router.post("/snapshots", async (req: Request, res: Response) => {
             jurisdiction: null,
             revitCentralGuid: guid,
             revitDocumentPath: path,
+            ownerUserId: snapshotOwner,
+            tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
           })
           .returning();
         const [snap] = await tx
@@ -740,6 +755,7 @@ router.post("/snapshots", async (req: Request, res: Response) => {
 });
 
 router.get("/snapshots/:id", async (req: Request, res: Response) => {
+  if (requireAuthenticatedUser(req, res)) return;
   const params = GetSnapshotParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -747,6 +763,7 @@ router.get("/snapshots/:id", async (req: Request, res: Response) => {
   }
 
   try {
+    const ownerFilter = engagementOwnerAnd(req.session, eq(snapshots.id, params.data.id));
     const rows = await db
       .select({
         id: snapshots.id,
@@ -762,7 +779,7 @@ router.get("/snapshots/:id", async (req: Request, res: Response) => {
       })
       .from(snapshots)
       .innerJoin(engagements, eq(engagements.id, snapshots.engagementId))
-      .where(eq(snapshots.id, params.data.id))
+      .where(ownerFilter)
       .limit(1);
 
     const row = rows[0];

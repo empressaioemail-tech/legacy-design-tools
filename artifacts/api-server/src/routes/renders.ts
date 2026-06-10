@@ -94,6 +94,10 @@ import {
 } from "../lib/objectStorage";
 import { Readable } from "node:stream";
 import { runRendersSweep } from "../lib/rendersSweep";
+import {
+  loadEngagementForSession,
+  requireEngagementOwnerForRenders,
+} from "../lib/engagementOwnership";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constants
@@ -169,7 +173,7 @@ const RENDER_SYSTEM_ACTOR: { kind: "system"; id: string } = {
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// Audience guard (inline pending V1-3's audienceGuards.ts)
+// Ownership guard (QA-30/31 follow-up — engagement owner, not audience)
 // ─────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1530,13 +1534,18 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
   }
 
   const engagementId = params.data.id;
-  const [eng] = await db
-    .select({ id: engagements.id })
-    .from(engagements)
-    .where(eq(engagements.id, engagementId))
-    .limit(1);
-  if (!eng) {
-    res.status(404).json({ error: "engagement_not_found" });
+  const loaded = await loadEngagementForSession(engagementId, req.session);
+  if (!loaded.ok) {
+    res.status(loaded.status).json({ error: loaded.error });
+    return;
+  }
+  if (
+    requireEngagementOwnerForRenders(
+      req,
+      res,
+      loaded.engagement.ownerUserId,
+    )
+  ) {
     return;
   }
 
@@ -1875,6 +1884,20 @@ router.get("/engagements/:id/renders", async (req: Request, res: Response) => {
   const params = EngagementIdParamsSchema.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "invalid_engagement_id" });
+    return;
+  }
+  const loaded = await loadEngagementForSession(params.data.id, req.session);
+  if (!loaded.ok) {
+    res.status(loaded.status).json({ error: loaded.error });
+    return;
+  }
+  if (
+    requireEngagementOwnerForRenders(
+      req,
+      res,
+      loaded.engagement.ownerUserId,
+    )
+  ) {
     return;
   }
   const rows = await db
