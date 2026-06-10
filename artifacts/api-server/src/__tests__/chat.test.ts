@@ -151,11 +151,33 @@ describe("POST /api/chat", () => {
     expect(res.body).toEqual({ error: "Engagement not found" });
   });
 
-  it("400 with no_snapshots when the engagement has no snapshot yet", async () => {
+  it("streams chat for an engagement with no snapshot yet (web-first wedge)", async () => {
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
     const eng = await seedEngagementWithSnapshot({ withSnapshot: false });
     const res = await request(getApp())
       .post("/api/chat")
-      .send({ engagementId: eng.id, question: "hi" });
+      .send({ engagementId: eng.id, question: "What is on the plan set?" });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    expect(anthropicMocks.lastArgs.system).toContain(
+      "No Revit model has been pushed yet",
+    );
+    expect(anthropicMocks.lastArgs.system).toContain(
+      "list_attached_documents",
+    );
+  });
+
+  it("400 with no_snapshots when snapshot focus is requested without a pushed model", async () => {
+    const eng = await seedEngagementWithSnapshot({ withSnapshot: false });
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        question: "hi",
+        snapshotFocus: true,
+      });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("no_snapshots");
   });

@@ -866,14 +866,22 @@ async function handleReadAttachedDocument(
       isError: true,
     };
   }
+  const text = doc.extractedText.trim();
+  const hasVisionRead = text.includes("[source: vision-read");
+  const verificationState = hasVisionRead
+    ? "unverified-model-read"
+    : text.length > 0
+      ? "text-extraction"
+      : "none";
   return {
     resultText: asJson({
       id: doc.id,
       title: doc.title,
       documentType: doc.documentType,
       uploadedAt: doc.createdAt,
+      verificationState,
       extractedText:
-        doc.extractedText.trim().length > 0
+        text.length > 0
           ? doc.extractedText
           : "(no readable text — this document was stored as a binary file with no note)",
     }),

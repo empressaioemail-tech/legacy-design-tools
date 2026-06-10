@@ -163,8 +163,8 @@ export function ClaudeChat({
   const loadAttachedDocuments = useEngagementsStore(
     (s) => s.loadAttachedDocuments,
   );
-  const uploadAttachedDocument = useEngagementsStore(
-    (s) => s.uploadAttachedDocument,
+  const uploadAttachedDocuments = useEngagementsStore(
+    (s) => s.uploadAttachedDocuments,
   );
   const collapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
@@ -272,14 +272,16 @@ export function ClaudeChat({
   };
 
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     // Clear the value so re-selecting the same file still fires onChange.
     e.target.value = "";
-    if (file) void uploadAttachedDocument(engagementId, file);
+    if (files.length > 0) {
+      void uploadAttachedDocuments(engagementId, files);
+    }
   };
 
   const handleSend = () => {
-    if (!input.trim() || !hasSnapshots || streaming) return;
+    if (!input.trim() || streaming) return;
     // Cap the staged ids client-side too — the server caps at the same
     // value, but trimming here keeps the user message chip honest about
     // what was actually compared.
@@ -350,7 +352,7 @@ export function ClaudeChat({
     ? "Ask which projects need attention (Cmd/Ctrl + Enter)"
     : hasSnapshots
       ? "Ask a question (Cmd/Ctrl + Enter to send)"
-      : "Send a snapshot from Revit first.";
+      : "Upload plans or ask a question (Cmd/Ctrl + Enter)";
 
   return (
     <div className="flex flex-col h-full">
@@ -891,7 +893,7 @@ export function ClaudeChat({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={!hasSnapshots || streaming}
+          disabled={streaming}
           placeholder={placeholder}
           className="w-full resize-none rounded-md sc-ui sc-scroll"
           style={{
@@ -919,6 +921,7 @@ export function ClaudeChat({
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               accept={DOCUMENT_UPLOAD_ACCEPT}
               onChange={handleFileSelected}
               data-testid="claude-chat-file-input"
@@ -928,9 +931,9 @@ export function ClaudeChat({
             <button
               type="button"
               onClick={handleAttachClick}
-              disabled={!hasSnapshots || streaming || uploadingDocument}
-              aria-label="Attach a client document"
-              title="Attach a client PDF, photo, or note to this engagement"
+              disabled={streaming || uploadingDocument}
+              aria-label="Attach client documents"
+              title="Attach client PDFs, photos, or notes to this engagement (multi-select supported)"
               className="sc-ui"
               style={{
                 display: "inline-flex",
@@ -942,14 +945,11 @@ export function ClaudeChat({
                 padding: "4px 8px",
                 borderRadius: 4,
                 cursor:
-                  !hasSnapshots || streaming || uploadingDocument
-                    ? "not-allowed"
-                    : "pointer",
+                  streaming || uploadingDocument ? "not-allowed" : "pointer",
                 background: "transparent",
                 border: "1px solid var(--border-default)",
                 color: "var(--text-secondary)",
-                opacity:
-                  !hasSnapshots || streaming || uploadingDocument ? 0.5 : 1,
+                opacity: streaming || uploadingDocument ? 0.5 : 1,
               }}
             >
               <Paperclip size={12} />
@@ -1052,7 +1052,7 @@ export function ClaudeChat({
             <button
               className="sc-btn-primary"
               onClick={handleSend}
-              disabled={!hasSnapshots || streaming || !input.trim()}
+              disabled={streaming || !input.trim()}
             >
               Send
             </button>

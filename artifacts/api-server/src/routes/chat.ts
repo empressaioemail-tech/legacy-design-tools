@@ -269,15 +269,25 @@ router.post("/chat", async (req: Request, res: Response) => {
   const latestSnapshotRef = engagementSummary.relatedAtoms.find(
     (r) => r.entityType === "snapshot",
   );
-  if (!latestSnapshotRef) {
-    res.status(400).json({
-      error: "no_snapshots",
-      message:
-        "No snapshots yet for this engagement. Send one from Revit first.",
-    });
-    return;
+  const hasSnapshots = latestSnapshotRef != null;
+  const latestSnapshotId = latestSnapshotRef?.entityId;
+
+  // Snapshot focus requires a pushed model — the default chat path does not.
+  if (!hasSnapshots) {
+    const wantsFocus =
+      explicitSnapshotFocus === true ||
+      (explicitSnapshotFocusIds != null &&
+        explicitSnapshotFocusIds.length > 0) ||
+      parseInlineSnapshotFocusIds(question).size > 0;
+    if (wantsFocus) {
+      res.status(400).json({
+        error: "no_snapshots",
+        message:
+          "Snapshot focus requires a pushed Revit model. Upload plans and chat without focus until a snapshot arrives.",
+      });
+      return;
+    }
   }
-  const latestSnapshotId = latestSnapshotRef.entityId;
 
   // Build the engagement's full snapshot id set (sorted most-recent
   // first) once, off the same `relatedAtoms` view the latest-id lookup
@@ -300,24 +310,26 @@ router.post("/chat", async (req: Request, res: Response) => {
   // (e.g. throwing on a stale id) drops the framework entry but lets
   // the chat continue with engagement + raw payload.
   let snapshotSummary: ContextSummary<"snapshot"> | null = null;
-  const snapshotResolution = getAtomRegistry().resolve("snapshot");
-  if (snapshotResolution.ok) {
-    try {
-      snapshotSummary = await snapshotResolution.registration.contextSummary(
-        latestSnapshotId,
-        scope,
-      );
-    } catch (err) {
+  if (hasSnapshots && latestSnapshotId) {
+    const snapshotResolution = getAtomRegistry().resolve("snapshot");
+    if (snapshotResolution.ok) {
+      try {
+        snapshotSummary = await snapshotResolution.registration.contextSummary(
+          latestSnapshotId,
+          scope,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, engagementId, snapshotId: latestSnapshotId },
+          "chat: snapshot atom contextSummary threw — skipping framework entry",
+        );
+      }
+    } else {
       logger.warn(
-        { err, engagementId, snapshotId: latestSnapshotId },
-        "chat: snapshot atom contextSummary threw — skipping framework entry",
+        { err: snapshotResolution.error.message },
+        "chat: snapshot atom not registered — typed snapshot summary skipped",
       );
     }
-  } else {
-    logger.warn(
-      { err: snapshotResolution.error.message },
-      "chat: snapshot atom not registered — typed snapshot summary skipped",
-    );
   }
 
   // Snapshot focus mode (Task #39, expanded by Task #44). Three opt-in
@@ -393,6 +405,8 @@ router.post("/chat", async (req: Request, res: Response) => {
   // precedence over the implicit "and also the latest" interpretation.
   // Skipped entirely if the latest id is already in the set.
   if (
+    hasSnapshots &&
+    latestSnapshotId &&
     explicitSnapshotFocus === true &&
     requestedFocusIds.length < MAX_FOCUS_SNAPSHOTS
   ) {
@@ -403,63 +417,63 @@ router.post("/chat", async (req: Request, res: Response) => {
 
   let snapshotReceivedAt: Date | undefined;
   const focusPayloadById = new Map<string, unknown>();
-  try {
-    // `receivedAt` for the *latest* snapshot is always needed (it
-    // drives the "captured <relative-time> ago" framing sentence).
-    // When focus mode is on for this turn we batch the latest-id
-    // lookup with the focus-id payload reads via a single `inArray`
-    // query, so the worst case is still one round-trip. Default path
-    // stays a single-row primary-key lookup.
-    if (snapshotFocusOn) {
-      // Always include latestSnapshotId so we can populate
-      // `snapshotReceivedAt`, even if the caller is only focusing on
-      // older snapshots. The set lookup below is keyed off the row's
-      // own id so the merge stays unambiguous.
-      const ids = new Set<string>(requestedFocusIds);
-      ids.add(latestSnapshotId);
-      const sRows = await db
-        .select({
-          id: snapshots.id,
-          receivedAt: snapshots.receivedAt,
-          payload: snapshots.payload,
-        })
-        .from(snapshots)
-        .where(inArray(snapshots.id, Array.from(ids)));
-      for (const row of sRows) {
-        if (row.id === latestSnapshotId) {
-          snapshotReceivedAt = row.receivedAt;
+  if (hasSnapshots && latestSnapshotId) {
+    try {
+      // `receivedAt` for the *latest* snapshot is always needed (it
+      // drives the "captured <relative-time> ago" framing sentence).
+      // When focus mode is on for this turn we batch the latest-id
+      // lookup with the focus-id payload reads via a single `inArray`
+      // query, so the worst case is still one round-trip. Default path
+      // stays a single-row primary-key lookup.
+      if (snapshotFocusOn) {
+        // Always include latestSnapshotId so we can populate
+        // `snapshotReceivedAt`, even if the caller is only focusing on
+        // older snapshots. The set lookup below is keyed off the row's
+        // own id so the merge stays unambiguous.
+        const ids = new Set<string>(requestedFocusIds);
+        ids.add(latestSnapshotId);
+        const sRows = await db
+          .select({
+            id: snapshots.id,
+            receivedAt: snapshots.receivedAt,
+            payload: snapshots.payload,
+          })
+          .from(snapshots)
+          .where(inArray(snapshots.id, Array.from(ids)));
+        for (const row of sRows) {
+          if (row.id === latestSnapshotId) {
+            snapshotReceivedAt = row.receivedAt;
+          }
+          if (requestedFocusSeen.has(row.id)) {
+            focusPayloadById.set(row.id, row.payload as unknown);
+          }
         }
-        if (requestedFocusSeen.has(row.id)) {
-          focusPayloadById.set(row.id, row.payload as unknown);
-        }
+      } else {
+        const sRows = await db
+          .select({ receivedAt: snapshots.receivedAt })
+          .from(snapshots)
+          .where(eq(snapshots.id, latestSnapshotId))
+          .limit(1);
+        snapshotReceivedAt = sRows[0]?.receivedAt;
       }
-    } else {
-      const sRows = await db
-        .select({ receivedAt: snapshots.receivedAt })
-        .from(snapshots)
-        .where(eq(snapshots.id, latestSnapshotId))
-        .limit(1);
-      snapshotReceivedAt = sRows[0]?.receivedAt;
+    } catch (err) {
+      logger.error(
+        { err, engagementId, snapshotIds: requestedFocusIds },
+        "chat snapshot lookup failed",
+      );
+      res.status(500).json({ error: "Failed to load engagement" });
+      return;
     }
-  } catch (err) {
-    logger.error(
-      { err, engagementId, snapshotIds: requestedFocusIds },
-      "chat snapshot lookup failed",
-    );
-    res.status(500).json({ error: "Failed to load engagement" });
-    return;
-  }
 
-  if (!snapshotReceivedAt) {
-    // The engagement atom said this snapshot existed a moment ago. If
-    // the row is gone now (deleted between reads) treat it the same as
-    // "no snapshots" — the wire contract callers expect.
-    res.status(400).json({
-      error: "no_snapshots",
-      message:
-        "No snapshots yet for this engagement. Send one from Revit first.",
-    });
-    return;
+    if (!snapshotReceivedAt) {
+      // The engagement atom said this snapshot existed a moment ago. If
+      // the row is gone now (deleted between reads) continue without
+      // snapshot framing — geometry enriches, never gates.
+      logger.warn(
+        { engagementId, snapshotId: latestSnapshotId },
+        "chat: snapshot row missing after atom read — proceeding without snapshot framing",
+      );
+    }
   }
 
   // Materialize `focusPayloads` in the same order the route resolved
@@ -500,7 +514,7 @@ router.post("/chat", async (req: Request, res: Response) => {
       historyProvenance: engagementSummary.historyProvenance,
     },
   ];
-  if (snapshotSummary) {
+  if (snapshotSummary && latestSnapshotId) {
     frameworkAtoms.push({
       entityType: "snapshot",
       entityId: latestSnapshotId,
@@ -730,21 +744,24 @@ router.post("/chat", async (req: Request, res: Response) => {
       address: engagementTyped.address ?? null,
       jurisdiction: engagementTyped.jurisdiction ?? null,
     },
-    latestSnapshot: {
-      receivedAt: snapshotReceivedAt,
-      // Focus mode (Task #39, expanded by Task #44): array of one
-      // entry per snapshot the caller opted into for this turn (via
-      // explicit flag, explicit `snapshotFocusIds`, and/or inline
-      // `{{atom|snapshot|<id>|focus}}` references). Each payload is
-      // forwarded as-is — the formatter owns the serialization +
-      // per-block size cap. When a payload is null (the row exists
-      // but `payload` happens to be JSON null) we still honor focus
-      // mode for that id and the formatter emits `null` in the
-      // block, making it obvious the snapshot has no structured
-      // detail to mine. Empty array → formatter omits both the
-      // `<snapshot_focus>` blocks and the instruction line.
-      ...(focusPayloads.length > 0 ? { focusPayloads } : {}),
-    },
+    latestSnapshot:
+      snapshotReceivedAt != null
+        ? {
+            receivedAt: snapshotReceivedAt,
+            // Focus mode (Task #39, expanded by Task #44): array of one
+            // entry per snapshot the caller opted into for this turn (via
+            // explicit flag, explicit `snapshotFocusIds`, and/or inline
+            // `{{atom|snapshot|<id>|focus}}` references). Each payload is
+            // forwarded as-is — the formatter owns the serialization +
+            // per-block size cap. When a payload is null (the row exists
+            // but `payload` happens to be JSON null) we still honor focus
+            // mode for that id and the formatter emits `null` in the
+            // block, making it obvious the snapshot has no structured
+            // detail to mine. Empty array → formatter omits both the
+            // `<snapshot_focus>` blocks and the instruction line.
+            ...(focusPayloads.length > 0 ? { focusPayloads } : {}),
+          }
+        : null,
     allAtoms,
     attachedSheets,
     question,

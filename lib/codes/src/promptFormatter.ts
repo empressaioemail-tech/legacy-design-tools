@@ -296,7 +296,11 @@ export interface PromptOutputMessage {
 
 export interface BuildChatPromptInput {
   engagement: PromptEngagement;
-  latestSnapshot: PromptSnapshot;
+  /**
+   * Latest Revit snapshot framing. Omitted when the engagement has no pushed
+   * model yet — the web-first wedge grounds on uploaded documents instead.
+   */
+  latestSnapshot?: PromptSnapshot | null;
   allAtoms: RetrievedAtom[];
   attachedSheets: PromptAttachedSheet[];
   question: string;
@@ -1300,7 +1304,10 @@ export function buildChatPrompt(
   const jurisdictionSuffix = engagement.jurisdiction
     ? ` (${engagement.jurisdiction})`
     : "";
-  const captured = relativeTime(latestSnapshot.receivedAt, now());
+  const hasSnapshot = latestSnapshot != null;
+  const captured = hasSnapshot
+    ? relativeTime(latestSnapshot.receivedAt, now())
+    : null;
 
   // The reference_code_atoms XML block is assembled by a helper so the
   // /dev/atoms/probe diagnostic can render the SAME bytes the LLM would
@@ -1356,7 +1363,7 @@ export function buildChatPrompt(
   // target. Default chat path leaves `focusPayloads` empty, both
   // surfaces stay empty, and the Task #34 JSON-free contract is
   // preserved.
-  const focusPayloads = latestSnapshot.focusPayloads ?? [];
+  const focusPayloads = latestSnapshot?.focusPayloads ?? [];
   const focusFormatted =
     focusPayloads.length > 0
       ? formatSnapshotFocusBlocks(focusPayloads)
@@ -1412,8 +1419,11 @@ export function buildChatPrompt(
   // per turn and uses the new `<snapshot_focus>` shape above. The
   // snapshot atom's prose (in `<framework_atoms>`) keeps carrying
   // project name, counts, and the compact sheet listing on every turn.
+  const engagementFraming = hasSnapshot
+    ? `You are helping an architect understand their Revit model for the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. The most recent snapshot was captured ${captured}.`
+    : `You are helping an architect review the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. No Revit model has been pushed yet — ground answers on uploaded client documents (use list_attached_documents and read_attached_document) and jurisdiction context. When a model arrives it will enrich this context; it is not required now.`;
   const systemPrompt =
-    `You are helping an architect understand their Revit model for the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. The most recent snapshot was captured ${captured}.\n\n` +
+    `${engagementFraming}\n\n` +
     "Answer grounded in the structured atoms below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot." +
     codeCitationInstruction +
     atomReferenceInstruction +

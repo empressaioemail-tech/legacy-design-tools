@@ -321,6 +321,21 @@ describe("relativeTime: bucket boundaries", () => {
   });
 });
 
+describe("buildChatPrompt: web-first wedge (no snapshot)", () => {
+  it("frames the engagement without a Revit snapshot and directs document tools", () => {
+    const { systemPrompt } = buildChatPrompt(
+      baseInput({
+        latestSnapshot: null,
+      }),
+    );
+    expect(systemPrompt).toContain("No Revit model has been pushed yet");
+    expect(systemPrompt).toContain("list_attached_documents");
+    expect(systemPrompt).not.toContain(
+      "The most recent snapshot was captured",
+    );
+  });
+});
+
 describe("buildChatPrompt: snapshot framing without raw payload (Task #34)", () => {
   it("renders the captured-time framing sentence using receivedAt", () => {
     // The opening framing sentence still has to land — the snapshot
