@@ -39,6 +39,30 @@ const SECTION_KINDS: ReadonlyArray<LetterSectionKind> = [
   "signature",
 ];
 
+const SECTION_KIND_ORDER: Record<LetterSectionKind, number> = {
+  cover: 0,
+  intro: 1,
+  "per-comment-response": 2,
+  signature: 99,
+};
+
+function sortLetterSections(
+  sections: ReadonlyArray<LetterSection>,
+): LetterSection[] {
+  return [...sections].sort(
+    (a, b) => SECTION_KIND_ORDER[a.kind] - SECTION_KIND_ORDER[b.kind],
+  );
+}
+
+function letterExportPdfUrl(letterId: string, download = false): string {
+  const q = download ? "?download=1" : "";
+  return `/api/deliverable-letters/${letterId}/export.pdf${q}`;
+}
+
+function letterPreviewHtmlUrl(letterId: string): string {
+  return `/api/deliverable-letters/${letterId}/preview.html`;
+}
+
 /** Section kinds a letter must carry to be complete / sendable. */
 const REQUIRED_KINDS: ReadonlyArray<LetterSectionKind> = [
   "cover",
@@ -226,6 +250,115 @@ function CreateLetterDialog({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     Read / preview document view                           */
+/* -------------------------------------------------------------------------- */
+
+function sectionProvenanceSummary(section: LetterSection): string | null {
+  const p = section.provenance;
+  const parts: string[] = [];
+  if (p.findingIds.length > 0) parts.push(`${p.findingIds.length} finding(s)`);
+  if (p.responseTaskIds.length > 0) {
+    parts.push(`${p.responseTaskIds.length} response task(s)`);
+  }
+  if (p.sheetContentExtractionIds.length > 0) {
+    parts.push(`${p.sheetContentExtractionIds.length} sheet extraction(s)`);
+  }
+  if (p.adjudicationStateIds.length > 0) {
+    parts.push(`${p.adjudicationStateIds.length} adjudication(s)`);
+  }
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
+function LetterDocumentPreview({
+  title,
+  sections,
+}: {
+  title: string;
+  sections: ReadonlyArray<LetterSection>;
+}) {
+  const ordered = sortLetterSections(sections);
+
+  return (
+    <article
+      data-testid="deliverable-letter-document-preview"
+      style={{
+        fontFamily: '"Times New Roman", Times, serif',
+        fontSize: 13,
+        lineHeight: 1.5,
+        color: "var(--text-primary)",
+        background: "#fff",
+        border: "1px solid var(--border-default)",
+        borderRadius: 6,
+        padding: "28px 32px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+      }}
+    >
+      <h1
+        style={{
+          fontSize: 17,
+          fontWeight: 700,
+          textAlign: "center",
+          margin: "0 0 1.5rem",
+          letterSpacing: "0.02em",
+        }}
+      >
+        {title}
+      </h1>
+      {ordered.map((section, i) => {
+        const heading =
+          section.heading.trim() ||
+          section.kind.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const prov = sectionProvenanceSummary(section);
+        return (
+          <section
+            key={`${section.kind}-${i}`}
+            data-testid={`deliverable-letter-preview-section-${i}`}
+            style={{
+              marginBottom: "1.1rem",
+              ...(section.kind === "cover"
+                ? { textAlign: "center" as const }
+                : {}),
+            }}
+          >
+            {section.kind !== "cover" && (
+              <h2
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: "var(--text-secondary)",
+                  margin: "0 0 0.4rem",
+                }}
+              >
+                {heading}
+              </h2>
+            )}
+            <div style={{ whiteSpace: "pre-wrap", textAlign: "justify" }}>
+              {section.content}
+            </div>
+            {prov && (
+              <div
+                className="sc-meta"
+                title={prov}
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginTop: 6,
+                  fontStyle: "italic",
+                }}
+              >
+                Sources: {prov}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </article>
   );
 }
 
@@ -633,6 +766,7 @@ function LetterDetail({
 }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"read" | "edit">("read");
   const readOnly = letter.status === "sent";
 
   const presentKinds = new Set(letter.sections.map((s) => s.kind));
@@ -666,12 +800,25 @@ function LetterDetail({
 
   const busy = addSection.isPending || send.isPending;
 
+  const handlePrint = () => {
+    const w = window.open(letterPreviewHtmlUrl(letter.entityId), "_blank");
+    if (w) {
+      w.addEventListener("load", () => w.print());
+    }
+  };
+
   return (
     <div
       data-testid="deliverable-letter-detail"
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        minHeight: 0,
+        flex: 1,
+      }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span
           className="sc-medium"
           style={{ fontSize: 15, color: "var(--text-primary)", flex: 1 }}
@@ -679,6 +826,43 @@ function LetterDetail({
           {letter.title}
         </span>
         <LetterStatusBadge status={letter.status} />
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button
+            type="button"
+            className={viewMode === "read" ? "sc-btn-primary sc-btn-sm" : "sc-btn-ghost sc-btn-sm"}
+            data-testid="deliverable-letter-view-read"
+            aria-pressed={viewMode === "read"}
+            onClick={() => setViewMode("read")}
+          >
+            Document
+          </button>
+          <button
+            type="button"
+            className={viewMode === "edit" ? "sc-btn-primary sc-btn-sm" : "sc-btn-ghost sc-btn-sm"}
+            data-testid="deliverable-letter-view-edit"
+            aria-pressed={viewMode === "edit"}
+            disabled={readOnly}
+            onClick={() => setViewMode("edit")}
+          >
+            Edit
+          </button>
+          <a
+            href={letterExportPdfUrl(letter.entityId, true)}
+            className="sc-btn-ghost sc-btn-sm"
+            data-testid="deliverable-letter-download-pdf"
+            download
+          >
+            Download PDF
+          </a>
+          <button
+            type="button"
+            className="sc-btn-ghost sc-btn-sm"
+            data-testid="deliverable-letter-print"
+            onClick={handlePrint}
+          >
+            Print
+          </button>
+        </div>
       </div>
 
       <div
@@ -699,26 +883,36 @@ function LetterDetail({
             }: ${missing.join(", ")}.`}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {letter.sections.length === 0 && (
+      {viewMode === "read" ? (
+        letter.sections.length === 0 ? (
           <div className="sc-meta" style={{ color: "var(--text-muted)" }}>
-            No sections yet. Add a cover, intro, and signature to make the
-            letter sendable.
+            No sections yet. Switch to Edit to add cover, intro, and signature.
           </div>
-        )}
-        {letter.sections.map((section, i) => (
-          <SectionCard
-            key={i}
-            engagementId={engagementId}
-            letterId={letter.entityId}
-            section={section}
-            index={i}
-            readOnly={readOnly}
-          />
-        ))}
-      </div>
+        ) : (
+          <LetterDocumentPreview title={letter.title} sections={letter.sections} />
+        )
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {letter.sections.length === 0 && (
+            <div className="sc-meta" style={{ color: "var(--text-muted)" }}>
+              No sections yet. Add a cover, intro, and signature to make the
+              letter sendable.
+            </div>
+          )}
+          {letter.sections.map((section, i) => (
+            <SectionCard
+              key={i}
+              engagementId={engagementId}
+              letterId={letter.entityId}
+              section={section}
+              index={i}
+              readOnly={readOnly}
+            />
+          ))}
+        </div>
+      )}
 
-      {!readOnly && (
+      {!readOnly && viewMode === "edit" && (
         <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
@@ -777,11 +971,18 @@ function LetterDetail({
 
 export function DeliverableLettersTab({
   engagementId,
+  focusLetterId,
 }: {
   engagementId: string;
+  /** When set (e.g. from chat artifact nav), select and open this letter. */
+  focusLetterId?: string | null;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusLetterId) setSelectedId(focusLetterId);
+  }, [focusLetterId]);
   const { data, isLoading } = useListDeliverableLetters(engagementId, {
     query: {
       enabled: !!engagementId,
@@ -803,7 +1004,7 @@ export function DeliverableLettersTab({
         title="Comment-response letters"
         subtitle="Deliverable letters tied to submissions and findings — cover, intro, per-comment responses, and signature, with provenance back to review artifacts."
       />
-      <div className="sc-card flex flex-col">
+      <div className="sc-card flex flex-col" style={{ minHeight: 0, flex: 1 }}>
       <div className="sc-card-header sc-row-sb">
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="sc-label">DELIVERABLE LETTERS</span>
@@ -833,7 +1034,15 @@ export function DeliverableLettersTab({
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", gap: 0, minHeight: 320 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 0,
+            flex: 1,
+            minHeight: 320,
+            overflow: "hidden",
+          }}
+        >
           <div
             style={{
               width: 220,
@@ -884,7 +1093,18 @@ export function DeliverableLettersTab({
               );
             })}
           </div>
-          <div style={{ flex: 1, padding: 16, minWidth: 0 }}>
+          <div
+            className="sc-scroll"
+            style={{
+              flex: 1,
+              padding: 16,
+              minWidth: 0,
+              minHeight: 0,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             {selected && (
               <LetterDetail engagementId={engagementId} letter={selected} />
             )}

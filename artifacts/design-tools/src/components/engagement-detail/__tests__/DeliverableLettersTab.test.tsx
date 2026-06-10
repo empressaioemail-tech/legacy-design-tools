@@ -151,6 +151,7 @@ describe("DeliverableLettersTab", () => {
     expect(
       screen.getByTestId("deliverable-letter-completeness"),
     ).toHaveTextContent(/Incomplete/);
+    fireEvent.click(screen.getByTestId("deliverable-letter-view-edit"));
     const send = screen.getByTestId(
       "deliverable-letter-send",
     ) as HTMLButtonElement;
@@ -178,6 +179,7 @@ describe("DeliverableLettersTab", () => {
     expect(
       screen.getByTestId("deliverable-letter-completeness"),
     ).toHaveTextContent(/Complete/);
+    fireEvent.click(screen.getByTestId("deliverable-letter-view-edit"));
     const send = screen.getByTestId(
       "deliverable-letter-send",
     ) as HTMLButtonElement;
@@ -218,6 +220,7 @@ describe("DeliverableLettersTab", () => {
       ],
     };
     renderTab();
+    fireEvent.click(screen.getByTestId("deliverable-letter-view-edit"));
     fireEvent.click(screen.getByTestId("deliverable-letter-section-0-save"));
     expect(hoisted.upsertMutate).toHaveBeenCalledTimes(1);
     expect(hoisted.upsertMutate.mock.calls[0][0]).toMatchObject({
@@ -229,6 +232,7 @@ describe("DeliverableLettersTab", () => {
   it("adds a section via the add-section affordance", () => {
     hoisted.listData = { deliverableLetters: [makeLetter()] };
     renderTab();
+    fireEvent.click(screen.getByTestId("deliverable-letter-view-edit"));
     fireEvent.click(screen.getByTestId("deliverable-letter-add-section"));
     expect(hoisted.upsertMutate).toHaveBeenCalledWith({
       letterId: "dl-1",
@@ -300,5 +304,35 @@ describe("DeliverableLettersTab", () => {
     expect(download.getAttribute("href")).toBe(
       "/api/deliverable-letter-renders/rnd-1/file",
     );
+  });
+
+  it("defaults to the document read view with download and print affordances", () => {
+    hoisted.listData = {
+      deliverableLetters: [
+        makeLetter({
+          title: "Pre-Bid Code & Scope Analysis",
+          sections: [
+            {
+              kind: "intro",
+              heading: "Introduction",
+              content: "Jurisdiction code is unverified — confirm against adopted ordinances.",
+              provenance: emptyProv(),
+            },
+          ],
+        }),
+      ],
+    };
+    renderTab();
+    expect(
+      screen.getByTestId("deliverable-letter-document-preview"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/unverified/i)).toBeInTheDocument();
+    const download = screen.getByTestId(
+      "deliverable-letter-download-pdf",
+    ) as HTMLAnchorElement;
+    expect(download.getAttribute("href")).toBe(
+      "/api/deliverable-letters/dl-1/export.pdf?download=1",
+    );
+    expect(screen.getByTestId("deliverable-letter-print")).toBeInTheDocument();
   });
 });

@@ -52,6 +52,8 @@ import {
   parseSectionUpsertBody,
   upsertSection,
 } from "./deliverableLetter.logic";
+import { renderDeliverableLetterPdf } from "../lib/deliverableLetterPdf";
+import { renderDeliverableLetterHtml } from "../lib/deliverableLetterHtml";
 
 const router: IRouter = Router();
 
@@ -249,6 +251,103 @@ router.get(
     } catch (err) {
       reqLog.error({ err, letterId }, "fetch deliverable-letter failed");
       res.status(500).json({ error: "Failed to fetch deliverable letter" });
+    }
+  },
+);
+
+/* -------------------------------------------------------------------------- */
+/*  GET /api/deliverable-letters/:letterId/export.pdf  — download / print      */
+/*  GET /api/deliverable-letters/:letterId/preview.html — print layout HTML    */
+/* -------------------------------------------------------------------------- */
+
+function letterExportFilename(title: string): string {
+  const slug = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return `${slug || "deliverable-letter"}.pdf`;
+}
+
+router.get(
+  "/deliverable-letters/:letterId/export.pdf",
+  async (req: Request, res: Response): Promise<void> => {
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const letterId =
+      typeof req.params.letterId === "string" ? req.params.letterId : "";
+
+    if (!UUID_RE.test(letterId)) {
+      res.status(404).json({ error: "deliverable_letter_not_found" });
+      return;
+    }
+
+    try {
+      const letter = await loadLetter(letterId);
+      if (!letter) {
+        res.status(404).json({ error: "deliverable_letter_not_found" });
+        return;
+      }
+
+      const sections = (letter.sections ?? []) as LetterSection[];
+      if (sections.length === 0) {
+        res.status(422).json({ error: "no_letter_content_to_export" });
+        return;
+      }
+
+      const pdfBuffer = await renderDeliverableLetterPdf({
+        title: letter.title,
+        sections,
+      });
+      const download = req.query.download === "1";
+      const disposition = download ? "attachment" : "inline";
+      const filename = letterExportFilename(letter.title);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `${disposition}; filename="${filename}"`,
+      );
+      res.setHeader("Content-Length", String(pdfBuffer.length));
+      res.setHeader("Cache-Control", "private, no-store");
+      res.status(200).end(pdfBuffer);
+    } catch (err) {
+      reqLog.error({ err, letterId }, "deliverable-letter export.pdf failed");
+      res.status(500).json({ error: "Failed to export deliverable letter" });
+    }
+  },
+);
+
+router.get(
+  "/deliverable-letters/:letterId/preview.html",
+  async (req: Request, res: Response): Promise<void> => {
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const letterId =
+      typeof req.params.letterId === "string" ? req.params.letterId : "";
+
+    if (!UUID_RE.test(letterId)) {
+      res.status(404).json({ error: "deliverable_letter_not_found" });
+      return;
+    }
+
+    try {
+      const letter = await loadLetter(letterId);
+      if (!letter) {
+        res.status(404).json({ error: "deliverable_letter_not_found" });
+        return;
+      }
+
+      const sections = (letter.sections ?? []) as LetterSection[];
+      const html = renderDeliverableLetterHtml({
+        title: letter.title,
+        sections,
+      });
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.status(200).send(html);
+    } catch (err) {
+      reqLog.error({ err, letterId }, "deliverable-letter preview.html failed");
+      res.status(500).json({ error: "Failed to render deliverable letter preview" });
     }
   },
 );
