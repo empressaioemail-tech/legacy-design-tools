@@ -50,7 +50,7 @@ export async function runCodewarmBatch(
     }
 
     try {
-      const target = manifestEntryToTarget(entry);
+      const target = manifestEntryToTarget(entry, options.jurisdictionKey);
 
       if (entry.grounding === "NFPA-license-required") {
         if (dryRun) {

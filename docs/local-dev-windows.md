@@ -36,6 +36,18 @@ api-server  dev:local  (Node, built dist/index.mjs)
 
 ---
 
+## Cold-warm harness (codewarm) on Windows
+
+When running `pnpm --filter @workspace/codewarm codewarm` or the B1 warm pass, Node may fail TLS to UpCodes/ICC with `unable to verify the first certificate` on workstations behind a TLS-intercepting proxy. Set:
+
+```powershell
+$env:NODE_OPTIONS = "--use-system-ca"
+```
+
+See `lib/codewarm/README.md` for manifest and driver profile notes.
+
+---
+
 ## One-time setup
 
 ### 1. Install deps

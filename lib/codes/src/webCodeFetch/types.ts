@@ -44,6 +44,8 @@ export interface WebCodeReviewTarget {
   label: string;
   /** Preferred driver order. */
   drivers: Array<"icc" | "florida" | "nfpa" | "upcodes">;
+  /** Jurisdiction key — selects Florida vs Texas vs national driver profile. */
+  jurisdictionKey?: string;
 }
 
 export type HttpFetcher = (url: string) => Promise<{

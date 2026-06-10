@@ -1,0 +1,6 @@
+codes:
+  - code: IBC
+    edition: "2021"
+    sections:
+      - { section: "302.1", title: "Occupancy classification", discipline: occupancy, traffic: high }
+      - { section: "303", title: "Assembly Group A", discipline: occupancy, traffic: high }

@@ -76,6 +76,7 @@ export async function fetchCodeSection(
         .replace(/\s+/g, "-")
         .replace(/[^a-z0-9-]/g, ""),
       label: input.codeRef,
+      jurisdictionKey: input.jurisdictionKey,
       drivers: input.codeRef.startsWith("NEC")
         ? ["nfpa", "upcodes"]
         : ["icc", "upcodes", "florida"],

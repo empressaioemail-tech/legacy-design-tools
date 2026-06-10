@@ -16,7 +16,10 @@ export function driversForCode(code: string, codeRef: string): WebCodeReviewTarg
   return ["icc", "upcodes"];
 }
 
-export function manifestEntryToTarget(entry: CodewarmManifestEntry): WebCodeReviewTarget {
+export function manifestEntryToTarget(
+  entry: CodewarmManifestEntry,
+  jurisdictionKey?: string,
+): WebCodeReviewTarget {
   const slug = editionSlug(entry.code, entry.edition);
   return {
     codeRef: entry.codeRef,
@@ -24,6 +27,7 @@ export function manifestEntryToTarget(entry: CodewarmManifestEntry): WebCodeRevi
     editionSlug: slug,
     label: `${entry.codeRef} — ${entry.title}`,
     drivers: driversForCode(entry.code, entry.codeRef),
+    jurisdictionKey,
   };
 }
 

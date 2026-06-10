@@ -61,11 +61,19 @@ function parseManifestDoc(doc: RawManifest): CodewarmManifestEntry[] {
   for (const group of doc.groups ?? []) {
     for (const section of group.sections) {
       const code = section.code ?? group.group ?? "UNKNOWN";
-      entries.push(toEntry(section, code, group.edition, group.grounding));
+      const edition = section.edition ?? group.edition;
+      entries.push(toEntry(section, code, edition, group.grounding));
     }
   }
 
   return entries;
+}
+
+function readQuotedOrBare(inner: string, key: string): string | undefined {
+  const quoted = inner.match(new RegExp(`\\b${key}:\\s*"([^"]+)"`));
+  if (quoted) return quoted[1];
+  const bare = inner.match(new RegExp(`\\b${key}:\\s*([^,"]+)`));
+  return bare?.[1]?.trim().replace(/^"|"$/g, "");
 }
 
 /** Parse inline `{ section: X, title: "Y", ... }` rows from catalog YAML. */
@@ -73,29 +81,22 @@ function parseInlineSectionRow(line: string): CodewarmManifestSection | null {
   const match = line.match(/-\s*\{([^}]+)\}/);
   if (!match) return null;
   const inner = match[1]!;
-  const section = readField(inner, "section");
-  const title = readQuotedField(inner, "title");
+  const section = readQuotedOrBare(inner, "section");
+  const title = readQuotedOrBare(inner, "title");
   if (!section || !title) return null;
-  const grounding = readField(inner, "grounding") as CodewarmGroundingFlag | undefined;
+  const grounding = readQuotedOrBare(inner, "grounding") as
+    | CodewarmGroundingFlag
+    | undefined;
   return {
-    section: section.replace(/^"|"$/g, ""),
+    section,
     title,
-    discipline: readField(inner, "discipline"),
-    traffic: readField(inner, "traffic"),
-    code: readField(inner, "code")?.replace(/^"|"$/g, ""),
-    verify: inner.includes("verify: true"),
+    discipline: readQuotedOrBare(inner, "discipline"),
+    traffic: readQuotedOrBare(inner, "traffic"),
+    code: readQuotedOrBare(inner, "code"),
+    edition: readQuotedOrBare(inner, "edition"),
+    verify: /\bverify:\s*true\b/.test(inner),
     grounding,
   };
-}
-
-function readField(inner: string, key: string): string | undefined {
-  const m = inner.match(new RegExp(`\\b${key}:\\s*([^,"]+)`));
-  return m?.[1]?.trim();
-}
-
-function readQuotedField(inner: string, key: string): string | undefined {
-  const m = inner.match(new RegExp(`\\b${key}:\\s*"([^"]+)"`));
-  return m?.[1];
 }
 
 /**
@@ -115,38 +116,47 @@ export function parseCodewarmManifestYaml(raw: string): CodewarmManifestEntry[] 
       inGroups = true;
       continue;
     }
+    if (trimmed.startsWith("codes:")) {
+      inGroups = false;
+      continue;
+    }
     const codeMatch = trimmed.match(/^-?\s*code:\s*(\S+)/);
-    if (codeMatch) {
+    if (codeMatch && !trimmed.includes("{")) {
       currentCode = codeMatch[1]!.replace(/"/g, "");
       continue;
     }
     const groupMatch = trimmed.match(/^-\s*group:\s*(\S+)/);
     if (groupMatch) {
       currentCode = groupMatch[1]!.replace(/"/g, "");
+      currentEdition = "";
+      groupGrounding = undefined;
       continue;
     }
     const editionMatch = trimmed.match(/^edition:\s*"?([^"#]+)"?/);
-    if (editionMatch) {
+    if (editionMatch && !trimmed.includes("{")) {
       currentEdition = editionMatch[1]!.trim();
       continue;
     }
     const groundingMatch = trimmed.match(/^grounding:\s*(\S+)/);
-    if (groundingMatch) {
+    if (groundingMatch && !trimmed.includes("{")) {
       groupGrounding = groundingMatch[1] as CodewarmGroundingFlag;
       continue;
     }
     const sectionRow = parseInlineSectionRow(trimmed);
-    if (sectionRow && currentEdition) {
-      const code = sectionRow.code ?? currentCode;
-      entries.push(
-        toEntry(
-          sectionRow,
-          code,
-          currentEdition,
-          inGroups ? groupGrounding : undefined,
-        ),
-      );
-    }
+    if (!sectionRow) continue;
+
+    const code = sectionRow.code ?? currentCode;
+    const edition = sectionRow.edition ?? currentEdition;
+    if (!edition || !code) continue;
+
+    entries.push(
+      toEntry(
+        sectionRow,
+        code,
+        edition,
+        inGroups ? groupGrounding : undefined,
+      ),
+    );
   }
 
   return entries;

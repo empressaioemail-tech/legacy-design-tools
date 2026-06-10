@@ -17,7 +17,7 @@ export async function queryCorpusCoverage(args: {
   jurisdictionKey: string;
   entry: CodewarmManifestEntry;
 }): Promise<CorpusCoverageHit> {
-  const target = manifestEntryToTarget(args.entry);
+  const target = manifestEntryToTarget(args.entry, args.jurisdictionKey);
   const sectionToken =
     args.entry.codeRef.split("-").pop() ?? args.entry.codeRef;
 
