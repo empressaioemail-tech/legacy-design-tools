@@ -149,7 +149,11 @@ export function ClaudeChat({
   const agentActionsByEngagement = useEngagementsStore(
     (s) => s.agentActionsByEngagement,
   );
+  const artifactNavByEngagement = useEngagementsStore(
+    (s) => s.artifactNavByEngagement,
+  );
   const reverseAgentAction = useEngagementsStore((s) => s.reverseAgentAction);
+  const applyArtifactNav = useEngagementsStore((s) => s.applyArtifactNav);
   // QA-18 — engagement-scoped client documents.
   const attachedDocumentsByEngagement = useEngagementsStore(
     (s) => s.attachedDocumentsByEngagement,
@@ -194,6 +198,7 @@ export function ClaudeChat({
   // navigate there once a create turn settles, so this component itself
   // stays free of react-query.
   const agentActions = agentActionsByEngagement[engagementId] ?? [];
+  const pendingArtifactNav = artifactNavByEngagement[engagementId] ?? null;
   // QA-18 — persisted client documents for this engagement.
   const attachedDocuments = attachedDocumentsByEngagement[engagementId] ?? [];
   const uploadingDocument =
@@ -551,6 +556,27 @@ export function ClaudeChat({
           );
         })}
       </div>
+
+      {pendingArtifactNav && !workspaceMode && (
+        <div
+          className="flex-shrink-0 border-t"
+          data-testid="artifact-nav-banner"
+          style={{
+            borderColor: "var(--border-default)",
+            padding: "10px 12px",
+          }}
+        >
+          <button
+            type="button"
+            className="sc-btn-primary sc-btn-sm"
+            data-testid="artifact-nav-open"
+            onClick={() => applyArtifactNav(engagementId)}
+            style={{ width: "100%" }}
+          >
+            Open {pendingArtifactNav.label} →
+          </button>
+        </div>
+      )}
 
       {agentActions.length > 0 && (
         <div

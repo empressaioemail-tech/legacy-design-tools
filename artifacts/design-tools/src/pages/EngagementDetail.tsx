@@ -20,6 +20,7 @@ import {
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
   getListResponseTasksQueryKey,
+  getListDeliverableLettersQueryKey,
   getGetBriefingSourceGlbUrl,
   getGetMaterializableElementGlbUrl,
   type EngagementSubmissionSummary,
@@ -310,7 +311,17 @@ export function EngagementDetail() {
   const agentActionsByEngagement = useEngagementsStore(
     (s) => s.agentActionsByEngagement,
   );
+  const artifactNavByEngagement = useEngagementsStore(
+    (s) => s.artifactNavByEngagement,
+  );
+  const consumeArtifactNav = useEngagementsStore((s) => s.consumeArtifactNav);
+  const artifactNavApplySeq = useEngagementsStore(
+    (s) => s.artifactNavApplySeqByEngagement[id] ?? 0,
+  );
   const chatStreaming = useEngagementsStore((s) => s.streaming);
+  const [focusDeliverableLetterId, setFocusDeliverableLetterId] = useState<
+    string | null
+  >(null);
 
   // WS-C (WSC.4) — when the chat agent stages a spec draft, route it to
   // the matching L4 / L5 tab and hand it to that tab for form pre-fill.
@@ -349,6 +360,32 @@ export function EngagementDetail() {
       setTab("response-tasks");
     }
   }, [agentActionsByEngagement, id, chatStreaming, queryClient, setTab]);
+
+  // WS-C — when the chat agent creates an artifact (letter, package, …),
+  // auto-navigate once the turn settles, or immediately on one-click Open.
+  useEffect(() => {
+    const nav = artifactNavByEngagement[id];
+    if (!nav) return;
+    const manualApply = artifactNavApplySeq > 0;
+    if (chatStreaming && !manualApply) return;
+    const target = consumeArtifactNav(id);
+    if (!target) return;
+    if (target.tab === "deliverable-letters") {
+      setFocusDeliverableLetterId(target.entityId);
+      void queryClient.invalidateQueries({
+        queryKey: getListDeliverableLettersQueryKey(id),
+      });
+    }
+    setTab(target.tab as TabId);
+  }, [
+    artifactNavByEngagement,
+    artifactNavApplySeq,
+    id,
+    chatStreaming,
+    consumeArtifactNav,
+    setTab,
+  ]);
+
   const rightCollapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
 
@@ -772,7 +809,10 @@ export function EngagementDetail() {
         </TabPanel>
 
         <TabPanel id="deliverable-letters" active={tab}>
-          <DeliverableLettersTab engagementId={engagement.id} />
+          <DeliverableLettersTab
+            engagementId={engagement.id}
+            focusLetterId={focusDeliverableLetterId}
+          />
         </TabPanel>
 
         <TabPanel id="detail-callouts" active={tab}>

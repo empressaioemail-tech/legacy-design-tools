@@ -137,10 +137,23 @@ export interface AgentDraft {
   reasoning: string;
 }
 
+/**
+ * Navigation target when the chat agent creates an artifact the operator
+ * should land on (letter, package, etc.).
+ */
+export interface AgentArtifactNav {
+  /** Engagement-detail tab to open (e.g. `deliverable-letters`). */
+  tab: string;
+  entityType: string;
+  entityId: string;
+  label: string;
+}
+
 /** Side-effect a tool produced, surfaced to the FE over SSE. */
 export type AgentSideEffect =
   | { type: "agent_action"; action: AgentAction }
-  | { type: "agent_draft"; draft: AgentDraft };
+  | { type: "agent_draft"; draft: AgentDraft }
+  | { type: "agent_artifact"; nav: AgentArtifactNav };
 
 /** Result of running one tool. */
 export interface ToolRunResult {
@@ -1204,8 +1217,19 @@ async function handleGenerateDeliverableLetter(
       letterId: row.id,
       title: row.title,
       status: "draft",
-      note: "Draft letter created — open Review → Letters to edit and send.",
+      note: "Draft letter created — opening Review → Letters.",
     }),
+    events: [
+      {
+        type: "agent_artifact",
+        nav: {
+          tab: "deliverable-letters",
+          entityType: "deliverable-letter",
+          entityId: row.id,
+          label: row.title,
+        },
+      },
+    ],
   };
 }
 
@@ -1247,8 +1271,19 @@ async function handleGeneratePresentationPacket(
     resultText: asJson({
       packageId: row.id,
       template: row.template,
-      note: "Draft presentation package — open Deliver → Packages → Client presentation to export.",
+      note: "Draft presentation package — opening Deliver → Packages.",
     }),
+    events: [
+      {
+        type: "agent_artifact",
+        nav: {
+          tab: "packages",
+          entityType: "engagement-package",
+          entityId: row.id,
+          label: row.title,
+        },
+      },
+    ],
   };
 }
 

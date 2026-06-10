@@ -51,6 +51,14 @@ export interface SpecDraftEntry {
   reasoning: string;
 }
 
+/** WS-C — artifact the chat agent created; FE navigates center pane here. */
+export interface ArtifactNavEntry {
+  tab: string;
+  entityType: string;
+  entityId: string;
+  label: string;
+}
+
 /**
  * QA-18 — a client document attached to an engagement (PDF, photo, or
  * note). The chat panel lists these so the operator can see what client
@@ -83,6 +91,10 @@ interface EngagementsUiState {
   // WS-C — the latest pending spec draft per engagement, awaiting the
   // engagement page to route it to the L4/L5 form. `null`/absent == none.
   specDraftByEngagement: Record<string, SpecDraftEntry | null>;
+  /** WS-C — latest artifact nav target from chat (letter, package, …). */
+  artifactNavByEngagement: Record<string, ArtifactNavEntry | null>;
+  /** Bumped when the operator clicks Open in chat (manual artifact nav). */
+  artifactNavApplySeqByEngagement: Record<string, number>;
   streaming: boolean;
 
   selectSnapshot: (engagementId: string, snapshotId: string | null) => void;
@@ -101,6 +113,10 @@ interface EngagementsUiState {
   clearFocusSnapshots: (engagementId: string) => void;
   /** Pull (and clear) the pending spec draft for an engagement. */
   consumeSpecDraft: (engagementId: string) => SpecDraftEntry | null;
+  /** Pull (and clear) the pending artifact navigation target. */
+  consumeArtifactNav: (engagementId: string) => ArtifactNavEntry | null;
+  /** Request center-pane navigation to the pending artifact (one-click Open). */
+  applyArtifactNav: (engagementId: string) => void;
   /**
    * Reverse an agent-created response-task by transitioning it to the L1
    * `cancelled` state. Resolves `true` on success and marks the
@@ -155,6 +171,8 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
   focusSnapshotIdsByEngagement: {},
   agentActionsByEngagement: {},
   specDraftByEngagement: {},
+  artifactNavByEngagement: {},
+  artifactNavApplySeqByEngagement: {},
   streaming: false,
 
   selectSnapshot: (engagementId, snapshotId) =>
@@ -357,6 +375,29 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
     return draft;
   },
 
+  consumeArtifactNav: (engagementId) => {
+    const nav = get().artifactNavByEngagement[engagementId] ?? null;
+    if (nav) {
+      set((state) => {
+        const next = { ...state.artifactNavByEngagement };
+        delete next[engagementId];
+        return { artifactNavByEngagement: next };
+      });
+    }
+    return nav;
+  },
+
+  applyArtifactNav: (engagementId) => {
+    if (!get().artifactNavByEngagement[engagementId]) return;
+    set((state) => ({
+      artifactNavApplySeqByEngagement: {
+        ...state.artifactNavApplySeqByEngagement,
+        [engagementId]:
+          (state.artifactNavApplySeqByEngagement[engagementId] ?? 0) + 1,
+      },
+    }));
+  },
+
   reverseAgentAction: async (engagementId, entityId) => {
     try {
       const res = await fetch(
@@ -541,6 +582,13 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
                   specDraftByEngagement: {
                     ...state.specDraftByEngagement,
                     [engagementId]: parsed.draft as SpecDraftEntry,
+                  },
+                }));
+              } else if (parsed.type === "agent_artifact" && parsed.nav) {
+                set((state) => ({
+                  artifactNavByEngagement: {
+                    ...state.artifactNavByEngagement,
+                    [engagementId]: parsed.nav as ArtifactNavEntry,
                   },
                 }));
               } else if (parsed.text) {
