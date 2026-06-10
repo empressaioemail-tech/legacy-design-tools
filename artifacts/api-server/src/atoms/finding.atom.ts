@@ -91,9 +91,14 @@ export const FINDING_EVENT_TYPES = [
   "finding.rejected",
   "finding.overridden",
   "finding.promoted-to-architect",
+  "finding.outcome.recorded",
 ] as const;
 
 export type FindingEventType = (typeof FINDING_EVENT_TYPES)[number];
+
+/** Phase 2 — ground-truth outcome tied to a finding's accuracy. */
+export const FINDING_OUTCOME_RECORDED_EVENT_TYPE: FindingEventType =
+  FINDING_EVENT_TYPES[5];
 
 /**
  * Typed payload returned by `finding`'s `contextSummary.typed`.

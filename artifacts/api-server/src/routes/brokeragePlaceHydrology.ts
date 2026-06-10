@@ -22,6 +22,7 @@ import {
 } from "express";
 import { z } from "zod";
 import { logger } from "../lib/logger";
+import { resolveRequestJurisdictionTenant } from "../lib/gateFrontSeam";
 import { getHistoryService } from "../atoms/registry";
 import { ensureMcpPlaceEngagement } from "../lib/mcpPlaceEngagement";
 import {
@@ -136,7 +137,10 @@ async function handleTopoRefresh(
     return;
   }
 
-  const ensured = await ensureMcpPlaceEngagement(input);
+  const ensured = await ensureMcpPlaceEngagement({
+    ...input,
+    jurisdictionTenant: resolveRequestJurisdictionTenant(req),
+  });
   if (!ensured.ok) {
     res.status(ensured.status).json(ensured.body);
     return;
@@ -186,6 +190,7 @@ async function handleTopoRead(
 
   const ensured = await ensureMcpPlaceEngagement({
     placeKey: placeKeyParse.data,
+    jurisdictionTenant: resolveRequestJurisdictionTenant(req),
   });
   if (!ensured.ok) {
     res.status(ensured.status).json(ensured.body);
@@ -256,7 +261,10 @@ async function handleDrainageRefresh(
     return;
   }
 
-  const ensured = await ensureMcpPlaceEngagement(input);
+  const ensured = await ensureMcpPlaceEngagement({
+    ...input,
+    jurisdictionTenant: resolveRequestJurisdictionTenant(req),
+  });
   if (!ensured.ok) {
     res.status(ensured.status).json(ensured.body);
     return;
@@ -307,6 +315,7 @@ async function handleDrainageRead(
 
   const ensured = await ensureMcpPlaceEngagement({
     placeKey: placeKeyParse.data,
+    jurisdictionTenant: resolveRequestJurisdictionTenant(req),
   });
   if (!ensured.ok) {
     res.status(ensured.status).json(ensured.body);

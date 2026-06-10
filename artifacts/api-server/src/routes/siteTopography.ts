@@ -27,6 +27,8 @@ import {
 } from "express";
 import { z } from "zod";
 import { logger } from "../lib/logger";
+import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { getHistoryService } from "../atoms/registry";
 import {
   ingestSiteTopography,
@@ -38,6 +40,8 @@ import {
 } from "../lib/siteTopographyMaterializer";
 
 const router: IRouter = Router();
+
+router.use(requireGateEngineServiceAuth);
 
 const REFRESH_BODY_SCHEMA = z
   .object({
@@ -125,6 +129,14 @@ router.post(
       return;
     }
     const log = reqLog(req);
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
+      return;
+    }
     let result: SiteTopographyIngestResult;
     try {
       result = await ingestSiteTopography({
@@ -166,6 +178,14 @@ router.get(
       return;
     }
     const log = reqLog(req);
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
+      return;
+    }
 
     // 1) Fast path — active row already materialized.
     let row = await loadActiveSiteTopographyRow(engagementId);

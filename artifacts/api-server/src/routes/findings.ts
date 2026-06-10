@@ -117,8 +117,12 @@ import {
   getFindingLlmMode,
 } from "../lib/findingLlmClient";
 import { publishSubmissionFindingEvent } from "../lib/submissionLiveEvents";
+import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { assertSubmissionServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 
 const router: IRouter = Router();
+
+router.use(requireGateEngineServiceAuth);
 
 /** Pinned event-type constants — break compilation on a rename. */
 const FINDING_GENERATED_EVENT_TYPE: FindingEventType = FINDING_EVENT_TYPES[0];
@@ -1188,6 +1192,15 @@ router.post(
       const sub = await loadSubmission(submissionId);
       if (!sub) {
         res.status(404).json({ error: "submission_not_found" });
+        return;
+      }
+
+      const tenantScope = await assertSubmissionServiceTenantScope(
+        req,
+        submissionId,
+      );
+      if (!tenantScope.ok) {
+        res.status(tenantScope.status).json(tenantScope.body);
         return;
       }
 

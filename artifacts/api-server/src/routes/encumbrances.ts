@@ -7,6 +7,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, engagements, recordedInstruments, restrictionClauses } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { consumePdfUpload } from "../lib/encumbranceMultipart";
 import {
   ingestEncumbrancePdfUpload,
@@ -16,6 +18,8 @@ import {
 export { loadEncumbrancesForEngagement } from "../lib/encumbranceService";
 
 const router: IRouter = Router();
+
+router.use(requireGateEngineServiceAuth);
 
 const ENGAGEMENT_PARAMS = z.object({ id: z.string().uuid() });
 const CLAUSE_VERIFY_PARAMS = z.object({
@@ -56,6 +60,15 @@ router.post(
 
     if (!(await loadEngagementOr404(engagementId, res))) return;
 
+    const tenantScope = await assertEngagementServiceTenantScope(
+      req,
+      engagementId,
+    );
+    if (!tenantScope.ok) {
+      res.status(tenantScope.status).json(tenantScope.body);
+      return;
+    }
+
     const parsed = await consumePdfUpload(req);
     if (!parsed.ok) {
       res.status(parsed.status).json({ error: parsed.error });
@@ -89,6 +102,15 @@ router.get("/engagements/:id/encumbrances", async (req: Request, res: Response) 
   }
   const engagementId = paramsParse.data.id;
   if (!(await loadEngagementOr404(engagementId, res))) return;
+
+  const tenantScope = await assertEngagementServiceTenantScope(
+    req,
+    engagementId,
+  );
+  if (!tenantScope.ok) {
+    res.status(tenantScope.status).json(tenantScope.body);
+    return;
+  }
 
   try {
     res.json(await loadEncumbrancesForEngagement(engagementId));

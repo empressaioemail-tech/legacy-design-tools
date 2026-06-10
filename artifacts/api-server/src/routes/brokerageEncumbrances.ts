@@ -4,7 +4,10 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import { brokerageAuth } from "../middlewares/brokerageAuth";
+import {
+  isBrokerageServiceCaller,
+  requireBrokerageExtensionAuthUnlessService,
+} from "../middlewares/brokerageServiceAuth";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { requireInstallId } from "../lib/brokerageInstallId";
 import { consumePdfUpload } from "../lib/encumbranceMultipart";
@@ -19,8 +22,14 @@ import { logger } from "../lib/logger";
 export const brokerageEncumbrancesRouter: IRouter = Router();
 
 brokerageEncumbrancesRouter.use(brokerageCors);
-brokerageEncumbrancesRouter.use(brokerageAuth);
-brokerageEncumbrancesRouter.use(requireBrokerageDevClient);
+brokerageEncumbrancesRouter.use(requireBrokerageExtensionAuthUnlessService);
+brokerageEncumbrancesRouter.use((req, res, next) => {
+  if (isBrokerageServiceCaller(req)) {
+    next();
+    return;
+  }
+  requireBrokerageDevClient(req, res, next);
+});
 
 const WORKSPACE_DID_QUERY = z.object({
   workspaceDid: z.string().min(1),
@@ -29,7 +38,9 @@ const WORKSPACE_DID_QUERY = z.object({
 brokerageEncumbrancesRouter.post(
   "/encumbrances/upload",
   async (req: Request, res: Response) => {
-    const installId = requireInstallId(req, res);
+    const installId = isBrokerageServiceCaller(req)
+      ? "mcp-service"
+      : requireInstallId(req, res);
     if (!installId) return;
 
     if (!(req.headers["content-type"] ?? "").toLowerCase().startsWith("multipart/form-data")) {
@@ -81,7 +92,9 @@ brokerageEncumbrancesRouter.post(
 );
 
 brokerageEncumbrancesRouter.get("/encumbrances", async (req: Request, res: Response) => {
-  const installId = requireInstallId(req, res);
+  const installId = isBrokerageServiceCaller(req)
+    ? "mcp-service"
+    : requireInstallId(req, res);
   if (!installId) return;
 
   const q = WORKSPACE_DID_QUERY.safeParse(req.query);
