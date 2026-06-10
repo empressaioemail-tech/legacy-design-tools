@@ -69,6 +69,9 @@ describe("lib/db schema integration", () => {
         // requestor id; bumped to "now" on POST
         // /me/notifications/mark-read.
         "architect_notification_reads",
+        // Arrow-two Phase 3 — per-(atomId, jurisdictionTenant) calibration
+        // overlay covering reasoning + corpus atoms (corpus never mutated).
+        "atom_calibration_overlay",
         "atom_events",
         // Cortex L2 (Lane C.4 / C.4.2) — supporting documents attached
         // to an engagement (produced by the sheet-ingest pipeline).
