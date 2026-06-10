@@ -90,18 +90,41 @@ export function upcodesJurisdictionSlug(jurisdictionKey?: string): string {
   return "texas";
 }
 
+/** Map manifest code families (IECC-R, IECC-C) to slug-table keys. */
+export function normalizeCodeBookKey(code: string): string {
+  const upper = code.toUpperCase();
+  if (upper.startsWith("IECC")) return "IECC";
+  if (upper.startsWith("A117")) return "A117.1";
+  return upper;
+}
+
+/** ICC / UpCodes fragment anchor: R301.1 → R301_1 */
+export function sectionAnchorToken(section: string): string {
+  return section.replace(/\./g, "_");
+}
+
+/** Resolve code-book family from a manifest codeRef (handles IECC-C402.4, A117.1-302). */
+export function codeBookFromRef(codeRef: string): string | null {
+  const upper = codeRef.toUpperCase();
+  if (upper.startsWith("IECC-R-") || upper.startsWith("IECC-C-")) return "IECC";
+  if (upper.startsWith("IECC-R") || upper.startsWith("IECC-C")) return "IECC";
+  if (upper.startsWith("A117.1-")) return "A117.1";
+  const m = codeRef.match(/^([A-Z][A-Z0-9.]*?)-/i);
+  return m?.[1] ?? null;
+}
+
 /** Lookup slug config from codeRef prefix + edition label. */
 export function slugConfigForTarget(args: {
   editionSlug: string;
   codeRef: string;
   edition?: string;
 }): CodeBookSlugConfig | null {
-  const codeFromRef = args.codeRef.match(/^([A-Z][A-Z0-9.]+)-/i)?.[1];
+  const codeFromRef = codeBookFromRef(args.codeRef);
   const year =
     args.edition?.match(/\b(20\d{2})\b/)?.[1] ??
     args.editionSlug.match(/\b(20\d{2})\b/)?.[1];
   if (codeFromRef && year) {
-    const composite = `${codeFromRef.toUpperCase()}-${year}`;
+    const composite = `${normalizeCodeBookKey(codeFromRef)}-${year}`;
     const hit = CODE_BOOK_SLUGS[composite];
     if (hit) return hit;
   }
@@ -129,9 +152,11 @@ export function inferChapterNumber(section: string): string {
   const bare = section.replace(/"/g, "").trim();
   const r = bare.match(/^R(\d)/i);
   if (r) return r[1]!;
+  const threeDigit = bare.match(/^(\d{3})(?:\.\d+)*$/);
+  if (threeDigit) return threeDigit[1]!.charAt(0);
+  const letterNum = bare.match(/^[A-Z]+(\d)/i);
+  if (letterNum) return letterNum[1]!;
   const n = bare.match(/^(\d{1,2})/);
   if (n) return String(parseInt(n[1]!, 10));
-  const a = bare.match(/^(\d{3})/);
-  if (a) return a[1]!.charAt(0);
   return "1";
 }

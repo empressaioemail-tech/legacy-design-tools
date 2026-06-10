@@ -7,11 +7,19 @@ import {
   bareSectionFromCodeRef,
   driverProfileForJurisdiction,
   inferChapterNumber,
+  sectionAnchorToken,
   slugConfigForTarget,
   upcodesJurisdictionSlug,
 } from "./driverProfiles";
 
 export type WebDriverId = "icc" | "florida" | "nfpa" | "upcodes";
+
+export interface DriverUrlCandidate {
+  driver: WebDriverId;
+  url: string;
+  /** Section-level fetch preferred over chapter landing. */
+  granularity: "section" | "chapter";
+}
 
 /** Build candidate fetch URLs for a review target (allowlist only). */
 export function buildDriverUrls(
@@ -19,23 +27,22 @@ export function buildDriverUrls(
     WebCodeReviewTarget,
     "codeRef" | "editionSlug" | "edition" | "drivers" | "jurisdictionKey"
   >,
-): Array<{ driver: WebDriverId; url: string }> {
-  const urls: Array<{ driver: WebDriverId; url: string }> = [];
+): DriverUrlCandidate[] {
+  const urls: DriverUrlCandidate[] = [];
 
   for (const driver of target.drivers) {
-    const url = singleDriverUrl(driver, target);
-    if (url) urls.push({ driver, url });
+    urls.push(...singleDriverUrls(driver, target));
   }
   return urls;
 }
 
-function singleDriverUrl(
+function singleDriverUrls(
   driver: WebDriverId,
   target: Pick<
     WebCodeReviewTarget,
     "codeRef" | "editionSlug" | "edition" | "jurisdictionKey"
   >,
-): string | null {
+): DriverUrlCandidate[] {
   const profile = driverProfileForJurisdiction(target.jurisdictionKey, {
     edition: target.edition,
     codeRef: target.codeRef,
@@ -43,10 +50,11 @@ function singleDriverUrl(
   const ref = target.codeRef;
 
   if (profile === "florida") {
-    return floridaDriverUrl(driver, ref);
+    const url = floridaDriverUrl(driver, ref);
+    return url ? [{ driver, url, granularity: "chapter" }] : [];
   }
 
-  return nationalOrTexasDriverUrl(driver, target);
+  return nationalOrTexasDriverUrls(driver, target);
 }
 
 /** Legacy Miami / FBC 2023 paths — unchanged. */
@@ -80,13 +88,13 @@ function floridaDriverUrl(driver: WebDriverId, codeRef: string): string | null {
   }
 }
 
-function nationalOrTexasDriverUrl(
+function nationalOrTexasDriverUrls(
   driver: WebDriverId,
   target: Pick<
     WebCodeReviewTarget,
     "codeRef" | "editionSlug" | "edition" | "jurisdictionKey"
   >,
-): string | null {
+): DriverUrlCandidate[] {
   const cfg = slugConfigForTarget({
     editionSlug: target.editionSlug,
     codeRef: target.codeRef,
@@ -94,33 +102,60 @@ function nationalOrTexasDriverUrl(
   });
   const section = bareSectionFromCodeRef(target.codeRef);
   const chapter = inferChapterNumber(section);
+  const anchor = sectionAnchorToken(section);
 
   if (cfg?.deeplinkOnly && cfg.deeplinkUrl) {
-    return driver === "icc" ? cfg.deeplinkUrl : null;
+    return driver === "icc"
+      ? [{ driver, url: cfg.deeplinkUrl, granularity: "chapter" }]
+      : [];
   }
 
   switch (driver) {
     case "nfpa":
-      if (!target.codeRef.startsWith("NEC")) return null;
-      return "https://www.nfpa.org/codes-and-standards/nfpa-70-nec";
-    case "icc":
-      if (!cfg?.iccContentSlug) return null;
-      return `https://codes.iccsafe.org/content/${cfg.iccContentSlug}/chapter-${chapter}`;
-    case "upcodes":
-      if (!cfg?.upcodesBookSlug) return null;
+      if (!target.codeRef.startsWith("NEC")) return [];
+      return [
+        {
+          driver,
+          url: "https://www.nfpa.org/codes-and-standards/nfpa-70-nec",
+          granularity: "chapter",
+        },
+      ];
+    case "icc": {
+      if (!cfg?.iccContentSlug) return [];
+      const chapterUrl = `https://codes.iccsafe.org/content/${cfg.iccContentSlug}/chapter-${chapter}`;
+      return [
+        {
+          driver,
+          url: `${chapterUrl}#${anchor}`,
+          granularity: "section",
+        },
+        { driver, url: chapterUrl, granularity: "chapter" },
+      ];
+    }
+    case "upcodes": {
+      if (!cfg?.upcodesBookSlug) return [];
       if (target.codeRef.startsWith("NEC")) {
         const art = target.codeRef.replace(/NEC\s*Art\.?\s*/i, "").trim();
-        return `https://up.codes/viewer/texas/nfpa-70-2017/chapter/${art.split(".")[0]}`;
+        const url = `https://up.codes/viewer/texas/nfpa-70-2017/chapter/${art.split(".")[0]}`;
+        return [{ driver, url, granularity: "chapter" }];
       }
-      if (cfg.municipalityScoped) {
-        const city = upcodesJurisdictionSlug(target.jurisdictionKey);
-        return `https://up.codes/viewer/${city}/${cfg.upcodesBookSlug}/chapter/${chapter}`;
-      }
-      return `https://up.codes/viewer/texas/${cfg.upcodesBookSlug}/chapter/${chapter}`;
+      const city = cfg.municipalityScoped
+        ? upcodesJurisdictionSlug(target.jurisdictionKey)
+        : "texas";
+      const chapterBase = `https://up.codes/viewer/${city}/${cfg.upcodesBookSlug}/chapter/${chapter}`;
+      return [
+        {
+          driver,
+          url: `${chapterBase}/${encodeURIComponent(section)}`,
+          granularity: "section",
+        },
+        { driver, url: chapterBase, granularity: "chapter" },
+      ];
+    }
     case "florida":
-      return null;
+      return [];
     default:
-      return null;
+      return [];
   }
 }
 

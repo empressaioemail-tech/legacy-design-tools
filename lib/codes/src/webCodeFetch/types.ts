@@ -22,6 +22,8 @@ export interface WebCodeFetchInput {
   /** Requested edition label, e.g. `FBC 2023`, `NEC 2017`. */
   edition: string;
   jurisdictionKey?: string;
+  /** Manifest/catalog title — verified against fetched section heading when set. */
+  expectedTitle?: string;
 }
 
 export interface WebCodeFetchResult {
@@ -42,6 +44,8 @@ export interface WebCodeReviewTarget {
   edition: string;
   editionSlug: string;
   label: string;
+  /** Manifest/catalog title for section-heading verification. */
+  expectedTitle?: string;
   /** Preferred driver order. */
   drivers: Array<"icc" | "florida" | "nfpa" | "upcodes">;
   /** Jurisdiction key — selects Florida vs Texas vs national driver profile. */

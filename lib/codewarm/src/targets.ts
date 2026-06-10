@@ -13,7 +13,7 @@ export function driversForCode(code: string, codeRef: string): WebCodeReviewTarg
   if (upper.includes("NEC") || upper.includes("NFPA")) {
     return ["nfpa", "upcodes"];
   }
-  return ["icc", "upcodes"];
+  return ["upcodes", "icc"];
 }
 
 export function manifestEntryToTarget(
@@ -26,6 +26,7 @@ export function manifestEntryToTarget(
     edition: `${entry.code} ${entry.edition}`,
     editionSlug: slug,
     label: `${entry.codeRef} — ${entry.title}`,
+    expectedTitle: entry.title,
     drivers: driversForCode(entry.code, entry.codeRef),
     jurisdictionKey,
   };

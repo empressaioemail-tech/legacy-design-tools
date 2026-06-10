@@ -82,15 +82,24 @@ export async function fetchCodeSection(
         : ["icc", "upcodes", "florida"],
     };
 
+  const fetchInput: WebCodeFetchInput = {
+    ...input,
+    expectedTitle:
+      input.expectedTitle ??
+      target.expectedTitle ??
+      parseTitleFromLabel(target.label),
+  };
+
   const candidates = buildDriverUrls(target);
   const retrievedAt = new Date().toISOString();
+  let fallback: WebCodeFetchResult | null = null;
 
-  for (const { driver, url } of candidates) {
+  for (const { driver, url, granularity } of candidates) {
     try {
       const res = await http(url);
       if (res.status < 200 || res.status >= 400) continue;
-      const extracted = verifyAndExtract(res.body, input);
-      return {
+      const extracted = verifyAndExtract(res.body, fetchInput);
+      const result: WebCodeFetchResult = {
         text: extracted.text,
         sourceUrl: res.finalUrl,
         retrievedAt,
@@ -103,10 +112,20 @@ export async function fetchCodeSection(
           ? { unverifiedWebSource: true }
           : {}),
       };
+      if (extracted.verified) return result;
+      if (
+        !fallback ||
+        granularity === "section" ||
+        (fallback.sourceName !== driver && extracted.text.length > fallback.text.length)
+      ) {
+        fallback = result;
+      }
     } catch {
       /* try next driver */
     }
   }
+
+  if (fallback) return fallback;
 
   return {
     text: "",
@@ -119,6 +138,13 @@ export async function fetchCodeSection(
     sourceName: "none",
     unverifiedWebSource: true,
   };
+}
+
+function parseTitleFromLabel(label?: string): string | undefined {
+  if (!label) return undefined;
+  const parts = label.split(" — ");
+  if (parts.length < 2) return undefined;
+  return parts.slice(1).join(" — ").trim() || undefined;
 }
 
 export interface WebCodeSectionSourceLink {

@@ -140,6 +140,7 @@ export async function runCodewarmBatch(
             codeRef: entry.codeRef,
             edition: target.edition,
             jurisdictionKey: options.jurisdictionKey,
+            expectedTitle: entry.title,
           },
           { http, target },
         );
@@ -161,6 +162,7 @@ export async function runCodewarmBatch(
           codeRef: entry.codeRef,
           edition: target.edition,
           jurisdictionKey: options.jurisdictionKey,
+          expectedTitle: entry.title,
         },
         { http, target },
       );
