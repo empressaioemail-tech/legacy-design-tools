@@ -200,6 +200,53 @@ describe("GET /api/findings/adjudication-evidence", () => {
     expect(res.body.rows).toHaveLength(3);
   });
 
+  it("normalizes did:hauska:code-section and bare UUID to the same citedAtomId", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { submission } = await seedTenantEngagement("bastrop_tx");
+    const corpusUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const corpusDid = `did:hauska:code-section:${corpusUuid}`;
+
+    const findingUuid = await seedFindingWithCitations({
+      submissionId: submission.id,
+      atomId: "finding:uuid-cite:001",
+      citations: [{ kind: "code-section", atomId: corpusUuid }],
+      confidence: "0.80",
+    });
+    const findingDid = await seedFindingWithCitations({
+      submissionId: submission.id,
+      atomId: "finding:did-cite:001",
+      citations: [{ kind: "code-section", atomId: corpusDid }],
+      confidence: "0.75",
+    });
+
+    await appendFindingMutationEvent({
+      findingAtomId: findingUuid.atomId,
+      eventType: "finding.accepted",
+    });
+    await appendFindingMutationEvent({
+      findingAtomId: findingDid.atomId,
+      eventType: "finding.accepted",
+    });
+
+    const res = await request(getApp())
+      .get("/api/findings/adjudication-evidence?jurisdictionTenant=bastrop_tx")
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+
+    const row = res.body.rows.find(
+      (r: { citedAtomId: string }) => r.citedAtomId === corpusUuid,
+    );
+    expect(row).toBeDefined();
+    expect(row.acceptCount).toBe(2);
+    expect(row.statedConfidences).toEqual(expect.arrayContaining([0.8, 0.75]));
+    expect(
+      res.body.rows.filter(
+        (r: { citedAtomId: string }) =>
+          r.citedAtomId === corpusUuid || r.citedAtomId === corpusDid,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("filters by jurisdictionTenant query param", async () => {
     if (!ctx.schema) throw new Error("ctx");
     const { submission } = await seedTenantEngagement("bastrop_tx");

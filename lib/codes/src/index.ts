@@ -88,6 +88,15 @@ export {
 } from "./reasoningAtoms/index";
 
 export {
+  HAUSKA_CODE_SECTION_DID_PREFIX,
+  isReasoningOverlayAtomId,
+  canonicalOverlayAtomKey,
+  overlayAtomLookupKey,
+  canonicalOverlayKeyFromCodeToken,
+  toHauskaCodeSectionDid,
+} from "./overlayAtomKey";
+
+export {
   buildChatPrompt,
   formatReferenceCodeAtoms,
   formatAtomVocabulary,

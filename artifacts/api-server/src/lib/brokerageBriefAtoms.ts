@@ -5,6 +5,10 @@
 
 import { createHash } from "node:crypto";
 import { pickFirstString } from "@workspace/adapters";
+import {
+  canonicalOverlayAtomKey,
+  toHauskaCodeSectionDid,
+} from "@workspace/codes";
 import type { BrokerageSiteContext } from "./brokerageSiteContext";
 import { extractLlUuidFromPayload } from "./placeLayerUtils";
 import type { PrivateRestrictionsBriefing } from "./encumbranceWire";
@@ -68,8 +72,7 @@ export function buildPlaceLayerDid(
 }
 
 export function buildCodeSectionDid(atomId: string): string {
-  if (atomId.startsWith("did:")) return atomId;
-  return `did:hauska:code-section:${atomId}`;
+  return toHauskaCodeSectionDid(atomId);
 }
 
 export function buildBriefAtomProjection(input: {
@@ -107,10 +110,11 @@ export function buildBriefAtomProjection(input: {
 
   const inlineRefs: BriefInlineRef[] = [];
   for (const c of input.citations.slice(0, 3)) {
+    const canonicalId = canonicalOverlayAtomKey(c.atomDid);
     inlineRefs.push({
       did: buildCodeSectionDid(c.atomDid),
       entityType: "code-section",
-      entityId: c.atomDid,
+      entityId: canonicalId,
       label: c.query.slice(0, 48),
       mode: "inline",
     });
