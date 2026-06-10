@@ -96,6 +96,8 @@ describe("lib/db schema integration", () => {
         "briefing_sources",
         // Hauska Property Brief Chrome extension — persisted brief runs.
         "brokerage_brief_runs",
+        // Task #29 — one install id maps to exactly one authenticated user.
+        "brokerage_install_claims",
         "brokerage_wallet_ledger",
         "brokerage_wallets",
         "brokerage_workspace_attachments",
@@ -201,6 +203,9 @@ describe("lib/db schema integration", () => {
         // append-only letter log). Cascades off `submissions`.
         "submission_communications",
         "submissions",
+        // Task #29 — hosted login credentials + per-user metering.
+        "user_auth_credentials",
+        "user_usage_metering",
         "users",
         "viewpoint_renders",
         // QA-57 — pilot workspace branding (firm display name, logo URL).
