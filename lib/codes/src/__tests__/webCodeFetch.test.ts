@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { verifyAndExtract } from "../webCodeFetch/extract";
+import {
+  extractSectionBlock,
+  titleMatchesExpected,
+  verifyAndExtract,
+} from "../webCodeFetch/extract";
 import {
   corpusCoversTarget,
   fetchCodeSection,
@@ -27,8 +31,41 @@ const NEC_2020_WRONG_HTML = `
 <html><head><title>NFPA 70 NEC 2020</title></head>
 <body><h1>Article 220</h1><p>2020 edition load calculations.</p></body></html>`;
 
-function mockHttp(body: string, url = "https://codes.iccsafe.org/content/FLMECH2023P1"): HttpFetcher {
+const IRC_2021_SECTION_HTML = `
+<html><head><title>Texas IRC 2021 R301.1</title></head>
+<body>
+<h2>### R301.1 Application</h2>
+<p>Buildings and structures, and parts thereof, shall be constructed to safely support all loads,
+including dead loads, live loads, roof loads, flood loads, snow loads, wind loads and seismic loads
+as prescribed by this code. 2021 International Residential Code.</p>
+<h2>### R301.2 Climatic and Geographic Design Criteria</h2>
+<p>Other section content here.</p>
+</body></html>`;
+
+const IRC_2021_LANDING_HTML = `
+<html><head><title>IRC 2021</title></head>
+<body><p>International Residential Code 2021 — select a chapter to browse.</p></body></html>`;
+
+function mockHttp(
+  body: string,
+  url = "https://codes.iccsafe.org/content/FLMECH2023P1",
+): HttpFetcher {
   return async () => ({ status: 200, body, finalUrl: url });
+}
+
+function mockHttpSequence(
+  responses: Array<{ body: string; url: string; status?: number }>,
+): HttpFetcher {
+  let i = 0;
+  return async (url) => {
+    const hit = responses[i] ?? responses[responses.length - 1]!;
+    i++;
+    return {
+      status: hit.status ?? 200,
+      body: hit.body,
+      finalUrl: hit.url ?? url,
+    };
+  };
 }
 
 describe("verifyAndExtract", () => {
@@ -36,6 +73,7 @@ describe("verifyAndExtract", () => {
     const out = verifyAndExtract(FBC_2023_HTML, {
       codeRef: "FBC-M601.6",
       edition: "FBC 2023",
+      expectedTitle: "Duct insulation",
     });
     expect(out.verified).toBe(true);
     expect(out.unverifiedWebSource).toBe(false);
@@ -46,16 +84,18 @@ describe("verifyAndExtract", () => {
     const out = verifyAndExtract(FBC_2020_WRONG_HTML, {
       codeRef: "FBC-M601.6",
       edition: "FBC 2023",
+      expectedTitle: "Duct insulation",
     });
     expect(out.verified).toBe(false);
     expect(out.unverifiedWebSource).toBe(true);
-    expect(out.confidence).toBeLessThan(0.5);
+    expect(out.verificationNote).toBe("wrong-edition");
   });
 
   it("refuses wrong edition NEC 2020 when 2017 requested", () => {
     const out = verifyAndExtract(NEC_2020_WRONG_HTML, {
       codeRef: "NEC Art. 220",
       edition: "NEC 2017",
+      expectedTitle: "Branch-Circuit Load Calculations",
     });
     expect(out.verified).toBe(false);
     expect(out.unverifiedWebSource).toBe(true);
@@ -65,16 +105,74 @@ describe("verifyAndExtract", () => {
     const out = verifyAndExtract(NEC_2017_HTML, {
       codeRef: "NEC Art. 220",
       edition: "NEC 2017",
+      expectedTitle: "Branch-Circuit Load Calculations",
     });
     expect(out.verified).toBe(true);
     expect(out.text).toContain("Load calculations");
+  });
+
+  it("verifies IRC section body + title from UpCodes-style HTML", () => {
+    const out = verifyAndExtract(IRC_2021_SECTION_HTML, {
+      codeRef: "IRC-R301.1",
+      edition: "IRC 2021",
+      expectedTitle: "Application (design criteria)",
+    });
+    expect(out.verified).toBe(true);
+    expect(out.text).toContain("safely support all loads");
+    expect(out.text).not.toContain("Climatic and Geographic");
+  });
+
+  it("rejects chapter landing without section body", () => {
+    const out = verifyAndExtract(IRC_2021_LANDING_HTML, {
+      codeRef: "IRC-R301.1",
+      edition: "IRC 2021",
+      expectedTitle: "Application (design criteria)",
+    });
+    expect(out.verified).toBe(false);
+    expect(out.verificationNote).toBe("section-not-found");
+  });
+
+  it("rejects title mismatch on otherwise valid section", () => {
+    const out = verifyAndExtract(IRC_2021_SECTION_HTML, {
+      codeRef: "IRC-R301.1",
+      edition: "IRC 2021",
+      expectedTitle: "Ice barriers",
+    });
+    expect(out.verified).toBe(false);
+    expect(out.verificationNote).toBe("title-mismatch");
+  });
+});
+
+describe("extractSectionBlock", () => {
+  it("isolates one section from a multi-section chapter page", () => {
+    const plain =
+      "### R301.1 Application Buildings shall support loads. ### R301.2 Climatic criteria Other text.";
+    const block = extractSectionBlock(plain, "R301.1", "Application");
+    expect(block?.heading).toContain("R301.1");
+    expect(block?.body).toContain("support loads");
+    expect(block?.body).not.toContain("Climatic");
+  });
+});
+
+describe("titleMatchesExpected", () => {
+  it("accepts fuzzy title overlap", () => {
+    expect(
+      titleMatchesExpected(
+        "R301.1 Application",
+        "Application (design criteria)",
+      ),
+    ).toBe(true);
   });
 });
 
 describe("fetchCodeSection", () => {
   it("returns verified result with source URL and retrievedAt", async () => {
     const result = await fetchCodeSection(
-      { codeRef: "FBC-M601.6", edition: "FBC 2023" },
+      {
+        codeRef: "FBC-M601.6",
+        edition: "FBC 2023",
+        expectedTitle: "Duct insulation",
+      },
       { http: mockHttp(FBC_2023_HTML) },
     );
     expect(result.verified).toBe(true);
@@ -85,11 +183,48 @@ describe("fetchCodeSection", () => {
 
   it("returns verified:false for wrong edition", async () => {
     const result = await fetchCodeSection(
-      { codeRef: "FBC-M601.6", edition: "FBC 2023" },
+      {
+        codeRef: "FBC-M601.6",
+        edition: "FBC 2023",
+        expectedTitle: "Duct insulation",
+      },
       { http: mockHttp(FBC_2020_WRONG_HTML) },
     );
     expect(result.verified).toBe(false);
     expect(result.unverifiedWebSource).toBe(true);
+  });
+
+  it("tries next driver when first returns unverified landing HTML", async () => {
+    const result = await fetchCodeSection(
+      {
+        codeRef: "IRC-R301.1",
+        edition: "IRC 2021",
+        expectedTitle: "Application (design criteria)",
+      },
+      {
+        http: mockHttpSequence([
+          {
+            body: IRC_2021_LANDING_HTML,
+            url: "https://codes.iccsafe.org/content/IRC2021P1",
+          },
+          {
+            body: IRC_2021_SECTION_HTML,
+            url: "https://up.codes/viewer/texas/irc-2021/chapter/3/R301.1",
+          },
+        ]),
+        target: {
+          codeRef: "IRC-R301.1",
+          edition: "IRC 2021",
+          editionSlug: "irc-2021",
+          label: "IRC-R301.1 — Application (design criteria)",
+          expectedTitle: "Application (design criteria)",
+          jurisdictionKey: "austin_tx",
+          drivers: ["upcodes", "icc"],
+        },
+      },
+    );
+    expect(result.verified).toBe(true);
+    expect(result.sourceUrl).toContain("up.codes");
   });
 });
 

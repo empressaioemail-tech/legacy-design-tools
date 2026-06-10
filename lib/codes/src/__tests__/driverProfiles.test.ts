@@ -2,32 +2,49 @@ import { describe, expect, it } from "vitest";
 import { buildDriverUrls } from "../webCodeFetch/drivers";
 
 describe("buildDriverUrls national/texas profiles", () => {
-  it("builds Texas UpCodes + ICC URLs for IRC 2021", () => {
+  it("builds Texas UpCodes section + ICC section URLs for IRC 2021", () => {
     const urls = buildDriverUrls({
       codeRef: "IRC-R301.1",
       edition: "IRC 2021",
       editionSlug: "irc-2021",
       jurisdictionKey: "austin_tx",
-      drivers: ["icc", "upcodes"],
+      drivers: ["upcodes", "icc"],
     });
-    expect(urls.some((u) => u.url.includes("up.codes/viewer/texas/irc-2021"))).toBe(
-      true,
-    );
-    expect(urls.some((u) => u.url.includes("IRC2021P1"))).toBe(true);
+    expect(
+      urls.some(
+        (u) =>
+          u.driver === "upcodes" &&
+          u.granularity === "section" &&
+          u.url.includes("up.codes/viewer/texas/irc-2021/chapter/3/R301.1"),
+      ),
+    ).toBe(true);
+    expect(
+      urls.some(
+        (u) =>
+          u.driver === "icc" &&
+          u.granularity === "section" &&
+          u.url.includes("IRC2021P1/chapter-3#R301_1"),
+      ),
+    ).toBe(true);
   });
 
   it("uses municipality slug for IECC (no statewide texas/iecc-2021)", () => {
     const urls = buildDriverUrls({
       codeRef: "IECC-C402.4",
       edition: "IECC 2021",
-      editionSlug: "iecc-2021",
+      editionSlug: "iecc-c-2021",
       jurisdictionKey: "austin_tx",
       drivers: ["upcodes"],
     });
-    expect(urls.some((u) => u.url.includes("up.codes/viewer/austin/iecc-2021"))).toBe(
-      true,
+    expect(
+      urls.some(
+        (u) =>
+          u.url.includes("up.codes/viewer/austin/iecc-2021/chapter/4/C402.4"),
+      ),
+    ).toBe(true);
+    expect(urls.some((u) => u.url.includes("viewer/texas/iecc-2021"))).toBe(
+      false,
     );
-    expect(urls.some((u) => u.url.includes("viewer/texas/iecc-2021"))).toBe(false);
   });
 
   it("uses municipality slug for A117.1-2017", () => {
@@ -39,7 +56,10 @@ describe("buildDriverUrls national/texas profiles", () => {
       drivers: ["upcodes", "icc"],
     });
     expect(
-      urls.some((u) => u.url.includes("up.codes/viewer/austin/icc-a117.1-2017")),
+      urls.some(
+        (u) =>
+          u.url.includes("up.codes/viewer/austin/icc-a117.1-2017/chapter/3/302"),
+      ),
     ).toBe(true);
     expect(urls.some((u) => u.url.includes("A11712017"))).toBe(true);
   });
