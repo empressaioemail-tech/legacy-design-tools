@@ -42,15 +42,20 @@ export async function queryCorpusCoverage(args: {
 
   const labels = rows.map(
     (r) =>
-      `${r.sectionNumber ?? ""} ${r.sectionTitle ?? ""}`.trim(),
+      `${args.entry.codeRef} — ${r.sectionTitle ?? r.sectionNumber ?? ""}`.trim(),
   );
 
-  if (corpusCoversTarget(labels, target) && rows[0]) {
+  const matchedIndex = labels.findIndex((_label, i) =>
+    corpusCoversTarget([labels[i]!], target),
+  );
+  const hit = matchedIndex >= 0 ? rows[matchedIndex]! : null;
+
+  if (hit) {
     return {
       covered: true,
-      corpusAtomId: rows[0].id,
-      corpusSourceUrl: rows[0].sourceUrl,
-      label: labels[0],
+      corpusAtomId: hit.id,
+      corpusSourceUrl: hit.sourceUrl,
+      label: labels[matchedIndex],
     };
   }
 
