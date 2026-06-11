@@ -142,6 +142,7 @@ export const utahParcelsAdapter: Adapter = {
       longitude: ctx.parcel.longitude,
       outFields: "*",
       returnGeometry: true,
+      outSpatialReference: 4326,
       fetchImpl: ctx.fetchImpl,
       signal: ctx.signal,
     });
