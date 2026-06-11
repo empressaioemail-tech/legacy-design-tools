@@ -56,12 +56,17 @@ vi.mock("@workspace/db", async () => {
 // factory closure would reference a `const` that has not yet been
 // initialized at hoist time.
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
+const supplementCodeSectionsWithReasoningGroundingMock = vi.hoisted(() =>
+  vi.fn(),
+);
 vi.mock("@workspace/codes", async () => {
   const actual =
     await vi.importActual<typeof import("@workspace/codes")>("@workspace/codes");
   return {
     ...actual,
     retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
+    supplementCodeSectionsWithReasoningGrounding:
+      supplementCodeSectionsWithReasoningGroundingMock,
   };
 });
 
@@ -90,6 +95,12 @@ beforeEach(() => {
   // retrieval-reaches-engine path override per-call.
   retrieveAtomsForQuestionMock.mockReset();
   retrieveAtomsForQuestionMock.mockResolvedValue([]);
+  supplementCodeSectionsWithReasoningGroundingMock.mockReset();
+  supplementCodeSectionsWithReasoningGroundingMock.mockResolvedValue({
+    sections: [],
+    reasoningRetrievedCount: 0,
+    webFilledCount: 0,
+  });
 });
 
 const REVIEWER_HEADERS = {
