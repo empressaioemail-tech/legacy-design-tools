@@ -207,7 +207,9 @@ const CITY_STATE_TO_KEY: Record<string, string> = {
  * fallbacks, retrieval silently returns zero atoms and the chat answers from
  * model knowledge instead of our ingested code corpus.
  *
- * Returns null when no warmup is configured for the engagement's location.
+ * Returns null only when city/state cannot be resolved (including blocked
+ * partnership keys). Unwarmed cities synthesize a `city_state` slug so
+ * retrieval + web-first grounding can run on demand.
  */
 export function keyFromEngagement(input: {
   jurisdictionCity?: string | null;
@@ -219,29 +221,24 @@ export function keyFromEngagement(input: {
   const city = (input.jurisdictionCity ?? "").trim().toLowerCase();
   const state = (input.jurisdictionState ?? "").trim().toLowerCase();
   if (city && state) {
-    const pair = `${city}|${state}`;
-    if (BLOCKED_CITY_STATE_KEYS[pair as keyof typeof BLOCKED_CITY_STATE_KEYS]) {
-      return null;
-    }
-    const k =
-      CITY_STATE_TO_KEY[pair] ?? CENTRAL_TEXAS_CITY_STATE_TO_KEY[pair];
-    if (k) return k;
+    const resolved = resolveRegisteredOrSynthesizedKey(
+      `${city}|${state}`,
+      input.jurisdictionCity ?? city,
+      state,
+    );
+    if (resolved) return resolved;
   }
 
   // 2) Freeform "City, ST" jurisdiction string.
   const fromJurisdiction = parseCityState(input.jurisdiction);
   if (fromJurisdiction) {
-    if (
-      BLOCKED_CITY_STATE_KEYS[
-        fromJurisdiction as keyof typeof BLOCKED_CITY_STATE_KEYS
-      ]
-    ) {
-      return null;
-    }
-    const k =
-      CITY_STATE_TO_KEY[fromJurisdiction] ??
-      CENTRAL_TEXAS_CITY_STATE_TO_KEY[fromJurisdiction];
-    if (k) return k;
+    const [parsedCity, parsedState] = fromJurisdiction.split("|");
+    const resolved = resolveRegisteredOrSynthesizedKey(
+      fromJurisdiction,
+      parsedCity,
+      parsedState,
+    );
+    if (resolved) return resolved;
   }
 
   // 3) Scan the address for any registered city/state pair. We test each
@@ -263,9 +260,189 @@ export function keyFromEngagement(input: {
         return key;
       }
     }
+
+    const fromAddress = parseCityStateFromAddress(input.address ?? "");
+    if (fromAddress) {
+      const pair = `${fromAddress.city.toLowerCase()}|${fromAddress.state.toLowerCase()}`;
+      const resolved = resolveRegisteredOrSynthesizedKey(
+        pair,
+        fromAddress.city,
+        fromAddress.state,
+      );
+      if (resolved) return resolved;
+    }
   }
 
   return null;
+}
+
+const US_STATE_SLUG: Record<string, string> = {
+  al: "al",
+  alabama: "al",
+  ak: "ak",
+  alaska: "ak",
+  az: "az",
+  arizona: "az",
+  ar: "ar",
+  arkansas: "ar",
+  ca: "ca",
+  california: "ca",
+  co: "co",
+  colorado: "co",
+  ct: "ct",
+  connecticut: "ct",
+  de: "de",
+  delaware: "de",
+  fl: "fl",
+  florida: "fl",
+  ga: "ga",
+  georgia: "ga",
+  hi: "hi",
+  hawaii: "hi",
+  id: "id",
+  idaho: "id",
+  il: "il",
+  illinois: "il",
+  in: "in",
+  indiana: "in",
+  ia: "ia",
+  iowa: "ia",
+  ks: "ks",
+  kansas: "ks",
+  ky: "ky",
+  kentucky: "ky",
+  la: "la",
+  louisiana: "la",
+  me: "me",
+  maine: "me",
+  md: "md",
+  maryland: "md",
+  ma: "ma",
+  massachusetts: "ma",
+  mi: "mi",
+  michigan: "mi",
+  mn: "mn",
+  minnesota: "mn",
+  ms: "ms",
+  mississippi: "ms",
+  mo: "mo",
+  missouri: "mo",
+  mt: "mt",
+  montana: "mt",
+  ne: "ne",
+  nebraska: "ne",
+  nv: "nv",
+  nevada: "nv",
+  nh: "nh",
+  "new hampshire": "nh",
+  nj: "nj",
+  "new jersey": "nj",
+  nm: "nm",
+  "new mexico": "nm",
+  ny: "ny",
+  "new york": "ny",
+  nc: "nc",
+  "north carolina": "nc",
+  nd: "nd",
+  "north dakota": "nd",
+  oh: "oh",
+  ohio: "oh",
+  ok: "ok",
+  oklahoma: "ok",
+  or: "or",
+  oregon: "or",
+  pa: "pa",
+  pennsylvania: "pa",
+  ri: "ri",
+  "rhode island": "ri",
+  sc: "sc",
+  "south carolina": "sc",
+  sd: "sd",
+  "south dakota": "sd",
+  tn: "tn",
+  tennessee: "tn",
+  tx: "tx",
+  texas: "tx",
+  ut: "ut",
+  utah: "ut",
+  vt: "vt",
+  vermont: "vt",
+  va: "va",
+  virginia: "va",
+  wa: "wa",
+  washington: "wa",
+  wv: "wv",
+  "west virginia": "wv",
+  wi: "wi",
+  wisconsin: "wi",
+  wy: "wy",
+  wyoming: "wy",
+};
+
+function normalizeStateSlug(state: string): string | null {
+  const raw = state.trim().toLowerCase();
+  if (!raw) return null;
+  return US_STATE_SLUG[raw] ?? null;
+}
+
+function slugifyCityName(city: string): string {
+  return city
+    .trim()
+    .toLowerCase()
+    .replace(/['.]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
+/**
+ * Synthesize a jurisdiction slug for an unwarmed US city (`san_marcos_tx`).
+ * Returns null for blocked partnership keys or unparseable city/state.
+ */
+export function synthesizeJurisdictionKey(
+  city: string,
+  state: string,
+): string | null {
+  const cityNorm = city.trim().toLowerCase();
+  const stateSlug = normalizeStateSlug(state);
+  if (!cityNorm || !stateSlug) return null;
+  const pair = `${cityNorm}|${stateSlug}`;
+  if (BLOCKED_CITY_STATE_KEYS[pair as keyof typeof BLOCKED_CITY_STATE_KEYS]) {
+    return null;
+  }
+  const citySlug = slugifyCityName(city);
+  if (!citySlug) return null;
+  return `${citySlug}_${stateSlug}`;
+}
+
+function resolveRegisteredOrSynthesizedKey(
+  pair: string,
+  city: string,
+  stateToken: string,
+): string | null {
+  if (BLOCKED_CITY_STATE_KEYS[pair as keyof typeof BLOCKED_CITY_STATE_KEYS]) {
+    return null;
+  }
+  const registered =
+    CITY_STATE_TO_KEY[pair] ?? CENTRAL_TEXAS_CITY_STATE_TO_KEY[pair];
+  if (registered) return registered;
+  return synthesizeJurisdictionKey(city, stateToken);
+}
+
+/** Parse trailing "City, ST [zip]" from a US mailing address. */
+function parseCityStateFromAddress(
+  address: string,
+): { city: string; state: string } | null {
+  const m = address
+    .trim()
+    .match(/,\s*([^,]+?),\s*([A-Za-z]{2})(?:\s+(?:\d{5}(?:-\d{4})?))?\s*$/);
+  if (!m) return null;
+  const city = m[1]!.trim();
+  const state = m[2]!.trim();
+  if (!city || !state) return null;
+  if (!normalizeStateSlug(state)) return null;
+  return { city, state };
 }
 
 /**

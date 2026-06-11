@@ -51,6 +51,24 @@ export const MIAMI_WHOLE_REVIEW_WEB_TARGETS: ReadonlyArray<WebCodeReviewTarget> 
   },
 ];
 
+/** Stock residential review refs for unwarmed Texas municipalities (web-first). */
+export const TEXAS_WEB_FIRST_REVIEW_TARGETS: ReadonlyArray<WebCodeReviewTarget> = [
+  {
+    codeRef: "IRC-R301.1",
+    edition: "IRC 2021",
+    editionSlug: "irc-2021",
+    label: "IRC R301.1 — Application (design criteria)",
+    drivers: ["icc", "upcodes"],
+  },
+  {
+    codeRef: "IRC-R301.2.1",
+    edition: "IRC 2021",
+    editionSlug: "irc-2021",
+    label: "IRC R301.2.1 — Climatic and geographic design criteria",
+    drivers: ["icc", "upcodes"],
+  },
+];
+
 const JURISDICTION_WEB_TARGETS: Record<string, ReadonlyArray<WebCodeReviewTarget>> = {
   miami_beach_fl: MIAMI_WHOLE_REVIEW_WEB_TARGETS,
   miami_dade_fl: MIAMI_WHOLE_REVIEW_WEB_TARGETS,
@@ -60,5 +78,8 @@ export function reviewWebTargetsForJurisdiction(
   jurisdictionKey: string | null | undefined,
 ): ReadonlyArray<WebCodeReviewTarget> {
   if (!jurisdictionKey) return [];
-  return JURISDICTION_WEB_TARGETS[jurisdictionKey] ?? [];
+  const explicit = JURISDICTION_WEB_TARGETS[jurisdictionKey];
+  if (explicit) return explicit;
+  if (jurisdictionKey.endsWith("_tx")) return TEXAS_WEB_FIRST_REVIEW_TARGETS;
+  return [];
 }

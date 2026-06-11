@@ -29,6 +29,7 @@ import {
   useSpineFindings,
   useSpineFindingsOrchestrated,
 } from "./engineSpineFlags";
+import { rehydrateSpineFindingsResult } from "./engineSpineDeserialize";
 
 type BriefingEngineOptions = Parameters<typeof generateBriefing>[1];
 type FindingEngineOptions = GenerateFindingsOptions;
@@ -77,7 +78,7 @@ export async function routeGenerateFindings(
     gateFront,
   });
 
-  return payload.result;
+  return rehydrateSpineFindingsResult(payload.result);
 }
 
 export async function routeGenerateOrchestratedFindings(
@@ -101,7 +102,7 @@ export async function routeGenerateOrchestratedFindings(
     gateFront,
   });
 
-  return payload.result;
+  return rehydrateSpineFindingsResult(payload.result);
 }
 
 export async function routeGenerateBriefing(
