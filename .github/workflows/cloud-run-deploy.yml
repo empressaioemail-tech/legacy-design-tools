@@ -171,6 +171,12 @@ jobs:
         # PRIVATE_OBJECT_DIR is the prefix before the code-appended
         # `/uploads/<uuid>` (use `.../.private`, not `.../.private/uploads`).
         #
+        # ENGINE_SPINE_* flags: one engine at a time. Append each spine flag
+        # to --set-env-vars below only AFTER that engine is verified green on
+        # the canary. Findings is live (ENGINE_SPINE_FINDINGS +
+        # ENGINE_SPINE_FINDINGS_ORCHESTRATED). Next: briefing, then hydrology,
+        # then topography — do not batch.
+        #
         # --allow-unauthenticated: CI is non-interactive; without an explicit
         # flag, gcloud prompts and fails. Phase 1A uses curl /api/healthz smoke;
         # tighten to --no-allow-unauthenticated + identity tokens before prod.
@@ -201,8 +207,8 @@ jobs:
             --timeout=300 \
             --service-account=${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }} \
             --allow-unauthenticated \
-            --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=anthropic,BRIEFING_LLM_MODE=anthropic,AIR_FINDING_ORCHESTRATED=1,MNML_RENDER_MODE=mock,RENDERS_PROD_ENABLED=false,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private,ICC_ES_REPORT_URL_TEMPLATE=https://icc-es.org/report-listing/?search_api_fulltext={ESR} \
-            --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest,SNAPSHOT_SECRET=SNAPSHOT_SECRET:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest
+            --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=anthropic,BRIEFING_LLM_MODE=anthropic,AIR_FINDING_ORCHESTRATED=1,ENGINE_API_URL=https://hauska-engine-api-h7gvu7rgcq-uc.a.run.app,ENGINE_SPINE_FINDINGS=1,ENGINE_SPINE_FINDINGS_ORCHESTRATED=1,MNML_RENDER_MODE=mock,RENDERS_PROD_ENABLED=false,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private,ICC_ES_REPORT_URL_TEMPLATE=https://icc-es.org/report-listing/?search_api_fulltext={ESR} \
+            --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest,SNAPSHOT_SECRET=SNAPSHOT_SECRET:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest,ENGINE_API_GATE_TOKEN=HAUSKA_ENGINE_API_KEY:latest
 
       - name: Show new revision and canary smoke URL
         run: |
