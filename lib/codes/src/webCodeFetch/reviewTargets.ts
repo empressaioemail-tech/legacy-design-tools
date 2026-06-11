@@ -3,7 +3,14 @@
  * Jurisdiction-agnostic shape; Miami Beach / Miami-Dade targets are the first consumer.
  */
 
+import { ENGINE_CORPUS_JURISDICTION_KEYS } from "../centralTexasPilot";
+import { JURISDICTIONS } from "../jurisdictions";
 import type { WebCodeReviewTarget } from "./types";
+
+function isRegisteredJurisdictionKey(key: string): boolean {
+  if (JURISDICTIONS[key]) return true;
+  return (ENGINE_CORPUS_JURISDICTION_KEYS as readonly string[]).includes(key);
+}
 
 /** Operator-cited sections for 404 Remodel_B whole-discipline review. */
 export const MIAMI_WHOLE_REVIEW_WEB_TARGETS: ReadonlyArray<WebCodeReviewTarget> = [
@@ -51,6 +58,24 @@ export const MIAMI_WHOLE_REVIEW_WEB_TARGETS: ReadonlyArray<WebCodeReviewTarget> 
   },
 ];
 
+/** Stock residential review refs for unwarmed Texas municipalities (web-first). */
+export const TEXAS_WEB_FIRST_REVIEW_TARGETS: ReadonlyArray<WebCodeReviewTarget> = [
+  {
+    codeRef: "IRC-R301.1",
+    edition: "IRC 2021",
+    editionSlug: "irc-2021",
+    label: "IRC R301.1 — Application (design criteria)",
+    drivers: ["icc", "upcodes"],
+  },
+  {
+    codeRef: "IRC-R301.2.1",
+    edition: "IRC 2021",
+    editionSlug: "irc-2021",
+    label: "IRC R301.2.1 — Climatic and geographic design criteria",
+    drivers: ["icc", "upcodes"],
+  },
+];
+
 const JURISDICTION_WEB_TARGETS: Record<string, ReadonlyArray<WebCodeReviewTarget>> = {
   miami_beach_fl: MIAMI_WHOLE_REVIEW_WEB_TARGETS,
   miami_dade_fl: MIAMI_WHOLE_REVIEW_WEB_TARGETS,
@@ -60,5 +85,15 @@ export function reviewWebTargetsForJurisdiction(
   jurisdictionKey: string | null | undefined,
 ): ReadonlyArray<WebCodeReviewTarget> {
   if (!jurisdictionKey) return [];
-  return JURISDICTION_WEB_TARGETS[jurisdictionKey] ?? [];
+  const explicit = JURISDICTION_WEB_TARGETS[jurisdictionKey];
+  if (explicit) return explicit;
+  // Web-first stock targets only for synthesized unwarmed Texas keys —
+  // registered corpus jurisdictions rely on retrieval, not generic IRC fetch.
+  if (
+    jurisdictionKey.endsWith("_tx") &&
+    !isRegisteredJurisdictionKey(jurisdictionKey)
+  ) {
+    return TEXAS_WEB_FIRST_REVIEW_TARGETS;
+  }
+  return [];
 }

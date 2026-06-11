@@ -159,14 +159,25 @@ describe("keyFromEngagement: three-tier fallback", () => {
     ).toBeNull();
   });
 
-  it("returns null for an unknown jurisdiction", () => {
+  it("synthesizes a slug for unwarmed US cities (web-first on demand)", () => {
     expect(
       keyFromEngagement({
         jurisdictionCity: "Boise",
         jurisdictionState: "ID",
       }),
-    ).toBeNull();
-    expect(keyFromEngagement({ jurisdiction: "Boise, ID" })).toBeNull();
+    ).toBe("boise_id");
+    expect(keyFromEngagement({ jurisdiction: "Boise, ID" })).toBe("boise_id");
+    expect(
+      keyFromEngagement({
+        jurisdictionCity: "San Marcos",
+        jurisdictionState: "TX",
+      }),
+    ).toBe("san_marcos_tx");
+    expect(
+      keyFromEngagement({
+        address: "613 Sturgeon Dr, San Marcos, TX 78666",
+      }),
+    ).toBe("san_marcos_tx");
   });
 
   it("structured tier wins when both structured and freeform are present", () => {
