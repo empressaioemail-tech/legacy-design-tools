@@ -5,6 +5,10 @@
  */
 
 import { eq, inArray } from "drizzle-orm";
+import {
+  canonicalOverlayAtomKey,
+  isReasoningOverlayAtomId,
+} from "@workspace/codes";
 import { db, codeAtoms, codeAtomSources, reasoningAtoms, type Finding, type ParcelBriefing, type BriefingSource } from "@workspace/db";
 import type { CodeSectionInput } from "@workspace/finding-engine";
 import type { FindingCitation } from "@workspace/finding-engine";
@@ -57,33 +61,62 @@ function parsePrecedenceReasoning(text: string): {
   };
 }
 
+/** Split citation atom ids by namespace before DB hydration (UUID corpus vs reasoning-layer). */
+export function partitionProvenanceAtomIds(atomIds: readonly string[]): {
+  corpusAtomIds: string[];
+  reasoningAtomIds: string[];
+} {
+  const corpusAtomIds: string[] = [];
+  const reasoningAtomIds: string[] = [];
+  for (const raw of atomIds) {
+    if (isReasoningOverlayAtomId(raw)) {
+      reasoningAtomIds.push(raw);
+    } else {
+      corpusAtomIds.push(canonicalOverlayAtomKey(raw));
+    }
+  }
+  return { corpusAtomIds, reasoningAtomIds };
+}
+
 export async function hydrateProvenanceSources(
   atomIds: readonly string[],
 ): Promise<ProvenanceSourceEntry[]> {
   if (atomIds.length === 0) return [];
 
-  const corpusRows = await db
-    .select({
-      id: codeAtoms.id,
-      edition: codeAtoms.edition,
-      sourceUrl: codeAtoms.sourceUrl,
-      fetchedAt: codeAtoms.fetchedAt,
-      sourceName: codeAtomSources.sourceName,
-    })
-    .from(codeAtoms)
-    .innerJoin(codeAtomSources, eq(codeAtomSources.id, codeAtoms.sourceId))
-    .where(inArray(codeAtoms.id, [...atomIds]));
+  const { corpusAtomIds, reasoningAtomIds } =
+    partitionProvenanceAtomIds(atomIds);
 
-  const reasoningRows = await db
-    .select({
-      id: reasoningAtoms.id,
-      edition: reasoningAtoms.edition,
-      sources: reasoningAtoms.sources,
-      verificationState: reasoningAtoms.verificationState,
-      updatedAt: reasoningAtoms.updatedAt,
-    })
-    .from(reasoningAtoms)
-    .where(inArray(reasoningAtoms.id, [...atomIds]));
+  const corpusRows =
+    corpusAtomIds.length > 0
+      ? await db
+          .select({
+            id: codeAtoms.id,
+            edition: codeAtoms.edition,
+            sourceUrl: codeAtoms.sourceUrl,
+            fetchedAt: codeAtoms.fetchedAt,
+            sourceName: codeAtomSources.sourceName,
+          })
+          .from(codeAtoms)
+          .innerJoin(
+            codeAtomSources,
+            eq(codeAtomSources.id, codeAtoms.sourceId),
+          )
+          .where(inArray(codeAtoms.id, corpusAtomIds))
+      : [];
+
+  const reasoningRows =
+    reasoningAtomIds.length > 0
+      ? await db
+          .select({
+            id: reasoningAtoms.id,
+            edition: reasoningAtoms.edition,
+            sources: reasoningAtoms.sources,
+            verificationState: reasoningAtoms.verificationState,
+            updatedAt: reasoningAtoms.updatedAt,
+          })
+          .from(reasoningAtoms)
+          .where(inArray(reasoningAtoms.id, reasoningAtomIds))
+      : [];
 
   const byId = new Map<string, ProvenanceSourceEntry>();
 
