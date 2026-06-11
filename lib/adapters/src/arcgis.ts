@@ -45,6 +45,8 @@ export interface ArcGisPointQueryInput {
   returnGeometry?: boolean;
   /** Spatial reference of the input point. Defaults to WGS84 (4326). */
   inSpatialReference?: number;
+  /** Output spatial reference for returned geometries. Defaults to WGS84 (4326). */
+  outSpatialReference?: number;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
   /**
@@ -78,6 +80,7 @@ export async function arcgisPointQuery(
   input: ArcGisPointQueryInput,
 ): Promise<ArcGisQueryResult> {
   const sr = input.inSpatialReference ?? 4326;
+  const outSr = input.outSpatialReference ?? 4326;
   const label = input.upstreamLabel ?? "ArcGIS";
   const url = new URL(`${input.serviceUrl.replace(/\/$/, "")}/query`);
   url.searchParams.set("f", "json");
@@ -91,6 +94,7 @@ export async function arcgisPointQuery(
   );
   url.searchParams.set("geometryType", "esriGeometryPoint");
   url.searchParams.set("inSR", String(sr));
+  url.searchParams.set("outSR", String(outSr));
   url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
   url.searchParams.set("outFields", input.outFields ?? "*");
   url.searchParams.set(

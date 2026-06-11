@@ -70,6 +70,16 @@ import { SITE_TOPOGRAPHY_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { ObjectStorageService } from "./objectStorage";
 import { logger as defaultLogger } from "./logger";
 import {
+  extractParcelGeometryFromPayload,
+  geometryToBboxWgs84,
+  type GeoJsonGeometry,
+} from "./siteTopographyGeometry";
+export {
+  extractParcelGeometryFromPayload,
+  geometryToBboxWgs84,
+  webMercatorToWgs84,
+} from "./siteTopographyGeometry";
+import {
   SITE_TOPOGRAPHY_EVENT_TYPES,
   type SiteTopographyEventType,
 } from "../atoms/site-topography.atom";
@@ -119,12 +129,6 @@ const PARCEL_LAYER_KINDS_BY_PRIORITY: ReadonlyArray<string> = [
   "grand-county-ut-parcels", // County-GIS for partner cities (Bastrop is partner-only on the parcels side; Grand County gated off baseline)
   "ugrc-parcels", // State-tier UGRC fallback for Utah
 ];
-
-/** GeoJSON-ish geometry shapes the resolver accepts. */
-interface GeoJsonGeometry {
-  type: "Polygon" | "MultiPolygon" | string;
-  coordinates: unknown;
-}
 
 interface GeoJsonFeature {
   type: "Feature";
@@ -265,40 +269,6 @@ function inputSignature(input: {
 }
 
 /**
- * Recursively walk a GeoJSON coordinate tree and accumulate the WGS84
- * lng/lat extrema. Used to derive the parcel bbox before buffering.
- * Returns null when no finite coordinate was found (degenerate / empty
- * geometry).
- */
-export function geometryToBboxWgs84(
-  geometry: GeoJsonGeometry,
-): BboxWgs84 | null {
-  let west = Infinity;
-  let east = -Infinity;
-  let south = Infinity;
-  let north = -Infinity;
-  function visit(coords: unknown): void {
-    if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === "number") {
-      const lng = coords[0] as number;
-      const lat = coords[1] as number;
-      if (Number.isFinite(lng) && Number.isFinite(lat)) {
-        if (lng < west) west = lng;
-        if (lng > east) east = lng;
-        if (lat < south) south = lat;
-        if (lat > north) north = lat;
-      }
-      return;
-    }
-    if (Array.isArray(coords)) {
-      for (const c of coords) visit(c);
-    }
-  }
-  visit(geometry.coordinates);
-  if (!Number.isFinite(west) || !Number.isFinite(south)) return null;
-  return { westLng: west, southLat: south, eastLng: east, northLat: north };
-}
-
-/**
  * Expand a bbox by `meters` on every side. Approximate — uses 111,320
  * m/deg latitude and the cosine-of-mean-latitude scaling for longitude.
  * Sufficient for the parcel-scale extents this worker handles; the
@@ -315,47 +285,6 @@ export function bufferBbox(bbox: BboxWgs84, meters: number): BboxWgs84 {
     eastLng: bbox.eastLng + dLng,
     northLat: bbox.northLat + dLat,
   };
-}
-
-/**
- * Inspect a `briefing_sources.payload` value for a usable parcel
- * geometry. Looks first at `payload.parcel.geometry` as a full GeoJSON
- * Feature wrapper (Regrid emits this); falls back to ArcGIS-style
- * `geometry.rings` (the county-GIS shape) and rewraps it as GeoJSON
- * Polygon coordinates so the downstream consumers all see one shape.
- * Returns null when no usable geometry is present.
- */
-export function extractParcelGeometryFromPayload(
-  payload: unknown,
-): GeoJsonGeometry | null {
-  if (!payload || typeof payload !== "object") return null;
-  const p = payload as { parcel?: unknown };
-  if (!p.parcel || typeof p.parcel !== "object") return null;
-  const parcel = p.parcel as {
-    type?: unknown;
-    geometry?: unknown;
-  };
-  // Regrid — `parcel` is a full GeoJSON Feature with nested geometry.
-  if (parcel.type === "Feature" && parcel.geometry && typeof parcel.geometry === "object") {
-    const g = parcel.geometry as GeoJsonGeometry;
-    if (
-      (g.type === "Polygon" || g.type === "MultiPolygon") &&
-      Array.isArray(g.coordinates)
-    ) {
-      return g;
-    }
-  }
-  // ArcGIS-style — `parcel.geometry.rings` is the polygon ring set.
-  if (parcel.geometry && typeof parcel.geometry === "object") {
-    const g = parcel.geometry as { rings?: unknown };
-    if (Array.isArray(g.rings) && g.rings.length > 0) {
-      return {
-        type: "Polygon",
-        coordinates: g.rings,
-      };
-    }
-  }
-  return null;
 }
 
 /**

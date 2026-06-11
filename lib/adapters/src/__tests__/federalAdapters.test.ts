@@ -369,6 +369,7 @@ describe("EPA EJScreen adapter (CalEPA mirror opt-in, 2026-05-23)", () => {
     expect(calledUrl).toMatch(/[?&]geometryType=esriGeometryPoint\b/);
     expect(calledUrl).toMatch(/[?&]spatialRel=esriSpatialRelIntersects\b/);
     expect(calledUrl).toMatch(/[?&]inSR=4326\b/);
+    expect(calledUrl).toMatch(/[?&]outSR=4326\b/);
     expect(calledUrl).toMatch(/[?&]returnGeometry=false\b/);
     // Every field the payload reads must be in the outFields list so
     // a typo doesn't silently drop one indicator from the briefing.
