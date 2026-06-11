@@ -420,12 +420,13 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     // The Boulder context has stateKey=null + localKey=null, so no
     // state/local fakes apply. The two federal fakes (FEMA + FCC)
     // both fire — FEMA as ok, FCC as upstream-error per the fake's
-    // failure config. Every other fake is a no-coverage skip.
+    // failure config. Every other fake is a no-coverage skip. Full
+    // runs also fold in catchment DEM ingest as `usgs:3dep-dem`.
     const ranKeys = outcomes
       .filter((o) => o.status !== "no-coverage")
       .map((o) => o.adapterKey)
       .sort();
-    expect(ranKeys).toEqual(["fema:nfhl-flood-zone"]);
+    expect(ranKeys).toEqual(["fema:nfhl-flood-zone", "usgs:3dep-dem"]);
     // The successful federal row was persisted as a briefing source,
     // so the briefing wire has a non-empty `sources` array.
     expect(res.body.briefing.sources.length).toBeGreaterThan(0);
