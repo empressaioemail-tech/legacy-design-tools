@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 import {
   keyFromEngagement,
+  keyFromEngagementOrSynthesize,
   getJurisdiction,
   listJurisdictions,
   JURISDICTIONS,
@@ -159,25 +160,20 @@ describe("keyFromEngagement: three-tier fallback", () => {
     ).toBeNull();
   });
 
-  it("synthesizes a slug for unwarmed US cities (web-first on demand)", () => {
+  it("returns null for an unknown jurisdiction", () => {
     expect(
       keyFromEngagement({
         jurisdictionCity: "Boise",
         jurisdictionState: "ID",
       }),
-    ).toBe("boise_id");
-    expect(keyFromEngagement({ jurisdiction: "Boise, ID" })).toBe("boise_id");
+    ).toBeNull();
+    expect(keyFromEngagement({ jurisdiction: "Boise, ID" })).toBeNull();
     expect(
       keyFromEngagement({
         jurisdictionCity: "San Marcos",
         jurisdictionState: "TX",
       }),
-    ).toBe("san_marcos_tx");
-    expect(
-      keyFromEngagement({
-        address: "613 Sturgeon Dr, San Marcos, TX 78666",
-      }),
-    ).toBe("san_marcos_tx");
+    ).toBeNull();
   });
 
   it("structured tier wins when both structured and freeform are present", () => {
@@ -203,5 +199,39 @@ describe("keyFromEngagement: three-tier fallback", () => {
 
   it("ignores garbage freeform without a comma", () => {
     expect(keyFromEngagement({ jurisdiction: "just a string" })).toBeNull();
+  });
+});
+
+describe("keyFromEngagementOrSynthesize: finding-grounding path", () => {
+  it("synthesizes a slug for unwarmed US cities (web-first on demand)", () => {
+    expect(
+      keyFromEngagementOrSynthesize({
+        jurisdictionCity: "Boise",
+        jurisdictionState: "ID",
+      }),
+    ).toBe("boise_id");
+    expect(
+      keyFromEngagementOrSynthesize({ jurisdiction: "Boise, ID" }),
+    ).toBe("boise_id");
+    expect(
+      keyFromEngagementOrSynthesize({
+        jurisdictionCity: "San Marcos",
+        jurisdictionState: "TX",
+      }),
+    ).toBe("san_marcos_tx");
+    expect(
+      keyFromEngagementOrSynthesize({
+        address: "613 Sturgeon Dr, San Marcos, TX 78666",
+      }),
+    ).toBe("san_marcos_tx");
+  });
+
+  it("still returns registered keys when warmed", () => {
+    expect(
+      keyFromEngagementOrSynthesize({
+        jurisdictionCity: "Bastrop",
+        jurisdictionState: "TX",
+      }),
+    ).toBe("bastrop_tx");
   });
 });

@@ -1049,6 +1049,42 @@ describe("V1-7 — code retrieval wired into the engine input", () => {
       expect(f.text).not.toMatch(/\[\[CODE:/);
     }
   });
+
+  it("resolves a synthesized jurisdiction key for unwarmed US cities on the finding path", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "san-marcos-engagement",
+        nameLower: "san-marcos-engagement",
+        jurisdictionCity: "San Marcos",
+        jurisdictionState: "TX",
+        jurisdiction: "San Marcos, TX",
+        address: "613 Sturgeon Dr, San Marcos, TX 78666",
+        status: "active",
+      })
+      .returning();
+    const [sub] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "San Marcos, TX",
+      })
+      .returning();
+    await seedBriefingForEngagement(eng.id);
+
+    const kickoff = await request(getApp())
+      .post(`/api/submissions/${sub.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(kickoff.status).toBe(202);
+    await waitForStatus(sub.id, "completed");
+
+    expect(retrieveAtomsForQuestionMock).toHaveBeenCalledTimes(1);
+    expect(retrieveAtomsForQuestionMock.mock.calls[0]![0]).toMatchObject({
+      jurisdictionKey: "san_marcos_tx",
+    });
+  });
 });
 
 describe("V1-7 — materializable elements wired into the engine input", () => {

@@ -268,9 +268,13 @@ describe("PATCH /api/engagements/:id — lifecycle events", () => {
       id: "engagement-edit",
     });
     expect(jurisdictionEvent.payload).toMatchObject({
-      // Provo is not a warmed corpus jurisdiction, but keyFromEngagement
-      // synthesizes a slug so retrieval + web-first grounding can run.
-      jurisdictionKey: "provo_ut",
+      // Provo is not a registered jurisdiction in the codes registry,
+      // so the canonical key derives to null. The field is still
+      // present in the payload (vs. the city/state pair being absent
+      // entirely, which would have short-circuited the emit) so
+      // downstream consumers can distinguish "resolved but uncovered"
+      // from "geocoder produced no jurisdiction".
+      jurisdictionKey: null,
       jurisdictionCity: "Provo",
       jurisdictionState: "UT",
       jurisdictionFips: "4962470",
@@ -398,7 +402,11 @@ describe("POST /api/engagements/:id/geocode — lifecycle events", () => {
       id: "engagement-edit",
     });
     expect(events[0]!.payload).toMatchObject({
-      jurisdictionKey: "salt_lake_city_ut",
+      // Salt Lake City is not a registered jurisdiction in the codes
+      // registry, so the canonical key derives to null. Assert the
+      // field is present so a future registration would auto-update
+      // the timeline without a code change here.
+      jurisdictionKey: null,
       jurisdictionCity: "Salt Lake City",
       jurisdictionState: "UT",
       jurisdictionFips: "4967000",
