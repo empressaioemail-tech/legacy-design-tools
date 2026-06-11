@@ -31,7 +31,7 @@
  * the route tests have always avoided.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -59,6 +59,15 @@ vi.mock("@workspace/site-context/server", async () => {
     );
   return { ...actual, geocodeAddress: vi.fn().mockResolvedValue(null) };
 });
+
+const { mockedIngestSiteTopography } = vi.hoisted(() => ({
+  mockedIngestSiteTopography: vi.fn(),
+}));
+
+vi.mock("../lib/siteTopographyIngest", () => ({
+  ingestSiteTopography: (...args: unknown[]) =>
+    mockedIngestSiteTopography(...args),
+}));
 
 interface FakeAdapter {
   readonly adapterKey: string;
@@ -306,9 +315,49 @@ const { eq, and } = await import("drizzle-orm");
 const { geocodeAddress } = await import("@workspace/site-context/server");
 const mockedGeocodeAddress = vi.mocked(geocodeAddress);
 
+function defaultTopographyOkResult(): Extract<
+  Awaited<
+    ReturnType<
+      typeof import("../lib/siteTopographyIngest").ingestSiteTopography
+    >
+  >,
+  { status: "ok" }
+> {
+  return {
+    status: "ok",
+    atomEventId: "topo-event-1",
+    atomEventChainHash: "hash-1",
+    eventType: "site-topography.ingested",
+    materializableElementId: "topo-row-1",
+    demGcsObjectPath: "/objects/test-dem.tif",
+    contourCount: 12,
+    contourIntervalMeters: 1,
+    parcelOrigin: "engagement-geocode-fallback",
+    parcelBbox: {
+      westLng: -109.55,
+      southLat: 38.57,
+      eastLng: -109.54,
+      northLat: 38.58,
+    },
+    catchmentBbox: {
+      westLng: -109.56,
+      southLat: 38.56,
+      eastLng: -109.53,
+      northLat: 38.59,
+    },
+    demResolutionMeters: 1,
+    reusedExisting: false,
+  };
+}
+
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
+});
+
+beforeEach(() => {
+  mockedIngestSiteTopography.mockReset();
+  mockedIngestSiteTopography.mockResolvedValue(defaultTopographyOkResult());
 });
 
 interface SeedOpts {
@@ -522,6 +571,18 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       error: { code: "upstream-error", message: "Bastrop GIS returned 503" },
       sourceId: null,
     });
+    expect(byKey.get("usgs:3dep-dem")).toMatchObject({
+      tier: "federal",
+      sourceKind: "federal-adapter",
+      layerKind: "site-topography",
+      status: "ok",
+    });
+    expect(mockedIngestSiteTopography).toHaveBeenCalledWith(
+      expect.objectContaining({
+        engagementId: eng.id,
+        forceRefresh: false,
+      }),
+    );
 
     // Briefing wire envelope: only the OK rows show up, each with the
     // packed `<adapterKey> (<provider>)` provider string.
@@ -949,9 +1010,86 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       .post(`/api/engagements/${eng.id}/generate-layers`)
       .query({ adapterKey: "   " });
     expect(emptyKey.status).toBe(200);
-    // Full Bastrop run produces 4 outcomes (1 federal + 1 state +
-    // 2 local). Anything less would mean we accidentally narrowed
-    // the run on the empty value.
-    expect(emptyKey.body.outcomes).toHaveLength(4);
+    // Full Bastrop run produces adapter outcomes plus the folded-in
+    // site-topography ingest line. Anything less would mean we
+    // accidentally narrowed the run on the empty value.
+    expect(emptyKey.body.outcomes.length).toBeGreaterThanOrEqual(5);
+    expect(
+      emptyKey.body.outcomes.some(
+        (o: { adapterKey: string }) => o.adapterKey === "usgs:3dep-dem",
+      ),
+    ).toBe(true);
+  });
+
+  it("folds site-topography ingest into full generate-layers runs (best-effort)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement({
+      city: "Moab",
+      state: "UT",
+      lat: "38.573300",
+      lng: "-109.549800",
+    });
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
+    expect(res.status).toBe(200);
+    const topo = (res.body.outcomes as Array<{ adapterKey: string; status: string }>).find(
+      (o) => o.adapterKey === "usgs:3dep-dem",
+    );
+    expect(topo).toMatchObject({
+      layerKind: "site-topography",
+      status: "ok",
+    });
+    expect(mockedIngestSiteTopography).toHaveBeenCalledTimes(1);
+  });
+
+  it("site-topography ingest failure does not fail generate-layers", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    mockedIngestSiteTopography.mockResolvedValueOnce({
+      status: "upstream-error",
+      code: "usgs3dep-unavailable",
+      reason: "USGS 3DEP returned 503",
+    });
+    const eng = await seedEngagement({
+      city: "Moab",
+      state: "UT",
+      lat: "38.573300",
+      lng: "-109.549800",
+    });
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
+    expect(res.status).toBe(200);
+    const topo = (res.body.outcomes as Array<{ adapterKey: string; status: string; error?: { code: string } }>).find(
+      (o) => o.adapterKey === "usgs:3dep-dem",
+    );
+    expect(topo).toMatchObject({
+      status: "failed",
+      error: { code: "upstream-error" },
+    });
+    expect(res.body.briefing.sources.length).toBeGreaterThan(0);
+  });
+
+  it("?adapterKey= scoped runs skip folded site-topography ingest", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement({
+      city: "Bastrop",
+      state: "TX",
+      lat: "30.110800",
+      lng: "-97.315600",
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ adapterKey: "fema:nfhl-flood-zone", forceRefresh: "true" });
+    expect(res.status).toBe(200);
+    expect(
+      (res.body.outcomes as Array<{ adapterKey: string }>).some(
+        (o) => o.adapterKey === "usgs:3dep-dem",
+      ),
+    ).toBe(false);
+    expect(mockedIngestSiteTopography).not.toHaveBeenCalled();
   });
 });

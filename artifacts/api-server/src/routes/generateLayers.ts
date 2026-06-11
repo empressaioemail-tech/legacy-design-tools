@@ -65,6 +65,13 @@ import {
 } from "../atoms/briefing-source.atom";
 import { filterAdaptersByPreferences } from "../lib/workspacePreferences";
 import { loadWorkspacePreferences } from "../lib/loadWorkspacePreferences";
+import {
+  ingestSiteTopography,
+  type SiteTopographyIngestResult,
+} from "../lib/siteTopographyIngest";
+
+/** Stable identifier for the catchment DEM ingest folded into generate-layers. */
+export const GENERATE_LAYERS_TOPOGRAPHY_ADAPTER_KEY = "usgs:3dep-dem";
 
 /**
  * Pinned to the briefing-source atom's event-type union so a rename
@@ -372,6 +379,47 @@ interface GenerateLayersOutcomeWire {
     status: "fresh" | "stale" | "unknown";
     reason: string | null;
   } | null;
+}
+
+/**
+ * Maps a site-topography ingest result into the generate-layers outcomes
+ * wire shape so the Site tab can render DEM ingest beside adapter rows.
+ */
+export function siteTopographyIngestToGenerateLayersOutcome(
+  result: SiteTopographyIngestResult,
+): GenerateLayersOutcomeWire {
+  const base: GenerateLayersOutcomeWire = {
+    adapterKey: GENERATE_LAYERS_TOPOGRAPHY_ADAPTER_KEY,
+    tier: "federal",
+    sourceKind: "federal-adapter",
+    layerKind: "site-topography",
+    sourceId: null,
+    fromCache: false,
+    cachedAt: null,
+    upstreamFreshness: null,
+    status: "failed",
+    error: null,
+  };
+  if (result.status === "ok") {
+    return {
+      ...base,
+      status: "ok",
+      error: null,
+      fromCache: result.reusedExisting === true,
+    };
+  }
+  if (result.status === "no-parcel-coverage") {
+    return {
+      ...base,
+      status: "no-coverage",
+      error: { code: "no-coverage", message: result.reason },
+    };
+  }
+  return {
+    ...base,
+    status: "failed",
+    error: { code: "upstream-error", message: result.reason },
+  };
 }
 
 const router: IRouter = Router();
@@ -771,6 +819,53 @@ router.post(
       }
     }
 
+    // Catchment DEM ingest — same worker as POST /site-topography/refresh.
+    // Best-effort: a topo failure must not fail the adapter run. Skip on
+    // single-adapter scoped runs (?adapterKey=) and when the engagement
+    // still has no geocode after self-heal.
+    let topographyOutcome: GenerateLayersOutcomeWire | null = null;
+    if (haveCoords && adapterKeyScope === null) {
+      try {
+        const topoResult = await ingestSiteTopography({
+          engagementId,
+          history,
+          forceRefresh,
+          log: reqLog,
+        });
+        topographyOutcome =
+          siteTopographyIngestToGenerateLayersOutcome(topoResult);
+        reqLog.info(
+          {
+            engagementId,
+            status: topoResult.status,
+            reusedExisting:
+              topoResult.status === "ok" ? topoResult.reusedExisting : undefined,
+          },
+          "generate-layers: site-topography ingest finished",
+        );
+      } catch (err) {
+        reqLog.warn(
+          { err, engagementId },
+          "generate-layers: site-topography ingest threw unexpectedly (continuing)",
+        );
+        topographyOutcome = {
+          adapterKey: GENERATE_LAYERS_TOPOGRAPHY_ADAPTER_KEY,
+          tier: "federal",
+          sourceKind: "federal-adapter",
+          layerKind: "site-topography",
+          status: "failed",
+          error: {
+            code: "unknown",
+            message: err instanceof Error ? err.message : String(err),
+          },
+          sourceId: null,
+          fromCache: false,
+          cachedAt: null,
+          upstreamFreshness: null,
+        };
+      }
+    }
+
     const persistedByAdapterKey = new Map<string, string>(
       persisted.map((p) => [p.outcome.adapterKey, p.newSource.id]),
     );
@@ -810,6 +905,9 @@ router.post(
             }
           : null,
     }));
+    if (topographyOutcome) {
+      outcomesWire.push(topographyOutcome);
+    }
 
     if (!briefingRow) {
       // Defensive: the transaction above always returns a briefing,

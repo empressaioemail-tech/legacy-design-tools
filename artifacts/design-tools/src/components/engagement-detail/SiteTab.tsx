@@ -791,18 +791,42 @@ export function SiteTab({
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
+          status?: string;
           reason?: string;
         } | null;
-        throw new Error(body?.reason ?? `Drainage refresh failed (${res.status})`);
+        if (res.status === 422 && body?.status === "no-topography") {
+          showLayerRefreshNotice(
+            "error",
+            "Generate site layers/topography first, then run drainage.",
+          );
+          return;
+        }
+        showLayerRefreshNotice(
+          "error",
+          body?.reason ?? `Drainage refresh failed (${res.status})`,
+        );
+        return;
       }
       await queryClient.invalidateQueries({
         queryKey: ["siteDrainage", engagement.id],
       });
       setMapRenderEpoch((epoch) => epoch + 1);
+    } catch (err) {
+      showLayerRefreshNotice(
+        "error",
+        err instanceof Error
+          ? err.message
+          : "Drainage refresh failed. Check that the API server is running.",
+      );
     } finally {
       setDrainageBusy(false);
     }
-  }, [engagement.id, queryClient, rainfallDepthInches]);
+  }, [
+    engagement.id,
+    queryClient,
+    rainfallDepthInches,
+    showLayerRefreshNotice,
+  ]);
 
   const layerGroups = useMemo(
     () => buildLayerGroups(briefing, !!geocode, hasDemContours, hasDrainage),
