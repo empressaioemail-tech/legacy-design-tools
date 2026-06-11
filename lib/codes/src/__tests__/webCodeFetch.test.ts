@@ -7,6 +7,7 @@ import {
 import {
   corpusCoversTarget,
   fetchCodeSection,
+  reviewWebTargetsForJurisdiction,
   websearchAtomId,
 } from "../webCodeFetch/index";
 import type { HttpFetcher } from "../webCodeFetch/types";
@@ -235,6 +236,22 @@ describe("websearch atom ids", () => {
     expect(id).not.toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
+  });
+});
+
+describe("reviewWebTargetsForJurisdiction", () => {
+  it("returns Miami explicit targets for warmed FL keys", () => {
+    expect(reviewWebTargetsForJurisdiction("miami_beach_fl").length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("returns stock IRC targets only for synthesized unwarmed Texas keys", () => {
+    expect(reviewWebTargetsForJurisdiction("san_marcos_tx").length).toBeGreaterThan(
+      0,
+    );
+    expect(reviewWebTargetsForJurisdiction("bastrop_tx")).toEqual([]);
+    expect(reviewWebTargetsForJurisdiction("austin_tx")).toEqual([]);
   });
 });
 
