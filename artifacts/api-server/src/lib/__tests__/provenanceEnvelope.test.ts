@@ -3,7 +3,12 @@ import {
   atomIdsFromCitations,
   buildProvenanceFromCodeAtom,
   buildProvenanceFromBriefing,
+  partitionProvenanceAtomIds,
 } from "../provenanceEnvelope";
+
+const CORPUS_UUID = "550E8400-E29B-41D4-A716-446655440000";
+const CORPUS_UUID_LOWER = CORPUS_UUID.toLowerCase();
+const REASONING_ID = "reasoning:irc-2021:irc-r301-2-1";
 
 describe("provenanceEnvelope", () => {
   it("atomIdsFromCitations preserves code-section atomIds", () => {
@@ -51,5 +56,41 @@ describe("provenanceEnvelope", () => {
     );
     expect(env.lineage.atomIds).toEqual(["src-zoning"]);
     expect(env.sources[0]?.sourceName).toBe("Regrid");
+  });
+
+  it("partitionProvenanceAtomIds routes reasoning ids away from corpus UUID query", () => {
+    const mixed = [CORPUS_UUID, REASONING_ID, "websearch:irc-2021:irc-r302"];
+    expect(partitionProvenanceAtomIds(mixed)).toEqual({
+      corpusAtomIds: [CORPUS_UUID_LOWER],
+      reasoningAtomIds: [REASONING_ID, "websearch:irc-2021:irc-r302"],
+    });
+  });
+
+  it("partitionProvenanceAtomIds normalizes corpus DIDs to lowercase UUID keys", () => {
+    expect(
+      partitionProvenanceAtomIds([
+        `did:hauska:code-section:${CORPUS_UUID}`,
+      ]),
+    ).toEqual({
+      corpusAtomIds: [CORPUS_UUID_LOWER],
+      reasoningAtomIds: [],
+    });
+  });
+
+  it("partitionProvenanceAtomIds preserves mixed citation order in lineage buckets", () => {
+    const atomIds = [
+      REASONING_ID,
+      CORPUS_UUID,
+      "reasoning:irc-2021:irc-r302-1",
+    ];
+    expect(partitionProvenanceAtomIds(atomIds)).toEqual({
+      corpusAtomIds: [CORPUS_UUID_LOWER],
+      reasoningAtomIds: [REASONING_ID, "reasoning:irc-2021:irc-r302-1"],
+    });
+    expect(atomIdsFromCitations([
+      { kind: "code-section", atomId: REASONING_ID },
+      { kind: "code-section", atomId: CORPUS_UUID },
+      { kind: "code-section", atomId: "reasoning:irc-2021:irc-r302-1" },
+    ])).toEqual(atomIds);
   });
 });
