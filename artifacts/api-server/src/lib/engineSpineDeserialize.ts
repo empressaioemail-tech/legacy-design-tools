@@ -1,16 +1,27 @@
 /**
- * Rehydrate engine-api JSON findings responses to in-process Date contracts.
+ * Rehydrate engine-api JSON spine responses to in-process Date contracts.
  *
  * Spine HTTP responses serialize `Date` fields as ISO-8601 strings. Drizzle
  * timestamp columns and downstream consumers expect real `Date` objects — the
- * same shape the local finding-engine returns in-process.
+ * same shape local engines return in-process.
+ *
+ * Apply typed rehydrators at the routing boundary for each spine engine whose
+ * response is persisted through drizzle `timestamp` columns. ISO strings stored
+ * intentionally as plain text in JSON payloads (e.g. hydrology `fetchedAt`,
+ * `computedAt`) must NOT be coerced here.
  */
 
+import type { GenerateBriefingResult } from "@workspace/briefing-engine";
 import type {
   EngineFinding,
   GenerateFindingsResult,
   GenerateOrchestratedFindingsResult,
 } from "@workspace/finding-engine";
+import type {
+  FetchUsgs3depDemResult,
+  HydrologyWorkerResult,
+  RainfallForcingSource,
+} from "@workspace/site-context/server";
 
 function toDate(value: unknown): Date | undefined {
   if (value instanceof Date) return value;
@@ -44,4 +55,45 @@ export function rehydrateSpineFindingsResult<
     findings: result.findings.map(rehydrateEngineFinding),
     generatedAt,
   };
+}
+
+/** Rehydrate date fields on a spine {@link GenerateBriefingResult}. */
+export function rehydrateSpineBriefingResult(
+  result: GenerateBriefingResult,
+): GenerateBriefingResult {
+  const generatedAt = toDate(result.generatedAt);
+  if (!generatedAt) {
+    throw new Error("spine briefing result: generatedAt is not a Date or ISO string");
+  }
+  return { ...result, generatedAt };
+}
+
+/**
+ * Spine hydrology worker — audited: response has no Date-typed fields that
+ * persist through drizzle timestamp columns (GeoJSON + string metadata only).
+ */
+export function rehydrateSpineHydrologyWorkerResult(
+  result: HydrologyWorkerResult,
+): HydrologyWorkerResult {
+  return result;
+}
+
+/**
+ * Spine rainfall forcing — audited: `estimate.fetchedAt` is an ISO string kept
+ * in atom JSON payloads, not a drizzle timestamp column.
+ */
+export function rehydrateSpineRainfallForcingSource(
+  result: RainfallForcingSource,
+): RainfallForcingSource {
+  return result;
+}
+
+/**
+ * Spine USGS 3DEP DEM fetch — audited: `fetchedAt` is an ISO string in atom
+ * payloads; the routing layer stamps it locally after decode.
+ */
+export function rehydrateSpineFetchUsgs3depDemResult(
+  result: FetchUsgs3depDemResult,
+): FetchUsgs3depDemResult {
+  return result;
 }

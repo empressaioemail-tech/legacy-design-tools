@@ -22,6 +22,11 @@ import {
   buildSpineGateFrontContextFromTenant,
   postEngineSpine,
 } from "./engineSpineClient";
+import {
+  rehydrateSpineFetchUsgs3depDemResult,
+  rehydrateSpineHydrologyWorkerResult,
+  rehydrateSpineRainfallForcingSource,
+} from "./engineSpineDeserialize";
 import { useSpineHydrology, useSpineTopography } from "./engineSpineFlags";
 
 export interface SpineHydrologyContext {
@@ -59,7 +64,7 @@ export async function routeFetchUsgs3depDem(
 
   const bytes = Buffer.from(payload.demBytesBase64, "base64");
   const fetchedAt = new Date().toISOString();
-  return {
+  return rehydrateSpineFetchUsgs3depDemResult({
     bytes: new Uint8Array(bytes),
     contentType: "image/tiff",
     bbox: payload.bbox,
@@ -68,7 +73,7 @@ export async function routeFetchUsgs3depDem(
     heightPx: payload.heightPx,
     endpoint: "spine:/v1/hydrology/dem",
     fetchedAt,
-  };
+  });
 }
 
 export async function routeRunHydrologyWorker(
@@ -101,7 +106,7 @@ export async function routeRunHydrologyWorker(
     timeoutMs: 180_000,
   });
 
-  return payload;
+  return rehydrateSpineHydrologyWorkerResult(payload);
 }
 
 export async function routeResolveRainfallForcing(
@@ -117,7 +122,7 @@ export async function routeResolveRainfallForcing(
     jurisdictionTenant: ctx.jurisdictionTenant,
   });
 
-  return postEngineSpine<RainfallForcingSource>({
+  const payload = await postEngineSpine<RainfallForcingSource>({
     path: "/v1/hydrology/rainfall-forcing",
     body: {
       latitude: input.lat,
@@ -129,4 +134,6 @@ export async function routeResolveRainfallForcing(
     },
     gateFront,
   });
+
+  return rehydrateSpineRainfallForcingSource(payload);
 }
