@@ -56,22 +56,15 @@ vi.mock("@workspace/codes", async () => {
   };
 });
 
-// Task #447 — auto-trigger AI plan review on submission.created. The
-// auto-trigger fires the same finding-engine path the manual generate
-// endpoint uses; we wrap `generateFindings` in a spy that defaults to
-// the real implementation so most tests in this file are unaffected,
-// and the failure-path test below can swap in a throwing impl.
-const generateFindingsMock = vi.hoisted(() => vi.fn());
-vi.mock("@workspace/finding-engine", async () => {
-  const actual =
-    await vi.importActual<typeof import("@workspace/finding-engine")>(
-      "@workspace/finding-engine",
-    );
-  return {
-    ...actual,
-    generateFindings: generateFindingsMock,
-  };
-});
+// Task #447 — auto-trigger AI plan review on submission.created. C3 routes
+// findings through spine; mock the routing seam so tests stay offline.
+const routeGenerateFindingsMock = vi.hoisted(() => vi.fn());
+const routeGenerateOrchestratedFindingsMock = vi.hoisted(() => vi.fn());
+vi.mock("../lib/engineSpineRouting", () => ({
+  routeGenerateFindings: routeGenerateFindingsMock,
+  routeGenerateOrchestratedFindings: routeGenerateOrchestratedFindingsMock,
+  routeGenerateBriefing: vi.fn(),
+}));
 
 const { setupRouteTests } = await import("./setup");
 const {
@@ -115,11 +108,12 @@ beforeEach(() => {
   // NOT call geocode does not pick up a leftover from the prior test.
   mockedGeocodeAddress.mockReset();
   mockedEnqueueWarmup.mockClear();
-  // Default `generateFindings` to the real engine impl so the rest of
-  // the suite is unaffected; the auto-trigger failure test below
-  // overrides per-call to force a deterministic failure.
-  generateFindingsMock.mockReset();
-  generateFindingsMock.mockImplementation(findingEngineActual.generateFindings);
+  routeGenerateFindingsMock.mockReset();
+  routeGenerateOrchestratedFindingsMock.mockReset();
+  routeGenerateFindingsMock.mockImplementation(findingEngineActual.generateFindings);
+  routeGenerateOrchestratedFindingsMock.mockImplementation(
+    findingEngineActual.generateOrchestratedFindings,
+  );
 });
 
 async function seedEngagement(overrides: Partial<{
@@ -993,7 +987,10 @@ describe("POST /api/engagements/:id/submissions — auto AI plan review", () => 
       expect(r.findingRunId).toBe(run.id);
       expect(r.status).toBe("ai-produced");
     }
-    expect(generateFindingsMock).toHaveBeenCalled();
+    expect(
+      routeGenerateFindingsMock.mock.calls.length +
+        routeGenerateOrchestratedFindingsMock.mock.calls.length,
+    ).toBeGreaterThan(0);
   });
 
   it("swallows engine failures, returns 201, and logs structured { submissionId, error }", async () => {
@@ -1008,7 +1005,7 @@ describe("POST /api/engagements/:id/submissions — auto AI plan review", () => 
     });
     await seedBriefing(eng.id);
 
-    generateFindingsMock.mockImplementationOnce(async () => {
+    routeGenerateFindingsMock.mockImplementationOnce(async () => {
       throw new Error("forced engine failure for auto-trigger test");
     });
 

@@ -15,6 +15,7 @@ import {
   type BboxWgs84,
   type RainfallForcingSource,
 } from "@workspace/site-context/server";
+import { formatEngineSpineFailure } from "./engineSpineClient";
 import {
   routeResolveRainfallForcing,
   routeRunHydrologyWorker,
@@ -221,17 +222,27 @@ export async function ingestSiteDrainage(
       : bboxCenter(catchmentBbox);
 
   const spineCtx = { jurisdictionTenant: args.jurisdictionTenant ?? null };
-  const rainfallForcing = await routeResolveRainfallForcing(
-    {
-      lat: pour.lat,
-      lng: pour.lng,
-      manualDepthInches: args.manualDepthInches,
-      returnPeriodYears: args.returnPeriodYears,
-      useCotalityForcing: args.useCotalityForcing ?? false,
-      cotalityForcing: null,
-    },
-    spineCtx,
-  );
+  let rainfallForcing: RainfallForcingSource;
+  try {
+    rainfallForcing = await routeResolveRainfallForcing(
+      {
+        lat: pour.lat,
+        lng: pour.lng,
+        manualDepthInches: args.manualDepthInches,
+        returnPeriodYears: args.returnPeriodYears,
+        useCotalityForcing: args.useCotalityForcing ?? false,
+        cotalityForcing: null,
+      },
+      spineCtx,
+    );
+  } catch (err) {
+    const { code, message } = formatEngineSpineFailure(err);
+    return {
+      status: "upstream-error",
+      reason: `engine-api rainfall-forcing failed (${code}): ${message}`,
+      code: "engine-api-unreachable",
+    };
+  }
   const rainfallDepthMm = rainfallForcingDepthMm(rainfallForcing);
 
   const latestDrainage = await args.history.latestEvent({
@@ -326,20 +337,30 @@ export async function ingestSiteDrainage(
     demBytes.byteOffset + demBytes.byteLength,
   ) as ArrayBuffer;
 
-  const hydrology = await routeRunHydrologyWorker(
-    {
-      demBytes: demArrayBuffer,
-      pourLng: pour.lng,
-      pourLat: pour.lat,
-      catchmentBbox,
-      width: parsed.width,
-      height: parsed.height,
-      elevation: parsed.values,
-      rainfallDepthMm,
-      accumulationThreshold: accThreshold,
-    },
-    spineCtx,
-  );
+  let hydrology: Awaited<ReturnType<typeof routeRunHydrologyWorker>>;
+  try {
+    hydrology = await routeRunHydrologyWorker(
+      {
+        demBytes: demArrayBuffer,
+        pourLng: pour.lng,
+        pourLat: pour.lat,
+        catchmentBbox,
+        width: parsed.width,
+        height: parsed.height,
+        elevation: parsed.values,
+        rainfallDepthMm,
+        accumulationThreshold: accThreshold,
+      },
+      spineCtx,
+    );
+  } catch (err) {
+    const { code, message } = formatEngineSpineFailure(err);
+    return {
+      status: "upstream-error",
+      reason: `engine-api hydrology drainage failed (${code}): ${message}`,
+      code: "engine-api-unreachable",
+    };
+  }
 
   if (hydrology.status !== "ok") {
     return {

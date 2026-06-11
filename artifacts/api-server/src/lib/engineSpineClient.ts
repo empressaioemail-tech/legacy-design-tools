@@ -216,25 +216,31 @@ export async function postEngineSpine<T>(options: SpinePostOptions): Promise<T> 
   }
 }
 
-/** Boot-time fail-fast when any spine flag is on but ENGINE_API_URL missing. */
+/**
+ * Human-readable failure for consumers when engine-api is unreachable.
+ * Never returns empty success — callers map this to failed-run / 502 states.
+ */
+export function formatEngineSpineFailure(err: unknown): {
+  code: EngineSpineError["code"] | "engine_api_unknown";
+  message: string;
+} {
+  if (err instanceof EngineSpineError) {
+    return { code: err.code, message: err.message };
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return { code: "engine_api_unknown", message };
+}
+
+/** Boot-time fail-fast: cortex-api BFF requires a configured engine-api home. */
 export function validateEngineSpineEnvAtBoot(): void {
-  const anyFlag =
-    process.env.ENGINE_SPINE_BRIEFING === "1" ||
-    process.env.ENGINE_SPINE_FINDINGS === "1" ||
-    process.env.ENGINE_SPINE_FINDINGS_ORCHESTRATED === "1" ||
-    process.env.ENGINE_SPINE_HYDROLOGY === "1" ||
-    process.env.ENGINE_SPINE_TOPOGRAPHY === "1";
-
-  if (!anyFlag) return;
-
   if (!engineApiBaseUrl()) {
     throw new Error(
-      "An ENGINE_SPINE_* flag is enabled but ENGINE_API_URL is not set",
+      "ENGINE_API_URL is required — cortex-api routes all reasoning through spine engine-api",
     );
   }
 
   logger.info(
-    { flags: process.env },
-    "engine spine: one or more ENGINE_SPINE_* flags enabled",
+    { engineApiUrl: engineApiBaseUrl(), spineFlags: "unconditional" },
+    "engine spine: cortex-api BFF — all reasoning via engine-api",
   );
 }

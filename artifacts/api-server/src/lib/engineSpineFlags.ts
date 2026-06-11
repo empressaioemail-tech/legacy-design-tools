@@ -1,16 +1,10 @@
 /**
- * Per-engine feature flags for reversible cortex → spine engine-api cutover (C1).
+ * Engine spine routing — C3 BFF cut.
  *
- * Each flag defaults off (`0`). Set to `1` or `true` to route that engine
- * through spine engine-api instead of the local lib/*-engine workspace package.
+ * All four reasoning engines are unconditionally served via gate-front
+ * engine-api. Local lib/*-engine fallbacks were removed; these names
+ * remain for logging snapshots and deploy env documentation.
  */
-
-function flagOn(name: string): boolean {
-  const raw = process.env[name];
-  if (!raw) return false;
-  const v = raw.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
 
 export const ENGINE_SPINE_FLAGS = {
   briefing: "ENGINE_SPINE_BRIEFING",
@@ -20,33 +14,13 @@ export const ENGINE_SPINE_FLAGS = {
   topography: "ENGINE_SPINE_TOPOGRAPHY",
 } as const;
 
-export function useSpineBriefing(): boolean {
-  return flagOn(ENGINE_SPINE_FLAGS.briefing);
-}
-
-export function useSpineFindings(): boolean {
-  return flagOn(ENGINE_SPINE_FLAGS.findings);
-}
-
-export function useSpineFindingsOrchestrated(): boolean {
-  return flagOn(ENGINE_SPINE_FLAGS.findingsOrchestrated);
-}
-
-export function useSpineHydrology(): boolean {
-  return flagOn(ENGINE_SPINE_FLAGS.hydrology);
-}
-
-export function useSpineTopography(): boolean {
-  return flagOn(ENGINE_SPINE_FLAGS.topography);
-}
-
-/** Snapshot for health / operator QA endpoints. */
+/** Snapshot for operator QA logs — always spine-routed after C3. */
 export function engineSpineFlagSnapshot(): Record<string, boolean> {
   return {
-    [ENGINE_SPINE_FLAGS.briefing]: useSpineBriefing(),
-    [ENGINE_SPINE_FLAGS.findings]: useSpineFindings(),
-    [ENGINE_SPINE_FLAGS.findingsOrchestrated]: useSpineFindingsOrchestrated(),
-    [ENGINE_SPINE_FLAGS.hydrology]: useSpineHydrology(),
-    [ENGINE_SPINE_FLAGS.topography]: useSpineTopography(),
+    [ENGINE_SPINE_FLAGS.briefing]: true,
+    [ENGINE_SPINE_FLAGS.findings]: true,
+    [ENGINE_SPINE_FLAGS.findingsOrchestrated]: true,
+    [ENGINE_SPINE_FLAGS.hydrology]: true,
+    [ENGINE_SPINE_FLAGS.topography]: true,
   };
 }

@@ -125,6 +125,7 @@ import {
   routeGenerateFindings,
   routeGenerateOrchestratedFindings,
 } from "../lib/engineSpineRouting";
+import { formatEngineSpineFailure } from "../lib/engineSpineClient";
 import { engineSpineFlagSnapshot } from "../lib/engineSpineFlags";
 import {
   buildProvenanceFromFindingRow,
@@ -1127,12 +1128,13 @@ async function runFindingGeneration(args: {
       "finding generation: completed",
     );
   } catch (err) {
-    const message = (err as Error).message ?? "unknown engine failure";
+    const { code, message } = formatEngineSpineFailure(err);
+    const error = `finding engine failed (${code}): ${message}`;
     await finalizeRun(
       generationId,
       {
         state: "failed",
-        error: message,
+        error,
         invalidCitationCount: null,
         invalidCitations: null,
         discardedFindingCount: null,
@@ -1140,7 +1142,7 @@ async function runFindingGeneration(args: {
       reqLog,
     );
     reqLog.error(
-      { err, error: message, submissionId, generationId },
+      { err, error, submissionId, generationId, engineSpineCode: code },
       "finding generation: failed",
     );
   }

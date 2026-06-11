@@ -1,5 +1,6 @@
 /**
- * Route-layer helpers: delegate engine calls to spine engine-api when flags on.
+ * Route-layer helpers: delegate engine calls to spine engine-api (C3 BFF).
+ * All reasoning paths are unconditional — no local lib/*-engine fallback.
  */
 
 import type { Request } from "express";
@@ -15,26 +16,16 @@ import type {
   GenerateBriefingResult,
 } from "@workspace/briefing-engine";
 import {
-  generateFindings,
-  generateOrchestratedFindings,
-} from "@workspace/finding-engine";
-import { generateBriefing } from "@workspace/briefing-engine";
-import {
   buildSpineGateFrontContext,
   buildSpineGateFrontContextFromTenant,
   postEngineSpine,
 } from "./engineSpineClient";
 import {
-  useSpineBriefing,
-  useSpineFindings,
-  useSpineFindingsOrchestrated,
-} from "./engineSpineFlags";
-import {
   rehydrateSpineBriefingResult,
   rehydrateSpineFindingsResult,
 } from "./engineSpineDeserialize";
 
-type BriefingEngineOptions = Parameters<typeof generateBriefing>[1];
+type BriefingEngineOptions = { mode?: string };
 type FindingEngineOptions = GenerateFindingsOptions;
 
 export interface SpineRoutingContext {
@@ -66,10 +57,6 @@ export async function routeGenerateFindings(
   ctx: SpineRoutingContext,
   req: Request | null = null,
 ): Promise<GenerateFindingsResult> {
-  if (!useSpineFindings()) {
-    return generateFindings(input, options);
-  }
-
   const gateFront = resolveGateFront(req, ctx, "plan-review");
 
   const payload = await postEngineSpine<{
@@ -90,10 +77,6 @@ export async function routeGenerateOrchestratedFindings(
   ctx: SpineRoutingContext,
   req: Request | null = null,
 ): Promise<GenerateOrchestratedFindingsResult> {
-  if (!useSpineFindingsOrchestrated()) {
-    return generateOrchestratedFindings(input, options);
-  }
-
   const gateFront = resolveGateFront(req, ctx, "plan-review");
 
   const payload = await postEngineSpine<{
@@ -119,17 +102,6 @@ export async function routeGenerateBriefing(
   req: Request | null = null,
   subjectId?: string,
 ): Promise<GenerateBriefingResult> {
-  if (!useSpineBriefing()) {
-    return generateBriefing(
-      {
-        engagementId: args.engagementId,
-        sources: args.sources,
-        generatedBy: args.generatedBy,
-      },
-      options,
-    );
-  }
-
   const gateFront = req
     ? buildSpineGateFrontContext(req, {
         packageId: "briefing",
