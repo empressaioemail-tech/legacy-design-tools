@@ -10,6 +10,13 @@
  */
 process.env.NODE_ENV = "test";
 
+// C3 BFF: spine client requires a configured engine-api URL at runtime.
+// Integration tests delegate spine routing to local engines via
+// engine-spine-test-setup.ts; this dummy URL satisfies any direct client use.
+if (!process.env.ENGINE_API_URL?.trim()) {
+  process.env.ENGINE_API_URL = "http://engine.test.invalid";
+}
+
 /**
  *
  * We deliberately:

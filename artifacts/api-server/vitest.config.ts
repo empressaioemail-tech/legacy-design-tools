@@ -11,7 +11,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "node",
-    setupFiles: ["./src/__tests__/test-env.ts"],
+    setupFiles: [
+      "./src/__tests__/test-env.ts",
+      "./src/__tests__/engine-spine-test-setup.ts",
+    ],
     include: ["src/**/*.test.ts"],
     globals: false,
     // Each file gets its own worker so per-file PG schemas + test-context state

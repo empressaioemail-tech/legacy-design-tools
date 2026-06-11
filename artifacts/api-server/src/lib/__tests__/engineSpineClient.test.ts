@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   buildSpineGateFrontContextFromTenant,
   EngineSpineError,
+  formatEngineSpineFailure,
   postEngineSpine,
   SPINE_GATE_HEADERS,
 } from "../engineSpineClient";
@@ -66,6 +67,14 @@ describe("engineSpineClient", () => {
         }),
       }),
     ).rejects.toMatchObject({ code: "engine_api_not_configured" });
+  });
+
+  it("formatEngineSpineFailure preserves EngineSpineError code", () => {
+    const err = new EngineSpineError("engine_api_unreachable", "timed out");
+    expect(formatEngineSpineFailure(err)).toEqual({
+      code: "engine_api_unreachable",
+      message: "timed out",
+    });
   });
 
   it("postEngineSpine maps 401 to EngineSpineError", async () => {

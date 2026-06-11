@@ -1,22 +1,18 @@
 /**
- * Hydrology / topography spine delegation (C1).
+ * Hydrology / topography spine delegation (C3 BFF).
  *
- * When ENGINE_SPINE_HYDROLOGY or ENGINE_SPINE_TOPOGRAPHY flags are on,
- * DEM fetch, drainage worker, and rainfall forcing call engine-api /v1/hydrology/*
- * instead of local @workspace/site-context adapters.
+ * DEM fetch, drainage worker, and rainfall forcing unconditionally call
+ * engine-api /v1/hydrology/* through the gate-front seam.
  */
 
 import type { BboxWgs84 } from "@workspace/site-context/server";
-import {
-  fetchUsgs3depDem,
-  runHydrologyWorker,
-  resolveRainfallForcing,
-  type FetchUsgs3depDemOptions,
-  type FetchUsgs3depDemResult,
-  type HydrologyWorkerRequest,
-  type HydrologyWorkerResult,
-  type ResolveRainfallForcingInput,
-  type RainfallForcingSource,
+import type {
+  FetchUsgs3depDemOptions,
+  FetchUsgs3depDemResult,
+  HydrologyWorkerRequest,
+  HydrologyWorkerResult,
+  ResolveRainfallForcingInput,
+  RainfallForcingSource,
 } from "@workspace/site-context/server";
 import {
   buildSpineGateFrontContextFromTenant,
@@ -27,7 +23,6 @@ import {
   rehydrateSpineHydrologyWorkerResult,
   rehydrateSpineRainfallForcingSource,
 } from "./engineSpineDeserialize";
-import { useSpineHydrology, useSpineTopography } from "./engineSpineFlags";
 
 export interface SpineHydrologyContext {
   jurisdictionTenant: string | null;
@@ -38,10 +33,6 @@ export async function routeFetchUsgs3depDem(
   opts: FetchUsgs3depDemOptions,
   ctx: SpineHydrologyContext,
 ): Promise<FetchUsgs3depDemResult> {
-  if (!useSpineTopography()) {
-    return fetchUsgs3depDem(bbox, opts);
-  }
-
   const gateFront = buildSpineGateFrontContextFromTenant({
     packageId: "hydrology",
     jurisdictionTenant: ctx.jurisdictionTenant,
@@ -80,10 +71,6 @@ export async function routeRunHydrologyWorker(
   req: HydrologyWorkerRequest,
   ctx: SpineHydrologyContext,
 ): Promise<HydrologyWorkerResult> {
-  if (!useSpineHydrology()) {
-    return runHydrologyWorker(req);
-  }
-
   const gateFront = buildSpineGateFrontContextFromTenant({
     packageId: "hydrology",
     jurisdictionTenant: ctx.jurisdictionTenant,
@@ -113,10 +100,6 @@ export async function routeResolveRainfallForcing(
   input: ResolveRainfallForcingInput,
   ctx: SpineHydrologyContext,
 ): Promise<RainfallForcingSource> {
-  if (!useSpineHydrology()) {
-    return resolveRainfallForcing(input);
-  }
-
   const gateFront = buildSpineGateFrontContextFromTenant({
     packageId: "hydrology",
     jurisdictionTenant: ctx.jurisdictionTenant,

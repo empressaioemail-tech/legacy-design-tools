@@ -75,6 +75,7 @@ import {
   assertEngagementServiceTenantScope,
 } from "../lib/gateFrontSeamEngagement";
 import { resolveJurisdictionTenant } from "../lib/atomAdjudicationEvidenceLedger";
+import { formatEngineSpineFailure } from "../lib/engineSpineClient";
 import { routeGenerateBriefing } from "../lib/engineSpineRouting";
 import { engineSpineFlagSnapshot } from "../lib/engineSpineFlags";
 import {
@@ -1766,19 +1767,20 @@ async function runBriefingGeneration(args: {
       "briefing generation: completed",
     );
   } catch (err) {
-    const message = (err as Error).message ?? "unknown engine failure";
+    const { code, message } = formatEngineSpineFailure(err);
+    const error = `briefing engine failed (${code}): ${message}`;
     await finalizeJob(
       generationId,
       {
         state: "failed",
-        error: message,
+        error,
         invalidCitationCount: null,
         invalidCitations: null,
       },
       reqLog,
     );
     reqLog.error(
-      { err, engagementId, briefingId, generationId },
+      { err, engagementId, briefingId, generationId, engineSpineCode: code },
       "briefing generation: failed",
     );
   }

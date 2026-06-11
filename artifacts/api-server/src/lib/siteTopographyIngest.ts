@@ -64,6 +64,7 @@ import {
   type BboxWgs84,
   type FetchUsgs3depDemResult,
 } from "@workspace/site-context/server";
+import { EngineSpineError } from "./engineSpineClient";
 import { routeFetchUsgs3depDem } from "./engineSpineHydrology";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import { SITE_TOPOGRAPHY_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
@@ -205,6 +206,8 @@ export type SiteTopographyIngestResult =
         | "usgs3dep-timeout"
         | "usgs3dep-non-image"
         | "usgs3dep-aborted"
+        | "engine-api-unreachable"
+        | "engine-api-rejected"
         | "geotiff-parse-failed"
         | "contour-derivation-failed"
         | "storage-upload-failed"
@@ -945,7 +948,19 @@ export async function ingestSiteTopography(
 
 function mapUsgs3depError(
   err: unknown,
-): "usgs3dep-unavailable" | "usgs3dep-timeout" | "usgs3dep-non-image" | "usgs3dep-aborted" {
+):
+  | "usgs3dep-unavailable"
+  | "usgs3dep-timeout"
+  | "usgs3dep-non-image"
+  | "usgs3dep-aborted"
+  | "engine-api-unreachable"
+  | "engine-api-rejected" {
+  if (err instanceof EngineSpineError) {
+    if (err.code === "engine_api_unreachable" || err.code === "engine_api_not_configured") {
+      return "engine-api-unreachable";
+    }
+    return "engine-api-rejected";
+  }
   if (err instanceof Usgs3depFetchError) {
     if (err.code === "timeout") return "usgs3dep-timeout";
     if (err.code === "aborted") return "usgs3dep-aborted";
