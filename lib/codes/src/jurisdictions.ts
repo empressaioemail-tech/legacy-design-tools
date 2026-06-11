@@ -207,38 +207,47 @@ const CITY_STATE_TO_KEY: Record<string, string> = {
  * fallbacks, retrieval silently returns zero atoms and the chat answers from
  * model knowledge instead of our ingested code corpus.
  *
- * Returns null only when city/state cannot be resolved (including blocked
- * partnership keys). Unwarmed cities synthesize a `city_state` slug so
- * retrieval + web-first grounding can run on demand.
+ * Returns null when no warmup is configured for the engagement's location.
  */
-export function keyFromEngagement(input: {
+export type KeyFromEngagementInput = {
   jurisdictionCity?: string | null;
   jurisdictionState?: string | null;
   jurisdiction?: string | null;
   address?: string | null;
-}): string | null {
+};
+
+function lookupRegisteredKey(pair: string): string | null {
+  if (BLOCKED_CITY_STATE_KEYS[pair as keyof typeof BLOCKED_CITY_STATE_KEYS]) {
+    return null;
+  }
+  return CITY_STATE_TO_KEY[pair] ?? CENTRAL_TEXAS_CITY_STATE_TO_KEY[pair] ?? null;
+}
+
+function resolveKeyFromEngagement(
+  input: KeyFromEngagementInput,
+  options: { synthesize: boolean },
+): string | null {
   // 1) Structured city+state (preferred — set by the geocoder).
   const city = (input.jurisdictionCity ?? "").trim().toLowerCase();
   const state = (input.jurisdictionState ?? "").trim().toLowerCase();
   if (city && state) {
-    const resolved = resolveRegisteredOrSynthesizedKey(
-      `${city}|${state}`,
-      input.jurisdictionCity ?? city,
-      state,
-    );
-    if (resolved) return resolved;
+    const pair = `${city}|${state}`;
+    const registered = lookupRegisteredKey(pair);
+    if (registered) return registered;
+    if (options.synthesize) {
+      return synthesizeJurisdictionKey(input.jurisdictionCity ?? city, state);
+    }
   }
 
   // 2) Freeform "City, ST" jurisdiction string.
   const fromJurisdiction = parseCityState(input.jurisdiction);
   if (fromJurisdiction) {
-    const [parsedCity, parsedState] = fromJurisdiction.split("|");
-    const resolved = resolveRegisteredOrSynthesizedKey(
-      fromJurisdiction,
-      parsedCity,
-      parsedState,
-    );
-    if (resolved) return resolved;
+    const registered = lookupRegisteredKey(fromJurisdiction);
+    if (registered) return registered;
+    if (options.synthesize) {
+      const [parsedCity, parsedState] = fromJurisdiction.split("|");
+      return synthesizeJurisdictionKey(parsedCity, parsedState);
+    }
   }
 
   // 3) Scan the address for any registered city/state pair. We test each
@@ -261,19 +270,33 @@ export function keyFromEngagement(input: {
       }
     }
 
-    const fromAddress = parseCityStateFromAddress(input.address ?? "");
-    if (fromAddress) {
-      const pair = `${fromAddress.city.toLowerCase()}|${fromAddress.state.toLowerCase()}`;
-      const resolved = resolveRegisteredOrSynthesizedKey(
-        pair,
-        fromAddress.city,
-        fromAddress.state,
-      );
-      if (resolved) return resolved;
+    if (options.synthesize) {
+      const fromAddress = parseCityStateFromAddress(input.address ?? "");
+      if (fromAddress) {
+        const pair = `${fromAddress.city.toLowerCase()}|${fromAddress.state.toLowerCase()}`;
+        const registered = lookupRegisteredKey(pair);
+        if (registered) return registered;
+        return synthesizeJurisdictionKey(fromAddress.city, fromAddress.state);
+      }
     }
   }
 
   return null;
+}
+
+/** Registered corpus keys only — used by coverage, chat, engagement events, etc. */
+export function keyFromEngagement(input: KeyFromEngagementInput): string | null {
+  return resolveKeyFromEngagement(input, { synthesize: false });
+}
+
+/**
+ * Registered key when warmed; otherwise synthesize `city_state` for the
+ * finding-generation grounding path (retrieval + web-first supplement).
+ */
+export function keyFromEngagementOrSynthesize(
+  input: KeyFromEngagementInput,
+): string | null {
+  return resolveKeyFromEngagement(input, { synthesize: true });
 }
 
 const US_STATE_SLUG: Record<string, string> = {
@@ -414,20 +437,6 @@ export function synthesizeJurisdictionKey(
   const citySlug = slugifyCityName(city);
   if (!citySlug) return null;
   return `${citySlug}_${stateSlug}`;
-}
-
-function resolveRegisteredOrSynthesizedKey(
-  pair: string,
-  city: string,
-  stateToken: string,
-): string | null {
-  if (BLOCKED_CITY_STATE_KEYS[pair as keyof typeof BLOCKED_CITY_STATE_KEYS]) {
-    return null;
-  }
-  const registered =
-    CITY_STATE_TO_KEY[pair] ?? CENTRAL_TEXAS_CITY_STATE_TO_KEY[pair];
-  if (registered) return registered;
-  return synthesizeJurisdictionKey(city, stateToken);
 }
 
 /** Parse trailing "City, ST [zip]" from a US mailing address. */

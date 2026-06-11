@@ -32,30 +32,14 @@ describe("resolveEngagementCoverage", () => {
     });
   });
 
-  it("returns not_in_catalog when city/state cannot be resolved", () => {
-    expect(
-      resolveEngagementCoverage(
-        {
-          jurisdiction: "Atlantis, Lost Continent",
-          address: "1 Trident Way, Atlantis",
-        },
-        { substrateJurisdictions: [{ key: "bastrop-tx", displayName: "Bastrop, TX" }] },
-      ),
-    ).toMatchObject({
-      cortexJurisdictionKey: null,
-      coverageStatus: "not_in_catalog",
-    });
-  });
-
-  it("returns warming for synthesized unwarmed US cities (web-first on demand)", () => {
+  it("returns not_in_catalog when no substrate or cortex match", () => {
     expect(
       resolveEngagementCoverage(
         { jurisdictionCity: "Pagosa Springs", jurisdictionState: "CO" },
         { substrateJurisdictions: [{ key: "bastrop-tx", displayName: "Bastrop, TX" }] },
       ),
     ).toMatchObject({
-      cortexJurisdictionKey: "pagosa_springs_co",
-      coverageStatus: "warming",
+      coverageStatus: "not_in_catalog",
     });
   });
 

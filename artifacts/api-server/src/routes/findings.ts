@@ -60,7 +60,7 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
-  keyFromEngagement,
+  keyFromEngagementOrSynthesize,
   retrieveAtomsForQuestion,
   supplementCodeSectionsWithReasoningGrounding,
   canonicalOverlayAtomKey,
@@ -531,7 +531,7 @@ async function resolveEngineInputs(
     .limit(1);
   const engagement = engRows[0];
   const jurisdictionKey = engagement
-    ? keyFromEngagement({
+    ? keyFromEngagementOrSynthesize({
         jurisdictionCity: engagement.jurisdictionCity,
         jurisdictionState: engagement.jurisdictionState,
         jurisdiction: engagement.jurisdiction,

@@ -3,6 +3,7 @@ export {
   getJurisdiction,
   listJurisdictions,
   keyFromEngagement,
+  keyFromEngagementOrSynthesize,
   type JurisdictionConfig,
   type CodeBookConfig,
 } from "./jurisdictions";
