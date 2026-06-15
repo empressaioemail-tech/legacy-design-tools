@@ -1,6 +1,6 @@
 /**
  * Task #29 — cross-user engagement isolation (mirrors gate tenant-isolation rigor).
- * Phase 1: anonymous sessions scope to migration-owner demo data only.
+ * Anonymous sessions scope to per-browser ephemeral owners only.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -9,7 +9,7 @@ import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import { db, engagements } from "@workspace/db";
-import { MIGRATION_OWNER_USER_ID } from "../lib/sessionToken";
+import { LEGACY_INTERNAL_OWNER_USER_ID } from "../lib/anonymousOwnerCookie";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -40,9 +40,9 @@ describe("engagement ownership isolation", () => {
   beforeEach(async () => {
     await db.insert(engagements).values([
       {
-        name: "Demo Project",
-        nameLower: "demo project",
-        ownerUserId: MIGRATION_OWNER_USER_ID,
+        name: "Legacy Internal Project",
+        nameLower: "legacy internal project",
+        ownerUserId: LEGACY_INTERNAL_OWNER_USER_ID,
       },
       {
         name: "User A Project",
@@ -80,14 +80,13 @@ describe("engagement ownership isolation", () => {
     expect(res.body.error).toBe("engagement_not_found");
   });
 
-  it("anonymous caller sees only migration-owner engagements in production", async () => {
+  it("anonymous caller sees no legacy-internal engagements in production", async () => {
     const prev = process.env["NODE_ENV"];
     process.env["NODE_ENV"] = "production";
     try {
       const res = await request(getApp()).get("/api/engagements");
       expect(res.status).toBe(200);
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].name).toBe("Demo Project");
+      expect(res.body).toEqual([]);
     } finally {
       process.env["NODE_ENV"] = prev;
     }
@@ -110,11 +109,12 @@ describe("engagement ownership isolation", () => {
     }
   });
 
-  it("anonymous caller can create engagements owned by migration-owner in production", async () => {
+  it("anonymous caller can create engagements owned by their ephemeral id in production", async () => {
     const prev = process.env["NODE_ENV"];
     process.env["NODE_ENV"] = "production";
     try {
-      const res = await request(getApp())
+      const agent = request.agent(getApp());
+      const res = await agent
         .post("/api/engagements")
         .send({ name: "New Anonymous Project" });
       expect(res.status).toBe(201);
@@ -124,7 +124,7 @@ describe("engagement ownership isolation", () => {
         .select({ ownerUserId: engagements.ownerUserId })
         .from(engagements)
         .where(eq(engagements.id, res.body.id));
-      expect(row?.ownerUserId).toBe(MIGRATION_OWNER_USER_ID);
+      expect(row?.ownerUserId).toMatch(/^anon_/);
     } finally {
       process.env["NODE_ENV"] = prev;
     }

@@ -1,18 +1,23 @@
 /**
  * Per-user engagement ownership predicates (Task #29).
  *
- * Phase 1 (phased-7k): anonymous sessions scope to {@link MIGRATION_OWNER_USER_ID}
- * — the 0038 backfill owner — so the instant demo works without login.
- *
- * Phase 2: signed-in users (`session.requestor`) see only their own rows;
- * internal (`audience: internal`) callers bypass owner scoping for plan-review.
+ * Anonymous sessions carry a per-browser ephemeral `anon_*` owner id
+ * (see {@link anonymousOwnerCookie.ts}). Signed-in users see only their
+ * rows; internal (`audience: internal`) callers bypass owner scoping.
  */
 
 import type { Request, Response } from "express";
-import { and, eq, type SQL } from "drizzle-orm";
-import { db, engagements, submissions, type Engagement } from "@workspace/db";
+import { and, eq, sql, type SQL } from "drizzle-orm";
+import {
+  db,
+  engagements,
+  snapshots,
+  sheets,
+  submissions,
+  type Engagement,
+} from "@workspace/db";
 import type { SessionUser } from "../middlewares/session";
-import { MIGRATION_OWNER_USER_ID } from "./sessionToken";
+import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 
 export function isInternalSession(session: SessionUser): boolean {
   return session.audience === "internal";
@@ -27,25 +32,20 @@ export function sessionOwnerUserId(
 }
 
 /**
- * Demo/anonymous owner id. Migration 0038 backfilled legacy engagements here;
- * anonymous create/read paths use the same id so existing data stays reachable.
- */
-export function anonymousOwnerUserId(): string {
-  return MIGRATION_OWNER_USER_ID;
-}
-
-/**
- * Owner id used for access checks. Anonymous → demo owner; signed-in → requestor id.
+ * Owner id used for access checks. Anonymous ephemeral → requestor id;
+ * signed-in → requestor id. Returns null when no owner can be resolved.
  */
 export function effectiveOwnerUserId(session: SessionUser): string | null {
   if (isInternalSession(session)) return null;
-  return sessionOwnerUserId(session) ?? anonymousOwnerUserId();
+  return sessionOwnerUserId(session);
 }
 
 /** SQL fragment scoping engagements to the session owner (or true for internal). */
 export function engagementOwnerWhere(session: SessionUser): SQL | undefined {
   if (isInternalSession(session)) return undefined;
-  return eq(engagements.ownerUserId, effectiveOwnerUserId(session)!);
+  const owner = effectiveOwnerUserId(session);
+  if (!owner) return sql`false`;
+  return eq(engagements.ownerUserId, owner);
 }
 
 export function engagementOwnerAnd(
@@ -159,6 +159,68 @@ export async function loadSubmissionForSession(
     submission: row.submission,
     engagement: row.engagement,
   };
+}
+
+export async function loadSnapshotForSession(
+  snapshotId: string,
+  session: SessionUser,
+): Promise<
+  | {
+      ok: true;
+      snapshot: typeof snapshots.$inferSelect;
+      engagement: Engagement;
+    }
+  | { ok: false; status: 401 | 404; error: string }
+> {
+  const [row] = await db
+    .select({
+      snapshot: snapshots,
+      engagement: engagements,
+    })
+    .from(snapshots)
+    .innerJoin(engagements, eq(snapshots.engagementId, engagements.id))
+    .where(
+      engagementOwnerAnd(session, eq(snapshots.id, snapshotId)) ??
+        eq(snapshots.id, snapshotId),
+    )
+    .limit(1);
+  if (!row) {
+    return { ok: false, status: 404, error: "snapshot_not_found" };
+  }
+  return { ok: true, snapshot: row.snapshot, engagement: row.engagement };
+}
+
+export async function loadSheetForSession(
+  sheetId: string,
+  session: SessionUser,
+): Promise<
+  | {
+      ok: true;
+      sheet: typeof sheets.$inferSelect;
+      engagement: Engagement;
+    }
+  | { ok: false; status: 401 | 404; error: string }
+> {
+  const [row] = await db
+    .select({
+      sheet: sheets,
+      engagement: engagements,
+    })
+    .from(sheets)
+    .innerJoin(engagements, eq(sheets.engagementId, engagements.id))
+    .where(
+      engagementOwnerAnd(session, eq(sheets.id, sheetId)) ??
+        eq(sheets.id, sheetId),
+    )
+    .limit(1);
+  if (!row) {
+    return { ok: false, status: 404, error: "sheet_not_found" };
+  }
+  return { ok: true, sheet: row.sheet, engagement: row.engagement };
+}
+
+export function shouldEnsureUserProfile(userId: string): boolean {
+  return !isAnonymousOwnerId(userId);
 }
 
 /**

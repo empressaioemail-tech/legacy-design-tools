@@ -46,9 +46,9 @@ export const engagements = pgTable(
     /**
      * Task #29 — per-user ownership for Cortex self-serve isolation.
      * Opaque text id (same shape as `users.id` / session requestor id).
-     * Legacy rows backfilled to `migration-owner`.
+     * Legacy rows backfilled to `legacy-internal-owner` (migration 0039).
      */
-    ownerUserId: text("owner_user_id").notNull().default("migration-owner"),
+    ownerUserId: text("owner_user_id").notNull().default("legacy-internal-owner"),
     /**
      * ADR-005 tenant scope. Defaults to `default` until a verified tenant
      * claim is minted by the auth layer.

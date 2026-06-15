@@ -96,6 +96,7 @@ import {
 import { FINDING_ENGINE_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
 import { findEngagementInFlightFindingRun } from "../lib/findingRunsEngagement";
+import { loadSubmissionForSession } from "../lib/engagementOwnership";
 import {
   classifyAndPersistPlanSetPieces,
   filterPlanSetPieceCandidates,
@@ -391,13 +392,17 @@ async function atomIdForRowId(rowId: string | null): Promise<string | null> {
   }
 }
 
-async function loadSubmission(submissionId: string): Promise<Submission | null> {
-  const rows = await db
-    .select()
-    .from(submissions)
-    .where(eq(submissions.id, submissionId))
-    .limit(1);
-  return rows[0] ?? null;
+async function loadSubmissionForRoute(
+  submissionId: string,
+  req: Request,
+  res: Response,
+): Promise<Submission | null> {
+  const loaded = await loadSubmissionForSession(submissionId, req.session);
+  if (!loaded.ok) {
+    res.status(loaded.status).json({ error: loaded.error });
+    return null;
+  }
+  return loaded.submission;
 }
 
 async function loadFindingByAtomId(atomId: string): Promise<Finding | null> {
@@ -1230,11 +1235,8 @@ router.post(
     const submissionId = params.data.submissionId;
 
     try {
-      const sub = await loadSubmission(submissionId);
-      if (!sub) {
-        res.status(404).json({ error: "submission_not_found" });
-        return;
-      }
+      const sub = await loadSubmissionForRoute(submissionId, req, res);
+      if (!sub) return;
 
       const tenantScope = await assertSubmissionServiceTenantScope(
         req,
@@ -1302,11 +1304,8 @@ router.get(
     const submissionId = params.data.submissionId;
 
     try {
-      const sub = await loadSubmission(submissionId);
-      if (!sub) {
-        res.status(404).json({ error: "submission_not_found" });
-        return;
-      }
+      const sub = await loadSubmissionForRoute(submissionId, req, res);
+      if (!sub) return;
       const [run] = await db
         .select()
         .from(findingRuns)
@@ -1359,11 +1358,8 @@ router.get(
     const submissionId = params.data.submissionId;
 
     try {
-      const sub = await loadSubmission(submissionId);
-      if (!sub) {
-        res.status(404).json({ error: "submission_not_found" });
-        return;
-      }
+      const sub = await loadSubmissionForRoute(submissionId, req, res);
+      if (!sub) return;
       const rows = await db
         .select()
         .from(findings)
@@ -1473,11 +1469,8 @@ router.post(
     }
 
     try {
-      const sub = await loadSubmission(submissionId);
-      if (!sub) {
-        res.status(404).json({ error: "submission_not_found" });
-        return;
-      }
+      const sub = await loadSubmissionForRoute(submissionId, req, res);
+      if (!sub) return;
 
       const title = body.data.title.trim();
       if (title.length === 0) {
@@ -1591,11 +1584,8 @@ router.get(
     const submissionId = params.data.submissionId;
 
     try {
-      const sub = await loadSubmission(submissionId);
-      if (!sub) {
-        res.status(404).json({ error: "submission_not_found" });
-        return;
-      }
+      const sub = await loadSubmissionForRoute(submissionId, req, res);
+      if (!sub) return;
       const limit = resolveKeepPerSubmission();
       const rows = await db
         .select()

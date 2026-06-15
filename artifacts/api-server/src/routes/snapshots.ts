@@ -45,6 +45,7 @@ import {
   effectiveOwnerUserId,
   engagementOwnerAnd,
   loadEngagementForSession,
+  loadSnapshotForSession,
 } from "../lib/engagementOwnership";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
@@ -868,24 +869,16 @@ router.get(
     }
 
     try {
-      // 1. Confirm the snapshot exists and collect its sheet ids in one
-      //    cheap query. We could collapse this into the window query
-      //    below by JOINing on `sheets`, but that would conflate "no
-      //    such snapshot" with "snapshot has zero sheets" — distinguishing
-      //    the two lets us return a proper 404 for the former.
-      const snapshotRow = await db
-        .select({ id: snapshots.id })
-        .from(snapshots)
-        .where(eq(snapshots.id, params.data.id))
-        .limit(1);
-      if (snapshotRow.length === 0) {
-        res.status(404).json({ error: "Snapshot not found" });
+      const loaded = await loadSnapshotForSession(params.data.id, req.session);
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
         return;
       }
+
       const sheetRows = await db
         .select({ id: sheets.id })
         .from(sheets)
-        .where(eq(sheets.snapshotId, params.data.id));
+        .where(eq(sheets.snapshotId, loaded.snapshot.id));
       const sheetIds = sheetRows.map((r) => r.id);
 
       // Snapshot with no sheets — short-circuit, no need to hit

@@ -16,6 +16,11 @@ import {
   runSheetContentExtraction,
   type SheetExtractionTarget,
 } from "../lib/sheetContentExtractor";
+import {
+  loadSheetForSession,
+  loadSnapshotForSession,
+  loadSubmissionForSession,
+} from "../lib/engagementOwnership";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -813,13 +818,9 @@ router.get(
       return;
     }
     try {
-      const snapRows = await db
-        .select({ id: snapshots.id })
-        .from(snapshots)
-        .where(eq(snapshots.id, snapshotId))
-        .limit(1);
-      if (snapRows.length === 0) {
-        res.status(404).json({ error: "Snapshot not found" });
+      const loaded = await loadSnapshotForSession(snapshotId, req.session);
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
         return;
       }
 
@@ -870,23 +871,22 @@ async function serveSheetPng(
     return;
   }
   try {
-    const rows = await db
-      .select({
-        bytes: column === "thumbnailPng" ? sheets.thumbnailPng : sheets.fullPng,
-      })
-      .from(sheets)
-      .where(eq(sheets.id, id))
-      .limit(1);
+    const loaded = await loadSheetForSession(id, req.session);
+    if (!loaded.ok) {
+      res.status(loaded.status).json({ error: loaded.error });
+      return;
+    }
 
-    const row = rows[0];
-    if (!row || !row.bytes) {
+    const bytes =
+      column === "thumbnailPng"
+        ? loaded.sheet.thumbnailPng
+        : loaded.sheet.fullPng;
+    if (!bytes) {
       res.status(404).json({ error: "Sheet not found" });
       return;
     }
 
-    const buf = Buffer.isBuffer(row.bytes)
-      ? row.bytes
-      : Buffer.from(row.bytes as Uint8Array);
+    const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes as Uint8Array);
     // ETag is derived from the bytes themselves so re-uploading a sheet
     // (same id, different image) busts cached entries even though the URL
     // is unchanged.
@@ -917,20 +917,12 @@ router.get(
       return;
     }
     try {
-      const subRows = await db
-        .select({
-          id: submissions.id,
-          engagementId: submissions.engagementId,
-          submittedAt: submissions.submittedAt,
-        })
-        .from(submissions)
-        .where(eq(submissions.id, submissionId))
-        .limit(1);
-      const sub = subRows[0];
-      if (!sub) {
-        res.status(404).json({ error: "Submission not found" });
+      const loaded = await loadSubmissionForSession(submissionId, req.session);
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
         return;
       }
+      const sub = loaded.submission;
 
       // Resolve the submission's *contemporaneous* snapshot — the
       // newest snapshot uploaded at or before `submittedAt`. Pinning

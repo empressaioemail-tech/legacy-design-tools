@@ -36,6 +36,7 @@ import {
   type PlanReviewDiscipline,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { isAnonymousOwnerId } from "../lib/anonymousOwnerCookie";
 
 const router: IRouter = Router();
 
@@ -50,7 +51,10 @@ router.get("/session", async (req: Request, res: Response) => {
       }
     | undefined;
 
-  if (s.requestor) {
+  if (
+    s.requestor &&
+    !(s.requestor.kind === "user" && isAnonymousOwnerId(s.requestor.id))
+  ) {
     let disciplines: PlanReviewDiscipline[] = [];
     if (s.requestor.kind === "user") {
       try {

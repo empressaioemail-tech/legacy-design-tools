@@ -47,6 +47,13 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "../lib/logger";
 import { ensureUserProfile } from "../lib/userProfiles";
 import { verifySessionToken } from "../lib/sessionToken";
+import {
+  ANONYMOUS_OWNER_COOKIE,
+  mintAnonymousOwnerToken,
+  newAnonymousOwnerId,
+  readAnonymousOwnerFromCookies,
+} from "../lib/anonymousOwnerCookie";
+import { shouldEnsureUserProfile } from "../lib/engagementOwnership";
 
 /**
  * Identity attached to every request after this middleware runs. The
@@ -215,6 +222,50 @@ function applyDevOverrides(base: SessionUser, req: Request): SessionUser {
   return next;
 }
 
+function setAnonymousOwnerCookie(res: Response, ownerId: string): void {
+  const secure = process.env["NODE_ENV"] === "production";
+  res.cookie(ANONYMOUS_OWNER_COOKIE, mintAnonymousOwnerToken(ownerId), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/",
+  });
+}
+
+/**
+ * Resolve or mint the ephemeral anonymous owner id and attach it to the
+ * session. Sets `pr_anon_owner` when a new id is minted.
+ */
+function attachEphemeralAnonymousOwner(
+  req: Request,
+  res: Response,
+): SessionUser {
+  const cookies = (req as Request & { cookies?: Record<string, unknown> })
+    .cookies;
+  let ownerId = readAnonymousOwnerFromCookies(cookies);
+  if (!ownerId) {
+    ownerId = newAnonymousOwnerId();
+    setAnonymousOwnerCookie(res, ownerId);
+  }
+  return {
+    ...ANONYMOUS_APPLICANT,
+    requestor: { kind: "user", id: ownerId },
+  };
+}
+
+/**
+ * When the session has no verified user requestor, attach the ephemeral
+ * anonymous owner (unless dev overrides already supplied one).
+ */
+function ensureAnonymousOwnerIfNeeded(req: Request, res: Response): void {
+  if (req.session.requestor?.kind === "user" && req.session.requestor.id) {
+    return;
+  }
+  const withOwner = attachEphemeralAnonymousOwner(req, res);
+  req.session = { ...req.session, requestor: withOwner.requestor };
+}
+
 function bearerTokenFromRequest(req: Request): string | null {
   const hdr = req.headers.authorization;
   if (!hdr?.startsWith("Bearer ")) return null;
@@ -264,16 +315,14 @@ function resolveVerifiedSession(req: Request): SessionUser | null {
  */
 export const sessionMiddleware: RequestHandler = (
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction,
 ) => {
   const verified = resolveVerifiedSession(req);
   if (verified) {
     req.session = verified;
   } else if (process.env["NODE_ENV"] === "production") {
-    req.session = ANONYMOUS_APPLICANT;
-    next();
-    return;
+    req.session = attachEphemeralAnonymousOwner(req, res);
   } else {
     const cookies = (req as Request & { cookies?: Record<string, unknown> })
       .cookies;
@@ -285,9 +334,14 @@ export const sessionMiddleware: RequestHandler = (
     const fromCookie = parseSessionCookie(cookies?.[SESSION_COOKIE]);
     const base = fromCookie ?? ANONYMOUS_APPLICANT;
     req.session = applyDevOverrides(base, req);
+    ensureAnonymousOwnerIfNeeded(req, res);
   }
 
-  if (req.session.requestor && req.session.requestor.kind === "user") {
+  if (
+    req.session.requestor &&
+    req.session.requestor.kind === "user" &&
+    shouldEnsureUserProfile(req.session.requestor.id)
+  ) {
     void ensureUserProfile(req.session.requestor.id);
   }
 

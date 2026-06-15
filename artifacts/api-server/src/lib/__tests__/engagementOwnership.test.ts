@@ -1,20 +1,23 @@
 /**
- * Unit tests for Phase 1 anonymous demo owner scoping (production-safe).
+ * Unit tests for ephemeral anonymous owner scoping (production-safe).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  anonymousOwnerUserId,
   effectiveOwnerUserId,
   engagementOwnerWhere,
   sessionOwnerUserId,
 } from "../engagementOwnership";
-import { MIGRATION_OWNER_USER_ID } from "../sessionToken";
+import {
+  ANONYMOUS_OWNER_PREFIX,
+  isAnonymousOwnerId,
+} from "../anonymousOwnerCookie";
 import type { SessionUser } from "../../middlewares/session";
 
 const anonymous: SessionUser = {
   audience: "user",
   tenantId: "default",
+  requestor: { kind: "user", id: `${ANONYMOUS_OWNER_PREFIX}test123` },
 };
 
 const userA: SessionUser = {
@@ -23,7 +26,7 @@ const userA: SessionUser = {
   requestor: { kind: "user", id: "user-a" },
 };
 
-describe("engagementOwnership — anonymous demo path", () => {
+describe("engagementOwnership — ephemeral anonymous path", () => {
   let prevNodeEnv: string | undefined;
 
   beforeEach(() => {
@@ -36,13 +39,14 @@ describe("engagementOwnership — anonymous demo path", () => {
     else process.env.NODE_ENV = prevNodeEnv;
   });
 
-  it("anonymousOwnerUserId matches migration backfill owner", () => {
-    expect(anonymousOwnerUserId()).toBe(MIGRATION_OWNER_USER_ID);
+  it("isAnonymousOwnerId identifies ephemeral ids", () => {
+    expect(isAnonymousOwnerId(`${ANONYMOUS_OWNER_PREFIX}abc`)).toBe(true);
+    expect(isAnonymousOwnerId("user-a")).toBe(false);
   });
 
-  it("anonymous production session resolves to migration-owner", () => {
-    expect(sessionOwnerUserId(anonymous)).toBeNull();
-    expect(effectiveOwnerUserId(anonymous)).toBe(MIGRATION_OWNER_USER_ID);
+  it("anonymous production session scopes to its ephemeral requestor id", () => {
+    expect(sessionOwnerUserId(anonymous)).toBe(`${ANONYMOUS_OWNER_PREFIX}test123`);
+    expect(effectiveOwnerUserId(anonymous)).toBe(`${ANONYMOUS_OWNER_PREFIX}test123`);
     expect(engagementOwnerWhere(anonymous)).toBeDefined();
   });
 
