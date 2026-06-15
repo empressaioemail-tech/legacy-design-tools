@@ -9,7 +9,6 @@ import {
   __resetCotalityDedupForTests,
   __resetCotalityTokenCacheForTests,
   __resetCotalityClipDedupForTests,
-  cotalityTokenUrl,
   cotalityPropertyBaseUrl,
   cotalitySpatialTileBaseUrl,
 } from "../national/cotality";
@@ -38,10 +37,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function tokenForBody(body: string): string {
-  if (body.includes("prop-key")) return "property-token";
-  if (body.includes("tile-key")) return "tile-token";
-  return "unknown-token";
+/** Decode the `Authorization: Basic <b64>` header to "<key>:<secret>". */
+function decodeBasicCreds(init?: RequestInit): string {
+  const auth = (init?.headers as Record<string, string> | undefined)
+    ?.Authorization;
+  const match = /^Basic (.+)$/.exec(auth ?? "");
+  return match ? Buffer.from(match[1], "base64").toString("utf8") : "";
 }
 
 /** Mock router for token + geocode + spatial parcels + site-location. */
@@ -63,14 +64,13 @@ function cotalityFetchRouter(opts: {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
 
-    if (url.includes("/oauth/token") || url === cotalityTokenUrl()) {
-      const body = init?.body?.toString() ?? "";
-      if (body.includes("prop-key")) propertyTokenPosts += 1;
-      if (body.includes("tile-key")) tileTokenPosts += 1;
-      expect(body).toContain("scope=openid");
-      const token = body.includes("tile-key")
-        ? "tile-token"
-        : "property-token";
+    if (url.includes("/oauth/token")) {
+      // Basic auth carries the creds; grant_type rides in the query; no body.
+      expect(url).toContain("grant_type=client_credentials");
+      const creds = decodeBasicCreds(init);
+      if (creds.includes("prop-key")) propertyTokenPosts += 1;
+      if (creds.includes("tile-key")) tileTokenPosts += 1;
+      const token = creds.includes("tile-key") ? "tile-token" : "property-token";
       return jsonResponse({ ...cotalityOAuthTokenResponse, access_token: token });
     }
 

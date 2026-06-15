@@ -4,11 +4,14 @@
  *
  * Auth: OAuth2 client_credentials, per-product token host (Cotality enforces
  * strict product isolation; each app authenticates independently against its
- * own host). Property mints at `https://api1.cotality.com/oauth/token` (vendor-
- * confirmed 2026-06-11, Cotality Data Implementation Services); Spatial Tile /
- * RiskMeter default to `https://api.cotality.com/oauth/token` until their hosts
- * are confirmed from each product's Swagger tile. Creds in form body +
- * `scope=openid` (Incapsula WAF requires non-empty body).
+ * own host). Property mints at `https://api1.cotality.com/oauth/token`; Spatial
+ * Tile and RiskMeter mint at `https://api.cotality.com/oauth/token` (vendor-
+ * confirmed 2026-06-11, Cotality Data Implementation Services). Credentials go
+ * in an HTTP Basic auth header with `grant_type=client_credentials` in the
+ * query string and an empty body (undici sends `Content-Length: 0`, which the
+ * Incapsula WAF requires). grant_type in the body returns `invalid_request`;
+ * credentials in the body return `InvalidClientIdentifier`. All three products
+ * verified HTTP 200 against the live token endpoints 2026-06-15.
  *
  * Demo apps (env vars):
  *   COTALITY_PROPERTY_*     → Property API v2 (`property_auth`)
@@ -34,14 +37,13 @@ export const COTALITY_USER_AGENT =
 // Endpoint constants — OPERATOR-CONFIRM from developer.corelogic.com
 // ---------------------------------------------------------------------------
 
-// Generic / Spatial Tile / RiskMeter token host (default until each product's
-// own host is confirmed from its Swagger tile).
+// Spatial Tile + RiskMeter token host (api.cotality.com). grant_type rides in
+// the query because the request body is empty (Basic auth carries the creds).
 export const COTALITY_TOKEN_URL_DEFAULT =
-  "https://api.cotality.com/oauth/token";
+  "https://api.cotality.com/oauth/token?grant_type=client_credentials";
 // Property API tokens mint at api1.cotality.com — vendor-confirmed 2026-06-11
-// (Cotality Data Implementation Services). The wrong host returns
-// `InvalidClientIdentifier`. grant_type is carried in the query per the
-// vendor-confirmed mint form (also present in the form body, harmlessly).
+// (Cotality Data Implementation Services); api.cotality.com returns
+// `InvalidClientIdentifier` for the Property app.
 export const COTALITY_PROPERTY_TOKEN_URL_DEFAULT =
   "https://api1.cotality.com/oauth/token?grant_type=client_credentials";
 export const COTALITY_API_BASE_DEFAULT = "https://api.cotality.com";
@@ -247,12 +249,13 @@ export async function getCotalityAccessToken(
     });
     const startedAtMs = Date.now();
 
-    const body = new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: creds.clientId,
-      client_secret: creds.clientSecret,
-      scope: "openid",
-    });
+    // Credentials as HTTP Basic auth; grant_type rides in the query (already on
+    // tokenUrl). No body — undici sends Content-Length: 0, which the Incapsula
+    // WAF requires. grant_type in the body -> invalid_request; creds in the
+    // body -> InvalidClientIdentifier.
+    const basicAuth = Buffer.from(
+      `${creds.clientId}:${creds.clientSecret}`,
+    ).toString("base64");
 
     let res: Response;
     try {
@@ -262,9 +265,8 @@ export async function getCotalityAccessToken(
         headers: {
           "User-Agent": COTALITY_USER_AGENT,
           Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${basicAuth}`,
         },
-        body: body.toString(),
       });
     } catch (err) {
       const throwExcerpt =
@@ -324,10 +326,10 @@ export async function getCotalityAccessToken(
       );
     }
 
+    // Cotality returns expires_in as a numeric string (e.g. "3599").
+    const expiresInRaw = Number(tokenObj.expires_in);
     const expiresInSec =
-      typeof tokenObj.expires_in === "number" && tokenObj.expires_in > 0
-        ? tokenObj.expires_in
-        : 3600;
+      Number.isFinite(expiresInRaw) && expiresInRaw > 0 ? expiresInRaw : 3600;
     const expiresAt =
       Date.now() + expiresInSec * 1000 - COTALITY_TOKEN_EXPIRY_BUFFER_MS;
 
