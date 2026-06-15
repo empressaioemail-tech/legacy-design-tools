@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   effectiveOwnerUserId,
   engagementOwnerWhere,
+  isRealSignedInUser,
   sessionOwnerUserId,
 } from "../engagementOwnership";
 import {
@@ -52,5 +53,10 @@ describe("engagementOwnership — ephemeral anonymous path", () => {
 
   it("signed-in user scopes to their own owner id", () => {
     expect(effectiveOwnerUserId(userA)).toBe("user-a");
+  });
+
+  it("ephemeral anonymous owner is not a real signed-in user", () => {
+    expect(isRealSignedInUser(anonymous)).toBe(false);
+    expect(isRealSignedInUser(userA)).toBe(true);
   });
 });

@@ -176,4 +176,20 @@ describe("anonymous-sees-no-migration-owner-data", () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("engagement_not_found");
   });
+
+  it("ephemeral anonymous owner cannot PATCH /api/me/profile (real-auth gate)", async () => {
+    const prev = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
+    try {
+      const agent = request.agent(getApp());
+      await agent.get("/api/engagements");
+      const res = await agent
+        .patch("/api/me/profile")
+        .send({ displayName: "Should not land" });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/signed-in/i);
+    } finally {
+      process.env["NODE_ENV"] = prev;
+    }
+  });
 });

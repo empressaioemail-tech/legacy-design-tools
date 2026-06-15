@@ -222,12 +222,22 @@ function applyDevOverrides(base: SessionUser, req: Request): SessionUser {
   return next;
 }
 
-function setAnonymousOwnerCookie(res: Response, ownerId: string): void {
-  const secure = process.env["NODE_ENV"] === "production";
+function anonymousOwnerCookieSecure(req: Request): boolean {
+  return (
+    process.env["NODE_ENV"] === "production" &&
+    (req.secure || req.get("x-forwarded-proto") === "https")
+  );
+}
+
+function setAnonymousOwnerCookie(
+  req: Request,
+  res: Response,
+  ownerId: string,
+): void {
   res.cookie(ANONYMOUS_OWNER_COOKIE, mintAnonymousOwnerToken(ownerId), {
     httpOnly: true,
     sameSite: "lax",
-    secure,
+    secure: anonymousOwnerCookieSecure(req),
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   });
@@ -246,7 +256,7 @@ function attachEphemeralAnonymousOwner(
   let ownerId = readAnonymousOwnerFromCookies(cookies);
   if (!ownerId) {
     ownerId = newAnonymousOwnerId();
-    setAnonymousOwnerCookie(res, ownerId);
+    setAnonymousOwnerCookie(req, res, ownerId);
   }
   return {
     ...ANONYMOUS_APPLICANT,
@@ -259,7 +269,8 @@ function attachEphemeralAnonymousOwner(
  * anonymous owner (unless dev overrides already supplied one).
  */
 function ensureAnonymousOwnerIfNeeded(req: Request, res: Response): void {
-  if (req.session.requestor?.kind === "user" && req.session.requestor.id) {
+  if (req.session.audience === "internal") return;
+  if (req.session.requestor?.id) {
     return;
   }
   const withOwner = attachEphemeralAnonymousOwner(req, res);

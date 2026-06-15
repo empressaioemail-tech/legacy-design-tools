@@ -61,6 +61,7 @@ import {
 import { and, desc, eq, inArray, like, or } from "drizzle-orm";
 import type { Logger } from "pino";
 import { logger } from "../lib/logger";
+import { isRealSignedInUser } from "../lib/engagementOwnership";
 
 const router: IRouter = Router();
 
@@ -121,13 +122,13 @@ function reviewerRequestTitle(eventType: string): string {
 router.get(
   "/me/notifications",
   async (req: Request, res: Response): Promise<void> => {
-    const requestor = req.session?.requestor;
-    if (!requestor || requestor.kind !== "user") {
+    if (!isRealSignedInUser(req.session)) {
       res
         .status(401)
         .json({ error: "Notifications require a signed-in user session" });
       return;
     }
+    const requestor = req.session.requestor!;
     const reqLog: Logger =
       (req as Request & { log?: Logger }).log ?? logger;
 
@@ -279,13 +280,13 @@ router.get(
 router.post(
   "/me/notifications/mark-read",
   async (req: Request, res: Response): Promise<void> => {
-    const requestor = req.session?.requestor;
-    if (!requestor || requestor.kind !== "user") {
+    if (!isRealSignedInUser(req.session)) {
       res
         .status(401)
         .json({ error: "Notifications require a signed-in user session" });
       return;
     }
+    const requestor = req.session.requestor!;
     const reqLog: Logger =
       (req as Request & { log?: Logger }).log ?? logger;
 

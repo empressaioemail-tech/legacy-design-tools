@@ -56,6 +56,7 @@ import {
   UpdateMyProfileBody,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { isRealSignedInUser } from "../lib/engagementOwnership";
 import { ensureUserProfile } from "../lib/userProfiles";
 import { toUserResponse } from "./users";
 import {
@@ -72,13 +73,13 @@ const router: IRouter = Router();
 router.patch(
   "/me/architect-pdf-header",
   async (req: Request, res: Response) => {
-    const requestor = req.session?.requestor;
-    if (!requestor || requestor.kind !== "user") {
+    if (!isRealSignedInUser(req.session)) {
       res
         .status(401)
         .json({ error: "Self-edit requires a signed-in user session" });
       return;
     }
+    const requestor = req.session.requestor!;
 
     const parsed = UpdateMyArchitectPdfHeaderBody.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -151,13 +152,13 @@ router.patch(
  * cannot be coerced into editing another user's row.
  */
 router.patch("/me/profile", async (req: Request, res: Response) => {
-  const requestor = req.session?.requestor;
-  if (!requestor || requestor.kind !== "user") {
+  if (!isRealSignedInUser(req.session)) {
     res
       .status(401)
       .json({ error: "Self-edit requires a signed-in user session" });
     return;
   }
+  const requestor = req.session.requestor!;
 
   // Read the raw avatarUrl up-front so the rollback can fire even on
   // 400 paths (where `parsed.data` doesn't exist yet) — same posture
@@ -347,13 +348,13 @@ router.patch("/me/profile", async (req: Request, res: Response) => {
  * state without a follow-up GET.
  */
 router.patch("/me/disciplines", async (req: Request, res: Response) => {
-  const requestor = req.session?.requestor;
-  if (!requestor || requestor.kind !== "user") {
+  if (!isRealSignedInUser(req.session)) {
     res
       .status(401)
       .json({ error: "Self-edit requires a signed-in user session" });
     return;
   }
+  const requestor = req.session.requestor!;
 
   const parsed = UpdateMyDisciplinesBody.safeParse(req.body ?? {});
   if (!parsed.success) {

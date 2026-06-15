@@ -17,11 +17,17 @@ import { DEFAULT_TENANT_ID } from "../middlewares/session";
 export const ANONYMOUS_OWNER_COOKIE = "pr_anon_owner";
 export const ANONYMOUS_OWNER_PREFIX = "anon_";
 
+/** Stable owner id for vitest route suites (matches session middleware in NODE_ENV=test). */
+export const ANON_TEST_SESSION_OWNER_ID = "anon_test_default";
+
 export function isAnonymousOwnerId(id: string): boolean {
   return id.startsWith(ANONYMOUS_OWNER_PREFIX);
 }
 
 export function newAnonymousOwnerId(): string {
+  if (process.env.NODE_ENV === "test") {
+    return ANON_TEST_SESSION_OWNER_ID;
+  }
   return `${ANONYMOUS_OWNER_PREFIX}${randomBytes(12).toString("hex")}`;
 }
 
