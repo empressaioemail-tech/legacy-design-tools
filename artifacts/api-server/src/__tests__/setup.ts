@@ -177,6 +177,7 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "user_auth_credentials",
   "brokerage_install_claims",
   "user_usage_metering",
+  "workspace_settings",
 ];
 
 /**

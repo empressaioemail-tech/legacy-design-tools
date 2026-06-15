@@ -80,6 +80,7 @@ import {
   BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,
 } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
+import { isRealSignedInUser } from "../lib/engagementOwnership";
 import { hydrateActors } from "../lib/userLookup";
 import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";
 import { getHistoryService } from "../atoms/registry";
@@ -1458,7 +1459,9 @@ router.post(
     // session shape never blocks the write — the resolve still
     // lands, but `resolvedByRequestor` ends up null so the FE can
     // distinguish a system-side resolve from an attributed one.
-    const requestor = req.session?.requestor;
+    const requestor = isRealSignedInUser(req.session)
+      ? req.session.requestor
+      : undefined;
     const resolvedByKind =
       requestor && requestor.id ? requestor.kind : null;
     const resolvedById =

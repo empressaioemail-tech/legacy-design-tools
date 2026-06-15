@@ -85,6 +85,8 @@ const findingEngineActual = await vi.importActual<
   typeof import("@workspace/finding-engine")
 >("@workspace/finding-engine");
 
+import { ANON_TEST_SESSION_OWNER_ID } from "../lib/anonymousOwnerCookie";
+
 const SECRET = process.env["SNAPSHOT_SECRET"]!;
 
 let getApp: () => Express;
@@ -172,8 +174,8 @@ describe("PATCH /api/engagements/:id — lifecycle events", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.eventType).toBe("engagement.address-updated");
     expect(events[0]!.actor).toEqual({
-      kind: "system",
-      id: "engagement-edit",
+      kind: "user",
+      id: ANON_TEST_SESSION_OWNER_ID,
     });
     expect(events[0]!.payload).toMatchObject({
       fromAddress: "100 Original St",
@@ -258,8 +260,8 @@ describe("PATCH /api/engagements/:id — lifecycle events", () => {
 
     const jurisdictionEvent = events[1]!;
     expect(jurisdictionEvent.actor).toEqual({
-      kind: "system",
-      id: "engagement-edit",
+      kind: "user",
+      id: ANON_TEST_SESSION_OWNER_ID,
     });
     expect(jurisdictionEvent.payload).toMatchObject({
       // Provo is not a registered jurisdiction in the codes registry,
@@ -392,8 +394,8 @@ describe("POST /api/engagements/:id/geocode — lifecycle events", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.eventType).toBe("engagement.jurisdiction-resolved");
     expect(events[0]!.actor).toEqual({
-      kind: "system",
-      id: "engagement-edit",
+      kind: "user",
+      id: ANON_TEST_SESSION_OWNER_ID,
     });
     expect(events[0]!.payload).toMatchObject({
       // Salt Lake City is not a registered jurisdiction in the codes

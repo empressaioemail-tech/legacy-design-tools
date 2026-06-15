@@ -614,7 +614,7 @@ CREATE TABLE @@SCHEMA@@.engagements (
     architect_of_record_email text,
     architect_of_record_role text,
     status text DEFAULT 'active'::text NOT NULL,
-    owner_user_id text DEFAULT 'migration-owner'::text NOT NULL,
+    owner_user_id text DEFAULT 'legacy-internal-owner'::text NOT NULL,
     tenant_id text DEFAULT 'default'::text NOT NULL,
     latitude numeric(9,6),
     longitude numeric(9,6),

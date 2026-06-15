@@ -3,6 +3,7 @@ import {
   assertUserApiRateAllowed,
 } from "../lib/userMetering";
 import { sessionOwnerUserId } from "../lib/engagementOwnership";
+import { isAnonymousOwnerId } from "../lib/anonymousOwnerCookie";
 
 /**
  * Per-user daily API rate limit for authenticated Cortex web sessions.
@@ -18,7 +19,7 @@ export const userRateLimitMiddleware: RequestHandler = async (
     return;
   }
   const ownerId = sessionOwnerUserId(req.session);
-  if (!ownerId) {
+  if (!ownerId || isAnonymousOwnerId(ownerId)) {
     next();
     return;
   }
