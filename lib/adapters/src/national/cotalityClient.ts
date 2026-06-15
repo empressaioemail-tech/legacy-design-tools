@@ -2,8 +2,13 @@
  * Cotality (CoreLogic Developer Platform) — shared OAuth client, CLIP
  * resolution, and JSON fetch helpers for all national Cotality adapters.
  *
- * Auth: OAuth2 client_credentials at `https://api.cotality.com/oauth/token`
- * with creds in form body + `scope=openid` (Incapsula WAF requires non-empty body).
+ * Auth: OAuth2 client_credentials, per-product token host (Cotality enforces
+ * strict product isolation; each app authenticates independently against its
+ * own host). Property mints at `https://api1.cotality.com/oauth/token` (vendor-
+ * confirmed 2026-06-11, Cotality Data Implementation Services); Spatial Tile /
+ * RiskMeter default to `https://api.cotality.com/oauth/token` until their hosts
+ * are confirmed from each product's Swagger tile. Creds in form body +
+ * `scope=openid` (Incapsula WAF requires non-empty body).
  *
  * Demo apps (env vars):
  *   COTALITY_PROPERTY_*     → Property API v2 (`property_auth`)
@@ -29,8 +34,16 @@ export const COTALITY_USER_AGENT =
 // Endpoint constants — OPERATOR-CONFIRM from developer.corelogic.com
 // ---------------------------------------------------------------------------
 
+// Generic / Spatial Tile / RiskMeter token host (default until each product's
+// own host is confirmed from its Swagger tile).
 export const COTALITY_TOKEN_URL_DEFAULT =
   "https://api.cotality.com/oauth/token";
+// Property API tokens mint at api1.cotality.com — vendor-confirmed 2026-06-11
+// (Cotality Data Implementation Services). The wrong host returns
+// `InvalidClientIdentifier`. grant_type is carried in the query per the
+// vendor-confirmed mint form (also present in the form body, harmlessly).
+export const COTALITY_PROPERTY_TOKEN_URL_DEFAULT =
+  "https://api1.cotality.com/oauth/token?grant_type=client_credentials";
 export const COTALITY_API_BASE_DEFAULT = "https://api.cotality.com";
 export const COTALITY_PROPERTY_BASE_URL_DEFAULT =
   "https://api.cotality.com/v2/properties";
@@ -39,8 +52,33 @@ export const COTALITY_SPATIALTILE_BASE_URL_DEFAULT =
 export const COTALITY_RISKMETER_BASE_URL_DEFAULT =
   "https://api.cotality.com/riskmeter-api";
 
-export function cotalityTokenUrl(): string {
-  return process.env.COTALITY_TOKEN_URL ?? COTALITY_TOKEN_URL_DEFAULT;
+/**
+ * Per-product OAuth token host. Each product's host is overridable without a
+ * redeploy via its own env var; `COTALITY_TOKEN_URL` remains a legacy global
+ * override (applies to every product) for back-compat.
+ */
+export function cotalityTokenUrl(app: CotalityOAuthApp = "property"): string {
+  const legacyOverride = process.env.COTALITY_TOKEN_URL;
+  switch (app) {
+    case "property":
+      return (
+        process.env.COTALITY_PROPERTY_TOKEN_URL ??
+        legacyOverride ??
+        COTALITY_PROPERTY_TOKEN_URL_DEFAULT
+      );
+    case "spatialtile":
+      return (
+        process.env.COTALITY_SPATIALTILE_TOKEN_URL ??
+        legacyOverride ??
+        COTALITY_TOKEN_URL_DEFAULT
+      );
+    case "riskmeter":
+      return (
+        process.env.COTALITY_RISKMETER_TOKEN_URL ??
+        legacyOverride ??
+        COTALITY_TOKEN_URL_DEFAULT
+      );
+  }
 }
 
 export function cotalityPropertyBaseUrl(): string {
@@ -199,7 +237,7 @@ export async function getCotalityAccessToken(
 
   const creds = readCotalityAppCredentials(app)!;
   const fetcher: typeof fetch = fetchImpl ?? fetch;
-  const tokenUrl = cotalityTokenUrl();
+  const tokenUrl = cotalityTokenUrl(app);
 
   const promise = (async (): Promise<string> => {
     cotalityLogEvent("info", "cotality oauth token start", adapterKeyForLog, {
