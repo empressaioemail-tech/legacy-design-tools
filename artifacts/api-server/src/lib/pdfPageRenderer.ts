@@ -1,17 +1,20 @@
 /**
  * Server-side PDF-page → PNG render for uploaded plan-set PDFs (P2).
  *
- * Uses puppeteer (already in api-server deps) + pdf-lib page count to
- * rasterize each page via Chrome's built-in PDF viewer at a viewport
- * sized for Claude Opus 4.8 high-resolution vision (~2576px long edge).
+ * Primary path: poppler `pdftoppm` (native, reliable on Cloud Run slim).
+ * Puppeteer/Chrome was structurally fragile on cortex-api Cloud Run
+ * (30s WS-endpoint launch timeout on revision 00177 despite bundled libs).
  */
 
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import puppeteer from "puppeteer";
 import { PDFDocument } from "pdf-lib";
+
+const execFileAsync = promisify(execFile);
 
 /** Target long-edge pixels for Claude Opus 4.8 high-resolution vision. */
 export const PDF_RENDER_TARGET_LONG_EDGE_PX = 2576;
@@ -19,22 +22,13 @@ export const PDF_RENDER_TARGET_LONG_EDGE_PX = 2576;
 /** Hard cap on pages rendered per attached-document PDF. */
 export const PDF_RENDER_MAX_PAGES = 40;
 
-/** Raised when headless Chrome cannot rasterize an attached plan-set PDF. */
+/** Raised when rasterization of an attached plan-set PDF fails. */
 export class PdfRenderError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = "PdfRenderError";
   }
 }
-
-const CLOUD_RUN_CHROME_ARGS = [
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
-  "--disable-dev-shm-usage",
-  "--single-process",
-  "--no-zygote",
-  "--disable-gpu",
-] as const;
 
 export interface RenderedPdfPage {
   pageIndex: number;
@@ -57,9 +51,76 @@ async function countPdfPages(pdfBytes: Buffer): Promise<number> {
   }
 }
 
+/** DPI to hit target long edge on US Letter (11" long side). */
+function dpiForTargetLongEdge(targetLongEdgePx: number): number {
+  return Math.max(72, Math.min(300, Math.round(targetLongEdgePx / 11)));
+}
+
+async function renderWithPoppler(
+  pdfBytes: Buffer,
+  totalPages: number,
+  targetLongEdgePx: number,
+): Promise<RenderedPdfPage[]> {
+  const workDir = await mkdtemp(join(tmpdir(), "ldt-pdf-render-"));
+  const pdfPath = join(workDir, `${randomUUID()}.pdf`);
+  const outPrefix = join(workDir, "page");
+  const dpi = dpiForTargetLongEdge(targetLongEdgePx);
+
+  try {
+    await writeFile(pdfPath, pdfBytes);
+    await execFileAsync(
+      "pdftoppm",
+      [
+        "-png",
+        "-r",
+        String(dpi),
+        "-f",
+        "1",
+        "-l",
+        String(totalPages),
+        pdfPath,
+        outPrefix,
+      ],
+      { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 },
+    );
+
+    const files = (await readdir(workDir))
+      .filter((f) => f.startsWith("page-") && f.endsWith(".png"))
+      .sort((a, b) => {
+        const na = Number(a.match(/page-(\d+)\.png/)?.[1] ?? 0);
+        const nb = Number(b.match(/page-(\d+)\.png/)?.[1] ?? 0);
+        return na - nb;
+      });
+
+    const pages: RenderedPdfPage[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const png = await readFile(join(workDir, files[i]));
+      pages.push({
+        pageIndex: i,
+        png,
+        width: Math.round((8.5 * dpi) / 1),
+        height: Math.round((11 * dpi) / 1),
+      });
+    }
+    if (pages.length === 0) {
+      throw new PdfRenderError(
+        "plan-set vision unavailable: PDF render produced no pages",
+      );
+    }
+    return pages;
+  } catch (err) {
+    if (err instanceof PdfRenderError) throw err;
+    throw new PdfRenderError(
+      "plan-set vision unavailable: PDF render failed (pdftoppm)",
+      { cause: err },
+    );
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
+}
+
 /**
- * Render PDF bytes to PNG buffers via headless Chromium PDF viewer.
- * Navigates with `#page=N` fragments for multi-page plan sets.
+ * Render PDF bytes to PNG buffers via poppler pdftoppm.
  */
 export async function renderPdfPagesToPng(
   pdfBytes: Buffer,
@@ -68,62 +129,5 @@ export async function renderPdfPagesToPng(
   const maxPages = opts.maxPages ?? PDF_RENDER_MAX_PAGES;
   const targetLongEdge = opts.targetLongEdgePx ?? PDF_RENDER_TARGET_LONG_EDGE_PX;
   const totalPages = Math.min(await countPdfPages(pdfBytes), maxPages);
-
-  const workDir = await mkdtemp(join(tmpdir(), "ldt-pdf-render-"));
-  const pdfPath = join(workDir, `${randomUUID()}.pdf`);
-  await writeFile(pdfPath, pdfBytes);
-
-  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
-  try {
-    browser = await puppeteer.launch({
-      headless: true,
-      executablePath: puppeteer.executablePath(),
-      args: [...CLOUD_RUN_CHROME_ARGS],
-    });
-  } catch (err) {
-    throw new PdfRenderError(
-      "plan-set vision unavailable: PDF render failed (Chrome launch)",
-      { cause: err },
-    );
-  }
-
-  const viewportW = targetLongEdge;
-  const viewportH = Math.round(targetLongEdge * 0.77);
-  const pages: RenderedPdfPage[] = [];
-
-  try {
-    const page = await browser.newPage();
-    await page.setViewport({
-      width: viewportW,
-      height: viewportH,
-      deviceScaleFactor: 1,
-    });
-    const baseUrl = `file:///${pdfPath.replace(/\\/g, "/")}`;
-
-    for (let i = 0; i < totalPages; i++) {
-      const pageNum = i + 1;
-      await page.goto(`${baseUrl}#page=${pageNum}`, {
-        waitUntil: "networkidle0",
-        timeout: 60_000,
-      });
-      await new Promise((r) => setTimeout(r, 500));
-      const png = (await page.screenshot({ type: "png", fullPage: false })) as Buffer;
-      pages.push({
-        pageIndex: i,
-        png,
-        width: viewportW,
-        height: viewportH,
-      });
-    }
-
-    return pages;
-  } catch (err) {
-    throw new PdfRenderError(
-      "plan-set vision unavailable: PDF render failed",
-      { cause: err },
-    );
-  } finally {
-    await browser.close();
-    await rm(workDir, { recursive: true, force: true });
-  }
+  return renderWithPoppler(pdfBytes, totalPages, targetLongEdge);
 }

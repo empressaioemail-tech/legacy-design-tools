@@ -117,6 +117,7 @@ RUN apt-get update \
       libxss1 \
       libxtst6 \
       lsb-release \
+      poppler-utils \
       wget \
       xdg-utils \
  && apt-get clean \
