@@ -14365,6 +14365,14 @@ components:
             Null when `acceptedAt` is null. Otherwise carries the
             same actor data as `reviewerStatusBy` (the existing
             status-change attribution).
+        engineHonesty:
+          oneOf:
+            - $ref: "#/components/schemas/EngineHonesty"
+          nullable: true
+          description: |
+            Engine-api honesty envelope for this finding's generation
+            run — confidence kind, data vintage, coverage degradation,
+            and source. Null on reviewer-authored rows and legacy runs.
       required:
         - id
         - submissionId
@@ -14499,6 +14507,10 @@ components:
             short) dropped entirely. Distinct dimension from
             `invalidCitationCount` — see findingRuns.ts column docs.
             Null while pending.
+        engineHonesty:
+          oneOf:
+            - $ref: "#/components/schemas/EngineHonesty"
+          nullable: true
       required:
         - generationId
         - state
@@ -14508,6 +14520,53 @@ components:
         - invalidCitationCount
         - invalidCitations
         - discardedFindingCount
+
+    EngineHonesty:
+      type: object
+      description: |
+        Buyer-facing honesty slice of the engine-api EngineEnvelope —
+        confidence kind, data acquisition vintage, coverage degradation,
+        and reasoning source. Forwarded by cortex-api without flattening.
+      properties:
+        confidence:
+          type: object
+          properties:
+            value:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+            kind:
+              type: string
+              enum: [calibrated, asserted, deterministic]
+          required: [value, kind]
+        dataVintage:
+          type: string
+          format: date
+          nullable: true
+          description: Acquisition date for underlying data, when known.
+        coverage:
+          type: object
+          properties:
+            degraded:
+              type: boolean
+            reason:
+              type: string
+          required: [degraded]
+        source:
+          type: object
+          description: |
+            Engine reasoning provenance — adapter id and optional cited atom ids
+            (matches hauska-engine envelopeSourceSchema).
+          properties:
+            adapter:
+              type: string
+            citationIds:
+              type: array
+              items:
+                type: string
+          required: [adapter]
+      required: [confidence, dataVintage, coverage, source]
 
     SubmissionFindingsGenerationRun:
       type: object
@@ -14541,6 +14600,10 @@ components:
             type: string
         discardedFindingCount:
           type: integer
+          nullable: true
+        engineHonesty:
+          oneOf:
+            - $ref: "#/components/schemas/EngineHonesty"
           nullable: true
       required:
         - generationId

@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { EngineHonesty } from "./engineHonesty";
 import type { SubmissionFindingsGenerationStatusResponseState } from "./submissionFindingsGenerationStatusResponseState";
 
 /**
@@ -29,4 +30,5 @@ short) dropped entirely. Distinct dimension from
 Null while pending.
  */
   discardedFindingCount: number | null;
+  engineHonesty?: EngineHonesty | null;
 }

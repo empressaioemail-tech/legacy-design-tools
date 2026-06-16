@@ -4498,6 +4498,56 @@ export interface FindingSourceRef {
   label: string;
 }
 
+export type EngineHonestyConfidenceKind =
+  (typeof EngineHonestyConfidenceKind)[keyof typeof EngineHonestyConfidenceKind];
+
+export const EngineHonestyConfidenceKind = {
+  calibrated: "calibrated",
+  asserted: "asserted",
+  deterministic: "deterministic",
+} as const;
+
+export type EngineHonestyConfidence = {
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  value: number;
+  kind: EngineHonestyConfidenceKind;
+};
+
+export type EngineHonestyCoverage = {
+  degraded: boolean;
+  reason?: string;
+};
+
+/**
+ * Engine reasoning provenance — adapter id and optional cited atom ids
+(matches hauska-engine envelopeSourceSchema).
+
+ */
+export type EngineHonestySource = {
+  adapter: string;
+  citationIds?: string[];
+};
+
+/**
+ * Buyer-facing honesty slice of the engine-api EngineEnvelope —
+confidence kind, data acquisition vintage, coverage degradation,
+and reasoning source. Forwarded by cortex-api without flattening.
+
+ */
+export interface EngineHonesty {
+  confidence: EngineHonestyConfidence;
+  /** Acquisition date for underlying data, when known. */
+  dataVintage: string | null;
+  coverage: EngineHonestyCoverage;
+  /** Engine reasoning provenance — adapter id and optional cited atom ids
+(matches hauska-engine envelopeSourceSchema).
+ */
+  source: EngineHonestySource;
+}
+
 /**
  * One AIR-1 compliance finding. Wire shape mirrors
 `findingsMock.ts:82-103` so the V1-6 frontend swap is a
@@ -4585,6 +4635,11 @@ same actor data as `reviewerStatusBy` (the existing
 status-change attribution).
  */
   acceptedBy: FindingActor | null;
+  /** Engine-api honesty envelope for this finding's generation
+run — confidence kind, data vintage, coverage degradation,
+and source. Null on reviewer-authored rows and legacy runs.
+ */
+  engineHonesty?: EngineHonesty | null;
 }
 
 /**
@@ -4687,6 +4742,7 @@ short) dropped entirely. Distinct dimension from
 Null while pending.
  */
   discardedFindingCount: number | null;
+  engineHonesty?: EngineHonesty | null;
 }
 
 export type SubmissionFindingsGenerationRunState =
@@ -4713,6 +4769,7 @@ export interface SubmissionFindingsGenerationRun {
   invalidCitationCount: number | null;
   invalidCitations: string[] | null;
   discardedFindingCount: number | null;
+  engineHonesty?: EngineHonesty | null;
 }
 
 export type FindingsRunsListItemState =

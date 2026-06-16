@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { EngineHonesty } from "./engineHonesty";
 import type { FindingActor } from "./findingActor";
 import type { FindingCategory } from "./findingCategory";
 import type { FindingCitation } from "./findingCitation";
@@ -99,4 +100,9 @@ same actor data as `reviewerStatusBy` (the existing
 status-change attribution).
  */
   acceptedBy: FindingActor | null;
+  /** Engine-api honesty envelope for this finding's generation
+run — confidence kind, data vintage, coverage degradation,
+and source. Null on reviewer-authored rows and legacy runs.
+ */
+  engineHonesty?: EngineHonesty | null;
 }

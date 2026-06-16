@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { EngineHonesty } from "./engineHonesty";
 import type { SubmissionFindingsGenerationRunState } from "./submissionFindingsGenerationRunState";
 
 /**
@@ -22,4 +23,5 @@ export interface SubmissionFindingsGenerationRun {
   invalidCitationCount: number | null;
   invalidCitations: string[] | null;
   discardedFindingCount: number | null;
+  engineHonesty?: EngineHonesty | null;
 }
