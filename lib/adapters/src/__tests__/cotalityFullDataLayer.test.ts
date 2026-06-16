@@ -54,10 +54,18 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function bearerForBody(body: string): string {
-  if (body.includes("prop-key")) return "property-token";
-  if (body.includes("tile-key")) return "tile-token";
-  if (body.includes("risk-key")) return "risk-token";
+/** Decode the `Authorization: Basic <b64>` header to "<key>:<secret>". */
+function decodeBasicCreds(init?: RequestInit): string {
+  const auth = (init?.headers as Record<string, string> | undefined)
+    ?.Authorization;
+  const match = /^Basic (.+)$/.exec(auth ?? "");
+  return match ? Buffer.from(match[1], "base64").toString("utf8") : "";
+}
+
+function bearerForCreds(creds: string): string {
+  if (creds.includes("prop-key")) return "property-token";
+  if (creds.includes("tile-key")) return "tile-token";
+  if (creds.includes("risk-key")) return "risk-token";
   return "token";
 }
 
@@ -67,11 +75,11 @@ function fullPackFetchRouter() {
     const method = (init?.method ?? "GET").toUpperCase();
 
     if (url.includes("/oauth/token")) {
-      const body = init?.body?.toString() ?? "";
-      expect(body).toContain("scope=openid");
+      // Basic auth carries the creds; grant_type rides in the query; no body.
+      expect(url).toContain("grant_type=client_credentials");
       return jsonResponse({
         ...cotalityOAuthTokenResponse,
-        access_token: bearerForBody(body),
+        access_token: bearerForCreds(decodeBasicCreds(init)),
       });
     }
 
