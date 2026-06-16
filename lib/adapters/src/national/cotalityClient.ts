@@ -21,7 +21,6 @@
  * See `_research/2026-06-06_cotality_api_surface_catalog.md`.
  */
 
-import { CACHE_COORDINATE_PRECISION } from "../cache";
 import { AdapterRunError } from "../types";
 
 export const COTALITY_PROVIDER_LABEL = "Cotality";
@@ -48,7 +47,7 @@ export const COTALITY_PROPERTY_TOKEN_URL_DEFAULT =
   "https://api1.cotality.com/oauth/token?grant_type=client_credentials";
 export const COTALITY_API_BASE_DEFAULT = "https://api.cotality.com";
 export const COTALITY_PROPERTY_BASE_URL_DEFAULT =
-  "https://api.cotality.com/v2/properties";
+  "https://api1.cotality.com/v2/properties";
 export const COTALITY_SPATIALTILE_BASE_URL_DEFAULT =
   "https://api.cotality.com/spatial-tile";
 export const COTALITY_RISKMETER_BASE_URL_DEFAULT =
@@ -516,15 +515,251 @@ interface ClipDedupEntry {
 const clipDedup = new Map<string, ClipDedupEntry>();
 
 function clipDedupKey(
-  latitude: number,
-  longitude: number,
-  address?: string | null,
+  streetAddress: string,
+  city: string,
+  state: string,
 ): string {
-  const factor = 10 ** CACHE_COORDINATE_PRECISION;
-  const lat = Math.round(latitude * factor) / factor;
-  const lng = Math.round(longitude * factor) / factor;
-  const addr = address?.trim().toLowerCase() ?? "";
-  return `${lat},${lng}:${addr}`;
+  return `${streetAddress.trim().toLowerCase()}|${city.trim().toLowerCase()}|${state.trim().toLowerCase()}`;
+}
+
+/** US state name → 2-letter abbreviation for Cotality catalog geocode. */
+const US_STATE_ABBR: Record<string, string> = {
+  alabama: "AL",
+  alaska: "AK",
+  arizona: "AZ",
+  arkansas: "AR",
+  california: "CA",
+  colorado: "CO",
+  connecticut: "CT",
+  delaware: "DE",
+  florida: "FL",
+  georgia: "GA",
+  hawaii: "HI",
+  idaho: "ID",
+  illinois: "IL",
+  indiana: "IN",
+  iowa: "IA",
+  kansas: "KS",
+  kentucky: "KY",
+  louisiana: "LA",
+  maine: "ME",
+  maryland: "MD",
+  massachusetts: "MA",
+  michigan: "MI",
+  minnesota: "MN",
+  mississippi: "MS",
+  missouri: "MO",
+  montana: "MT",
+  nebraska: "NE",
+  nevada: "NV",
+  "new hampshire": "NH",
+  "new jersey": "NJ",
+  "new mexico": "NM",
+  "new york": "NY",
+  "north carolina": "NC",
+  "north dakota": "ND",
+  ohio: "OH",
+  oklahoma: "OK",
+  oregon: "OR",
+  pennsylvania: "PA",
+  "rhode island": "RI",
+  "south carolina": "SC",
+  "south dakota": "SD",
+  tennessee: "TN",
+  texas: "TX",
+  utah: "UT",
+  vermont: "VT",
+  virginia: "VA",
+  washington: "WA",
+  "west virginia": "WV",
+  wisconsin: "WI",
+  wyoming: "WY",
+  "district of columbia": "DC",
+};
+
+function normalizeStateCode(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  if (/^[A-Za-z]{2}$/.test(t)) return t.toUpperCase();
+  const abbr = US_STATE_ABBR[t.toLowerCase()];
+  return abbr ?? null;
+}
+
+/**
+ * Parse a US mailing address into Cotality catalog geocode components.
+ * Prefers explicit city/state when supplied; otherwise parses "street, City, ST zip".
+ */
+export function parseCotalityCatalogAddress(args: {
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  streetAddress?: string | null;
+}): { streetAddress: string; city: string; state: string } | null {
+  const explicitCity = args.city?.trim() ?? "";
+  const explicitState = normalizeStateCode(args.state);
+  const explicitStreet = args.streetAddress?.trim() ?? "";
+
+  if (explicitStreet && explicitCity && explicitState) {
+    return {
+      streetAddress: explicitStreet,
+      city: explicitCity,
+      state: explicitState,
+    };
+  }
+
+  const addr = args.address?.trim() ?? "";
+  if (!addr) return null;
+
+  // "613 Sturgeon Dr, San Marcos, TX 78666" or "5225 COLLINS AVE, MIAMI BEACH, FL 33140"
+  const parts = addr.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+
+  const streetAddress = explicitStreet || parts[0];
+  const cityPart = explicitCity || parts[parts.length - 2] || parts[1];
+  const stateZipPart = parts[parts.length - 1] ?? "";
+  const stateFromZip = stateZipPart.match(/\b([A-Za-z]{2})\b(?:\s+\d{5})?/)?.[1];
+  const state = explicitState ?? normalizeStateCode(stateFromZip ?? stateZipPart);
+
+  if (!streetAddress || !cityPart || !state) return null;
+  return { streetAddress, city: cityPart, state };
+}
+
+function bodyIndicatesClipNotFound(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed) return false;
+  try {
+    const json = JSON.parse(trimmed) as Record<string, unknown>;
+    const messages = json.messages;
+    if (Array.isArray(messages)) {
+      for (const m of messages) {
+        if (!m || typeof m !== "object") continue;
+        const msg = (m as Record<string, unknown>).message;
+        if (typeof msg === "string" && /clip not found/i.test(msg)) return true;
+      }
+    }
+    if (typeof json.message === "string" && /clip not found/i.test(json.message)) {
+      return true;
+    }
+  } catch {
+    if (/clip not found/i.test(trimmed)) return true;
+  }
+  return false;
+}
+
+async function cotalityFetchGeocodeCatalog(args: {
+  streetAddress: string;
+  city: string;
+  state: string;
+  bearerToken: string;
+  fetchImpl: typeof fetch;
+  signal?: AbortSignal;
+  adapterKeyForLog: string;
+}): Promise<unknown> {
+  const {
+    streetAddress,
+    city,
+    state,
+    bearerToken,
+    fetchImpl,
+    signal,
+    adapterKeyForLog,
+  } = args;
+  const base = cotalityPropertyBaseUrl().replace(/\/$/, "");
+  const url = new URL(`${base}/search/geocode`);
+  url.searchParams.set("streetAddress", streetAddress);
+  url.searchParams.set("city", city);
+  url.searchParams.set("state", state);
+  url.searchParams.set("bestMatch", "true");
+
+  const startedAtMs = Date.now();
+  cotalityLogEvent("info", "cotality request start", adapterKeyForLog, {
+    label: "property-geocode",
+    url: redactUrl(url.toString()),
+  });
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url.toString(), {
+      signal,
+      headers: {
+        "User-Agent": COTALITY_USER_AGENT,
+        Accept: "application/json",
+        Authorization: `Bearer ${bearerToken}`,
+      },
+    });
+  } catch (err) {
+    const throwExcerpt =
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
+      label: "property-geocode",
+      error_class: "network",
+      duration_ms: Date.now() - startedAtMs,
+      throw_excerpt: throwExcerpt,
+    });
+    throw new AdapterRunError(
+      "network-error",
+      `Cotality property-geocode did not get a response. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+    );
+  }
+
+  let bodyText = "";
+  try {
+    bodyText = await res.text();
+  } catch {
+    bodyText = "";
+  }
+
+  if (res.status === 404) {
+    if (bodyIndicatesClipNotFound(bodyText)) {
+      cotalityLogEvent("info", "cotality geocode clip not found", adapterKeyForLog, {
+        label: "property-geocode",
+        http_status: 404,
+        duration_ms: Date.now() - startedAtMs,
+        body_excerpt: bodyText.slice(0, 256),
+      });
+      throw new AdapterRunError(
+        "no-coverage",
+        "Address not in Cotality coverage (Clip not found).",
+      );
+    }
+    cotalityLogEvent("warn", "cotality geocode routing 404", adapterKeyForLog, {
+      label: "property-geocode",
+      error_class: "routing-404",
+      http_status: 404,
+      duration_ms: Date.now() - startedAtMs,
+      body_excerpt: bodyText.slice(0, 256),
+    });
+    throw new AdapterRunError(
+      "upstream-error",
+      `Cotality property-geocode responded HTTP 404 with empty or non-catalog body (likely routing/host misconfiguration). Use Force refresh to retry.`,
+    );
+  }
+
+  if (!res.ok) {
+    cotalityLogEvent("warn", "cotality request failed", adapterKeyForLog, {
+      label: "property-geocode",
+      error_class: "status",
+      http_status: res.status,
+      duration_ms: Date.now() - startedAtMs,
+      body_excerpt: bodyText.slice(0, 256),
+    });
+    throw new AdapterRunError(
+      "upstream-error",
+      `Cotality property-geocode responded HTTP ${res.status}.${
+        bodyText ? ` Upstream: ${bodyText.slice(0, 256)}` : ""
+      } Use Force refresh to retry.`,
+    );
+  }
+
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new AdapterRunError(
+      "parse-error",
+      `Cotality property-geocode response was not JSON: ${message}`,
+    );
+  }
 }
 
 export function __resetCotalityClipDedupForTests(): void {
@@ -595,14 +830,43 @@ export async function resolveCotalityClip(args: {
   latitude: number;
   longitude: number;
   address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  streetAddress?: string | null;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
   adapterKeyForLog: string;
 }): Promise<CotalityClipContext> {
-  const { latitude, longitude, address, fetchImpl, signal, adapterKeyForLog } =
-    args;
+  const {
+    latitude,
+    longitude,
+    address,
+    city,
+    state,
+    streetAddress,
+    fetchImpl,
+    signal,
+    adapterKeyForLog,
+  } = args;
 
-  const key = clipDedupKey(latitude, longitude, address);
+  const catalog = parseCotalityCatalogAddress({
+    address,
+    city,
+    state,
+    streetAddress,
+  });
+  if (!catalog) {
+    throw new AdapterRunError(
+      "no-coverage",
+      "Cannot resolve Cotality CLIP: engagement address must include street, city, and state for catalog geocode.",
+    );
+  }
+
+  const key = clipDedupKey(
+    catalog.streetAddress,
+    catalog.city,
+    catalog.state,
+  );
   const now = Date.now();
   const existing = clipDedup.get(key);
   if (existing && existing.expiresAt > now) return existing.promise;
@@ -615,32 +879,29 @@ export async function resolveCotalityClip(args: {
       );
     }
 
-    const query: Record<string, string | number | undefined | null> = {
-      lat: latitude,
-      lon: longitude,
-      latitude,
-      longitude,
-    };
-    if (address) {
-      query.address = address;
-      query.fullAddress = address;
-    }
-
-    const json = await cotalityGetWithApp({
+    const fetcher: typeof fetch = fetchImpl ?? fetch;
+    const token = await getCotalityAccessToken({
       app: "property",
-      path: "/search/geocode",
-      query,
-      fetchImpl,
+      fetchImpl: fetcher,
       signal,
       adapterKeyForLog,
-      label: "property-geocode",
+    });
+
+    const json = await cotalityFetchGeocodeCatalog({
+      streetAddress: catalog.streetAddress,
+      city: catalog.city,
+      state: catalog.state,
+      bearerToken: token,
+      fetchImpl: fetcher,
+      signal,
+      adapterKeyForLog,
     });
 
     const parsed = extractClipFromSearchResponse(json);
     if (!parsed) {
       throw new AdapterRunError(
         "no-coverage",
-        "Cotality geocode search returned no CLIP at this lat/lng/address.",
+        "Cotality geocode search returned no CLIP for this address.",
       );
     }
 

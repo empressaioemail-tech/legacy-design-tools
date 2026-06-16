@@ -55,6 +55,10 @@ export interface AdapterParcelContext {
   latitude: number;
   longitude: number;
   address?: string | null;
+  /** Structured city from engagement geocode (Cotality catalog geocode). */
+  city?: string | null;
+  /** Structured state from engagement geocode (Cotality catalog geocode). */
+  state?: string | null;
 }
 
 /**

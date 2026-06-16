@@ -88,6 +88,9 @@ function fullPackFetchRouter() {
 
     if (url.includes("/search/geocode")) {
       expect(auth).toBe("Bearer property-token");
+      expect(url).toContain("api1.cotality.com");
+      expect(url).toContain("streetAddress=");
+      expect(url).toContain("bestMatch=true");
       return jsonResponse(cotalityGeocodeSearchResponse);
     }
     if (url.includes("/property-detail")) {

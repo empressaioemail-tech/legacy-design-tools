@@ -15,6 +15,8 @@ export const ROUND_ROCK: AdapterContext = {
     latitude: ROUND_ROCK_LAT,
     longitude: ROUND_ROCK_LNG,
     address: ROUND_ROCK_ADDRESS,
+    city: "Round Rock",
+    state: "TX",
   },
   jurisdiction: { stateKey: "texas", localKey: null },
 };

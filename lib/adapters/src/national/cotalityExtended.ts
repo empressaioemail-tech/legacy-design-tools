@@ -29,6 +29,8 @@ async function clipFor(ctx: AdapterContext, adapterKey: string) {
     latitude: ctx.parcel.latitude,
     longitude: ctx.parcel.longitude,
     address: ctx.parcel.address ?? null,
+    city: ctx.parcel.city ?? null,
+    state: ctx.parcel.state ?? null,
     fetchImpl: ctx.fetchImpl,
     signal: ctx.signal,
     adapterKeyForLog: adapterKey,

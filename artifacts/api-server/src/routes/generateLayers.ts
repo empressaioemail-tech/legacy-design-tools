@@ -544,7 +544,13 @@ router.post(
 
     const ctx: AdapterContext = {
       parcel: haveCoords
-        ? { latitude: lat, longitude: lng }
+        ? {
+            latitude: lat,
+            longitude: lng,
+            address: engRow.address ?? null,
+            city: engRow.jurisdictionCity ?? null,
+            state: engRow.jurisdictionState ?? null,
+          }
         : // Pass NaN through deliberately — adapters that need coords
           // call `appliesTo` first and return no-coverage, so the
           // runner's outcome is still deterministic. We log the gap
