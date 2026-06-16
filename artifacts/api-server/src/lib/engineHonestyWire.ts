@@ -81,3 +81,27 @@ export function engineHonestyForWire(honesty: EngineHonesty): EngineHonesty {
     },
   };
 }
+
+/** Merge cortex-side plan-set vision degradation into an engine honesty row. */
+export function mergePlanSetVisionDegradation(
+  honesty: EngineHonesty | null,
+  reason: string,
+): EngineHonesty {
+  const base: EngineHonesty =
+    honesty ??
+    ({
+      confidence: { value: 0.68, kind: "asserted" },
+      dataVintage: null,
+      coverage: { degraded: true, reason },
+      source: { adapter: "cortex-api:plan-set-vision" },
+    } satisfies EngineHonesty);
+
+  const mergedReason = base.coverage.degraded
+    ? [base.coverage.reason, reason].filter(Boolean).join("; ")
+    : reason;
+
+  return {
+    ...base,
+    coverage: { degraded: true, reason: mergedReason },
+  };
+}

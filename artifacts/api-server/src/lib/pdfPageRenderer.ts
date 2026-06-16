@@ -19,6 +19,23 @@ export const PDF_RENDER_TARGET_LONG_EDGE_PX = 2576;
 /** Hard cap on pages rendered per attached-document PDF. */
 export const PDF_RENDER_MAX_PAGES = 40;
 
+/** Raised when headless Chrome cannot rasterize an attached plan-set PDF. */
+export class PdfRenderError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "PdfRenderError";
+  }
+}
+
+const CLOUD_RUN_CHROME_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--single-process",
+  "--no-zygote",
+  "--disable-gpu",
+] as const;
+
 export interface RenderedPdfPage {
   pageIndex: number;
   png: Buffer;
@@ -56,10 +73,19 @@ export async function renderPdfPagesToPng(
   const pdfPath = join(workDir, `${randomUUID()}.pdf`);
   await writeFile(pdfPath, pdfBytes);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      executablePath: puppeteer.executablePath(),
+      args: [...CLOUD_RUN_CHROME_ARGS],
+    });
+  } catch (err) {
+    throw new PdfRenderError(
+      "plan-set vision unavailable: PDF render failed (Chrome launch)",
+      { cause: err },
+    );
+  }
 
   const viewportW = targetLongEdge;
   const viewportH = Math.round(targetLongEdge * 0.77);
@@ -91,6 +117,11 @@ export async function renderPdfPagesToPng(
     }
 
     return pages;
+  } catch (err) {
+    throw new PdfRenderError(
+      "plan-set vision unavailable: PDF render failed",
+      { cause: err },
+    );
   } finally {
     await browser.close();
     await rm(workDir, { recursive: true, force: true });
