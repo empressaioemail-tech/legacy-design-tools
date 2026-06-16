@@ -15,15 +15,22 @@ import type {
   BriefingSourceInput,
   GenerateBriefingResult,
 } from "@workspace/briefing-engine";
+import type { EngineHonesty } from "@workspace/engine-core";
 import {
   buildSpineGateFrontContext,
   buildSpineGateFrontContextFromTenant,
   postEngineSpine,
 } from "./engineSpineClient";
+import { unwrapSpineResponse } from "./engineSpineEnvelope";
 import {
   rehydrateSpineBriefingResult,
   rehydrateSpineFindingsResult,
 } from "./engineSpineDeserialize";
+
+export type SpineRoutedFindingsResult<T> = {
+  result: T;
+  honesty: EngineHonesty;
+};
 
 type BriefingEngineOptions = { mode?: string };
 type FindingEngineOptions = GenerateFindingsOptions;
@@ -56,19 +63,24 @@ export async function routeGenerateFindings(
   options: FindingEngineOptions,
   ctx: SpineRoutingContext,
   req: Request | null = null,
-): Promise<GenerateFindingsResult> {
+): Promise<SpineRoutedFindingsResult<GenerateFindingsResult>> {
   const gateFront = resolveGateFront(req, ctx, "plan-review");
 
-  const payload = await postEngineSpine<{
-    result: GenerateFindingsResult;
-    mode: string;
-  }>({
+  const raw = await postEngineSpine<unknown>({
     path: "/v1/findings/generate",
     body: { input, mode: options.mode },
     gateFront,
   });
 
-  return rehydrateSpineFindingsResult(payload.result);
+  const { payload, honesty } = unwrapSpineResponse<{
+    result: GenerateFindingsResult;
+    mode: string;
+  }>(raw, { legacyProducer: options.mode });
+
+  return {
+    result: rehydrateSpineFindingsResult(payload.result),
+    honesty,
+  };
 }
 
 export async function routeGenerateOrchestratedFindings(
@@ -76,19 +88,24 @@ export async function routeGenerateOrchestratedFindings(
   options: FindingEngineOptions,
   ctx: SpineRoutingContext,
   req: Request | null = null,
-): Promise<GenerateOrchestratedFindingsResult> {
+): Promise<SpineRoutedFindingsResult<GenerateOrchestratedFindingsResult>> {
   const gateFront = resolveGateFront(req, ctx, "plan-review");
 
-  const payload = await postEngineSpine<{
-    result: GenerateOrchestratedFindingsResult;
-    mode: string;
-  }>({
+  const raw = await postEngineSpine<unknown>({
     path: "/v1/findings/generate-orchestrated",
     body: { input, mode: options.mode },
     gateFront,
   });
 
-  return rehydrateSpineFindingsResult(payload.result);
+  const { payload, honesty } = unwrapSpineResponse<{
+    result: GenerateOrchestratedFindingsResult;
+    mode: string;
+  }>(raw, { legacyProducer: options.mode });
+
+  return {
+    result: rehydrateSpineFindingsResult(payload.result),
+    honesty,
+  };
 }
 
 export async function routeGenerateBriefing(
@@ -101,7 +118,7 @@ export async function routeGenerateBriefing(
   options: BriefingEngineOptions,
   req: Request | null = null,
   subjectId?: string,
-): Promise<GenerateBriefingResult> {
+): Promise<SpineRoutedFindingsResult<GenerateBriefingResult>> {
   const gateFront = req
     ? buildSpineGateFrontContext(req, {
         packageId: "briefing",
@@ -113,10 +130,7 @@ export async function routeGenerateBriefing(
         subjectId,
       });
 
-  const payload = await postEngineSpine<{
-    result: GenerateBriefingResult;
-    mode: string;
-  }>({
+  const raw = await postEngineSpine<unknown>({
     path: "/v1/briefing/generate",
     body: {
       input: {
@@ -129,5 +143,13 @@ export async function routeGenerateBriefing(
     gateFront,
   });
 
-  return rehydrateSpineBriefingResult(payload.result);
+  const { payload, honesty } = unwrapSpineResponse<{
+    result: GenerateBriefingResult;
+    mode: string;
+  }>(raw, { legacyProducer: options?.mode });
+
+  return {
+    result: rehydrateSpineBriefingResult(payload.result),
+    honesty,
+  };
 }

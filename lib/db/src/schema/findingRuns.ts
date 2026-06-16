@@ -6,6 +6,7 @@ import {
   integer,
   index,
   uniqueIndex,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { submissions } from "./submissions";
@@ -101,6 +102,12 @@ export const findingRuns = pgTable(
      * other tokens or its elementRef anchor it. Null while pending.
      */
     discardedFindingCount: integer("discarded_finding_count"),
+    /**
+     * Engine-api honesty envelope persisted at terminal transition —
+     * confidence kind, data vintage, coverage degradation, source.
+     * Null while pending or on legacy rows predating migration 0040.
+     */
+    engineHonesty: jsonb("engine_honesty"),
   },
   (t) => ({
     /**

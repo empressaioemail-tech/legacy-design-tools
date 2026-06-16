@@ -132,6 +132,11 @@ import {
   buildProvenanceFromFindingRow,
   type ProvenanceEnvelope,
 } from "../lib/provenanceEnvelope";
+import {
+  engineHonestyForWire,
+  wireEngineHonesty,
+  type EngineHonesty,
+} from "../lib/engineHonestyWire";
 
 const router: IRouter = Router();
 
@@ -272,6 +277,8 @@ interface FindingWire {
   discipline: string | null;
   /** Uniform provenance envelope (moat #3); calibration grade omitted (rail-quiet). */
   provenance: ProvenanceEnvelope;
+  /** Engine-api honesty — confidence kind, data vintage, coverage, source. */
+  engineHonesty: EngineHonesty | null;
 }
 
 function actorFromRequest(req: Request): FindingActorWire | null {
@@ -304,6 +311,7 @@ async function toWire(
    * to null and the FE renders the unconfirmed badge variant.
    */
   acceptedBy: FindingActorWire | null = null,
+  engineHonesty: EngineHonesty | null = null,
 ): Promise<FindingWire> {
   const citations = Array.isArray(row.citations)
     ? (row.citations as FindingCitation[])
@@ -341,6 +349,7 @@ async function toWire(
     acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
     discipline: row.discipline ?? null,
     provenance: await buildProvenanceFromFindingRow(row),
+    engineHonesty: engineHonesty ? engineHonestyForWire(engineHonesty) : null,
   };
 }
 
@@ -840,6 +849,7 @@ async function finalizeRun(
     invalidCitationCount: number | null;
     invalidCitations: string[] | null;
     discardedFindingCount: number | null;
+    engineHonesty?: EngineHonesty | null;
   },
   reqLog: typeof logger,
 ): Promise<void> {
@@ -852,6 +862,9 @@ async function finalizeRun(
         invalidCitationCount: patch.invalidCitationCount,
         invalidCitations: patch.invalidCitations,
         discardedFindingCount: patch.discardedFindingCount,
+        ...(patch.engineHonesty !== undefined
+          ? { engineHonesty: patch.engineHonesty }
+          : {}),
         completedAt: new Date(),
       })
       .where(eq(findingRuns.id, runId))
@@ -958,6 +971,7 @@ async function runFindingGeneration(args: {
     };
 
     let result: GenerateFindingsResult;
+    let runEngineHonesty: EngineHonesty | null = null;
     if (orchestrated) {
       let pieceCandidates = await classifyAndPersistPlanSetPieces(
         submissionId,
@@ -1026,11 +1040,13 @@ async function runFindingGeneration(args: {
 
       const spineCtx = { jurisdictionTenant };
       if (pieceCandidates.length >= 2) {
-        const orchestratedResult = await routeGenerateOrchestratedFindings(
+        const orchestratedRouted = await routeGenerateOrchestratedFindings(
           { baseInput: visionBaseInput, pieceCandidates },
           engineOptions,
           spineCtx,
         );
+        const orchestratedResult = orchestratedRouted.result;
+        runEngineHonesty = orchestratedRouted.honesty;
         reqLog.info(
           {
             submissionId,
@@ -1047,18 +1063,22 @@ async function runFindingGeneration(args: {
           { submissionId, pieceCount: pieceCandidates.length },
           "finding generation: orchestrated flag set but <2 pieces — legacy single-pass",
         );
-        result = await routeGenerateFindings(
+        const singleRouted = await routeGenerateFindings(
           baseInput,
           engineOptions,
           spineCtx,
         );
+        result = singleRouted.result;
+        runEngineHonesty = singleRouted.honesty;
       }
     } else {
-      result = await routeGenerateFindings(
+      const singleRouted = await routeGenerateFindings(
         baseInput,
         engineOptions,
         { jurisdictionTenant },
       );
+      result = singleRouted.result;
+      runEngineHonesty = singleRouted.honesty;
     }
 
     // Insert findings, then emit events. Atomicity within the run is
@@ -1118,6 +1138,7 @@ async function runFindingGeneration(args: {
         invalidCitationCount: result.invalidCitations.length,
         invalidCitations: [...result.invalidCitations],
         discardedFindingCount: result.discardedFindings.length,
+        engineHonesty: runEngineHonesty,
       },
       reqLog,
     );
@@ -1334,6 +1355,7 @@ router.get(
         invalidCitationCount: run.invalidCitationCount,
         invalidCitations: run.invalidCitations,
         discardedFindingCount: run.discardedFindingCount,
+        engineHonesty: wireEngineHonesty(run.engineHonesty),
       });
     } catch (err) {
       logger.error(
@@ -1414,6 +1436,28 @@ router.get(
         }
       }
 
+      const runHonestyById = new Map<string, EngineHonesty>();
+      const runIds = Array.from(
+        new Set(
+          rows
+            .map((r) => r.findingRunId)
+            .filter((v): v is string => !!v),
+        ),
+      );
+      if (runIds.length > 0) {
+        const runRows = await db
+          .select({
+            id: findingRuns.id,
+            engineHonesty: findingRuns.engineHonesty,
+          })
+          .from(findingRuns)
+          .where(inArray(findingRuns.id, runIds));
+        for (const runRow of runRows) {
+          const honesty = wireEngineHonesty(runRow.engineHonesty);
+          if (honesty) runHonestyById.set(runRow.id, honesty);
+        }
+      }
+
       const wire = await Promise.all(
         rows.map((r) =>
           toWire(
@@ -1425,6 +1469,9 @@ router.get(
                   id: r.acceptedByReviewerId,
                   displayName: null,
                 }
+              : null,
+            r.findingRunId
+              ? runHonestyById.get(r.findingRunId) ?? null
               : null,
           ),
         ),
@@ -1603,6 +1650,7 @@ router.get(
         invalidCitationCount: r.invalidCitationCount,
         invalidCitations: r.invalidCitations,
         discardedFindingCount: r.discardedFindingCount,
+        engineHonesty: wireEngineHonesty(r.engineHonesty),
       }));
       res.json({ runs });
     } catch (err) {

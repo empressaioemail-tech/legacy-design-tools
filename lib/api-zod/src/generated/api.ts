@@ -5884,6 +5884,9 @@ export const ListSubmissionFindingsParams = zod.object({
 export const listSubmissionFindingsResponseFindingsItemConfidenceMin = 0;
 export const listSubmissionFindingsResponseFindingsItemConfidenceMax = 1;
 
+export const listSubmissionFindingsResponseFindingsItemEngineHonestyOneConfidenceValueMin = 0;
+export const listSubmissionFindingsResponseFindingsItemEngineHonestyOneConfidenceValueMax = 1;
+
 export const ListSubmissionFindingsResponse = zod
   .object({
     findings: zod.array(
@@ -6032,6 +6035,43 @@ export const ListSubmissionFindingsResponse = zod
             .describe(
               "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
             ),
+          engineHonesty: zod
+            .object({
+              confidence: zod.object({
+                value: zod
+                  .number()
+                  .min(
+                    listSubmissionFindingsResponseFindingsItemEngineHonestyOneConfidenceValueMin,
+                  )
+                  .max(
+                    listSubmissionFindingsResponseFindingsItemEngineHonestyOneConfidenceValueMax,
+                  ),
+                kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+              }),
+              dataVintage: zod.coerce
+                .date()
+                .nullable()
+                .describe("Acquisition date for underlying data, when known."),
+              coverage: zod.object({
+                degraded: zod.boolean(),
+                reason: zod.string().optional(),
+              }),
+              source: zod
+                .object({
+                  adapter: zod.string(),
+                  citationIds: zod.array(zod.string()).optional(),
+                })
+                .describe(
+                  "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+                ),
+            })
+            .describe(
+              "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+            )
+            .nullish()
+            .describe(
+              "Engine-api honesty envelope for this finding's generation\nrun — confidence kind, data vintage, coverage degradation,\nand source. Null on reviewer-authored rows and legacy runs.\n",
+            ),
         })
         .describe(
           "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
@@ -6105,6 +6145,9 @@ export const GetSubmissionFindingsGenerationStatusParams = zod.object({
   submissionId: zod.coerce.string(),
 });
 
+export const getSubmissionFindingsGenerationStatusResponseEngineHonestyOneConfidenceValueMin = 0;
+export const getSubmissionFindingsGenerationStatusResponseEngineHonestyOneConfidenceValueMax = 1;
+
 export const GetSubmissionFindingsGenerationStatusResponse = zod
   .object({
     generationId: zod.string().nullable(),
@@ -6120,6 +6163,40 @@ export const GetSubmissionFindingsGenerationStatusResponse = zod
       .describe(
         "Number of findings the engine produced that the discard\nrule (no surviving citations + no elementRef OR text too\nshort) dropped entirely. Distinct dimension from\n`invalidCitationCount` — see findingRuns.ts column docs.\nNull while pending.\n",
       ),
+    engineHonesty: zod
+      .object({
+        confidence: zod.object({
+          value: zod
+            .number()
+            .min(
+              getSubmissionFindingsGenerationStatusResponseEngineHonestyOneConfidenceValueMin,
+            )
+            .max(
+              getSubmissionFindingsGenerationStatusResponseEngineHonestyOneConfidenceValueMax,
+            ),
+          kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+        }),
+        dataVintage: zod.coerce
+          .date()
+          .nullable()
+          .describe("Acquisition date for underlying data, when known."),
+        coverage: zod.object({
+          degraded: zod.boolean(),
+          reason: zod.string().optional(),
+        }),
+        source: zod
+          .object({
+            adapter: zod.string(),
+            citationIds: zod.array(zod.string()).optional(),
+          })
+          .describe(
+            "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+          ),
+      })
+      .describe(
+        "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+      )
+      .nullish(),
   })
   .describe(
     "Wire envelope for `GET \/submissions\/{id}\/findings\/status`.\nState is persisted in `finding_runs`; the endpoint reads the\nmost recent row by `submission_id` ordered by `started_at`\nDESC. Returns `idle` when no kickoff has ever run.\n",
@@ -6146,6 +6223,9 @@ export const ListSubmissionFindingsGenerationRunsParams = zod.object({
   submissionId: zod.coerce.string(),
 });
 
+export const listSubmissionFindingsGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMin = 0;
+export const listSubmissionFindingsGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMax = 1;
+
 export const ListSubmissionFindingsGenerationRunsResponse = zod
   .object({
     runs: zod.array(
@@ -6159,6 +6239,40 @@ export const ListSubmissionFindingsGenerationRunsResponse = zod
           invalidCitationCount: zod.number().nullable(),
           invalidCitations: zod.array(zod.string()).nullable(),
           discardedFindingCount: zod.number().nullable(),
+          engineHonesty: zod
+            .object({
+              confidence: zod.object({
+                value: zod
+                  .number()
+                  .min(
+                    listSubmissionFindingsGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMin,
+                  )
+                  .max(
+                    listSubmissionFindingsGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMax,
+                  ),
+                kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+              }),
+              dataVintage: zod.coerce
+                .date()
+                .nullable()
+                .describe("Acquisition date for underlying data, when known."),
+              coverage: zod.object({
+                degraded: zod.boolean(),
+                reason: zod.string().optional(),
+              }),
+              source: zod
+                .object({
+                  adapter: zod.string(),
+                  citationIds: zod.array(zod.string()).optional(),
+                })
+                .describe(
+                  "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+                ),
+            })
+            .describe(
+              "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+            )
+            .nullish(),
         })
         .describe(
           "One historical finding-generation attempt for a submission.\nSame shape as the status response minus the `idle` enum\nentry (idle = absence of a row, represented by omission).\n",
@@ -6399,6 +6513,9 @@ export const AcceptFindingParams = zod.object({
 export const acceptFindingResponseFindingConfidenceMin = 0;
 export const acceptFindingResponseFindingConfidenceMax = 1;
 
+export const acceptFindingResponseFindingEngineHonestyOneConfidenceValueMin = 0;
+export const acceptFindingResponseFindingEngineHonestyOneConfidenceValueMax = 1;
+
 export const AcceptFindingResponse = zod
   .object({
     finding: zod
@@ -6544,6 +6661,43 @@ export const AcceptFindingResponse = zod
           .describe(
             "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
           ),
+        engineHonesty: zod
+          .object({
+            confidence: zod.object({
+              value: zod
+                .number()
+                .min(
+                  acceptFindingResponseFindingEngineHonestyOneConfidenceValueMin,
+                )
+                .max(
+                  acceptFindingResponseFindingEngineHonestyOneConfidenceValueMax,
+                ),
+              kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+            }),
+            dataVintage: zod.coerce
+              .date()
+              .nullable()
+              .describe("Acquisition date for underlying data, when known."),
+            coverage: zod.object({
+              degraded: zod.boolean(),
+              reason: zod.string().optional(),
+            }),
+            source: zod
+              .object({
+                adapter: zod.string(),
+                citationIds: zod.array(zod.string()).optional(),
+              })
+              .describe(
+                "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+              ),
+          })
+          .describe(
+            "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+          )
+          .nullish()
+          .describe(
+            "Engine-api honesty envelope for this finding's generation\nrun — confidence kind, data vintage, coverage degradation,\nand source. Null on reviewer-authored rows and legacy runs.\n",
+          ),
       })
       .describe(
         "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
@@ -6573,6 +6727,9 @@ export const RejectFindingParams = zod.object({
 
 export const rejectFindingResponseFindingConfidenceMin = 0;
 export const rejectFindingResponseFindingConfidenceMax = 1;
+
+export const rejectFindingResponseFindingEngineHonestyOneConfidenceValueMin = 0;
+export const rejectFindingResponseFindingEngineHonestyOneConfidenceValueMax = 1;
 
 export const RejectFindingResponse = zod
   .object({
@@ -6719,6 +6876,43 @@ export const RejectFindingResponse = zod
           .describe(
             "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
           ),
+        engineHonesty: zod
+          .object({
+            confidence: zod.object({
+              value: zod
+                .number()
+                .min(
+                  rejectFindingResponseFindingEngineHonestyOneConfidenceValueMin,
+                )
+                .max(
+                  rejectFindingResponseFindingEngineHonestyOneConfidenceValueMax,
+                ),
+              kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+            }),
+            dataVintage: zod.coerce
+              .date()
+              .nullable()
+              .describe("Acquisition date for underlying data, when known."),
+            coverage: zod.object({
+              degraded: zod.boolean(),
+              reason: zod.string().optional(),
+            }),
+            source: zod
+              .object({
+                adapter: zod.string(),
+                citationIds: zod.array(zod.string()).optional(),
+              })
+              .describe(
+                "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+              ),
+          })
+          .describe(
+            "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+          )
+          .nullish()
+          .describe(
+            "Engine-api honesty envelope for this finding's generation\nrun — confidence kind, data vintage, coverage degradation,\nand source. Null on reviewer-authored rows and legacy runs.\n",
+          ),
       })
       .describe(
         "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
@@ -6808,6 +7002,9 @@ export const OverrideFindingBody = zod
 
 export const overrideFindingResponseFindingConfidenceMin = 0;
 export const overrideFindingResponseFindingConfidenceMax = 1;
+
+export const overrideFindingResponseFindingEngineHonestyOneConfidenceValueMin = 0;
+export const overrideFindingResponseFindingEngineHonestyOneConfidenceValueMax = 1;
 
 export const OverrideFindingResponse = zod
   .object({
@@ -6953,6 +7150,43 @@ export const OverrideFindingResponse = zod
           .nullable()
           .describe(
             "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
+          ),
+        engineHonesty: zod
+          .object({
+            confidence: zod.object({
+              value: zod
+                .number()
+                .min(
+                  overrideFindingResponseFindingEngineHonestyOneConfidenceValueMin,
+                )
+                .max(
+                  overrideFindingResponseFindingEngineHonestyOneConfidenceValueMax,
+                ),
+              kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+            }),
+            dataVintage: zod.coerce
+              .date()
+              .nullable()
+              .describe("Acquisition date for underlying data, when known."),
+            coverage: zod.object({
+              degraded: zod.boolean(),
+              reason: zod.string().optional(),
+            }),
+            source: zod
+              .object({
+                adapter: zod.string(),
+                citationIds: zod.array(zod.string()).optional(),
+              })
+              .describe(
+                "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+              ),
+          })
+          .describe(
+            "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+          )
+          .nullish()
+          .describe(
+            "Engine-api honesty envelope for this finding's generation\nrun — confidence kind, data vintage, coverage degradation,\nand source. Null on reviewer-authored rows and legacy runs.\n",
           ),
       })
       .describe(

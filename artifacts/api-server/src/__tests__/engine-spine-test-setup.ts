@@ -7,10 +7,24 @@
  */
 
 import { vi } from "vitest";
+import type { EngineHonesty } from "@workspace/engine-core";
 
 if (!process.env.ENGINE_API_URL?.trim()) {
   process.env.ENGINE_API_URL = "http://engine.test.invalid";
 }
+
+const offlineHonesty = (producer: string): EngineHonesty => ({
+  confidence: {
+    value: producer === "mock" ? 0 : 0.85,
+    kind: producer === "mock" ? "asserted" : "asserted",
+  },
+  dataVintage: null,
+  coverage: {
+    degraded: producer === "mock",
+    ...(producer === "mock" ? { reason: "mock_producer" } : {}),
+  },
+  source: { adapter: "local-engine-test" },
+});
 
 vi.mock("../lib/engineSpineRouting", async () => {
   const findingEngine =
@@ -22,17 +36,29 @@ vi.mock("../lib/engineSpineRouting", async () => {
       "@workspace/briefing-engine",
     );
   return {
-    routeGenerateFindings: findingEngine.generateFindings,
-    routeGenerateOrchestratedFindings: findingEngine.generateOrchestratedFindings,
-    routeGenerateBriefing: (
+    routeGenerateFindings: async (
+      input: Parameters<typeof findingEngine.generateFindings>[0],
+      options?: Parameters<typeof findingEngine.generateFindings>[1],
+    ) => ({
+      result: await findingEngine.generateFindings(input, options),
+      honesty: offlineHonesty(options?.mode ?? "mock"),
+    }),
+    routeGenerateOrchestratedFindings: async (
+      input: Parameters<typeof findingEngine.generateOrchestratedFindings>[0],
+      options?: Parameters<typeof findingEngine.generateOrchestratedFindings>[1],
+    ) => ({
+      result: await findingEngine.generateOrchestratedFindings(input, options),
+      honesty: offlineHonesty(options?.mode ?? "mock"),
+    }),
+    routeGenerateBriefing: async (
       args: {
         engagementId: string;
         sources: Parameters<typeof briefingEngine.generateBriefing>[0]["sources"];
         generatedBy: string;
       },
       options?: Parameters<typeof briefingEngine.generateBriefing>[1],
-    ) =>
-      briefingEngine.generateBriefing(
+    ) => ({
+      result: await briefingEngine.generateBriefing(
         {
           engagementId: args.engagementId,
           sources: args.sources,
@@ -40,6 +66,8 @@ vi.mock("../lib/engineSpineRouting", async () => {
         },
         options,
       ),
+      honesty: offlineHonesty(options?.mode ?? "mock"),
+    }),
   };
 });
 

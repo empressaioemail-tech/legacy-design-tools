@@ -73,6 +73,9 @@ const router: IRouter = Router();
 
 /** Upper bound on a single attached-document upload (client PDFs/photos). */
 const MAX_ATTACHED_DOCUMENT_BYTES = 25 * 1024 * 1024;
+/** Signed-URL path for large plan-set PDFs (bypasses Cloud Run body limit). */
+const MAX_PLAN_SET_SIGNED_UPLOAD_BYTES = 100 * 1024 * 1024;
+const objectStorageService = new ObjectStorageService();
 /** Cap on the extracted text persisted on the row (and fed to the agent). */
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 /** Hard cap on the operator-supplied note field. */
@@ -346,6 +349,244 @@ router.get(
 );
 
 /* -------------------------------------------------------------------------- */
+/*  POST .../attached-documents/request-upload-url — signed GCS upload (large) */
+/* -------------------------------------------------------------------------- */
+
+router.post(
+  "/engagements/:engagementId/attached-documents/request-upload-url",
+  async (req: Request, res: Response): Promise<void> => {
+    const engagementId =
+      typeof req.params.engagementId === "string"
+        ? req.params.engagementId
+        : "";
+    if (!UUID_RE.test(engagementId)) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const { name, size, contentType } = req.body ?? {};
+    if (typeof size === "number" && size > MAX_PLAN_SET_SIGNED_UPLOAD_BYTES) {
+      res.status(413).json({
+        error: `Upload too large: ${size} bytes exceeds the ${MAX_PLAN_SET_SIGNED_UPLOAD_BYTES}-byte cap.`,
+      });
+      return;
+    }
+    if (contentType !== "application/pdf") {
+      res.status(415).json({ error: "expected_application_pdf" });
+      return;
+    }
+    if (
+      typeof name !== "string" ||
+      !name.trim() ||
+      typeof size !== "number" ||
+      size <= 0
+    ) {
+      res.status(400).json({ error: "invalid_upload_metadata" });
+      return;
+    }
+    try {
+      const rows = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      if (rows.length === 0) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const objectPath =
+        objectStorageService.normalizeObjectEntityPath(uploadURL);
+      res.json({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType },
+      });
+    } catch (err) {
+      logger.error({ err, engagementId }, "attached-document presign failed");
+      res.status(500).json({ error: "presign_failed" });
+    }
+  },
+);
+
+/* -------------------------------------------------------------------------- */
+/*  POST .../attached-documents/complete-upload — register signed upload      */
+/* -------------------------------------------------------------------------- */
+
+router.post(
+  "/engagements/:engagementId/attached-documents/complete-upload",
+  async (req: Request, res: Response): Promise<void> => {
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const engagementId =
+      typeof req.params.engagementId === "string"
+        ? req.params.engagementId
+        : "";
+    if (!UUID_RE.test(engagementId)) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const {
+      objectPath,
+      name,
+      size,
+      contentType,
+      title,
+      documentType,
+      note,
+    } = req.body ?? {};
+    if (
+      typeof objectPath !== "string" ||
+      !objectPath.startsWith("/objects/") ||
+      typeof name !== "string" ||
+      typeof size !== "number" ||
+      size > MAX_PLAN_SET_SIGNED_UPLOAD_BYTES ||
+      contentType !== "application/pdf"
+    ) {
+      res.status(400).json({ error: "invalid_complete_upload_body" });
+      return;
+    }
+    const typeParse = parseUploadedDocumentType(
+      typeof documentType === "string" ? documentType : null,
+    );
+    if (!typeParse.ok) {
+      res.status(400).json({ error: typeParse.error });
+      return;
+    }
+    const resolvedTitle = resolveDocumentTitle(
+      typeof title === "string" ? title : null,
+      name,
+    );
+    let fileBytes: Buffer;
+    try {
+      const objectFile = await objectStorageService.getObjectEntityFile(
+        objectPath,
+      );
+      const response = await objectStorageService.downloadObject(objectFile);
+      if (!response.body) {
+        res.status(404).json({ error: "uploaded_object_missing" });
+        return;
+      }
+      const chunks: Uint8Array[] = [];
+      const reader = response.body.getReader();
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          total += value.length;
+          if (total > MAX_PLAN_SET_SIGNED_UPLOAD_BYTES) {
+            res.status(413).json({ error: "file_too_large" });
+            return;
+          }
+          chunks.push(value);
+        }
+      }
+      fileBytes = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    } catch (err) {
+      reqLog.error({ err, engagementId, objectPath }, "complete-upload fetch failed");
+      res.status(404).json({ error: "uploaded_object_missing" });
+      return;
+    }
+    const parts = {
+      fileBytes,
+      filename: name,
+      mimeType: "application/pdf",
+      title: typeof title === "string" ? title : null,
+      documentType: typeParse.value,
+      note: typeof note === "string" ? note.slice(0, MAX_DOCUMENT_NOTE_CHARS) : "",
+    };
+    await persistAttachedDocumentFromParts(req, res, engagementId, parts, objectPath);
+  },
+);
+
+async function persistAttachedDocumentFromParts(
+  req: Request,
+  res: Response,
+  engagementId: string,
+  parts: DocumentUploadParts,
+  originalBlobRef: string,
+): Promise<void> {
+  const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+  const resolvedTitle = resolveDocumentTitle(parts.title, parts.filename);
+  const documentType =
+    (parts.documentType as AttachedDocumentType | null) ?? "narrative";
+
+  let extractedText: string;
+  let lowTextExtraction = false;
+  try {
+    const built = await buildAttachedDocumentExtractedText({
+      mimeType: parts.mimeType,
+      note: parts.note,
+      fileBytes: parts.fileBytes,
+      maxChars: MAX_EXTRACTED_TEXT_CHARS,
+      extractPdfPlainText,
+    });
+    extractedText = built.extractedText;
+    lowTextExtraction = built.lowTextExtraction === true;
+  } catch (err) {
+    if ((err as Error).message === "pdf_too_large") {
+      res.status(413).json({ error: "pdf_too_large" });
+      return;
+    }
+    reqLog.error({ err, engagementId }, "attached-document: PDF extract failed");
+    res.status(500).json({ error: "pdf_extract_failed" });
+    return;
+  }
+
+  try {
+    const visionClient = await getVisionAnthropicClient();
+    const visionResult = await enrichExtractedTextWithVision({
+      docId: randomUUID(),
+      title: resolvedTitle,
+      mimeType: parts.mimeType,
+      fileBytes: parts.fileBytes,
+      baseExtractedText: extractedText,
+      lowTextExtraction,
+      visionClient,
+      log: (msg, meta) => reqLog.info(meta ?? {}, msg),
+    });
+    extractedText = visionResult.extractedText;
+  } catch (err) {
+    reqLog.warn({ err, engagementId }, "attached-document: vision read failed");
+  }
+
+  const actor = resolveEventActor(req);
+  try {
+    const [row] = await db
+      .insert(attachedDocuments)
+      .values({
+        engagementId,
+        title: resolvedTitle,
+        documentType,
+        extractedText,
+        originalBlobRef,
+        actorId: actor.id,
+      })
+      .returning();
+    if (!row) throw new Error("attached_documents insert returned no row");
+
+    const atom = toAttachedDocumentAtom(row, resolveTenantId(req));
+    await recordLSurfaceEvent(reqLog, {
+      entityType: "attached-document",
+      entityId: row.id,
+      eventType: "attached-document.attached",
+      actor,
+      payload: {
+        engagementId,
+        documentType,
+        title: resolvedTitle,
+        mimeType: parts.mimeType,
+        fileSizeBytes: parts.fileBytes.length,
+      },
+    });
+
+    res.status(201).json({ attachedDocument: atom });
+  } catch (err) {
+    reqLog.error({ err, engagementId }, "attached-document: db insert failed");
+    res.status(500).json({ error: "db_error" });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /*  POST /api/engagements/:engagementId/attached-documents  — operator upload  */
 /*  (QA-18 — engagement-scoped client PDF / photo / note upload)              */
 /* -------------------------------------------------------------------------- */
@@ -543,75 +784,13 @@ router.post(
       res.status(400).json({ error: typeParse.error });
       return;
     }
-    const documentType = typeParse.value;
-    const title = resolveDocumentTitle(parts.title, parts.filename);
-
-    // `extractedText` — what the in-app agent reads. Text/* uploads
-    // decode inline; PDFs run extractPdfPlainText (P1 grounding).
-    let extractedText: string;
-    let lowTextExtraction = false;
-    try {
-      const built = await buildAttachedDocumentExtractedText({
-        mimeType: parts.mimeType,
-        note: parts.note,
-        fileBytes: parts.fileBytes,
-        maxChars: MAX_EXTRACTED_TEXT_CHARS,
-        extractPdfPlainText,
-      });
-      extractedText = built.extractedText;
-      lowTextExtraction = built.lowTextExtraction === true;
-    } catch (err) {
-      if ((err as Error).message === "pdf_too_large") {
-        res.status(413).json({ error: "pdf_too_large" });
-        return;
-      }
-      reqLog.error(
-        { err, engagementId },
-        "attached-document upload: PDF text extraction failed",
-      );
-      res.status(500).json({ error: "pdf_extract_failed" });
-      return;
-    }
-    if (lowTextExtraction) {
-      reqLog.info(
-        { engagementId, title },
-        "attached-document upload: low_text_extraction — running P2 vision pass",
-      );
-    }
-
-    // P2 Opus vision read for images and low-text PDFs — reuses the
-    // finding-engine path so chat attachments carry interpreted content.
-    try {
-      const visionClient = await getVisionAnthropicClient();
-      const visionResult = await enrichExtractedTextWithVision({
-        docId: randomUUID(),
-        title,
-        mimeType: parts.mimeType,
-        fileBytes: parts.fileBytes,
-        baseExtractedText: extractedText,
-        lowTextExtraction,
-        visionClient,
-        log: (msg, meta) => reqLog.info(meta ?? {}, msg),
-      });
-      extractedText = visionResult.extractedText;
-      if (visionResult.visionApplied) {
-        reqLog.info(
-          { engagementId, title },
-          "attached-document upload: vision read applied",
-        );
-      }
-    } catch (err) {
-      reqLog.warn(
-        { err, engagementId, title },
-        "attached-document upload: vision read failed — storing text-only extraction",
-      );
-    }
+    parts.documentType = typeParse.value;
 
     // Persist the original blob first so a later DB failure still leaves
     // the bytes recoverable for triage.
     let originalBlobRef: string;
     try {
-      originalBlobRef = await new ObjectStorageService().uploadObjectEntityFromBuffer(
+      originalBlobRef = await objectStorageService.uploadObjectEntityFromBuffer(
         parts.fileBytes,
         parts.mimeType || "application/octet-stream",
       );
@@ -624,44 +803,13 @@ router.post(
       return;
     }
 
-    const actor = resolveEventActor(req);
-    try {
-      const [row] = await db
-        .insert(attachedDocuments)
-        .values({
-          engagementId,
-          title,
-          documentType,
-          extractedText,
-          originalBlobRef,
-          actorId: actor.id,
-        })
-        .returning();
-      if (!row) throw new Error("attached_documents insert returned no row");
-
-      const atom = toAttachedDocumentAtom(row, resolveTenantId(req));
-      await recordLSurfaceEvent(reqLog, {
-        entityType: "attached-document",
-        entityId: row.id,
-        eventType: "attached-document.attached",
-        actor,
-        payload: {
-          engagementId,
-          documentType,
-          title,
-          mimeType: parts.mimeType,
-          fileSizeBytes: parts.fileBytes.length,
-        },
-      });
-
-      res.status(201).json({ attachedDocument: atom });
-    } catch (err) {
-      reqLog.error(
-        { err, engagementId },
-        "attached-document upload: db insert failed",
-      );
-      res.status(500).json({ error: "db_error" });
-    }
+    await persistAttachedDocumentFromParts(
+      req,
+      res,
+      engagementId,
+      parts,
+      originalBlobRef,
+    );
   },
 );
 

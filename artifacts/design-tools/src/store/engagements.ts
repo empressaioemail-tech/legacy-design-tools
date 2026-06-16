@@ -254,8 +254,91 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
       },
     }));
     let lastError: string | null = null;
+    const SIGNED_PDF_THRESHOLD_BYTES = 4 * 1024 * 1024;
     for (const file of files) {
       try {
+        const useSignedPdf =
+          file.type === "application/pdf" ||
+          file.name.toLowerCase().endsWith(".pdf");
+        if (useSignedPdf && file.size > SIGNED_PDF_THRESHOLD_BYTES) {
+          const presignRes = await fetch(
+            `${API_BASE}/engagements/${engagementId}/attached-documents/request-upload-url`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: file.name,
+                size: file.size,
+                contentType: "application/pdf",
+              }),
+            },
+          );
+          if (!presignRes.ok) {
+            lastError = uploadErrorMessage(
+              (await presignRes.json().catch(() => ({})))?.error,
+              presignRes.status,
+            );
+            continue;
+          }
+          const presign = (await presignRes.json()) as {
+            uploadURL: string;
+            objectPath: string;
+          };
+          const putRes = await fetch(presign.uploadURL, {
+            method: "PUT",
+            body: file,
+            headers: { "Content-Type": "application/pdf" },
+          });
+          if (!putRes.ok) {
+            lastError = "Upload to storage failed — retry.";
+            continue;
+          }
+          const completeRes = await fetch(
+            `${API_BASE}/engagements/${engagementId}/attached-documents/complete-upload`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                objectPath: presign.objectPath,
+                name: file.name,
+                size: file.size,
+                contentType: "application/pdf",
+              }),
+            },
+          );
+          if (!completeRes.ok) {
+            lastError = uploadErrorMessage(
+              (await completeRes.json().catch(() => ({})))?.error,
+              completeRes.status,
+            );
+            continue;
+          }
+          const atom = (await completeRes.json())?.attachedDocument as
+            | Record<string, unknown>
+            | undefined;
+          if (atom) {
+            const summary: AttachedDocumentSummary = {
+              id: String(atom.entityId ?? ""),
+              title: String(atom.title ?? file.name),
+              documentType: String(atom.documentType ?? "narrative"),
+            };
+            set((state) => {
+              const existing =
+                state.attachedDocumentsByEngagement[engagementId] ?? [];
+              return {
+                attachedDocumentsByEngagement: {
+                  ...state.attachedDocumentsByEngagement,
+                  [engagementId]: [
+                    summary,
+                    ...existing.filter((d) => d.id !== summary.id),
+                  ],
+                },
+              };
+            });
+          }
+          continue;
+        }
+
         const form = new FormData();
         form.append("file", file);
         const res = await fetch(

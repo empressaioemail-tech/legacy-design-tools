@@ -105,6 +105,13 @@ beforeAll(() => {
 const mockedGeocodeAddress = vi.mocked(geocodeAddress);
 const mockedEnqueueWarmup = vi.mocked(enqueueWarmupForJurisdiction);
 
+const testSpineHonesty = {
+  confidence: { value: 0.85, kind: "asserted" as const },
+  dataVintage: null,
+  coverage: { degraded: false },
+  source: { adapter: "local-engine-test" },
+};
+
 beforeEach(() => {
   // Reset queued `mockResolvedValueOnce` returns so a test that does
   // NOT call geocode does not pick up a leftover from the prior test.
@@ -112,9 +119,30 @@ beforeEach(() => {
   mockedEnqueueWarmup.mockClear();
   routeGenerateFindingsMock.mockReset();
   routeGenerateOrchestratedFindingsMock.mockReset();
-  routeGenerateFindingsMock.mockImplementation(findingEngineActual.generateFindings);
+  routeGenerateFindingsMock.mockImplementation(
+    async (
+      input: Parameters<typeof findingEngineActual.generateFindings>[0],
+      options?: Parameters<typeof findingEngineActual.generateFindings>[1],
+    ) => ({
+      result: await findingEngineActual.generateFindings(input, options),
+      honesty: testSpineHonesty,
+    }),
+  );
   routeGenerateOrchestratedFindingsMock.mockImplementation(
-    findingEngineActual.generateOrchestratedFindings,
+    async (
+      input: Parameters<
+        typeof findingEngineActual.generateOrchestratedFindings
+      >[0],
+      options?: Parameters<
+        typeof findingEngineActual.generateOrchestratedFindings
+      >[1],
+    ) => ({
+      result: await findingEngineActual.generateOrchestratedFindings(
+        input,
+        options,
+      ),
+      honesty: testSpineHonesty,
+    }),
   );
 });
 

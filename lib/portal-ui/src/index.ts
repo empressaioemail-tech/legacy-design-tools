@@ -226,6 +226,8 @@ export type { ParcelZoningCardProps } from "./components/ParcelZoningCard";
 // `Model confidence NN%` tooltip copy.
 export { LowConfidencePill } from "./components/LowConfidencePill";
 export type { LowConfidencePillProps } from "./components/LowConfidencePill";
+export { EngineHonestyChrome } from "./components/EngineHonestyChrome";
+export type { EngineHonesty } from "./components/EngineHonestyChrome";
 
 // Architect-side AIR-1 findings surfaces (Task #421 / V1-1 / V1-7).
 export {

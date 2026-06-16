@@ -6,6 +6,7 @@ import {
 } from "@workspace/api-client-react";
 import { CodeAtomPill, splitOnCodeAtomTokens } from "./CodeAtomPill";
 import { isFindingAddressed, isFindingReviewerPromoted } from "./FindingsList";
+import { EngineHonestyChrome } from "./EngineHonestyChrome";
 
 const SEVERITY_LABEL: Record<FindingSeverity, string> = {
   blocker: "Blocker",
@@ -200,6 +201,17 @@ export function FindingDetailPanel({
       </div>
 
       <div className="p-4 flex flex-col gap-4 flex-1 overflow-y-auto sc-scroll">
+        {"engineHonesty" in finding && finding.engineHonesty ? (
+          <EngineHonestyChrome
+            honesty={
+              finding.engineHonesty as Parameters<
+                typeof EngineHonestyChrome
+              >[0]["honesty"]
+            }
+            testIdPrefix={`${testIdPrefix}-honesty`}
+          />
+        ) : null}
+
         <div
           className="sc-body"
           data-testid={`${testIdPrefix}-body`}
