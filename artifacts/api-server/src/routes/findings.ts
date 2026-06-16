@@ -134,9 +134,11 @@ import {
 } from "../lib/provenanceEnvelope";
 import {
   engineHonestyForWire,
+  mergePlanSetVisionDegradation,
   wireEngineHonesty,
   type EngineHonesty,
 } from "../lib/engineHonestyWire";
+import { PdfRenderError } from "../lib/pdfPageRenderer";
 
 const router: IRouter = Router();
 
@@ -972,6 +974,7 @@ async function runFindingGeneration(args: {
 
     let result: GenerateFindingsResult;
     let runEngineHonesty: EngineHonesty | null = null;
+    let planSetVisionDegradedReason: string | null = null;
     if (orchestrated) {
       let pieceCandidates = await classifyAndPersistPlanSetPieces(
         submissionId,
@@ -1000,36 +1003,48 @@ async function runFindingGeneration(args: {
       const engagementId = subEngRows[0]?.engagementId;
       let attachedSheetImages: GenerateFindingsInput["attachedSheetImages"];
       if (engagementId && visionClient) {
-        const imageMap = await gatherPlanSetVisionImages(engagementId, (msg, meta) =>
-          reqLog.info(meta ?? {}, msg),
-        );
-        if (imageMap.allImages.length > 0) {
-          attachedSheetImages = planSetPieceIds?.length
-            ? imageMap.allImages.filter(
-                (img) =>
-                  planSetPieceIds.includes(img.pieceId) ||
-                  planSetPieceIds.some((id) =>
-                    img.pieceId.startsWith(`${id}:page`),
-                  ),
-              )
-            : imageMap.allImages;
-          pieceCandidates = expandCandidatesWithPdfPages(
-            pieceCandidates,
-            imageMap,
+        try {
+          const imageMap = await gatherPlanSetVisionImages(
+            engagementId,
+            (msg, meta) => reqLog.info(meta ?? {}, msg),
           );
-          if (planSetPieceIds?.length) {
-            pieceCandidates = filterPlanSetPieceCandidates(
+          if (imageMap.allImages.length > 0) {
+            attachedSheetImages = planSetPieceIds?.length
+              ? imageMap.allImages.filter(
+                  (img) =>
+                    planSetPieceIds.includes(img.pieceId) ||
+                    planSetPieceIds.some((id) =>
+                      img.pieceId.startsWith(`${id}:page`),
+                    ),
+                )
+              : imageMap.allImages;
+            pieceCandidates = expandCandidatesWithPdfPages(
               pieceCandidates,
-              planSetPieceIds,
+              imageMap,
+            );
+            if (planSetPieceIds?.length) {
+              pieceCandidates = filterPlanSetPieceCandidates(
+                pieceCandidates,
+                planSetPieceIds,
+              );
+            }
+            reqLog.info(
+              {
+                submissionId,
+                imageCount: imageMap.allImages.length,
+                expandedPieceCount: pieceCandidates.length,
+              },
+              "finding generation: plan-set vision images attached",
             );
           }
-          reqLog.info(
-            {
-              submissionId,
-              imageCount: imageMap.allImages.length,
-              expandedPieceCount: pieceCandidates.length,
-            },
-            "finding generation: plan-set vision images attached",
+        } catch (err) {
+          planSetVisionDegradedReason =
+            err instanceof PdfRenderError
+              ? err.message
+              : "plan-set vision unavailable: PDF render failed";
+          reqLog.warn(
+            { err, submissionId, generationId },
+            planSetVisionDegradedReason,
           );
         }
       }
@@ -1079,6 +1094,13 @@ async function runFindingGeneration(args: {
       );
       result = singleRouted.result;
       runEngineHonesty = singleRouted.honesty;
+    }
+
+    if (planSetVisionDegradedReason) {
+      runEngineHonesty = mergePlanSetVisionDegradation(
+        runEngineHonesty,
+        planSetVisionDegradedReason,
+      );
     }
 
     // Insert findings, then emit events. Atomicity within the run is
@@ -1154,8 +1176,23 @@ async function runFindingGeneration(args: {
       "finding generation: completed",
     );
   } catch (err) {
-    const { code, message } = formatEngineSpineFailure(err);
-    const error = `finding engine failed (${code}): ${message}`;
+    const isPdfVision =
+      err instanceof PdfRenderError ||
+      (err instanceof Error &&
+        (err.message.includes("PDF render failed") ||
+          err.message.includes("WS endpoint URL")));
+    const { code, message } = isPdfVision
+      ? {
+          code: "plan_set_vision_failed" as const,
+          message:
+            err instanceof Error
+              ? err.message
+              : "plan-set vision unavailable: PDF render failed",
+        }
+      : formatEngineSpineFailure(err);
+    const error = isPdfVision
+      ? `finding generation degraded (${code}): ${message}`
+      : `finding engine failed (${code}): ${message}`;
     await finalizeRun(
       generationId,
       {
