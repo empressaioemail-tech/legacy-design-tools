@@ -187,7 +187,8 @@ CREATE TABLE @@SCHEMA@@.briefing_generation_jobs (
     completed_at timestamp with time zone,
     error text,
     invalid_citation_count integer,
-    invalid_citations text[]
+    invalid_citations text[],
+    engine_honesty jsonb
 );
 
 
@@ -692,7 +693,8 @@ CREATE TABLE @@SCHEMA@@.finding_runs (
     error text,
     invalid_citation_count integer,
     invalid_citations text[],
-    discarded_finding_count integer
+    discarded_finding_count integer,
+    engine_honesty jsonb
 );
 
 

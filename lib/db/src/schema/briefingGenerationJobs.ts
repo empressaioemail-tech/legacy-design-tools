@@ -6,6 +6,7 @@ import {
   integer,
   index,
   uniqueIndex,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { engagements } from "./engagements";
@@ -92,6 +93,8 @@ export const briefingGenerationJobs = pgTable(
      * set. Null while pending and on the failed branch.
      */
     invalidCitations: text("invalid_citations").array(),
+    /** Engine-api honesty envelope — see findingRuns.engineHonesty. */
+    engineHonesty: jsonb("engine_honesty"),
   },
   (t) => ({
     /**
