@@ -37,3 +37,17 @@ export {
 } from "./overlay";
 export { computeAttributionCoverage } from "./attribution";
 export { FINDING_OUTCOME_RECORDED_EVENT_TYPE } from "./findingOutcomeEventType";
+export type {
+  EngineConfidenceKind,
+  EngineEnvelopeConfidence,
+  EngineEnvelopeCoverage,
+  EngineEnvelopeSource,
+  EngineHonesty,
+  EngineEnvelope,
+} from "./envelope";
+export {
+  engineHonestyFromEnvelope,
+  isEngineEnvelopeShape,
+  unwrapEngineEnvelope,
+  wrapEngineEnvelope,
+} from "./envelope";
