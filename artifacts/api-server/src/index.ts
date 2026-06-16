@@ -9,6 +9,7 @@ import { validateEngineSpineEnvAtBoot } from "./lib/engineSpineClient";
 import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
 import { validateBriefingEngineEnvAtBoot } from "./lib/briefingLlmClient";
 import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
+import { validateClassificationEnvAtBoot } from "@workspace/submission-classifier";
 import { reconcileOrphanedAutopilotRuns } from "./lib/qa/autopilot";
 
 const rawPort = process.env["PORT"];
@@ -107,6 +108,16 @@ try {
   logger.error(
     { err },
     "sheet-content env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
+
+try {
+  validateClassificationEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "classification env validation failed — refusing to start",
   );
   process.exit(1);
 }

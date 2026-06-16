@@ -82,6 +82,10 @@ import {
   buildProvenanceFromBriefing,
   type ProvenanceEnvelope,
 } from "../lib/provenanceEnvelope";
+import {
+  wireEngineHonesty,
+  type EngineHonesty,
+} from "../lib/engineHonestyWire";
 import { getHistoryService } from "../atoms/registry";
 import {
   BRIEFING_SOURCE_EVENT_TYPES,
@@ -1603,6 +1607,7 @@ async function finalizeJob(
      * legacy rows written before Task #176 landed.
      */
     invalidCitations: string[] | null;
+    engineHonesty?: EngineHonesty | null;
   },
   reqLog: typeof logger,
 ): Promise<void> {
@@ -1614,6 +1619,9 @@ async function finalizeJob(
         error: patch.error,
         invalidCitationCount: patch.invalidCitationCount,
         invalidCitations: patch.invalidCitations,
+        ...(patch.engineHonesty !== undefined
+          ? { engineHonesty: patch.engineHonesty }
+          : {}),
         completedAt: new Date(),
       })
       .where(eq(briefingGenerationJobs.id, generationId))
@@ -1673,7 +1681,7 @@ async function runBriefingGeneration(args: {
       },
       "briefing generation: engine call starting",
     );
-    const result = await routeGenerateBriefing(
+    const routed = await routeGenerateBriefing(
       {
         engagementId,
         sources: sources.map(toEngineSourceInput),
@@ -1688,6 +1696,8 @@ async function runBriefingGeneration(args: {
           : {}),
       },
     );
+    const result = routed.result;
+    const briefingEngineHonesty = routed.honesty;
     const drainageRow = await loadActiveSiteDrainageRow(engagementId);
     const drainagePs = drainageRow?.propertySet;
     const mergedResult: GenerateBriefingResult = {
@@ -1753,6 +1763,7 @@ async function runBriefingGeneration(args: {
         // (Task #176). The engine returns `ReadonlyArray<string>`;
         // copy into a mutable array for the DB writer's shape.
         invalidCitations: [...result.invalidCitations],
+        engineHonesty: briefingEngineHonesty,
       },
       reqLog,
     );
@@ -2049,6 +2060,7 @@ router.get(
         error: job.error,
         invalidCitationCount: job.invalidCitationCount,
         invalidCitations: job.invalidCitations,
+        engineHonesty: wireEngineHonesty(job.engineHonesty),
       });
     } catch (err) {
       logger.error(
