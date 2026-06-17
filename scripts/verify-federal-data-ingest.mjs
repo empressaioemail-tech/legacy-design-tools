@@ -3,8 +3,8 @@
  * Run live federal data ingests and verify OZ + MUD/PID resolve real records.
  *
  * Usage:
- *   node scripts/verify-federal-data-ingest.mjs
- *   BROKERAGE_FEDERAL_DATA_DIR=./var/brokerage-federal-data node scripts/verify-federal-data-ingest.mjs
+ *   pnpm --filter @workspace/scripts run ingest:brokerage-federal-data
+ *   BROKERAGE_FEDERAL_DATA_DIR=./var/brokerage-federal-data pnpm --filter @workspace/scripts run ingest:brokerage-federal-data
  */
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

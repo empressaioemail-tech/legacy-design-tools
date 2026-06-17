@@ -40,10 +40,13 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
-ENV BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data
+# Ship bundled CI fixtures — live HUD/Comptroller ingests run as a separate
+# job and publish to GCS (see scripts/publish-brokerage-federal-data-gcs.mjs).
 RUN mkdir -p /app/var/brokerage-federal-data/opportunity-zones \
- && pnpm exec tsx scripts/ingest-opportunity-zones.mjs \
- && pnpm exec tsx scripts/ingest-tx-special-districts.mjs
+ && cp artifacts/api-server/data/opportunity-zones/oz-1.0.geojson \
+      /app/var/brokerage-federal-data/opportunity-zones/ \
+ && cp artifacts/api-server/data/tx-special-districts.json \
+      /app/var/brokerage-federal-data/
 
 # pnpm v10 with --frozen-lockfile does NOT execute puppeteer's
 # pure-JS postinstall (install.mjs), so Chrome never auto-downloads.

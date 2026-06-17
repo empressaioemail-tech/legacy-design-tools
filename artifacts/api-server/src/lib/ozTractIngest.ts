@@ -1,8 +1,9 @@
 /**
  * CDFI/HUD Opportunity Zone tract ingest — live ArcGIS GeoJSON pull.
  *
- * Run via `node scripts/ingest-opportunity-zones.mjs` before deploy or
- * during Docker build. Writes to BROKERAGE_FEDERAL_DATA_DIR when set.
+ * Run via `pnpm --filter @workspace/scripts run ingest:brokerage-federal-data`
+ * (separate job — not during Docker build). Publish output with
+ * `publish:brokerage-federal-data-gcs`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
