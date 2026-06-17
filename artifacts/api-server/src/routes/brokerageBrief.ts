@@ -110,6 +110,7 @@ import { brokerageWalletRouter } from "./brokerageWalletRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
 import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
+import { brokerageMapDataRouter } from "./brokerageMapData";
 import {
   BROKERAGE_BRIEF_BILLABLE_HEADER,
   brokerageBriefMeteringMeta,
@@ -236,6 +237,7 @@ brokerageV1.use("/gtm", brokerageGtmRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
+brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);

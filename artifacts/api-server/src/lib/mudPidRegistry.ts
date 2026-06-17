@@ -35,10 +35,10 @@ export function loadTxSpecialDistrictRegistry(): TxSpecialDistrictRecord[] {
     cachedRegistry = [];
     return cachedRegistry;
   }
-  const raw = JSON.parse(readFileSync(path, "utf8")) as {
-    districts?: TxSpecialDistrictRecord[];
-  };
-  cachedRegistry = raw.districts ?? [];
+  const raw = JSON.parse(readFileSync(path, "utf8")) as
+    | { districts?: TxSpecialDistrictRecord[] }
+    | TxSpecialDistrictRecord[];
+  cachedRegistry = Array.isArray(raw) ? raw : (raw.districts ?? []);
   return cachedRegistry;
 }
 
