@@ -13,6 +13,9 @@ export function driversForCode(code: string, codeRef: string): WebCodeReviewTarg
   if (upper.includes("NEC") || upper.includes("NFPA")) {
     return ["nfpa", "upcodes"];
   }
+  if (upper.includes("IFC") || upper.includes("IPMC")) {
+    return ["icc", "upcodes"];
+  }
   return ["upcodes", "icc"];
 }
 
