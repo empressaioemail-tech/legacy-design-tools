@@ -60,21 +60,21 @@ const authHeaders = {
 
 const siteLayers = {
   placeKey: "coord:30.11000:-97.32000",
+  parcelClip: "1234567890",
   layers: [
     {
-      layerKind: "regrid-parcel",
-      adapterKey: "regrid:parcels",
+      layerKind: "cotality-parcel",
+      adapterKey: "cotality:parcels",
       tier: "federal",
       status: "ok",
-      provider: "Regrid",
-      summary: "APN TEST-001",
+      provider: "Cotality",
+      summary: "CLIP 1234567890 · APN T-1",
       snapshotDate: "2026-05-01T00:00:00.000Z",
       fromArchive: false,
       payload: {
+        clip: "1234567890",
         parcel: {
-          properties: {
-            fields: { ll_uuid: "place-test-uuid", parcelnumb: "T-1" },
-          },
+          properties: { parcelnumb: "T-1" },
         },
       },
     },
@@ -132,7 +132,7 @@ describe("place API", () => {
     expect(res.body.jurisdiction_key).toBe("bastrop_tx");
     expect(res.body.geocode.confidence).toBe("high");
     expect(res.body.workspaceDid).toMatch(/^did:hauska:property-workspace:/);
-    expect(res.body.ll_uuid).toBe("place-test-uuid");
+    expect(res.body.ll_uuid).toBe("1234567890");
   });
 
   it("POST /place/resolve returns Cedar Hill jurisdiction", async () => {
@@ -196,7 +196,7 @@ describe("place API", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.layers.map((l: { layerKind: string }) => l.layerKind)).toContain(
-      "regrid-parcel",
+      "cotality-parcel",
     );
     expect(res.body.layers[0].citation.source).toBeTruthy();
   });
