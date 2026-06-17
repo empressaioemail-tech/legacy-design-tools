@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Ingest CDFI/HUD Opportunity Zone tracts into versioned GeoJSON.
- * Usage: node scripts/ingest-opportunity-zones.mjs [--version oz-1.0]
+ * Usage: pnpm --filter @workspace/scripts exec tsx scripts/ingest-opportunity-zones.mjs [--version oz-1.0]
  */
 import { ingestOpportunityZonesFromHud } from "../artifacts/api-server/src/lib/ozTractIngest.ts";
 

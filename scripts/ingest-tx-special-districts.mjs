@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Ingest TX Comptroller SPDPID registry into tx-special-districts.json.
- * Usage: node scripts/ingest-tx-special-districts.mjs
+ * Usage: pnpm --filter @workspace/scripts exec tsx scripts/ingest-tx-special-districts.mjs
  */
 import { ingestTxSpecialDistrictsFromComptroller } from "../artifacts/api-server/src/lib/txSpecialDistrictIngest.ts";
 

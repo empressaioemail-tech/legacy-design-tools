@@ -11,6 +11,7 @@ import { validateBriefingEngineEnvAtBoot } from "./lib/briefingLlmClient";
 import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
 import { validateClassificationEnvAtBoot } from "@workspace/submission-classifier";
 import { reconcileOrphanedAutopilotRuns } from "./lib/qa/autopilot";
+import { ensureBrokerageFederalDataFromGcs } from "./lib/brokerageFederalDataBootstrap";
 
 const rawPort = process.env["PORT"];
 
@@ -173,6 +174,15 @@ async function bootAndListen(): Promise<void> {
     logger.error(
       { err },
       "autopilot: boot-time reconciliation failed — continuing",
+    );
+  }
+
+  try {
+    await ensureBrokerageFederalDataFromGcs(logger);
+  } catch (err) {
+    logger.warn(
+      { err },
+      "brokerage federal data: GCS bootstrap failed — using image fixtures",
     );
   }
 
