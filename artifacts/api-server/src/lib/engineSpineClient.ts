@@ -30,7 +30,8 @@ export type SpineEnginePackage =
   | "plan-review"
   | "briefing"
   | "site-context"
-  | "hydrology";
+  | "hydrology"
+  | "map-layers";
 
 export interface SpineGateFrontContext {
   product: "cortex";

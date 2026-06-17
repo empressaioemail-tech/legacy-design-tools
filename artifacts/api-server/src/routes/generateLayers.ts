@@ -69,6 +69,17 @@ import {
   ingestSiteTopography,
   type SiteTopographyIngestResult,
 } from "../lib/siteTopographyIngest";
+import { isEngineSpineConfigured } from "../lib/engineSpineClient";
+import {
+  MAP_LAYERS_DEDUPED_ADAPTER_KEYS,
+  defaultCatchmentBbox,
+  routeAssembleMapLayers,
+  type MapLayersAssemblePayload,
+} from "../lib/engineSpineMapLayers";
+import { resolveRequestJurisdictionTenant } from "../lib/gateFrontSeam";
+import {
+  mapLayersToAdapterOutcomes,
+} from "../lib/mapLayersGenerateLayers";
 
 /** Stable identifier for the catchment DEM ingest folded into generate-layers. */
 export const GENERATE_LAYERS_TOPOGRAPHY_ADAPTER_KEY = "usgs:3dep-dem";
@@ -655,14 +666,68 @@ router.post(
       );
     }
 
+    let mapLayersPayload: MapLayersAssemblePayload | null = null;
+    const useSpineMapLayers =
+      isEngineSpineConfigured() && adapterKeyScope === null && haveCoords;
+
+    if (useSpineMapLayers) {
+      try {
+        const { payload } = await routeAssembleMapLayers(
+          {
+            parcel: {
+              latitude: lat,
+              longitude: lng,
+              address: engRow.address ?? null,
+              parcelKey: engagementId,
+            },
+            jurisdiction,
+            forceRefresh,
+            bbox: defaultCatchmentBbox(lat, lng),
+          },
+          {
+            jurisdictionTenant: resolveRequestJurisdictionTenant(req),
+            subjectId: req.session?.requestor?.id,
+            accessTier: "platform-internal",
+          },
+          req,
+        );
+        mapLayersPayload = payload;
+        reqLog.info(
+          { engagementId, layerCount: payload.layers.length },
+          "generate-layers: map-layers assemble via engine spine",
+        );
+      } catch (err) {
+        reqLog.warn(
+          { err, engagementId },
+          "generate-layers: map-layers assemble failed — falling back to local adapter fan-out",
+        );
+      }
+    }
+
+    let adaptersToRun = scopedApplicable;
+    if (mapLayersPayload) {
+      adaptersToRun = scopedApplicable.filter(
+        (a) => !MAP_LAYERS_DEDUPED_ADAPTER_KEYS.has(a.adapterKey),
+      );
+    }
+
     let outcomes: AdapterRunOutcome[];
     try {
-      outcomes = await runAdapters({
-        adapters: scopedApplicable,
-        context: ctx,
-        cache,
-        forceRefresh,
-      });
+      outcomes =
+        adaptersToRun.length > 0
+          ? await runAdapters({
+              adapters: adaptersToRun,
+              context: ctx,
+              cache,
+              forceRefresh,
+            })
+          : [];
+      if (mapLayersPayload) {
+        outcomes = [
+          ...mapLayersToAdapterOutcomes(mapLayersPayload),
+          ...outcomes,
+        ];
+      }
     } catch (err) {
       // The runner contract is "never throws" — a thrown error here
       // is a programming bug rather than a runtime upstream failure.
@@ -830,7 +895,12 @@ router.post(
     // single-adapter scoped runs (?adapterKey=) and when the engagement
     // still has no geocode after self-heal.
     let topographyOutcome: GenerateLayersOutcomeWire | null = null;
-    if (haveCoords && adapterKeyScope === null) {
+    const spineCoversTopography = mapLayersPayload?.layers.some(
+      (l) =>
+        (l.layerKey === "dem" || l.layerKey === "topography") &&
+        l.status === "ok",
+    );
+    if (haveCoords && adapterKeyScope === null && !spineCoversTopography) {
       try {
         const topoResult = await ingestSiteTopography({
           engagementId,

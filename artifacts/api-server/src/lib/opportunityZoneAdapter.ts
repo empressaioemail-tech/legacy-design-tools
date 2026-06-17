@@ -36,10 +36,12 @@ let cachedTracts: OzTractCollection | null = null;
 
 function fixturePath(): string {
   const here = dirname(fileURLToPath(import.meta.url));
+  const envPath = process.env.OZ_TRACT_DATA_PATH?.trim();
   const candidates = [
+    envPath,
     join(here, "../../data/opportunity-zones", `${OZ_TRACT_LIST_VERSION}.geojson`),
     join(process.cwd(), "artifacts/api-server/data/opportunity-zones", `${OZ_TRACT_LIST_VERSION}.geojson`),
-  ];
+  ].filter((p): p is string => Boolean(p));
   const hit = candidates.find((p) => existsSync(p));
   if (!hit) {
     throw new AdapterRunError(
