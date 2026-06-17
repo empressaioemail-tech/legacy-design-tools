@@ -2,12 +2,15 @@
  * CDFI/HUD Opportunity Zone tract ingest — live ArcGIS GeoJSON pull.
  *
  * Run via `node scripts/ingest-opportunity-zones.mjs` before deploy or
- * on a schedule. Writes versioned GeoJSON consumed by opportunityZoneAdapter.
+ * during Docker build. Writes to BROKERAGE_FEDERAL_DATA_DIR when set.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import {
+  OZ_TRACT_LIST_VERSION,
+  resolveOzTractDataPath,
+} from "./brokerageFederalDataPaths";
 
 export const HUD_OZ_ARCGIS_QUERY =
   "https://services.arcgis.com/VTyQ9soqVukalItT/ArcGIS/rest/services/Opportunity_Zones/FeatureServer/13/query";
@@ -27,20 +30,11 @@ export interface OzIngestResult {
   fetchedAt: string;
 }
 
-function defaultOutputPath(version: string): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(
-    here,
-    "../../data/opportunity-zones",
-    `${version}.geojson`,
-  );
-}
-
 export async function ingestOpportunityZonesFromHud(
   options: OzIngestOptions = {},
 ): Promise<OzIngestResult> {
-  const version = options.version ?? process.env.OZ_TRACT_LIST_VERSION ?? "oz-1.0";
-  const outputPath = options.outputPath ?? defaultOutputPath(version);
+  const version = options.version ?? OZ_TRACT_LIST_VERSION;
+  const outputPath = options.outputPath ?? resolveOzTractDataPath(version);
   const fetchImpl = options.fetchImpl ?? fetch;
   const features: unknown[] = [];
   let offset = 0;

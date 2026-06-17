@@ -1,99 +1,137 @@
 /**
  * TX Comptroller Special Purpose District registry ingest.
  *
- * Pulls SPDPID entity records from data.texas.gov (Socrata SODA API)
+ * Pulls SPDPID entity records from the Comptroller open-data CSV bundle
+ * (https://assets.comptroller.texas.gov/open-data-files/spdpid-entity.csv)
  * and normalizes to the mudPidRegistry wire shape.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import { resolveTxSpecialDistrictsDataPath } from "./brokerageFederalDataPaths";
 import type { TxSpecialDistrictRecord } from "./mudPidRegistry";
 
-/** SPDPID entity dimension — data.texas.gov resource (SB625). */
-export const TX_SPDPID_ENTITIES_RESOURCE =
-  "https://data.texas.gov/resource/8y3e-9i7w.json";
+/** Official Comptroller SPDPID entity export (SB625). */
+export const TX_SPDPID_ENTITY_CSV_URL =
+  "https://assets.comptroller.texas.gov/open-data-files/spdpid-entity.csv";
 
 export interface TxSpecialDistrictIngestOptions {
   outputPath?: string;
   fetchImpl?: typeof fetch;
-  limit?: number;
+  csvUrl?: string;
 }
 
 export interface TxSpecialDistrictIngestResult {
   outputPath: string;
   districtCount: number;
   fetchedAt: string;
+  sourceRows: number;
 }
 
-function defaultOutputPath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, "../../data/tx-special-districts.json");
+/** Parse one CSV row respecting double-quoted fields. */
+export function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
 }
 
-function normalizeDistrictType(name: string): TxSpecialDistrictRecord["districtType"] {
-  const u = name.toUpperCase();
-  if (u.includes("MUD")) return "MUD";
-  if (u.includes("PID")) return "PID";
-  if (u.includes("PUD")) return "PUD";
+function normalizeDistrictType(
+  entityType: string,
+  name: string,
+): TxSpecialDistrictRecord["districtType"] {
+  const u = `${entityType} ${name}`.toUpperCase();
+  if (u.includes("MUD") || u.includes("MUNICIPAL UTILITY")) return "MUD";
+  if (u.includes("PID") || u.includes("PUBLIC IMPROVEMENT")) return "PID";
+  if (u.includes("PUD") || u.includes("PLANNED UNIT")) return "PUD";
   return "OTHER";
 }
 
 export async function ingestTxSpecialDistrictsFromComptroller(
   options: TxSpecialDistrictIngestOptions = {},
 ): Promise<TxSpecialDistrictIngestResult> {
-  const outputPath = options.outputPath ?? defaultOutputPath();
+  const outputPath = options.outputPath ?? resolveTxSpecialDistrictsDataPath();
   const fetchImpl = options.fetchImpl ?? fetch;
-  const limit = options.limit ?? 50_000;
-  const rows: TxSpecialDistrictRecord[] = [];
-  let offset = 0;
-  const pageSize = 1000;
+  const csvUrl = options.csvUrl ?? TX_SPDPID_ENTITY_CSV_URL;
 
-  for (;;) {
-    const url = new URL(TX_SPDPID_ENTITIES_RESOURCE);
-    url.searchParams.set("$limit", String(pageSize));
-    url.searchParams.set("$offset", String(offset));
-    url.searchParams.set(
-      "$select",
-      "spd_publ_id,entity_name,entity_type,entity_county,taxpayer_number",
+  const res = await fetchImpl(csvUrl, {
+    headers: { Accept: "text/csv" },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `TX Comptroller SPDPID ingest failed (${res.status}): ${await res.text()}`,
     );
-
-    const res = await fetchImpl(url.toString(), {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) {
-      throw new Error(
-        `TX Comptroller SPDPID ingest failed (${res.status}): ${await res.text()}`,
-      );
-    }
-    const batch = (await res.json()) as Array<Record<string, string>>;
-    if (!Array.isArray(batch) || batch.length === 0) break;
-
-    for (const row of batch) {
-      const name = String(row.entity_name ?? "").trim();
-      if (!name) continue;
-      rows.push({
-        districtId: String(row.spd_publ_id ?? name),
-        districtType: normalizeDistrictType(
-          String(row.entity_type ?? name),
-        ),
-        name,
-        county: row.entity_county ? String(row.entity_county) : null,
-        taxUnitCode: row.taxpayer_number
-          ? String(row.taxpayer_number)
-          : null,
-      });
-    }
-
-    offset += batch.length;
-    if (batch.length < pageSize || offset >= limit) break;
   }
 
+  const text = await res.text();
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) {
+    throw new Error("TX Comptroller SPDPID CSV was empty");
+  }
+
+  const header = parseCsvLine(lines[0]!);
+  const idx = (name: string) => header.indexOf(name);
+  const spdIdx = idx("spd_publ_id");
+  const nameIdx = idx("ent_dis_nm");
+  const typeIdx = idx("ent_ty_tx");
+  const yearIdx = idx("rpt_yr");
+  const tpIdx = idx("tp_id");
+  const cityIdx = idx("city_nm");
+
+  const latestBySpd = new Map<
+    string,
+    { year: number; row: TxSpecialDistrictRecord }
+  >();
+
+  for (const line of lines.slice(1)) {
+    const cols = parseCsvLine(line);
+    const spdId = cols[spdIdx] ?? "";
+    const name = String(cols[nameIdx] ?? "").trim();
+    if (!spdId || !name) continue;
+
+    const year = Number(cols[yearIdx] ?? 0);
+    const record: TxSpecialDistrictRecord = {
+      districtId: spdId,
+      districtType: normalizeDistrictType(
+        String(cols[typeIdx] ?? ""),
+        name,
+      ),
+      name,
+      county: cols[cityIdx] ? String(cols[cityIdx]) : null,
+      taxUnitCode: cols[tpIdx] ? String(cols[tpIdx]) : null,
+    };
+
+    const prev = latestBySpd.get(spdId);
+    if (!prev || year >= prev.year) {
+      latestBySpd.set(spdId, { year, row: record });
+    }
+  }
+
+  const districts = [...latestBySpd.values()].map((v) => v.row);
   const fetchedAt = new Date().toISOString();
   const payload = {
-    source: "data.texas.gov SPDPID (TX Comptroller SB625)",
+    source: TX_SPDPID_ENTITY_CSV_URL,
     fetchedAt,
-    districts: rows,
+    districts,
   };
 
   mkdirSync(dirname(outputPath), { recursive: true });
@@ -101,7 +139,8 @@ export async function ingestTxSpecialDistrictsFromComptroller(
 
   return {
     outputPath,
-    districtCount: rows.length,
+    districtCount: districts.length,
     fetchedAt,
+    sourceRows: lines.length - 1,
   };
 }

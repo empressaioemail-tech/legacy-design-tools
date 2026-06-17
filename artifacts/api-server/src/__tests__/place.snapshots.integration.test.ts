@@ -116,7 +116,7 @@ setupRouteTests((g) => {
 
 describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
   beforeAll(async () => {
-    process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
+    process.env.BROKERAGE_API_KEYS = TEST_API_KEY;
     resetBrokerageApiKeysForTests();
     if (!ctx.schema) return;
     const here = dirname(fileURLToPath(import.meta.url));

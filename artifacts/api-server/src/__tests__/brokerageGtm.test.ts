@@ -41,8 +41,7 @@ const authHeaders = {
 };
 
 beforeAll(async () => {
-  process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
-  process.env.BROKERAGE_API_KEYS = "external-mcp-caller-key-01,external-mcp-caller-key-02";
+  process.env.BROKERAGE_API_KEYS = `${TEST_API_KEY},external-mcp-caller-key-01,external-mcp-caller-key-02`;
   resetBrokerageApiKeysForTests();
 
   if (!ctx.schema) return;

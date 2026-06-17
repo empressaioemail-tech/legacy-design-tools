@@ -42,7 +42,7 @@ function mockRes(): Response & { _status: number | null; _json: unknown } {
 
 beforeEach(() => {
   process.env.SERVICE_API_KEY = SERVICE_TOKEN;
-  process.env.BROKERAGE_DEV_API_KEY = BROKERAGE_KEY;
+  process.env.BROKERAGE_API_KEYS = BROKERAGE_KEY;
   __resetServiceApiKeyCacheForTests();
   resetBrokerageApiKeysForTests();
 });
@@ -73,7 +73,7 @@ describe("requireBrokerageAuthOrServiceToken", () => {
     requireBrokerageAuthOrServiceToken(req, res, next);
 
     expect(next).toHaveBeenCalledOnce();
-    expect(req.brokerageAuth).toEqual({ tier: "dev" });
+    expect(req.brokerageAuth).toEqual({ tier: "operator" });
     expect(req.brokerageServiceCaller).toBeUndefined();
   });
 

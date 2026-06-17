@@ -244,14 +244,16 @@ National parcel/zoning and investor depth on `POST /api/brokerage/v1/brief` use
 Mount the six `COTALITY_*` secrets on **`cortex-api`** via
 `cloud-run-deploy.yml` `--set-secrets` (durable G1 wiring).
 
-Also mount **`BROKERAGE_DEV_API_KEY`** and **`BROKERAGE_EXTENSION_PUBLIC_KEY`**
-so `/brief` does not return HTTP 503 (`property_brief_api_unconfigured`).
+Mount **`BROKERAGE_EXTENSION_PUBLIC_KEY`** so `/brief` does not return
+HTTP 503 (`property_brief_api_unconfigured`). Optional operator keys via
+comma-separated **`BROKERAGE_API_KEYS`** (MCP / internal smoke — not the
+Chrome Web Store public key).
 
 ### Smoke (Round Rock pilot address)
 
 ```powershell
 $headers = @{
-  Authorization = "Bearer <BROKERAGE_DEV_API_KEY>"
+  Authorization = "Bearer <BROKERAGE_EXTENSION_PUBLIC_KEY>"
   "X-Hauska-Install-Id" = "<install-uuid>"
   "Content-Type" = "application/json"
 }
@@ -304,8 +306,8 @@ gcloud run services update cortex-api `
 
 `brokerageAuth` loads `BROKERAGE_EXTENSION_PUBLIC_KEY` automatically (also accepts
 it in comma-separated `BROKERAGE_API_KEYS` if you prefer a single env var).
-Keep `BROKERAGE_DEV_API_KEY` / operator keys separate — dev tier is unlimited
-wallet/workspace/share.
+Operator keys in `BROKERAGE_API_KEYS` get unlimited wallet/workspace/share;
+the public key is rate-limited per install.
 
 ### 3. Smoke (public tier — redact key in logs)
 
@@ -358,9 +360,11 @@ Manager. `Class = config` → Cloud Run env var.
 | `XAI_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Fallback model id when `XAI_FINDING_MODEL` unset. |
 | `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. `grok` requires `XAI_API_KEY`. `anthropic` requires AI Integrations env. AI chat stays Anthropic regardless. Property Brief brokerage routes (`/api/brokerage/v1/*`) use the same client via `briefingLlmClient.ts` — set `grok` for production extension summaries. |
 | `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings and brokerage brief/research Grok calls. Default `grok-3-mini`. |
-| `BROKERAGE_DEV_API_KEY` | secret | required for extension API | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Comma-separated keys accepted. Mounted via `cloud-run-deploy.yml` `--set-secrets`. Without it, `/brief` returns HTTP 503. |
-| `BROKERAGE_API_KEYS` | secret | optional alias | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Same as `BROKERAGE_DEV_API_KEY` when multiple pilot keys are needed. |
+| `BROKERAGE_API_KEYS` | secret | optional operator keys | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Comma-separated operator/MCP keys (`operator` tier). Not required for Chrome Web Store installs. |
 | `BROKERAGE_EXTENSION_PUBLIC_KEY` | secret | required for Chrome Web Store zero-config | `artifacts/api-server/src/middlewares/brokerageAuth.ts`, `lib/brokerageExtensionPublic.ts` | Mounted via `cloud-run-deploy.yml` `--set-secrets`. Rate-limited Layer-1 brief/research only. |
+| `BROKERAGE_FEDERAL_DATA_DIR` | config | optional | `artifacts/api-server/src/lib/brokerageFederalDataPaths.ts` | Runtime path for live OZ + SPDPID ingests. Docker build defaults to `/app/var/brokerage-federal-data` (baked at image build). |
+| `OZ_TRACT_DATA_PATH` | config | optional override | `artifacts/api-server/src/lib/opportunityZoneAdapter.ts` | Explicit OZ GeoJSON path; overrides `BROKERAGE_FEDERAL_DATA_DIR/opportunity-zones/<version>.geojson`. |
+| `TX_SPECIAL_DISTRICTS_DATA_PATH` | config | optional override | `artifacts/api-server/src/lib/mudPidRegistry.ts` | Explicit SPDPID JSON path; overrides `BROKERAGE_FEDERAL_DATA_DIR/tx-special-districts.json`. |
 | `BROKERAGE_EXTENSION_PUBLIC_BRIEFS_PER_DAY` | config | optional | `lib/brokerageExtensionPublic.ts` | Default `5` per `X-Hauska-Install-Id`. |
 | `BROKERAGE_EXTENSION_PUBLIC_RESEARCH_TURNS_PER_DAY` | config | optional | `lib/brokerageExtensionPublic.ts` | Default `20` per install. |
 | `BROKERAGE_EXTENSION_PUBLIC_GLOBAL_BRIEFS_PER_DAY` | config | optional | `lib/brokerageExtensionPublic.ts` | Default `10000` global anti-scrape ceiling. |

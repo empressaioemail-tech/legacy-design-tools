@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifySessionToken } from "../lib/sessionToken";
 
-export type BrokerageClientTier = "dev" | "extension_public" | "user";
+export type BrokerageClientTier = "operator" | "extension_public" | "user";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -28,11 +28,7 @@ function loadExtensionPublicKey(): string | null {
 export function loadBrokerageApiKeys(): Set<string> {
   if (cachedKeys) return cachedKeys;
   const keys = new Set<string>();
-  for (const envName of [
-    "BROKERAGE_DEV_API_KEY",
-    "BROKERAGE_API_KEYS",
-    "BROKERAGE_EXTENSION_PUBLIC_KEY",
-  ]) {
+  for (const envName of ["BROKERAGE_API_KEYS", "BROKERAGE_EXTENSION_PUBLIC_KEY"]) {
     const raw = process.env[envName]?.trim();
     if (!raw) continue;
     for (const part of raw.split(",")) {
@@ -53,7 +49,7 @@ export function resetBrokerageApiKeysForTests(): void {
 export function resolveBrokerageClientTier(providedKey: string): BrokerageClientTier {
   const publicKey = loadExtensionPublicKey();
   if (publicKey && providedKey === publicKey) return "extension_public";
-  return "dev";
+  return "operator";
 }
 
 export function isExtensionPublicClient(req: Request): boolean {

@@ -8,7 +8,7 @@ import type { Express } from "express";
 import { ctx } from "./test-context";
 import type { Request } from "express";
 
-const DEV_API_KEY = "brokerage-test-key-dev-001";
+const OPERATOR_API_KEY = "brokerage-test-key-operator-001";
 const PUBLIC_API_KEY = "brokerage-test-key-public-store-zzzzzzzz";
 const PUBLIC_INSTALL = "install-public-aaaaaaaa";
 const DEV_INSTALL = "install-dev-operator-bbbb";
@@ -139,8 +139,8 @@ const publicHeaders = {
   "X-Hauska-Install-Id": PUBLIC_INSTALL,
 };
 
-const devHeaders = {
-  Authorization: `Bearer ${DEV_API_KEY}`,
+const operatorHeaders = {
+  Authorization: `Bearer ${OPERATOR_API_KEY}`,
   "X-Hauska-Install-Id": DEV_INSTALL,
 };
 
@@ -169,7 +169,7 @@ function mockPlanoGeocode() {
 }
 
 beforeEach(() => {
-  process.env.BROKERAGE_DEV_API_KEY = DEV_API_KEY;
+  process.env.BROKERAGE_API_KEYS = OPERATOR_API_KEY;
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = PUBLIC_API_KEY;
   process.env.BROKERAGE_EXTENSION_PUBLIC_BRIEFS_PER_DAY = "5";
   process.env.BROKERAGE_EXTENSION_PUBLIC_RESEARCH_TURNS_PER_DAY = "20";
@@ -193,7 +193,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.BROKERAGE_DEV_API_KEY;
+  delete process.env.BROKERAGE_API_KEYS;
   delete process.env.BROKERAGE_EXTENSION_PUBLIC_KEY;
   delete process.env.BROKERAGE_EXTENSION_PUBLIC_BRIEFS_PER_DAY;
   delete process.env.BROKERAGE_EXTENSION_PUBLIC_RESEARCH_TURNS_PER_DAY;
@@ -241,7 +241,7 @@ describe("extension_public client tier", () => {
   it("POST /workspaces/:id/share returns account_upgrade_required for public key", async () => {
     await request(getApp())
       .post("/api/brokerage/v1/brief")
-      .set(devHeaders)
+      .set(operatorHeaders)
       .send({ address: "100 Share Ln, Bastrop, TX 78602" });
 
     geocodeAddressMock.mockResolvedValue({
@@ -256,7 +256,7 @@ describe("extension_public client tier", () => {
 
     const recent = await request(getApp())
       .get("/api/brokerage/v1/workspaces/recent")
-      .set(devHeaders);
+      .set(operatorHeaders);
     const workspaceId = recent.body.workspaces[0].id;
 
     const share = await request(getApp())
@@ -268,7 +268,7 @@ describe("extension_public client tier", () => {
     expect(share.body.error).toBe("account_upgrade_required");
   });
 
-  it("dev operator key still allows share", async () => {
+  it("operator API key still allows share", async () => {
     geocodeAddressMock.mockResolvedValue({
       latitude: 30.11,
       longitude: -97.32,
@@ -281,18 +281,18 @@ describe("extension_public client tier", () => {
 
     const brief = await request(getApp())
       .post("/api/brokerage/v1/brief")
-      .set(devHeaders)
+      .set(operatorHeaders)
       .send({ address: "200 Dev Share Ln, Bastrop, TX 78602" });
     expect(brief.status).toBe(200);
 
     const recent = await request(getApp())
       .get("/api/brokerage/v1/workspaces/recent")
-      .set(devHeaders);
+      .set(operatorHeaders);
     const workspaceId = recent.body.workspaces[0].id;
 
     const share = await request(getApp())
       .post(`/api/brokerage/v1/workspaces/${workspaceId}/share`)
-      .set(devHeaders)
+      .set(operatorHeaders)
       .send({});
     expect(share.status).toBe(201);
   });

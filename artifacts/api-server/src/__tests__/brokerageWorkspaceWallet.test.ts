@@ -125,7 +125,7 @@ const mockAtom = {
 };
 
 beforeEach(async () => {
-  process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
+  process.env.BROKERAGE_API_KEYS = TEST_API_KEY;
   process.env.BROKERAGE_ADMIN_API_KEYS = ADMIN_KEY;
   process.env.BROKERAGE_WALLET_BYPASS = "0";
   process.env.BROKERAGE_WALLET_START_BALANCE_CENTS = "0";
@@ -166,7 +166,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  delete process.env.BROKERAGE_DEV_API_KEY;
+  delete process.env.BROKERAGE_API_KEYS;
   delete process.env.BROKERAGE_ADMIN_API_KEYS;
   delete process.env.BROKERAGE_WALLET_BYPASS;
   delete process.env.BROKERAGE_WALLET_START_BALANCE_CENTS;
