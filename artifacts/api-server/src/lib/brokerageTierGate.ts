@@ -66,12 +66,12 @@ function pickKeys(keys: Set<string>): Adapter[] {
 
 export function resolveInvestorPackageTier(input: {
   tier?: InvestorPackageTier | null;
-  brokerageAuthTier?: "dev" | "extension_public" | "user" | null;
+  brokerageAuthTier?: "operator" | "extension_public" | "user" | null;
   profileTier?: InvestorPackageTier | null;
 }): InvestorPackageTier {
   if (input.profileTier) return input.profileTier;
   if (input.tier) return input.tier;
-  if (input.brokerageAuthTier === "dev") return "max";
+  if (input.brokerageAuthTier === "operator") return "max";
   if (input.brokerageAuthTier === "user") return "pro";
   return "free";
 }

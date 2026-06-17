@@ -40,6 +40,11 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
+ENV BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data
+RUN mkdir -p /app/var/brokerage-federal-data/opportunity-zones \
+ && pnpm exec tsx scripts/ingest-opportunity-zones.mjs \
+ && pnpm exec tsx scripts/ingest-tx-special-districts.mjs
+
 # pnpm v10 with --frozen-lockfile does NOT execute puppeteer's
 # pure-JS postinstall (install.mjs), so Chrome never auto-downloads.
 # Same workaround as .github/workflows/pr-checks.yml — run the
@@ -71,7 +76,8 @@ FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production \
     PUPPETEER_CACHE_DIR=/app/.puppeteer-cache \
     PORT=8080 \
-    SPA_STATIC_ROOT=/app/artifacts
+    SPA_STATIC_ROOT=/app/artifacts \
+    BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data
 
 WORKDIR /app
 

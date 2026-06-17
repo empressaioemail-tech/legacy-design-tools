@@ -4,8 +4,9 @@
  * Accepts EITHER:
  *   - `Authorization: Bearer <SERVICE_API_KEY>` — MCP service caller
  *     (no install id; wallet paywall skipped; metering signal surfaced)
- *   - Brokerage extension keys (`BROKERAGE_DEV_API_KEY`, etc.) — existing
- *     Chrome extension / pilot path via {@link brokerageAuth}
+ *   - Brokerage extension keys (`BROKERAGE_EXTENSION_PUBLIC_KEY`,
+ *     `BROKERAGE_API_KEYS`) — Chrome extension / operator path via
+ *     {@link brokerageAuth}
  *
  * cc-agent-M's `legacy-client.ts` sends the same bearer token as the L-surface
  * routes (`SERVICE_API_KEY` / `LEGACY_BACKEND_API_KEY`).

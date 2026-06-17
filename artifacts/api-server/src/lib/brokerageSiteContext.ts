@@ -74,7 +74,7 @@ export interface FetchBrokerageSiteContextInput {
   jurisdictionCity?: string | null;
   jurisdictionState?: string | null;
   packageTier?: InvestorPackageTier | null;
-  brokerageAuthTier?: "dev" | "extension_public" | "user" | null;
+  brokerageAuthTier?: "operator" | "extension_public" | "user" | null;
   depthMeterRemaining?: number | null;
 }
 

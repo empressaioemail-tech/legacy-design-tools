@@ -3,13 +3,14 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Adapter, AdapterContext, AdapterResult } from "@workspace/adapters";
 import { AdapterRunError } from "@workspace/adapters/types";
+import {
+  OZ_TRACT_LIST_VERSION,
+  resolveOzTractDataPath,
+} from "./brokerageFederalDataPaths";
 
-export const OZ_TRACT_LIST_VERSION =
-  process.env.OZ_TRACT_LIST_VERSION ?? "oz-1.0";
+export { OZ_TRACT_LIST_VERSION };
 
 export interface OzTractFeature {
   type: "Feature";
@@ -35,18 +36,11 @@ interface OzTractCollection {
 let cachedTracts: OzTractCollection | null = null;
 
 function fixturePath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const envPath = process.env.OZ_TRACT_DATA_PATH?.trim();
-  const candidates = [
-    envPath,
-    join(here, "../../data/opportunity-zones", `${OZ_TRACT_LIST_VERSION}.geojson`),
-    join(process.cwd(), "artifacts/api-server/data/opportunity-zones", `${OZ_TRACT_LIST_VERSION}.geojson`),
-  ].filter((p): p is string => Boolean(p));
-  const hit = candidates.find((p) => existsSync(p));
-  if (!hit) {
+  const hit = resolveOzTractDataPath();
+  if (!existsSync(hit)) {
     throw new AdapterRunError(
       "no-coverage",
-      `Opportunity Zone tract fixture not found for version ${OZ_TRACT_LIST_VERSION}.`,
+      `Opportunity Zone tract data not found at ${hit} (version ${OZ_TRACT_LIST_VERSION}).`,
     );
   }
   return hit;

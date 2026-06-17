@@ -6,8 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveTxSpecialDistrictsDataPath } from "./brokerageFederalDataPaths";
 
 export interface TxSpecialDistrictRecord {
   districtId: string;
@@ -20,12 +19,8 @@ export interface TxSpecialDistrictRecord {
 let cachedRegistry: TxSpecialDistrictRecord[] | null = null;
 
 function registryPath(): string | null {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, "../data/tx-special-districts.json"),
-    join(process.cwd(), "artifacts/api-server/data/tx-special-districts.json"),
-  ];
-  return candidates.find((p) => existsSync(p)) ?? null;
+  const path = resolveTxSpecialDistrictsDataPath();
+  return existsSync(path) ? path : null;
 }
 
 export function loadTxSpecialDistrictRegistry(): TxSpecialDistrictRecord[] {

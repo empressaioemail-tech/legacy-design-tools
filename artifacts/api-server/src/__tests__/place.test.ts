@@ -93,7 +93,7 @@ const siteLayers = {
 };
 
 beforeEach(() => {
-  process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
+  process.env.BROKERAGE_API_KEYS = TEST_API_KEY;
   resetBrokerageApiKeysForTests();
   retrieveAtomsForQuestionMock.mockResolvedValue([
     {
