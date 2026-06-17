@@ -232,8 +232,9 @@ router.get("/brief-coverage", (_req: Request, res: Response) => {
 });
 
 brokerageV1.use(brokerageCors);
-brokerageV1.use(requireBrokerageAuthOrServiceToken);
+/** GTM consent/events use {@link brokerageAuth} only — extension wedge, no service token. */
 brokerageV1.use("/gtm", brokerageGtmRouter);
+brokerageV1.use(requireBrokerageAuthOrServiceToken);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);

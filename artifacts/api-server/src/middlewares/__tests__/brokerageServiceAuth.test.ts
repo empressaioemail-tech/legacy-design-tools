@@ -13,6 +13,7 @@ import { DEFAULT_TENANT_ID } from "../session";
 
 const SERVICE_TOKEN = "test-service-token-abc123";
 const BROKERAGE_KEY = "brokerage-test-key-001";
+const PUBLIC_KEY = "brokerage-test-key-public-store-zzzzzzzz";
 
 function mockReq(headers: Record<string, string> = {}): Request {
   const lower = new Map(
@@ -75,6 +76,20 @@ describe("requireBrokerageAuthOrServiceToken", () => {
     expect(next).toHaveBeenCalledOnce();
     expect(req.brokerageAuth).toEqual({ tier: "operator" });
     expect(req.brokerageServiceCaller).toBeUndefined();
+  });
+
+  it("accepts extension_public key via X-Hauska-Key", () => {
+    process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = PUBLIC_KEY;
+    resetBrokerageApiKeysForTests();
+
+    const req = mockReq({ "x-hauska-key": PUBLIC_KEY });
+    const res = mockRes();
+    const next = vi.fn();
+
+    requireBrokerageAuthOrServiceToken(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.brokerageAuth).toEqual({ tier: "extension_public" });
   });
 
   it("rejects unknown bearer token", () => {

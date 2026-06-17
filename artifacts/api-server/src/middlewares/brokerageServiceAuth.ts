@@ -76,11 +76,9 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
       return;
     }
 
-    res.status(401).json({
-      error: "unauthorized",
-      message:
-        "Valid Authorization Bearer (service token or brokerage key) or X-Hauska-Key required",
-    });
+    // Session JWT bearer or other brokerageAuth paths (e.g. extension_public
+    // key timing) — do not hard-401 before brokerageAuth can classify.
+    brokerageAuth(req, res, next);
     return;
   }
 

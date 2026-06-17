@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { ctx } from "./test-context";
 
 const TEST_API_KEY = "brokerage-test-key-gtm";
+const PUBLIC_API_KEY = "brokerage-test-key-public-store-zzzzzzzz";
 const INSTALL_ID = "test-install-00000001";
 
 vi.mock("@workspace/db", async () => {
@@ -42,6 +43,7 @@ const authHeaders = {
 
 beforeAll(async () => {
   process.env.BROKERAGE_OPERATOR_API_KEYS = TEST_API_KEY;
+  process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = PUBLIC_API_KEY;
   process.env.BROKERAGE_API_KEYS =
     "external-mcp-caller-key-01,external-mcp-caller-key-02";
   resetBrokerageApiKeysForTests();
@@ -61,6 +63,41 @@ beforeAll(async () => {
 });
 
 describe("brokerage GTM", () => {
+  it("POST /gtm/consent accepts extension_public key via X-Hauska-Key", async () => {
+    const app = getApp();
+    const res = await request(app)
+      .post("/api/brokerage/v1/gtm/consent")
+      .set({ "X-Hauska-Key": PUBLIC_API_KEY })
+      .send({
+        installId: "install-public-aaaaaaaa",
+        consentVersion: "2026-05-26-v1",
+        graphOptIn: false,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.installId).toBe("install-public-aaaaaaaa");
+  });
+
+  it("POST /gtm/events accepts extension_public key via X-Hauska-Key after consent", async () => {
+    const installId = "install-public-events-bbbb";
+    const app = getApp();
+    await request(app)
+      .post("/api/brokerage/v1/gtm/consent")
+      .set({ "X-Hauska-Key": PUBLIC_API_KEY })
+      .send({ installId, graphOptIn: false });
+
+    const ev = await request(app)
+      .post("/api/brokerage/v1/gtm/events")
+      .set({ "X-Hauska-Key": PUBLIC_API_KEY })
+      .send({
+        installId,
+        eventType: "extension_install",
+        payload: { version: "0.4.3" },
+      });
+    expect(ev.status).toBe(201);
+    expect(ev.body.eventId).toBeTruthy();
+  });
+
   it("POST /gtm/consent then GET consent", async () => {
     const app = getApp();
     const post = await request(app)

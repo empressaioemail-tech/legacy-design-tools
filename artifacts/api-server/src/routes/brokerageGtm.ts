@@ -15,6 +15,7 @@ import { z } from "zod";
 import { db, gtmConsent, gtmEvents } from "@workspace/db";
 import { eq, sql, gte, desc, and } from "drizzle-orm";
 import { brokerageAuth } from "../middlewares/brokerageAuth";
+import { requireBrokerageAuthOrServiceToken } from "../middlewares/brokerageServiceAuth";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { GTM_CONSENT_VERSION, recordGtmEvent } from "../lib/recordGtmEvent";
 import {
@@ -51,9 +52,8 @@ const EVENT_BODY = z.object({
 export const brokerageGtmRouter: IRouter = Router();
 
 brokerageGtmRouter.use(brokerageCors);
-brokerageGtmRouter.use(brokerageAuth);
 
-brokerageGtmRouter.post("/consent", async (req: Request, res: Response) => {
+brokerageGtmRouter.post("/consent", brokerageAuth, async (req: Request, res: Response) => {
   const parse = CONSENT_BODY.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "invalid_request", message: "Invalid consent body" });
@@ -93,6 +93,7 @@ brokerageGtmRouter.post("/consent", async (req: Request, res: Response) => {
 
 brokerageGtmRouter.get(
   "/consent/:installId",
+  brokerageAuth,
   async (req: Request, res: Response) => {
     const raw = req.params.installId;
     const installId = (Array.isArray(raw) ? raw[0] : raw)?.trim();
@@ -122,7 +123,7 @@ brokerageGtmRouter.get(
   },
 );
 
-brokerageGtmRouter.post("/events", async (req: Request, res: Response) => {
+brokerageGtmRouter.post("/events", brokerageAuth, async (req: Request, res: Response) => {
   const parse = EVENT_BODY.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "invalid_request", message: "Invalid event body" });
@@ -190,7 +191,7 @@ function loadBrokerageKeyHashes(): string[] {
   return loadInternalGtmApiKeys().map((k) => hashApiKeyPrefix(k));
 }
 
-brokerageGtmRouter.post("/mcp-event", async (req: Request, res: Response) => {
+brokerageGtmRouter.post("/mcp-event", requireBrokerageAuthOrServiceToken, async (req: Request, res: Response) => {
   const parse = MCP_EVENT_BODY.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "invalid_request", message: "Invalid MCP event body" });
@@ -271,6 +272,7 @@ function parseDigestWindowDays(req: Request): number {
 /** Steward digest helper (default 7-day window). */
 brokerageGtmRouter.get(
   "/digest",
+  requireBrokerageAuthOrServiceToken,
   async (req: Request, res: Response) => {
     const windowDays = parseDigestWindowDays(req);
     const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
@@ -432,7 +434,7 @@ brokerageGtmRouter.get(
 );
 
 /** Read-only triage classification for external MCP events. */
-brokerageGtmRouter.get("/triage", async (req: Request, res: Response) => {
+brokerageGtmRouter.get("/triage", requireBrokerageAuthOrServiceToken, async (req: Request, res: Response) => {
   const windowDays = parseDigestWindowDays(req);
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
@@ -495,6 +497,7 @@ const OUTBOUND_BODY = z.object({
 /** Tier 1 outbound attempt — blocked when OUTBOUND_ENABLED=false (v1 default). */
 brokerageGtmRouter.post(
   "/outbound/attempt",
+  requireBrokerageAuthOrServiceToken,
   async (req: Request, res: Response) => {
     const parse = OUTBOUND_BODY.safeParse(req.body);
     if (!parse.success) {
