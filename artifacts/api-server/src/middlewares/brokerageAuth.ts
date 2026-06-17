@@ -28,7 +28,11 @@ function loadExtensionPublicKey(): string | null {
 export function loadBrokerageApiKeys(): Set<string> {
   if (cachedKeys) return cachedKeys;
   const keys = new Set<string>();
-  for (const envName of ["BROKERAGE_API_KEYS", "BROKERAGE_EXTENSION_PUBLIC_KEY"]) {
+  for (const envName of [
+    "BROKERAGE_OPERATOR_API_KEYS",
+    "BROKERAGE_API_KEYS",
+    "BROKERAGE_EXTENSION_PUBLIC_KEY",
+  ]) {
     const raw = process.env[envName]?.trim();
     if (!raw) continue;
     for (const part of raw.split(",")) {
