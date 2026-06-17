@@ -81,11 +81,18 @@ export {
   upsertReasoningAtomCorpusOverlay,
   upsertReasoningAtomDeeplinkOnly,
   retrieveReasoningAtomsForRefs,
+  retrieveReasoningAtomById,
+  countReasoningAtomsForJurisdiction,
+  snapshotReasoningVerification,
+  rollbackReasoningVerification,
+  restoreGroundedReasoningAtoms,
+  mergeVerificationState,
   supplementCodeSectionsWithReasoningGrounding,
   supplementCodeSectionsFromWeb,
   type ReasoningAtomRecord,
   type ReasoningSourceLink,
   type ReasoningGroundingResult,
+  type ReasoningVerificationSnapshot,
 } from "./reasoningAtoms/index";
 
 export {

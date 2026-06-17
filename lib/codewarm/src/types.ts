@@ -40,6 +40,8 @@ export interface CodewarmBatchOptions {
   costPerFetchUsd?: number;
   http?: import("@workspace/codes").HttpFetcher;
   log?: (msg: string, meta?: Record<string, unknown>) => void;
+  /** Deepen mode: skip already-verified atoms; verify-before-promote on the rest. */
+  incrementalDeepen?: boolean;
 }
 
 export type CodewarmReferenceOutcome =
@@ -47,6 +49,8 @@ export type CodewarmReferenceOutcome =
   | "corpus-covered"
   | "corpus-skipped"
   | "deeplink-only"
+  | "verified-skipped"
+  | "unverified-skipped"
   | "dry-run"
   | "budget-halted"
   | "error";
@@ -82,6 +86,8 @@ export interface CodewarmBatchResult {
   corpusSkippedCount: number;
   warmedCount: number;
   deeplinkOnlyCount: number;
+  verifiedSkippedCount?: number;
+  unverifiedSkippedCount?: number;
   errorCount: number;
   results: CodewarmReferenceResult[];
   costRecord: CodewarmCostRecord;

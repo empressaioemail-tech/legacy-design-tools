@@ -17,9 +17,18 @@ export {
   upsertReasoningAtomCorpusOverlay,
   upsertReasoningAtomDeeplinkOnly,
   retrieveReasoningAtomsForRefs,
+  retrieveReasoningAtomById,
+  countReasoningAtomsForJurisdiction,
   webResultToSourceLink,
   verificationStateFromResult,
+  mergeVerificationState,
 } from "./persist";
+export {
+  snapshotReasoningVerification,
+  rollbackReasoningVerification,
+  restoreGroundedReasoningAtoms,
+  type ReasoningVerificationSnapshot,
+} from "./snapshot";
 export { reasoningAtomToCodeSection } from "./toCodeSection";
 export {
   supplementCodeSectionsWithReasoningGrounding,

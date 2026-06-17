@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, reasoningAtoms, type ReasoningSourceLink } from "@workspace/db";
 import type { WebCodeFetchResult } from "../webCodeFetch/types";
 import type { WebCodeReviewTarget } from "../webCodeFetch/types";
@@ -23,6 +23,18 @@ export function verificationStateFromResult(
   return result.verified ? "verified" : "unverified-web-source";
 }
 
+/** Never downgrade verified → unverified on re-warm; upgrades only. */
+export function mergeVerificationState(
+  prior: ReasoningVerificationState | string | null | undefined,
+  incoming: ReasoningVerificationState,
+  opts?: { priorGrounded?: boolean },
+): ReasoningVerificationState {
+  if (prior === "verified") return "verified";
+  if (incoming === "verified") return "verified";
+  if (opts?.priorGrounded) return "verified";
+  return incoming;
+}
+
 function assertedConfidenceFromResult(result: WebCodeFetchResult): number {
   if (!result.verified) {
     return Math.min(result.confidence, 0.35);
@@ -34,16 +46,20 @@ function assertedConfidenceFromResult(result: WebCodeFetchResult): number {
  * UPSERT a reasoning atom from a web fetch. Merges sources[] on conflict;
  * persists capped snippet only — never full section text.
  * Preserves calibratedConfidence and calibration metadata on re-warm.
+ *
+ * When `verifyBeforePromote` is true (deepen/incremental mode), failed fetches
+ * never mutate an existing row — verified is a high-water mark.
  */
 export async function upsertReasoningAtomFromWebFetch(args: {
   jurisdictionKey: string;
   target: WebCodeReviewTarget;
   result: WebCodeFetchResult;
+  verifyBeforePromote?: boolean;
 }): Promise<ReasoningAtomRecord> {
-  const { jurisdictionKey, target, result } = args;
+  const { jurisdictionKey, target, result, verifyBeforePromote = false } = args;
   const id = reasoningAtomId(target.editionSlug, target.codeRef);
   const incomingSource = webResultToSourceLink(result);
-  const verificationState = verificationStateFromResult(result);
+  const incomingVerificationState = verificationStateFromResult(result);
   const assertedConfidence = assertedConfidenceFromResult(result);
   const snippet = capReasoningSnippet(
     result.verified ? result.text : null,
@@ -61,6 +77,10 @@ export async function upsertReasoningAtomFromWebFetch(args: {
     .where(eq(reasoningAtoms.id, id))
     .limit(1);
 
+  if (verifyBeforePromote && existing[0] && !result.verified) {
+    return mapRow(existing[0]);
+  }
+
   const now = new Date();
   if (existing[0]) {
     const priorSources = (existing[0].sources as ReasoningSourceLink[]) ?? [];
@@ -71,6 +91,13 @@ export async function upsertReasoningAtomFromWebFetch(args: {
         ? Number(existing[0].sourceSetVersion ?? 1) + 1
         : Number(existing[0].sourceSetVersion ?? 1);
 
+    const priorGrounded = priorSources.some((source) => source.verified);
+    const verificationState = mergeVerificationState(
+      existing[0].verificationState,
+      incomingVerificationState,
+      { priorGrounded },
+    );
+
     const [row] = await db
       .update(reasoningAtoms)
       .set({
@@ -80,7 +107,10 @@ export async function upsertReasoningAtomFromWebFetch(args: {
         ),
         verificationState,
         snippet: snippet ?? existing[0].snippet,
-        reasoning,
+        reasoning:
+          incomingVerificationState === "verified" || verificationState === "verified"
+            ? reasoning
+            : existing[0].reasoning,
         updatedAt: now,
         sourceSetVersion: nextSourceSetVersion,
         calibrationStale:
@@ -102,7 +132,7 @@ export async function upsertReasoningAtomFromWebFetch(args: {
       sources: [incomingSource],
       reasoning,
       assertedConfidence: String(assertedConfidence),
-      verificationState,
+      verificationState: incomingVerificationState,
       snippet,
       displayMode: "deeplink",
       accessPolicy: "platform-internal",
@@ -262,6 +292,17 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
   return mapRow(row!);
 }
 
+export async function retrieveReasoningAtomById(
+  id: string,
+): Promise<ReasoningAtomRecord | null> {
+  const rows = await db
+    .select()
+    .from(reasoningAtoms)
+    .where(eq(reasoningAtoms.id, id))
+    .limit(1);
+  return rows[0] ? mapRow(rows[0]) : null;
+}
+
 export async function retrieveReasoningAtomsForRefs(args: {
   jurisdictionKey: string;
   codeRefs: ReadonlyArray<string>;
@@ -277,6 +318,17 @@ export async function retrieveReasoningAtomsForRefs(args: {
       ),
     );
   return rows.map(mapRow);
+}
+
+/** Count persisted reasoning atoms for coverage tier / warmup verification. */
+export async function countReasoningAtomsForJurisdiction(
+  jurisdictionKey: string,
+): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(reasoningAtoms)
+    .where(eq(reasoningAtoms.jurisdictionKey, jurisdictionKey));
+  return Number(rows[0]?.n ?? 0);
 }
 
 function mapRow(row: typeof reasoningAtoms.$inferSelect): ReasoningAtomRecord {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   fetchCodeSection,
   reasoningAtomId,
+  retrieveReasoningAtomById,
   upsertReasoningAtomCorpusOverlay,
   upsertReasoningAtomDeeplinkOnly,
   upsertReasoningAtomFromWebFetch,
@@ -35,6 +36,8 @@ export async function runCodewarmBatch(
   let corpusSkippedCount = 0;
   let warmedCount = 0;
   let deeplinkOnlyCount = 0;
+  let verifiedSkippedCount = 0;
+  let unverifiedSkippedCount = 0;
   let errorCount = 0;
 
   const http = wrapHttpWithCost(options.http, cost, costPerFetch);
@@ -135,6 +138,26 @@ export async function runCodewarmBatch(
       }
 
       if (dryRun) {
+        const atomId = reasoningAtomId(target.editionSlug, target.codeRef);
+        if (options.incrementalDeepen) {
+          const existing = await retrieveReasoningAtomById(atomId);
+          if (existing?.verificationState === "verified") {
+            verifiedSkippedCount++;
+            results.push({
+              codeRef: entry.codeRef,
+              edition: entry.edition,
+              outcome: "verified-skipped",
+              atomId: existing.id,
+              verificationState: existing.verificationState,
+            });
+            log("codewarm verified-skipped (incremental deepen)", {
+              codeRef: entry.codeRef,
+              atomId: existing.id,
+            });
+            continue;
+          }
+        }
+
         const result = await fetchCodeSection(
           {
             codeRef: entry.codeRef,
@@ -157,6 +180,26 @@ export async function runCodewarmBatch(
         continue;
       }
 
+      const atomId = reasoningAtomId(target.editionSlug, target.codeRef);
+      if (options.incrementalDeepen) {
+        const existing = await retrieveReasoningAtomById(atomId);
+        if (existing?.verificationState === "verified") {
+          verifiedSkippedCount++;
+          results.push({
+            codeRef: entry.codeRef,
+            edition: entry.edition,
+            outcome: "verified-skipped",
+            atomId: existing.id,
+            verificationState: existing.verificationState,
+          });
+          log("codewarm verified-skipped (incremental deepen)", {
+            codeRef: entry.codeRef,
+            atomId: existing.id,
+          });
+          continue;
+        }
+      }
+
       const result = await fetchCodeSection(
         {
           codeRef: entry.codeRef,
@@ -171,7 +214,27 @@ export async function runCodewarmBatch(
         jurisdictionKey: options.jurisdictionKey,
         target,
         result,
+        verifyBeforePromote: Boolean(options.incrementalDeepen),
       });
+      if (
+        options.incrementalDeepen &&
+        !result.verified &&
+        atom.verificationState !== "verified"
+      ) {
+        unverifiedSkippedCount++;
+        results.push({
+          codeRef: entry.codeRef,
+          edition: entry.edition,
+          outcome: "unverified-skipped",
+          atomId: atom.id,
+          verificationState: atom.verificationState,
+        });
+        log("codewarm unverified-skipped (verify-before-promote)", {
+          codeRef: entry.codeRef,
+          atomId: atom.id,
+        });
+        continue;
+      }
       warmedCount++;
       results.push({
         codeRef: entry.codeRef,
@@ -208,6 +271,8 @@ export async function runCodewarmBatch(
     corpusSkippedCount,
     warmedCount,
     deeplinkOnlyCount,
+    verifiedSkippedCount,
+    unverifiedSkippedCount,
     errorCount,
     dryRun,
   };
@@ -222,6 +287,8 @@ export async function runCodewarmBatch(
     corpusSkippedCount,
     warmedCount,
     deeplinkOnlyCount,
+    verifiedSkippedCount,
+    unverifiedSkippedCount,
     errorCount,
     results,
     costRecord: cost.toRecord({

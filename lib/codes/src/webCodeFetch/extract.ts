@@ -141,6 +141,8 @@ export function extractSectionBlock(
       `${articlePrefix}\\b(${exactSection})\\s+${titleCapture}`,
       "i",
     ),
+    /** UMC/UPC chapter pages: bare `401.2 Title` without Section prefix. */
+    new RegExp(`\\b(${exactSection})\\s+${titleCapture}`, "i"),
   ];
 
   let heading = "";

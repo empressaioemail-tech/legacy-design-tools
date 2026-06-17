@@ -26,6 +26,7 @@ vi.mock("@workspace/db", async () => {
 
 import { withTestSchema } from "@workspace/db/testing";
 import { reasoningAtoms } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import {
   REASONING_ATOM_PREFIX,
   REASONING_SNIPPET_MAX_CHARS,
@@ -34,6 +35,7 @@ import {
   reasoningAtomId,
   supplementCodeSectionsWithReasoningGrounding,
   upsertReasoningAtomFromWebFetch,
+  mergeVerificationState,
 } from "../reasoningAtoms/index";
 import type { HttpFetcher, WebCodeReviewTarget } from "../webCodeFetch/types";
 
@@ -110,6 +112,22 @@ describe("mergeReasoningSources", () => {
     });
     expect(merged).toHaveLength(1);
     expect(merged[0]!.verified).toBe(true);
+  });
+});
+
+describe("mergeVerificationState", () => {
+  it("never downgrades verified to unverified", () => {
+    expect(
+      mergeVerificationState("verified", "unverified-web-source"),
+    ).toBe("verified");
+  });
+
+  it("restores verified when prior snippet + verified source survived downgrade", () => {
+    expect(
+      mergeVerificationState("unverified-web-source", "unverified-web-source", {
+        priorGrounded: true,
+      }),
+    ).toBe("verified");
   });
 });
 
@@ -198,6 +216,102 @@ describe("reasoning atom persistence", () => {
         "nfpa",
         "upcodes",
       ]);
+    });
+  });
+
+  it("re-warm does not downgrade verified atom on failed re-fetch", async () => {
+    await withTestSchema(async ({ db }) => {
+      mocks.db = db;
+      const target: WebCodeReviewTarget = {
+        codeRef: "A117.1-1102.1",
+        edition: "A117.1 2017",
+        editionSlug: "a117-1-2017",
+        label: "A117.1 1102.1",
+        drivers: ["upcodes"],
+      };
+      await upsertReasoningAtomFromWebFetch({
+        jurisdictionKey: "austin_tx",
+        target,
+        result: {
+          text: "Accessible route shall connect to building entrance.",
+          sourceUrl: "https://upcodes.io/a117-1-2017",
+          retrievedAt: "2026-06-08T12:00:00.000Z",
+          edition: "A117.1 2017",
+          section: "A117.1-1102.1",
+          confidence: 0.9,
+          verified: true,
+          sourceName: "upcodes",
+        },
+      });
+
+      const atom = await upsertReasoningAtomFromWebFetch({
+        jurisdictionKey: "austin_tx",
+        target,
+        result: {
+          text: "Wrong page content without section match.",
+          sourceUrl: "https://upcodes.io/a117-1-2017/retry",
+          retrievedAt: "2026-06-08T13:00:00.000Z",
+          edition: "A117.1 2017",
+          section: "A117.1-1102.1",
+          confidence: 0.25,
+          verified: false,
+          sourceName: "upcodes",
+        },
+      });
+
+      expect(atom.verificationState).toBe("verified");
+      expect(atom.snippet).toContain("Accessible route");
+    });
+  });
+
+  it("recovers verified state when snippet and verified source pre-exist", async () => {
+    await withTestSchema(async ({ db }) => {
+      mocks.db = db;
+      const target: WebCodeReviewTarget = {
+        codeRef: "A117.1-1102.1",
+        edition: "A117.1 2017",
+        editionSlug: "a117-1-2017",
+        label: "A117.1 1102.1",
+        drivers: ["upcodes"],
+      };
+      const first = await upsertReasoningAtomFromWebFetch({
+        jurisdictionKey: "austin_tx",
+        target,
+        result: {
+          text: "Accessible route shall connect to building entrance.",
+          sourceUrl: "https://upcodes.io/a117-1-2017",
+          retrievedAt: "2026-06-08T12:00:00.000Z",
+          edition: "A117.1 2017",
+          section: "A117.1-1102.1",
+          confidence: 0.9,
+          verified: true,
+          sourceName: "upcodes",
+        },
+      });
+      expect(first.verificationState).toBe("verified");
+
+      // Simulate prior bad upsert that clobbered verification_state only.
+      await db
+        .update(reasoningAtoms)
+        .set({ verificationState: "unverified-web-source" })
+        .where(eq(reasoningAtoms.id, first.id));
+
+      const recovered = await upsertReasoningAtomFromWebFetch({
+        jurisdictionKey: "austin_tx",
+        target,
+        result: {
+          text: "Wrong page content without section match.",
+          sourceUrl: "https://upcodes.io/a117-1-2017/retry",
+          retrievedAt: "2026-06-08T13:00:00.000Z",
+          edition: "A117.1 2017",
+          section: "A117.1-1102.1",
+          confidence: 0.25,
+          verified: false,
+          sourceName: "upcodes",
+        },
+      });
+
+      expect(recovered.verificationState).toBe("verified");
     });
   });
 });
