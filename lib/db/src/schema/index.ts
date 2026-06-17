@@ -58,6 +58,7 @@ export * from "./brokerageBriefRuns";
 export * from "./brokerageWorkspaces";
 export * from "./placeLayerSnapshots";
 export * from "./brokerageWallets";
+export * from "./brokerageUserProfiles";
 export * from "./gtmEvents";
 export * from "./gtmConsent";
 export * from "./userAuthCredentials";

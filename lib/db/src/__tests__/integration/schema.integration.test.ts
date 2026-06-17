@@ -98,6 +98,7 @@ describe("lib/db schema integration", () => {
         "brokerage_brief_runs",
         // Task #29 — one install id maps to exactly one authenticated user.
         "brokerage_install_claims",
+        "brokerage_user_profiles",
         "brokerage_wallet_ledger",
         "brokerage_wallets",
         "brokerage_workspace_attachments",

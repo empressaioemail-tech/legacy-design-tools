@@ -20,14 +20,11 @@ import { usgsGroundwaterAdapter } from "./federal/usgs-groundwater";
 import { usgsSeismicAdapter } from "./federal/usgs-seismic";
 import { fccBroadbandAdapter } from "./federal/fcc-broadband";
 import {
-  regridParcelsAdapter,
-  regridZoningAdapter,
-} from "./national/regrid";
-import {
   cotalityParcelsAdapter,
   cotalityZoningAdapter,
 } from "./national/cotality";
 import { COTALITY_EXTENDED_ADAPTERS } from "./national/cotalityExtended";
+import { COTALITY_INVESTOR_DEPTH_ADAPTERS } from "./national/cotalityInvestorDepth";
 import {
   utahDemAdapter,
   utahParcelsAdapter,
@@ -117,19 +114,11 @@ export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   // in when the operator flips `FCC_ENABLED=true` on the Cloud Run
   // service env.
   ...(isFccEnabled() ? [fccBroadbandAdapter] : []),
-  // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national
-  // parcel + zoning baseline. Tier-housed under FEDERAL_ADAPTERS
-  // for cache-predicate reuse (the runner's default cache predicate
-  // caches federal-tier outcomes). The operator-visible attribution
-  // is source_kind = "national-aggregator", which the UI reads.
-  regridParcelsAdapter,
-  regridZoningAdapter,
-  // 2026-06-06 cotality parcel provider decision — Cotality selected as
-  // launch provider for parcel/zoning (Regrid kept as interim fallback).
-  // COTALITY_* creds absent → clean no-coverage (Regrid fallback).
+  // 2026-06-17 investor radar — Cotality is the sole national parcel spine.
   cotalityParcelsAdapter,
   cotalityZoningAdapter,
   ...COTALITY_EXTENDED_ADAPTERS,
+  ...COTALITY_INVESTOR_DEPTH_ADAPTERS,
 ];
 
 // TODO: state-tier gates on localKey not stateKey — see PL-04

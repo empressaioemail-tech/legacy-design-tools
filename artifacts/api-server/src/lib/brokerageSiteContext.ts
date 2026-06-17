@@ -1,83 +1,49 @@
 /**
- * Property Brief site-context layers — federal environmental + Regrid
- * parcel/zoning for the Chrome extension wedge (no engagement /
+ * Property Brief site-context layers — federal environmental + Cotality
+ * investor depth for the Chrome extension wedge (no engagement /
  * briefing_sources row).
  *
  * Read order: permanent place_layer_snapshots → adapter_response_cache
  * (via runAdapters cache) → live upstream.
  *
- * Federal set mirrors `FEDERAL_ADAPTERS` minus FCC (QA-22) and matches
- * the nationwide generate-layers federal trio: FEMA, USGS NED, EPA
- * EJScreen, plus Regrid parcel/zoning. USDA / USFWS adapters are not
- * yet in `@workspace/adapters` — track under PB-003 follow-up.
+ * Regrid was purged 2026-06-17 — Cotality is the sole national parcel spine.
  */
 
 import {
   runAdapters,
   resolveJurisdiction,
   pickFirstString,
-  PARCEL_ID_KEYS,
-  ZONING_CODE_KEYS,
-  ZONING_DESC_KEYS,
-  isTceqEdwardsEnabled,
   type Adapter,
   type AdapterRunOutcome,
   type AdapterResult,
 } from "@workspace/adapters";
-import { femaNfhlAdapter } from "@workspace/adapters/federal/fema-nfhl";
-import { usgsNedAdapter } from "@workspace/adapters/federal/usgs-ned";
-import { epaEjscreenAdapter } from "@workspace/adapters/federal/epa-ejscreen";
 import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
-import {
-  regridParcelsAdapter,
-  regridZoningAdapter,
-} from "@workspace/adapters/national/regrid";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
-import { texasEdwardsAquiferAdapter } from "@workspace/adapters/state/texas";
+import type { EngineHonesty } from "@workspace/engine-core";
 import { createAdapterResponseCache } from "./adapterCache";
 import { placeKeyFromCoords } from "./placeLayerUtils";
 import {
   readPlaceLayerSnapshot,
   writePlaceLayerSnapshot,
 } from "./placeLayerSnapshots";
+import {
+  adaptersForInvestorTier,
+  depthMeterAllowance,
+  isMeteredCotalityAdapter,
+  resolveInvestorPackageTier,
+  type InvestorPackageTier,
+} from "./brokerageTierGate";
 
 /** Wall-clock budget for one brief site-context fetch (all adapters). */
-export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 30_000;
+export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 45_000;
 
-/** Premium Regrid `fields` keys beyond pilot GIS column names. */
-const REGRID_PARCEL_ID_KEYS = [
-  ...PARCEL_ID_KEYS,
+const COTALITY_PARCEL_ID_KEYS = [
   "parcelnumb",
   "parcelnum",
-  "state_parcelnum",
-  "account_num",
+  "apn",
+  "APN",
+  "clip",
 ] as const;
-
-const REGRID_ZONING_CODE_KEYS = [
-  ...ZONING_CODE_KEYS,
-  "zoning",
-  "zoning_code",
-] as const;
-
-const REGRID_ZONING_DESC_KEYS = [
-  ...ZONING_DESC_KEYS,
-  "zoning_description",
-  "zoning_desc",
-] as const;
-
-function brokerageSiteContextAdapters(): readonly Adapter[] {
-  const adapters: Adapter[] = [
-    femaNfhlAdapter,
-    usgsNedAdapter,
-    epaEjscreenAdapter,
-    regridParcelsAdapter,
-    regridZoningAdapter,
-  ];
-  if (isTceqEdwardsEnabled()) {
-    adapters.push(texasEdwardsAquiferAdapter);
-  }
-  return adapters;
-}
 
 export interface BrokerageSiteContextLayer {
   layerKind: string;
@@ -90,33 +56,15 @@ export interface BrokerageSiteContextLayer {
   payload?: Record<string, unknown>;
   fromArchive?: boolean;
   error?: { code: string; message: string };
+  /** Sealed envelope honesty slice per layer (vintage + confidence). */
+  engineHonesty?: EngineHonesty | null;
 }
 
 export interface BrokerageSiteContext {
   layers: BrokerageSiteContextLayer[];
   placeKey: string;
-}
-
-/** Extension / workspace read — omits GeoJSON-scale `payload` blobs. */
-export function stripSiteContextForClient(
-  ctx: BrokerageSiteContext,
-): BrokerageSiteContext {
-  return {
-    placeKey: ctx.placeKey,
-    layers: ctx.layers.map(({ payload: _payload, ...layer }) => layer),
-  };
-}
-
-/** Strip layer payloads from a stored brief run payload before API response. */
-export function stripBriefPayloadForClient<T extends Record<string, unknown>>(
-  brief: T,
-): T {
-  const raw = brief.siteContext;
-  if (!raw || typeof raw !== "object") return brief;
-  return {
-    ...brief,
-    siteContext: stripSiteContextForClient(raw as BrokerageSiteContext),
-  };
+  parcelClip?: string | null;
+  packageTier?: InvestorPackageTier;
 }
 
 export interface FetchBrokerageSiteContextInput {
@@ -125,48 +73,105 @@ export interface FetchBrokerageSiteContextInput {
   address?: string;
   jurisdictionCity?: string | null;
   jurisdictionState?: string | null;
+  packageTier?: InvestorPackageTier | null;
+  brokerageAuthTier?: "dev" | "extension_public" | "user" | null;
+  depthMeterRemaining?: number | null;
 }
 
-function summarizeRegridPayload(
+function layerHonestyFromPayload(
+  payload: Record<string, unknown> | undefined,
+  adapterKey: string,
+): EngineHonesty | null {
+  if (!payload) return null;
+  const vintage =
+    typeof payload.snapshotDate === "string"
+      ? payload.snapshotDate
+      : typeof payload.retrievedAt === "string"
+        ? payload.retrievedAt
+        : null;
+  return {
+    confidence: { value: 0.72, kind: "asserted" },
+    dataVintage: vintage,
+    coverage: { degraded: false },
+    source: { adapter: adapterKey },
+  };
+}
+
+function summarizeCotalityPayload(
   layerKind: string,
   payload: Record<string, unknown>,
 ): string | null {
-  if (layerKind === "regrid-parcel") {
+  const clip = payload.clip;
+  if (layerKind === "cotality-parcel") {
     const parcel = payload.parcel as
-      | { properties?: { fields?: Record<string, unknown> } }
+      | { properties?: Record<string, unknown> }
       | undefined;
-    const fields = parcel?.properties?.fields;
-    if (!fields) return null;
-    const apn = pickFirstString(fields, REGRID_PARCEL_ID_KEYS);
-    const acres =
-      typeof fields.ll_gisacre === "number" ? fields.ll_gisacre : null;
-    const owner = pickFirstString(fields, ["owner", "ownername", "ownfrst"]);
-    const landUse = pickFirstString(fields, [
-      "usecode",
-      "usedesc",
-      "landuse",
-      "land_use",
-    ]);
-    const parts: string[] = [];
+    const apn = pickFirstString(parcel?.properties ?? {}, COTALITY_PARCEL_ID_KEYS);
+    const parts = ["Parcel polygon mapped"];
     if (apn) parts.push(`APN ${apn}`);
-    if (acres !== null) parts.push(`${acres.toFixed(2)} ac`);
-    if (landUse) parts.push(landUse);
-    if (owner) parts.push(`Owner: ${owner}`);
-    return parts.length ? parts.join(" · ") : "Parcel mapped";
+    if (clip) parts.push(`CLIP ${clip}`);
+    return parts.join(" · ");
   }
-  if (layerKind === "regrid-zoning") {
+  if (layerKind === "cotality-zoning") {
     const zoning = payload.zoning as
-      | { properties?: { fields?: Record<string, unknown> } }
+      | { properties?: Record<string, unknown> }
       | undefined;
-    const fields = zoning?.properties?.fields;
-    if (!fields) return null;
-    const code = pickFirstString(fields, REGRID_ZONING_CODE_KEYS);
-    const desc = pickFirstString(fields, REGRID_ZONING_DESC_KEYS);
-    const subtype = pickFirstString(fields, ["zoning_subtype", "zoning_type"]);
-    if (code && desc) {
-      return subtype ? `${code} — ${desc} (${subtype})` : `${code} — ${desc}`;
+    const code = pickFirstString(zoning?.properties ?? {}, [
+      "zoning",
+      "zoningCode",
+      "code",
+    ]);
+    const desc = pickFirstString(zoning?.properties ?? {}, [
+      "zoning_description",
+      "zoningDescription",
+      "description",
+    ]);
+    if (code && desc) return `${code} — ${desc}`;
+    return code ?? desc ?? "Zoning from Cotality site-location";
+  }
+  if (layerKind === "cotality-property") {
+    return "Owner, sale, tax, AVM, comparables, and transaction history (cited)";
+  }
+  if (layerKind === "cotality-rent-avm") {
+    return "Rent AVM + rental trend cite (not an opinion of value)";
+  }
+  if (layerKind === "cotality-liens-mortgage-tax") {
+    const mud = payload.mudPidAssessment as
+      | { mudPidDetected?: boolean }
+      | undefined;
+    if (mud?.mudPidDetected) {
+      return "Tax/liens cite — MUD/PID special-district assessment flags present";
     }
-    return code ?? desc ?? subtype ?? null;
+    return "Liens, mortgage, and tax assessment cite";
+  }
+  if (layerKind === "cotality-permits") {
+    return "Building permits on this parcel (underwriting depth)";
+  }
+  if (layerKind === "cotality-propensity") {
+    return "Propensity scores (underwriting depth, not a lead feed)";
+  }
+  if (layerKind === "cotality-owner-occupancy") {
+    return "Owner-occupancy / absentee indicator (underwriting depth)";
+  }
+  if (layerKind === "cotality-climate" || layerKind === "cotality-hazards") {
+    return "Modeled peril / flood depth at return periods (FEMA stays free baseline)";
+  }
+  if (layerKind === "cotality-replacement-cost") {
+    return "Replacement cost cite for insurance math";
+  }
+  if (layerKind === "cotality-sinkhole") {
+    return "Karst / sinkhole integrated risk cite";
+  }
+  if (layerKind === "cotality-foundation") {
+    return "Foundation type cite (insurability depth)";
+  }
+  if (layerKind === "opportunity-zone") {
+    const inOz = payload.inOpportunityZone === true;
+    const tract = payload.tractGeoid;
+    const round = payload.ozRound ?? "oz-1.0";
+    return inOz
+      ? `In OZ tract ${tract ?? "unknown"} (${round})`
+      : `Not in OZ (${round} list)`;
   }
   return null;
 }
@@ -178,12 +183,13 @@ function layerSummary(
   return (
     summarizeFederalPayload(layerKind, payload) ??
     summarizeStatePayload(layerKind, payload) ??
-    summarizeRegridPayload(layerKind, payload)
+    summarizeCotalityPayload(layerKind, payload)
   );
 }
 
 function adapterSourceKind(adapter: Adapter): AdapterResult["sourceKind"] {
-  if (adapter.adapterKey.startsWith("regrid:")) return "national-aggregator";
+  if (adapter.adapterKey.startsWith("cotality:")) return "national-aggregator";
+  if (adapter.adapterKey.startsWith("national:")) return "federal-adapter";
   if (adapter.tier === "state") return "state-adapter";
   return "federal-adapter";
 }
@@ -209,6 +215,10 @@ function outcomeToLayer(
       summary: layerSummary(result.layerKind, result.payload),
       snapshotDate: result.snapshotDate,
       payload: result.payload,
+      engineHonesty: layerHonestyFromPayload(
+        result.payload,
+        outcome.adapterKey,
+      ),
     };
   }
 
@@ -306,6 +316,50 @@ function emptyArchiveResult(adapter: Adapter, archivedAt: string): AdapterResult
   };
 }
 
+function applyDepthMeter(
+  adapters: readonly Adapter[],
+  depthMeterRemaining: number | null | undefined,
+): readonly Adapter[] {
+  if (depthMeterRemaining == null) return adapters;
+  let budget = depthMeterRemaining;
+  return adapters.filter((a) => {
+    if (!isMeteredCotalityAdapter(a.adapterKey)) return true;
+    if (budget <= 0) return false;
+    budget -= 1;
+    return true;
+  });
+}
+
+export function brokerageSiteContextAdapters(
+  tier: InvestorPackageTier = "free",
+): readonly Adapter[] {
+  return adaptersForInvestorTier(tier);
+}
+
+/** Extension / workspace read — omits GeoJSON-scale `payload` blobs. */
+export function stripSiteContextForClient(
+  ctx: BrokerageSiteContext,
+): BrokerageSiteContext {
+  return {
+    placeKey: ctx.placeKey,
+    parcelClip: ctx.parcelClip,
+    packageTier: ctx.packageTier,
+    layers: ctx.layers.map(({ payload: _payload, ...layer }) => layer),
+  };
+}
+
+/** Strip layer payloads from a stored brief run payload before API response. */
+export function stripBriefPayloadForClient<T extends Record<string, unknown>>(
+  brief: T,
+): T {
+  const raw = brief.siteContext;
+  if (!raw || typeof raw !== "object") return brief;
+  return {
+    ...brief,
+    siteContext: stripSiteContextForClient(raw as BrokerageSiteContext),
+  };
+}
+
 export async function fetchBrokerageSiteContext(
   input: FetchBrokerageSiteContextInput,
 ): Promise<BrokerageSiteContext> {
@@ -315,7 +369,13 @@ export async function fetchBrokerageSiteContext(
     return { layers: [], placeKey };
   }
 
-  const adapters = brokerageSiteContextAdapters();
+  const packageTier = resolveInvestorPackageTier({
+    tier: input.packageTier,
+    brokerageAuthTier: input.brokerageAuthTier,
+  });
+
+  let adapters = brokerageSiteContextAdapters(packageTier);
+  adapters = applyDepthMeter(adapters, input.depthMeterRemaining ?? depthMeterAllowance(packageTier));
 
   const jurisdiction = resolveJurisdiction({
     jurisdictionCity: input.jurisdictionCity,
@@ -352,6 +412,8 @@ export async function fetchBrokerageSiteContext(
             latitude,
             longitude,
             address: input.address ?? null,
+            city: input.jurisdictionCity ?? null,
+            state: input.jurisdictionState ?? null,
           },
           jurisdiction: { ...jurisdiction, partnerCity },
           signal: budgetAc.signal,
@@ -405,88 +467,40 @@ export async function fetchBrokerageSiteContext(
     );
   });
 
+  const layers = mergedOutcomes.map((o) =>
+    outcomeToLayer(o, { fromArchive: archived.has(o.adapterKey) }),
+  );
+
+  let parcelClip: string | null = null;
+  for (const layer of layers) {
+    if (layer.status !== "ok" || !layer.payload) continue;
+    const clip = layer.payload.clip;
+    if (typeof clip === "string" && clip.trim()) {
+      parcelClip = clip.trim();
+      break;
+    }
+  }
+
   return {
     placeKey,
-    layers: mergedOutcomes.map((o) =>
-      outcomeToLayer(o, { fromArchive: archived.has(o.adapterKey) }),
-    ),
+    parcelClip,
+    packageTier,
+    layers,
   };
-}
-
-function regridParcelDetailLines(
-  payload: Record<string, unknown>,
-): string[] {
-  const parcel = payload.parcel as
-    | { properties?: { fields?: Record<string, unknown> } }
-    | undefined;
-  const fields = parcel?.properties?.fields;
-  if (!fields) return [];
-
-  const lines: string[] = [];
-  const apn = pickFirstString(fields, REGRID_PARCEL_ID_KEYS);
-  const llUuid = pickFirstString(fields, ["ll_uuid", "llUuid"]);
-  const owner = pickFirstString(fields, ["owner", "ownername", "ownfrst"]);
-  const landUse = pickFirstString(fields, [
-    "usecode",
-    "usedesc",
-    "landuse",
-    "land_use",
-  ]);
-  const acres =
-    typeof fields.ll_gisacre === "number" ? fields.ll_gisacre : null;
-  const parcelZoning = pickFirstString(fields, REGRID_ZONING_CODE_KEYS);
-
-  if (apn) lines.push(`APN: ${apn}`);
-  if (llUuid) lines.push(`Regrid ll_uuid: ${llUuid}`);
-  if (acres !== null) lines.push(`Area: ${acres.toFixed(2)} acres`);
-  if (landUse) lines.push(`Land use: ${landUse}`);
-  if (owner) lines.push(`Owner: ${owner}`);
-  if (parcelZoning) lines.push(`Zoning (parcel field): ${parcelZoning}`);
-  return lines;
-}
-
-function regridZoningDetailLines(
-  payload: Record<string, unknown>,
-): string[] {
-  const zoning = payload.zoning as
-    | { properties?: { fields?: Record<string, unknown> } }
-    | undefined;
-  const fields = zoning?.properties?.fields;
-  if (!fields) return [];
-
-  const lines: string[] = [];
-  const code = pickFirstString(fields, REGRID_ZONING_CODE_KEYS);
-  const desc = pickFirstString(fields, REGRID_ZONING_DESC_KEYS);
-  const subtype = pickFirstString(fields, ["zoning_subtype", "zoning_type"]);
-  const llUuid = pickFirstString(fields, ["ll_uuid", "llUuid"]);
-
-  if (code) lines.push(`Zoning code: ${code}`);
-  if (desc) lines.push(`Zoning description: ${desc}`);
-  if (subtype) lines.push(`Zoning subtype: ${subtype}`);
-  if (llUuid) lines.push(`Regrid ll_uuid: ${llUuid}`);
-  return lines;
 }
 
 function layerDetailLines(layer: BrokerageSiteContextLayer): string[] {
   if (layer.status !== "ok" || !layer.payload) {
     return layer.summary ? [layer.summary] : [];
   }
-
-  if (layer.layerKind === "regrid-parcel") {
-    const detail = regridParcelDetailLines(layer.payload);
-    return detail.length ? detail : layer.summary ? [layer.summary] : [];
-  }
-  if (layer.layerKind === "regrid-zoning") {
-    const detail = regridZoningDetailLines(layer.payload);
-    return detail.length ? detail : layer.summary ? [layer.summary] : [];
-  }
   const summary =
-    summarizeFederalPayload(layer.layerKind, layer.payload) ??
-    summarizeStatePayload(layer.layerKind, layer.payload);
-  return summary ? [summary] : layer.summary ? [layer.summary] : [];
+    layer.summary ??
+    layerSummary(layer.layerKind, layer.payload) ??
+    null;
+  return summary ? [summary] : [];
 }
 
-/** Plain-text block for Grok prompts (ok layers with field-level Regrid detail). */
+/** Plain-text block for Grok prompts (ok layers with Cotality/federal summaries). */
 export function formatSiteContextForLlm(ctx: BrokerageSiteContext): string {
   const lines: string[] = [];
   for (const layer of ctx.layers) {

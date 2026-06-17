@@ -12,15 +12,14 @@ describe("buildBriefAtomProjection", () => {
         placeKey: "coord:30.11000:-97.32000",
         layers: [
           {
-            layerKind: "regrid-parcel",
-            adapterKey: "regrid:parcels",
+            layerKind: "cotality-parcel",
+            adapterKey: "cotality:parcels",
             tier: "federal",
             status: "ok",
             payload: {
+              clip: "1234567890",
               parcel: {
-                properties: {
-                  fields: { ll_uuid: "parcel-uuid-1", parcelnumb: "R1" },
-                },
+                properties: { parcelnumb: "R1" },
               },
             },
           },

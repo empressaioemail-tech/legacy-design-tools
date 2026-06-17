@@ -332,13 +332,15 @@ describe("Regrid adapters — SCOPE B", () => {
     }
   });
 
-  it("[9] registry shape — ALL_ADAPTERS contains both regrid adapters in the federal block", () => {
+  it("[9] registry shape — Regrid purged; Cotality is the national parcel spine", () => {
     const keys = ALL_ADAPTERS.map((a) => a.adapterKey);
-    expect(keys).toContain("regrid:parcels");
-    expect(keys).toContain("regrid:zoning");
+    expect(keys).not.toContain("regrid:parcels");
+    expect(keys).not.toContain("regrid:zoning");
+    expect(keys).toContain("cotality:parcels");
+    expect(keys).toContain("cotality:zoning");
     const federalKeys = FEDERAL_ADAPTERS.map((a) => a.adapterKey);
-    expect(federalKeys).toContain("regrid:parcels");
-    expect(federalKeys).toContain("regrid:zoning");
+    expect(federalKeys).toContain("cotality:parcels");
+    expect(federalKeys).toContain("cotality:rent-avm");
   });
 
   it("[10] missing REGRID_API_KEY — surfaces as upstream-error with diagnostic message", async () => {

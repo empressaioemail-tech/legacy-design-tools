@@ -172,6 +172,7 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "brokerage_workspaces",
   "brokerage_wallet_ledger",
   "brokerage_wallets",
+  "brokerage_user_profiles",
   "gtm_events",
   "gtm_consent",
   "user_auth_credentials",
