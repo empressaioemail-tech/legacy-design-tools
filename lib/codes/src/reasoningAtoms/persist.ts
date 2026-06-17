@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, reasoningAtoms, type ReasoningSourceLink } from "@workspace/db";
 import type { WebCodeFetchResult } from "../webCodeFetch/types";
 import type { WebCodeReviewTarget } from "../webCodeFetch/types";
@@ -277,6 +277,17 @@ export async function retrieveReasoningAtomsForRefs(args: {
       ),
     );
   return rows.map(mapRow);
+}
+
+/** Count persisted reasoning atoms for coverage tier / warmup verification. */
+export async function countReasoningAtomsForJurisdiction(
+  jurisdictionKey: string,
+): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(reasoningAtoms)
+    .where(eq(reasoningAtoms.jurisdictionKey, jurisdictionKey));
+  return Number(rows[0]?.n ?? 0);
 }
 
 function mapRow(row: typeof reasoningAtoms.$inferSelect): ReasoningAtomRecord {

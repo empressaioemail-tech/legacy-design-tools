@@ -81,6 +81,7 @@ export {
   upsertReasoningAtomCorpusOverlay,
   upsertReasoningAtomDeeplinkOnly,
   retrieveReasoningAtomsForRefs,
+  countReasoningAtomsForJurisdiction,
   supplementCodeSectionsWithReasoningGrounding,
   supplementCodeSectionsFromWeb,
   type ReasoningAtomRecord,

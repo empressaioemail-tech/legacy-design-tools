@@ -17,6 +17,7 @@ export {
   upsertReasoningAtomCorpusOverlay,
   upsertReasoningAtomDeeplinkOnly,
   retrieveReasoningAtomsForRefs,
+  countReasoningAtomsForJurisdiction,
   webResultToSourceLink,
   verificationStateFromResult,
 } from "./persist";
