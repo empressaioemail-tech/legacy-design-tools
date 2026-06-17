@@ -101,8 +101,39 @@ export function buildRulesLaySummary(input: {
   const aduHit = hasAtomTopic(input.atoms, /adu|accessory|dwelling/i);
   const strHit = hasAtomTopic(input.atoms, /str|short.?term|rental/i);
   const setbackHit = hasAtomTopic(input.atoms, /setback|addition|pool/i);
+  const rehabHit = hasAtomTopic(input.atoms, /rehab|remodel|renovation|gut/i);
 
   const verdicts: LayVerdict[] = [
+    {
+      id: "rehab_reality",
+      label: "Rehab reality",
+      status: !inCorpus ? "unknown" : rehabHit ? "maybe" : "unknown",
+      oneLine: !inCorpus
+        ? "Code coverage is limited — rehab triggers are unknown."
+        : rehabHit
+          ? "Adopted code mentions rehab/remodel topics — permit path still needs city check."
+          : "No strong rehab-specific code hits in our scan.",
+      detailParagraph: !inCorpus
+        ? "Without corpus coverage we cannot cite what a gut rehab triggers. Ask planning for scope before budgeting."
+        : rehabHit
+          ? "Indexed code snippets touch renovation/remodel rules. Structural, MEP, and historic overlays may add requirements."
+          : "Our scan did not surface explicit rehab chapters — that does not mean permits are waived.",
+    },
+    {
+      id: "can_i_add_unit",
+      label: "Can I add a unit?",
+      status: !inCorpus ? "unknown" : aduHit ? "maybe" : "unknown",
+      oneLine: !inCorpus
+        ? "We do not have enough local code coverage to say yet."
+        : aduHit
+          ? "Local rules mention ADUs — zoning still needs a city check."
+          : "No clear ADU rules surfaced in our search.",
+      detailParagraph: !inCorpus
+        ? "Hauska could not match this address to a fully indexed city code library. Ask your agent or city planning before assuming an ADU is allowed."
+        : aduHit
+          ? "Adopted code snippets reference accessory dwelling rules. Lot size, zoning district, and utility capacity still matter."
+          : "Our standard property-intel scan did not pull strong ADU provisions. That does not prove ADUs are banned.",
+    },
     {
       id: "adu",
       label: "ADU / guest house",
@@ -228,7 +259,9 @@ export async function generateLaySummary(input: {
     "NO statute numbers, NO atom IDs, NO legal jargon dumps.",
     "Each verdict uses plain English with implied confidence in status.",
     "status must be one of: yes, maybe, no, unknown.",
-    "Cover at minimum these verdict ids: adu, flood, major_restrictions, corpus_coverage.",
+    "Cover at minimum these verdict ids: adu, rehab_reality, can_i_add_unit, flood, major_restrictions, corpus_coverage.",
+    "rehab_reality: what a gut rehab likely triggers in adopted code (cited topics only).",
+    "can_i_add_unit: ADU/guest-house feasibility from code hits — zoning still needs city check.",
     "For flood: use site context when provided; if no flood data, status=unknown.",
     "For corpus_coverage: be honest about in_corpus/partial/no_match.",
     'Respond JSON only: {"verdicts":[{"id":string,"label":string,"status":"yes"|"maybe"|"no"|"unknown","oneLine":string,"detailParagraph":string}]}',

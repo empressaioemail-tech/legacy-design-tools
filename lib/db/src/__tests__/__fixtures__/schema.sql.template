@@ -240,6 +240,20 @@ CREATE TABLE @@SCHEMA@@.brokerage_install_claims (
 );
 
 
+-- Name: brokerage_user_profiles; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_user_profiles (
+    owner_user_id text NOT NULL,
+    tenant_slug text DEFAULT 'default'::text NOT NULL,
+    package_tier text DEFAULT 'free'::text NOT NULL,
+    buy_box_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    investor_profile_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    dialogue_by_clip_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    depth_meter_remaining integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: brokerage_wallet_ledger; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.brokerage_wallet_ledger (
@@ -1430,6 +1444,12 @@ ALTER TABLE ONLY @@SCHEMA@@.brokerage_install_claims
     ADD CONSTRAINT brokerage_install_claims_pkey PRIMARY KEY (install_id);
 
 
+-- Name: brokerage_user_profiles brokerage_user_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_user_profiles
+    ADD CONSTRAINT brokerage_user_profiles_pkey PRIMARY KEY (owner_user_id);
+
+
 -- Name: brokerage_wallet_ledger brokerage_wallet_ledger_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.brokerage_wallet_ledger
@@ -1956,6 +1976,11 @@ CREATE INDEX brokerage_brief_runs_owner_user_id_idx ON @@SCHEMA@@.brokerage_brie
 -- Name: brokerage_install_claims_owner_user_id_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX brokerage_install_claims_owner_user_id_idx ON @@SCHEMA@@.brokerage_install_claims USING btree (owner_user_id);
+
+
+-- Name: brokerage_user_profiles_tenant_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_user_profiles_tenant_idx ON @@SCHEMA@@.brokerage_user_profiles USING btree (tenant_slug);
 
 
 -- Name: brokerage_wallet_ledger_install_created_idx; Type: INDEX; Schema: public; Owner: -

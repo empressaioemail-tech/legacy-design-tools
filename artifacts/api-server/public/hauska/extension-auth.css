@@ -1,0 +1,123 @@
+/* Hosted extension auth — layout only; tokens/components from hauska.css */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  background: linear-gradient(160deg, #ece6da, var(--bg) 60%);
+}
+
+.auth-shell {
+  width: 100%;
+  max-width: var(--panel-w);
+}
+
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-5);
+  text-align: center;
+}
+
+.auth-brand .brand {
+  gap: var(--sp-3);
+}
+
+.auth-brand .brand__name {
+  font-size: var(--fs-h2);
+}
+
+.auth-kicker {
+  margin-top: var(--sp-1);
+}
+
+.auth-card {
+  box-shadow: var(--elev-2);
+}
+
+.auth-card .t-h2 {
+  margin-bottom: var(--sp-2);
+}
+
+.auth-lead {
+  margin-bottom: var(--sp-5);
+}
+
+.auth-field {
+  margin-bottom: var(--sp-4);
+}
+
+.auth-label {
+  display: block;
+  font: var(--w-medium) var(--fs-cap)/var(--lh-cap) var(--font-sans);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-2);
+}
+
+.auth-input {
+  width: 100%;
+  font: var(--w-regular) var(--fs-body)/var(--lh-body) var(--font-sans);
+  color: var(--heading);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: var(--sp-2);
+}
+
+.auth-panel[hidden] {
+  display: none !important;
+}
+
+.auth-switch {
+  margin-top: var(--sp-5);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.auth-switch button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--brand);
+  font-weight: var(--w-semibold);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.auth-err {
+  min-height: 1.25rem;
+  margin-top: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--dead-solid);
+  text-align: center;
+}
+
+.auth-err.is-ok {
+  color: var(--text-muted);
+}
+
+.auth-foot {
+  margin-top: var(--sp-4);
+  text-align: center;
+  font-size: var(--fs-mini);
+  color: var(--text-faint);
+}

@@ -64,27 +64,23 @@ const hasDb = Boolean(
   process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
 );
 
-const regridOutcome = {
-  adapterKey: "regrid:parcels",
+const cotalityParcelOutcome = {
+  adapterKey: "cotality:parcels",
   tier: "federal",
-  layerKind: "regrid-parcel",
+  layerKind: "cotality-parcel",
   status: "ok" as const,
   result: {
-    adapterKey: "regrid:parcels",
+    adapterKey: "cotality:parcels",
     tier: "federal",
-    layerKind: "regrid-parcel",
+    layerKind: "cotality-parcel",
     sourceKind: "national-aggregator",
-    provider: "Regrid",
+    provider: "Cotality",
     snapshotDate: "2026-05-01T00:00:00.000Z",
     payload: {
       kind: "parcel",
+      clip: "1234567890",
       parcel: {
-        properties: {
-          fields: {
-            ll_uuid: "dossier-snap-uuid",
-            parcelnumb: "DS-001",
-          },
-        },
+        properties: { parcelnumb: "DS-001" },
       },
     },
   },
@@ -140,43 +136,28 @@ describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
     retrieveAtomsForQuestionMock.mockResolvedValue([]);
     runAdaptersMock.mockResolvedValue([
       femaOutcome,
+      cotalityParcelOutcome,
       {
-        adapterKey: "usgs:ned-elevation",
+        adapterKey: "cotality:zoning",
         tier: "federal",
-        layerKind: "usgs-ned-elevation",
-        status: "ok" as const,
-        result: {
-          adapterKey: "usgs:ned-elevation",
-          tier: "federal",
-          layerKind: "usgs-ned-elevation",
-          sourceKind: "federal-adapter",
-          provider: "USGS",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "elevation-point", elevationFeet: 700, units: "Feet" },
-        },
-      },
-      {
-        adapterKey: "epa:ejscreen",
-        tier: "federal",
-        layerKind: "epa-ejscreen-blockgroup",
-        status: "ok" as const,
-        result: {
-          adapterKey: "epa:ejscreen",
-          tier: "federal",
-          layerKind: "epa-ejscreen-blockgroup",
-          sourceKind: "federal-adapter",
-          provider: "EPA",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "ejscreen-blockgroup", demographicIndexPercentile: 55 },
-        },
-      },
-      regridOutcome,
-      {
-        adapterKey: "regrid:zoning",
-        tier: "federal",
-        layerKind: "regrid-zoning",
+        layerKind: "cotality-zoning",
         status: "no-coverage",
         error: { code: "no-coverage", message: "none" },
+      },
+      {
+        adapterKey: "national:opportunity-zone",
+        tier: "federal",
+        layerKind: "opportunity-zone",
+        status: "ok" as const,
+        result: {
+          adapterKey: "national:opportunity-zone",
+          tier: "federal",
+          layerKind: "opportunity-zone",
+          sourceKind: "federal-adapter",
+          provider: "CDFI Fund / HUD (OZ tracts)",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: { inOpportunityZone: false, ozRound: "oz-1.0" },
+        },
       },
     ]);
   });

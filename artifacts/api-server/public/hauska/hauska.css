@@ -1,0 +1,229 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600&family=Geist+Mono:wght@400;500;600&display=swap');
+
+/* ============================================================
+   Hauska design system — Edition 02
+   Editorial / quiet-luxury rework. One source of truth.
+   Layered: tokens -> base -> components -> utilities.
+   Page files own layout only; they consume tokens.
+   ============================================================ */
+
+@layer tokens, base, components, utilities;
+
+/* ------------------------------------------------------------
+   1. TOKENS
+   ------------------------------------------------------------ */
+@layer tokens {
+  :root {
+    /* --- color primitives: deep brand blue ramp --- */
+    --blue-50:#eef1f7;  --blue-100:#dde4ef; --blue-200:#bcc9e0;
+    --blue-300:#8ba3c8; --blue-400:#5e7aa6; --blue-500:#2f5e93;
+    --blue-600:#234a78; --blue-700:#1b3a5e; --blue-800:#16314f;
+    --blue-900:#0f2138;
+
+    /* --- color primitives: warm neutral ramp (paper -> ink) --- */
+    --slate-0:#fffdf8;  --slate-50:#f6f4ee; --slate-100:#efece3;
+    --slate-200:#e7e2d6; --slate-300:#d9d3c5; --slate-400:#a39c8f;
+    --slate-500:#746e62; --slate-600:#4c473f; --slate-700:#37332c;
+    --slate-800:#262420; --slate-900:#1c1b17;
+
+    /* --- color primitives: earthy verdict ramps --- */
+    --deal-50:#e9efe8;  --deal-500:#3f7256; --deal-600:#345f48; --deal-700:#2f5640;
+    --look-50:#f4eedd;  --look-500:#b07d2e; --look-600:#946722; --look-700:#7e571a;
+    --dead-50:#f3e6e2;  --dead-500:#a6433c; --dead-600:#8c3631; --dead-700:#7c2d28;
+
+    /* --- spacing scale: 4px base --- */
+    --sp-1:4px;  --sp-2:8px;  --sp-3:12px; --sp-4:16px; --sp-5:20px;
+    --sp-6:24px; --sp-7:32px; --sp-8:40px; --sp-9:48px; --sp-10:64px; --sp-12:96px;
+
+    /* --- radius scale (tightened, architectural) --- */
+    --r-sm:6px; --r-md:8px; --r-lg:10px; --r-xl:12px; --r-2xl:16px; --r-pill:999px;
+
+    /* --- type: family --- */
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-display: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* --- type: weights --- */
+    --w-regular:400; --w-medium:500; --w-semibold:600; --w-bold:700; --w-black:800;
+
+    /* --- type: size / line-height pairs --- */
+    --fs-display:60px; --lh-display:1.02;
+    --fs-h1:32px;      --lh-h1:1.12;
+    --fs-h2:21px;      --lh-h2:1.2;
+    --fs-h3:16px;      --lh-h3:1.3;
+    --fs-lg:18px;      --lh-lg:1.6;
+    --fs-body:14px;    --lh-body:1.55;
+    --fs-sm:13px;      --lh-sm:1.5;
+    --fs-cap:12px;     --lh-cap:1.45;
+    --fs-mini:11px;    --lh-mini:1.4;
+
+    /* --- type: tracking --- */
+    --ls-tight:-0.03em; --ls-snug:-0.015em; --ls-flat:0; --ls-wide:0.08em; --ls-wider:0.14em;
+
+    /* --- elevation (soft, no glow) --- */
+    --elev-1:0 1px 2px rgba(28,27,23,.05);
+    --elev-2:0 12px 30px -16px rgba(28,27,23,.22);
+    --elev-3:0 32px 60px -36px rgba(28,27,23,.40);
+    --elev-brand:0 1px 2px rgba(28,27,23,.10);
+
+    /* --- motion --- */
+    --ease:cubic-bezier(.4,0,.2,1); --dur:.16s;
+
+    /* --- layout constants --- */
+    --panel-w:380px;
+
+    /* ---------- SEMANTIC ALIASES ---------- */
+    --bg:var(--slate-50);
+    --surface:var(--slate-0);
+    --surface-2:var(--slate-100);
+    --border:var(--slate-200);
+    --border-strong:var(--slate-300);
+
+    --heading:var(--slate-900);
+    --text:var(--slate-600);
+    --text-muted:var(--slate-500);
+    --text-faint:var(--slate-400);
+
+    --brand:var(--blue-600);
+    --brand-hover:var(--blue-700);
+    --brand-strong:var(--blue-700);
+    --brand-tint:var(--blue-50);
+    --brand-tint-border:var(--blue-100);
+    --on-brand:#ffffff;
+    --mark-accent:var(--blue-400);
+
+    --deal-fg:var(--deal-700);   --deal-bg:var(--deal-50);   --deal-solid:var(--deal-500);
+    --look-fg:var(--look-700);   --look-bg:var(--look-50);   --look-solid:var(--look-500);
+    --dead-fg:var(--dead-700);   --dead-bg:var(--dead-50);   --dead-solid:var(--dead-500);
+  }
+}
+
+/* ------------------------------------------------------------
+   2. BASE
+   ------------------------------------------------------------ */
+@layer base {
+  *,*::before,*::after { box-sizing:border-box; }
+  html,body { margin:0; }
+  body {
+    font-family:var(--font-sans);
+    color:var(--heading);
+    background:var(--bg);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  h1,h2,h3,p { margin:0; }
+  a { color:inherit; }
+  button { font:inherit; }
+  ::selection { background:var(--brand); color:#fff; }
+}
+
+/* ------------------------------------------------------------
+   3. COMPONENTS
+   ------------------------------------------------------------ */
+@layer components {
+
+  /* --- type roles --- */
+  .t-display { font:var(--w-black) var(--fs-display)/var(--lh-display) var(--font-display); letter-spacing:var(--ls-tight); color:var(--heading); }
+  .t-h1 { font:var(--w-bold) var(--fs-h1)/var(--lh-h1) var(--font-display); letter-spacing:var(--ls-snug); color:var(--heading); }
+  .t-h2 { font:var(--w-bold) var(--fs-h2)/var(--lh-h2) var(--font-sans); letter-spacing:var(--ls-snug); color:var(--heading); }
+  .t-h3 { font:var(--w-bold) var(--fs-h3)/var(--lh-h3) var(--font-sans); letter-spacing:var(--ls-snug); color:var(--heading); }
+  .t-lead { font:var(--w-regular) var(--fs-lg)/var(--lh-lg) var(--font-sans); color:var(--text); }
+  .t-body { font:var(--w-regular) var(--fs-body)/var(--lh-body) var(--font-sans); color:var(--text); }
+  .t-cap { font:var(--w-medium) var(--fs-cap)/var(--lh-cap) var(--font-sans); color:var(--text-muted); }
+  .t-overline { font:var(--w-semibold) var(--fs-mini)/var(--lh-mini) var(--font-mono); letter-spacing:var(--ls-wide); text-transform:uppercase; color:var(--text-faint); }
+
+  /* --- brand lockup + radar-sweep mark --- */
+  .brand { display:inline-flex; align-items:center; gap:var(--sp-2); }
+  .brand__name { font:var(--w-bold) var(--fs-h3)/1 var(--font-display); letter-spacing:var(--ls-snug); color:var(--heading); }
+  .mark { color:var(--brand); width:var(--mark-size,26px); height:var(--mark-size,26px); flex:none; }
+  .mark .ring  { fill:none; stroke:currentColor; stroke-opacity:.22; }
+  .mark .ring2 { fill:none; stroke:currentColor; stroke-opacity:.16; }
+  .mark .wedge { fill:currentColor; fill-opacity:.82; }
+  .mark .edge  { stroke:var(--mark-accent); }
+  .mark .core  { fill:currentColor; }
+  .mark .blip  { fill:var(--mark-accent); }
+
+  /* --- buttons (flat, confident) --- */
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:var(--sp-2);
+    font-weight:var(--w-semibold); font-size:var(--fs-body); line-height:1; letter-spacing:.005em;
+    padding:var(--sp-3) var(--sp-5); border-radius:var(--r-md);
+    border:1px solid transparent; cursor:pointer; text-decoration:none;
+    transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .btn--lg { padding:var(--sp-4) var(--sp-6); font-size:var(--fs-lg); }
+  .btn--primary { background:var(--brand); color:var(--on-brand); box-shadow:var(--elev-brand); }
+  .btn--primary:hover { background:var(--brand-hover); }
+  .btn--success { background:var(--deal-solid); color:var(--on-brand); }
+  .btn--success:hover { background:var(--deal-600); }
+  .btn--quiet { background:var(--surface); color:var(--text); border-color:var(--border-strong); }
+  .btn--quiet:hover { border-color:var(--brand); color:var(--brand); }
+  .btn svg { width:1.2em; height:1.2em; }
+
+  /* --- surfaces --- */
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--elev-1); }
+  .card--pad { padding:var(--sp-6); }
+  .card--flat { box-shadow:none; }
+  .card--interactive { transition:border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease); }
+  .card--interactive:hover { border-color:var(--brand); box-shadow:var(--elev-2); transform:translateY(-1px); }
+
+  /* --- pill (label chip) + tag (status) --- */
+  .pill { display:inline-flex; align-items:center; gap:var(--sp-2); font-size:var(--fs-cap); font-weight:var(--w-semibold); color:var(--text-muted); background:var(--surface); border:1px solid var(--border-strong); border-radius:var(--r-pill); padding:var(--sp-1) var(--sp-3); }
+  .pill .dot { width:7px; height:7px; border-radius:var(--r-pill); background:var(--brand); flex:none; }
+  .tag { font:var(--w-medium) 9.5px/1 var(--font-mono); letter-spacing:var(--ls-wide); text-transform:uppercase; padding:4px var(--sp-2); border-radius:var(--r-pill); color:var(--text-muted); background:transparent; border:1px solid var(--border-strong); }
+
+  /* --- chip (token in a set) --- */
+  .chip { font-size:var(--fs-cap); font-weight:var(--w-medium); color:var(--text); background:var(--bg); border:1px solid var(--border-strong); border-radius:var(--r-pill); padding:6px var(--sp-3); }
+  .chip--brand { color:var(--brand-strong); background:var(--brand-tint); border-color:var(--brand-tint-border); font-weight:var(--w-semibold); }
+
+  /* --- confidence meter --- */
+  .meter { height:5px; border-radius:var(--r-pill); background:var(--border); overflow:hidden; }
+  .meter > span { display:block; height:100%; border-radius:var(--r-pill); background:var(--brand); }
+  .confidence { display:inline-flex; align-items:center; gap:var(--sp-2); }
+  .confidence .label { font:var(--w-medium) 9.5px/1 var(--font-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); }
+  .confidence .pct { font:var(--w-semibold) var(--fs-mini)/1 var(--font-mono); color:var(--text-faint); }
+
+  /* --- verdict block (flat, editorial, tinted) --- */
+  .verdict { border-radius:var(--r-lg); padding:var(--sp-4); border:1px solid; border-left-width:3px; }
+  .verdict--deal { --vfg:var(--deal-fg); --vsolid:var(--deal-solid); background:var(--deal-bg); border-color:color-mix(in srgb,var(--deal-solid) 26%,transparent); border-left-color:var(--deal-solid); }
+  .verdict--look { --vfg:var(--look-fg); --vsolid:var(--look-solid); background:var(--look-bg); border-color:color-mix(in srgb,var(--look-solid) 26%,transparent); border-left-color:var(--look-solid); }
+  .verdict--dead { --vfg:var(--dead-fg); --vsolid:var(--dead-solid); background:var(--dead-bg); border-color:color-mix(in srgb,var(--dead-solid) 26%,transparent); border-left-color:var(--dead-solid); }
+  .verdict__kicker { font:var(--w-bold) var(--fs-mini)/1.3 var(--font-sans); letter-spacing:var(--ls-wide); text-transform:uppercase; color:var(--vfg); }
+  .verdict__title { font:var(--w-black) var(--fs-h1)/1.12 var(--font-display); letter-spacing:var(--ls-snug); color:var(--heading); margin:4px 0 var(--sp-1); }
+  .verdict__note { font-size:var(--fs-sm); line-height:1.5; color:var(--text); }
+  .verdict .confidence { margin-top:var(--sp-3); }
+  .verdict .confidence .label, .verdict .confidence .pct { color:var(--vfg); }
+  .verdict .meter { background:color-mix(in srgb,var(--vsolid) 20%,transparent); }
+  .verdict .meter > span { background:var(--vsolid); }
+  .meter--on-solid { background:color-mix(in srgb,var(--vsolid) 20%,transparent); }
+  .meter--on-solid > span { background:var(--vsolid); }
+
+  /* --- factor row (a single cited finding) --- */
+  .factor { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:var(--sp-2) var(--sp-3); background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); padding:var(--sp-3); }
+  .factor__dot { width:8px; height:8px; border-radius:var(--r-pill); }
+  .factor__name { font-size:var(--fs-sm); font-weight:var(--w-semibold); color:var(--heading); }
+  .factor__verdict { font:var(--w-semibold) 9.5px/1 var(--font-mono); letter-spacing:.07em; text-transform:uppercase; padding:3px 7px; border-radius:var(--r-sm); }
+  .factor__body { grid-column:1/-1; font-size:var(--fs-cap); color:var(--text-muted); line-height:1.45; }
+  .factor__body cite { font-style:normal; color:var(--brand); font-weight:var(--w-semibold); cursor:pointer; }
+  .is-deal .factor__dot { background:var(--deal-solid); } .is-deal .factor__verdict { color:var(--deal-fg); background:var(--deal-bg); }
+  .is-dead .factor__dot { background:var(--dead-solid); } .is-dead .factor__verdict { color:var(--dead-fg); background:var(--dead-bg); }
+  .is-look .factor__dot { background:var(--look-solid); } .is-look .factor__verdict { color:var(--look-fg); background:var(--look-bg); }
+  .is-note .factor__dot { background:var(--text-faint); } .is-note .factor__verdict { color:var(--text-muted); background:var(--surface-2); }
+
+  /* verdict dot for lists */
+  .vdot { width:8px; height:8px; border-radius:var(--r-pill); flex:none; }
+  .vdot.is-deal { background:var(--deal-solid); } .vdot.is-dead { background:var(--dead-solid); }
+  .vdot.is-look { background:var(--look-solid); } .vdot.is-note { background:var(--text-faint); }
+}
+
+/* ------------------------------------------------------------
+   4. UTILITIES
+   ------------------------------------------------------------ */
+@layer utilities {
+  .u-center { text-align:center; }
+  .u-stack { display:flex; flex-direction:column; }
+  .u-row { display:flex; align-items:center; }
+  .u-muted { color:var(--text-muted); }
+  .u-faint { color:var(--text-faint); }
+  .u-brand { color:var(--brand); }
+}

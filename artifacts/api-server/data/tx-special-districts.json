@@ -1,0 +1,16 @@
+[
+  {
+    "districtId": "mud-sample-travis-001",
+    "districtType": "MUD",
+    "name": "Sample Travis MUD No. 1",
+    "county": "Travis",
+    "taxUnitCode": "MUD001"
+  },
+  {
+    "districtId": "pid-sample-hays-001",
+    "districtType": "PID",
+    "name": "Sample Hays PID District",
+    "county": "Hays",
+    "taxUnitCode": "PID042"
+  }
+]

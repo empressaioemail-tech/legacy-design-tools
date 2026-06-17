@@ -59,28 +59,23 @@ const hasDb = Boolean(
   process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
 );
 
-const regridOutcome = {
-  adapterKey: "regrid:parcels",
+const cotalityParcelOutcome = {
+  adapterKey: "cotality:parcels",
   tier: "federal",
-  layerKind: "regrid-parcel",
+  layerKind: "cotality-parcel",
   status: "ok" as const,
   result: {
-    adapterKey: "regrid:parcels",
+    adapterKey: "cotality:parcels",
     tier: "federal",
-    layerKind: "regrid-parcel",
+    layerKind: "cotality-parcel",
     sourceKind: "national-aggregator",
-    provider: "Regrid",
+    provider: "Cotality",
     snapshotDate: "2026-05-01T00:00:00.000Z",
     payload: {
       kind: "parcel",
+      clip: "1234567890",
       parcel: {
-        properties: {
-          fields: {
-            ll_uuid: "integration-parcel-uuid",
-            parcelnumb: "INT-001",
-            ll_gisacre: 0.25,
-          },
-        },
+        properties: { parcelnumb: "INT-001" },
       },
     },
   },
@@ -133,43 +128,28 @@ describe.skipIf(!hasDb)("fetchBrokerageSiteContext snapshots (integration)", () 
   it("second fetch at same coords does not call runAdapters when snapshots exist", async () => {
     runAdaptersMock.mockResolvedValue([
       femaOutcome,
+      cotalityParcelOutcome,
       {
-        adapterKey: "usgs:ned-elevation",
+        adapterKey: "cotality:zoning",
         tier: "federal",
-        layerKind: "usgs-ned-elevation",
-        status: "ok" as const,
-        result: {
-          adapterKey: "usgs:ned-elevation",
-          tier: "federal",
-          layerKind: "usgs-ned-elevation",
-          sourceKind: "federal-adapter",
-          provider: "USGS",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "elevation-point", elevationFeet: 700, units: "Feet" },
-        },
-      },
-      {
-        adapterKey: "epa:ejscreen",
-        tier: "federal",
-        layerKind: "epa-ejscreen-blockgroup",
-        status: "ok" as const,
-        result: {
-          adapterKey: "epa:ejscreen",
-          tier: "federal",
-          layerKind: "epa-ejscreen-blockgroup",
-          sourceKind: "federal-adapter",
-          provider: "EPA",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "ejscreen-blockgroup", demographicIndexPercentile: 55 },
-        },
-      },
-      regridOutcome,
-      {
-        adapterKey: "regrid:zoning",
-        tier: "federal",
-        layerKind: "regrid-zoning",
+        layerKind: "cotality-zoning",
         status: "no-coverage",
         error: { code: "no-coverage", message: "none" },
+      },
+      {
+        adapterKey: "national:opportunity-zone",
+        tier: "federal",
+        layerKind: "opportunity-zone",
+        status: "ok" as const,
+        result: {
+          adapterKey: "national:opportunity-zone",
+          tier: "federal",
+          layerKind: "opportunity-zone",
+          sourceKind: "federal-adapter",
+          provider: "CDFI Fund / HUD (OZ tracts)",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: { inOpportunityZone: false, ozRound: "oz-1.0" },
+        },
       },
     ]);
 
@@ -187,7 +167,7 @@ describe.skipIf(!hasDb)("fetchBrokerageSiteContext snapshots (integration)", () 
 
     const first = await fetchBrokerageSiteContext(input);
     expect(runAdaptersMock).toHaveBeenCalledOnce();
-    expect(first.layers.some((l) => l.layerKind === "regrid-parcel")).toBe(
+    expect(first.layers.some((l) => l.layerKind === "cotality-parcel")).toBe(
       true,
     );
 
@@ -195,7 +175,7 @@ describe.skipIf(!hasDb)("fetchBrokerageSiteContext snapshots (integration)", () 
 
     const second = await fetchBrokerageSiteContext(input);
     expect(runAdaptersMock).not.toHaveBeenCalled();
-    expect(second.layers.find((l) => l.layerKind === "regrid-parcel")?.fromArchive).toBe(
+    expect(second.layers.find((l) => l.layerKind === "cotality-parcel")?.fromArchive).toBe(
       true,
     );
   });

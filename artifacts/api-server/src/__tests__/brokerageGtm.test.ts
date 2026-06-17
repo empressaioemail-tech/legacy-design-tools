@@ -2,7 +2,7 @@
  * /api/brokerage/v1/gtm/* — observation layer for Empressa wedge.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { readFileSync } from "node:fs";
@@ -12,6 +12,18 @@ import { ctx } from "./test-context";
 
 const TEST_API_KEY = "brokerage-test-key-gtm";
 const INSTALL_ID = "test-install-00000001";
+
+vi.mock("@workspace/db", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
+  return {
+    ...actual,
+    get db() {
+      if (!ctx.schema) throw new Error("brokerageGtm.test: ctx.schema not set");
+      return ctx.schema.db;
+    },
+  };
+});
 
 const { setupRouteTests } = await import("./setup");
 const { resetBrokerageApiKeysForTests } = await import(

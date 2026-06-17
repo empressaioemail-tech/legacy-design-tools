@@ -10,16 +10,17 @@ import {
   toHauskaCodeSectionDid,
 } from "@workspace/codes";
 import type { BrokerageSiteContext } from "./brokerageSiteContext";
-import { extractLlUuidFromPayload } from "./placeLayerUtils";
+import { extractClipFromSiteContext } from "./brokerageParcelKey";
 import type { PrivateRestrictionsBriefing } from "./encumbranceWire";
 
-const REGRID_PARCEL_ID_KEYS = [
+const COTALITY_PARCEL_ID_KEYS = [
   "PARCEL_ID",
   "PARCELID",
   "APN",
   "PIN",
   "parcelnumb",
   "parcelnum",
+  "clip",
 ] as const;
 
 export interface BriefInlineRef {
@@ -32,7 +33,7 @@ export interface BriefInlineRef {
 
 export interface BriefPlaceLayerRef {
   did: string;
-  entityType: "place-layer-regrid" | "place-layer-fema";
+  entityType: "place-layer-cotality" | "place-layer-fema" | "place-layer-oz";
   entityId: string;
   adapterKey: string;
   layerKind: string;
@@ -89,10 +90,11 @@ export function buildBriefAtomProjection(input: {
 
   const placeLayers: BriefPlaceLayerRef[] = [];
   for (const layer of input.siteContext.layers) {
-    const entityType =
-      layer.layerKind.startsWith("regrid") || layer.adapterKey.startsWith("regrid:")
-        ? "place-layer-regrid"
-        : "place-layer-fema";
+    const entityType = layer.layerKind.startsWith("opportunity-zone")
+      ? "place-layer-oz"
+      : layer.adapterKey.includes("fema")
+        ? "place-layer-fema"
+        : "place-layer-cotality";
     placeLayers.push({
       did: buildPlaceLayerDid(layer.layerKind, input.placeKey),
       entityType,
@@ -120,26 +122,27 @@ export function buildBriefAtomProjection(input: {
     });
   }
 
-  const regridParcel = input.siteContext.layers.find(
-    (l) => l.layerKind === "regrid-parcel" && l.status === "ok" && l.payload,
-  );
-  if (regridParcel?.payload) {
-    const llUuid = extractLlUuidFromPayload(regridParcel.payload);
-    if (llUuid) {
-      const fields = (
-        regridParcel.payload.parcel as
-          | { properties?: { fields?: Record<string, unknown> } }
+  const clip =
+    input.siteContext.parcelClip ??
+    extractClipFromSiteContext(input.siteContext.layers);
+  if (clip) {
+    const parcelLayer = input.siteContext.layers.find(
+      (l) => l.layerKind === "cotality-parcel" && l.status === "ok" && l.payload,
+    );
+    const fields =
+      (
+        parcelLayer?.payload?.parcel as
+          | { properties?: Record<string, unknown> }
           | undefined
-      )?.properties?.fields;
-      const apn = fields ? pickFirstString(fields, REGRID_PARCEL_ID_KEYS) : null;
-      inlineRefs.push({
-        did: `did:hauska:parcel:${llUuid}`,
-        entityType: "parcel",
-        entityId: llUuid,
-        label: apn ? `Parcel APN ${apn}` : "Parcel record",
-        mode: "inline",
-      });
-    }
+      )?.properties ?? {};
+    const apn = pickFirstString(fields, COTALITY_PARCEL_ID_KEYS);
+    inlineRefs.push({
+      did: `did:hauska:parcel:${clip}`,
+      entityType: "parcel",
+      entityId: clip,
+      label: apn ? `Parcel CLIP ${clip} (APN ${apn})` : `Parcel CLIP ${clip}`,
+      mode: "inline",
+    });
   }
 
   for (const item of input.privateRestrictions?.items.slice(0, 2) ?? []) {
@@ -161,13 +164,11 @@ export function buildBriefAtomProjection(input: {
   };
 }
 
+/** @deprecated Use extractClipFromSiteContext — Regrid ll_uuid removed. */
 export function extractLlUuidFromSiteContext(
   siteContext: BrokerageSiteContext,
 ): string | null {
-  for (const layer of siteContext.layers) {
-    if (layer.layerKind !== "regrid-parcel" || !layer.payload) continue;
-    const id = extractLlUuidFromPayload(layer.payload);
-    if (id) return id;
-  }
-  return null;
+  return (
+    siteContext.parcelClip ?? extractClipFromSiteContext(siteContext.layers)
+  );
 }

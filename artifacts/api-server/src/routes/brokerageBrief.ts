@@ -76,6 +76,23 @@ import {
   extractLlUuidFromSiteContext,
 } from "../lib/brokerageBriefAtoms";
 import {
+  buildInvestorVerdict,
+  type InvestorProfileBuyBox,
+} from "../lib/brokerageInvestorVerdict";
+import {
+  computePencilsAt,
+  extractPencilsInputsFromLayers,
+} from "../lib/brokeragePencilsAt";
+import {
+  getOrCreateBrokerageUserProfile,
+  packageTierFromProfile,
+} from "../lib/brokerageUserProfile";
+import { captureParcelKey } from "../lib/brokerageParcelKey";
+import {
+  resolveInvestorPackageTier,
+  depthMeterAllowance,
+} from "../lib/brokerageTierGate";
+import {
   buildPrivateRestrictionsBriefing,
   formatPrivateRestrictionsForLlm,
 } from "../lib/encumbranceWire";
@@ -514,9 +531,37 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const corpusStatus = await resolveCorpusStatus(jurisdictionKey, hasHits);
   const finishedAt = new Date().toISOString();
 
+  let profileRow = null;
+  if (authenticatedUser) {
+    profileRow = await getOrCreateBrokerageUserProfile(authenticatedUser);
+  }
+  const packageTier = resolveInvestorPackageTier({
+    brokerageAuthTier: req.brokerageAuth?.tier ?? null,
+    profileTier: packageTierFromProfile(profileRow),
+  });
+  const depthMeterRemaining =
+    profileRow?.depthMeterRemaining ?? depthMeterAllowance(packageTier);
+
+  let parcelCapture = null;
+  if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
+    try {
+      parcelCapture = await captureParcelKey({
+        address,
+        latitude: geocode.lat,
+        longitude: geocode.lon,
+        city: geocode.city,
+        state: geocode.state,
+        source: "address-geocode",
+      });
+    } catch (err) {
+      logger.warn({ err, address }, "brokerage: parcel key capture failed");
+    }
+  }
+
   let siteContext: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> = {
     layers: [],
     placeKey: "coord:0.00000:0.00000",
+    packageTier,
   };
   if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
     try {
@@ -526,6 +571,9 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
         address,
         jurisdictionCity: geocode.city,
         jurisdictionState: geocode.state,
+        packageTier,
+        brokerageAuthTier: req.brokerageAuth?.tier ?? null,
+        depthMeterRemaining,
       });
     } catch (err) {
       logger.warn({ err, address }, "brokerage: site context layers failed");
@@ -579,6 +627,38 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   });
 
   const llUuid = extractLlUuidFromSiteContext(siteContext);
+  const parcelClip = siteContext.parcelClip ?? parcelCapture?.clip ?? llUuid ?? null;
+
+  const buyBox = (profileRow?.buyBoxJson ?? {}) as {
+    capRateFloor?: number;
+    rehabPerSf?: number;
+    rentSpreadTolerance?: number;
+  };
+  const pencilsInputs = extractPencilsInputsFromLayers(siteContext.layers);
+  const resolvedBuyBox: InvestorProfileBuyBox = {
+    capRateFloor: buyBox.capRateFloor ?? 0.08,
+    rehabPerSf: buyBox.rehabPerSf ?? 35,
+    rentSpreadTolerance: buyBox.rentSpreadTolerance ?? 0.05,
+  };
+  const pencilsAt = computePencilsAt({
+    buyBox: {
+      ...resolvedBuyBox,
+      annualInsurance: pencilsInputs.annualInsurance,
+    },
+    ...pencilsInputs,
+  });
+  const investorVerdict = buildInvestorVerdict({
+    layers: siteContext.layers,
+    corpusStatus,
+    buyBox: resolvedBuyBox,
+    finishedAt,
+  });
+
+  const precedenceStatus = {
+    wired: false,
+    note: "Plan-review precedence resolver is not yet wired on the Property Brief path — 61 audit gap; reasoning cites code atoms only.",
+  };
+
   const workspaceDid = buildPropertyWorkspaceDid(lk);
   const atoms = buildBriefAtomProjection({
     listingKey: lk,
@@ -615,10 +695,16 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       address,
       source: source ?? null,
       url: page_url ?? null,
-      llUuid: llUuid ?? undefined,
+      llUuid: parcelClip ?? undefined,
+      parcelClip: parcelClip ?? undefined,
+      parcelKeySource: parcelCapture?.source ?? null,
     },
     jurisdiction: jurisdictionKey,
     corpusStatus,
+    packageTier,
+    precedenceStatus,
+    pencilsAt,
+    investorVerdict,
     geocode: geocode
       ? { lat: geocode.lat, lon: geocode.lon }
       : undefined,
@@ -1002,6 +1088,36 @@ brokerageV1.post(
     });
   },
 );
+
+const PARCEL_KEY_BODY = z.object({
+  address: z.string().optional(),
+  clip: z.string().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  source: z
+    .enum(["address-geocode", "clip-paste", "coordinates", "auto-detect"])
+    .optional(),
+});
+
+brokerageV1.post("/parcel-key", async (req: Request, res: Response) => {
+  const parse = PARCEL_KEY_BODY.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+  try {
+    const captured = await captureParcelKey(parse.data);
+    res.json(captured);
+  } catch (err) {
+    logger.warn({ err }, "parcel-key capture failed");
+    res.status(422).json({
+      error: "parcel_key_unresolved",
+      message: String((err as Error).message ?? err),
+    });
+  }
+});
 
 router.use("/brokerage/v1", brokerageV1);
 

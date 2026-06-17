@@ -1,5 +1,5 @@
 /**
- * brokerageSiteContext — federal environmental + Regrid layers for Property Brief.
+ * brokerageSiteContext — federal environmental + Cotality investor depth.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -38,12 +38,11 @@ const {
   BROKERAGE_SITE_CONTEXT_TIMEOUT_MS,
 } = await import("../lib/brokerageSiteContext");
 
-const DEFAULT_ADAPTER_KEYS = [
+const FREE_ADAPTER_KEYS = [
   "fema:nfhl-flood-zone",
-  "usgs:ned-elevation",
-  "epa:ejscreen",
-  "regrid:parcels",
-  "regrid:zoning",
+  "cotality:parcels",
+  "cotality:zoning",
+  "national:opportunity-zone",
 ];
 
 describe("fetchBrokerageSiteContext", () => {
@@ -71,7 +70,7 @@ describe("fetchBrokerageSiteContext", () => {
     expect(runAdaptersMock).not.toHaveBeenCalled();
   });
 
-  it("maps FEMA, USGS, EPA, and Regrid adapter outcomes to siteContext.layers", async () => {
+  it("maps FEMA and Cotality free-tier adapter outcomes to siteContext.layers", async () => {
     runAdaptersMock.mockResolvedValue([
       {
         adapterKey: "fema:nfhl-flood-zone",
@@ -94,71 +93,53 @@ describe("fetchBrokerageSiteContext", () => {
         },
       },
       {
-        adapterKey: "usgs:ned-elevation",
+        adapterKey: "cotality:parcels",
         tier: "federal",
-        layerKind: "usgs-ned-elevation",
+        layerKind: "cotality-parcel",
         status: "ok",
         result: {
-          adapterKey: "usgs:ned-elevation",
+          adapterKey: "cotality:parcels",
           tier: "federal",
-          layerKind: "usgs-ned-elevation",
-          sourceKind: "federal-adapter",
-          provider: "USGS National Elevation Dataset (3DEP)",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: {
-            kind: "elevation-point",
-            elevationFeet: 512,
-            units: "Feet",
-          },
-        },
-      },
-      {
-        adapterKey: "epa:ejscreen",
-        tier: "federal",
-        layerKind: "epa-ejscreen-blockgroup",
-        status: "ok",
-        result: {
-          adapterKey: "epa:ejscreen",
-          tier: "federal",
-          layerKind: "epa-ejscreen-blockgroup",
-          sourceKind: "federal-adapter",
-          provider: "EJScreen 2023 — CalEPA mirror",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: {
-            kind: "ejscreen-blockgroup",
-            demographicIndexPercentile: 65,
-            pm25Percentile: 72,
-          },
-        },
-      },
-      {
-        adapterKey: "regrid:parcels",
-        tier: "federal",
-        layerKind: "regrid-parcel",
-        status: "ok",
-        result: {
-          adapterKey: "regrid:parcels",
-          tier: "federal",
-          layerKind: "regrid-parcel",
+          layerKind: "cotality-parcel",
           sourceKind: "national-aggregator",
-          provider: "Regrid",
+          provider: "Cotality",
           snapshotDate: "2026-05-01T00:00:00.000Z",
           payload: {
             kind: "parcel",
+            clip: "1234567890",
             parcel: {
-              properties: { fields: { parcelnumb: "R12345", ll_gisacre: 0.42 } },
+              properties: { parcelnumb: "R12345" },
             },
           },
         },
       },
       {
-        adapterKey: "regrid:zoning",
+        adapterKey: "cotality:zoning",
         tier: "federal",
-        layerKind: "regrid-zoning",
+        layerKind: "cotality-zoning",
         status: "no-coverage",
         error: {
           code: "no-coverage",
           message: "No zoning at this point",
+        },
+      },
+      {
+        adapterKey: "national:opportunity-zone",
+        tier: "federal",
+        layerKind: "opportunity-zone",
+        status: "ok",
+        result: {
+          adapterKey: "national:opportunity-zone",
+          tier: "federal",
+          layerKind: "opportunity-zone",
+          sourceKind: "federal-adapter",
+          provider: "CDFI Fund / HUD (OZ tracts)",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: {
+            kind: "opportunity-zone",
+            inOpportunityZone: false,
+            ozRound: "oz-1.0",
+          },
         },
       },
     ]);
@@ -169,6 +150,7 @@ describe("fetchBrokerageSiteContext", () => {
       address: "251 Cool Water Dr, Bastrop, TX 78602",
       jurisdictionCity: "Bastrop",
       jurisdictionState: "TX",
+      packageTier: "free",
     });
 
     expect(createAdapterResponseCacheMock).toHaveBeenCalled();
@@ -176,44 +158,31 @@ describe("fetchBrokerageSiteContext", () => {
     const runInput = runAdaptersMock.mock.calls[0]?.[0];
     expect(runInput?.context?.signal).toBeDefined();
     expect(runInput?.adapters?.map((a: { adapterKey: string }) => a.adapterKey)).toEqual(
-      DEFAULT_ADAPTER_KEYS,
+      FREE_ADAPTER_KEYS,
     );
-    expect(writePlaceLayerSnapshotMock).toHaveBeenCalledTimes(5);
-    expect(ctx.layers).toHaveLength(5);
-
-    const federalBeyondFemaRegrid = ctx.layers.filter(
-      (l) =>
-        l.status === "ok" &&
-        !l.layerKind.startsWith("regrid-") &&
-        l.layerKind !== "fema-nfhl-flood-zone",
-    );
-    expect(federalBeyondFemaRegrid.length).toBeGreaterThanOrEqual(2);
+    expect(ctx.layers).toHaveLength(4);
+    expect(ctx.parcelClip).toBe("1234567890");
 
     expect(
       ctx.layers.find((l) => l.layerKind === "fema-nfhl-flood-zone")?.summary,
     ).toMatch(/Flood Zone AE/);
-    expect(ctx.layers.find((l) => l.layerKind === "usgs-ned-elevation")?.summary).toMatch(
-      /512/,
-    );
-    expect(ctx.layers.find((l) => l.layerKind === "regrid-zoning")?.status).toBe(
+    expect(ctx.layers.find((l) => l.layerKind === "cotality-zoning")?.status).toBe(
       "no-coverage",
     );
 
     const llm = formatSiteContextForLlm(ctx);
     expect(llm).toContain("fema-nfhl-flood-zone");
-    expect(llm).toContain("usgs-ned-elevation");
-    expect(llm).toContain("epa-ejscreen-blockgroup");
-    expect(llm).toContain("regrid-parcel");
-    expect(llm).not.toContain("regrid-zoning");
+    expect(llm).toContain("cotality-parcel");
+    expect(llm).toContain("opportunity-zone");
   });
 
-  it("passes a 30s abort signal budget to runAdapters", async () => {
+  it("passes a 45s abort signal budget to runAdapters", async () => {
     runAdaptersMock.mockResolvedValue([]);
     await fetchBrokerageSiteContext({
       latitude: 30.11,
       longitude: -97.32,
     });
-    expect(BROKERAGE_SITE_CONTEXT_TIMEOUT_MS).toBe(30_000);
+    expect(BROKERAGE_SITE_CONTEXT_TIMEOUT_MS).toBe(45_000);
     const signal = runAdaptersMock.mock.calls[0]?.[0]?.context?.signal;
     expect(signal).toBeInstanceOf(AbortSignal);
   });
@@ -221,23 +190,14 @@ describe("fetchBrokerageSiteContext", () => {
   it("serves archived layers without calling runAdapters when snapshots exist", async () => {
     readPlaceLayerSnapshotMock.mockImplementation(async ({ adapterKey }) => {
       const payloads: Record<string, Record<string, unknown>> = {
-        "regrid:parcels": {
+        "cotality:parcels": {
           kind: "parcel",
-          parcel: {
-            properties: { fields: { parcelnumb: "ARCH-1", ll_gisacre: 1.0 } },
-          },
+          clip: "999",
+          parcel: { properties: { parcelnumb: "ARCH-1" } },
         },
         "fema:nfhl-flood-zone": { kind: "flood-zone", floodZone: "X" },
-        "usgs:ned-elevation": {
-          kind: "elevation-point",
-          elevationFeet: 400,
-          units: "Feet",
-        },
-        "epa:ejscreen": {
-          kind: "ejscreen-blockgroup",
-          demographicIndexPercentile: 50,
-        },
-        "regrid:zoning": {},
+        "cotality:zoning": {},
+        "national:opportunity-zone": { inOpportunityZone: false },
       };
       const payload = payloads[adapterKey];
       if (!payload) return null;
@@ -258,111 +218,7 @@ describe("fetchBrokerageSiteContext", () => {
     expect(runAdaptersMock).not.toHaveBeenCalled();
     expect(ctx.layers.every((l) => l.fromArchive)).toBe(true);
     expect(writePlaceLayerSnapshotMock).not.toHaveBeenCalled();
-    expect(ctx.layers).toHaveLength(5);
-  });
-
-  it("archives no-coverage adapter outcomes so repeat fetches skip live calls", async () => {
-    runAdaptersMock.mockResolvedValue([
-      {
-        adapterKey: "fema:nfhl-flood-zone",
-        tier: "federal",
-        layerKind: "fema-nfhl-flood-zone",
-        status: "ok",
-        result: {
-          adapterKey: "fema:nfhl-flood-zone",
-          tier: "federal",
-          layerKind: "fema-nfhl-flood-zone",
-          sourceKind: "federal-adapter",
-          provider: "FEMA NFHL",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "flood-zone", floodZone: "X" },
-        },
-      },
-      {
-        adapterKey: "usgs:ned-elevation",
-        tier: "federal",
-        layerKind: "usgs-ned-elevation",
-        status: "ok",
-        result: {
-          adapterKey: "usgs:ned-elevation",
-          tier: "federal",
-          layerKind: "usgs-ned-elevation",
-          sourceKind: "federal-adapter",
-          provider: "USGS",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "elevation-point", elevationFeet: 100, units: "Feet" },
-        },
-      },
-      {
-        adapterKey: "epa:ejscreen",
-        tier: "federal",
-        layerKind: "epa-ejscreen-blockgroup",
-        status: "ok",
-        result: {
-          adapterKey: "epa:ejscreen",
-          tier: "federal",
-          layerKind: "epa-ejscreen-blockgroup",
-          sourceKind: "federal-adapter",
-          provider: "EPA",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: { kind: "ejscreen-blockgroup", demographicIndexPercentile: 40 },
-        },
-      },
-      {
-        adapterKey: "regrid:parcels",
-        tier: "federal",
-        layerKind: "regrid-parcel",
-        status: "ok",
-        result: {
-          adapterKey: "regrid:parcels",
-          tier: "federal",
-          layerKind: "regrid-parcel",
-          sourceKind: "national-aggregator",
-          provider: "Regrid",
-          snapshotDate: "2026-05-01T00:00:00.000Z",
-          payload: {
-            kind: "parcel",
-            parcel: { properties: { fields: { parcelnumb: "R1" } } },
-          },
-        },
-      },
-      {
-        adapterKey: "regrid:zoning",
-        tier: "federal",
-        layerKind: "regrid-zoning",
-        status: "no-coverage",
-        error: { code: "no-coverage", message: "none" },
-      },
-    ]);
-
-    await fetchBrokerageSiteContext({
-      latitude: 30.11,
-      longitude: -97.32,
-      address: "251 Cool Water Dr, Bastrop, TX 78602",
-    });
-
-    expect(writePlaceLayerSnapshotMock).toHaveBeenCalledTimes(5);
-    const zoningWrite = writePlaceLayerSnapshotMock.mock.calls.find(
-      (c) => c[0]?.adapterKey === "regrid:zoning",
-    );
-    expect(zoningWrite?.[0]?.result.payload).toEqual({});
-  });
-
-  it("includes TCEQ Edwards adapter when TCEQ_EDWARDS_ENABLED", async () => {
-    isTceqEdwardsEnabledMock.mockReturnValue(true);
-    runAdaptersMock.mockResolvedValue([]);
-
-    await fetchBrokerageSiteContext({
-      latitude: 30.11,
-      longitude: -97.32,
-      jurisdictionState: "TX",
-    });
-
-    const keys = runAdaptersMock.mock.calls[0]?.[0]?.adapters?.map(
-      (a: { adapterKey: string }) => a.adapterKey,
-    );
-    expect(keys).toContain("tceq:edwards-aquifer");
-    expect(keys).toHaveLength(6);
+    expect(ctx.layers).toHaveLength(4);
   });
 });
 
@@ -375,14 +231,15 @@ describe("stripSiteContextForClient", () => {
 
     const ctx = {
       placeKey: "coord:30.50000:-97.60000",
+      parcelClip: "1234567890",
       layers: [
         {
-          layerKind: "regrid-parcel",
-          adapterKey: "regrid:parcels",
-          tier: "national",
+          layerKind: "cotality-parcel",
+          adapterKey: "cotality:parcels",
+          tier: "federal",
           status: "ok" as const,
-          provider: "regrid",
-          summary: "APN R123 · 0.25 ac",
+          provider: "Cotality",
+          summary: "CLIP 123 · APN R123",
           payload: fatPayload,
         },
       ],
@@ -390,8 +247,8 @@ describe("stripSiteContextForClient", () => {
 
     const slim = stripSiteContextForClient(ctx);
     expect(slim.layers[0]).not.toHaveProperty("payload");
-    expect(slim.layers[0]?.summary).toBe("APN R123 · 0.25 ac");
-    expect(slim.layers[0]?.provider).toBe("regrid");
+    expect(slim.layers[0]?.summary).toBe("CLIP 123 · APN R123");
+    expect(slim.parcelClip).toBe("1234567890");
 
     const brief = stripBriefPayloadForClient({
       runId: "abc",

@@ -20,6 +20,13 @@ const COTALITY_ADAPTER_KEYS = [
   "cotality:replacementcost",
   "cotality:mineral",
   "cotality:utility",
+  "cotality:rent-avm",
+  "cotality:liens-mortgage-tax",
+  "cotality:permits",
+  "cotality:propensity",
+  "cotality:owner-occupancy",
+  "cotality:sinkhole",
+  "cotality:foundation",
 ] as const;
 
 function ctxFor(
@@ -49,10 +56,6 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
-        // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national baseline.
-        "regrid:parcels",
-        "regrid:zoning",
-        // 2026-06-06 cotality full data-layer pack — all national Cotality adapters.
         ...COTALITY_ADAPTER_KEYS,
         "tceq:edwards-aquifer",
         "bastrop-tx:parcels",
@@ -77,9 +80,6 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
-        "regrid:parcels",
-        "regrid:zoning",
-        // 2026-06-06 — Cotality full pack (Regrid fallback remains).
         ...COTALITY_ADAPTER_KEYS,
         "ugrc:dem",
         "ugrc:parcels",
@@ -107,9 +107,6 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
-        "regrid:parcels",
-        "regrid:zoning",
-        // 2026-06-06 — Cotality full pack.
         ...COTALITY_ADAPTER_KEYS,
         "ugrc:dem",
         "ugrc:parcels",
@@ -131,10 +128,6 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
-        // Cortex prop-intel SCOPE B (2026-05-23) — Regrid baseline.
-        "regrid:parcels",
-        "regrid:zoning",
-        // 2026-06-06 — Cotality full pack (interim Regrid fallback).
         ...COTALITY_ADAPTER_KEYS,
         "inside-idaho:dem",
         "inside-idaho:parcels",
@@ -145,7 +138,7 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns the federal set (FEMA + USGS + EPA + Regrid + Cotality full pack) for an out-of-pilot but geocoded context (PL-04 + SCOPE B + 2026-06-06 cotality)", () => {
+  it("returns the federal set (FEMA + USGS + EPA + Cotality full pack) for an out-of-pilot but geocoded context (PL-04 + SCOPE B + 2026-06-06 cotality)", () => {
     // Boulder CO style: stateKey null, but the parcel is geocoded
     // (lat/lng baked into ctxFor's defaults). Federal adapters apply
     // to any finite-coords engagement.
@@ -153,7 +146,7 @@ describe("filterApplicableAdapters", () => {
     // The federal-tier set after the 2026-05-23 changes:
     //   - FEMA NFHL + USGS NED + EPA EJScreen — the original
     //     ungated federal trio.
-    //   - `regrid:parcels` + `regrid:zoning` — Cortex prop-intel
+    //   - `cotality:parcels` + `cotality:zoning` — investor radar
     //     SCOPE B (PR #104) national baseline; tier-housed under
     //     federal for cache-predicate reuse.
     //   - `fcc:broadband` — gated off by default (QA-22 SCOPE B
@@ -165,9 +158,6 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
-        "regrid:parcels",
-        "regrid:zoning",
-        // 2026-06-06 cotality full pack — registered for every geocoded engagement.
         ...COTALITY_ADAPTER_KEYS,
       ].sort(),
     );

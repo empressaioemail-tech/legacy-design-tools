@@ -1,16 +1,11 @@
 /**
- * Cortex-api hosted login — shared identity for Cortex web + extension C2.
- *
- * Extension C2 spec (not built here): chrome.identity.launchWebAuthFlow
- * opens GET /api/auth/extension-login?redirect_uri=<chrome-extension-url>
- * with optional state; user signs in; callback redirects to redirect_uri
- * with #token=<signed-session-token>. Extension stores token and sends
- * Authorization: Bearer <token> on authenticated calls, swapping the
- * embedded BROKERAGE_EXTENSION_PUBLIC_KEY for user-tier routes.
- * Anonymous tier (public key + X-Hauska-Install-Id) stays unchanged.
+ * Hosted extension login — signup + sign-in + password reset request (75i task 8).
  */
 
-import { Router, type IRouter, type Request, type Response } from "express";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import express, { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
 import { DEFAULT_TENANT_ID, SESSION_COOKIE } from "../middlewares/session";
 import { mintSessionToken } from "../lib/sessionToken";
@@ -21,8 +16,38 @@ import {
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { logger } from "../lib/logger";
+import {
+  renderExtensionLoginPage,
+  resolveExtensionLoginMode,
+} from "../lib/extensionLoginPage";
 
 const router: IRouter = Router();
+
+function hauskaPublicDir(): string | null {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(process.cwd(), "artifacts/api-server/public/hauska"),
+    join(process.cwd(), "public/hauska"),
+    join(here, "../public/hauska"),
+    join(here, "../../public/hauska"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "hauska.css"))) return dir;
+  }
+  return null;
+}
+
+const hauskaDir = hauskaPublicDir();
+if (hauskaDir) {
+  router.use(
+    "/auth/hauska",
+    express.static(hauskaDir, {
+      maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
+    }),
+  );
+} else {
+  logger.warn("hauska auth static assets not found — extension-login CSS will 404");
+}
 
 const LoginBodySchema = z.object({
   email: z.string().min(3),
@@ -122,42 +147,20 @@ router.post("/auth/login", async (req: Request, res: Response) => {
   }
 });
 
-/** Minimal hosted login page for chrome.identity.launchWebAuthFlow (C2). */
-router.get("/auth/extension-login", (_req: Request, res: Response) => {
-  res.type("html").send(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Sign in with Hauska</title></head>
-<body>
-<h1>Sign in with Hauska</h1>
-<form id="f">
-<label>Email <input type="email" id="email" required></label><br>
-<label>Password <input type="password" id="password" required minlength="8"></label><br>
-<button type="submit">Sign in</button>
-</form>
-<p id="err" style="color:red"></p>
-<script>
-const params = new URLSearchParams(location.search);
-const redirectUri = params.get("redirect_uri");
-document.getElementById("f").onsubmit = async (e) => {
-  e.preventDefault();
-  const email = document.getElementById("email").value;
-  const password = document.getElementById("password").value;
-  const r = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Hauska-Install-Id": params.get("install_id") || "" },
-    body: JSON.stringify({ email, password }),
-  });
-  const body = await r.json();
-  if (!r.ok) { document.getElementById("err").textContent = body.error || "login failed"; return; }
-  if (redirectUri) {
-    const u = new URL(redirectUri);
-    u.hash = "token=" + encodeURIComponent(body.token);
-    location.href = u.toString();
-  } else {
-    document.getElementById("err").textContent = "Signed in. Token: " + body.token.slice(0, 16) + "…";
+router.post("/auth/password-reset-request", async (req: Request, res: Response) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+  if (!email) {
+    res.status(400).json({ error: "invalid_input" });
+    return;
   }
-};
-</script>
-</body></html>`);
+  // Token email delivery is operator-configured; always return 202 to avoid account enumeration.
+  logger.info({ emailDomain: email.split("@")[1] ?? "" }, "password reset requested");
+  res.status(202).json({ ok: true, message: "If an account exists, reset instructions will be sent." });
+});
+
+router.get("/auth/extension-login", (req: Request, res: Response) => {
+  const mode = resolveExtensionLoginMode(req.query.intent);
+  res.type("html").send(renderExtensionLoginPage(mode));
 });
 
 router.post("/auth/logout", (_req: Request, res: Response) => {

@@ -18,6 +18,7 @@
     "./national/regrid": "./src/national/regrid.ts",
     "./national/cotality": "./src/national/cotality.ts",
     "./national/cotalityExtended": "./src/national/cotalityExtended.ts",
+    "./national/cotalityInvestorDepth": "./src/national/cotalityInvestorDepth.ts",
     "./national/cotalityClient": "./src/national/cotalityClient.ts",
     "./state/utah": "./src/state/utah.ts",
     "./state/idaho": "./src/state/idaho.ts",

@@ -193,11 +193,14 @@ export async function generateReasoningSummary(input: {
   const atoms = input.atoms.slice(0, 12);
   const hasPrivate = Boolean(input.privateRestrictionsBlock?.trim());
   const system = [
-    "You are a Texas real estate agent diligence assistant.",
+    "You are a Texas real estate agent diligence assistant for investor-radar.",
     hasPrivate
       ? "Use numbered code atom sources AND private recorded-restriction excerpts (P1, P2, …) when relevant. Private restrictions are CC&Rs/deed limits — not municipal code."
       : "Write a concise property brief reasoning summary using ONLY the numbered code atom sources provided.",
+    "Foreground rehab-reality (what a gut rehab triggers in adopted code) and can-I-add-a-unit / ADU reasoning cited to the code set.",
+    "Precedence/adjudication: if jurisdiction precedence is not wired in prod, say so explicitly — do not imply governing hierarchy that was not resolved.",
     "Use inline citations like [1], [2] that map to the source numbers.",
+    "Never state an opinion of value or appraisal — cite inputs only.",
     "Do not guarantee compliance or permit outcomes.",
     "Respond with JSON only: {\"headline\": string, \"body\": string (plain text, multiple paragraphs separated by blank lines)}.",
   ].join(" ");
