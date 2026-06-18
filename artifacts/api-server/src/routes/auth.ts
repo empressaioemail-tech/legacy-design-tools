@@ -14,6 +14,7 @@ import {
   signupWithEmailPassword,
 } from "../lib/authCredentials";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
+import { syncPipedrivePerson } from "../lib/brokeragePipedrive";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { logger } from "../lib/logger";
 import {
@@ -108,6 +109,14 @@ router.post("/auth/signup", async (req: Request, res: Response) => {
     const token = mintSessionToken(applicantSession(signup.userId));
     setSessionCookie(res, token);
     const claim = await maybeClaimInstall(req, signup.userId);
+    const installId = installIdFromRequest(req);
+    if (installId) {
+      void syncPipedrivePerson({
+        email: signup.email,
+        installId,
+        acquisitionSource: "hauska_extension_signup",
+      });
+    }
     res.status(201).json({
       token,
       userId: signup.userId,

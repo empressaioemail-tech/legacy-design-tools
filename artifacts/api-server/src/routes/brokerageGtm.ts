@@ -27,6 +27,8 @@ import {
 import { isGtmErrorClass, type GtmErrorClass } from "../lib/gtmErrorClass";
 import { classifyGtmEvents } from "../lib/gtmTriage";
 import { computeGtmScoreboardMetrics } from "../lib/gtmScoreboardMetrics";
+import { computeInvestorFunnelMetrics, listRecentQualifiedProspects } from "../lib/gtmInvestorFunnel";
+import { syncPipedriveLead } from "../lib/brokeragePipedrive";
 import { attemptOutboundSend } from "../lib/gtmOutbound";
 import { GTM_OUTBOUND_ACTIONS, isOutboundEnabled } from "../lib/gtmPolicy";
 
@@ -351,6 +353,7 @@ brokerageGtmRouter.get(
       .from(gtmConsent);
 
     const scoreboardMetrics = await computeGtmScoreboardMetrics(since);
+    const investorFunnel = await computeInvestorFunnelMetrics(since, windowDays);
 
     const triageSourceRows = await db
       .select({
@@ -419,6 +422,7 @@ brokerageGtmRouter.get(
         internal: internalMcpCalls,
       },
       scoreboardMetrics,
+      investorFunnel,
       triageSample,
       policyTier: {
         outboundEnabled: isOutboundEnabled(),
@@ -481,11 +485,22 @@ brokerageGtmRouter.get("/triage", requireBrokerageAuthOrServiceToken, async (req
     }),
   );
 
+  const qualifiedProspects = await listRecentQualifiedProspects(since, 25);
+  for (const prospect of qualifiedProspects) {
+    void syncPipedriveLead({
+      installId: prospect.installId,
+      title: `Qualified prospect — ${prospect.eventType}`,
+      sourceEventId: prospect.eventId,
+      intentScore: prospect.intentScore,
+    });
+  }
+
   res.json({
     windowDays,
     since: since.toISOString(),
     externalEventCount: classified.length,
     classifications: classified,
+    qualifiedProspects,
   });
 });
 

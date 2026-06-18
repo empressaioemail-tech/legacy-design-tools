@@ -298,17 +298,24 @@ export async function runCodewarmBatch(
   };
 }
 
+function codewarmHttpTimeoutMs(): number {
+  const raw = process.env.CODEWARM_HTTP_TIMEOUT_MS?.trim();
+  const n = raw ? Number.parseInt(raw, 10) : 25_000;
+  return Number.isFinite(n) && n > 0 ? n : 25_000;
+}
+
 function wrapHttpWithCost(
   http: HttpFetcher | undefined,
   cost: ReturnType<typeof createCostTracker>,
   costPerFetch: number,
 ): HttpFetcher {
+  const timeoutMs = codewarmHttpTimeoutMs();
   return async (url) => {
     cost.chargeFetch(costPerFetch);
     if (http) return http(url);
     const res = await fetch(url, {
       headers: { "User-Agent": "Hauska-Codewarm-Batch/1.0" },
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await res.text();
     return { status: res.status, body, finalUrl: res.url };
