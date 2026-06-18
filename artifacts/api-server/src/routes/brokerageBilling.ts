@@ -63,7 +63,6 @@ brokerageBillingRouter.post("/checkout", async (req: Request, res: Response) => 
   void syncPipedriveDeal({
     installId,
     title: `Hauska Pro upgrade — ${installId.slice(0, 8)}`,
-    stage: "upgrade_started",
   });
 
   try {

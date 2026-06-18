@@ -57,12 +57,11 @@ export async function syncPipedrivePerson(input: {
   installId: string;
   acquisitionSource?: string | null;
 }): Promise<PipedriveSyncResult> {
+  const baseName = input.email.split("@")[0] || "Hauska user";
   const payload = {
-    name: input.email.split("@")[0] || "Hauska user",
+    name: `${baseName} (${input.installId.slice(0, 12)})`,
     email: [{ value: input.email, primary: true, label: "work" }],
-    "a8f3f9b2e1d04c6a9b0e2f1a3c4d5e6f": input.installId,
     visible_to: "3",
-    label: input.acquisitionSource ?? "hauska_extension",
   };
 
   if (!isPipedriveConfigured()) {
@@ -73,8 +72,17 @@ export async function syncPipedrivePerson(input: {
     return { mode: "simulated", objectType: "person", payload };
   }
 
-  const created = await pipedrivePost("/persons", payload);
-  return { mode: "live", objectType: "person", id: created.id };
+  try {
+    const created = await pipedrivePost("/persons", payload);
+    logger.info(
+      { installId: input.installId.slice(0, 8), personId: created.id },
+      "pipedrive: person synced",
+    );
+    return { mode: "live", objectType: "person", id: created.id };
+  } catch (err) {
+    logger.warn({ err, installId: input.installId.slice(0, 8) }, "pipedrive: person sync failed");
+    return { mode: "simulated", objectType: "person", payload };
+  }
 }
 
 /** Deal when a free user hits Pro gate or starts upgrade. */
@@ -86,11 +94,13 @@ export async function syncPipedriveDeal(input: {
 }): Promise<PipedriveSyncResult> {
   const payload: Record<string, unknown> = {
     title: input.title,
-    "a8f3f9b2e1d04c6a9b0e2f1a3c4d5e6f": input.installId,
     visible_to: "3",
   };
   if (input.personId) payload.person_id = input.personId;
-  if (input.stage) payload.stage_id = input.stage;
+  if (input.stage) {
+    const stageId = Number(input.stage);
+    if (Number.isFinite(stageId)) payload.stage_id = stageId;
+  }
 
   if (!isPipedriveConfigured()) {
     logger.info(
@@ -100,8 +110,13 @@ export async function syncPipedriveDeal(input: {
     return { mode: "simulated", objectType: "deal", payload };
   }
 
-  const created = await pipedrivePost("/deals", payload);
-  return { mode: "live", objectType: "deal", id: created.id };
+  try {
+    const created = await pipedrivePost("/deals", payload);
+    return { mode: "live", objectType: "deal", id: created.id };
+  } catch (err) {
+    logger.warn({ err, installId: input.installId.slice(0, 8) }, "pipedrive: deal sync failed");
+    return { mode: "simulated", objectType: "deal", payload };
+  }
 }
 
 /** Lead for qualified prospect from GTM triage (signal only). */
@@ -113,9 +128,8 @@ export async function syncPipedriveLead(input: {
 }): Promise<PipedriveSyncResult> {
   const payload: Record<string, unknown> = {
     title: input.title,
-    "a8f3f9b2e1d04c6a9b0e2f1a3c4d5e6f": input.installId,
     visible_to: "3",
-    note: `qualified_prospect intent=${input.intentScore ?? "n/a"} event=${input.sourceEventId ?? "n/a"}`,
+    note: `install=${input.installId.slice(0, 16)} intent=${input.intentScore ?? "n/a"} event=${input.sourceEventId ?? "n/a"}`,
   };
 
   if (!isPipedriveConfigured()) {
@@ -126,6 +140,11 @@ export async function syncPipedriveLead(input: {
     return { mode: "simulated", objectType: "lead", payload };
   }
 
-  const created = await pipedrivePost("/leads", payload);
-  return { mode: "live", objectType: "lead", id: created.id };
+  try {
+    const created = await pipedrivePost("/leads", payload);
+    return { mode: "live", objectType: "lead", id: created.id };
+  } catch (err) {
+    logger.warn({ err, installId: input.installId.slice(0, 8) }, "pipedrive: lead sync failed");
+    return { mode: "simulated", objectType: "lead", payload };
+  }
 }
