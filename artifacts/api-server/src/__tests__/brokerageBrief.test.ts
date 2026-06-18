@@ -430,6 +430,33 @@ describe("POST /api/brokerage/v1/research/chat", () => {
     expect(aduRetrievalCalls.length).toBeGreaterThan(0);
   });
 
+  it("accepts message + address without runId when a brief exists", async () => {
+    completeChatMock.mockResolvedValueOnce(
+      JSON.stringify({
+        answer: "Setbacks depend on zoning [1].",
+      }),
+    );
+
+    const address = "251 Cool Water Dr, Bastrop, TX 78602";
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address });
+    expect(briefRes.status).toBe(200);
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        address,
+        message: "What are the setbacks?",
+        history: [],
+      });
+
+    expect(chatRes.status).toBe(200);
+    expect(chatRes.body.message).toMatch(/setback/i);
+  });
+
   it("logs starter_prompt_selected when starterPromptId is sent", async () => {
     const briefRes = await request(getApp())
       .post("/api/brokerage/v1/brief")

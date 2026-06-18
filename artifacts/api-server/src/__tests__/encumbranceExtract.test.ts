@@ -20,6 +20,12 @@ vi.mock("@workspace/codes-sources/pdf-text", () => ({
 }));
 
 describe("encumbranceExtract fixture", () => {
+  it("rejects non-PDF bytes as unparseable", async () => {
+    await expect(
+      extractEncumbranceClausesFromPdf(Buffer.from("not a pdf")),
+    ).rejects.toThrow("pdf_unparseable");
+  });
+
   it("splits Article VII clause from fixture PDF bytes", async () => {
     const result = await extractEncumbranceClausesFromPdf(
       Buffer.from("%PDF-1.4 fixture\n"),

@@ -29,13 +29,25 @@ export interface EncumbranceExtractResult {
   };
 }
 
+function isPdfMagic(bytes: Buffer): boolean {
+  return bytes.length >= 5 && bytes.subarray(0, 5).toString("ascii") === "%PDF-";
+}
+
 export async function extractEncumbranceClausesFromPdf(
   bytes: Buffer,
 ): Promise<EncumbranceExtractResult> {
   if (bytes.length > MAX_PDF_BYTES) {
     throw new Error("pdf_too_large");
   }
-  const parsed = await extractPdfPlainText(bytes);
+  if (!isPdfMagic(bytes)) {
+    throw new Error("pdf_unparseable");
+  }
+  let parsed: { text: string; numpages: number };
+  try {
+    parsed = await extractPdfPlainText(bytes);
+  } catch {
+    throw new Error("pdf_unparseable");
+  }
   const plainText = parsed.text.trim();
   const pageCount = parsed.numpages;
   const clauses = splitClauseCandidates(plainText, pageCount);
