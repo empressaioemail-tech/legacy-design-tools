@@ -26,6 +26,12 @@
 import { AdapterRunError } from "./types";
 import { fetchWithRetry } from "./retry";
 
+/** Minimal GeoJSON FeatureCollection for ArcGIS `f=geojson` responses. */
+export type ArcGisGeoJsonFeatureCollection = {
+  type: "FeatureCollection";
+  features: unknown[];
+};
+
 /**
  * Identifying User-Agent the helper sends on every request. See the
  * docstring above the `headers:` block in `arcgisPointQuery` for why
@@ -217,7 +223,7 @@ export async function arcgisPointQuery(
 /** Point-intersect query returning a GeoJSON FeatureCollection (`f=geojson`). */
 export async function arcgisPointQueryGeoJson(
   input: ArcGisPointQueryInput,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<ArcGisGeoJsonFeatureCollection> {
   const sr = input.inSpatialReference ?? 4326;
   const outSr = input.outSpatialReference ?? 4326;
   const label = input.upstreamLabel ?? "ArcGIS";
@@ -296,7 +302,7 @@ export async function arcgisPointQueryGeoJson(
       `${label} error ${errorEnv.code ?? "?"}: ${errorEnv.message ?? "unknown"}`,
     );
   }
-  const fc = json as GeoJSON.FeatureCollection;
+  const fc = json as ArcGisGeoJsonFeatureCollection;
   if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features)) {
     throw new AdapterRunError(
       "parse-error",

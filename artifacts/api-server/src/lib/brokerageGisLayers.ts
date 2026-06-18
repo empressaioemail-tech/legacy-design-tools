@@ -3,7 +3,7 @@
  * Lifts SmartCity-era Bastrop + FEMA layer URLs; ETJ is env-configured.
  */
 
-import { arcgisPointQueryGeoJson } from "@workspace/adapters/arcgis";
+import { arcgisPointQueryGeoJson, type ArcGisGeoJsonFeatureCollection } from "@workspace/adapters/arcgis";
 import { AdapterRunError } from "@workspace/adapters/types";
 
 const FEMA_NFHL_FLOOD_ZONES =
@@ -73,7 +73,7 @@ export function resolveGisLayerEndpoint(
 }
 
 export type GisLayerGeoJsonResult = GisLayerEndpoint & {
-  geojson: GeoJSON.FeatureCollection;
+  geojson: ArcGisGeoJsonFeatureCollection;
   featureCount: number;
 };
 
