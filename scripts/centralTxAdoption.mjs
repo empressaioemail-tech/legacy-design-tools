@@ -3,6 +3,15 @@
  * Layer 1/2 reasoning warm — manifest lists per jurisdiction.
  */
 
+const MANIFESTS_2021_PACKAGE = [
+  "manifest_irc_2021.yaml",
+  "manifest_ibc_iebc_2021.yaml",
+  "manifest_iecc_2021.yaml",
+  "manifest_imc_ipc_ifgc_2021.yaml",
+  "manifest_ifc_ipmc_2021.yaml",
+  "manifest_accessibility_nfpa_2021.yaml",
+];
+
 /** @type {Record<string, { label: string; adoptedEditions: string; manifests: string[]; deepenManifests?: string[]; secFloors?: string; preDeepen?: { verifiedRate: number; families?: Record<string, number> } }>} */
 export const CENTRAL_TX_ADOPTION = {
   austin_tx: {
@@ -160,14 +169,49 @@ export const CENTRAL_TX_ADOPTION = {
     label: "Boerne, TX",
     adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
     secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
-    manifests: [
-      "manifest_irc_2021.yaml",
-      "manifest_ibc_iebc_2021.yaml",
-      "manifest_iecc_2021.yaml",
-      "manifest_imc_ipc_ifgc_2021.yaml",
-      "manifest_ifc_ipmc_2021.yaml",
-      "manifest_accessibility_nfpa_2021.yaml",
-    ],
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  waco_tx: {
+    label: "Waco, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  temple_tx: {
+    label: "Temple, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  san_marcos_tx: {
+    label: "San Marcos, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  seguin_tx: {
+    label: "Seguin, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  cibolo_tx: {
+    label: "Cibolo, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  belton_tx: {
+    label: "Belton, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
+  },
+  universal_city_tx: {
+    label: "Universal City, TX",
+    adoptedEditions: "IRC/IBC/IECC/IFC 2021 package",
+    secFloors: "SECO 2015 IRC Ch.11 res / 2015 IECC commercial; TAS 2012",
+    manifests: MANIFESTS_2021_PACKAGE,
   },
 };
 

@@ -9,7 +9,8 @@ param(
   [double]$BudgetCap = 200,
   [switch]$AllowBatch,
   [int]$JurisdictionTimeoutMinutes = 90,
-  [switch]$IncludeClassBTail
+  [switch]$IncludeClassBTail,
+  [switch]$FullPackageForSanAntonio
 )
 
 if (-not $AllowBatch) {
@@ -119,16 +120,20 @@ foreach ($key in $queue) {
   $errPath = "$logPath.err"
 
   $job = Start-Job -ScriptBlock {
-    param($Root, $Key, $Budget, $CatalogDir, $DbUrl, $HttpTimeoutMs, $LogPath)
+    param($Root, $Key, $Budget, $CatalogDir, $DbUrl, $HttpTimeoutMs, $LogPath, $FullPackageSa)
     Set-Location $Root
     $env:NODE_OPTIONS = "--use-system-ca"
     $env:CODEWARM_CATALOG_DIR = $CatalogDir
     $env:DATABASE_URL = $DbUrl
     $env:CODEWARM_HTTP_TIMEOUT_MS = $HttpTimeoutMs
-    & pnpm --filter @workspace/scripts exec tsx deepen-central-tx-jurisdiction.mjs $Key --budget-cap $Budget 2>&1 |
+    $deepenArgs = @($Key, "--budget-cap", $Budget)
+    if ($FullPackageSa -and $Key -eq "san_antonio_tx") {
+      $deepenArgs += "--full-package"
+    }
+    & pnpm --filter @workspace/scripts exec tsx deepen-central-tx-jurisdiction.mjs @deepenArgs 2>&1 |
       Tee-Object -FilePath $LogPath
     return $LASTEXITCODE
-  } -ArgumentList $repoRoot, $key, $BudgetCap, $env:CODEWARM_CATALOG_DIR, $env:DATABASE_URL, $env:CODEWARM_HTTP_TIMEOUT_MS, $logPath
+  } -ArgumentList $repoRoot, $key, $BudgetCap, $env:CODEWARM_CATALOG_DIR, $env:DATABASE_URL, $env:CODEWARM_HTTP_TIMEOUT_MS, $logPath, ($FullPackageForSanAntonio.IsPresent)
 
   $wait = Wait-Job -Job $job -Timeout ($JurisdictionTimeoutMinutes * 60)
   $hung = $false
