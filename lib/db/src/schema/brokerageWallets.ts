@@ -12,7 +12,11 @@ export type BrokerageWalletLedgerKind =
   | "top_up"
   | "compute_debit"
   | "auto_refill"
-  | "adjustment";
+  | "adjustment"
+  | "free_brief";
+
+export type BrokerageSubscriptionTier = "free" | "pro";
+export type BrokerageSubscriptionStatus = "active" | "trialing" | "churned";
 
 export const brokerageWallets = pgTable("brokerage_wallets", {
   installId: text("install_id").primaryKey(),
@@ -21,6 +25,14 @@ export const brokerageWallets = pgTable("brokerage_wallets", {
   autoRefillFailedAt: timestamp("auto_refill_failed_at", {
     withTimezone: true,
   }),
+  freeBriefsUsed: integer("free_briefs_used").notNull().default(0),
+  subscriptionTier: text("subscription_tier").$type<BrokerageSubscriptionTier>(),
+  subscriptionStatus: text("subscription_status").$type<BrokerageSubscriptionStatus>(),
+  subscriptionPeriodEnd: timestamp("subscription_period_end", {
+    withTimezone: true,
+  }),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

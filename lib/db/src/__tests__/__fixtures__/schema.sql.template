@@ -274,6 +274,12 @@ CREATE TABLE @@SCHEMA@@.brokerage_wallets (
     balance_cents integer DEFAULT 0 NOT NULL,
     auto_refill_enabled boolean DEFAULT false NOT NULL,
     auto_refill_failed_at timestamp with time zone,
+    free_briefs_used integer DEFAULT 0 NOT NULL,
+    subscription_tier text,
+    subscription_status text,
+    subscription_period_end timestamp with time zone,
+    stripe_customer_id text,
+    stripe_subscription_id text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 

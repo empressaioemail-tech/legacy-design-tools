@@ -2,9 +2,13 @@
  * Chrome Web Store extension_public client tier — auth, limits, gating.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import type { Request } from "express";
 
@@ -82,11 +86,21 @@ const {
   gtmPayloadWithClientTier,
   EXTENSION_PUBLIC_CLIENT_TIER,
 } = await import("../lib/brokerageExtensionPublic");
-const { gtmEvents } = await import("@workspace/db");
+const { gtmEvents, brokerageWallets } = await import("@workspace/db");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
+});
+
+beforeAll(async () => {
+  if (!ctx.schema) return;
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql42 = readFileSync(
+    join(here, "../../../../lib/db/drizzle/0042_brokerage_entitlements.sql"),
+    "utf8",
+  );
+  await ctx.schema.pool.query(sql42);
 });
 
 const layVerdictsJson = JSON.stringify({
@@ -301,6 +315,79 @@ describe("extension_public client tier", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("install_id_required");
+  });
+
+  describe("free brief entitlement (wallet balance 0)", () => {
+    const FREE_INSTALL = "install-public-free-tier-aaaa";
+
+    beforeEach(async () => {
+      process.env.BROKERAGE_WALLET_BYPASS = "0";
+      process.env.BROKERAGE_FREE_BRIEFS_CAP = "3";
+      process.env.BROKERAGE_WALLET_START_BALANCE_CENTS = "0";
+      if (!ctx.schema) return;
+      await ctx.schema.db
+        .delete(brokerageWallets)
+        .where(eq(brokerageWallets.installId, FREE_INSTALL));
+    });
+
+    it("allows briefs 1-3 at zero balance and returns entitlement snapshot", async () => {
+      const headers = {
+        Authorization: `Bearer ${PUBLIC_API_KEY}`,
+        "X-Hauska-Install-Id": FREE_INSTALL,
+      };
+
+      for (let n = 3; n >= 1; n -= 1) {
+        const res = await request(getApp())
+          .post("/api/brokerage/v1/brief")
+          .set(headers)
+          .send({ address: `190${n} Heathwood Cir, Round Rock, TX 78664` });
+        expect(res.status).toBe(200);
+        expect(res.body.entitlement).toEqual({
+          freeBriefsRemaining: n - 1,
+          freeBriefsCap: 3,
+          proActive: false,
+        });
+      }
+    });
+
+    it("returns upgrade_required on 4th brief (cap exhausted)", async () => {
+      const headers = {
+        Authorization: `Bearer ${PUBLIC_API_KEY}`,
+        "X-Hauska-Install-Id": FREE_INSTALL,
+      };
+
+      for (let i = 0; i < 3; i += 1) {
+        const ok = await request(getApp())
+          .post("/api/brokerage/v1/brief")
+          .set(headers)
+          .send({ address: `200${i} Heathwood Cir, Round Rock, TX 78664` });
+        expect(ok.status).toBe(200);
+      }
+
+      const blocked = await request(getApp())
+        .post("/api/brokerage/v1/brief")
+        .set(headers)
+        .send({ address: "2099 Heathwood Cir, Round Rock, TX 78664" });
+      expect(blocked.status).toBe(402);
+      expect(blocked.body.error).toBe("upgrade_required");
+      expect(blocked.body.upgradeCta).toBe("pro_subscription");
+      expect(blocked.body.freeBriefsRemaining).toBe(0);
+    });
+
+    it("GET /entitlement exposes snapshot for extension panel", async () => {
+      const headers = {
+        Authorization: `Bearer ${PUBLIC_API_KEY}`,
+        "X-Hauska-Install-Id": FREE_INSTALL,
+      };
+
+      const ent = await request(getApp())
+        .get("/api/brokerage/v1/entitlement")
+        .set(headers);
+      expect(ent.status).toBe(200);
+      expect(ent.body.freeBriefsCap).toBe(3);
+      expect(ent.body.freeBriefsRemaining).toBe(3);
+      expect(ent.body.proActive).toBe(false);
+    });
   });
 
   it("POST /workspaces/:id/share returns account_upgrade_required for public key", async () => {

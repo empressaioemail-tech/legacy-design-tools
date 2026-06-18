@@ -7,6 +7,30 @@ import { db, brokerageWallets, brokerageWalletLedger } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 
+import type { Response } from "express";
+import {
+  assertBriefComputeEntitled,
+  getEntitlementSnapshot,
+  type EntitlementSnapshot,
+} from "./brokerageEntitlement";
+
+/** Extension-facing entitlement fields (brief response + GET /entitlement). */
+export type ClientEntitlementSnapshot = {
+  freeBriefsRemaining: number;
+  freeBriefsCap: number;
+  proActive: boolean;
+};
+
+export function clientEntitlementFromSnapshot(
+  ent: EntitlementSnapshot,
+): ClientEntitlementSnapshot {
+  return {
+    freeBriefsRemaining: ent.freeBriefsRemaining,
+    freeBriefsCap: ent.freeBriefsCap,
+    proActive: ent.proActive,
+  };
+}
+
 export const BROKERAGE_TOP_UP_INCREMENT_CENTS = 500;
 
 export function brokerageComputeCostCents(): number {
@@ -24,6 +48,13 @@ export type WalletSnapshot = {
   balanceCents: number;
   autoRefillEnabled: boolean;
   autoRefillFailedAt: string | null;
+  freeBriefsUsed: number;
+  freeBriefsCap: number;
+  freeBriefsRemaining: number;
+  subscriptionTier: "free" | "pro" | null;
+  subscriptionStatus: "active" | "trialing" | "churned" | null;
+  subscriptionPeriodEnd: string | null;
+  proActive: boolean;
 };
 
 async function ensureWallet(installId: string) {
@@ -64,12 +95,20 @@ async function ensureWallet(installId: string) {
 export async function getWalletSnapshot(
   installId: string,
 ): Promise<WalletSnapshot> {
+  const ent = await getEntitlementSnapshot(installId);
   const row = await ensureWallet(installId);
   return {
-    installId: row.installId,
-    balanceCents: row.balanceCents,
+    installId: ent.installId,
+    balanceCents: ent.balanceCents,
     autoRefillEnabled: row.autoRefillEnabled,
     autoRefillFailedAt: row.autoRefillFailedAt?.toISOString() ?? null,
+    freeBriefsUsed: ent.freeBriefsUsed,
+    freeBriefsCap: ent.freeBriefsCap,
+    freeBriefsRemaining: ent.freeBriefsRemaining,
+    subscriptionTier: ent.subscriptionTier,
+    subscriptionStatus: ent.subscriptionStatus,
+    subscriptionPeriodEnd: ent.subscriptionPeriodEnd,
+    proActive: ent.proActive,
   };
 }
 
@@ -120,12 +159,7 @@ export async function topUpWallet(
     balanceAfterCents: balanceAfter,
   });
 
-  return {
-    installId,
-    balanceCents: updated!.balanceCents,
-    autoRefillEnabled: updated!.autoRefillEnabled,
-    autoRefillFailedAt: null,
-  };
+  return getWalletSnapshot(installId);
 }
 
 export async function setWalletAutoRefill(
@@ -133,17 +167,11 @@ export async function setWalletAutoRefill(
   enabled: boolean,
 ): Promise<WalletSnapshot> {
   await ensureWallet(installId);
-  const [updated] = await db
+  await db
     .update(brokerageWallets)
     .set({ autoRefillEnabled: enabled, updatedAt: new Date() })
-    .where(eq(brokerageWallets.installId, installId))
-    .returning();
-  return {
-    installId,
-    balanceCents: updated!.balanceCents,
-    autoRefillEnabled: updated!.autoRefillEnabled,
-    autoRefillFailedAt: updated!.autoRefillFailedAt?.toISOString() ?? null,
-  };
+    .where(eq(brokerageWallets.installId, installId));
+  return getWalletSnapshot(installId);
 }
 
 async function tryAutoRefill(installId: string): Promise<boolean> {
@@ -176,8 +204,15 @@ async function tryAutoRefill(installId: string): Promise<boolean> {
 }
 
 export type DebitResult =
-  | { ok: true; balanceCents: number }
-  | { ok: false; reason: "insufficient_balance"; balanceCents: number };
+  | { ok: true; balanceCents: number; consumed?: "free_brief" | "wallet" | "pro_subscription" }
+  | {
+      ok: false;
+      reason: "paywall_hit";
+      balanceCents: number;
+      freeBriefsUsed?: number;
+      freeBriefsCap?: number;
+      upgradeCta?: string;
+    };
 
 export async function debitCompute(
   installId: string,
@@ -187,43 +222,42 @@ export async function debitCompute(
     return { ok: true, balanceCents: Number.MAX_SAFE_INTEGER };
   }
 
-  const cost = brokerageComputeCostCents();
-  let row = await ensureWallet(installId);
-
-  if (row.balanceCents < cost) {
+  let gate = await assertBriefComputeEntitled(installId, reference);
+  if (!gate.ok && gate.balanceCents === 0) {
     const refilled = await tryAutoRefill(installId);
     if (refilled) {
-      row = (await db
-        .select()
-        .from(brokerageWallets)
-        .where(eq(brokerageWallets.installId, installId))
-        .limit(1))[0]!;
+      gate = await assertBriefComputeEntitled(installId, reference);
     }
   }
 
-  if (row.balanceCents < cost) {
-    return { ok: false, reason: "insufficient_balance", balanceCents: row.balanceCents };
+  if (!gate.ok) {
+    return {
+      ok: false,
+      reason: "paywall_hit",
+      balanceCents: gate.balanceCents,
+      freeBriefsUsed: gate.freeBriefsUsed,
+      freeBriefsCap: gate.freeBriefsCap,
+      upgradeCta: gate.upgradeCta,
+    };
   }
 
-  const balanceAfter = row.balanceCents - cost;
-  await db
-    .update(brokerageWallets)
-    .set({ balanceCents: balanceAfter, updatedAt: new Date() })
-    .where(eq(brokerageWallets.installId, installId));
-
-  await appendLedger({
-    installId,
-    amountCents: -cost,
-    kind: "compute_debit",
-    reference: reference ?? null,
-    balanceAfterCents: balanceAfter,
-  });
-
-  if (balanceAfter === 0 && row.autoRefillEnabled && !row.autoRefillFailedAt) {
-    void tryAutoRefill(installId);
+  if ("skipped" in gate && gate.skipped) {
+    return { ok: true, balanceCents: Number.MAX_SAFE_INTEGER };
   }
 
-  return { ok: true, balanceCents: balanceAfter };
+  if ("consumed" in gate) {
+    if (gate.consumed === "pro_subscription" || gate.consumed === "free_brief") {
+      const ent = await getEntitlementSnapshot(installId);
+      return {
+        ok: true,
+        balanceCents: ent.balanceCents,
+        consumed: gate.consumed,
+      };
+    }
+    return { ok: true, balanceCents: gate.balanceCents, consumed: "wallet" };
+  }
+
+  return { ok: true, balanceCents: Number.MAX_SAFE_INTEGER };
 }
 
 export async function assertComputeAllowed(
@@ -234,3 +268,22 @@ export async function assertComputeAllowed(
   }
   return debitCompute(installId);
 }
+
+export function sendBriefUpgradeRequiredResponse(
+  res: Response,
+  gate: Extract<DebitResult, { ok: false }>,
+): void {
+  res.status(402).json({
+    error: "upgrade_required",
+    message:
+      "Free briefs used for this install. Upgrade to Hauska Pro for unlimited Property Briefs.",
+    upgradeCta: gate.upgradeCta ?? "pro_subscription",
+    freeBriefsUsed: gate.freeBriefsUsed,
+    freeBriefsCap: gate.freeBriefsCap,
+    freeBriefsRemaining: 0,
+    balanceCents: gate.balanceCents,
+    proActive: false,
+  });
+}
+
+export { getEntitlementSnapshot, brokerageFreeBriefsCap } from "./brokerageEntitlement";

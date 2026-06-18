@@ -2,7 +2,10 @@
  * Brokerage V1 — workspaces, wallet paywall, admin graph.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -92,7 +95,7 @@ const { resetBrokerageApiKeysForTests } = await import(
   "../middlewares/brokerageAuth"
 );
 const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
-const { gtmConsent } = await import("@workspace/db");
+const { gtmConsent, brokerageWallets } = await import("@workspace/db");
 const { listingKeyFromAddress } = await import("../lib/brokerageWorkspace");
 
 let getApp: () => Express;
@@ -104,6 +107,17 @@ const authHeaders = {
   Authorization: `Bearer ${TEST_API_KEY}`,
   "X-Hauska-Install-Id": OWNER_INSTALL,
 };
+
+beforeAll(async () => {
+  process.env.BROKERAGE_FREE_BRIEFS_CAP = "3";
+  if (!ctx.schema) return;
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql42 = readFileSync(
+    join(here, "../../../../lib/db/drizzle/0042_brokerage_entitlements.sql"),
+    "utf8",
+  );
+  await ctx.schema.pool.query(sql42);
+});
 
 const adminHeaders = {
   Authorization: `Bearer ${TEST_API_KEY}`,
@@ -163,6 +177,10 @@ beforeEach(async () => {
     graphOptIn: true,
     updatedAt: new Date(),
   });
+  await ctx.schema.db
+    .update(brokerageWallets)
+    .set({ freeBriefsUsed: 0, balanceCents: 0 })
+    .where(eq(brokerageWallets.installId, OWNER_INSTALL));
 });
 
 afterEach(() => {
@@ -282,16 +300,41 @@ describe("brokerage brief response shape", () => {
 });
 
 describe("brokerage wallet paywall", () => {
-  it("blocks brief at zero balance but allows workspace read", async () => {
-    const blocked = await request(getApp())
+  it("allows first brief under free cap at zero balance", async () => {
+    const brief = await request(getApp())
       .post("/api/brokerage/v1/brief")
       .set(authHeaders)
       .send({
         address: "251 Cool Water Dr, Bastrop, TX 78602",
         page_url: "https://matrix.example/listing/1",
       });
+    expect(brief.status).toBe(200);
+
+    const wallet = await request(getApp())
+      .get("/api/brokerage/v1/wallet")
+      .set(authHeaders);
+    expect(wallet.body.freeBriefsUsed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("blocks brief after free cap but allows workspace read", async () => {
+    process.env.BROKERAGE_FREE_BRIEFS_CAP = "1";
+    await request(getApp()).get("/api/brokerage/v1/wallet").set(authHeaders);
+    if (!ctx.schema) throw new Error("schema missing");
+    await ctx.schema.db
+      .update(brokerageWallets)
+      .set({ freeBriefsUsed: 1, balanceCents: 0 })
+      .where(eq(brokerageWallets.installId, OWNER_INSTALL));
+
+    const blocked = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({
+        address: "252 Cool Water Dr, Bastrop, TX 78602",
+        page_url: "https://matrix.example/listing/2",
+      });
     expect(blocked.status).toBe(402);
-    expect(blocked.body.error).toBe("insufficient_balance");
+    expect(blocked.body.error).toBe("upgrade_required");
+    expect(blocked.body.upgradeCta).toBe("pro_subscription");
 
     const topUp = await request(getApp())
       .post("/api/brokerage/v1/wallet/top-up")
@@ -410,6 +453,13 @@ describe("brokerage workspace attachments and share", () => {
 
 describe("brokerage wallet auto-refill", () => {
   it("auto-refills $5 before compute when balance is zero", async () => {
+    process.env.BROKERAGE_FREE_BRIEFS_CAP = "0";
+    if (!ctx.schema) throw new Error("schema missing");
+    await ctx.schema.db
+      .update(brokerageWallets)
+      .set({ freeBriefsUsed: 0, balanceCents: 0 })
+      .where(eq(brokerageWallets.installId, OWNER_INSTALL));
+
     await request(getApp())
       .post("/api/brokerage/v1/wallet/settings")
       .set(authHeaders)
@@ -421,7 +471,6 @@ describe("brokerage wallet auto-refill", () => {
       .send({ amountCents: 500 });
 
     if (!ctx.schema) throw new Error("schema missing");
-    const { brokerageWallets } = await import("@workspace/db");
     await ctx.schema.db
       .update(brokerageWallets)
       .set({ balanceCents: 0 })

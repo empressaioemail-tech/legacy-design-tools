@@ -8,6 +8,7 @@
  *   GET  /api/brokerage/v1/coverage
  *   GET  /api/brokerage/v1/workspaces/recent
  *   GET  /api/brokerage/v1/workspaces/:id
+ *   GET  /api/brokerage/v1/entitlement
  *   GET  /api/brokerage/v1/wallet
  *   GET  /api/brokerage/v1/admin/graph
  */
@@ -61,7 +62,13 @@ import {
   gtmPayloadWithClientTier,
   sendExtensionPublicRateLimitResponse,
 } from "../lib/brokerageExtensionPublic";
-import { assertComputeAllowed } from "../lib/brokerageWallet";
+import {
+  assertComputeAllowed,
+  clientEntitlementFromSnapshot,
+  getEntitlementSnapshot,
+  sendBriefUpgradeRequiredResponse,
+  type ClientEntitlementSnapshot,
+} from "../lib/brokerageWallet";
 import {
   findWorkspaceByListingKey,
   listingKeyFromAddress,
@@ -104,6 +111,7 @@ import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokeragePlaceRouter } from "./brokeragePlace";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
+import { brokerageEntitlementRouter } from "./brokerageEntitlementRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
 import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
@@ -242,6 +250,7 @@ brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
+brokerageV1.use("/entitlement", brokerageEntitlementRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
 
 function logStarterPromptSelected(
@@ -290,6 +299,66 @@ function toBriefAtom(atom: RetrievedAtom, label?: string): BriefAtomInput {
   };
 }
 
+type BriefComputeGateResult =
+  | { ok: true; entitlement: ClientEntitlementSnapshot | null }
+  | { ok: false };
+
+async function enforceBriefComputeGate(
+  req: Request,
+  res: Response,
+  input: {
+    installId: string | null;
+    extensionPublic: boolean;
+    serviceCaller: boolean;
+    rateLimit?: (installId: string) => Promise<
+      Awaited<ReturnType<typeof assertExtensionPublicBriefAllowed>>
+    >;
+  },
+): Promise<BriefComputeGateResult> {
+  if (input.serviceCaller) {
+    return { ok: true, entitlement: null };
+  }
+
+  if (input.extensionPublic) {
+    if (!input.installId) {
+      res.status(400).json({
+        error: "install_id_required",
+        message: "X-Hauska-Install-Id header is required",
+      });
+      return { ok: false };
+    }
+    if (input.rateLimit) {
+      const rateLimit = await input.rateLimit(input.installId);
+      if (!rateLimit.ok) {
+        sendExtensionPublicRateLimitResponse(res, rateLimit);
+        return { ok: false };
+      }
+    }
+  }
+
+  if (!input.installId) {
+    return { ok: true, entitlement: null };
+  }
+
+  const debit = await assertComputeAllowed(input.installId);
+  if (!debit.ok) {
+    recordGtmEvent({
+      installId: input.installId,
+      eventType: "paywall_hit",
+      payload: gtmPayloadWithClientTier(req, {
+        freeBriefsUsed: debit.freeBriefsUsed,
+        freeBriefsCap: debit.freeBriefsCap,
+        balanceCents: debit.balanceCents,
+      }),
+    });
+    sendBriefUpgradeRequiredResponse(res, debit);
+    return { ok: false };
+  }
+
+  const ent = await getEntitlementSnapshot(input.installId);
+  return { ok: true, entitlement: clientEntitlementFromSnapshot(ent) };
+}
+
 brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const parse = BRIEF_BODY.safeParse(req.body);
   if (!parse.success) {
@@ -327,34 +396,13 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const serviceCaller = isBrokerageServiceCaller(req);
   const spineViaGate = isBrokerageBriefViaGateEnabled();
 
-  if (serviceCaller) {
-    // MCP service path — gate owns metering; no install id or wallet debit.
-  } else if (extensionPublic) {
-    if (!installId) {
-      res.status(400).json({
-        error: "install_id_required",
-        message: "X-Hauska-Install-Id header is required",
-      });
-      return;
-    }
-
-    const rateLimit = await assertExtensionPublicBriefAllowed(installId);
-    if (!rateLimit.ok) {
-      sendExtensionPublicRateLimitResponse(res, rateLimit);
-      return;
-    }
-  } else if (installId) {
-    const debit = await assertComputeAllowed(installId);
-    if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
-      res.status(402).json({
-        error: "insufficient_balance",
-        message:
-          "Wallet balance is zero. Top up in $5 increments to run new briefs.",
-        balanceCents: debit.balanceCents,
-      });
-      return;
-    }
-  }
+  const computeGate = await enforceBriefComputeGate(req, res, {
+    installId,
+    extensionPublic,
+    serviceCaller,
+    rateLimit: extensionPublic ? assertExtensionPublicBriefAllowed : undefined,
+  });
+  if (!computeGate.ok) return;
 
   if (installId && starterPromptId) {
     logStarterPromptSelected(req, {
@@ -710,6 +758,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   res.json({
     ...responseBody,
     siteContext: stripSiteContextForClient(siteContext),
+    ...(computeGate.entitlement ? { entitlement: computeGate.entitlement } : {}),
     ...(workspaceId && !extensionPublic && !serviceCaller
       ? { workspaceId, workspaceDid }
       : {}),
@@ -807,13 +856,8 @@ brokerageV1.post(
       }
     } else if (installId) {
       const debit = await assertComputeAllowed(installId);
-      if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
-        res.status(402).json({
-          error: "insufficient_balance",
-          message:
-            "Wallet balance is zero. Top up in $5 increments for new research chat turns.",
-          balanceCents: debit.balanceCents,
-        });
+      if (!debit.ok) {
+        sendBriefUpgradeRequiredResponse(res, debit);
         return;
       }
     }
