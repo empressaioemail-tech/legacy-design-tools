@@ -109,6 +109,7 @@ import {
 import { brokerageCoverageRouter } from "./brokerageCoverage";
 import { brokerageCoveragePublicCors } from "../middlewares/brokerageCoverageCors";
 import { brokerageGtmRouter } from "./brokerageGtm";
+import { brokerageProfileRouter } from "./brokerageProfile";
 import { brokeragePlaceRouter } from "./brokeragePlace";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
@@ -254,6 +255,7 @@ brokerageV1.use(brokerageCors);
 /** GTM consent/events use {@link brokerageAuth} only — extension wedge, no service token. */
 brokerageV1.use("/gtm", brokerageGtmRouter);
 brokerageV1.use(requireBrokerageAuthOrServiceToken);
+brokerageV1.use("/profile", brokerageProfileRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
