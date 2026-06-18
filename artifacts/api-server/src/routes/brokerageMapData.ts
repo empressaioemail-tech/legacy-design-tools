@@ -100,7 +100,7 @@ brokerageMapDataRouter.post("/", async (req: Request, res: Response) => {
   const packageTier = resolveInvestorPackageTier({
     brokerageAuthTier: req.brokerageAuth?.tier ?? null,
     profileTier: packageTierFromProfile(profileRow),
-    entitlementTier: mapDataMaxInstallOverride(installId),
+    tier: mapDataMaxInstallOverride(installId),
   });
 
   if (packageTier !== "max") {
