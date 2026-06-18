@@ -117,6 +117,7 @@ import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
 import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokerageMapDataRouter } from "./brokerageMapData";
+import { brokerageBillingRouter } from "./brokerageBilling";
 import {
   BROKERAGE_BRIEF_BILLABLE_HEADER,
   brokerageBriefMeteringMeta,
@@ -261,6 +262,7 @@ brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/entitlement", brokerageEntitlementRouter);
+brokerageV1.use("/billing", brokerageBillingRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
 
 async function resolveResearchChatRun(input: {
