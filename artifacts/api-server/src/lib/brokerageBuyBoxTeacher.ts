@@ -33,21 +33,27 @@ export type InvestorProfileState = {
 const MAX_DEAL_HISTORY = 200;
 
 export async function resolveProfileOwnerId(req: Request): Promise<string | null> {
-  const sessionUser = req.session?.requestor?.id?.trim();
-  if (sessionUser) return sessionUser;
-
   const installId = installIdFromRequest(req);
-  if (!installId) return null;
+  const sessionUser = req.session?.requestor?.id?.trim();
+  const isAuthenticatedUser =
+    Boolean(sessionUser) && !sessionUser!.startsWith("anon_");
 
-  const [claim] = await db
-    .select({ ownerUserId: brokerageInstallClaims.ownerUserId })
-    .from(brokerageInstallClaims)
-    .where(eq(brokerageInstallClaims.installId, installId))
-    .limit(1);
+  if (isAuthenticatedUser) return sessionUser!;
 
-  if (claim?.ownerUserId) return claim.ownerUserId;
+  if (installId) {
+    const [claim] = await db
+      .select({ ownerUserId: brokerageInstallClaims.ownerUserId })
+      .from(brokerageInstallClaims)
+      .where(eq(brokerageInstallClaims.installId, installId))
+      .limit(1);
 
-  return `install:${installId}`;
+    if (claim?.ownerUserId) return claim.ownerUserId;
+
+    return `install:${installId}`;
+  }
+
+  if (sessionUser) return sessionUser;
+  return null;
 }
 
 function parseInvestorProfile(raw: unknown): InvestorProfileState {
