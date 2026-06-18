@@ -8,7 +8,8 @@ param(
   [string]$StartAt = "austin_tx",
   [double]$BudgetCap = 200,
   [switch]$AllowBatch,
-  [int]$JurisdictionTimeoutMinutes = 90
+  [int]$JurisdictionTimeoutMinutes = 90,
+  [switch]$IncludeClassBTail
 )
 
 if (-not $AllowBatch) {
@@ -55,6 +56,18 @@ $queue = @(
   "schertz_tx",
   "boerne_tx"
 )
+
+if ($IncludeClassBTail) {
+  $queue += @(
+    "waco_tx",
+    "temple_tx",
+    "san_marcos_tx",
+    "seguin_tx",
+    "cibolo_tx",
+    "belton_tx",
+    "universal_city_tx"
+  )
+}
 
 function Get-JurisdictionRate {
   param([string]$Key)

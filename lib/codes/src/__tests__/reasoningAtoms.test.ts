@@ -33,6 +33,7 @@ import {
   capReasoningSnippet,
   mergeReasoningSources,
   reasoningAtomId,
+  jurisdictionReasoningAtomId,
   supplementCodeSectionsWithReasoningGrounding,
   upsertReasoningAtomFromWebFetch,
   mergeVerificationState,
@@ -69,6 +70,20 @@ describe("capReasoningSnippet", () => {
     const capped = capReasoningSnippet(long)!;
     expect(capped.length).toBeLessThanOrEqual(REASONING_SNIPPET_MAX_CHARS);
     expect(capped.endsWith("…")).toBe(true);
+  });
+});
+
+describe("jurisdictionReasoningAtomId", () => {
+  it("keeps legacy ids for austin_tx", () => {
+    expect(jurisdictionReasoningAtomId("austin_tx", "ibc-2021", "R301.1")).toBe(
+      reasoningAtomId("ibc-2021", "R301.1"),
+    );
+  });
+
+  it("scopes ids to jurisdiction for non-austin cities", () => {
+    expect(jurisdictionReasoningAtomId("round_rock_tx", "ibc-2021", "R301.1")).toBe(
+      "reasoning:round_rock_tx:ibc-2021:r301-1",
+    );
   });
 });
 
@@ -158,7 +173,9 @@ describe("reasoning atom persistence", () => {
         },
       });
 
-      expect(atom.id).toBe(reasoningAtomId("fbc-2023", "FBC-M601.6"));
+      expect(atom.id).toBe(
+        jurisdictionReasoningAtomId("miami_beach_fl", "fbc-2023", "FBC-M601.6"),
+      );
       expect(atom.id.startsWith(REASONING_ATOM_PREFIX)).toBe(true);
       expect(atom.snippet!.length).toBeLessThanOrEqual(REASONING_SNIPPET_MAX_CHARS);
       expect(atom.snippet).not.toBe(fullText);

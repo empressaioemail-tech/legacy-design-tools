@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   fetchCodeSection,
   reasoningAtomId,
+  jurisdictionReasoningAtomId,
   retrieveReasoningAtomById,
   upsertReasoningAtomCorpusOverlay,
   upsertReasoningAtomDeeplinkOnly,
@@ -138,7 +139,11 @@ export async function runCodewarmBatch(
       }
 
       if (dryRun) {
-        const atomId = reasoningAtomId(target.editionSlug, target.codeRef);
+        const atomId = jurisdictionReasoningAtomId(
+          options.jurisdictionKey,
+          target.editionSlug,
+          target.codeRef,
+        );
         if (options.incrementalDeepen) {
           const existing = await retrieveReasoningAtomById(atomId);
           if (existing?.verificationState === "verified") {
@@ -180,7 +185,11 @@ export async function runCodewarmBatch(
         continue;
       }
 
-      const atomId = reasoningAtomId(target.editionSlug, target.codeRef);
+      const atomId = jurisdictionReasoningAtomId(
+        options.jurisdictionKey,
+        target.editionSlug,
+        target.codeRef,
+      );
       if (options.incrementalDeepen) {
         const existing = await retrieveReasoningAtomById(atomId);
         if (existing?.verificationState === "verified") {

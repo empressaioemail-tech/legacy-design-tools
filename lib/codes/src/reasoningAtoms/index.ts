@@ -9,7 +9,7 @@ export {
   type ReasoningVerificationState,
 } from "./types";
 
-export { reasoningAtomId } from "./ids";
+export { reasoningAtomId, jurisdictionReasoningAtomId } from "./ids";
 export { capReasoningSnippet, reasoningSummaryFromFetch } from "./snippet";
 export { mergeReasoningSources, sourceSetChanged } from "./sources";
 export {

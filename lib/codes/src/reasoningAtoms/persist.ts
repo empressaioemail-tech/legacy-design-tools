@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, reasoningAtoms, type ReasoningSourceLink } from "@workspace/db";
 import type { WebCodeFetchResult } from "../webCodeFetch/types";
 import type { WebCodeReviewTarget } from "../webCodeFetch/types";
-import { reasoningAtomId } from "./ids";
+import { reasoningAtomId, jurisdictionReasoningAtomId } from "./ids";
 import { mergeReasoningSources, sourceSetChanged } from "./sources";
 import { capReasoningSnippet, reasoningSummaryFromFetch } from "./snippet";
 import type { ReasoningAtomRecord, ReasoningVerificationState } from "./types";
@@ -57,7 +57,7 @@ export async function upsertReasoningAtomFromWebFetch(args: {
   verifyBeforePromote?: boolean;
 }): Promise<ReasoningAtomRecord> {
   const { jurisdictionKey, target, result, verifyBeforePromote = false } = args;
-  const id = reasoningAtomId(target.editionSlug, target.codeRef);
+  const id = jurisdictionReasoningAtomId(jurisdictionKey, target.editionSlug, target.codeRef);
   const incomingSource = webResultToSourceLink(result);
   const incomingVerificationState = verificationStateFromResult(result);
   const assertedConfidence = assertedConfidenceFromResult(result);
@@ -153,7 +153,7 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
   corpusAtomId: string;
 }): Promise<ReasoningAtomRecord> {
   const { jurisdictionKey, target, corpusSourceUrl, corpusAtomId } = args;
-  const id = reasoningAtomId(target.editionSlug, target.codeRef);
+  const id = jurisdictionReasoningAtomId(jurisdictionKey, target.editionSlug, target.codeRef);
   const retrievedAt = new Date().toISOString();
   const incomingSource: ReasoningSourceLink = {
     url: corpusSourceUrl,
@@ -225,7 +225,7 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
 }): Promise<ReasoningAtomRecord> {
   const { jurisdictionKey, target, deeplinkUrl } = args;
   const sourceName = args.sourceName ?? "nfpa";
-  const id = reasoningAtomId(target.editionSlug, target.codeRef);
+  const id = jurisdictionReasoningAtomId(jurisdictionKey, target.editionSlug, target.codeRef);
   const retrievedAt = new Date().toISOString();
   const incomingSource: ReasoningSourceLink = {
     url: deeplinkUrl,

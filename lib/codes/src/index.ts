@@ -75,6 +75,7 @@ export {
   REASONING_ATOM_PREFIX,
   REASONING_SNIPPET_MAX_CHARS,
   reasoningAtomId,
+  jurisdictionReasoningAtomId,
   capReasoningSnippet,
   mergeReasoningSources,
   upsertReasoningAtomFromWebFetch,
