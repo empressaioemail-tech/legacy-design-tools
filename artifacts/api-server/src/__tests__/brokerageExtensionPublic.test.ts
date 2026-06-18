@@ -195,7 +195,18 @@ beforeEach(() => {
     reasoningRetrievedCount: 0,
     webFilledCount: 0,
   });
-  fetchBrokerageSiteContextMock.mockResolvedValue({ placeKey: "coord:30.50000:-97.60000", layers: [{ layerKind: "fema-flood", status: "ok" }] });
+  fetchBrokerageSiteContextMock.mockResolvedValue({
+    placeKey: "coord:30.50000:-97.60000",
+    layers: [
+      {
+        layerKind: "fema-nfhl-flood-zone",
+        adapterKey: "fema:nfhl-flood-zone",
+        tier: "federal",
+        status: "ok",
+        summary: "Flood Zone AE (high-risk)",
+      },
+    ],
+  });
   completeChatMock.mockImplementation(async (opts: { system?: string }) => {
     if ((opts.system ?? "").includes("verdicts")) return layVerdictsJson;
     return JSON.stringify({

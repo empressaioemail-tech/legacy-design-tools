@@ -244,33 +244,6 @@ brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
 
-function sendBriefPaywallResponse(
-  res: Response,
-  installId: string,
-  debit: { balanceCents: number; freeBriefsUsed?: number; freeBriefsCap?: number; upgradeCta?: string },
-): void {
-  recordGtmEvent({
-    installId,
-    eventType: "paywall_hit",
-    sourceSurface: "api",
-    payload: {
-      freeBriefsUsed: debit.freeBriefsUsed ?? null,
-      freeBriefsCap: debit.freeBriefsCap ?? null,
-      balanceCents: debit.balanceCents,
-    },
-  });
-
-  res.status(402).json({
-    error: "paywall_hit",
-    message:
-      "Free brief allowance used. Upgrade to Pro for unlimited briefs and full underwriting depth.",
-    balanceCents: debit.balanceCents,
-    freeBriefsUsed: debit.freeBriefsUsed,
-    freeBriefsCap: debit.freeBriefsCap,
-    upgradeCta: debit.upgradeCta ?? "pro_subscription",
-  });
-}
-
 function logStarterPromptSelected(
   req: Request,
   input: {
@@ -372,8 +345,13 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     }
   } else if (installId) {
     const debit = await assertComputeAllowed(installId);
-    if (!debit.ok) {
-      sendBriefPaywallResponse(res, installId, debit);
+    if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
+      res.status(402).json({
+        error: "insufficient_balance",
+        message:
+          "Wallet balance is zero. Top up in $5 increments to run new briefs.",
+        balanceCents: debit.balanceCents,
+      });
       return;
     }
   }
@@ -829,8 +807,13 @@ brokerageV1.post(
       }
     } else if (installId) {
       const debit = await assertComputeAllowed(installId);
-      if (!debit.ok) {
-        sendBriefPaywallResponse(res, installId, debit);
+      if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
+        res.status(402).json({
+          error: "insufficient_balance",
+          message:
+            "Wallet balance is zero. Top up in $5 increments for new research chat turns.",
+          balanceCents: debit.balanceCents,
+        });
         return;
       }
     }
