@@ -61,8 +61,7 @@ import {
   gtmPayloadWithClientTier,
   sendExtensionPublicRateLimitResponse,
 } from "../lib/brokerageExtensionPublic";
-import { assertComputeAllowed, getEntitlementSnapshot } from "../lib/brokerageWallet";
-import { entitlementPackageTier } from "../lib/brokerageEntitlement";
+import { assertComputeAllowed } from "../lib/brokerageWallet";
 import {
   findWorkspaceByListingKey,
   listingKeyFromAddress,
@@ -102,7 +101,6 @@ import {
 import { brokerageCoverageRouter } from "./brokerageCoverage";
 import { brokerageCoveragePublicCors } from "../middlewares/brokerageCoverageCors";
 import { brokerageGtmRouter } from "./brokerageGtm";
-import { brokerageBillingRouter, stripeWebhookHandler } from "./brokerageBilling";
 import { brokeragePlaceRouter } from "./brokeragePlace";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
@@ -236,10 +234,6 @@ router.get("/brief-coverage", (_req: Request, res: Response) => {
 brokerageV1.use(brokerageCors);
 /** GTM consent/events use {@link brokerageAuth} only — extension wedge, no service token. */
 brokerageV1.use("/gtm", brokerageGtmRouter);
-router.post(
-  "/brokerage/v1/billing/stripe/webhook",
-  stripeWebhookHandler,
-);
 brokerageV1.use(requireBrokerageAuthOrServiceToken);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
@@ -248,7 +242,6 @@ brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
 brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
-brokerageV1.use("/billing", brokerageBillingRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
 
 function sendBriefPaywallResponse(
@@ -446,15 +439,9 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   if (authenticatedUser) {
     profileRow = await getOrCreateBrokerageUserProfile(authenticatedUser);
   }
-  let entitlementTier: ReturnType<typeof entitlementPackageTier> = null;
-  if (installId) {
-    const ent = await getEntitlementSnapshot(installId);
-    entitlementTier = entitlementPackageTier(ent);
-  }
   const packageTier = resolveInvestorPackageTier({
     brokerageAuthTier: req.brokerageAuth?.tier ?? null,
     profileTier: packageTierFromProfile(profileRow),
-    entitlementTier,
   });
   const depthMeterRemaining =
     profileRow?.depthMeterRemaining ?? depthMeterAllowance(packageTier);
