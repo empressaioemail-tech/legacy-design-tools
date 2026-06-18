@@ -224,6 +224,13 @@ describe("keyFromEngagementOrSynthesize: finding-grounding path", () => {
         address: "613 Sturgeon Dr, San Marcos, TX 78666",
       }),
     ).toBe("san_marcos_tx");
+    expect(
+      keyFromEngagementOrSynthesize({
+        jurisdictionCity: "Pflugerville",
+        jurisdictionState: "TX",
+        address: "17003 Simsbrook Dr, Pflugerville, TX 78660",
+      }),
+    ).toBe("pflugerville_tx");
   });
 
   it("still returns registered keys when warmed", () => {

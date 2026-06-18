@@ -23,6 +23,8 @@ export interface BriefProvenanceEnvelope {
   confidence: number | null;
   timestamp: string;
   edition: string | null;
+  /** Local-code layer honesty — corpus vs web-scraped fallback. */
+  coverage?: { degraded: boolean; reason?: string };
   /** Present when BROKERAGE_BRIEF_VIA_GATE routes retrieval through the spine. */
   spineViaGate?: boolean;
 }
@@ -42,6 +44,8 @@ export function buildBrokerageBriefProvenanceEnvelope(input: {
   corpusStatus: string;
   reasoningMethod?: string;
   spineViaGate?: boolean;
+  coverage?: { degraded: boolean; reason?: string };
+  localCodeSource?: "corpus" | "websearch" | "none";
 }): BriefProvenanceEnvelope {
   const atomIds = [
     ...new Set(
@@ -53,15 +57,23 @@ export function buildBrokerageBriefProvenanceEnvelope(input: {
     (input.atoms ?? []).map((a) => [a.atomDid, a] as const),
   );
 
+  const webSourced = input.localCodeSource === "websearch";
   const sources: BriefProvenanceSource[] = atomIds.map((atomId) => {
     const meta = atomMeta.get(atomId);
+    const isWebAtom =
+      webSourced ||
+      atomId.startsWith("websearch:") ||
+      atomId.startsWith("reasoning:");
     return {
       atomId,
       sourceUrl: meta?.sourceUrl?.trim() || "",
       edition: meta?.edition?.trim() || meta?.codeBook?.trim() || "",
       retrievedAt: input.finishedAt,
-      verificationState:
-        input.corpusStatus === "in_corpus" ? "corpus" : "unverified",
+      verificationState: isWebAtom
+        ? "unverified"
+        : input.corpusStatus === "in_corpus"
+          ? "corpus"
+          : "unverified",
     };
   });
 
@@ -79,14 +91,16 @@ export function buildBrokerageBriefProvenanceEnvelope(input: {
         ? [`jurisdiction:${input.jurisdictionKey}`]
         : [],
     },
-    confidence:
-      input.corpusStatus === "in_corpus"
+    confidence: webSourced
+      ? 0.35
+      : input.corpusStatus === "in_corpus"
         ? 0.85
         : input.corpusStatus === "partial"
           ? 0.6
           : null,
     timestamp: input.finishedAt,
     edition,
+    ...(input.coverage ? { coverage: { ...input.coverage } } : {}),
     ...(input.spineViaGate ? { spineViaGate: true } : {}),
   };
 }

@@ -115,30 +115,68 @@ export async function ingestEncumbrancePdfUpload(input: {
     input.upload.bytes,
     input.upload.contentType,
   );
+  return persistEncumbranceExtract({
+    extract,
+    objectPath,
+    upload: input.upload,
+    scope: input.scope,
+  });
+}
+
+/** Ingest after client PUT to a presigned GCS URL (plan-review pattern). */
+export async function ingestEncumbrancePresignedUpload(input: {
+  objectPath: string;
+  filename: string;
+  contentType: string;
+  bytes: Buffer;
+  scope:
+    | { kind: "engagement"; engagementId: string }
+    | { kind: "brokerage"; installId: string; listingKey: string };
+}): Promise<EncumbrancesListWire> {
+  const extract = await extractEncumbranceClausesFromPdf(input.bytes);
+  return persistEncumbranceExtract({
+    extract,
+    objectPath: input.objectPath,
+    upload: {
+      bytes: input.bytes,
+      filename: input.filename,
+      contentType: input.contentType,
+    },
+    scope: input.scope,
+  });
+}
+
+async function persistEncumbranceExtract(input: {
+  extract: Awaited<ReturnType<typeof extractEncumbranceClausesFromPdf>>;
+  objectPath: string;
+  upload: Pick<ParsedPdfUpload, "bytes" | "filename" | "contentType">;
+  scope:
+    | { kind: "engagement"; engagementId: string }
+    | { kind: "brokerage"; installId: string; listingKey: string };
+}): Promise<EncumbrancesListWire> {
+  const { extract, objectPath, upload, scope } = input;
   const sourceDocumentCid = sourceDocumentCidFromObjectPath(objectPath);
   const scopeKey =
-    input.scope.kind === "engagement"
-      ? input.scope.engagementId
-      : `${input.scope.installId}:${input.scope.listingKey}`;
+    scope.kind === "engagement"
+      ? scope.engagementId
+      : `${scope.installId}:${scope.listingKey}`;
   const instrumentDid = mintInstrumentDid(scopeKey);
   const extractedAt = new Date(extract.metadata.extractedAt);
 
   const appliesTo =
-    input.scope.kind === "engagement"
-      ? { legalDescription: `Engagement ${input.scope.engagementId}` }
+    scope.kind === "engagement"
+      ? { legalDescription: `Engagement ${scope.engagementId}` }
       : {
-          legalDescription: `Property workspace ${input.scope.listingKey}`,
-          listingKey: input.scope.listingKey,
+          legalDescription: `Property workspace ${scope.listingKey}`,
+          listingKey: scope.listingKey,
         };
 
   const [instrument] = await db
     .insert(recordedInstruments)
     .values({
-      engagementId:
-        input.scope.kind === "engagement" ? input.scope.engagementId : null,
-      listingKey:
-        input.scope.kind === "brokerage" ? input.scope.listingKey : null,
-      installId: input.scope.kind === "brokerage" ? input.scope.installId : null,
+      engagementId: scope.kind === "engagement" ? scope.engagementId : null,
+      listingKey: scope.kind === "brokerage" ? scope.listingKey : null,
+      installId: scope.kind === "brokerage" ? scope.installId : null,
       instrumentDid,
       instrumentType: "other",
       recording: null,
@@ -151,9 +189,9 @@ export async function ingestEncumbrancePdfUpload(input: {
       extractedAt,
       sourceAdapter: "R4",
       sourceObjectPath: objectPath,
-      uploadOriginalFilename: input.upload.filename,
-      uploadContentType: input.upload.contentType,
-      uploadByteSize: input.upload.bytes.length,
+      uploadOriginalFilename: upload.filename,
+      uploadContentType: upload.contentType,
+      uploadByteSize: upload.bytes.length,
       extractMetadata: extract.metadata,
     })
     .returning();
@@ -178,11 +216,11 @@ export async function ingestEncumbrancePdfUpload(input: {
     await db.insert(restrictionClauses).values(clauseValues);
   }
 
-  if (input.scope.kind === "engagement") {
-    return loadEncumbrancesForEngagement(input.scope.engagementId);
+  if (scope.kind === "engagement") {
+    return loadEncumbrancesForEngagement(scope.engagementId);
   }
   return loadEncumbrancesForBrokerageWorkspace({
-    installId: input.scope.installId,
-    listingKey: input.scope.listingKey,
+    installId: scope.installId,
+    listingKey: scope.listingKey,
   });
 }
