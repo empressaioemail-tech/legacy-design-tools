@@ -167,6 +167,16 @@ describe("brokerage GTM", () => {
     expect(res.body.mcp.scoreboard).toEqual(res.body.scoreboardMetrics);
     expect(Array.isArray(res.body.triageSample)).toBe(true);
     expect(res.body.policyTier.tier1Held).toBe(true);
+    expect(res.body.investorFunnel).toMatchObject({
+      windowDays: 7,
+      funnel: expect.any(Array),
+      upgrades: expect.objectContaining({
+        paywall_hit: expect.any(Number),
+        upgrade_started: expect.any(Number),
+        subscription_active: expect.any(Number),
+        churned: expect.any(Number),
+      }),
+    });
   });
 
   it("GET /gtm/digest scoreboard counts external MCP caller", async () => {
