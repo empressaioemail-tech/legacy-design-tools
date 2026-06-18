@@ -8,6 +8,7 @@ import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
 import { userRateLimitMiddleware } from "./middlewares/userRateLimit";
 import { mountSpaStatic } from "./middlewares/spaStatic";
+import { stripeWebhookHandler } from "./routes/brokerageBilling";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
 import { startFindingRunsSweep } from "./lib/findingRunsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
@@ -57,6 +58,13 @@ app.use(
 );
 app.use(cors());
 app.use(cookieParser());
+app.post(
+  "/api/brokerage/v1/billing/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    void stripeWebhookHandler(req, res);
+  },
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Session middleware MUST run after cookieParser (it reads `pr_session`
