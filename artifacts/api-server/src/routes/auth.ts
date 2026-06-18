@@ -15,7 +15,11 @@ import {
 } from "../lib/authCredentials";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { syncPipedrivePerson } from "../lib/brokeragePipedrive";
-import { installIdFromRequest } from "../lib/brokerageInstallId";
+import {
+  installIdFromRequest,
+  pipedriveInstallIdForSignup,
+  signupInstallIdFromRequest,
+} from "../lib/brokerageInstallId";
 import { logger } from "../lib/logger";
 import {
   renderExtensionLoginPage,
@@ -59,6 +63,8 @@ const SignupBodySchema = z.object({
   email: z.string().min(3),
   password: z.string().min(8),
   displayName: z.string().optional(),
+  installId: z.string().min(8).max(128).optional(),
+  install_id: z.string().min(8).max(128).optional(),
 });
 
 function applicantSession(userId: string) {
@@ -109,14 +115,18 @@ router.post("/auth/signup", async (req: Request, res: Response) => {
     const token = mintSessionToken(applicantSession(signup.userId));
     setSessionCookie(res, token);
     const claim = await maybeClaimInstall(req, signup.userId);
-    const installId = installIdFromRequest(req);
-    if (installId) {
-      void syncPipedrivePerson({
-        email: signup.email,
-        installId,
-        acquisitionSource: "hauska_extension_signup",
-      });
-    }
+    const pipedriveInstallId = pipedriveInstallIdForSignup(
+      req,
+      signup.userId,
+      parsed.data,
+    );
+    void syncPipedrivePerson({
+      email: signup.email,
+      installId: pipedriveInstallId,
+      acquisitionSource: signupInstallIdFromRequest(req, parsed.data)
+        ? "hauska_extension_signup"
+        : "hauska_web_signup",
+    });
     res.status(201).json({
       token,
       userId: signup.userId,

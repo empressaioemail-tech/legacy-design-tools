@@ -113,10 +113,15 @@ import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokerageProfileRouter } from "./brokerageProfile";
 import { brokeragePlaceRouter } from "./brokeragePlace";
 import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
+import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
 import { brokerageEntitlementRouter } from "./brokerageEntitlementRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
-import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
+import {
+  RESEARCH_AREA_CONTEXT,
+  formatResearchAreaContextForLlm,
+  isAreaResearchChatEligible,
+} from "../lib/brokerageResearchAreaContext";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
@@ -186,18 +191,29 @@ const RESEARCH_CHAT_BASE = z.object({
     )
     .default([]),
   presentationMode: presentationModeSchema.optional(),
+  areaContext: RESEARCH_AREA_CONTEXT,
   ...starterFields,
 });
 
-/** Follow-up chat: `runId` from a prior brief, or `address` / `workspaceDid` to resolve the latest run. */
-const RESEARCH_CHAT_BODY = z.union([
-  RESEARCH_CHAT_BASE.extend({ runId: z.string().uuid() }),
-  RESEARCH_CHAT_BASE.extend({
-    address: z.string().min(1),
-    mls_id: z.string().optional(),
-  }),
-  RESEARCH_CHAT_BASE.extend({ workspaceDid: z.string().min(1) }),
-]);
+/** Follow-up chat: brief run selector and/or map area context for portfolio questions. */
+const RESEARCH_CHAT_BODY = RESEARCH_CHAT_BASE.extend({
+  runId: z.string().uuid().optional(),
+  address: z.string().min(1).optional(),
+  mls_id: z.string().optional(),
+  workspaceDid: z.string().min(1).optional(),
+}).superRefine((data, ctx) => {
+  const hasRunSelector = Boolean(
+    data.runId || data.address || data.workspaceDid,
+  );
+  if (!hasRunSelector && !isAreaResearchChatEligible(data.areaContext)) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "Provide runId, address, workspaceDid, or areaContext (scope=area or visibleParcels)",
+      path: ["runId"],
+    });
+  }
+});
 
 const router: IRouter = Router();
 const brokerageV1: IRouter = Router();
@@ -918,13 +934,15 @@ brokerageV1.post(
         details: parse.error.flatten(),
         accepted: {
           required: ["message"],
-          runSelector: "runId (uuid) OR address OR workspaceDid",
+          runSelector:
+            "runId (uuid) OR address OR workspaceDid OR areaContext (scope=area | visibleParcels)",
           optional: [
             "history",
             "presentationMode",
             "starterPromptId",
             "personaBucket",
             "mls_id",
+            "areaContext",
           ],
         },
       });
@@ -937,12 +955,12 @@ brokerageV1.post(
       presentationMode = "consumer",
       starterPromptId,
       personaBucket,
+      areaContext,
+      runId: runIdField,
+      address: addressField,
+      mls_id: mlsIdField,
+      workspaceDid: workspaceDidField,
     } = parse.data;
-    const runIdField = "runId" in parse.data ? parse.data.runId : undefined;
-    const addressField = "address" in parse.data ? parse.data.address : undefined;
-    const mlsIdField = "mls_id" in parse.data ? parse.data.mls_id : undefined;
-    const workspaceDidField =
-      "workspaceDid" in parse.data ? parse.data.workspaceDid : undefined;
 
     const installId = installIdFromRequest(req);
     const extensionPublic = isExtensionPublicClient(req);
@@ -981,7 +999,9 @@ brokerageV1.post(
       serviceCaller,
     });
 
-    if (!run) {
+    const areaEligible = isAreaResearchChatEligible(areaContext);
+
+    if (!run && !areaEligible) {
       res.status(404).json({
         error: "not_found",
         message: runIdField
@@ -991,9 +1011,9 @@ brokerageV1.post(
       return;
     }
 
-    const runId = run.id;
+    const runId = run?.id ?? null;
 
-    const payload = run.payloadJson as {
+    const payload = (run?.payloadJson ?? {}) as {
       jurisdiction?: string | null;
       property?: { address?: string };
       citations?: Array<{ atomDid: string; snippet?: string; query?: string }>;
@@ -1002,10 +1022,17 @@ brokerageV1.post(
       }>;
     };
 
-    const jurisdictionKey = payload.jurisdiction ?? null;
-    const address = payload.property?.address ?? run.address;
+    const jurisdictionKey =
+      payload.jurisdiction ??
+      areaContext?.jurisdictionKey ??
+      null;
+    const address =
+      payload.property?.address ??
+      run?.address ??
+      areaContext?.visibleParcels?.[0]?.address ??
+      (areaEligible ? "Map selection" : "");
 
-    if (installId && starterPromptId) {
+    if (installId && starterPromptId && runId) {
       logStarterPromptSelected(req, {
         installId,
         starterPromptId,
@@ -1089,7 +1116,7 @@ brokerageV1.post(
     ).siteContext;
 
     let privateRestrictionsBlock = "";
-    if (installId && !extensionPublic) {
+    if (installId && !extensionPublic && run) {
       const enc = await loadEncumbrancesForBrokerageWorkspace({
         installId,
         listingKey: run.listingKey,
@@ -1099,6 +1126,8 @@ brokerageV1.post(
       );
     }
 
+    const areaContextBlock = formatResearchAreaContextForLlm(areaContext);
+
     const result = await generateResearchChat({
       address,
       jurisdiction: jurisdictionKey,
@@ -1107,6 +1136,7 @@ brokerageV1.post(
       atoms,
       siteContext: storedSiteContext,
       privateRestrictionsBlock,
+      areaContextBlock,
       presentationMode,
     });
 
@@ -1114,28 +1144,31 @@ brokerageV1.post(
       recordGtmEvent({
         installId,
         eventType: "research_chat_turn",
-        runId,
-        listingKey: run.listingKey,
+        runId: runId ?? undefined,
+        listingKey: run?.listingKey,
         payload: gtmPayloadWithClientTier(req, {
           messageLength: message.length,
+          areaScope: areaContext?.scope ?? null,
+          visibleParcelCount: areaContext?.visibleParcels?.length ?? 0,
         }),
       });
     }
 
     let workspaceId: string | undefined;
-    if (installId && !extensionPublic) {
+    if (installId && !extensionPublic && run) {
       const ws = await findWorkspaceByListingKey(installId, run.listingKey);
       workspaceId = ws?.id;
     }
 
     res.json({
       ...result,
-      ...(workspaceId && !extensionPublic
+      ...(workspaceId && !extensionPublic && run
         ? {
             workspaceId,
             workspaceDid: buildPropertyWorkspaceDid(run.listingKey),
           }
         : {}),
+      ...(areaEligible ? { areaContextApplied: true } : {}),
     });
   },
 );

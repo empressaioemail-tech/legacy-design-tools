@@ -371,11 +371,13 @@ export async function generateResearchChat(input: {
   atoms: BriefAtomInput[];
   siteContext?: BrokerageSiteContext;
   privateRestrictionsBlock?: string;
+  areaContextBlock?: string;
   presentationMode?: PresentationMode;
 }): Promise<ResearchChatResult> {
   const presentationMode = input.presentationMode ?? "consumer";
   const atoms = input.atoms.slice(0, 16);
   const hasPrivate = Boolean(input.privateRestrictionsBlock?.trim());
+  const hasArea = Boolean(input.areaContextBlock?.trim());
   const historyBlock = input.history
     .slice(-8)
     .map((h) => `${h.role}: ${h.content}`)
@@ -386,12 +388,17 @@ export async function generateResearchChat(input: {
     presentationMode === "consumer"
       ? "Answer in plain English for a homebuyer. Do NOT include [n] citation markers or statute numbers in the answer text."
       : "Answer for a real estate professional. Cite with [n] inline matching source numbers.",
+    hasArea
+      ? "When map/area context lists multiple visible parcels, answer portfolio or neighborhood questions (rent strength, likely sellers, filter matches) using ONLY the parcel rows and filters provided — do not invent listings."
+      : null,
     hasPrivate
       ? "Use numbered code sources and private recorded-restriction excerpts (P1, P2, …) when the question touches HOA/CC&R/deed limits. Private restrictions are not municipal code."
       : "Use ONLY the numbered code atom sources. Do not invent code.",
     "No compliance guarantees.",
     "Respond with JSON only: {\"answer\": string (plain text)}.",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const siteBlock = formatBrokerageContextForLlm({
     siteContext: input.siteContext,
@@ -399,9 +406,10 @@ export async function generateResearchChat(input: {
   });
 
   const user = [
-    `Property: ${input.address}`,
+    hasArea ? `Focus: ${input.address} (map area)` : `Property: ${input.address}`,
     `Jurisdiction: ${input.jurisdiction ?? "unknown"}`,
     siteBlock ? `\n${siteBlock}` : "",
+    input.areaContextBlock ? `\n${input.areaContextBlock}` : "",
     "",
     "Conversation:",
     historyBlock || "(none)",

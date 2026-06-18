@@ -457,6 +457,46 @@ describe("POST /api/brokerage/v1/research/chat", () => {
     expect(chatRes.body.message).toMatch(/setback/i);
   });
 
+  it("answers area questions from map context without a brief run", async () => {
+    completeChatMock.mockResolvedValueOnce(
+      JSON.stringify({
+        answer:
+          "Rent looks strongest on Oak St parcels with higher rent estimates in your map view.",
+      }),
+    );
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        message: "Where is rent strongest in what I am looking at?",
+        history: [],
+        areaContext: {
+          scope: "area",
+          jurisdictionKey: "bastrop_tx",
+          jurisdictionCity: "Bastrop",
+          jurisdictionState: "TX",
+          activeFilters: { minRent: 1800 },
+          visibleParcels: [
+            {
+              address: "100 Oak St, Bastrop, TX",
+              rentZestimate: 2200,
+              verdict: "keep",
+            },
+            {
+              address: "200 Pine St, Bastrop, TX",
+              rentZestimate: 1600,
+              verdict: "pass",
+            },
+          ],
+        },
+      });
+
+    expect(chatRes.status).toBe(200);
+    expect(chatRes.body.areaContextApplied).toBe(true);
+    expect(chatRes.body.message).toMatch(/rent/i);
+  });
+
   it("logs starter_prompt_selected when starterPromptId is sent", async () => {
     const briefRes = await request(getApp())
       .post("/api/brokerage/v1/brief")

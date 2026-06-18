@@ -200,7 +200,7 @@ export function renderExtensionLoginPage(initialMode: ExtensionLoginMode): strin
           const r = await fetch("/api/auth/signup", {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Hauska-Install-Id": installId },
-            body: JSON.stringify({ email, password }),
+            body: JSON.stringify({ email, password, installId: installId || undefined }),
           });
           const body = await r.json();
           if (!r.ok) {
