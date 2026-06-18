@@ -246,8 +246,11 @@ describe("reviewWebTargetsForJurisdiction", () => {
     );
   });
 
-  it("returns stock IRC targets only for synthesized unwarmed Texas keys", () => {
+  it("returns stock IRC targets for synthesized unwarmed keys (US-wide)", () => {
     expect(reviewWebTargetsForJurisdiction("san_marcos_tx").length).toBeGreaterThan(
+      0,
+    );
+    expect(reviewWebTargetsForJurisdiction("denver_co").length).toBeGreaterThan(
       0,
     );
     expect(reviewWebTargetsForJurisdiction("bastrop_tx")).toEqual([]);

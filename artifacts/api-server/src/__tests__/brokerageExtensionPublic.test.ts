@@ -15,6 +15,7 @@ const DEV_INSTALL = "install-dev-operator-bbbb";
 
 const geocodeAddressMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
+const supplementGroundingMock = vi.hoisted(() => vi.fn());
 const completeChatMock = vi.hoisted(() => vi.fn());
 const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
 
@@ -40,7 +41,8 @@ vi.mock("@workspace/codes", async () => {
   return {
     ...actual,
     retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
-    countAtomsForJurisdiction: vi.fn(async () => 10),
+    countAtomsForJurisdiction: vi.fn(async () => 0),
+    supplementCodeSectionsWithReasoningGrounding: supplementGroundingMock,
   };
 });
 
@@ -156,6 +158,18 @@ function mockRoundRockGeocode() {
   });
 }
 
+function mockPflugervilleGeocode() {
+  geocodeAddressMock.mockResolvedValue({
+    latitude: 30.4397,
+    longitude: -97.6203,
+    jurisdictionCity: "Pflugerville",
+    jurisdictionState: "TX",
+    jurisdictionFips: null,
+    source: "nominatim",
+    geocodedAt: new Date().toISOString(),
+  });
+}
+
 function mockPlanoGeocode() {
   geocodeAddressMock.mockResolvedValue({
     latitude: 33.0198,
@@ -176,7 +190,23 @@ beforeEach(() => {
   process.env.BROKERAGE_WALLET_BYPASS = "1";
   resetBrokerageApiKeysForTests();
   retrieveAtomsForQuestionMock.mockResolvedValue([mockAtom]);
-  fetchBrokerageSiteContextMock.mockResolvedValue({ placeKey: "coord:30.50000:-97.60000", layers: [] });
+  supplementGroundingMock.mockResolvedValue({
+    sections: [],
+    reasoningRetrievedCount: 0,
+    webFilledCount: 0,
+  });
+  fetchBrokerageSiteContextMock.mockResolvedValue({
+    placeKey: "coord:30.50000:-97.60000",
+    layers: [
+      {
+        layerKind: "fema-nfhl-flood-zone",
+        adapterKey: "fema:nfhl-flood-zone",
+        tier: "federal",
+        status: "ok",
+        summary: "Flood Zone AE (high-risk)",
+      },
+    ],
+  });
   completeChatMock.mockImplementation(async (opts: { system?: string }) => {
     if ((opts.system ?? "").includes("verdicts")) return layVerdictsJson;
     return JSON.stringify({
@@ -215,17 +245,52 @@ describe("extension_public client tier", () => {
     expect(res.body.workspaceId).toBeUndefined();
   });
 
-  it("POST /brief rejects non-pilot jurisdiction with 403", async () => {
+  it("POST /brief succeeds for non-pilot jurisdiction (no 403)", async () => {
     mockPlanoGeocode();
+    retrieveAtomsForQuestionMock.mockResolvedValue([]);
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
       .set(publicHeaders)
       .send({ address: "5800 Democracy Dr, Plano, TX 75024" });
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("jurisdiction_not_available");
-    expect(res.body.clientTier).toBe("extension_public");
+    expect(res.status).toBe(200);
     expect(res.body.jurisdiction).toBe("plano_tx");
+    expect(res.body.meta.clientTier).toBe("extension_public");
+    expect(res.body.siteContext?.layers?.length).toBeGreaterThan(0);
+  });
+
+  it("POST /brief resolves Pflugerville and serves websearch local layer", async () => {
+    mockPflugervilleGeocode();
+    retrieveAtomsForQuestionMock.mockResolvedValue([]);
+    supplementGroundingMock.mockResolvedValue({
+      sections: [
+        {
+          atomId: "reasoning:pflugerville_tx:irc-r301-1",
+          label: "IRC R301.1 — Application (design criteria)",
+          snippet: "Design criteria from web.",
+          webProvenance: {
+            sourceUrl: "https://codes.iccsafe.org/",
+            verified: false,
+            confidence: 0.35,
+            sourceName: "icc",
+          },
+        },
+      ],
+      reasoningRetrievedCount: 0,
+      webFilledCount: 1,
+    });
+
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(publicHeaders)
+      .send({ address: "17003 Simsbrook Dr, Pflugerville, TX 78660" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.jurisdiction).toBe("pflugerville_tx");
+    expect(res.body.localCodeSource).toBe("websearch");
+    expect(res.body.coverage?.degraded).toBe(true);
+    expect(res.body.coverage?.reason).toContain("web-scraped");
+    expect(res.body.provenance?.coverage?.degraded).toBe(true);
   });
 
   it("POST /brief requires X-Hauska-Install-Id for public key", async () => {

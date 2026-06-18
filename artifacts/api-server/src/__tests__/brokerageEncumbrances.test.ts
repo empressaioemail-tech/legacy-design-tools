@@ -55,16 +55,55 @@ vi.mock("../lib/encumbranceExtract", () => ({
   ENCUMBRANCE_EXTRACT_VERSION: "1.0.0",
 }));
 
+const MINIMAL_PDF = Buffer.from(
+  "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+);
+
+const getPresignUrlMock = vi.hoisted(() =>
+  vi.fn(async () => "https://storage.example/upload?signed=1"),
+);
+const normalizePathMock = vi.hoisted(() =>
+  vi.fn(() => "/objects/uploads/brokerage-ccr-presign.pdf"),
+);
+const downloadObjectMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    status: 200,
+    headers: new Headers(),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"),
+        );
+        controller.close();
+      },
+    }),
+  })),
+);
+const getObjectFileMock = vi.hoisted(() =>
+  vi.fn(async () => ({ name: "brokerage-ccr-presign.pdf" })),
+);
+
 vi.mock("../lib/objectStorage", async () => {
   const actual = await vi.importActual<
     typeof import("../lib/objectStorage")
   >("../lib/objectStorage");
+  type OSS = InstanceType<typeof actual.ObjectStorageService>;
   return {
     ...actual,
     ObjectStorageService: class extends actual.ObjectStorageService {
       override async uploadObjectEntityFromBuffer() {
         return uploadMock();
       }
+      override async getObjectEntityUploadURL() {
+        return getPresignUrlMock();
+      }
+      override normalizeObjectEntityPath() {
+        return normalizePathMock();
+      }
+      override getObjectEntityFile =
+        getObjectFileMock as unknown as OSS["getObjectEntityFile"];
+      override downloadObject =
+        downloadObjectMock as unknown as OSS["downloadObject"];
     },
   };
 });
@@ -94,11 +133,42 @@ const authHeaders = {
   Authorization: `Bearer ${TEST_API_KEY}`,
 };
 
-const MINIMAL_PDF = Buffer.from(
-  "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
-);
-
 describe("brokerage workspace encumbrances", () => {
+  it("presign request-upload-url + complete-upload", async () => {
+    const address = "17003 Simsbrook Dr, Pflugerville, TX 78660";
+    const listingKey = listingKeyFromAddress(address);
+    const workspaceDid = buildPropertyWorkspaceDid(listingKey);
+
+    const presign = await request(getApp())
+      .post("/api/brokerage/v1/workspaces/encumbrances/request-upload-url")
+      .set(authHeaders)
+      .send({
+        workspaceDid,
+        name: "ccr-sample.pdf",
+        size: MINIMAL_PDF.length,
+        contentType: "application/pdf",
+      });
+
+    expect(presign.status).toBe(200);
+    expect(presign.body.uploadURL).toContain("https://");
+    expect(presign.body.objectPath).toMatch(/^\/objects\//);
+
+    const complete = await request(getApp())
+      .post("/api/brokerage/v1/workspaces/encumbrances/complete-upload")
+      .set(authHeaders)
+      .send({
+        workspaceDid,
+        objectPath: presign.body.objectPath,
+        name: "ccr-sample.pdf",
+        size: MINIMAL_PDF.length,
+        contentType: "application/pdf",
+      });
+
+    expect(complete.status).toBe(201);
+    expect(complete.body.workspaceDid).toBe(workspaceDid);
+    expect(complete.body.instruments).toHaveLength(1);
+  });
+
   it("upload + list by workspaceDid", async () => {
     const address = "430 Evergreen Trl, Cedar Hill, TX 75104";
     const listingKey = listingKeyFromAddress(address);

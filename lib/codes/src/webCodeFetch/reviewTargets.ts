@@ -87,12 +87,9 @@ export function reviewWebTargetsForJurisdiction(
   if (!jurisdictionKey) return [];
   const explicit = JURISDICTION_WEB_TARGETS[jurisdictionKey];
   if (explicit) return explicit;
-  // Web-first stock targets only for synthesized unwarmed Texas keys —
-  // registered corpus jurisdictions rely on retrieval, not generic IRC fetch.
-  if (
-    jurisdictionKey.endsWith("_tx") &&
-    !isRegisteredJurisdictionKey(jurisdictionKey)
-  ) {
+  // Web-first stock IRC targets for any synthesized unwarmed key (US-wide).
+  // Registered corpus jurisdictions rely on retrieval, not generic IRC fetch.
+  if (!isRegisteredJurisdictionKey(jurisdictionKey)) {
     return TEXAS_WEB_FIRST_REVIEW_TARGETS;
   }
   return [];

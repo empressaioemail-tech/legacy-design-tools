@@ -20,9 +20,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import {
-  keyFromEngagement,
   retrieveAtomsForQuestion,
-  countAtomsForJurisdiction,
   type RetrievedAtom,
 } from "@workspace/codes";
 import { db, brokerageBriefRuns } from "@workspace/db";
@@ -59,7 +57,6 @@ import {
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import {
   assertExtensionPublicBriefAllowed,
-  assertExtensionPublicJurisdictionAllowed,
   assertExtensionPublicResearchChatAllowed,
   gtmPayloadWithClientTier,
   sendExtensionPublicRateLimitResponse,
@@ -118,7 +115,10 @@ import {
 import { UUID_RE } from "../lib/lSurfaceRoute";
 import { buildBrokerageBriefProvenanceEnvelope } from "../lib/brokerageProvenanceEnvelope";
 import {
-  brokerageBriefRetrievalMode,
+  BRIEF_WEB_SCRAPED_DISCLOSURE,
+  resolveBriefLocalCodeLayer,
+} from "../lib/brokerageBriefLocalCode";
+import {
   isBrokerageBriefViaGateEnabled,
 } from "../lib/brokerageSpineGate";
 
@@ -290,91 +290,6 @@ function toBriefAtom(atom: RetrievedAtom, label?: string): BriefAtomInput {
   };
 }
 
-async function resolveCorpusStatus(
-  jurisdictionKey: string | null,
-  hasHits: boolean,
-): Promise<"in_corpus" | "partial" | "no_match" | "unknown"> {
-  if (!jurisdictionKey) return "no_match";
-  if (hasHits) return "in_corpus";
-  try {
-    const count = await countAtomsForJurisdiction(jurisdictionKey);
-    return count > 0 ? "partial" : "no_match";
-  } catch {
-    return "unknown";
-  }
-}
-
-async function runCodeRetrieval(
-  jurisdictionKey: string,
-  retrievalMode: "neon" | "gate" = brokerageBriefRetrievalMode(),
-): Promise<{
-  sections: Array<{
-    title: string;
-    query: string;
-    hits: Array<{ atomDid: string; snippet: string; score: number }>;
-  }>;
-  citations: Array<{ atomDid: string; query: string; snippet: string }>;
-  retrievedAtoms: RetrievedAtom[];
-}> {
-  const sections: Array<{
-    title: string;
-    query: string;
-    hits: Array<{ atomDid: string; snippet: string; score: number }>;
-  }> = [];
-  const citations: Array<{ atomDid: string; query: string; snippet: string }> =
-    [];
-  const retrievedAtoms: RetrievedAtom[] = [];
-  const priorMode = process.env.BRIEF_CODE_RETRIEVAL;
-  if (retrievalMode === "gate") {
-    process.env.BRIEF_CODE_RETRIEVAL = "gate";
-  }
-
-  try {
-  for (const query of BROKERAGE_CODE_QUERIES) {
-    let hits: RetrievedAtom[] = [];
-    try {
-      hits = await retrieveAtomsForQuestion({
-        jurisdictionKey,
-        question: query,
-        limit: 2,
-        logger,
-        applyMinScore: false,
-      });
-    } catch (err) {
-      logger.warn({ err, jurisdictionKey, query }, "brokerage: retrieval failed");
-    }
-
-    for (const h of hits) retrievedAtoms.push(h);
-
-    if (hits.length > 0) {
-      const top = hits[0]!;
-      citations.push({
-        atomDid: top.id,
-        query,
-        snippet: atomSnippet(top).slice(0, 280),
-      });
-    }
-
-    sections.push({
-      title: sectionTitle(query),
-      query,
-      hits: hits.map((h) => ({
-        atomDid: h.id,
-        snippet: atomSnippet(h),
-        score: h.score,
-      })),
-    });
-  }
-  } finally {
-    if (retrievalMode === "gate") {
-      if (priorMode === undefined) delete process.env.BRIEF_CODE_RETRIEVAL;
-      else process.env.BRIEF_CODE_RETRIEVAL = priorMode;
-    }
-  }
-
-  return { sections, citations, retrievedAtoms };
-}
-
 brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const parse = BRIEF_BODY.safeParse(req.body);
   if (!parse.success) {
@@ -484,54 +399,18 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     geocode = { lat: 0, lon: 0, error: String((err as Error).message || err) };
   }
 
-  const jurisdictionKey = keyFromEngagement({
+  const localCodeLayer = await resolveBriefLocalCodeLayer({
+    address,
     jurisdictionCity: geocode?.city ?? null,
     jurisdictionState: geocode?.state ?? null,
-    address,
   });
-
-  if (extensionPublic) {
-    const jurisdictionGate = assertExtensionPublicJurisdictionAllowed(jurisdictionKey);
-    if (!jurisdictionGate.ok) {
-      res.status(403).json({
-        error: "jurisdiction_not_available",
-        message: jurisdictionGate.message,
-        clientTier: "extension_public",
-        jurisdiction: jurisdictionGate.jurisdiction,
-      });
-      return;
-    }
-  }
-
-  let sections: Array<{
-    title: string;
-    query: string;
-    hits: Array<{ atomDid: string; snippet: string; score: number }>;
-  }> = [];
-  let citations: Array<{ atomDid: string; query: string; snippet: string }> =
-    [];
-  let retrievedAtomsForProvenance: RetrievedAtom[] = [];
-
-  if (!jurisdictionKey) {
-    sections = [
-      {
-        title: "Municipal code",
-        query: "jurisdiction",
-        hits: [],
-      },
-    ];
-  } else {
-    const retrieved = await runCodeRetrieval(
-      jurisdictionKey,
-      brokerageBriefRetrievalMode(),
-    );
-    sections = retrieved.sections;
-    citations = retrieved.citations;
-    retrievedAtomsForProvenance = retrieved.retrievedAtoms;
-  }
-
-  const hasHits = sections.some((s) => s.hits.length > 0);
-  const corpusStatus = await resolveCorpusStatus(jurisdictionKey, hasHits);
+  const jurisdictionKey = localCodeLayer.jurisdictionKey;
+  const sections = localCodeLayer.sections;
+  const citations = localCodeLayer.citations;
+  const retrievedAtomsForProvenance = localCodeLayer.retrievedAtoms;
+  const corpusStatus = localCodeLayer.corpusStatus;
+  const localCodeCoverage = localCodeLayer.coverage;
+  const localCodeSource = localCodeLayer.localCodeSource;
   const finishedAt = new Date().toISOString();
 
   let profileRow = null;
@@ -686,6 +565,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     corpusStatus,
     reasoningMethod: reasoningSummary.method,
     spineViaGate,
+    coverage: localCodeCoverage,
+    localCodeSource,
   });
 
   const responseBody = {
@@ -704,6 +585,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     },
     jurisdiction: jurisdictionKey,
     corpusStatus,
+    localCodeSource,
+    coverage: localCodeCoverage,
     packageTier,
     precedenceStatus,
     pencilsAt,
@@ -720,11 +603,25 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     privateRestrictions,
     meta: {
       disclaimer:
-        "Not legal advice. Code layer only where jurisdiction is in corpus. Verify with city staff.",
+        localCodeSource === "websearch"
+          ? `${BRIEF_WEB_SCRAPED_DISCLOSURE}. Not legal advice — verify with city staff.`
+          : "Not legal advice. Code layer only where jurisdiction is in corpus. Verify with city staff.",
       tool: "property-brief-v1",
       ...(serviceCaller ? brokerageBriefMeteringMeta() : {}),
       ...(extensionPublic
-        ? { clientTier: "extension_public" as const }
+        ? {
+            clientTier: "extension_public" as const,
+            encumbranceUploadCta: {
+              label: "Upload CC&Rs",
+              workspaceDid,
+              requestPath:
+                "/api/brokerage/v1/workspaces/encumbrances/request-upload-url",
+              completePath:
+                "/api/brokerage/v1/workspaces/encumbrances/complete-upload",
+              maxBytes: 25 * 1024 * 1024,
+              contentType: "application/pdf",
+            },
+          }
         : {
             encumbranceUploadCta: {
               label: "Upload CC&Rs",
@@ -943,19 +840,6 @@ brokerageV1.post(
 
     const jurisdictionKey = payload.jurisdiction ?? null;
     const address = payload.property?.address ?? run.address;
-
-    if (extensionPublic) {
-      const jurisdictionGate = assertExtensionPublicJurisdictionAllowed(jurisdictionKey);
-      if (!jurisdictionGate.ok) {
-        res.status(403).json({
-          error: "jurisdiction_not_available",
-          message: jurisdictionGate.message,
-          clientTier: "extension_public",
-          jurisdiction: jurisdictionGate.jurisdiction,
-        });
-        return;
-      }
-    }
 
     if (installId && starterPromptId) {
       logStarterPromptSelected(req, {
