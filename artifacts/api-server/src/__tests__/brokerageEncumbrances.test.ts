@@ -169,6 +169,40 @@ describe("brokerage workspace encumbrances", () => {
     expect(complete.body.instruments).toHaveLength(1);
   });
 
+  it("returns 422 when PDF text cannot be extracted", async () => {
+    const address = "901 Broken Pdf Ln, Pflugerville, TX 78660";
+    const listingKey = listingKeyFromAddress(address);
+    const workspaceDid = buildPropertyWorkspaceDid(listingKey);
+
+    extractMock.mockRejectedValueOnce(new Error("pdf_unparseable"));
+
+    const presign = await request(getApp())
+      .post("/api/brokerage/v1/workspaces/encumbrances/request-upload-url")
+      .set(authHeaders)
+      .send({
+        workspaceDid,
+        name: "broken.pdf",
+        size: MINIMAL_PDF.length,
+        contentType: "application/pdf",
+      });
+    expect(presign.status).toBe(200);
+
+    const complete = await request(getApp())
+      .post("/api/brokerage/v1/workspaces/encumbrances/complete-upload")
+      .set(authHeaders)
+      .send({
+        workspaceDid,
+        objectPath: presign.body.objectPath,
+        name: "broken.pdf",
+        size: MINIMAL_PDF.length,
+        contentType: "application/pdf",
+      });
+
+    expect(complete.status).toBe(422);
+    expect(complete.body.error).toBe("pdf_unparseable");
+    expect(complete.body.message).toMatch(/Could not extract text/i);
+  });
+
   it("upload + list by workspaceDid", async () => {
     const address = "430 Evergreen Trl, Cedar Hill, TX 75104";
     const listingKey = listingKeyFromAddress(address);

@@ -190,6 +190,14 @@ brokerageEncumbrancesRouter.post(
         res.status(413).json({ error: "pdf_too_large" });
         return;
       }
+      if (message === "pdf_unparseable") {
+        res.status(422).json({
+          error: "pdf_unparseable",
+          message:
+            "Could not extract text from this PDF. Upload a valid CC&R or restriction document (not a blank or corrupted file).",
+        });
+        return;
+      }
       logger.error({ err, installId: scope.installId }, "brokerage encumbrance complete-upload failed");
       res.status(500).json({ error: "encumbrance_upload_failed" });
     }
@@ -252,6 +260,14 @@ brokerageEncumbrancesRouter.post(
       const message = err instanceof Error ? err.message : String(err);
       if (message === "pdf_too_large") {
         res.status(413).json({ error: "pdf_too_large" });
+        return;
+      }
+      if (message === "pdf_unparseable") {
+        res.status(422).json({
+          error: "pdf_unparseable",
+          message:
+            "Could not extract text from this PDF. Upload a valid CC&R or restriction document (not a blank or corrupted file).",
+        });
         return;
       }
       logger.error({ err, installId, listingKey }, "brokerage encumbrance upload failed");

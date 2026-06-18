@@ -88,6 +88,14 @@ router.post(
         res.status(413).json({ error: "pdf_too_large" });
         return;
       }
+      if (message === "pdf_unparseable") {
+        res.status(422).json({
+          error: "pdf_unparseable",
+          message:
+            "Could not extract text from this PDF. Upload a valid CC&R or restriction document (not a blank or corrupted file).",
+        });
+        return;
+      }
       logger.error({ err, engagementId }, "encumbrance upload failed");
       res.status(500).json({ error: "encumbrance_upload_failed" });
     }

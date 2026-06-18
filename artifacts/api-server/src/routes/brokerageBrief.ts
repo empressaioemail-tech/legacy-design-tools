@@ -25,7 +25,7 @@ import {
   type RetrievedAtom,
 } from "@workspace/codes";
 import { db, brokerageBriefRuns } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   isExtensionPublicClient,
 } from "../middlewares/brokerageAuth";
@@ -101,6 +101,7 @@ import {
   formatPrivateRestrictionsForLlm,
 } from "../lib/encumbranceWire";
 import { loadEncumbrancesForBrokerageWorkspace } from "../lib/encumbranceService";
+import { listingKeyFromWorkspaceDid } from "../lib/encumbranceScope";
 import {
   emitBriefRunGeneratedEvent,
   emitPropertyWorkspaceCreatedEvent,
@@ -171,8 +172,7 @@ const SUMMARIZE_BODY = z.object({
   ),
 });
 
-const RESEARCH_CHAT_BODY = z.object({
-  runId: z.string().uuid(),
+const RESEARCH_CHAT_BASE = z.object({
   message: z.string().min(1),
   history: z
     .array(
@@ -185,6 +185,16 @@ const RESEARCH_CHAT_BODY = z.object({
   presentationMode: presentationModeSchema.optional(),
   ...starterFields,
 });
+
+/** Follow-up chat: `runId` from a prior brief, or `address` / `workspaceDid` to resolve the latest run. */
+const RESEARCH_CHAT_BODY = z.union([
+  RESEARCH_CHAT_BASE.extend({ runId: z.string().uuid() }),
+  RESEARCH_CHAT_BASE.extend({
+    address: z.string().min(1),
+    mls_id: z.string().optional(),
+  }),
+  RESEARCH_CHAT_BASE.extend({ workspaceDid: z.string().min(1) }),
+]);
 
 const router: IRouter = Router();
 const brokerageV1: IRouter = Router();
@@ -252,6 +262,47 @@ brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
 brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/entitlement", brokerageEntitlementRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
+
+async function resolveResearchChatRun(input: {
+  runId?: string;
+  address?: string;
+  mls_id?: string;
+  workspaceDid?: string;
+  installId: string | null;
+  serviceCaller: boolean;
+}): Promise<(typeof brokerageBriefRuns.$inferSelect) | null> {
+  if (input.runId) {
+    const [run] = await db
+      .select()
+      .from(brokerageBriefRuns)
+      .where(eq(brokerageBriefRuns.id, input.runId))
+      .limit(1);
+    return run ?? null;
+  }
+
+  let listingKey: string | null = null;
+  if (input.workspaceDid) {
+    listingKey = listingKeyFromWorkspaceDid(input.workspaceDid);
+  } else if (input.address) {
+    listingKey = listingKeyFromAddress(input.address, input.mls_id);
+  }
+  if (!listingKey) return null;
+
+  if (!input.installId && !input.serviceCaller) return null;
+
+  const conditions = [eq(brokerageBriefRuns.listingKey, listingKey)];
+  if (input.installId) {
+    conditions.push(eq(brokerageBriefRuns.installId, input.installId));
+  }
+
+  const [run] = await db
+    .select()
+    .from(brokerageBriefRuns)
+    .where(and(...conditions))
+    .orderBy(desc(brokerageBriefRuns.createdAt))
+    .limit(1);
+  return run ?? null;
+}
 
 function logStarterPromptSelected(
   req: Request,
@@ -827,12 +878,34 @@ brokerageV1.post(
       res.status(400).json({
         error: "invalid_request",
         message: "Invalid research chat body",
+        details: parse.error.flatten(),
+        accepted: {
+          required: ["message"],
+          runSelector: "runId (uuid) OR address OR workspaceDid",
+          optional: [
+            "history",
+            "presentationMode",
+            "starterPromptId",
+            "personaBucket",
+            "mls_id",
+          ],
+        },
       });
       return;
     }
 
-    const { runId, message, history, presentationMode = "consumer", starterPromptId, personaBucket } =
-      parse.data;
+    const {
+      message,
+      history,
+      presentationMode = "consumer",
+      starterPromptId,
+      personaBucket,
+    } = parse.data;
+    const runIdField = "runId" in parse.data ? parse.data.runId : undefined;
+    const addressField = "address" in parse.data ? parse.data.address : undefined;
+    const mlsIdField = "mls_id" in parse.data ? parse.data.mls_id : undefined;
+    const workspaceDidField =
+      "workspaceDid" in parse.data ? parse.data.workspaceDid : undefined;
 
     const installId = installIdFromRequest(req);
     const extensionPublic = isExtensionPublicClient(req);
@@ -862,16 +935,26 @@ brokerageV1.post(
       }
     }
 
-    const [run] = await db
-      .select()
-      .from(brokerageBriefRuns)
-      .where(eq(brokerageBriefRuns.id, runId))
-      .limit(1);
+    const run = await resolveResearchChatRun({
+      runId: runIdField,
+      address: addressField,
+      mls_id: mlsIdField,
+      workspaceDid: workspaceDidField,
+      installId,
+      serviceCaller,
+    });
 
     if (!run) {
-      res.status(404).json({ error: "not_found", message: "Brief run not found" });
+      res.status(404).json({
+        error: "not_found",
+        message: runIdField
+          ? "Brief run not found"
+          : "No brief run for this property — POST /api/brokerage/v1/brief first",
+      });
       return;
     }
+
+    const runId = run.id;
 
     const payload = run.payloadJson as {
       jurisdiction?: string | null;

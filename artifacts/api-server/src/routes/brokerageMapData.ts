@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { db, brokerageUserProfiles } from "@workspace/db";
 import { resolveJurisdiction } from "@workspace/adapters";
 import { logger } from "../lib/logger";
+import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { resolveRequestJurisdictionTenant } from "../lib/gateFrontSeam";
 import {
   resolveInvestorPackageTier,
@@ -29,6 +30,20 @@ import {
 import { buildMapReasoningOverlays } from "../lib/brokerageMapReasoningOverlays";
 import { buildInvestorVerdict } from "../lib/brokerageInvestorVerdict";
 import type { BrokerageSiteContextLayer } from "../lib/brokerageSiteContext";
+
+function mapDataMaxInstallOverride(
+  installId: string | null,
+): "max" | null {
+  const raw = process.env.BROKERAGE_MAP_DATA_MAX_INSTALL_IDS?.trim();
+  if (!raw || !installId) return null;
+  const allowed = new Set(
+    raw
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+  return allowed.has(installId) ? "max" : null;
+}
 
 export const brokerageMapDataRouter: IRouter = Router();
 
@@ -72,6 +87,7 @@ brokerageMapDataRouter.post("/", async (req: Request, res: Response) => {
 
   const log = reqLog(req);
   const subjectId = req.session?.requestor?.id ?? null;
+  const installId = installIdFromRequest(req);
   let profileRow: typeof brokerageUserProfiles.$inferSelect | null = null;
   if (subjectId) {
     const rows = await db
@@ -84,6 +100,7 @@ brokerageMapDataRouter.post("/", async (req: Request, res: Response) => {
   const packageTier = resolveInvestorPackageTier({
     brokerageAuthTier: req.brokerageAuth?.tier ?? null,
     profileTier: packageTierFromProfile(profileRow),
+    tier: mapDataMaxInstallOverride(installId),
   });
 
   if (packageTier !== "max") {
