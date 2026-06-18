@@ -15,7 +15,7 @@ export type BrokerageWalletLedgerKind =
   | "adjustment"
   | "free_brief";
 
-export type BrokerageSubscriptionTier = "free" | "pro";
+export type BrokerageSubscriptionTier = "free" | "pro" | "max";
 export type BrokerageSubscriptionStatus = "active" | "trialing" | "churned";
 
 export const brokerageWallets = pgTable("brokerage_wallets", {

@@ -6,6 +6,7 @@
  *   STRIPE_PUBLISHABLE_KEY
  *   STRIPE_WEBHOOK_SECRET
  *   STRIPE_PRO_PRICE_ID
+ *   STRIPE_MAX_PRICE_ID
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -26,6 +27,24 @@ export function stripeProPriceId(): string | null {
   return process.env.STRIPE_PRO_PRICE_ID?.trim() || null;
 }
 
+export function stripeMaxPriceId(): string | null {
+  return process.env.STRIPE_MAX_PRICE_ID?.trim() || null;
+}
+
+export type SubscriptionCheckoutTier = "pro" | "max";
+
+function stripePriceIdForTier(tier: SubscriptionCheckoutTier): string | null {
+  return tier === "max" ? stripeMaxPriceId() : stripeProPriceId();
+}
+
+export function subscriptionTierFromPriceId(
+  priceId: string | null | undefined,
+): SubscriptionCheckoutTier {
+  const maxId = stripeMaxPriceId();
+  if (maxId && priceId === maxId) return "max";
+  return "pro";
+}
+
 export function stripeWebhookPath(): string {
   return "/api/brokerage/v1/billing/stripe/webhook";
 }
@@ -35,6 +54,7 @@ export type StripeCheckoutResult = {
   sessionId: string;
   mode: "live" | "simulated";
   publishableKey: string | null;
+  tier?: SubscriptionCheckoutTier;
   note?: string;
 };
 
@@ -110,27 +130,28 @@ async function getOrCreateStripeCustomer(installId: string): Promise<string> {
   return customerId;
 }
 
-export async function createProCheckoutSession(input: {
+export async function createSubscriptionCheckoutSession(input: {
   installId: string;
+  tier: SubscriptionCheckoutTier;
   successUrl: string;
   cancelUrl: string;
 }): Promise<StripeCheckoutResult> {
-  const priceId = stripeProPriceId();
+  const priceId = stripePriceIdForTier(input.tier);
   const publishableKey = stripePublishableKey();
 
   if (!isStripeConfigured() || !priceId) {
     const sessionId = `sim_cs_${input.installId.slice(0, 8)}_${Date.now()}`;
     logger.info(
-      { installId: input.installId.slice(0, 8) },
-      "stripe: simulated checkout (no STRIPE_SECRET_KEY or STRIPE_PRO_PRICE_ID)",
+      { installId: input.installId.slice(0, 8), tier: input.tier },
+      "stripe: simulated checkout (no STRIPE_SECRET_KEY or price id)",
     );
     const sep = input.successUrl.includes("?") ? "&" : "?";
     return {
       mode: "simulated",
       sessionId,
-      checkoutUrl: `${input.successUrl}${sep}simulated=1&session_id=${sessionId}`,
+      checkoutUrl: `${input.successUrl}${sep}simulated=1&session_id=${sessionId}&tier=${input.tier}`,
       publishableKey: null,
-      note: "Stripe credentials not configured — simulated checkout session",
+      note: `Stripe credentials not configured — simulated ${input.tier} checkout session`,
     };
   }
 
@@ -142,7 +163,9 @@ export async function createProCheckoutSession(input: {
     cancel_url: input.cancelUrl,
     client_reference_id: input.installId,
     "metadata[install_id]": input.installId,
+    "metadata[subscription_tier]": input.tier,
     "subscription_data[metadata][install_id]": input.installId,
+    "subscription_data[metadata][subscription_tier]": input.tier,
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   });
@@ -158,7 +181,16 @@ export async function createProCheckoutSession(input: {
     sessionId,
     checkoutUrl,
     publishableKey,
+    tier: input.tier,
   };
+}
+
+export async function createProCheckoutSession(input: {
+  installId: string;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<StripeCheckoutResult> {
+  return createSubscriptionCheckoutSession({ ...input, tier: "pro" });
 }
 
 export async function createBillingPortalSession(input: {
@@ -193,6 +225,7 @@ export async function createBillingPortalSession(input: {
 export async function completeSimulatedCheckout(input: {
   installId: string;
   sessionId?: string;
+  tier?: SubscriptionCheckoutTier;
 }): Promise<void> {
   if (isStripeConfigured()) {
     throw new Error("simulated_checkout_unavailable_when_stripe_configured");
@@ -200,13 +233,14 @@ export async function completeSimulatedCheckout(input: {
 
   const periodEnd = new Date();
   periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+  const tier = input.tier ?? "pro";
 
   await setSubscriptionEntitlement({
     installId: input.installId,
     stripeCustomerId: `sim_cus_${input.installId.slice(0, 8)}`,
     stripeSubscriptionId:
       input.sessionId ?? `sim_sub_${input.installId.slice(0, 8)}`,
-    subscriptionTier: "pro",
+    subscriptionTier: tier,
     subscriptionStatus: "active",
     subscriptionPeriodEnd: periodEnd,
   });
@@ -253,16 +287,16 @@ export async function handleStripeWebhook(
     const customerId = typeof obj.customer === "string" ? obj.customer : null;
 
     if (installId) {
-      let periodEnd: Date | null = null;
-      if (subscriptionId) {
-        periodEnd = await fetchSubscriptionPeriodEnd(subscriptionId);
-      }
+      const { tier, periodEnd } = await resolveSubscriptionTierFromStripe(
+        subscriptionId,
+        obj,
+      );
 
       await setSubscriptionEntitlement({
         installId,
         stripeCustomerId: customerId,
         stripeSubscriptionId: subscriptionId,
-        subscriptionTier: "pro",
+        subscriptionTier: tier,
         subscriptionStatus: "active",
         subscriptionPeriodEnd: periodEnd,
       });
@@ -275,12 +309,16 @@ export async function handleStripeWebhook(
     const status = typeof obj.status === "string" ? obj.status : "";
     const active = status === "active" || status === "trialing";
     if (installId) {
+      const subId = typeof obj.id === "string" ? obj.id : null;
+      const { tier } = active
+        ? await resolveSubscriptionTierFromStripe(subId, obj)
+        : { tier: "pro" as const };
       await setSubscriptionEntitlement({
         installId,
         stripeCustomerId:
           typeof obj.customer === "string" ? obj.customer : null,
-        stripeSubscriptionId: typeof obj.id === "string" ? obj.id : null,
-        subscriptionTier: active ? "pro" : "free",
+        stripeSubscriptionId: subId,
+        subscriptionTier: active ? tier : "free",
         subscriptionStatus: active
           ? (status as "active" | "trialing")
           : "churned",
@@ -330,21 +368,63 @@ function periodEndFromStripe(obj: Record<string, unknown>): Date | null {
   return null;
 }
 
-async function fetchSubscriptionPeriodEnd(
+async function fetchStripeSubscription(
   subscriptionId: string,
-): Promise<Date | null> {
-  try {
-    const secret = process.env.STRIPE_SECRET_KEY!.trim();
-    const res = await fetch(
-      `https://api.stripe.com/v1/subscriptions/${subscriptionId}`,
-      { headers: { Authorization: `Bearer ${secret}` } },
+): Promise<Record<string, unknown>> {
+  const secret = process.env.STRIPE_SECRET_KEY!.trim();
+  const res = await fetch(
+    `https://api.stripe.com/v1/subscriptions/${subscriptionId}?expand[]=items.data.price`,
+    { headers: { Authorization: `Bearer ${secret}` } },
+  );
+  const json = (await res.json()) as Record<string, unknown> & {
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(
+      json.error?.message ?? `Stripe subscription fetch failed (${res.status})`,
     );
-    const json = (await res.json()) as Record<string, unknown>;
-    return periodEndFromStripe(json);
-  } catch (err) {
-    logger.warn({ err, subscriptionId }, "stripe: subscription fetch failed");
-    return null;
   }
+  return json;
+}
+
+function tierFromStripeObject(
+  obj: Record<string, unknown>,
+): SubscriptionCheckoutTier {
+  const metaTier = (obj.metadata as Record<string, unknown> | undefined)
+    ?.subscription_tier;
+  if (metaTier === "max" || metaTier === "pro") return metaTier;
+
+  const items = obj.items as { data?: unknown[] } | undefined;
+  const first = items?.data?.[0] as
+    | { price?: { id?: string } | string }
+    | undefined;
+  let priceId: string | null = null;
+  if (first?.price) {
+    priceId =
+      typeof first.price === "string"
+        ? first.price
+        : typeof first.price.id === "string"
+          ? first.price.id
+          : null;
+  }
+  return subscriptionTierFromPriceId(priceId);
+}
+
+async function resolveSubscriptionTierFromStripe(
+  subscriptionId: string | null,
+  obj?: Record<string, unknown>,
+): Promise<{ tier: SubscriptionCheckoutTier; periodEnd: Date | null }> {
+  let source = obj;
+  if (subscriptionId) {
+    try {
+      source = await fetchStripeSubscription(subscriptionId);
+    } catch (err) {
+      logger.warn({ err, subscriptionId }, "stripe: subscription fetch failed");
+    }
+  }
+  const tier = source ? tierFromStripeObject(source) : "pro";
+  const periodEnd = source ? periodEndFromStripe(source) : null;
+  return { tier, periodEnd };
 }
 
 async function installIdFromStripeSubscription(

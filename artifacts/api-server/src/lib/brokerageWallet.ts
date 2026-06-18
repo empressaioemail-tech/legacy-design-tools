@@ -19,6 +19,8 @@ export type ClientEntitlementSnapshot = {
   freeBriefsRemaining: number;
   freeBriefsCap: number;
   proActive: boolean;
+  maxActive: boolean;
+  subscriptionTier: "free" | "pro" | "max" | null;
 };
 
 export function clientEntitlementFromSnapshot(
@@ -28,6 +30,8 @@ export function clientEntitlementFromSnapshot(
     freeBriefsRemaining: ent.freeBriefsRemaining,
     freeBriefsCap: ent.freeBriefsCap,
     proActive: ent.proActive,
+    maxActive: ent.maxActive,
+    subscriptionTier: ent.subscriptionTier,
   };
 }
 
@@ -51,10 +55,11 @@ export type WalletSnapshot = {
   freeBriefsUsed: number;
   freeBriefsCap: number;
   freeBriefsRemaining: number;
-  subscriptionTier: "free" | "pro" | null;
+  subscriptionTier: "free" | "pro" | "max" | null;
   subscriptionStatus: "active" | "trialing" | "churned" | null;
   subscriptionPeriodEnd: string | null;
   proActive: boolean;
+  maxActive: boolean;
 };
 
 async function ensureWallet(installId: string) {
@@ -109,6 +114,7 @@ export async function getWalletSnapshot(
     subscriptionStatus: ent.subscriptionStatus,
     subscriptionPeriodEnd: ent.subscriptionPeriodEnd,
     proActive: ent.proActive,
+    maxActive: ent.maxActive,
   };
 }
 

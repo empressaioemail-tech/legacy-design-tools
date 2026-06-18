@@ -74,6 +74,27 @@ export async function syncPipedrivePerson(input: {
 
   try {
     const created = await pipedrivePost("/persons", payload);
+    const note = [
+      `Hauska install: ${input.installId}`,
+      input.acquisitionSource
+        ? `Acquisition: ${input.acquisitionSource}`
+        : null,
+      `Email: ${input.email}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      await pipedrivePost("/notes", {
+        content: note,
+        person_id: created.id,
+        pinned_to_person_flag: 1,
+      });
+    } catch (noteErr) {
+      logger.warn(
+        { err: noteErr, personId: created.id },
+        "pipedrive: person note failed",
+      );
+    }
     logger.info(
       { installId: input.installId.slice(0, 8), personId: created.id },
       "pipedrive: person synced",

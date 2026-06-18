@@ -1,9 +1,10 @@
 /**
- * Install-level entitlements — free brief cap + Pro subscription (08, 75g).
+ * Install-level entitlements — free brief cap + Pro/Max subscription (08, 75g).
  * Reuses brokerage_wallets as the entitlement store; wallet balance is legacy metering.
  */
 
 import { db, brokerageWallets, brokerageWalletLedger } from "@workspace/db";
+import type { BrokerageSubscriptionTier } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { InvestorPackageTier } from "./brokerageTierGate";
 
@@ -18,32 +19,71 @@ export type EntitlementSnapshot = {
   freeBriefsUsed: number;
   freeBriefsCap: number;
   freeBriefsRemaining: number;
-  subscriptionTier: "free" | "pro" | null;
+  subscriptionTier: "free" | "pro" | "max" | null;
   subscriptionStatus: "active" | "trialing" | "churned" | null;
   subscriptionPeriodEnd: string | null;
   proActive: boolean;
+  maxActive: boolean;
+  paidActive: boolean;
   balanceCents: number;
 };
+
+function isSubscriptionStatusActive(row: {
+  subscriptionStatus: string | null;
+  subscriptionPeriodEnd: Date | null;
+}): boolean {
+  if (
+    row.subscriptionStatus !== "active" &&
+    row.subscriptionStatus !== "trialing"
+  ) {
+    return false;
+  }
+  if (
+    row.subscriptionPeriodEnd &&
+    row.subscriptionPeriodEnd.getTime() < Date.now()
+  ) {
+    return false;
+  }
+  return true;
+}
 
 export function isProSubscriptionActive(row: {
   subscriptionTier: string | null;
   subscriptionStatus: string | null;
   subscriptionPeriodEnd: Date | null;
 }): boolean {
-  if (row.subscriptionTier !== "pro") return false;
-  if (row.subscriptionStatus !== "active" && row.subscriptionStatus !== "trialing") {
-    return false;
-  }
-  if (row.subscriptionPeriodEnd && row.subscriptionPeriodEnd.getTime() < Date.now()) {
-    return false;
-  }
-  return true;
+  return (
+    row.subscriptionTier === "pro" && isSubscriptionStatusActive(row)
+  );
+}
+
+export function isMaxSubscriptionActive(row: {
+  subscriptionTier: string | null;
+  subscriptionStatus: string | null;
+  subscriptionPeriodEnd: Date | null;
+}): boolean {
+  return (
+    row.subscriptionTier === "max" && isSubscriptionStatusActive(row)
+  );
+}
+
+export function isPaidSubscriptionActive(row: {
+  subscriptionTier: string | null;
+  subscriptionStatus: string | null;
+  subscriptionPeriodEnd: Date | null;
+}): boolean {
+  return (
+    (row.subscriptionTier === "pro" || row.subscriptionTier === "max") &&
+    isSubscriptionStatusActive(row)
+  );
 }
 
 export function entitlementPackageTier(
-  ent: Pick<EntitlementSnapshot, "proActive">,
+  ent: Pick<EntitlementSnapshot, "maxActive" | "proActive">,
 ): InvestorPackageTier | null {
-  return ent.proActive ? "pro" : null;
+  if (ent.maxActive) return "max";
+  if (ent.proActive) return "pro";
+  return null;
 }
 
 async function ensureWalletRow(installId: string) {
@@ -82,17 +122,22 @@ export async function getEntitlementSnapshot(
   const cap = brokerageFreeBriefsCap();
   const used = row.freeBriefsUsed ?? 0;
   const proActive = isProSubscriptionActive(row);
+  const maxActive = isMaxSubscriptionActive(row);
 
   return {
     installId,
     freeBriefsUsed: used,
     freeBriefsCap: cap,
     freeBriefsRemaining: Math.max(0, cap - used),
-    subscriptionTier: (row.subscriptionTier as "free" | "pro" | null) ?? null,
+    subscriptionTier:
+      (row.subscriptionTier as EntitlementSnapshot["subscriptionTier"]) ?? null,
     subscriptionStatus:
-      (row.subscriptionStatus as EntitlementSnapshot["subscriptionStatus"]) ?? null,
+      (row.subscriptionStatus as EntitlementSnapshot["subscriptionStatus"]) ??
+      null,
     subscriptionPeriodEnd: row.subscriptionPeriodEnd?.toISOString() ?? null,
     proActive,
+    maxActive,
+    paidActive: proActive || maxActive,
     balanceCents: row.balanceCents,
   };
 }
@@ -123,7 +168,7 @@ export async function assertBriefComputeEntitled(
   const cap = brokerageFreeBriefsCap();
   const used = row.freeBriefsUsed ?? 0;
 
-  if (isProSubscriptionActive(row)) {
+  if (isPaidSubscriptionActive(row)) {
     return { ok: true, consumed: "pro_subscription" };
   }
 
@@ -185,7 +230,7 @@ export async function setSubscriptionEntitlement(input: {
   installId: string;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
-  subscriptionTier: "free" | "pro";
+  subscriptionTier: "free" | "pro" | "max";
   subscriptionStatus: "active" | "trialing" | "churned";
   subscriptionPeriodEnd?: Date | null;
 }): Promise<EntitlementSnapshot> {
@@ -193,7 +238,7 @@ export async function setSubscriptionEntitlement(input: {
   await db
     .update(brokerageWallets)
     .set({
-      subscriptionTier: input.subscriptionTier,
+      subscriptionTier: input.subscriptionTier as BrokerageSubscriptionTier,
       subscriptionStatus: input.subscriptionStatus,
       subscriptionPeriodEnd: input.subscriptionPeriodEnd ?? null,
       stripeCustomerId: input.stripeCustomerId ?? undefined,

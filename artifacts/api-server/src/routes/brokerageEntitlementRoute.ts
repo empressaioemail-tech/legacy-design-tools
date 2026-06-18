@@ -26,5 +26,6 @@ brokerageEntitlementRouter.get("/", async (req: Request, res: Response) => {
     ...clientEntitlementFromSnapshot(ent),
     freeBriefsUsed: ent.freeBriefsUsed,
     balanceCents: ent.balanceCents,
+    paidActive: ent.paidActive,
   });
 });

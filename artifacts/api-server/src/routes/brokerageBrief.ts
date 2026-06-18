@@ -72,6 +72,7 @@ import {
 import {
   findWorkspaceByListingKey,
   listingKeyFromAddress,
+  listingKeyCandidates,
   upsertWorkspaceFromBrief,
 } from "../lib/brokerageWorkspace";
 import {
@@ -281,31 +282,63 @@ async function resolveResearchChatRun(input: {
       .from(brokerageBriefRuns)
       .where(eq(brokerageBriefRuns.id, input.runId))
       .limit(1);
-    return run ?? null;
+    if (!run) return null;
+    if (
+      input.installId &&
+      run.installId &&
+      run.installId !== input.installId &&
+      !input.serviceCaller
+    ) {
+      return null;
+    }
+    return run;
   }
 
-  let listingKey: string | null = null;
+  const listingKeys: string[] = [];
   if (input.workspaceDid) {
-    listingKey = listingKeyFromWorkspaceDid(input.workspaceDid);
+    const workspaceKey = listingKeyFromWorkspaceDid(input.workspaceDid);
+    if (workspaceKey) listingKeys.push(workspaceKey);
   } else if (input.address) {
-    listingKey = listingKeyFromAddress(input.address, input.mls_id);
+    listingKeys.push(...listingKeyCandidates(input.address, input.mls_id));
   }
-  if (!listingKey) return null;
+  if (!listingKeys.length) return null;
 
   if (!input.installId && !input.serviceCaller) return null;
 
-  const conditions = [eq(brokerageBriefRuns.listingKey, listingKey)];
-  if (input.installId) {
-    conditions.push(eq(brokerageBriefRuns.installId, input.installId));
+  for (const listingKey of listingKeys) {
+    const conditions = [eq(brokerageBriefRuns.listingKey, listingKey)];
+    if (input.installId) {
+      conditions.push(eq(brokerageBriefRuns.installId, input.installId));
+    }
+    const [run] = await db
+      .select()
+      .from(brokerageBriefRuns)
+      .where(and(...conditions))
+      .orderBy(desc(brokerageBriefRuns.createdAt))
+      .limit(1);
+    if (run) return run;
   }
 
-  const [run] = await db
-    .select()
-    .from(brokerageBriefRuns)
-    .where(and(...conditions))
-    .orderBy(desc(brokerageBriefRuns.createdAt))
-    .limit(1);
-  return run ?? null;
+  for (const listingKey of listingKeys) {
+    const [run] = await db
+      .select()
+      .from(brokerageBriefRuns)
+      .where(eq(brokerageBriefRuns.listingKey, listingKey))
+      .orderBy(desc(brokerageBriefRuns.createdAt))
+      .limit(1);
+    if (!run) continue;
+    if (
+      input.installId &&
+      run.installId &&
+      run.installId !== input.installId &&
+      !input.serviceCaller
+    ) {
+      continue;
+    }
+    return run;
+  }
+
+  return null;
 }
 
 function logStarterPromptSelected(

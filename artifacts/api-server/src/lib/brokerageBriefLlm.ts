@@ -5,6 +5,7 @@
 import {
   resolveGrokBriefingModel,
   BRIEFING_GROK_MAX_TOKENS,
+  BRIEFING_ANTHROPIC_MODEL,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
 import {
@@ -41,7 +42,7 @@ export interface ReasoningSummaryResult {
   citations: NumberedCitation[];
   disclaimer: string;
   generatedAt: string;
-  method: "grok" | "rules-v1";
+  method: "grok" | "anthropic" | "rules-v1";
 }
 
 export interface SummarizeResult {
@@ -50,7 +51,7 @@ export interface SummarizeResult {
   summary: string;
   citations: NumberedCitation[];
   disclaimer: string;
-  method: "grok" | "rules-v1";
+  method: "grok" | "anthropic" | "rules-v1";
 }
 
 export interface ResearchChatResult {
@@ -63,7 +64,7 @@ export interface ResearchChatResult {
   disclaimer: string;
   confidence: number;
   generatedAt: string;
-  method: "grok" | "rules-v1";
+  method: "grok" | "anthropic" | "rules-v1";
   presentationMode: PresentationMode;
 }
 
@@ -127,15 +128,33 @@ function textToHtmlParagraphs(text: string): string {
   return parts.map((p) => `<p>${escapeHtml(p)}</p>`).join("");
 }
 
-async function completeGrok(system: string, user: string): Promise<string | null> {
+async function completeBriefingLlm(
+  system: string,
+  user: string,
+): Promise<{ text: string | null; method: "grok" | "anthropic" }> {
   const bundle = await getBriefingLlmClient();
-  if (bundle?.kind !== "grok") return null;
-  return bundle.client.completeChat({
-    model: resolveGrokBriefingModel(),
-    maxTokens: BRIEFING_GROK_MAX_TOKENS,
+  if (!bundle) return { text: null, method: "grok" };
+
+  if (bundle.kind === "grok") {
+    const text = await bundle.client.completeChat({
+      model: resolveGrokBriefingModel(),
+      maxTokens: BRIEFING_GROK_MAX_TOKENS,
+      system,
+      user,
+    });
+    return { text, method: "grok" };
+  }
+
+  const response = await bundle.client.messages.create({
+    model: BRIEFING_ANTHROPIC_MODEL,
+    max_tokens: BRIEFING_GROK_MAX_TOKENS,
     system,
-    user,
+    messages: [{ role: "user", content: user }],
   });
+  const textBlock = response.content.find((block) => block.type === "text");
+  const text =
+    textBlock && textBlock.type === "text" ? textBlock.text.trim() : null;
+  return { text: text || null, method: "anthropic" };
 }
 
 export function buildRulesReasoningSummary(input: {
@@ -220,7 +239,7 @@ export async function generateReasoningSummary(input: {
     numberedAtomBlock(atoms),
   ].join("\n");
 
-  const raw = await completeGrok(system, user);
+  const { text: raw, method: llmMethod } = await completeBriefingLlm(system, user);
   if (!raw) {
     return buildRulesReasoningSummary(input);
   }
@@ -241,7 +260,7 @@ export async function generateReasoningSummary(input: {
       citations,
       disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       generatedAt: input.finishedAt,
-      method: "grok",
+      method: llmMethod,
     };
   } catch {
     const citations = parseInlineCitations(raw, atoms);
@@ -251,7 +270,7 @@ export async function generateReasoningSummary(input: {
       citations,
       disclaimer: PROPERTY_BRIEF_DISCLAIMER,
       generatedAt: input.finishedAt,
-      method: "grok",
+      method: llmMethod,
     };
   }
 }
@@ -278,7 +297,7 @@ export async function generateSummarize(input: {
     numberedAtomBlock(atoms),
   ].join("\n");
 
-  const raw = await completeGrok(system, user);
+  const { text: raw, method: llmMethod } = await completeBriefingLlm(system, user);
   if (!raw) {
     const rules = buildRulesReasoningSummary({
       ...input,
@@ -307,7 +326,7 @@ export async function generateSummarize(input: {
       summary: body.split(/\n\n+/)[0]?.trim() || parsed.headline?.trim() || "",
       citations: parseInlineCitations(body, atoms),
       disclaimer: PROPERTY_BRIEF_DISCLAIMER,
-      method: "grok",
+      method: llmMethod,
     };
   } catch {
     return {
@@ -316,7 +335,7 @@ export async function generateSummarize(input: {
       summary: raw.slice(0, 280),
       citations: parseInlineCitations(raw, atoms),
       disclaimer: PROPERTY_BRIEF_DISCLAIMER,
-      method: "grok",
+      method: llmMethod,
     };
   }
 }
@@ -326,7 +345,7 @@ function finalizeResearchChatAnswer(
   atoms: BriefAtomInput[],
   presentationMode: PresentationMode,
   generatedAt: string,
-  method: "grok" | "rules-v1",
+  method: "grok" | "anthropic" | "rules-v1",
 ): ResearchChatResult {
   const citations = parseInlineCitations(answer, atoms);
   const consumer = presentationMode === "consumer";
@@ -393,7 +412,7 @@ export async function generateResearchChat(input: {
     numberedAtomBlock(atoms),
   ].join("\n");
 
-  const raw = await completeGrok(system, user);
+  const { text: raw, method: llmMethod } = await completeBriefingLlm(system, user);
   const generatedAt = new Date().toISOString();
 
   if (!raw) {
@@ -423,7 +442,7 @@ export async function generateResearchChat(input: {
       atoms,
       presentationMode,
       generatedAt,
-      "grok",
+      llmMethod,
     );
   } catch {
     return finalizeResearchChatAnswer(
@@ -431,7 +450,7 @@ export async function generateResearchChat(input: {
       atoms,
       presentationMode,
       generatedAt,
-      "grok",
+      llmMethod,
     );
   }
 }

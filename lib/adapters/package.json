@@ -28,7 +28,8 @@
     "./local/lemhi-county-id": "./src/local/lemhi-county-id.ts",
     "./local/bastrop-tx": "./src/local/bastrop-tx.ts",
     "./local/summaries": "./src/local/summaries.ts",
-    "./setbacks": "./src/local/setbacks/index.ts"
+    "./setbacks": "./src/local/setbacks/index.ts",
+    "./arcgis": "./src/arcgis.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

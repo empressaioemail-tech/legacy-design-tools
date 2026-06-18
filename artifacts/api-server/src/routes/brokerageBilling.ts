@@ -15,9 +15,10 @@ import { requireInstallId } from "../lib/brokerageInstallId";
 import {
   completeSimulatedCheckout,
   createBillingPortalSession,
-  createProCheckoutSession,
+  createSubscriptionCheckoutSession,
   handleStripeWebhook,
   isStripeConfigured,
+  type SubscriptionCheckoutTier,
 } from "../lib/brokerageStripe";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
 import { syncPipedriveDeal } from "../lib/brokeragePipedrive";
@@ -25,6 +26,7 @@ import { syncPipedriveDeal } from "../lib/brokeragePipedrive";
 const CHECKOUT_BODY = z.object({
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
+  tier: z.enum(["pro", "max"]).optional().default("pro"),
 });
 
 const PORTAL_BODY = z.object({
@@ -33,6 +35,7 @@ const PORTAL_BODY = z.object({
 
 const SIMULATED_COMPLETE_BODY = z.object({
   sessionId: z.string().min(1).optional(),
+  tier: z.enum(["pro", "max"]).optional().default("pro"),
 });
 
 export const brokerageBillingRouter: IRouter = Router();
@@ -53,21 +56,24 @@ brokerageBillingRouter.post("/checkout", async (req: Request, res: Response) => 
     return;
   }
 
+  const tier: SubscriptionCheckoutTier = parse.data.tier;
+
   recordGtmEvent({
     installId,
     eventType: "upgrade_started",
     sourceSurface: "api",
-    payload: { rail: "stripe" },
+    payload: { rail: "stripe", tier },
   });
 
   void syncPipedriveDeal({
     installId,
-    title: `Hauska Pro upgrade — ${installId.slice(0, 8)}`,
+    title: `Hauska ${tier === "max" ? "Max" : "Pro"} upgrade — ${installId.slice(0, 8)}`,
   });
 
   try {
-    const session = await createProCheckoutSession({
+    const session = await createSubscriptionCheckoutSession({
       installId,
+      tier,
       successUrl: parse.data.successUrl,
       cancelUrl: parse.data.cancelUrl,
     });
@@ -136,16 +142,22 @@ brokerageBillingRouter.post(
     await completeSimulatedCheckout({
       installId,
       sessionId: parse.data.sessionId,
+      tier: parse.data.tier,
     });
 
     recordGtmEvent({
       installId,
       eventType: "subscription_active",
       sourceSurface: "api",
-      payload: { rail: "stripe_simulated" },
+      payload: { rail: "stripe_simulated", tier: parse.data.tier },
     });
 
-    res.json({ ok: true, proActive: true });
+    res.json({
+      ok: true,
+      proActive: parse.data.tier === "pro",
+      maxActive: parse.data.tier === "max",
+      subscriptionTier: parse.data.tier,
+    });
   },
 );
 

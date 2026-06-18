@@ -9,14 +9,43 @@ import {
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { stripBriefPayloadForClient } from "./brokerageSiteContext";
 
+/** Normalize listing addresses so brief + chat resolve the same run. */
+export function normalizeListingAddress(address: string): string {
+  return address
+    .trim()
+    .toLowerCase()
+    .replace(/[.,#]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b(united states|usa|u s a)\b/g, "")
+    .replace(/\b\d{5}-\d{4}\b/g, (zip) => zip.slice(0, 5))
+    .trim();
+}
+
 export function listingKeyFromAddress(
   address: string,
   mlsId?: string | null,
 ): string {
-  const norm = address.trim().toLowerCase().replace(/\s+/g, " ");
+  const norm = normalizeListingAddress(address);
   return createHash("sha256")
     .update(`${norm}|${(mlsId ?? "").trim()}`)
     .digest("hex");
+}
+
+/** Address variants for research-chat run lookup (unit suffixes, etc.). */
+export function listingKeyCandidates(
+  address: string,
+  mlsId?: string | null,
+): string[] {
+  const keys = new Set<string>();
+  keys.add(listingKeyFromAddress(address, mlsId));
+  const withoutUnit = address
+    .replace(/\b(apt|apartment|unit|ste|suite|#)\s*[\w-]+/gi, "")
+    .replace(/\s+#\s*[\w-]+/g, "")
+    .trim();
+  if (withoutUnit && withoutUnit !== address) {
+    keys.add(listingKeyFromAddress(withoutUnit, mlsId));
+  }
+  return [...keys];
 }
 
 function formatCoordOptional(value: number | undefined): string | null {
