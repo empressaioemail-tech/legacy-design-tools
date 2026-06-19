@@ -18,6 +18,12 @@ import {
 } from "@workspace/adapters/national/cotalityClient";
 import { AdapterRunError } from "@workspace/adapters/types";
 import {
+  isFederalGisProxyLayer,
+  listFederalGisLayerEndpoints,
+  queryFederalGisLayerGeoJson,
+  federalGisLayerFixtureGeoJson,
+} from "./brokerageGisFederalLayers";
+import {
   tileKey,
   normalizeAddrKey,
   getSpatialTile,
@@ -39,7 +45,14 @@ const MAX_VIEWPORT_PAGES = 4;
 const ZONING_ENRICH_CONCURRENCY = 20;
 const MAX_BBOX_ZONING_ENRICH = 25;
 
-export type GisProxyLayerKey = "fema" | "parcels";
+export type GisProxyLayerKey =
+  | "fema"
+  | "parcels"
+  | "ssurgo-soils"
+  | "groundwater"
+  | "mud-pid"
+  | "edwards-aquifer"
+  | "texas-rrc";
 
 export type GisLayerEndpoint = {
   layer: GisProxyLayerKey;
@@ -89,6 +102,7 @@ export function listGisLayerEndpoints(): GisLayerEndpoint[] {
       provider: "Cotality Spatial Tile",
       adapterKey: "cotality:parcels",
     },
+    ...listFederalGisLayerEndpoints(),
   ];
 }
 
@@ -568,6 +582,18 @@ export async function queryGisLayerGeoJson(input: {
   const endpoint = resolveGisLayerEndpoint(input.layer);
   if (!endpoint) {
     throw new AdapterRunError("no-coverage", `GIS layer unavailable: ${input.layer}`);
+  }
+
+  if (isFederalGisProxyLayer(input.layer)) {
+    const bbox = input.bbox ? normalizeGisLayerBbox(input.bbox) : undefined;
+    const result = await queryFederalGisLayerGeoJson({
+      layer: input.layer,
+      bbox,
+    });
+    return {
+      ...result,
+      queryMode: "bbox",
+    };
   }
 
   if (input.layer === "parcels") {

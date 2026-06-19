@@ -25,9 +25,15 @@ import {
 const TCEQ_ENDPOINTS = {
   recharge:
     "https://gisweb.tceq.texas.gov/arcgis/rest/services/EdwardsAquifer/RechargeZone/MapServer/0",
+  /** Legacy path 404 on live probe 2026-06-19 — COA mirror is primary. */
   contributing:
+    "https://maps.austintexas.gov/arcgis/rest/services/Shared/Environmental_3/MapServer/6",
+  contributingFallback:
     "https://gisweb.tceq.texas.gov/arcgis/rest/services/EdwardsAquifer/ContributingZone/MapServer/0",
 } as const;
+
+export const TCEQ_EDWARDS_RECHARGE_LAYER = TCEQ_ENDPOINTS.recharge;
+export const TCEQ_EDWARDS_CONTRIBUTING_LAYER = TCEQ_ENDPOINTS.contributing;
 
 /**
  * Freshness window for the TCEQ Edwards Aquifer adapter snapshot,
@@ -55,6 +61,33 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+async function queryContributingZone(
+  ctx: AdapterContext,
+): Promise<Awaited<ReturnType<typeof arcgisPointQuery>>> {
+  const candidates = [
+    TCEQ_ENDPOINTS.contributing,
+    TCEQ_ENDPOINTS.contributingFallback,
+  ];
+  let lastErr: unknown;
+  for (const serviceUrl of candidates) {
+    try {
+      return await arcgisPointQuery({
+        serviceUrl,
+        latitude: ctx.parcel.latitude,
+        longitude: ctx.parcel.longitude,
+        outFields: "*",
+        returnGeometry: false,
+        fetchImpl: ctx.fetchImpl,
+        signal: ctx.signal,
+        upstreamLabel: "TCEQ Edwards contributing zone",
+      });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 export const texasEdwardsAquiferAdapter: Adapter = {
   adapterKey: "tceq:edwards-aquifer",
   tier: "state",
@@ -76,16 +109,9 @@ export const texasEdwardsAquiferAdapter: Adapter = {
         returnGeometry: false,
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,
+        upstreamLabel: "TCEQ Edwards recharge zone",
       }),
-      arcgisPointQuery({
-        serviceUrl: TCEQ_ENDPOINTS.contributing,
-        latitude: ctx.parcel.latitude,
-        longitude: ctx.parcel.longitude,
-        outFields: "*",
-        returnGeometry: false,
-        fetchImpl: ctx.fetchImpl,
-        signal: ctx.signal,
-      }),
+      queryContributingZone(ctx),
     ]);
 
     return {

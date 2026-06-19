@@ -18,6 +18,7 @@ import { usdaSsurgoSoilsAdapter } from "./federal/usda-ssurgo";
 import { usgsGeologyAdapter } from "./federal/usgs-geology";
 import { usgsGroundwaterAdapter } from "./federal/usgs-groundwater";
 import { usgsSeismicAdapter } from "./federal/usgs-seismic";
+import { texasRrcOgAdapter } from "./federal/texas-rrc";
 import { fccBroadbandAdapter } from "./federal/fcc-broadband";
 import {
   cotalityParcelsAdapter,
@@ -136,6 +137,7 @@ export const STATE_ADAPTERS: ReadonlyArray<Adapter> = [
   idahoDemAdapter,
   idahoParcelsAdapter,
   texasEdwardsAquiferAdapter,
+  texasRrcOgAdapter,
 ];
 
 export const LOCAL_ADAPTERS: ReadonlyArray<Adapter> = [

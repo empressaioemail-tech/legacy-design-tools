@@ -67,8 +67,7 @@ export const usgsGeologyAdapter: Adapter = {
       serviceUrl: USGS_SGMC_GEOLOGY_LAYER,
       latitude: ctx.parcel.latitude,
       longitude: ctx.parcel.longitude,
-      outFields:
-        "STATE,SGMC_LABEL,UNIT_NAME,MAJOR1,MAJOR2,MINOR1,AGE_MIN,AGE_MAX,ROCKTYPE1,ROCKTYPE2",
+      outFields: "*",
       returnGeometry: false,
       fetchImpl: ctx.fetchImpl,
       signal: ctx.signal,

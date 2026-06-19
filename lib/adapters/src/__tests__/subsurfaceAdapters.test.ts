@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { usdaSsurgoSoilsAdapter } from "../federal/usda-ssurgo";
 import { usgsGeologyAdapter } from "../federal/usgs-geology";
 import { usgsGroundwaterAdapter } from "../federal/usgs-groundwater";
-import { usgsSeismicAdapter } from "../federal/usgs-seismic";
+import { usgsSeismicAdapter, deriveSiteClassFromShrinkSwell } from "../federal/usgs-seismic";
 import { runAdapters } from "../runner";
 import {
   FEDERAL_TIER_CACHE_PREDICATE,
@@ -237,9 +237,24 @@ describe("USGS groundwater adapter", () => {
 });
 
 describe("USGS seismic adapter", () => {
+  it("derives site class E from high shrink-swell soils", () => {
+    const info = deriveSiteClassFromShrinkSwell("High");
+    expect(info.siteClass).toBe("E");
+    expect(info.degraded).toBe(false);
+  });
+
+  it("defaults to degraded site class D when soils absent", () => {
+    const info = deriveSiteClassFromShrinkSwell(null);
+    expect(info.siteClass).toBe("D");
+    expect(info.degraded).toBe(true);
+  });
+
   it("returns ASCE 7-22 design parameters for a covered parcel", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("sdmdataaccess.sc.egov.usda.gov")) {
+        return jsonResponse(ssurgoSdaTable);
+      }
       if (url.includes("designmaps/asce7-22")) {
         return jsonResponse(usgsSeismicDesignSuccess);
       }
@@ -257,9 +272,15 @@ describe("USGS seismic adapter", () => {
       kind: string;
       seismicDesignCategory: string | null;
       sds: number | null;
+      siteClass: string;
+      siteClassDegraded: boolean;
+      shrinkSwellPotential: string | null;
       nearestFault: { faultName: string | null } | null;
     };
     expect(payload.kind).toBe("seismic-design");
+    expect(payload.siteClass).toBe("D");
+    expect(payload.siteClassDegraded).toBe(false);
+    expect(payload.shrinkSwellPotential).toBe("Moderate");
     expect(payload.seismicDesignCategory).toBe("A");
     expect(payload.sds).toBeCloseTo(0.088, 3);
     expect(payload.nearestFault?.faultName).toBe("Barton Springs Fault");

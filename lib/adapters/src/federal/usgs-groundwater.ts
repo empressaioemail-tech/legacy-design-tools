@@ -219,7 +219,7 @@ export const usgsGroundwaterAdapter: Adapter = {
     );
     siteUrl.searchParams.set("siteType", "GW");
     siteUrl.searchParams.set("siteStatus", "active");
-    siteUrl.searchParams.set("hasDataTypeCd", "DV,GW");
+    siteUrl.searchParams.set("siteOutput", "expanded");
 
     const siteJson = await fetchJson(ctx, siteUrl.toString(), "USGS NWIS site");
     const sites = parseSites(siteJson, latitude, longitude).sort(
