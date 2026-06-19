@@ -91,6 +91,9 @@ describe("brokerage profile buy-box teacher", () => {
 
   it("tenant isolation — install B cannot read install A profile", async () => {
     if (!ctx.schema) throw new Error("schema missing");
+    // afterEach truncates between cases, so create install A's profile in THIS
+    // test (getOrCreate on read) rather than relying on a prior `it`.
+    await request(getApp()).get("/api/brokerage/v1/profile").set(authHeaders);
     const rowsA = await ctx.schema.pool.query(
       `SELECT owner_user_id FROM brokerage_user_profiles WHERE owner_user_id = $1`,
       [`install:${INSTALL_A}`],
