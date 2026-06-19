@@ -19,6 +19,7 @@ import {
   type AdapterResult,
 } from "../types";
 import { federalGeocodeApplies, isUsLatLng } from "./_federalGeocodeGate";
+import { querySdaShrinkSwell } from "./usda-ssurgo";
 
 export const USGS_SEISMIC_DESIGN_ENDPOINT =
   "https://earthquake.usgs.gov/ws/designmaps/asce7-22.json";
@@ -31,9 +32,50 @@ export const USGS_SEISMIC_PROVIDER_LABEL =
 
 export const USGS_SEISMIC_FRESHNESS_THRESHOLD_MONTHS = 24;
 
-/** Default ASCE 7 risk category / site class when the brief has no structural inputs. */
+/** Default ASCE 7 risk category when the brief has no structural inputs. */
 const DEFAULT_RISK_CATEGORY = "II";
 const DEFAULT_SITE_CLASS = "D";
+
+export function deriveSiteClassFromShrinkSwell(shrinkSwell: string | null): {
+  siteClass: string;
+  degraded: boolean;
+  reason?: string;
+} {
+  if (!shrinkSwell) {
+    return {
+      siteClass: DEFAULT_SITE_CLASS,
+      degraded: true,
+      reason: "Site class D assumed — no SSURGO shrink-swell reading at parcel.",
+    };
+  }
+  const v = shrinkSwell.trim().toLowerCase();
+  if (v.includes("very high") || v.includes("severe") || v.includes("high")) {
+    return {
+      siteClass: "E",
+      degraded: false,
+      reason: `Site class E from SSURGO shrink-swell (${shrinkSwell}).`,
+    };
+  }
+  if (v.includes("moderate")) {
+    return {
+      siteClass: "D",
+      degraded: false,
+      reason: `Site class D from SSURGO shrink-swell (${shrinkSwell}).`,
+    };
+  }
+  if (v.includes("low") || v.includes("very low") || v.includes("none")) {
+    return {
+      siteClass: "C",
+      degraded: false,
+      reason: `Site class C from SSURGO shrink-swell (${shrinkSwell}).`,
+    };
+  }
+  return {
+    siteClass: DEFAULT_SITE_CLASS,
+    degraded: true,
+    reason: `Unmapped shrink-swell value (${shrinkSwell}) — defaulting to site class D.`,
+  };
+}
 
 /** Fault proximity search radius (km) passed to ArcGIS `distance`. */
 const FAULT_SEARCH_KM = 50;
@@ -61,12 +103,13 @@ async function fetchDesignMaps(
   ctx: AdapterContext,
   latitude: number,
   longitude: number,
+  siteClass: string,
 ): Promise<Record<string, unknown>> {
   const url = new URL(USGS_SEISMIC_DESIGN_ENDPOINT);
   url.searchParams.set("latitude", String(latitude));
   url.searchParams.set("longitude", String(longitude));
   url.searchParams.set("riskCategory", DEFAULT_RISK_CATEGORY);
-  url.searchParams.set("siteClass", DEFAULT_SITE_CLASS);
+  url.searchParams.set("siteClass", siteClass);
   url.searchParams.set("title", "cortex-site-context");
 
   const { response: res, attempts } = await fetchWithRetry(
@@ -201,8 +244,13 @@ export const usgsSeismicAdapter: Adapter = {
   },
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const { latitude, longitude } = ctx.parcel;
+    const shrinkSwell = await querySdaShrinkSwell(ctx, longitude, latitude).catch(
+      () => null,
+    );
+    const siteClassInfo = deriveSiteClassFromShrinkSwell(shrinkSwell);
+
     const [designData, nearestFault] = await Promise.all([
-      fetchDesignMaps(ctx, latitude, longitude),
+      fetchDesignMaps(ctx, latitude, longitude, siteClassInfo.siteClass),
       queryNearestFault(ctx, latitude, longitude),
     ]);
 
@@ -217,7 +265,10 @@ export const usgsSeismicAdapter: Adapter = {
         kind: "seismic-design",
         referenceDocument: "ASCE7-22",
         riskCategory: DEFAULT_RISK_CATEGORY,
-        siteClass: DEFAULT_SITE_CLASS,
+        siteClass: siteClassInfo.siteClass,
+        siteClassDegraded: siteClassInfo.degraded,
+        siteClassReason: siteClassInfo.reason ?? null,
+        shrinkSwellPotential: shrinkSwell,
         sds: pickNumber(designData.sds),
         sd1: pickNumber(designData.sd1),
         sms: pickNumber(designData.sms),

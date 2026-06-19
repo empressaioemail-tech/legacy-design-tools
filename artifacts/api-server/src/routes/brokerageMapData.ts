@@ -1,9 +1,11 @@
 /**
- * Max-tier map-data consume — gate-fronted map-layers assemble + GIS GeoJSON proxy.
+ * Max-tier map-data consume ??? gate-fronted map-layers assemble + GIS GeoJSON proxy.
  *
  *   POST /api/brokerage/v1/map-data
  *   POST /api/brokerage/v1/map-data/gis-layer
  *   GET  /api/brokerage/v1/map-data/gis-layers
+ *   POST /api/brokerage/v1/map-data/composite-layer
+ *   GET  /api/brokerage/v1/map-data/composite-layers
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -36,12 +38,21 @@ import {
 import {
   listGisLayerEndpoints,
   queryGisLayerGeoJson,
+  normalizeGisLayerBbox,
   type GisProxyLayerKey,
 } from "../lib/brokerageGisLayers";
 import {
   gisFixtureRequested,
   loadGisLayerFixture,
 } from "../lib/brokerageGisLayerFixtures";
+import {
+  listCompositeLayerEndpoints,
+  queryCompositeLayer,
+} from "../lib/brokerageGisCompositeLayers";
+import {
+  federalGisLayerFixtureGeoJson,
+  isFederalGisProxyLayer,
+} from "../lib/brokerageGisFederalLayers";
 
 function mapDataMaxInstallOverride(
   installId: string | null,
@@ -146,9 +157,19 @@ const GIS_BBOX_ESRI_BODY = z
   })
   .strict();
 
+const GIS_LAYER_KEYS = [
+  "fema",
+  "parcels",
+  "ssurgo-soils",
+  "groundwater",
+  "mud-pid",
+  "edwards-aquifer",
+  "texas-rrc",
+] as const;
+
 const GIS_LAYER_BODY = z
   .object({
-    layer: z.enum(["fema", "parcels"]),
+    layer: z.enum(GIS_LAYER_KEYS),
     latitude: z.number().finite().optional(),
     longitude: z.number().finite().optional(),
     fixture: z.boolean().optional(),
@@ -160,6 +181,14 @@ const GIS_LAYER_BODY = z
   .strict()
   .superRefine((body, ctx) => {
     if (body.bbox) return;
+    if (isFederalGisProxyLayer(body.layer)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "bbox is required for federal GIS layer viewport queries",
+        path: ["bbox"],
+      });
+      return;
+    }
     if (body.latitude == null || body.longitude == null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -169,6 +198,19 @@ const GIS_LAYER_BODY = z
       });
     }
   });
+
+const COMPOSITE_LAYER_BODY = z
+  .object({
+    layer: z.enum([
+      "buildable-envelope",
+      "constraint-density",
+      "oz-deal-crossfilter",
+      "motivated-seller",
+    ]),
+    fixture: z.boolean().optional(),
+    bbox: z.union([GIS_BBOX_BODY, GIS_BBOX_CARDINAL_BODY, GIS_BBOX_ESRI_BODY]),
+  })
+  .strict();
 
 function reqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
@@ -199,10 +241,62 @@ brokerageMapDataRouter.get("/gis-layers", async (req: Request, res: Response) =>
       serviceUrl: layer.serviceUrl,
       provider: layer.provider,
       adapterKey: layer.adapterKey,
+      ...(layer.degraded ? { degraded: true } : {}),
+      ...(layer.degradedReason ? { degradedReason: layer.degradedReason } : {}),
     })),
     packageTier,
   });
 });
+
+brokerageMapDataRouter.get("/composite-layers", async (req: Request, res: Response) => {
+  const installId = installIdFromRequest(req);
+  const { packageTier } = await resolveMapDataPackageTier(req, installId);
+  if (packageTier !== "max") {
+    sendTierRequired(res, packageTier);
+    return;
+  }
+
+  res.json({
+    layers: listCompositeLayerEndpoints(),
+    packageTier,
+  });
+});
+
+brokerageMapDataRouter.post(
+  "/composite-layer",
+  async (req: Request, res: Response) => {
+    const parsed = COMPOSITE_LAYER_BODY.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "invalid_request",
+        details: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const installId = installIdFromRequest(req);
+    const { packageTier } = await resolveMapDataPackageTier(req, installId);
+    if (packageTier !== "max") {
+      sendTierRequired(res, packageTier);
+      return;
+    }
+
+    const bbox = normalizeGisLayerBbox(parsed.data.bbox);
+    const useFixture =
+      gisFixtureRequested(req, parsed.data) || parsed.data.fixture === true;
+
+    const envelope = queryCompositeLayer({
+      layer: parsed.data.layer,
+      bbox,
+      fixture: useFixture,
+    });
+
+    res.json({
+      ...envelope,
+      packageTier,
+    });
+  },
+);
 
 brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) => {
   const parsed = GIS_LAYER_BODY.safeParse(req.body);
@@ -221,6 +315,34 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
 
   try {
     if (gisFixtureRequested(req, parsed.data)) {
+      if (isFederalGisProxyLayer(parsed.data.layer)) {
+        const bbox = parsed.data.bbox
+          ? normalizeGisLayerBbox(parsed.data.bbox)
+          : {
+              westLng: -97.32,
+              southLat: 30.1,
+              eastLng: -97.3,
+              northLat: 30.12,
+            };
+        const geojson = federalGisLayerFixtureGeoJson(parsed.data.layer, bbox);
+        const meta = listGisLayerEndpoints().find(
+          (l) => l.layer === parsed.data.layer,
+        );
+        res.json({
+          layer: parsed.data.layer,
+          provider: meta?.provider ?? parsed.data.layer,
+          adapterKey: meta?.adapterKey ?? parsed.data.layer,
+          serviceUrl: meta?.serviceUrl ?? "",
+          featureCount: geojson.features.length,
+          queryMode: "bbox",
+          truncated: false,
+          geojson,
+          packageTier,
+          fixture: true,
+        });
+        return;
+      }
+
       const fixture = loadGisLayerFixture(parsed.data.layer as GisProxyLayerKey);
       if (!fixture) {
         res.status(503).json({

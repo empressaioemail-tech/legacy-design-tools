@@ -56,7 +56,6 @@ SELECT TOP 1
   mu.mukey,
   mu.musym,
   mu.muname,
-  ma.drainsubclass,
   ma.brockdepmin,
   ma.brockdepmax,
   ma.wtdepannmin,
@@ -71,13 +70,47 @@ SELECT TOP 1
       AND ci.mrulename = 'ENG - Shrink-Swell Potential'
       AND ci.ruledepth = 0) AS shrinkswell
 FROM mapunit mu
-INNER JOIN muaggatt ma ON ma.mukey = mu.mukey
 INNER JOIN component c ON c.mukey = mu.mukey AND c.majcompflag = 'Yes'
+LEFT JOIN muaggatt ma ON ma.mukey = mu.mukey
 WHERE mu.mukey IN (
   SELECT * FROM SDA_Get_Mukey_from_intersection_with_WktWgs84('${wkt}')
 )
 ORDER BY c.comppct_r DESC
 `.trim();
+}
+
+/** Foundation-risk choropleth score 1 (low) .. 5 (high) from shrink-swell interp. */
+export function foundationRiskScoreFromShrinkSwell(
+  shrinkSwell: string | null | undefined,
+): number {
+  if (!shrinkSwell) return 3;
+  const v = shrinkSwell.trim().toLowerCase();
+  if (v.includes("very high") || v.includes("severe")) return 5;
+  if (v.includes("high")) return 4;
+  if (v.includes("moderate")) return 3;
+  if (v.includes("low")) return 2;
+  if (v.includes("none") || v.includes("very low") || v.includes("negligible")) {
+    return 1;
+  }
+  return 3;
+}
+
+export async function querySdaShrinkSwell(
+  ctx: Pick<AdapterContext, "fetchImpl" | "signal">,
+  longitude: number,
+  latitude: number,
+): Promise<string | null> {
+  const row = await querySdaSoils(
+    ctx as AdapterContext,
+    longitude,
+    latitude,
+  ).catch(() => null);
+  if (!row) return null;
+  return (
+    pickString(row.shrinkswell) ??
+    pickString(row.SHRINKSWELL) ??
+    null
+  );
 }
 
 interface SdaTableRow {
@@ -217,9 +250,10 @@ export const usdaSsurgoSoilsAdapter: Adapter = {
         muname,
         areaSymbol: pickString(attrs.AREASYMBOL),
         drainageClass:
-          pickString(sdaRow?.drainagecl) ??
-          pickString(sdaRow?.drainsubclass) ??
-          pickString(sdaRow?.DRAINAGECL),
+          pickString(sdaRow?.drainagecl) ?? pickString(sdaRow?.DRAINAGECL),
+        foundationRiskScore: foundationRiskScoreFromShrinkSwell(
+          pickString(sdaRow?.shrinkswell) ?? pickString(sdaRow?.SHRINKSWELL),
+        ),
         hydrologicSoilGroup:
           pickString(sdaRow?.hydgrp) ?? pickString(sdaRow?.HYDGRP),
         dominantComponent:
