@@ -522,6 +522,42 @@ CREATE TABLE @@SCHEMA@@.collateral_metering_events (
 );
 
 
+-- Name: cotality_geocode_cache; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cotality_geocode_cache (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    addr_norm text NOT NULL,
+    clip text,
+    resolved boolean DEFAULT true NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: cotality_property_attr_cache; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cotality_property_attr_cache (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    clip text NOT NULL,
+    product text NOT NULL,
+    payload jsonb NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: cotality_spatial_tile_cache; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cotality_spatial_tile_cache (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tile_key text NOT NULL,
+    payload jsonb NOT NULL,
+    feature_count integer DEFAULT 0 NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: coverage_requests; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.coverage_requests (
@@ -1564,6 +1600,24 @@ ALTER TABLE ONLY @@SCHEMA@@.collateral_metering_events
     ADD CONSTRAINT collateral_metering_events_pkey PRIMARY KEY (id);
 
 
+-- Name: cotality_geocode_cache cotality_geocode_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cotality_geocode_cache
+    ADD CONSTRAINT cotality_geocode_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: cotality_property_attr_cache cotality_property_attr_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cotality_property_attr_cache
+    ADD CONSTRAINT cotality_property_attr_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: cotality_spatial_tile_cache cotality_spatial_tile_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cotality_spatial_tile_cache
+    ADD CONSTRAINT cotality_spatial_tile_cache_pkey PRIMARY KEY (id);
+
+
 -- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
@@ -2097,6 +2151,36 @@ CREATE INDEX collateral_exports_engagement_created_idx ON @@SCHEMA@@.collateral_
 -- Name: collateral_metering_events_engagement_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX collateral_metering_events_engagement_idx ON @@SCHEMA@@.collateral_metering_events USING btree (engagement_id, created_at);
+
+
+-- Name: cotality_geocode_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cotality_geocode_cache_expires_idx ON @@SCHEMA@@.cotality_geocode_cache USING btree (expires_at);
+
+
+-- Name: cotality_geocode_cache_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX cotality_geocode_cache_uniq ON @@SCHEMA@@.cotality_geocode_cache USING btree (addr_norm);
+
+
+-- Name: cotality_property_attr_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cotality_property_attr_cache_expires_idx ON @@SCHEMA@@.cotality_property_attr_cache USING btree (expires_at);
+
+
+-- Name: cotality_property_attr_cache_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX cotality_property_attr_cache_uniq ON @@SCHEMA@@.cotality_property_attr_cache USING btree (clip, product);
+
+
+-- Name: cotality_spatial_tile_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cotality_spatial_tile_cache_expires_idx ON @@SCHEMA@@.cotality_spatial_tile_cache USING btree (expires_at);
+
+
+-- Name: cotality_spatial_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX cotality_spatial_tile_cache_uniq ON @@SCHEMA@@.cotality_spatial_tile_cache USING btree (tile_key);
 
 
 -- Name: coverage_requests_engagement_idx; Type: INDEX; Schema: public; Owner: -
