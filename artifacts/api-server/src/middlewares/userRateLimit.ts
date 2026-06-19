@@ -5,6 +5,25 @@ import {
 import { sessionOwnerUserId } from "../lib/engagementOwnership";
 import { isAnonymousOwnerId } from "../lib/anonymousOwnerCookie";
 
+/** Paths that must never be blocked by per-user API metering. */
+export function isUserRateLimitExemptPath(path: string): boolean {
+  if (
+    path === "/api/healthz" ||
+    path === "/api/health" ||
+    path === "/healthz" ||
+    path === "/health"
+  ) {
+    return true;
+  }
+  if (path === "/api/brokerage/v1/billing/stripe/webhook") {
+    return true;
+  }
+  if (path === "/api/auth" || path.startsWith("/api/auth/")) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Per-user daily API rate limit for authenticated Cortex web sessions.
  * Anonymous and internal sessions pass through (extension has its own limits).
@@ -14,6 +33,10 @@ export const userRateLimitMiddleware: RequestHandler = async (
   res: Response,
   next,
 ) => {
+  if (isUserRateLimitExemptPath(req.path)) {
+    next();
+    return;
+  }
   if (req.session.audience === "internal") {
     next();
     return;
