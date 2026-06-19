@@ -26,6 +26,7 @@ export * from "./snapshotIfcFiles";
 export * from "./briefingDivergences";
 export * from "./briefingGenerationJobs";
 export * from "./adapterResponseCache";
+export * from "./cotalityMapCache";
 export * from "./reviewerAnnotations";
 export * from "./submissionComments";
 export * from "./submissionCommunications";

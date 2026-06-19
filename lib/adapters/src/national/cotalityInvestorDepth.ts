@@ -362,6 +362,115 @@ export const cotalityOwnerOccupancyAdapter: Adapter = {
   },
 };
 
+export const cotalityHoaAdapter: Adapter = {
+  adapterKey: "cotality:hoa",
+  tier: "federal",
+  sourceKind: "national-aggregator",
+  layerKind: "cotality-hoa",
+  provider: COTALITY_PROVIDER_LABEL,
+  jurisdictionGate: {},
+  timeoutMs: COTALITY_TIMEOUT_MS,
+  appliesTo: cotalityAppliesGeocoded,
+  async run(ctx): Promise<AdapterResult> {
+    const clipCtx = await clipFor(ctx, this.adapterKey);
+    const clip = clipCtx.clip;
+
+    const hoa = await cotalityGetWithApp({
+      app: "property",
+      path: `/${clip}/home-owners-association`,
+      fetchImpl: ctx.fetchImpl,
+      signal: ctx.signal,
+      adapterKeyForLog: this.adapterKey,
+      label: "property-hoa",
+    }).catch(() => null);
+
+    if (!hoa) {
+      throw new AdapterRunError(
+        "no-coverage",
+        "Cotality HOA returned no data.",
+      );
+    }
+
+    const rec = pickRecord(hoa);
+    const hoaName = rec.hoaName ?? rec.associationName ?? rec.name ?? null;
+    const hoaFee = rec.hoaFee ?? rec.fee ?? rec.dues ?? null;
+    const hasHoaOnRecord = Boolean(hoaName || hoaFee);
+
+    return {
+      adapterKey: this.adapterKey,
+      tier: this.tier,
+      layerKind: this.layerKind,
+      sourceKind: this.sourceKind,
+      provider: providerLabel(clipCtx.county),
+      snapshotDate: snapshotDateFromJson(hoa),
+      payload: {
+        kind: "cotality-hoa",
+        clip,
+        hoa,
+        hoaName,
+        hoaFee,
+        hasHoaOnRecord,
+        noHoaOnRecord: !hasHoaOnRecord,
+        depthRole: "underwriting-on-viewed-property",
+        ...cotalityAdapterMeta(this.adapterKey, "property"),
+      },
+    };
+  },
+};
+
+export const cotalityCompsAdapter: Adapter = {
+  adapterKey: "cotality:comparables",
+  tier: "federal",
+  sourceKind: "national-aggregator",
+  layerKind: "cotality-comparables",
+  provider: COTALITY_PROVIDER_LABEL,
+  jurisdictionGate: {},
+  timeoutMs: COTALITY_TIMEOUT_MS,
+  appliesTo: cotalityAppliesGeocoded,
+  async run(ctx): Promise<AdapterResult> {
+    const clipCtx = await clipFor(ctx, this.adapterKey);
+    const clip = clipCtx.clip;
+
+    const comps = await cotalityGetWithApp({
+      app: "property",
+      path: `/${clip}/comparables`,
+      fetchImpl: ctx.fetchImpl,
+      signal: ctx.signal,
+      adapterKeyForLog: this.adapterKey,
+      label: "property-comparables",
+    }).catch(() => null);
+
+    if (!comps) {
+      throw new AdapterRunError(
+        "no-coverage",
+        "Cotality comparables returned no data.",
+      );
+    }
+
+    const rec = pickRecord(comps);
+    const list = [rec.comparables, rec.items, rec.results, rec.data].find(
+      Array.isArray,
+    ) as unknown[] | undefined;
+
+    return {
+      adapterKey: this.adapterKey,
+      tier: this.tier,
+      layerKind: this.layerKind,
+      sourceKind: this.sourceKind,
+      provider: providerLabel(clipCtx.county),
+      snapshotDate: snapshotDateFromJson(comps),
+      payload: {
+        kind: "cotality-comparables",
+        clip,
+        comparables: comps,
+        comparableCount: Array.isArray(list) ? list.length : 0,
+        depthRole: "underwriting-on-viewed-property",
+        ...cotalityAdapterMeta(this.adapterKey, "property"),
+      },
+    };
+  },
+};
+
 export const cotalitySinkholeAdapter: Adapter = {
   adapterKey: "cotality:sinkhole",
   tier: "federal",
@@ -477,6 +586,8 @@ export const COTALITY_INVESTOR_DEPTH_ADAPTERS = [
   cotalityPermitsAdapter,
   cotalityPropensityAdapter,
   cotalityOwnerOccupancyAdapter,
+  cotalityHoaAdapter,
+  cotalityCompsAdapter,
   cotalitySinkholeAdapter,
   cotalityFoundationTypeAdapter,
 ] as const;

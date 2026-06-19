@@ -38,6 +38,10 @@ import {
   queryGisLayerGeoJson,
   type GisProxyLayerKey,
 } from "../lib/brokerageGisLayers";
+import {
+  gisFixtureRequested,
+  loadGisLayerFixture,
+} from "../lib/brokerageGisLayerFixtures";
 
 function mapDataMaxInstallOverride(
   installId: string | null,
@@ -114,13 +118,56 @@ const MAP_DATA_BODY = z
   })
   .strict();
 
-const GIS_LAYER_BODY = z
+const GIS_BBOX_BODY = z
   .object({
-    layer: z.enum(["fema", "zoning", "parcels", "etj", "floodplain"]),
-    latitude: z.number().finite(),
-    longitude: z.number().finite(),
+    westLng: z.number().finite(),
+    southLat: z.number().finite(),
+    eastLng: z.number().finite(),
+    northLat: z.number().finite(),
   })
   .strict();
+
+const GIS_BBOX_CARDINAL_BODY = z
+  .object({
+    west: z.number().finite(),
+    south: z.number().finite(),
+    east: z.number().finite(),
+    north: z.number().finite(),
+  })
+  .strict();
+
+const GIS_BBOX_ESRI_BODY = z
+  .object({
+    xmin: z.number().finite(),
+    ymin: z.number().finite(),
+    xmax: z.number().finite(),
+    ymax: z.number().finite(),
+  })
+  .strict();
+
+const GIS_LAYER_BODY = z
+  .object({
+    layer: z.enum(["fema", "parcels"]),
+    latitude: z.number().finite().optional(),
+    longitude: z.number().finite().optional(),
+    fixture: z.boolean().optional(),
+    forceRefresh: z.boolean().optional(),
+    bbox: z
+      .union([GIS_BBOX_BODY, GIS_BBOX_CARDINAL_BODY, GIS_BBOX_ESRI_BODY])
+      .optional(),
+  })
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.bbox) return;
+    if (body.latitude == null || body.longitude == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Provide bbox for viewport query or latitude+longitude for pin-intersect",
+        path: ["bbox"],
+      });
+    }
+  });
 
 function reqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
@@ -172,10 +219,38 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
   }
 
   try {
+    if (gisFixtureRequested(req, parsed.data)) {
+      const fixture = loadGisLayerFixture(parsed.data.layer as GisProxyLayerKey);
+      if (!fixture) {
+        res.status(503).json({
+          error: "fixture_unavailable",
+          message:
+            "GIS fixture file missing. Run artifacts/api-server/src/captureBrokerageGisFixtureCli.ts when Cotality Spatial Tile quota allows.",
+          layer: parsed.data.layer,
+        });
+        return;
+      }
+      res.json({
+        ...fixture.result,
+        packageTier,
+        fixture: true,
+        fixtureMeta: fixture.manifest,
+      });
+      return;
+    }
+
+    const refreshQuery = req.query.refresh;
+    const forceRefresh =
+      parsed.data.forceRefresh === true ||
+      refreshQuery === "1" ||
+      refreshQuery === "true";
+
     const result = await queryGisLayerGeoJson({
       layer: parsed.data.layer as GisProxyLayerKey,
       latitude: parsed.data.latitude,
       longitude: parsed.data.longitude,
+      bbox: parsed.data.bbox,
+      forceRefresh,
     });
     res.json({
       layer: result.layer,
@@ -183,6 +258,8 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
       adapterKey: result.adapterKey,
       serviceUrl: result.serviceUrl,
       featureCount: result.featureCount,
+      queryMode: result.queryMode,
+      truncated: result.truncated ?? false,
       geojson: result.geojson,
       packageTier,
     });
