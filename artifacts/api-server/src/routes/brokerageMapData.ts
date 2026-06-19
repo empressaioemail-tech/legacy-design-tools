@@ -241,6 +241,8 @@ brokerageMapDataRouter.get("/gis-layers", async (req: Request, res: Response) =>
       serviceUrl: layer.serviceUrl,
       provider: layer.provider,
       adapterKey: layer.adapterKey,
+      ...(layer.degraded ? { degraded: true } : {}),
+      ...(layer.degradedReason ? { degradedReason: layer.degradedReason } : {}),
     })),
     packageTier,
   });

@@ -17,8 +17,13 @@ import {
   TEXAS_RRC_WELLS_LAYER,
 } from "@workspace/adapters/federal/texas-rrc";
 import {
-  TCEQ_EDWARDS_CONTRIBUTING_LAYER,
-  TCEQ_EDWARDS_RECHARGE_LAYER,
+  buildNwisGwSiteBboxUrl,
+  parseNwisGwSitesFromRdb,
+} from "@workspace/adapters/federal/usgs-groundwater";
+import {
+  EDWARDS_CONTRIBUTING_LAYER_CANDIDATES,
+  EDWARDS_RECHARGE_LAYER_CANDIDATES,
+  TCEQ_AUSTIN_EDWARDS_RECHARGE_LAYER,
 } from "@workspace/adapters/state/texas";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { loadTxSpecialDistrictRegistry } from "./mudPidRegistry";
@@ -49,8 +54,9 @@ function endpoint(
   serviceUrl: string,
   provider: string,
   adapterKey: string,
+  meta?: { degraded?: boolean; degradedReason?: string },
 ): GisLayerEndpoint {
-  return { layer, serviceUrl, provider, adapterKey };
+  return { layer, serviceUrl, provider, adapterKey, ...meta };
 }
 
 export function listFederalGisLayerEndpoints(): GisLayerEndpoint[] {
@@ -60,6 +66,11 @@ export function listFederalGisLayerEndpoints(): GisLayerEndpoint[] {
       USDA_SSURGO_MAPUNIT_LAYER,
       "USDA NRCS gSSURGO",
       "usda:ssurgo-soils",
+      {
+        degraded: true,
+        degradedReason:
+          "USDA gSSURGO upstream intermittently unreachable from Cloud Run (TLS ECONNRESET); fixture mode available.",
+      },
     ),
     endpoint(
       "groundwater",
@@ -75,8 +86,8 @@ export function listFederalGisLayerEndpoints(): GisLayerEndpoint[] {
     ),
     endpoint(
       "edwards-aquifer",
-      TCEQ_EDWARDS_RECHARGE_LAYER,
-      "TCEQ Edwards Aquifer (recharge + contributing)",
+      TCEQ_AUSTIN_EDWARDS_RECHARGE_LAYER,
+      "TCEQ Edwards Aquifer (Austin COA mirror + contributing fallback)",
       "tceq:edwards-aquifer",
     ),
     endpoint(
@@ -186,73 +197,77 @@ export function enrichSsurgoGeoJson(
 async function fetchNwisGwSitesGeoJson(
   bbox: GisLayerBbox,
 ): Promise<ArcGisGeoJsonFeatureCollection> {
-  const url = new URL(FEMA_NWIS_GW_SITES);
-  url.searchParams.set("format", "json");
-  url.searchParams.set(
-    "bBox",
-    `${bbox.westLng},${bbox.southLat},${bbox.eastLng},${bbox.northLat}`,
-  );
-  url.searchParams.set("siteType", "GW");
-  url.searchParams.set("siteStatus", "active");
-  url.searchParams.set("siteOutput", "expanded");
-
-  const res = await fetch(url.toString(), {
-    headers: {
-      "User-Agent": "smartcity-plan-review/1.0 (+https://cortex.empressa.io)",
-      Accept: "application/json",
-    },
+  const url = buildNwisGwSiteBboxUrl({
+    west: bbox.westLng,
+    south: bbox.southLat,
+    east: bbox.eastLng,
+    north: bbox.northLat,
   });
-  if (!res.ok) {
-    throw new AdapterRunError(
-      "upstream-error",
-      `USGS NWIS site responded with HTTP ${res.status}.`,
-    );
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          "User-Agent": "smartcity-plan-review/1.0 (+https://cortex.empressa.io)",
+          Accept: "text/plain, application/json",
+        },
+      });
+      if (!res.ok) {
+        throw new AdapterRunError(
+          "upstream-error",
+          `USGS NWIS site responded with HTTP ${res.status}.`,
+        );
+      }
+      const sites = parseNwisGwSitesFromRdb(await res.text());
+      const features: unknown[] = sites.map((site) => ({
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [site.longitude, site.latitude],
+        },
+        properties: {
+          siteNo: site.siteNo,
+          siteName: site.siteName,
+          siteType: "GW",
+        },
+      }));
+      return { type: "FeatureCollection", features };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
   }
-  const json = (await res.json()) as {
-    value?: { timeSeries?: Array<Record<string, unknown>> };
-  };
-  const series = json.value?.timeSeries ?? [];
-  const features: unknown[] = [];
-  for (const entry of series) {
-    const sourceInfo = entry.sourceInfo as Record<string, unknown> | undefined;
-    if (!sourceInfo) continue;
-    const geo = sourceInfo.geoLocation as
-      | { geogLocation?: { latitude?: unknown; longitude?: unknown } }
-      | undefined;
-    const latRaw = geo?.geogLocation?.latitude;
-    const lonRaw = geo?.geogLocation?.longitude;
-    const lat =
-      typeof latRaw === "number"
-        ? latRaw
-        : typeof latRaw === "string"
-          ? Number(latRaw)
-          : NaN;
-    const lon =
-      typeof lonRaw === "number"
-        ? lonRaw
-        : typeof lonRaw === "string"
-          ? Number(lonRaw)
-          : NaN;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    const siteCodes = sourceInfo.siteCode;
-    const siteNo =
-      Array.isArray(siteCodes) &&
-      siteCodes[0] &&
-      typeof siteCodes[0] === "object"
-        ? String((siteCodes[0] as { value?: unknown }).value ?? "")
-        : "";
-    features.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [lon, lat] },
-      properties: {
-        siteNo,
-        siteName:
-          typeof sourceInfo.siteName === "string" ? sourceInfo.siteName : null,
-        siteType: "GW",
-      },
-    });
+  if (lastErr instanceof AdapterRunError) throw lastErr;
+  throw new AdapterRunError(
+    "network-error",
+    `USGS NWIS site did not get a response after 3 attempts. ${
+      lastErr instanceof Error ? lastErr.message : String(lastErr)
+    }`,
+  );
+}
+
+async function arcgisEnvelopeWithFallback(input: {
+  candidates: readonly string[];
+  bbox: GisLayerBbox;
+  upstreamLabel: string;
+}): Promise<ArcGisGeoJsonFeatureCollection & { truncated?: boolean }> {
+  let lastErr: unknown;
+  for (const serviceUrl of input.candidates) {
+    try {
+      return await arcgisEnvelopeQueryGeoJson({
+        serviceUrl,
+        bbox: input.bbox,
+        outFields: "*",
+        upstreamLabel: input.upstreamLabel,
+      });
+    } catch (err) {
+      lastErr = err;
+    }
   }
-  return { type: "FeatureCollection", features };
+  throw lastErr;
 }
 
 function mudPidTypeFromAttrs(attrs: Record<string, unknown>): string | null {
@@ -385,16 +400,14 @@ export async function queryFederalGisLayerGeoJson(input: {
 
   if (input.layer === "edwards-aquifer") {
     const [recharge, contributing] = await Promise.all([
-      arcgisEnvelopeQueryGeoJson({
-        serviceUrl: TCEQ_EDWARDS_RECHARGE_LAYER,
+      arcgisEnvelopeWithFallback({
+        candidates: EDWARDS_RECHARGE_LAYER_CANDIDATES,
         bbox,
-        outFields: "*",
         upstreamLabel: "TCEQ Edwards recharge",
       }),
-      arcgisEnvelopeQueryGeoJson({
-        serviceUrl: TCEQ_EDWARDS_CONTRIBUTING_LAYER,
+      arcgisEnvelopeWithFallback({
+        candidates: EDWARDS_CONTRIBUTING_LAYER_CANDIDATES,
         bbox,
-        outFields: "*",
         upstreamLabel: "TCEQ Edwards contributing",
       }).catch(() => ({
         type: "FeatureCollection" as const,

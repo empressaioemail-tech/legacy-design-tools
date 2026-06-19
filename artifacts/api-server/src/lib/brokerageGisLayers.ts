@@ -59,6 +59,8 @@ export type GisLayerEndpoint = {
   serviceUrl: string;
   provider: string;
   adapterKey: string;
+  degraded?: boolean;
+  degradedReason?: string;
 };
 
 export type GisLayerBbox = ArcGisEnvelopeBbox;

@@ -15,6 +15,7 @@
     "./federal/epa-ejscreen": "./src/federal/epa-ejscreen.ts",
     "./federal/fcc-broadband": "./src/federal/fcc-broadband.ts",
     "./federal/usda-ssurgo": "./src/federal/usda-ssurgo.ts",
+    "./federal/usgs-groundwater": "./src/federal/usgs-groundwater.ts",
     "./federal/texas-rrc": "./src/federal/texas-rrc.ts",
     "./federal/summaries": "./src/federal/summaries.ts",
     "./national/regrid": "./src/national/regrid.ts",

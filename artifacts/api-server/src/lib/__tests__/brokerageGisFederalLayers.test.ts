@@ -29,6 +29,14 @@ describe("listFederalGisLayerEndpoints", () => {
       "texas-rrc",
     ]);
   });
+
+  it("marks ssurgo-soils degraded pending USDA upstream TLS fix", () => {
+    const ssurgo = listFederalGisLayerEndpoints().find(
+      (l) => l.layer === "ssurgo-soils",
+    );
+    expect(ssurgo?.degraded).toBe(true);
+    expect(ssurgo?.degradedReason).toMatch(/ECONNRESET/i);
+  });
 });
 
 describe("foundation risk scoring", () => {
@@ -109,27 +117,18 @@ describe("federalGisLayerFixtureGeoJson", () => {
 });
 
 describe("queryFederalGisLayerGeoJson", () => {
-  it("parses NWIS expanded site JSON into point features", async () => {
+  it("parses NWIS RDB site rows into point features", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         new Response(
-          JSON.stringify({
-            value: {
-              timeSeries: [
-                {
-                  sourceInfo: {
-                    siteName: "Test GW",
-                    siteCode: [{ value: "293801097320001" }],
-                    geoLocation: {
-                      geogLocation: { latitude: "30.1105", longitude: "-97.3186" },
-                    },
-                  },
-                },
-              ],
-            },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          `#
+#
+agency_cd	site_no	station_nm	site_tp_cd	dec_lat_va	dec_long_va
+5s	15s	50s	7s	16s	16s
+USGS	293801097320001	Test GW	GW	30.1105	-97.3186
+`,
+          { status: 200, headers: { "content-type": "text/plain" } },
         ),
       ),
     );
