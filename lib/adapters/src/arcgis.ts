@@ -41,6 +41,30 @@ export type ArcGisGeoJsonFeatureCollection = {
 const ARC_GIS_USER_AGENT =
   "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
 
+/** WGS84 bounding box for envelope queries (west/south/east/north). */
+export interface ArcGisEnvelopeBbox {
+  westLng: number;
+  southLat: number;
+  eastLng: number;
+  northLat: number;
+}
+
+export interface ArcGisEnvelopeQueryInput {
+  serviceUrl: string;
+  bbox: ArcGisEnvelopeBbox;
+  /** Comma-separated attribute list ("*" for everything). */
+  outFields?: string;
+  /** Max features per upstream page (ArcGIS `resultRecordCount`). */
+  pageSize?: number;
+  /** Spatial reference of the input envelope. Defaults to WGS84 (4326). */
+  inSpatialReference?: number;
+  /** Output spatial reference for returned geometries. Defaults to WGS84 (4326). */
+  outSpatialReference?: number;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  upstreamLabel?: string;
+}
+
 export interface ArcGisPointQueryInput {
   serviceUrl: string;
   latitude: number;
@@ -310,4 +334,134 @@ export async function arcgisPointQueryGeoJson(
     );
   }
   return fc;
+}
+
+const DEFAULT_ENVELOPE_PAGE_SIZE = 500;
+
+/**
+ * Envelope-intersect query returning a GeoJSON FeatureCollection (`f=geojson`).
+ * Paginates through ArcGIS `exceededTransferLimit` until the viewport is
+ * exhausted or `maxPages` is reached (default 4 → up to 2000 features).
+ */
+export async function arcgisEnvelopeQueryGeoJson(
+  input: ArcGisEnvelopeQueryInput,
+): Promise<ArcGisGeoJsonFeatureCollection & { truncated?: boolean }> {
+  const sr = input.inSpatialReference ?? 4326;
+  const outSr = input.outSpatialReference ?? 4326;
+  const label = input.upstreamLabel ?? "ArcGIS";
+  const pageSize = input.pageSize ?? DEFAULT_ENVELOPE_PAGE_SIZE;
+  const maxPages = 4;
+  const merged: unknown[] = [];
+  let truncated = false;
+
+  for (let page = 0; page < maxPages; page++) {
+    const offset = page * pageSize;
+    const url = new URL(`${input.serviceUrl.replace(/\/$/, "")}/query`);
+    url.searchParams.set("f", "geojson");
+    url.searchParams.set(
+      "geometry",
+      JSON.stringify({
+        xmin: input.bbox.westLng,
+        ymin: input.bbox.southLat,
+        xmax: input.bbox.eastLng,
+        ymax: input.bbox.northLat,
+        spatialReference: { wkid: sr },
+      }),
+    );
+    url.searchParams.set("geometryType", "esriGeometryEnvelope");
+    url.searchParams.set("inSR", String(sr));
+    url.searchParams.set("outSR", String(outSr));
+    url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+    url.searchParams.set("outFields", input.outFields ?? "*");
+    url.searchParams.set("returnGeometry", "true");
+    url.searchParams.set("resultOffset", String(offset));
+    url.searchParams.set("resultRecordCount", String(pageSize));
+
+    const {
+      response: res,
+      attempts,
+      bodyExcerpt,
+      throwExcerpt,
+    } = await fetchWithRetry(
+      url.toString(),
+      {
+        signal: input.signal,
+        headers: {
+          "User-Agent": ARC_GIS_USER_AGENT,
+          Accept: "application/json, */*;q=0.1",
+        },
+      },
+      {
+        fetchImpl: input.fetchImpl,
+        signal: input.signal,
+        upstreamLabel: label,
+        captureThrowsAsResult: true,
+      },
+    );
+    if (!res.ok) {
+      if (throwExcerpt) {
+        throw new AdapterRunError(
+          "network-error",
+          `${label} did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+        );
+      }
+      const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
+      throw new AdapterRunError(
+        "upstream-error",
+        `${label} responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
+      );
+    }
+
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch (err) {
+      throw new AdapterRunError(
+        "parse-error",
+        `${label} GeoJSON response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!json || typeof json !== "object") {
+      throw new AdapterRunError(
+        "parse-error",
+        `${label} GeoJSON response was not a JSON object`,
+      );
+    }
+    const errorEnv = (json as { error?: { code?: number; message?: string } })
+      .error;
+    if (errorEnv) {
+      throw new AdapterRunError(
+        "upstream-error",
+        `${label} error ${errorEnv.code ?? "?"}: ${errorEnv.message ?? "unknown"}`,
+      );
+    }
+    const fc = json as ArcGisGeoJsonFeatureCollection;
+    if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features)) {
+      throw new AdapterRunError(
+        "parse-error",
+        `${label} GeoJSON response missing FeatureCollection.features`,
+      );
+    }
+    merged.push(...fc.features);
+
+    const exceeded = Boolean(
+      (json as { exceededTransferLimit?: boolean }).exceededTransferLimit,
+    );
+    if (!exceeded || fc.features.length < pageSize) {
+      return {
+        type: "FeatureCollection",
+        features: merged,
+        ...(truncated ? { truncated: true } : {}),
+      };
+    }
+    if (page === maxPages - 1) {
+      truncated = true;
+    }
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: merged,
+    truncated: true,
+  };
 }

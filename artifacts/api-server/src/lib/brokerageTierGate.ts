@@ -34,6 +34,8 @@ const PRO_EXTRA_KEYS = new Set([
   "cotality:permits",
   "cotality:propensity",
   "cotality:owner-occupancy",
+  "cotality:hoa",
+  "cotality:comparables",
 ]);
 
 const MAX_EXTRA_KEYS = new Set([

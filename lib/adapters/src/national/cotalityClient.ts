@@ -927,6 +927,87 @@ export async function resolveCotalityClip(args: {
 // Geometry + feature helpers
 // ---------------------------------------------------------------------------
 
+function parseWktCoordinatePairs(content: string): number[][] {
+  const pairs: number[][] = [];
+  const re =
+    /(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s+(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    pairs.push([Number(match[1]), Number(match[2])]);
+  }
+  return pairs;
+}
+
+function extractWktParenGroups(body: string): string[] {
+  const groups: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "(") {
+      if (depth === 0) start = i + 1;
+      depth++;
+    } else if (c === ")") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        groups.push(body.slice(start, i));
+        start = -1;
+      }
+    }
+  }
+  return groups;
+}
+
+function parseWktCoordinates(wkt: string): unknown | null {
+  const raw = wkt.trim();
+  if (!raw) return null;
+  const upper = raw.toUpperCase();
+
+  if (upper.startsWith("MULTIPOLYGON")) {
+    const body = raw.replace(/^MULTIPOLYGON\s*/i, "").trim();
+    const polys = extractWktParenGroups(body);
+    if (polys.length === 0) return null;
+    const result: number[][][][] = [];
+    for (const poly of polys) {
+      const rings = extractWktParenGroups(poly);
+      const parsedRings = (rings.length > 0 ? rings : [poly]).map(
+        parseWktCoordinatePairs,
+      );
+      if (parsedRings.length > 0 && parsedRings[0].length > 0) {
+        result.push(parsedRings);
+      }
+    }
+    return result.length > 0 ? result : null;
+  }
+
+  if (upper.startsWith("POLYGON")) {
+    const body = raw.replace(/^POLYGON\s*/i, "").trim();
+    const rings = extractWktParenGroups(body);
+    const parsedRings = (rings.length > 0 ? rings : [body]).map(
+      parseWktCoordinatePairs,
+    );
+    return parsedRings.length > 0 && parsedRings[0].length > 0
+      ? parsedRings
+      : null;
+  }
+
+  return null;
+}
+
+export function inferPolygonGeomType(
+  coords: unknown,
+): "Polygon" | "MultiPolygon" {
+  if (
+    Array.isArray(coords) &&
+    Array.isArray(coords[0]) &&
+    Array.isArray(coords[0][0]) &&
+    Array.isArray(coords[0][0][0])
+  ) {
+    return "MultiPolygon";
+  }
+  return "Polygon";
+}
+
 export interface NormalizedFeature {
   type: "Feature";
   geometry: {
@@ -953,8 +1034,8 @@ export function normalizeGeometryToCoordinates(geom: unknown): unknown | null {
     }
   }
   if (typeof geom === "string") {
-    const s = geom.trim().toUpperCase();
-    if (s.startsWith("POLYGON") || s.startsWith("MULTIPOLYGON")) return null;
+    const parsed = parseWktCoordinates(geom);
+    if (parsed) return parsed;
   }
   return null;
 }

@@ -83,6 +83,11 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // generate-layers route assert hit/miss behaviour, so we must
   // reset the table between cases.
   "adapter_response_cache",
+  // Cotality map-proxy caches (0043) — reset between cases for the same
+  // hit/miss-assertion reason as adapter_response_cache.
+  "cotality_spatial_tile_cache",
+  "cotality_property_attr_cache",
+  "cotality_geocode_cache",
   // Wave 2 Sprint C / Spec 307 — reviewer-annotation rows. Cascades
   // off `submissions` (which cascades off `engagements`), but listed
   // explicitly per the "if a route writes to it, it's in this list"
