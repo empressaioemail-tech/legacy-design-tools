@@ -9,7 +9,7 @@ import { brokerageAuth } from "../middlewares/brokerageAuth";
 import { requireInstallId } from "../lib/brokerageInstallId";
 import {
   clientEntitlementFromSnapshot,
-  getEntitlementSnapshot,
+  resolveEntitlementSnapshot,
 } from "../lib/brokerageWallet";
 
 export const brokerageEntitlementRouter: IRouter = Router();
@@ -18,10 +18,12 @@ brokerageEntitlementRouter.use(brokerageCors);
 brokerageEntitlementRouter.use(brokerageAuth);
 
 brokerageEntitlementRouter.get("/", async (req: Request, res: Response) => {
-  const installId = requireInstallId(req, res);
-  if (!installId) return;
+  const ent = await resolveEntitlementSnapshot(req);
+  if (!ent) {
+    requireInstallId(req, res);
+    return;
+  }
 
-  const ent = await getEntitlementSnapshot(installId);
   res.json({
     ...clientEntitlementFromSnapshot(ent),
     freeBriefsUsed: ent.freeBriefsUsed,

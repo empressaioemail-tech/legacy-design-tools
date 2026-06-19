@@ -292,4 +292,8 @@ export function sendBriefUpgradeRequiredResponse(
   });
 }
 
-export { getEntitlementSnapshot, brokerageFreeBriefsCap } from "./brokerageEntitlement";
+export {
+  getEntitlementSnapshot,
+  resolveEntitlementSnapshot,
+  brokerageFreeBriefsCap,
+} from "./brokerageEntitlement";

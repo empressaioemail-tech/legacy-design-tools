@@ -81,6 +81,30 @@ beforeEach(async () => {
 });
 
 describe("brokerage billing (simulated)", () => {
+  it("GET /billing/checkout-complete returns public HTML without auth", async () => {
+    const res = await request(getApp()).get(
+      "/api/brokerage/v1/billing/checkout-complete",
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/html/);
+    expect(res.text).toContain("Payment complete");
+  });
+
+  it("POST /billing/checkout defaults success/cancel URLs to cortex-api landing pages", async () => {
+    process.env.BROKERAGE_BILLING_PUBLIC_BASE_URL =
+      "https://cortex-api-test.example";
+
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/billing/checkout")
+      .set(authHeaders)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.checkoutUrl).toContain(
+      "https://cortex-api-test.example/api/brokerage/v1/billing/checkout-complete",
+    );
+  });
+
   it("POST /billing/checkout returns simulated checkoutUrl", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/billing/checkout")

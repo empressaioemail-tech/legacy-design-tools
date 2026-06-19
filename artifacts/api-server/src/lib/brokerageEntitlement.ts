@@ -3,9 +3,13 @@
  * Reuses brokerage_wallets as the entitlement store; wallet balance is legacy metering.
  */
 
+import type { Request } from "express";
 import { db, brokerageWallets, brokerageWalletLedger } from "@workspace/db";
 import type { BrokerageSubscriptionTier } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { authenticatedBrokerageUserId } from "../middlewares/brokerageAuth";
+import { installIdFromRequest } from "./brokerageInstallId";
+import { listClaimedInstallIdsForUser } from "./brokerageInstallClaim";
 import type { InvestorPackageTier } from "./brokerageTierGate";
 
 export function brokerageFreeBriefsCap(): number {
@@ -140,6 +144,94 @@ export async function getEntitlementSnapshot(
     paidActive: proActive || maxActive,
     balanceCents: row.balanceCents,
   };
+}
+
+function subscriptionTierRank(
+  snapshot: Pick<EntitlementSnapshot, "subscriptionTier" | "maxActive" | "proActive">,
+): number {
+  if (snapshot.maxActive) return 2;
+  if (snapshot.proActive) return 1;
+  if (snapshot.subscriptionTier === "max") return 2;
+  if (snapshot.subscriptionTier === "pro") return 1;
+  return 0;
+}
+
+function mergeEntitlementSnapshots(
+  snapshots: EntitlementSnapshot[],
+  primaryInstallId: string,
+): EntitlementSnapshot {
+  const primary =
+    snapshots.find((snapshot) => snapshot.installId === primaryInstallId) ??
+    snapshots[0]!;
+
+  let bestSubscription = primary;
+  for (const snapshot of snapshots) {
+    if (
+      subscriptionTierRank(snapshot) > subscriptionTierRank(bestSubscription)
+    ) {
+      bestSubscription = snapshot;
+    }
+  }
+
+  const maxActive = snapshots.some((snapshot) => snapshot.maxActive);
+  const proActive =
+    maxActive ? false : snapshots.some((snapshot) => snapshot.proActive);
+
+  return {
+    installId: primary.installId,
+    freeBriefsUsed: primary.freeBriefsUsed,
+    freeBriefsCap: primary.freeBriefsCap,
+    freeBriefsRemaining: primary.freeBriefsRemaining,
+    subscriptionTier: bestSubscription.subscriptionTier,
+    subscriptionStatus: bestSubscription.subscriptionStatus,
+    subscriptionPeriodEnd: bestSubscription.subscriptionPeriodEnd,
+    proActive,
+    maxActive,
+    paidActive: maxActive || proActive,
+    balanceCents: primary.balanceCents,
+  };
+}
+
+/** Aggregate subscription entitlements across all installs claimed by the user. */
+export async function getEntitlementSnapshotForUser(input: {
+  ownerUserId: string;
+  requestInstallId?: string | null;
+}): Promise<EntitlementSnapshot> {
+  const claimedInstallIds = await listClaimedInstallIdsForUser(input.ownerUserId);
+  const installIds = new Set(claimedInstallIds);
+  if (input.requestInstallId) {
+    installIds.add(input.requestInstallId);
+  }
+
+  const primaryInstallId =
+    input.requestInstallId ??
+    claimedInstallIds[0] ??
+    `user:${input.ownerUserId}`;
+
+  if (installIds.size === 0) {
+    return getEntitlementSnapshot(primaryInstallId);
+  }
+
+  const snapshots = await Promise.all(
+    [...installIds].map((installId) => getEntitlementSnapshot(installId)),
+  );
+  return mergeEntitlementSnapshots(snapshots, primaryInstallId);
+}
+
+export async function resolveEntitlementSnapshot(
+  req: Request,
+): Promise<EntitlementSnapshot | null> {
+  const ownerUserId = authenticatedBrokerageUserId(req);
+  if (ownerUserId) {
+    return getEntitlementSnapshotForUser({
+      ownerUserId,
+      requestInstallId: installIdFromRequest(req),
+    });
+  }
+
+  const installId = installIdFromRequest(req);
+  if (!installId) return null;
+  return getEntitlementSnapshot(installId);
 }
 
 export type ComputeGateResult =

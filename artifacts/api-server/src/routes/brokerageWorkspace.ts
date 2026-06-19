@@ -4,7 +4,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import {
   db,
   brokerageWorkspaces,
@@ -12,11 +12,12 @@ import {
   type BrokerageAttachmentKind,
 } from "@workspace/db";
 import { brokerageCors } from "../middlewares/brokerageCors";
-import { brokerageAuth } from "../middlewares/brokerageAuth";
+import { brokerageAuth, authenticatedBrokerageUserId } from "../middlewares/brokerageAuth";
 import {
   installIdFromRequest,
   requireInstallId,
 } from "../lib/brokerageInstallId";
+import { listClaimedInstallIdsForUser } from "../lib/brokerageInstallClaim";
 import {
   createWorkspaceShare,
   listingKeyFromAddress,
@@ -91,13 +92,56 @@ brokerageWorkspaceRouter.use(requireBrokerageDevClient);
 brokerageWorkspaceRouter.get(
   "/recent",
   async (req: Request, res: Response) => {
-    const installId = requireInstallId(req, res);
-    if (!installId) return;
-
     const limit = Math.min(
       Number.parseInt(String(req.query.limit ?? "20"), 10) || 20,
       50,
     );
+
+    const ownerUserId = authenticatedBrokerageUserId(req);
+    if (ownerUserId) {
+      const claimedInstallIds = await listClaimedInstallIdsForUser(ownerUserId);
+      const requestInstallId = installIdFromRequest(req);
+      const installIds = new Set(claimedInstallIds);
+      if (requestInstallId) installIds.add(requestInstallId);
+
+      const scopeFilters = [eq(brokerageWorkspaces.ownerUserId, ownerUserId)];
+      if (installIds.size > 0) {
+        scopeFilters.push(
+          inArray(brokerageWorkspaces.installId, [...installIds]),
+        );
+      }
+
+      const rows = await db
+        .select({
+          id: brokerageWorkspaces.id,
+          listingKey: brokerageWorkspaces.listingKey,
+          address: brokerageWorkspaces.address,
+          sourceListingUrl: brokerageWorkspaces.sourceListingUrl,
+          latestRunId: brokerageWorkspaces.latestRunId,
+          openedAt: brokerageWorkspaces.openedAt,
+          updatedAt: brokerageWorkspaces.updatedAt,
+        })
+        .from(brokerageWorkspaces)
+        .where(or(...scopeFilters))
+        .orderBy(desc(brokerageWorkspaces.openedAt))
+        .limit(limit);
+
+      res.json({
+        workspaces: rows.map((r) => ({
+          id: r.id,
+          listingKey: r.listingKey,
+          address: r.address,
+          sourceListingUrl: r.sourceListingUrl,
+          latestRunId: r.latestRunId,
+          openedAt: r.openedAt.toISOString(),
+          updatedAt: r.updatedAt.toISOString(),
+        })),
+      });
+      return;
+    }
+
+    const installId = requireInstallId(req, res);
+    if (!installId) return;
 
     const rows = await db
       .select({

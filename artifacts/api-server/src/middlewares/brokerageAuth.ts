@@ -60,6 +60,15 @@ export function isExtensionPublicClient(req: Request): boolean {
   return req.brokerageAuth?.tier === "extension_public";
 }
 
+/** Signed-in brokerage user (session Bearer → tier `user`). */
+export function authenticatedBrokerageUserId(req: Request): string | null {
+  if (req.brokerageAuth?.tier !== "user") return null;
+  if (req.session?.requestor?.kind !== "user") return null;
+  const id = req.session.requestor.id.trim();
+  if (!id || id.startsWith("anon_")) return null;
+  return id;
+}
+
 function extractBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice("Bearer ".length).trim();
