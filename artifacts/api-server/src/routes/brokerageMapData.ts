@@ -31,7 +31,7 @@ import { buildInvestorVerdict } from "../lib/brokerageInvestorVerdict";
 import type { BrokerageSiteContextLayer } from "../lib/brokerageSiteContext";
 import {
   entitlementPackageTier,
-  getEntitlementSnapshot,
+  resolveEntitlementSnapshot,
 } from "../lib/brokerageEntitlement";
 import {
   listGisLayerEndpoints,
@@ -75,8 +75,9 @@ async function resolveMapDataPackageTier(
     profileRow = rows[0] ?? null;
   }
 
-  const entitlementTier = installId
-    ? entitlementPackageTier(await getEntitlementSnapshot(installId))
+  const entitlementSnapshot = await resolveEntitlementSnapshot(req);
+  const entitlementTier = entitlementSnapshot
+    ? entitlementPackageTier(entitlementSnapshot)
     : null;
 
   const packageTier = resolveInvestorPackageTier({

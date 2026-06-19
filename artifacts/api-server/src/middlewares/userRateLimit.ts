@@ -23,6 +23,12 @@ export function isUserRateLimitExemptPath(
   if (path === "/api/brokerage/v1/billing/stripe/webhook") {
     return true;
   }
+  if (
+    path === "/api/brokerage/v1/billing/checkout-complete" ||
+    path === "/api/brokerage/v1/billing/checkout-cancel"
+  ) {
+    return true;
+  }
   if (path === "/api/auth" || path.startsWith("/api/auth/")) {
     return true;
   }

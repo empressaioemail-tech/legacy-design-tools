@@ -88,3 +88,47 @@ export async function listBriefRunsForUser(ownerUserId: string) {
     .from(brokerageBriefRuns)
     .where(eq(brokerageBriefRuns.ownerUserId, ownerUserId));
 }
+
+export async function listClaimedInstallIdsForUser(
+  ownerUserId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ installId: brokerageInstallClaims.installId })
+    .from(brokerageInstallClaims)
+    .where(eq(brokerageInstallClaims.ownerUserId, ownerUserId));
+  return rows.map((row) => row.installId);
+}
+
+/** Whether a stored brief run may be used by the current caller. */
+export function briefRunAccessibleToCaller(input: {
+  run: { installId: string | null; ownerUserId: string | null };
+  requestInstallId: string | null;
+  serviceCaller: boolean;
+  ownerUserId: string | null;
+  claimedInstallIds: ReadonlySet<string>;
+}): boolean {
+  if (input.serviceCaller) return true;
+
+  if (input.ownerUserId) {
+    if (input.run.ownerUserId === input.ownerUserId) return true;
+    if (input.run.installId && input.claimedInstallIds.has(input.run.installId)) {
+      return true;
+    }
+    if (
+      input.requestInstallId &&
+      input.run.installId === input.requestInstallId
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  if (
+    input.requestInstallId &&
+    input.run.installId &&
+    input.run.installId !== input.requestInstallId
+  ) {
+    return false;
+  }
+  return true;
+}

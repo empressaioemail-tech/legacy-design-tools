@@ -22,10 +22,14 @@ import {
 } from "../lib/brokerageStripe";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
 import { syncPipedriveDeal } from "../lib/brokeragePipedrive";
+import {
+  defaultCheckoutCancelUrl,
+  defaultCheckoutSuccessUrl,
+} from "../lib/brokerageBillingUrls";
 
 const CHECKOUT_BODY = z.object({
-  successUrl: z.string().url(),
-  cancelUrl: z.string().url(),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
   tier: z.enum(["pro", "max"]).optional().default("pro"),
 });
 
@@ -51,12 +55,14 @@ brokerageBillingRouter.post("/checkout", async (req: Request, res: Response) => 
   if (!parse.success) {
     res.status(400).json({
       error: "invalid_request",
-      message: "successUrl and cancelUrl (absolute URLs) are required",
+      message: "Invalid checkout body",
     });
     return;
   }
 
   const tier: SubscriptionCheckoutTier = parse.data.tier;
+  const successUrl = parse.data.successUrl ?? defaultCheckoutSuccessUrl();
+  const cancelUrl = parse.data.cancelUrl ?? defaultCheckoutCancelUrl();
 
   recordGtmEvent({
     installId,
@@ -74,8 +80,8 @@ brokerageBillingRouter.post("/checkout", async (req: Request, res: Response) => 
     const session = await createSubscriptionCheckoutSession({
       installId,
       tier,
-      successUrl: parse.data.successUrl,
-      cancelUrl: parse.data.cancelUrl,
+      successUrl,
+      cancelUrl,
     });
     res.json(session);
   } catch (err) {

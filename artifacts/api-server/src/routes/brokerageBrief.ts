@@ -25,8 +25,9 @@ import {
   type RetrievedAtom,
 } from "@workspace/codes";
 import { db, brokerageBriefRuns } from "@workspace/db";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
+  authenticatedBrokerageUserId,
   isExtensionPublicClient,
 } from "../middlewares/brokerageAuth";
 import {
@@ -65,7 +66,7 @@ import {
 import {
   assertComputeAllowed,
   clientEntitlementFromSnapshot,
-  getEntitlementSnapshot,
+  resolveEntitlementSnapshot,
   sendBriefUpgradeRequiredResponse,
   type ClientEntitlementSnapshot,
 } from "../lib/brokerageWallet";
@@ -75,6 +76,10 @@ import {
   listingKeyCandidates,
   upsertWorkspaceFromBrief,
 } from "../lib/brokerageWorkspace";
+import {
+  briefRunAccessibleToCaller,
+  listClaimedInstallIdsForUser,
+} from "../lib/brokerageInstallClaim";
 import {
   buildBriefAtomProjection,
   buildPropertyWorkspaceDid,
@@ -125,6 +130,7 @@ import {
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
+import { brokerageBillingPublicRouter } from "./brokerageBillingPublic";
 import {
   BROKERAGE_BRIEF_BILLABLE_HEADER,
   brokerageBriefMeteringMeta,
@@ -271,6 +277,8 @@ router.get("/brief-coverage", (_req: Request, res: Response) => {
 brokerageV1.use(brokerageCors);
 /** GTM consent/events use {@link brokerageAuth} only — extension wedge, no service token. */
 brokerageV1.use("/gtm", brokerageGtmRouter);
+/** Stripe checkout return pages — reachable without extension API key. */
+brokerageV1.use("/billing", brokerageBillingPublicRouter);
 brokerageV1.use(requireBrokerageAuthOrServiceToken);
 brokerageV1.use("/profile", brokerageProfileRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
@@ -291,22 +299,29 @@ async function resolveResearchChatRun(input: {
   workspaceDid?: string;
   installId: string | null;
   serviceCaller: boolean;
+  ownerUserId?: string | null;
+  claimedInstallIds?: readonly string[];
 }): Promise<(typeof brokerageBriefRuns.$inferSelect) | null> {
+  const claimedInstallIds = new Set(input.claimedInstallIds ?? []);
+  if (input.installId) claimedInstallIds.add(input.installId);
+  const ownerUserId = input.ownerUserId ?? null;
+
+  const runAccessible = (run: typeof brokerageBriefRuns.$inferSelect) =>
+    briefRunAccessibleToCaller({
+      run,
+      requestInstallId: input.installId,
+      serviceCaller: input.serviceCaller,
+      ownerUserId,
+      claimedInstallIds,
+    });
+
   if (input.runId) {
     const [run] = await db
       .select()
       .from(brokerageBriefRuns)
       .where(eq(brokerageBriefRuns.id, input.runId))
       .limit(1);
-    if (!run) return null;
-    if (
-      input.installId &&
-      run.installId &&
-      run.installId !== input.installId &&
-      !input.serviceCaller
-    ) {
-      return null;
-    }
+    if (!run || !runAccessible(run)) return null;
     return run;
   }
 
@@ -319,20 +334,57 @@ async function resolveResearchChatRun(input: {
   }
   if (!listingKeys.length) return null;
 
-  if (!input.installId && !input.serviceCaller) return null;
+  if (!input.installId && !input.serviceCaller && !ownerUserId) return null;
 
-  for (const listingKey of listingKeys) {
-    const conditions = [eq(brokerageBriefRuns.listingKey, listingKey)];
-    if (input.installId) {
-      conditions.push(eq(brokerageBriefRuns.installId, input.installId));
+  if (input.installId && !ownerUserId) {
+    for (const listingKey of listingKeys) {
+      const [run] = await db
+        .select()
+        .from(brokerageBriefRuns)
+        .where(
+          and(
+            eq(brokerageBriefRuns.listingKey, listingKey),
+            eq(brokerageBriefRuns.installId, input.installId),
+          ),
+        )
+        .orderBy(desc(brokerageBriefRuns.createdAt))
+        .limit(1);
+      if (run && runAccessible(run)) return run;
     }
-    const [run] = await db
-      .select()
-      .from(brokerageBriefRuns)
-      .where(and(...conditions))
-      .orderBy(desc(brokerageBriefRuns.createdAt))
-      .limit(1);
-    if (run) return run;
+  }
+
+  if (ownerUserId) {
+    for (const listingKey of listingKeys) {
+      const [run] = await db
+        .select()
+        .from(brokerageBriefRuns)
+        .where(
+          and(
+            eq(brokerageBriefRuns.listingKey, listingKey),
+            eq(brokerageBriefRuns.ownerUserId, ownerUserId),
+          ),
+        )
+        .orderBy(desc(brokerageBriefRuns.createdAt))
+        .limit(1);
+      if (run && runAccessible(run)) return run;
+    }
+
+    if (claimedInstallIds.size > 0) {
+      for (const listingKey of listingKeys) {
+        const [run] = await db
+          .select()
+          .from(brokerageBriefRuns)
+          .where(
+            and(
+              eq(brokerageBriefRuns.listingKey, listingKey),
+              inArray(brokerageBriefRuns.installId, [...claimedInstallIds]),
+            ),
+          )
+          .orderBy(desc(brokerageBriefRuns.createdAt))
+          .limit(1);
+        if (run && runAccessible(run)) return run;
+      }
+    }
   }
 
   for (const listingKey of listingKeys) {
@@ -342,15 +394,7 @@ async function resolveResearchChatRun(input: {
       .where(eq(brokerageBriefRuns.listingKey, listingKey))
       .orderBy(desc(brokerageBriefRuns.createdAt))
       .limit(1);
-    if (!run) continue;
-    if (
-      input.installId &&
-      run.installId &&
-      run.installId !== input.installId &&
-      !input.serviceCaller
-    ) {
-      continue;
-    }
+    if (!run || !runAccessible(run)) continue;
     return run;
   }
 
@@ -441,7 +485,19 @@ async function enforceBriefComputeGate(
   }
 
   if (!input.installId) {
-    return { ok: true, entitlement: null };
+    const ent = await resolveEntitlementSnapshot(req);
+    return {
+      ok: true,
+      entitlement: ent ? clientEntitlementFromSnapshot(ent) : null,
+    };
+  }
+
+  const resolvedEnt = await resolveEntitlementSnapshot(req);
+  if (resolvedEnt?.paidActive) {
+    return {
+      ok: true,
+      entitlement: clientEntitlementFromSnapshot(resolvedEnt),
+    };
   }
 
   const debit = await assertComputeAllowed(input.installId);
@@ -459,8 +515,13 @@ async function enforceBriefComputeGate(
     return { ok: false };
   }
 
-  const ent = await getEntitlementSnapshot(input.installId);
-  return { ok: true, entitlement: clientEntitlementFromSnapshot(ent) };
+  const ent =
+    resolvedEnt ??
+    (await resolveEntitlementSnapshot(req));
+  return {
+    ok: true,
+    entitlement: ent ? clientEntitlementFromSnapshot(ent) : null,
+  };
 }
 
 brokerageV1.post("/brief", async (req: Request, res: Response) => {
@@ -983,12 +1044,20 @@ brokerageV1.post(
         return;
       }
     } else if (installId) {
-      const debit = await assertComputeAllowed(installId);
-      if (!debit.ok) {
-        sendBriefUpgradeRequiredResponse(res, debit);
-        return;
+      const ent = await resolveEntitlementSnapshot(req);
+      if (!ent?.paidActive) {
+        const debit = await assertComputeAllowed(installId);
+        if (!debit.ok) {
+          sendBriefUpgradeRequiredResponse(res, debit);
+          return;
+        }
       }
     }
+
+    const ownerUserId = authenticatedBrokerageUserId(req);
+    const claimedInstallIds = ownerUserId
+      ? await listClaimedInstallIdsForUser(ownerUserId)
+      : [];
 
     const run = await resolveResearchChatRun({
       runId: runIdField,
@@ -997,6 +1066,8 @@ brokerageV1.post(
       workspaceDid: workspaceDidField,
       installId,
       serviceCaller,
+      ownerUserId,
+      claimedInstallIds,
     });
 
     const areaEligible = isAreaResearchChatEligible(areaContext);
