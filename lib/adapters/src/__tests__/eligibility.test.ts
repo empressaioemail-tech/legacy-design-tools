@@ -27,6 +27,8 @@ const COTALITY_ADAPTER_KEYS = [
   "cotality:owner-occupancy",
   "cotality:sinkhole",
   "cotality:foundation",
+  "cotality:hoa",
+  "cotality:comparables",
 ] as const;
 
 function ctxFor(
