@@ -118,6 +118,9 @@ describe("lib/db schema integration", () => {
         "collateral_export_jobs",
         "collateral_exports",
         "collateral_metering_events",
+        "cotality_geocode_cache",
+        "cotality_property_attr_cache",
+        "cotality_spatial_tile_cache",
         "coverage_requests",
         // PLR-11 — derived-state side table for the issued plan-set
         // PDF (one row per recorded approval event).
