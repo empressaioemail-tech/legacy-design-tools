@@ -6,7 +6,12 @@ import { sessionOwnerUserId } from "../lib/engagementOwnership";
 import { isAnonymousOwnerId } from "../lib/anonymousOwnerCookie";
 
 /** Paths that must never be blocked by per-user API metering. */
-export function isUserRateLimitExemptPath(path: string): boolean {
+export function isUserRateLimitExemptPath(
+  path: string,
+  method = "GET",
+): boolean {
+  const verb = method.toUpperCase();
+
   if (
     path === "/api/healthz" ||
     path === "/api/health" ||
@@ -21,6 +26,21 @@ export function isUserRateLimitExemptPath(path: string): boolean {
   if (path === "/api/auth" || path.startsWith("/api/auth/")) {
     return true;
   }
+
+  // Map viewport pan/zoom — high-frequency reads; Cotality quota is gated elsewhere.
+  if (path.startsWith("/api/brokerage/v1/map-data")) {
+    return true;
+  }
+  if (path === "/api/brokerage/v1/entitlement" && verb === "GET") {
+    return true;
+  }
+  if (path === "/api/brokerage/v1/coverage" && verb === "GET") {
+    return true;
+  }
+  if (path === "/api/brokerage/v1/profile" && verb === "GET") {
+    return true;
+  }
+
   return false;
 }
 
@@ -33,7 +53,7 @@ export const userRateLimitMiddleware: RequestHandler = async (
   res: Response,
   next,
 ) => {
-  if (isUserRateLimitExemptPath(req.path)) {
+  if (isUserRateLimitExemptPath(req.path, req.method)) {
     next();
     return;
   }
