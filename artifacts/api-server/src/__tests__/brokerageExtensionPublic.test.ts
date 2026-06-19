@@ -346,6 +346,8 @@ describe("extension_public client tier", () => {
           freeBriefsRemaining: n - 1,
           freeBriefsCap: 3,
           proActive: false,
+          maxActive: false,
+          subscriptionTier: null,
         });
       }
     });
