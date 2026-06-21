@@ -12,6 +12,7 @@ import type { FindingCitation } from "./findingCitation";
 import type { FindingSeverity } from "./findingSeverity";
 import type { FindingSourceRef } from "./findingSourceRef";
 import type { FindingStatus } from "./findingStatus";
+import type { ReadContract } from "./readContract";
 
 /**
  * One AIR-1 compliance finding. Wire shape mirrors
@@ -39,10 +40,15 @@ id failed to resolve.
   text: string;
   citations: FindingCitation[];
   /**
+   * Deprecated F4 — use `readContract`. Bare scalar retained for
+backward compatibility; do not render without width + provenance.
+
+   * @deprecated
    * @minimum 0
    * @maximum 1
    */
   confidence: number;
+  readContract: ReadContract;
   /** True iff the engine deemed this below the 0.6 threshold. */
   lowConfidence: boolean;
   reviewerStatusBy: FindingActor | null;

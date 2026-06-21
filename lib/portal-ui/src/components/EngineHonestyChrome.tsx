@@ -1,8 +1,14 @@
+import type { ReadContract as AtomReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract as WireReadContract } from "@workspace/api-client-react";
+import { ReadContractChrome } from "./ReadContractChrome";
+import { legacyHonestyToReadContract } from "@workspace/engine-core";
+
 export type EngineHonestySource = {
   adapter: string;
   citationIds?: string[];
 };
 
+/** @deprecated Migrate callers to {@link ReadContract} wire field. */
 export type EngineHonesty = {
   confidence: {
     value: number;
@@ -15,15 +21,6 @@ export type EngineHonesty = {
 
 export type { EngineHonesty as EngineHonestyWire };
 
-const CONFIDENCE_KIND_LABEL: Record<
-  EngineHonesty["confidence"]["kind"],
-  string
-> = {
-  calibrated: "Calibrated confidence",
-  asserted: "Asserted confidence",
-  deterministic: "Deterministic",
-};
-
 function formatDataVintage(dataVintage: string | null): string | null {
   if (!dataVintage) return null;
   const d = new Date(dataVintage);
@@ -35,36 +32,35 @@ function formatDataVintage(dataVintage: string | null): string | null {
   });
 }
 
+/**
+ * F4 — renders read-contract widthed confidence. Accepts readContract
+ * directly or legacy EngineHonesty (converted at render boundary).
+ */
 export function EngineHonestyChrome({
   honesty,
+  readContract,
   testIdPrefix = "engine-honesty",
 }: {
-  honesty: EngineHonesty | null | undefined;
+  /** @deprecated Use readContract */
+  honesty?: EngineHonesty | null;
+  readContract?: WireReadContract | AtomReadContract | null;
   testIdPrefix?: string;
 }) {
-  if (!honesty) return null;
+  const contract: WireReadContract | null =
+    (readContract as WireReadContract | null | undefined) ??
+    (honesty
+      ? (legacyHonestyToReadContract(honesty) as unknown as WireReadContract)
+      : null);
+  if (!contract) return null;
 
-  const pct = Math.max(
-    0,
-    Math.min(100, Math.round(honesty.confidence.value * 100)),
-  );
-  const vintage = formatDataVintage(honesty.dataVintage);
-  const kindLabel = CONFIDENCE_KIND_LABEL[honesty.confidence.kind];
-  const citationCount = honesty.source.citationIds?.length ?? 0;
+  const vintage = honesty ? formatDataVintage(honesty.dataVintage) : null;
+  const citationCount = honesty?.source.citationIds?.length ?? 0;
+  const adapter = honesty?.source.adapter;
 
   return (
-    <div
-      data-testid={testIdPrefix}
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 6,
-        alignItems: "center",
-        fontSize: 10,
-        letterSpacing: "0.04em",
-      }}
-    >
-      {honesty.coverage.degraded ? (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+      <ReadContractChrome readContract={contract} testIdPrefix={testIdPrefix} />
+      {honesty?.coverage.degraded ? (
         <span
           data-testid={`${testIdPrefix}-coverage-degraded`}
           title={honesty.coverage.reason ?? "Partial or web-grounded coverage"}
@@ -73,6 +69,8 @@ export function EngineHonestyChrome({
             color: "var(--warning-text)",
             padding: "1px 6px",
             borderRadius: 3,
+            fontSize: 10,
+            letterSpacing: "0.04em",
             textTransform: "uppercase",
           }}
         >
@@ -82,41 +80,25 @@ export function EngineHonestyChrome({
             : "Partial coverage"}
         </span>
       ) : null}
-      <span
-        data-testid={`${testIdPrefix}-confidence-kind`}
-        title={`${kindLabel} — ${pct}%`}
-        style={{
-          background:
-            honesty.confidence.kind === "asserted"
-              ? "var(--border-subtle)"
-              : "var(--cyan-accent-bg)",
-          color:
-            honesty.confidence.kind === "asserted"
-              ? "var(--text-secondary)"
-              : "var(--cyan)",
-          padding: "1px 6px",
-          borderRadius: 3,
-        }}
-      >
-        {kindLabel} {pct}%
-      </span>
       {vintage ? (
         <span
           data-testid={`${testIdPrefix}-data-vintage`}
           className="sc-meta"
-          style={{ opacity: 0.75 }}
+          style={{ opacity: 0.75, fontSize: 10 }}
         >
           Data as of {vintage}
         </span>
       ) : null}
-      <span
-        data-testid={`${testIdPrefix}-source`}
-        className="sc-meta"
-        style={{ opacity: 0.55 }}
-      >
-        via {honesty.source.adapter}
-        {citationCount > 0 ? ` · ${citationCount} cited` : ""}
-      </span>
+      {adapter ? (
+        <span
+          data-testid={`${testIdPrefix}-source`}
+          className="sc-meta"
+          style={{ opacity: 0.55, fontSize: 10 }}
+        >
+          via {adapter}
+          {citationCount > 0 ? ` · ${citationCount} cited` : ""}
+        </span>
+      ) : null}
     </div>
   );
 }

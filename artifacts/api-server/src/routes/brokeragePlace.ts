@@ -26,6 +26,20 @@ import {
   buildPlaceLayerDid,
   buildPropertyWorkspaceDid,
 } from "../lib/brokerageBriefAtoms";
+import {
+  buildPlaceParcelAtoms,
+  jurisdictionKeyFromPlaceContext,
+} from "../lib/placeParcelAtoms";
+import {
+  runWarmingCascade,
+  verifySnapshotCoverage,
+  K1_OUTCOME_LANDING_SCHEMA,
+} from "../lib/warmingHarness";
+
+const WARMING_BODY = z.object({
+  address: z.string().min(1),
+  synthetic: z.literal(true).default(true),
+});
 
 const RESOLVE_BODY = z
   .object({
@@ -149,6 +163,7 @@ brokeragePlaceRouter.get(
         provider: layer.provider ?? null,
         summary: layer.summary ?? null,
         asOf: layer.snapshotDate ?? new Date().toISOString(),
+        readContract: layer.readContract ?? null,
         citation: {
           source: layer.fromArchive
             ? "place_layer_snapshot"
@@ -217,5 +232,91 @@ brokeragePlaceRouter.get(
       ...dossier,
       workspaceDid: buildPropertyWorkspaceDid(listingKey),
     });
+  },
+);
+
+/** Decision 6 — uncapped parcel→atoms trace for spine console E7. */
+brokeragePlaceRouter.get(
+  "/:placeKey/atoms",
+  async (req: Request, res: Response) => {
+    const placeKey = decodeURIComponent(
+      (Array.isArray(req.params.placeKey)
+        ? req.params.placeKey[0]
+        : req.params.placeKey) ?? "",
+    ).trim();
+    if (!placeKey) {
+      res.status(400).json(
+        gtmErrorBody("validation_error", "invalid_request", "placeKey required"),
+      );
+      return;
+    }
+
+    const coords = await coordsForPlaceKey(placeKey);
+    if (!coords) {
+      res.status(404).json(
+        gtmErrorBody(
+          "geocode_miss",
+          "not_found",
+          "Unknown placeKey — resolve an address first",
+        ),
+      );
+      return;
+    }
+
+    const jurisdictionKey = jurisdictionKeyFromPlaceContext({
+      city: coords.city,
+      state: coords.state,
+      address: coords.address ?? placeKey,
+    });
+
+    const body = await buildPlaceParcelAtoms({
+      placeKey,
+      jurisdictionKey,
+      address: coords.address,
+    });
+    res.json(body);
+  },
+);
+
+/** W1 warming cascade scaffold — W4 snapshot gate + W5 synthetic tag. */
+brokeragePlaceRouter.post("/warming/run", async (req: Request, res: Response) => {
+  const parse = WARMING_BODY.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json(
+      gtmErrorBody(
+        "validation_error",
+        "invalid_request",
+        "address + synthetic:true required",
+      ),
+    );
+    return;
+  }
+
+  const result = await runWarmingCascade({
+    address: parse.data.address,
+    synthetic: true,
+  });
+  res.json({
+    ...result,
+    k1LandingSchema: K1_OUTCOME_LANDING_SCHEMA,
+  });
+});
+
+/** Snapshot coverage probe (gates warming). */
+brokeragePlaceRouter.get(
+  "/:placeKey/snapshot-coverage",
+  async (req: Request, res: Response) => {
+    const placeKey = decodeURIComponent(
+      (Array.isArray(req.params.placeKey)
+        ? req.params.placeKey[0]
+        : req.params.placeKey) ?? "",
+    ).trim();
+    if (!placeKey) {
+      res.status(400).json(
+        gtmErrorBody("validation_error", "invalid_request", "placeKey required"),
+      );
+      return;
+    }
+    res.json(await verifySnapshotCoverage(placeKey));
   },
 );

@@ -133,11 +133,25 @@ import {
   type ProvenanceEnvelope,
 } from "../lib/provenanceEnvelope";
 import {
+  deriveFindingReadContract,
+  isLowConfidenceReadContract,
+  readContractForWire,
+  resolveConsequenceGatedRoute,
+  buildRichLedgerPayload,
+  adjudicatorFromActor,
+} from "@workspace/engine-core";
+import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import { createModelAttributionStamp } from "@hauska/atom-contract/read-contract";
+import {
+  readContractFromEngineHonesty,
+} from "../lib/readContractWire";
+import {
   engineHonestyForWire,
   mergePlanSetVisionDegradation,
   wireEngineHonesty,
   type EngineHonesty,
 } from "../lib/engineHonestyWire";
+import { logPrecedenceConflictsFromCodeSections } from "../lib/rawConflictLogEmit";
 import { PdfRenderError } from "../lib/pdfPageRenderer";
 
 const router: IRouter = Router();
@@ -246,7 +260,8 @@ interface FindingWire {
     | "promoted-to-architect";
   text: string;
   citations: FindingCitation[];
-  confidence: number;
+  /** F4/F9 — widthed confidence + provenance (no scalar accessor). */
+  readContract: ReadContract;
   lowConfidence: boolean;
   reviewerStatusBy: FindingActorWire | null;
   reviewerStatusChangedAt: string | null;
@@ -279,7 +294,7 @@ interface FindingWire {
   discipline: string | null;
   /** Uniform provenance envelope (moat #3); calibration grade omitted (rail-quiet). */
   provenance: ProvenanceEnvelope;
-  /** Engine-api honesty — confidence kind, data vintage, coverage, source. */
+  /** Transitional engine-api honesty slice; prefer readContract. */
   engineHonesty: EngineHonesty | null;
 }
 
@@ -303,6 +318,41 @@ function actorFromRequest(req: Request): FindingActorWire | null {
   return wire;
 }
 
+function findingGenerationModelAttribution(
+  generationId: string,
+  mode: string,
+  orchestrated: boolean,
+): ReturnType<typeof createModelAttributionStamp> {
+  return createModelAttributionStamp({
+    modelId: mode,
+    modelVersion: "2026-06-01",
+    promptTemplateVersion: orchestrated
+      ? "plan-review-orchestrated-v1"
+      : "plan-review-v3",
+    contextTemplateVersion: "submission-context-v1",
+    samplingParams: { temperature: 0.2 },
+    retrievedAtomSetId: `finding-gen:${generationId}`,
+  });
+}
+
+async function resolveFindingWireContext(
+  submissionId: string,
+): Promise<{ jurisdictionTenant: string | null }> {
+  const [subRow] = await db
+    .select({ engagementId: submissions.engagementId })
+    .from(submissions)
+    .where(eq(submissions.id, submissionId))
+    .limit(1);
+  if (!subRow?.engagementId) return { jurisdictionTenant: null };
+  const engFields = await loadEngagementTenantFields(subRow.engagementId);
+  return {
+    jurisdictionTenant:
+      engFields.found === true
+        ? resolveJurisdictionTenant(engFields)
+        : null,
+  };
+}
+
 async function toWire(
   row: Finding,
   revisionOfAtomId: string | null,
@@ -314,6 +364,10 @@ async function toWire(
    */
   acceptedBy: FindingActorWire | null = null,
   engineHonesty: EngineHonesty | null = null,
+  context?: {
+    jurisdictionTenant?: string | null;
+    modelAttribution?: ReturnType<typeof createModelAttributionStamp>;
+  },
 ): Promise<FindingWire> {
   const citations = Array.isArray(row.citations)
     ? (row.citations as FindingCitation[])
@@ -326,6 +380,17 @@ async function toWire(
     row.sourceRef && typeof row.sourceRef === "object"
       ? (row.sourceRef as { id: string; label: string })
       : null;
+
+  const readContract = readContractForWire(
+    await deriveFindingReadContract({
+      citations,
+      jurisdictionTenant: context?.jurisdictionTenant ?? null,
+      rawModelConfidence: Number(row.confidence),
+      modelAttribution: context?.modelAttribution,
+    }),
+  );
+  const lowConfidence = isLowConfidenceReadContract(readContract);
+
   return {
     id: row.atomId,
     submissionId: row.submissionId,
@@ -334,8 +399,8 @@ async function toWire(
     status: row.status as FindingWire["status"],
     text: row.text,
     citations,
-    confidence: Number(row.confidence),
-    lowConfidence: row.lowConfidence,
+    readContract,
+    lowConfidence,
     reviewerStatusBy,
     reviewerStatusChangedAt: row.reviewerStatusChangedAt
       ? row.reviewerStatusChangedAt.toISOString()
@@ -727,22 +792,35 @@ async function emitFindingGeneratedEvent(
   finding: Finding,
   generationId: string,
   reqLog: typeof logger,
+  stamp?: {
+    modelAttribution?: ReturnType<typeof createModelAttributionStamp>;
+  },
 ): Promise<void> {
   try {
-    const event = await history.appendEvent({
-      entityType: "finding",
-      entityId: finding.atomId,
-      eventType: FINDING_GENERATED_EVENT_TYPE,
-      actor: FINDING_ENGINE_ACTOR,
-      payload: {
+    const payload = buildRichLedgerPayload(
+      {
         findingId: finding.id,
         atomId: finding.atomId,
         submissionId: finding.submissionId,
         severity: finding.severity,
         category: finding.category,
-        confidence: Number(finding.confidence),
         generationId,
       },
+      {
+        sourceEventType: "finding.generated",
+        subjectKey: finding.atomId,
+        modelAttribution: stamp?.modelAttribution,
+        rawModelConfidence: Number(finding.confidence),
+        rawCounts: { successCount: 1, trialCount: 1 },
+        adjudicator: adjudicatorFromActor(FINDING_ENGINE_ACTOR, "plan-review-engine"),
+      },
+    );
+    const event = await history.appendEvent({
+      entityType: "finding",
+      entityId: finding.atomId,
+      eventType: FINDING_GENERATED_EVENT_TYPE,
+      actor: FINDING_ENGINE_ACTOR,
+      payload,
     });
     reqLog.debug(
       {
@@ -771,16 +849,35 @@ async function emitFindingMutationEvent(
     eventType: FindingEventType;
     actor: FindingActorWire | { kind: "system"; id: string };
     payload: Record<string, unknown>;
+    roleAtJudgment?: string;
   },
   reqLog: typeof logger,
 ): Promise<void> {
   try {
+    const sourceEventType = args.eventType as
+      | "finding.accepted"
+      | "finding.rejected"
+      | "finding.overridden"
+      | "finding.generated";
+    const richPayload = buildRichLedgerPayload(args.payload, {
+      sourceEventType,
+      subjectKey: args.finding.atomId,
+      adjudicator: adjudicatorFromActor(
+        args.actor,
+        args.roleAtJudgment ?? "reviewer",
+      ),
+      rawModelConfidence:
+        typeof args.payload.confidence === "number"
+          ? args.payload.confidence
+          : Number(args.finding.confidence),
+      rawCounts: { successCount: 1, trialCount: 1 },
+    });
     const event = await history.appendEvent({
       entityType: "finding",
       entityId: args.finding.atomId,
       eventType: args.eventType,
       actor: args.actor,
-      payload: args.payload,
+      payload: richPayload,
     });
     reqLog.debug(
       {
@@ -954,11 +1051,31 @@ async function runFindingGeneration(args: {
       codeSections: inputs.codeSections,
       bimElements: inputs.bimElements,
     };
+    const consequenceRoute = resolveConsequenceGatedRoute(
+      inputs.codeSections.map((s) => ({ consequence: s.consequence ?? null })),
+    );
+    reqLog.info(
+      {
+        submissionId,
+        generationId,
+        consequenceStratum: consequenceRoute.stratum,
+        modelTier: consequenceRoute.modelTier,
+        grokModel: consequenceRoute.grokModel,
+        ensemble: consequenceRoute.ensembleEnabled,
+        routingLabel: consequenceRoute.label,
+      },
+      "finding generation: S5 consequence-gated routing",
+    );
+
     const visionClient = await getVisionAnthropicClient();
     const engineOptions = {
       mode,
       ...(llmClient?.kind === "grok"
-        ? { grokClient: llmClient.client }
+        ? {
+            grokClient: llmClient.client,
+            grokModel: consequenceRoute.grokModel,
+            ensembleEnabled: consequenceRoute.ensembleEnabled,
+          }
         : {}),
       ...(llmClient?.kind === "anthropic"
         ? { anthropicClient: llmClient.client }
@@ -1121,8 +1238,27 @@ async function runFindingGeneration(args: {
     }
 
     const history = getHistoryService();
+    const modelAttribution = findingGenerationModelAttribution(
+      generationId,
+      mode,
+      orchestrated,
+    );
+
+    await logPrecedenceConflictsFromCodeSections(history, {
+      subjectKey: `submission:${submissionId}:gen:${generationId}`,
+      codeSections: inputs.codeSections,
+    }).catch((err) =>
+      reqLog.warn({ err, submissionId, generationId }, "F5 conflict log append failed"),
+    );
+
     for (const row of persistedRows) {
-      await emitFindingGeneratedEvent(history, row, generationId, reqLog);
+      await emitFindingGeneratedEvent(
+        history,
+        row,
+        generationId,
+        reqLog,
+        { modelAttribution },
+      );
       // PLR-9 — fan out to any open SSE subscribers for the
       // submission so reviewer cohorts watching the run see new
       // rows stream in without a manual refetch.
@@ -1495,6 +1631,15 @@ router.get(
         }
       }
 
+      const engFields = sub.engagementId
+        ? await loadEngagementTenantFields(sub.engagementId)
+        : { found: false as const };
+      const jurisdictionTenant =
+        engFields.found === true
+          ? resolveJurisdictionTenant(engFields)
+          : null;
+      const wireContext = { jurisdictionTenant };
+
       const wire = await Promise.all(
         rows.map((r) =>
           toWire(
@@ -1510,6 +1655,7 @@ router.get(
             r.findingRunId
               ? runHonestyById.get(r.findingRunId) ?? null
               : null,
+            wireContext,
           ),
         ),
       );
@@ -1642,7 +1788,15 @@ router.post(
         },
         "manual finding created",
       );
-      res.status(201).json({ finding: await toWire(finalRow, null) });
+      res.status(201).json({
+        finding: await toWire(
+          finalRow,
+          null,
+          null,
+          null,
+          await resolveFindingWireContext(submissionId),
+        ),
+      });
     } catch (err) {
       logger.error(
         { err, submissionId },
@@ -1820,8 +1974,15 @@ router.post(
       const acceptedByActor = await resolveAcceptedByActor(
         finalRow.acceptedByReviewerId,
       );
+      const wireContext = await resolveFindingWireContext(finalRow.submissionId);
       res.json({
-        finding: await toWire(finalRow, revisionOfAtomId, acceptedByActor),
+        finding: await toWire(
+          finalRow,
+          revisionOfAtomId,
+          acceptedByActor,
+          null,
+          wireContext,
+        ),
       });
     } catch (err) {
       logger.error({ err, findingId }, "accept finding failed");
@@ -1902,8 +2063,15 @@ router.post(
       const acceptedByActor = await resolveAcceptedByActor(
         finalRow.acceptedByReviewerId,
       );
+      const wireContext = await resolveFindingWireContext(finalRow.submissionId);
       res.json({
-        finding: await toWire(finalRow, revisionOfAtomId, acceptedByActor),
+        finding: await toWire(
+          finalRow,
+          revisionOfAtomId,
+          acceptedByActor,
+          null,
+          wireContext,
+        ),
       });
     } catch (err) {
       logger.error({ err, findingId }, "reject finding failed");
@@ -2043,7 +2211,15 @@ router.post(
           actor,
         },
       });
-      res.json({ finding: await toWire(revisionRow, original.atomId) });
+      res.json({
+        finding: await toWire(
+          revisionRow,
+          original.atomId,
+          null,
+          null,
+          await resolveFindingWireContext(revisionRow.submissionId),
+        ),
+      });
     } catch (err) {
       logger.error({ err, findingId }, "override finding failed");
       res.status(500).json({ error: "Failed to override finding" });

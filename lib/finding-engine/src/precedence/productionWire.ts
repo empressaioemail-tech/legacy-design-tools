@@ -114,19 +114,7 @@ function sectionToRequirement(section: CodeSectionInput): ApplicableRequirement 
 export function buildPrecedenceFindingDrafts(
   codeSections: ReadonlyArray<CodeSectionInput>,
 ): RawFindingDraft[] {
-  const requirements: ApplicableRequirement[] = [];
-  for (const section of codeSections) {
-    const req = sectionToRequirement(section);
-    if (req) requirements.push(req);
-  }
-
-  if (requirements.length < 2) return [];
-
-  const { reconciliations } = reconcileRequirementsByTopic({
-    requirements,
-    options: { domain: "accessibility", federalPreempts: true },
-  });
-
+  const { reconciliations } = precedenceReconciliationsFromCodeSections(codeSections);
   return reconciliations.map((rec) => ({
     severity: "blocker" as const,
     category: "other" as const,
@@ -137,4 +125,24 @@ export function buildPrecedenceFindingDrafts(
     elementRef: null,
     sourceRef: null,
   }));
+}
+
+/** Expose reconciliations for F5 raw-conflict logging. */
+export function precedenceReconciliationsFromCodeSections(
+  codeSections: ReadonlyArray<CodeSectionInput>,
+) {
+  const requirements: ApplicableRequirement[] = [];
+  for (const section of codeSections) {
+    const req = sectionToRequirement(section);
+    if (req) requirements.push(req);
+  }
+
+  if (requirements.length < 2) {
+    return { reconciliations: [] as ReturnType<typeof reconcileRequirementsByTopic>["reconciliations"] };
+  }
+
+  return reconcileRequirementsByTopic({
+    requirements,
+    options: { domain: "accessibility", federalPreempts: true },
+  });
 }

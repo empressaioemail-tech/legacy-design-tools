@@ -9907,12 +9907,16 @@ components:
 
     PrivateRestrictionsBriefing:
       type: object
-      required: [summary, confidence, evaluatedAt, items]
+      required: [summary, confidence, readContract, evaluatedAt, items]
       properties:
         summary:
           type: string
         confidence:
           type: number
+          deprecated: true
+          description: Deprecated F4 — use readContract on aggregate briefing.
+        readContract:
+          $ref: "#/components/schemas/ReadContract"
         evaluatedAt:
           type: string
           format: date-time
@@ -9930,6 +9934,7 @@ components:
         - bodyText
         - legalWeight
         - confidence
+        - readContract
         - sourceCitation
         - instrumentType
         - sourceDocumentUrl
@@ -9950,6 +9955,9 @@ components:
           enum: [recorded, advisory]
         confidence:
           type: number
+          deprecated: true
+        readContract:
+          $ref: "#/components/schemas/ReadContract"
         reasoningSummary:
           type: string
           nullable: true
@@ -10186,6 +10194,15 @@ components:
             architect can see which sources were referenced but no
             longer exist. Mirrors `invalidCitationCount` — the count
             equals the array length when both are present.
+        engineHonesty:
+          oneOf:
+            - $ref: "#/components/schemas/EngineHonesty"
+          nullable: true
+          description: |
+            Engine-api honesty envelope for the briefing generation run —
+            confidence kind, data vintage, coverage degradation, and source.
+            Persisted on `briefing_generation_jobs.engine_honesty`; was
+            handler-only drift before Wave 2 OpenAPI fix.
       required:
         - generationId
         - state
@@ -10240,6 +10257,11 @@ components:
             unknown ids. A non-zero value is a model-quality
             regression auditors specifically want to spot when
             comparing recent runs. Null while pending.
+        engineHonesty:
+          oneOf:
+            - $ref: "#/components/schemas/EngineHonesty"
+          nullable: true
+          description: Engine-api honesty envelope for this run.
       required:
         - generationId
         - state
@@ -14281,6 +14303,12 @@ components:
           format: float
           minimum: 0
           maximum: 1
+          deprecated: true
+          description: |
+            Deprecated F4 — use `readContract`. Bare scalar retained for
+            backward compatibility; do not render without width + provenance.
+        readContract:
+          $ref: "#/components/schemas/ReadContract"
         lowConfidence:
           type: boolean
           description: True iff the engine deemed this below the 0.6 threshold.
@@ -14382,6 +14410,7 @@ components:
         - text
         - citations
         - confidence
+        - readContract
         - lowConfidence
         - reviewerStatusBy
         - reviewerStatusChangedAt
@@ -14520,6 +14549,87 @@ components:
         - invalidCitationCount
         - invalidCitations
         - discardedFindingCount
+
+    WidthedConfidence:
+      type: object
+      description: F4 widthed point estimate — no bare scalar accessor.
+      properties:
+        estimate:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        n:
+          type: integer
+          minimum: 0
+        intervalWidth:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        provenance:
+          type: string
+          enum: [asserted, backtest, seed, live]
+      required: [estimate, n, intervalWidth, provenance]
+
+    ConsequenceAxis:
+      type: object
+      description: F6 severity axis — discrete stratum, no invented scalar.
+      properties:
+        derivation:
+          type: object
+          properties:
+            source:
+              type: string
+              enum: [asce7-risk-category, ibc-occupancy-importance, derived-composite]
+            asce7RiskCategory:
+              type: string
+              enum: [I, II, III, IV]
+            ibcOccupancyGroup:
+              type: string
+            ibcImportanceFactor:
+              type: number
+            jurisdictionCode:
+              type: string
+          required: [source, asce7RiskCategory]
+        stratum:
+          type: string
+          enum: [routine, elevated, critical, essential]
+        assertedAt:
+          type: string
+          format: date-time
+        auditRef:
+          type: string
+      required: [derivation, stratum, assertedAt]
+
+    ThreeAxisConfidence:
+      type: object
+      properties:
+        calibratedConfidence:
+          $ref: "#/components/schemas/WidthedConfidence"
+        assertedConfidence:
+          $ref: "#/components/schemas/WidthedConfidence"
+        consequence:
+          $ref: "#/components/schemas/ConsequenceAxis"
+      required: [calibratedConfidence, assertedConfidence, consequence]
+
+    ReadContract:
+      type: object
+      description: |
+        F4 read-contract object — confidence, n, width, and provenance as
+        one inseparable object. Every confidence-emitting Cortex surface
+        must return this shape at read time.
+      properties:
+        axes:
+          $ref: "#/components/schemas/ThreeAxisConfidence"
+        assembledAt:
+          type: string
+          format: date-time
+        modelAttribution:
+          type: object
+          nullable: true
+          additionalProperties: true
+      required: [axes, assembledAt]
 
     EngineHonesty:
       type: object

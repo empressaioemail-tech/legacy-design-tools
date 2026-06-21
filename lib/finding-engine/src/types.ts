@@ -122,6 +122,13 @@ export interface CodeSectionInput {
   snippet?: string;
   /** Present on `reasoning:` / legacy `websearch:` ids — deeplink citation provenance. */
   webProvenance?: CodeSectionWebProvenance;
+  /** F2 — typed consequence metadata from code-section atom (cc-agent-E). */
+  consequence?: {
+    asce7RiskCategory?: "I" | "II" | "III" | "IV";
+    ibcOccupancyGroup?: string;
+    ibcImportanceFactor?: number;
+    jurisdictionCode?: string;
+  };
 }
 
 /**

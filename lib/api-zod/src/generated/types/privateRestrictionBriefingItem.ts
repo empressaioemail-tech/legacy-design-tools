@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PrivateRestrictionBriefingItemLegalWeight } from "./privateRestrictionBriefingItemLegalWeight";
+import type { ReadContract } from "./readContract";
 
 export interface PrivateRestrictionBriefingItem {
   clauseId: string;
@@ -13,7 +14,9 @@ export interface PrivateRestrictionBriefingItem {
   clausePath: string;
   bodyText: string;
   legalWeight: PrivateRestrictionBriefingItemLegalWeight;
+  /** @deprecated */
   confidence: number;
+  readContract: ReadContract;
   reasoningSummary?: string | null;
   sourceCitation: string;
   humanVerifiedAt?: Date | null;
