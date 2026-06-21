@@ -1,0 +1,50 @@
+[
+  {
+    "eventId": "01JK2BACKTESTOUT001",
+    "eventType": "finding.outcome.recorded",
+    "entityType": "finding",
+    "entityId": "finding:backtest:permit-2019-0042",
+    "occurredAt": "2019-08-15T00:00:00.000Z",
+    "actor": { "kind": "system", "id": "k2-retrodiction-harness" },
+    "payload": {
+      "sourceEventType": "finding.outcome.recorded",
+      "subjectKey": "historical:tx:bastrop:permit-2019-0042",
+      "outcomeKind": "permit-approved-clean",
+      "historicalCaseId": "tx:bastrop:permit-2019-0042",
+      "calibrationProvenance": "backtest",
+      "modelAttribution": {
+        "modelId": "substrate-retrodiction",
+        "modelVersion": "edition-at-date",
+        "retrievedAtomSetId": "atom-set:bastrop-ibc-2018"
+      },
+      "rawCounts": { "successCount": 1, "trialCount": 1 }
+    },
+    "citations": [{ "kind": "code-section", "atomId": "code-ibc-903-2-1" }],
+    "statedConfidenceRaw": null,
+    "cortexJurisdictionKey": "tx:bastrop",
+    "jurisdictionCity": "Bastrop",
+    "jurisdictionState": "TX",
+    "jurisdiction": null,
+    "address": "Historical permit record"
+  },
+  {
+    "eventId": "01JK2BACKTESTOUT002",
+    "eventType": "finding.outcome.recorded",
+    "entityType": "finding",
+    "entityId": "finding:backtest:permit-2020-0018",
+    "occurredAt": "2020-03-22T00:00:00.000Z",
+    "actor": { "kind": "system", "id": "k2-retrodiction-harness" },
+    "payload": {
+      "outcomeKind": "permit-approved-with-variance",
+      "historicalCaseId": "tx:bastrop:permit-2020-0018",
+      "provenance": "backtest"
+    },
+    "citations": [{ "kind": "code-section", "atomId": "code-ibc-1004-1" }],
+    "statedConfidenceRaw": null,
+    "cortexJurisdictionKey": "tx:bastrop",
+    "jurisdictionCity": "Bastrop",
+    "jurisdictionState": "TX",
+    "jurisdiction": null,
+    "address": "Historical permit record"
+  }
+]

@@ -1,0 +1,40 @@
+[
+  {
+    "eventId": "01JPHASE1ACCEPT001",
+    "eventType": "finding.accepted",
+    "entityType": "finding",
+    "entityId": "finding:sub-seguin-1:aaa11111-1111-4111-8111-111111111111",
+    "occurredAt": "2026-05-10T14:00:00.000Z",
+    "actor": { "kind": "user", "id": "reviewer-42" },
+    "payload": {
+      "findingId": "aaa11111-1111-4111-8111-111111111111",
+      "status": "accepted"
+    },
+    "citations": [{ "kind": "code-section", "atomId": "code-ibc-1004-1" }],
+    "statedConfidenceRaw": "0.82",
+    "cortexJurisdictionKey": "tx:seguin",
+    "jurisdictionCity": "Seguin",
+    "jurisdictionState": "TX",
+    "jurisdiction": null,
+    "address": "100 Main St, Seguin, TX"
+  },
+  {
+    "eventId": "01JPHASE1REJECT001",
+    "eventType": "finding.rejected",
+    "entityType": "finding",
+    "entityId": "finding:sub-seguin-1:bbb22222-2222-4222-8222-222222222222",
+    "occurredAt": "2026-05-11T09:30:00.000Z",
+    "actor": { "kind": "user", "id": "reviewer-7" },
+    "payload": {
+      "findingId": "bbb22222-2222-4222-8222-222222222222",
+      "status": "rejected"
+    },
+    "citations": [{ "kind": "code-section", "atomId": "code-ibc-1004-1" }],
+    "statedConfidenceRaw": "0.55",
+    "cortexJurisdictionKey": "tx:seguin",
+    "jurisdictionCity": "Seguin",
+    "jurisdictionState": "TX",
+    "jurisdiction": null,
+    "address": "100 Main St, Seguin, TX"
+  }
+]

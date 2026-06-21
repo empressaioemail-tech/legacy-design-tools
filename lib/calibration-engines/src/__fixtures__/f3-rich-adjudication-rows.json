@@ -1,0 +1,37 @@
+[
+  {
+    "eventId": "01JF3RICHACCEPT001",
+    "eventType": "finding.accepted",
+    "entityType": "finding",
+    "entityId": "finding:sub-bastrop-1:ccc33333-3333-4333-8333-333333333333",
+    "occurredAt": "2026-06-01T16:00:00.000Z",
+    "actor": { "kind": "user", "id": "reviewer-99" },
+    "payload": {
+      "sourceEventType": "finding.accepted",
+      "subjectKey": "finding:sub-bastrop-1:ccc33333-3333-4333-8333-333333333333",
+      "adjudicator": {
+        "identity": { "kind": "user", "id": "reviewer-99" },
+        "roleAtJudgment": "plan-review-reviewer"
+      },
+      "modelAttribution": {
+        "modelId": "claude-sonnet-plan-review",
+        "modelVersion": "2026-05-01",
+        "promptTemplateVersion": "plan-review-v3",
+        "contextTemplateVersion": "site-context-v2",
+        "retrievedAtomSetId": "atom-set:bastrop-ibc-2021",
+        "samplingParams": { "temperature": 0.2 }
+      },
+      "rawCounts": { "successCount": 1, "trialCount": 1 }
+    },
+    "citations": [
+      { "kind": "code-section", "atomId": "code-ibc-903-2-1" },
+      { "kind": "code-section", "atomId": "reasoning:fire-separation-001" }
+    ],
+    "statedConfidenceRaw": "0.91",
+    "cortexJurisdictionKey": "tx:bastrop",
+    "jurisdictionCity": "Bastrop",
+    "jurisdictionState": "TX",
+    "jurisdiction": null,
+    "address": "200 Chestnut St, Bastrop, TX"
+  }
+]
