@@ -52,6 +52,9 @@
       "path": "./lib/codewarm"
     },
     {
+      "path": "./lib/calibration-engines"
+    },
+    {
       "path": "./lib/eval"
     },
     {
