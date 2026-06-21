@@ -515,9 +515,9 @@ async function enforceBriefComputeGate(
     return { ok: false };
   }
 
-  const ent =
-    resolvedEnt ??
-    (await resolveEntitlementSnapshot(req));
+  // Re-fetch after debit so entitlement reflects consumed free briefs /
+  // wallet balance — the pre-debit snapshot would still show the cap.
+  const ent = await resolveEntitlementSnapshot(req);
   return {
     ok: true,
     entitlement: ent ? clientEntitlementFromSnapshot(ent) : null,
