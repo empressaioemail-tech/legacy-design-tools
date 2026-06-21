@@ -850,7 +850,7 @@ describe("POST /api/findings/:id/override", () => {
 // ─── V1-7: retrieval + bimElements wire-up ───────────────────────
 
 describe("POST /api/submissions/:id/findings (manual-add, Task #427)", () => {
-  it("creates a reviewer-attributed finding with status='ai-produced' and confidence=1", async () => {
+  it("creates a reviewer-attributed finding with status='ai-produced' and readContract confidence=1", async () => {
     if (!ctx.schema) throw new Error("ctx");
     const { submission } = await seedEngagementSubmission(
       "manual-add-engagement",
@@ -867,7 +867,10 @@ describe("POST /api/submissions/:id/findings (manual-add, Task #427)", () => {
     expect(res.status).toBe(201);
     expect(res.body.finding).toBeDefined();
     expect(res.body.finding.status).toBe("ai-produced");
-    expect(res.body.finding.confidence).toBe(1);
+    expect(res.body.finding.readContract).toBeDefined();
+    expect(res.body.finding.readContract.axes.assertedConfidence.estimate).toBe(
+      1,
+    );
     expect(res.body.finding.severity).toBe("blocker");
     expect(res.body.finding.category).toBe("setback");
     expect(res.body.finding.reviewerStatusBy?.kind).toBe("user");

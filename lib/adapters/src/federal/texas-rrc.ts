@@ -10,7 +10,6 @@ import {
   type AdapterContext,
   type AdapterResult,
 } from "../types";
-import { isUsLatLng } from "./_federalGeocodeGate";
 
 /** Harris County mirror of RRC public GIS (statewide well/pipeline coverage). */
 export const TEXAS_RRC_WELLS_LAYER =
@@ -29,7 +28,7 @@ function nowIso(): string {
 }
 
 function texasApplies(ctx: AdapterContext): boolean {
-  return isUsLatLng(ctx.parcel.latitude, ctx.parcel.longitude);
+  return ctx.jurisdiction.stateKey === "texas";
 }
 
 export const texasRrcOgAdapter: Adapter = {

@@ -119,4 +119,6 @@ export {
   type RequirementKind,
   type StandardAuthority,
   type StandardDescriptor,
+  buildPrecedenceFindingDrafts,
+  precedenceReconciliationsFromCodeSections,
 } from "./precedence";

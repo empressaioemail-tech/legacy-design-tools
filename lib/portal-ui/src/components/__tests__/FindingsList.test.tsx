@@ -6,6 +6,32 @@ import {
   countUnaddressedFindings,
 } from "../FindingsList";
 
+const FIXTURE_READ_CONTRACT: Finding["readContract"] = {
+  axes: {
+    calibratedConfidence: {
+      estimate: 0.8,
+      n: 1,
+      intervalWidth: 0.12,
+      provenance: "asserted",
+    },
+    assertedConfidence: {
+      estimate: 0.8,
+      n: 1,
+      intervalWidth: 0.12,
+      provenance: "asserted",
+    },
+    consequence: {
+      derivation: {
+        source: "asce7-risk-category",
+        asce7RiskCategory: "II",
+      },
+      stratum: "routine",
+      assertedAt: "2026-06-21T00:00:00.000Z",
+    },
+  },
+  assembledAt: "2026-06-21T00:00:00.000Z",
+};
+
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
     id: "finding:sub-1:01",
@@ -16,6 +42,7 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
     text: "Body",
     citations: [],
     confidence: 0.8,
+    readContract: FIXTURE_READ_CONTRACT,
     lowConfidence: false,
     reviewerStatusBy: null,
     reviewerStatusChangedAt: null,

@@ -1431,6 +1431,38 @@ export const GetEngagementBriefingParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin = 0;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin = 0;
+
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
 export const GetEngagementBriefingResponse = zod
   .object({
     briefing: zod
@@ -1570,7 +1602,114 @@ export const GetEngagementBriefingResponse = zod
         privateRestrictions: zod
           .object({
             summary: zod.string(),
-            confidence: zod.number(),
+            confidence: zod
+              .number()
+              .describe(
+                "Deprecated F4 — use readContract on aggregate briefing.",
+              ),
+            readContract: zod
+              .object({
+                axes: zod.object({
+                  calibratedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin,
+                        )
+                        .max(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  assertedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin,
+                        )
+                        .max(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  consequence: zod
+                    .object({
+                      derivation: zod.object({
+                        source: zod.enum([
+                          "asce7-risk-category",
+                          "ibc-occupancy-importance",
+                          "derived-composite",
+                        ]),
+                        asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                        ibcOccupancyGroup: zod.string().optional(),
+                        ibcImportanceFactor: zod.number().optional(),
+                        jurisdictionCode: zod.string().optional(),
+                      }),
+                      stratum: zod.enum([
+                        "routine",
+                        "elevated",
+                        "critical",
+                        "essential",
+                      ]),
+                      assertedAt: zod.coerce.date(),
+                      auditRef: zod.string().optional(),
+                    })
+                    .describe(
+                      "F6 severity axis — discrete stratum, no invented scalar.",
+                    ),
+                }),
+                assembledAt: zod.coerce.date(),
+                modelAttribution: zod
+                  .record(zod.string(), zod.unknown())
+                  .nullish(),
+              })
+              .describe(
+                "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+              ),
             evaluatedAt: zod.coerce.date(),
             items: zod.array(
               zod.object({
@@ -1580,6 +1719,114 @@ export const GetEngagementBriefingResponse = zod
                 bodyText: zod.string(),
                 legalWeight: zod.enum(["recorded", "advisory"]),
                 confidence: zod.number(),
+                readContract: zod
+                  .object({
+                    axes: zod.object({
+                      calibratedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin,
+                            )
+                            .max(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      assertedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin,
+                            )
+                            .max(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              getEngagementBriefingResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      consequence: zod
+                        .object({
+                          derivation: zod.object({
+                            source: zod.enum([
+                              "asce7-risk-category",
+                              "ibc-occupancy-importance",
+                              "derived-composite",
+                            ]),
+                            asce7RiskCategory: zod.enum([
+                              "I",
+                              "II",
+                              "III",
+                              "IV",
+                            ]),
+                            ibcOccupancyGroup: zod.string().optional(),
+                            ibcImportanceFactor: zod.number().optional(),
+                            jurisdictionCode: zod.string().optional(),
+                          }),
+                          stratum: zod.enum([
+                            "routine",
+                            "elevated",
+                            "critical",
+                            "essential",
+                          ]),
+                          assertedAt: zod.coerce.date(),
+                          auditRef: zod.string().optional(),
+                        })
+                        .describe(
+                          "F6 severity axis — discrete stratum, no invented scalar.",
+                        ),
+                    }),
+                    assembledAt: zod.coerce.date(),
+                    modelAttribution: zod
+                      .record(zod.string(), zod.unknown())
+                      .nullish(),
+                  })
+                  .describe(
+                    "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+                  ),
                 reasoningSummary: zod.string().nullish(),
                 sourceCitation: zod.string(),
                 humanVerifiedAt: zod.coerce.date().nullish(),
@@ -1850,6 +2097,38 @@ export const RestoreEngagementBriefingSourceParams = zod.object({
   sourceId: zod.coerce.string(),
 });
 
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin = 0;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin = 0;
+
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
 export const RestoreEngagementBriefingSourceResponse = zod
   .object({
     briefing: zod
@@ -1989,7 +2268,114 @@ export const RestoreEngagementBriefingSourceResponse = zod
         privateRestrictions: zod
           .object({
             summary: zod.string(),
-            confidence: zod.number(),
+            confidence: zod
+              .number()
+              .describe(
+                "Deprecated F4 — use readContract on aggregate briefing.",
+              ),
+            readContract: zod
+              .object({
+                axes: zod.object({
+                  calibratedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin,
+                        )
+                        .max(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  assertedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin,
+                        )
+                        .max(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  consequence: zod
+                    .object({
+                      derivation: zod.object({
+                        source: zod.enum([
+                          "asce7-risk-category",
+                          "ibc-occupancy-importance",
+                          "derived-composite",
+                        ]),
+                        asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                        ibcOccupancyGroup: zod.string().optional(),
+                        ibcImportanceFactor: zod.number().optional(),
+                        jurisdictionCode: zod.string().optional(),
+                      }),
+                      stratum: zod.enum([
+                        "routine",
+                        "elevated",
+                        "critical",
+                        "essential",
+                      ]),
+                      assertedAt: zod.coerce.date(),
+                      auditRef: zod.string().optional(),
+                    })
+                    .describe(
+                      "F6 severity axis — discrete stratum, no invented scalar.",
+                    ),
+                }),
+                assembledAt: zod.coerce.date(),
+                modelAttribution: zod
+                  .record(zod.string(), zod.unknown())
+                  .nullish(),
+              })
+              .describe(
+                "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+              ),
             evaluatedAt: zod.coerce.date(),
             items: zod.array(
               zod.object({
@@ -1999,6 +2385,114 @@ export const RestoreEngagementBriefingSourceResponse = zod
                 bodyText: zod.string(),
                 legalWeight: zod.enum(["recorded", "advisory"]),
                 confidence: zod.number(),
+                readContract: zod
+                  .object({
+                    axes: zod.object({
+                      calibratedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin,
+                            )
+                            .max(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      assertedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin,
+                            )
+                            .max(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              restoreEngagementBriefingSourceResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      consequence: zod
+                        .object({
+                          derivation: zod.object({
+                            source: zod.enum([
+                              "asce7-risk-category",
+                              "ibc-occupancy-importance",
+                              "derived-composite",
+                            ]),
+                            asce7RiskCategory: zod.enum([
+                              "I",
+                              "II",
+                              "III",
+                              "IV",
+                            ]),
+                            ibcOccupancyGroup: zod.string().optional(),
+                            ibcImportanceFactor: zod.number().optional(),
+                            jurisdictionCode: zod.string().optional(),
+                          }),
+                          stratum: zod.enum([
+                            "routine",
+                            "elevated",
+                            "critical",
+                            "essential",
+                          ]),
+                          assertedAt: zod.coerce.date(),
+                          auditRef: zod.string().optional(),
+                        })
+                        .describe(
+                          "F6 severity axis — discrete stratum, no invented scalar.",
+                        ),
+                    }),
+                    assembledAt: zod.coerce.date(),
+                    modelAttribution: zod
+                      .record(zod.string(), zod.unknown())
+                      .nullish(),
+                  })
+                  .describe(
+                    "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+                  ),
                 reasoningSummary: zod.string().nullish(),
                 sourceCitation: zod.string(),
                 humanVerifiedAt: zod.coerce.date().nullish(),
@@ -2042,6 +2536,38 @@ export const RetryBriefingSourceConversionParams = zod.object({
   id: zod.coerce.string(),
   sourceId: zod.coerce.string(),
 });
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin = 0;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin = 0;
+
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
 
 export const RetryBriefingSourceConversionResponse = zod
   .object({
@@ -2182,7 +2708,114 @@ export const RetryBriefingSourceConversionResponse = zod
         privateRestrictions: zod
           .object({
             summary: zod.string(),
-            confidence: zod.number(),
+            confidence: zod
+              .number()
+              .describe(
+                "Deprecated F4 — use readContract on aggregate briefing.",
+              ),
+            readContract: zod
+              .object({
+                axes: zod.object({
+                  calibratedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin,
+                        )
+                        .max(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  assertedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin,
+                        )
+                        .max(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  consequence: zod
+                    .object({
+                      derivation: zod.object({
+                        source: zod.enum([
+                          "asce7-risk-category",
+                          "ibc-occupancy-importance",
+                          "derived-composite",
+                        ]),
+                        asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                        ibcOccupancyGroup: zod.string().optional(),
+                        ibcImportanceFactor: zod.number().optional(),
+                        jurisdictionCode: zod.string().optional(),
+                      }),
+                      stratum: zod.enum([
+                        "routine",
+                        "elevated",
+                        "critical",
+                        "essential",
+                      ]),
+                      assertedAt: zod.coerce.date(),
+                      auditRef: zod.string().optional(),
+                    })
+                    .describe(
+                      "F6 severity axis — discrete stratum, no invented scalar.",
+                    ),
+                }),
+                assembledAt: zod.coerce.date(),
+                modelAttribution: zod
+                  .record(zod.string(), zod.unknown())
+                  .nullish(),
+              })
+              .describe(
+                "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+              ),
             evaluatedAt: zod.coerce.date(),
             items: zod.array(
               zod.object({
@@ -2192,6 +2825,114 @@ export const RetryBriefingSourceConversionResponse = zod
                 bodyText: zod.string(),
                 legalWeight: zod.enum(["recorded", "advisory"]),
                 confidence: zod.number(),
+                readContract: zod
+                  .object({
+                    axes: zod.object({
+                      calibratedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin,
+                            )
+                            .max(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      assertedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin,
+                            )
+                            .max(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              retryBriefingSourceConversionResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      consequence: zod
+                        .object({
+                          derivation: zod.object({
+                            source: zod.enum([
+                              "asce7-risk-category",
+                              "ibc-occupancy-importance",
+                              "derived-composite",
+                            ]),
+                            asce7RiskCategory: zod.enum([
+                              "I",
+                              "II",
+                              "III",
+                              "IV",
+                            ]),
+                            ibcOccupancyGroup: zod.string().optional(),
+                            ibcImportanceFactor: zod.number().optional(),
+                            jurisdictionCode: zod.string().optional(),
+                          }),
+                          stratum: zod.enum([
+                            "routine",
+                            "elevated",
+                            "critical",
+                            "essential",
+                          ]),
+                          assertedAt: zod.coerce.date(),
+                          auditRef: zod.string().optional(),
+                        })
+                        .describe(
+                          "F6 severity axis — discrete stratum, no invented scalar.",
+                        ),
+                    }),
+                    assembledAt: zod.coerce.date(),
+                    modelAttribution: zod
+                      .record(zod.string(), zod.unknown())
+                      .nullish(),
+                  })
+                  .describe(
+                    "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+                  ),
                 reasoningSummary: zod.string().nullish(),
                 sourceCitation: zod.string(),
                 humanVerifiedAt: zod.coerce.date().nullish(),
@@ -2264,6 +3005,38 @@ export const GenerateEngagementLayersQueryParams = zod.object({
       "Task #228 — when present, scope this run to the single\nadapter whose `adapterKey` matches. The applicable-adapter\nfilter (jurisdiction gate) is applied first, then narrowed\nto that one adapter. Use this with `?forceRefresh=true` to\nre-fetch a single layer (e.g. just FEMA flood zone) without\npaying the per-adapter timeout for every other layer in the\nengagement's jurisdiction.\n\nReturns 422 with `error: \"unknown_adapter_key\"` if the value\ndoes not match any adapter that applies to the engagement's\nresolved jurisdiction (so a stale UI bookmark or a typo\ncannot silently degrade to a no-op run that looks\nsuccessful).\n",
     ),
 });
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin = 0;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin = 0;
+
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
 
 export const generateEngagementLayersResponseOutcomesItemFromCacheDefault = false;
 
@@ -2406,7 +3179,114 @@ export const GenerateEngagementLayersResponse = zod
         privateRestrictions: zod
           .object({
             summary: zod.string(),
-            confidence: zod.number(),
+            confidence: zod
+              .number()
+              .describe(
+                "Deprecated F4 — use readContract on aggregate briefing.",
+              ),
+            readContract: zod
+              .object({
+                axes: zod.object({
+                  calibratedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMin,
+                        )
+                        .max(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  assertedConfidence: zod
+                    .object({
+                      estimate: zod
+                        .number()
+                        .min(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMin,
+                        )
+                        .max(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceEstimateMax,
+                        ),
+                      n: zod
+                        .number()
+                        .min(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceNMin,
+                        ),
+                      intervalWidth: zod
+                        .number()
+                        .min(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMin,
+                        )
+                        .max(
+                          generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneReadContractAxesAssertedConfidenceIntervalWidthMax,
+                        ),
+                      provenance: zod.enum([
+                        "asserted",
+                        "backtest",
+                        "seed",
+                        "live",
+                      ]),
+                    })
+                    .describe(
+                      "F4 widthed point estimate — no bare scalar accessor.",
+                    ),
+                  consequence: zod
+                    .object({
+                      derivation: zod.object({
+                        source: zod.enum([
+                          "asce7-risk-category",
+                          "ibc-occupancy-importance",
+                          "derived-composite",
+                        ]),
+                        asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                        ibcOccupancyGroup: zod.string().optional(),
+                        ibcImportanceFactor: zod.number().optional(),
+                        jurisdictionCode: zod.string().optional(),
+                      }),
+                      stratum: zod.enum([
+                        "routine",
+                        "elevated",
+                        "critical",
+                        "essential",
+                      ]),
+                      assertedAt: zod.coerce.date(),
+                      auditRef: zod.string().optional(),
+                    })
+                    .describe(
+                      "F6 severity axis — discrete stratum, no invented scalar.",
+                    ),
+                }),
+                assembledAt: zod.coerce.date(),
+                modelAttribution: zod
+                  .record(zod.string(), zod.unknown())
+                  .nullish(),
+              })
+              .describe(
+                "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+              ),
             evaluatedAt: zod.coerce.date(),
             items: zod.array(
               zod.object({
@@ -2416,6 +3296,114 @@ export const GenerateEngagementLayersResponse = zod
                 bodyText: zod.string(),
                 legalWeight: zod.enum(["recorded", "advisory"]),
                 confidence: zod.number(),
+                readContract: zod
+                  .object({
+                    axes: zod.object({
+                      calibratedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMin,
+                            )
+                            .max(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      assertedConfidence: zod
+                        .object({
+                          estimate: zod
+                            .number()
+                            .min(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMin,
+                            )
+                            .max(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceEstimateMax,
+                            ),
+                          n: zod
+                            .number()
+                            .min(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceNMin,
+                            ),
+                          intervalWidth: zod
+                            .number()
+                            .min(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMin,
+                            )
+                            .max(
+                              generateEngagementLayersResponseBriefingOnePrivateRestrictionsOneItemsItemReadContractAxesAssertedConfidenceIntervalWidthMax,
+                            ),
+                          provenance: zod.enum([
+                            "asserted",
+                            "backtest",
+                            "seed",
+                            "live",
+                          ]),
+                        })
+                        .describe(
+                          "F4 widthed point estimate — no bare scalar accessor.",
+                        ),
+                      consequence: zod
+                        .object({
+                          derivation: zod.object({
+                            source: zod.enum([
+                              "asce7-risk-category",
+                              "ibc-occupancy-importance",
+                              "derived-composite",
+                            ]),
+                            asce7RiskCategory: zod.enum([
+                              "I",
+                              "II",
+                              "III",
+                              "IV",
+                            ]),
+                            ibcOccupancyGroup: zod.string().optional(),
+                            ibcImportanceFactor: zod.number().optional(),
+                            jurisdictionCode: zod.string().optional(),
+                          }),
+                          stratum: zod.enum([
+                            "routine",
+                            "elevated",
+                            "critical",
+                            "essential",
+                          ]),
+                          assertedAt: zod.coerce.date(),
+                          auditRef: zod.string().optional(),
+                        })
+                        .describe(
+                          "F6 severity axis — discrete stratum, no invented scalar.",
+                        ),
+                    }),
+                    assembledAt: zod.coerce.date(),
+                    modelAttribution: zod
+                      .record(zod.string(), zod.unknown())
+                      .nullish(),
+                  })
+                  .describe(
+                    "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+                  ),
                 reasoningSummary: zod.string().nullish(),
                 sourceCitation: zod.string(),
                 humanVerifiedAt: zod.coerce.date().nullish(),
@@ -2616,6 +3604,9 @@ export const ListEngagementBriefingGenerationRunsParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const listEngagementBriefingGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMin = 0;
+export const listEngagementBriefingGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMax = 1;
+
 export const ListEngagementBriefingGenerationRunsResponse = zod
   .object({
     runs: zod.array(
@@ -2646,6 +3637,41 @@ export const ListEngagementBriefingGenerationRunsResponse = zod
             .describe(
               "Number of citation tokens stripped because they pointed at\nunknown ids. A non-zero value is a model-quality\nregression auditors specifically want to spot when\ncomparing recent runs. Null while pending.\n",
             ),
+          engineHonesty: zod
+            .object({
+              confidence: zod.object({
+                value: zod
+                  .number()
+                  .min(
+                    listEngagementBriefingGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMin,
+                  )
+                  .max(
+                    listEngagementBriefingGenerationRunsResponseRunsItemEngineHonestyOneConfidenceValueMax,
+                  ),
+                kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+              }),
+              dataVintage: zod.coerce
+                .date()
+                .nullable()
+                .describe("Acquisition date for underlying data, when known."),
+              coverage: zod.object({
+                degraded: zod.boolean(),
+                reason: zod.string().optional(),
+              }),
+              source: zod
+                .object({
+                  adapter: zod.string(),
+                  citationIds: zod.array(zod.string()).optional(),
+                })
+                .describe(
+                  "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+                ),
+            })
+            .describe(
+              "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+            )
+            .nullish()
+            .describe("Engine-api honesty envelope for this run."),
         })
         .describe(
           'One historical briefing-generation attempt for an engagement.\nMirrors the column subset auditors need on the \"Recent runs\"\ndisclosure (no full narrative — that lives on the briefing\nrow itself). Same field shapes as `BriefingGenerationStatusResponse`\nfor the corresponding fields, just packaged for list iteration.\n',
@@ -2731,6 +3757,9 @@ export const GetEngagementBriefingGenerationStatusParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const getEngagementBriefingGenerationStatusResponseEngineHonestyOneConfidenceValueMin = 0;
+export const getEngagementBriefingGenerationStatusResponseEngineHonestyOneConfidenceValueMax = 1;
+
 export const GetEngagementBriefingGenerationStatusResponse = zod
   .object({
     generationId: zod
@@ -2761,6 +3790,43 @@ export const GetEngagementBriefingGenerationStatusResponse = zod
       .nullable()
       .describe(
         'On `completed`, the exact citation token strings the engine\nstripped because they pointed at unknown ids. Used by the\nUI\'s invalid-citation warning to render each stripped\ntoken as a \"broken\" pill (Spec 51 traceability) so the\narchitect can see which sources were referenced but no\nlonger exist. Mirrors `invalidCitationCount` — the count\nequals the array length when both are present.\n',
+      ),
+    engineHonesty: zod
+      .object({
+        confidence: zod.object({
+          value: zod
+            .number()
+            .min(
+              getEngagementBriefingGenerationStatusResponseEngineHonestyOneConfidenceValueMin,
+            )
+            .max(
+              getEngagementBriefingGenerationStatusResponseEngineHonestyOneConfidenceValueMax,
+            ),
+          kind: zod.enum(["calibrated", "asserted", "deterministic"]),
+        }),
+        dataVintage: zod.coerce
+          .date()
+          .nullable()
+          .describe("Acquisition date for underlying data, when known."),
+        coverage: zod.object({
+          degraded: zod.boolean(),
+          reason: zod.string().optional(),
+        }),
+        source: zod
+          .object({
+            adapter: zod.string(),
+            citationIds: zod.array(zod.string()).optional(),
+          })
+          .describe(
+            "Engine reasoning provenance — adapter id and optional cited atom ids\n(matches hauska-engine envelopeSourceSchema).\n",
+          ),
+      })
+      .describe(
+        "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
+      )
+      .nullish()
+      .describe(
+        "Engine-api honesty envelope for the briefing generation run —\nconfidence kind, data vintage, coverage degradation, and source.\nPersisted on `briefing_generation_jobs.engine_honesty`; was\nhandler-only drift before Wave 2 OpenAPI fix.\n",
       ),
   })
   .describe(
@@ -5884,6 +6950,22 @@ export const ListSubmissionFindingsParams = zod.object({
 export const listSubmissionFindingsResponseFindingsItemConfidenceMin = 0;
 export const listSubmissionFindingsResponseFindingsItemConfidenceMax = 1;
 
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceNMin = 0;
+
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
 export const listSubmissionFindingsResponseFindingsItemEngineHonestyOneConfidenceValueMin = 0;
 export const listSubmissionFindingsResponseFindingsItemEngineHonestyOneConfidenceValueMax = 1;
 
@@ -5961,7 +7043,113 @@ export const ListSubmissionFindingsResponse = zod
           confidence: zod
             .number()
             .min(listSubmissionFindingsResponseFindingsItemConfidenceMin)
-            .max(listSubmissionFindingsResponseFindingsItemConfidenceMax),
+            .max(listSubmissionFindingsResponseFindingsItemConfidenceMax)
+            .describe(
+              "Deprecated F4 — use `readContract`. Bare scalar retained for\nbackward compatibility; do not render without width + provenance.\n",
+            ),
+          readContract: zod
+            .object({
+              axes: zod.object({
+                calibratedConfidence: zod
+                  .object({
+                    estimate: zod
+                      .number()
+                      .min(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceEstimateMin,
+                      )
+                      .max(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceEstimateMax,
+                      ),
+                    n: zod
+                      .number()
+                      .min(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceNMin,
+                      ),
+                    intervalWidth: zod
+                      .number()
+                      .min(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                      )
+                      .max(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                      ),
+                    provenance: zod.enum([
+                      "asserted",
+                      "backtest",
+                      "seed",
+                      "live",
+                    ]),
+                  })
+                  .describe(
+                    "F4 widthed point estimate — no bare scalar accessor.",
+                  ),
+                assertedConfidence: zod
+                  .object({
+                    estimate: zod
+                      .number()
+                      .min(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceEstimateMin,
+                      )
+                      .max(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceEstimateMax,
+                      ),
+                    n: zod
+                      .number()
+                      .min(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceNMin,
+                      ),
+                    intervalWidth: zod
+                      .number()
+                      .min(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceIntervalWidthMin,
+                      )
+                      .max(
+                        listSubmissionFindingsResponseFindingsItemReadContractAxesAssertedConfidenceIntervalWidthMax,
+                      ),
+                    provenance: zod.enum([
+                      "asserted",
+                      "backtest",
+                      "seed",
+                      "live",
+                    ]),
+                  })
+                  .describe(
+                    "F4 widthed point estimate — no bare scalar accessor.",
+                  ),
+                consequence: zod
+                  .object({
+                    derivation: zod.object({
+                      source: zod.enum([
+                        "asce7-risk-category",
+                        "ibc-occupancy-importance",
+                        "derived-composite",
+                      ]),
+                      asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                      ibcOccupancyGroup: zod.string().optional(),
+                      ibcImportanceFactor: zod.number().optional(),
+                      jurisdictionCode: zod.string().optional(),
+                    }),
+                    stratum: zod.enum([
+                      "routine",
+                      "elevated",
+                      "critical",
+                      "essential",
+                    ]),
+                    assertedAt: zod.coerce.date(),
+                    auditRef: zod.string().optional(),
+                  })
+                  .describe(
+                    "F6 severity axis — discrete stratum, no invented scalar.",
+                  ),
+              }),
+              assembledAt: zod.coerce.date(),
+              modelAttribution: zod
+                .record(zod.string(), zod.unknown())
+                .nullish(),
+            })
+            .describe(
+              "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+            ),
           lowConfidence: zod
             .boolean()
             .describe(
@@ -6513,6 +7701,22 @@ export const AcceptFindingParams = zod.object({
 export const acceptFindingResponseFindingConfidenceMin = 0;
 export const acceptFindingResponseFindingConfidenceMax = 1;
 
+export const acceptFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const acceptFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const acceptFindingResponseFindingReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const acceptFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const acceptFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const acceptFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const acceptFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const acceptFindingResponseFindingReadContractAxesAssertedConfidenceNMin = 0;
+
+export const acceptFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const acceptFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
 export const acceptFindingResponseFindingEngineHonestyOneConfidenceValueMin = 0;
 export const acceptFindingResponseFindingEngineHonestyOneConfidenceValueMax = 1;
 
@@ -6589,7 +7793,111 @@ export const AcceptFindingResponse = zod
         confidence: zod
           .number()
           .min(acceptFindingResponseFindingConfidenceMin)
-          .max(acceptFindingResponseFindingConfidenceMax),
+          .max(acceptFindingResponseFindingConfidenceMax)
+          .describe(
+            "Deprecated F4 — use `readContract`. Bare scalar retained for\nbackward compatibility; do not render without width + provenance.\n",
+          ),
+        readContract: zod
+          .object({
+            axes: zod.object({
+              calibratedConfidence: zod
+                .object({
+                  estimate: zod
+                    .number()
+                    .min(
+                      acceptFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMin,
+                    )
+                    .max(
+                      acceptFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMax,
+                    ),
+                  n: zod
+                    .number()
+                    .min(
+                      acceptFindingResponseFindingReadContractAxesCalibratedConfidenceNMin,
+                    ),
+                  intervalWidth: zod
+                    .number()
+                    .min(
+                      acceptFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                    )
+                    .max(
+                      acceptFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                    ),
+                  provenance: zod.enum([
+                    "asserted",
+                    "backtest",
+                    "seed",
+                    "live",
+                  ]),
+                })
+                .describe(
+                  "F4 widthed point estimate — no bare scalar accessor.",
+                ),
+              assertedConfidence: zod
+                .object({
+                  estimate: zod
+                    .number()
+                    .min(
+                      acceptFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMin,
+                    )
+                    .max(
+                      acceptFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMax,
+                    ),
+                  n: zod
+                    .number()
+                    .min(
+                      acceptFindingResponseFindingReadContractAxesAssertedConfidenceNMin,
+                    ),
+                  intervalWidth: zod
+                    .number()
+                    .min(
+                      acceptFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMin,
+                    )
+                    .max(
+                      acceptFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMax,
+                    ),
+                  provenance: zod.enum([
+                    "asserted",
+                    "backtest",
+                    "seed",
+                    "live",
+                  ]),
+                })
+                .describe(
+                  "F4 widthed point estimate — no bare scalar accessor.",
+                ),
+              consequence: zod
+                .object({
+                  derivation: zod.object({
+                    source: zod.enum([
+                      "asce7-risk-category",
+                      "ibc-occupancy-importance",
+                      "derived-composite",
+                    ]),
+                    asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                    ibcOccupancyGroup: zod.string().optional(),
+                    ibcImportanceFactor: zod.number().optional(),
+                    jurisdictionCode: zod.string().optional(),
+                  }),
+                  stratum: zod.enum([
+                    "routine",
+                    "elevated",
+                    "critical",
+                    "essential",
+                  ]),
+                  assertedAt: zod.coerce.date(),
+                  auditRef: zod.string().optional(),
+                })
+                .describe(
+                  "F6 severity axis — discrete stratum, no invented scalar.",
+                ),
+            }),
+            assembledAt: zod.coerce.date(),
+            modelAttribution: zod.record(zod.string(), zod.unknown()).nullish(),
+          })
+          .describe(
+            "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+          ),
         lowConfidence: zod
           .boolean()
           .describe("True iff the engine deemed this below the 0.6 threshold."),
@@ -6728,6 +8036,22 @@ export const RejectFindingParams = zod.object({
 export const rejectFindingResponseFindingConfidenceMin = 0;
 export const rejectFindingResponseFindingConfidenceMax = 1;
 
+export const rejectFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const rejectFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const rejectFindingResponseFindingReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const rejectFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const rejectFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const rejectFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const rejectFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const rejectFindingResponseFindingReadContractAxesAssertedConfidenceNMin = 0;
+
+export const rejectFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const rejectFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
 export const rejectFindingResponseFindingEngineHonestyOneConfidenceValueMin = 0;
 export const rejectFindingResponseFindingEngineHonestyOneConfidenceValueMax = 1;
 
@@ -6804,7 +8128,111 @@ export const RejectFindingResponse = zod
         confidence: zod
           .number()
           .min(rejectFindingResponseFindingConfidenceMin)
-          .max(rejectFindingResponseFindingConfidenceMax),
+          .max(rejectFindingResponseFindingConfidenceMax)
+          .describe(
+            "Deprecated F4 — use `readContract`. Bare scalar retained for\nbackward compatibility; do not render without width + provenance.\n",
+          ),
+        readContract: zod
+          .object({
+            axes: zod.object({
+              calibratedConfidence: zod
+                .object({
+                  estimate: zod
+                    .number()
+                    .min(
+                      rejectFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMin,
+                    )
+                    .max(
+                      rejectFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMax,
+                    ),
+                  n: zod
+                    .number()
+                    .min(
+                      rejectFindingResponseFindingReadContractAxesCalibratedConfidenceNMin,
+                    ),
+                  intervalWidth: zod
+                    .number()
+                    .min(
+                      rejectFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                    )
+                    .max(
+                      rejectFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                    ),
+                  provenance: zod.enum([
+                    "asserted",
+                    "backtest",
+                    "seed",
+                    "live",
+                  ]),
+                })
+                .describe(
+                  "F4 widthed point estimate — no bare scalar accessor.",
+                ),
+              assertedConfidence: zod
+                .object({
+                  estimate: zod
+                    .number()
+                    .min(
+                      rejectFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMin,
+                    )
+                    .max(
+                      rejectFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMax,
+                    ),
+                  n: zod
+                    .number()
+                    .min(
+                      rejectFindingResponseFindingReadContractAxesAssertedConfidenceNMin,
+                    ),
+                  intervalWidth: zod
+                    .number()
+                    .min(
+                      rejectFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMin,
+                    )
+                    .max(
+                      rejectFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMax,
+                    ),
+                  provenance: zod.enum([
+                    "asserted",
+                    "backtest",
+                    "seed",
+                    "live",
+                  ]),
+                })
+                .describe(
+                  "F4 widthed point estimate — no bare scalar accessor.",
+                ),
+              consequence: zod
+                .object({
+                  derivation: zod.object({
+                    source: zod.enum([
+                      "asce7-risk-category",
+                      "ibc-occupancy-importance",
+                      "derived-composite",
+                    ]),
+                    asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                    ibcOccupancyGroup: zod.string().optional(),
+                    ibcImportanceFactor: zod.number().optional(),
+                    jurisdictionCode: zod.string().optional(),
+                  }),
+                  stratum: zod.enum([
+                    "routine",
+                    "elevated",
+                    "critical",
+                    "essential",
+                  ]),
+                  assertedAt: zod.coerce.date(),
+                  auditRef: zod.string().optional(),
+                })
+                .describe(
+                  "F6 severity axis — discrete stratum, no invented scalar.",
+                ),
+            }),
+            assembledAt: zod.coerce.date(),
+            modelAttribution: zod.record(zod.string(), zod.unknown()).nullish(),
+          })
+          .describe(
+            "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+          ),
         lowConfidence: zod
           .boolean()
           .describe("True iff the engine deemed this below the 0.6 threshold."),
@@ -7003,6 +8431,22 @@ export const OverrideFindingBody = zod
 export const overrideFindingResponseFindingConfidenceMin = 0;
 export const overrideFindingResponseFindingConfidenceMax = 1;
 
+export const overrideFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMin = 0;
+export const overrideFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMax = 1;
+
+export const overrideFindingResponseFindingReadContractAxesCalibratedConfidenceNMin = 0;
+
+export const overrideFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMin = 0;
+export const overrideFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMax = 1;
+
+export const overrideFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMin = 0;
+export const overrideFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMax = 1;
+
+export const overrideFindingResponseFindingReadContractAxesAssertedConfidenceNMin = 0;
+
+export const overrideFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMin = 0;
+export const overrideFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMax = 1;
+
 export const overrideFindingResponseFindingEngineHonestyOneConfidenceValueMin = 0;
 export const overrideFindingResponseFindingEngineHonestyOneConfidenceValueMax = 1;
 
@@ -7079,7 +8523,111 @@ export const OverrideFindingResponse = zod
         confidence: zod
           .number()
           .min(overrideFindingResponseFindingConfidenceMin)
-          .max(overrideFindingResponseFindingConfidenceMax),
+          .max(overrideFindingResponseFindingConfidenceMax)
+          .describe(
+            "Deprecated F4 — use `readContract`. Bare scalar retained for\nbackward compatibility; do not render without width + provenance.\n",
+          ),
+        readContract: zod
+          .object({
+            axes: zod.object({
+              calibratedConfidence: zod
+                .object({
+                  estimate: zod
+                    .number()
+                    .min(
+                      overrideFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMin,
+                    )
+                    .max(
+                      overrideFindingResponseFindingReadContractAxesCalibratedConfidenceEstimateMax,
+                    ),
+                  n: zod
+                    .number()
+                    .min(
+                      overrideFindingResponseFindingReadContractAxesCalibratedConfidenceNMin,
+                    ),
+                  intervalWidth: zod
+                    .number()
+                    .min(
+                      overrideFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMin,
+                    )
+                    .max(
+                      overrideFindingResponseFindingReadContractAxesCalibratedConfidenceIntervalWidthMax,
+                    ),
+                  provenance: zod.enum([
+                    "asserted",
+                    "backtest",
+                    "seed",
+                    "live",
+                  ]),
+                })
+                .describe(
+                  "F4 widthed point estimate — no bare scalar accessor.",
+                ),
+              assertedConfidence: zod
+                .object({
+                  estimate: zod
+                    .number()
+                    .min(
+                      overrideFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMin,
+                    )
+                    .max(
+                      overrideFindingResponseFindingReadContractAxesAssertedConfidenceEstimateMax,
+                    ),
+                  n: zod
+                    .number()
+                    .min(
+                      overrideFindingResponseFindingReadContractAxesAssertedConfidenceNMin,
+                    ),
+                  intervalWidth: zod
+                    .number()
+                    .min(
+                      overrideFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMin,
+                    )
+                    .max(
+                      overrideFindingResponseFindingReadContractAxesAssertedConfidenceIntervalWidthMax,
+                    ),
+                  provenance: zod.enum([
+                    "asserted",
+                    "backtest",
+                    "seed",
+                    "live",
+                  ]),
+                })
+                .describe(
+                  "F4 widthed point estimate — no bare scalar accessor.",
+                ),
+              consequence: zod
+                .object({
+                  derivation: zod.object({
+                    source: zod.enum([
+                      "asce7-risk-category",
+                      "ibc-occupancy-importance",
+                      "derived-composite",
+                    ]),
+                    asce7RiskCategory: zod.enum(["I", "II", "III", "IV"]),
+                    ibcOccupancyGroup: zod.string().optional(),
+                    ibcImportanceFactor: zod.number().optional(),
+                    jurisdictionCode: zod.string().optional(),
+                  }),
+                  stratum: zod.enum([
+                    "routine",
+                    "elevated",
+                    "critical",
+                    "essential",
+                  ]),
+                  assertedAt: zod.coerce.date(),
+                  auditRef: zod.string().optional(),
+                })
+                .describe(
+                  "F6 severity axis — discrete stratum, no invented scalar.",
+                ),
+            }),
+            assembledAt: zod.coerce.date(),
+            modelAttribution: zod.record(zod.string(), zod.unknown()).nullish(),
+          })
+          .describe(
+            "F4 read-contract object — confidence, n, width, and provenance as\none inseparable object. Every confidence-emitting Cortex surface\nmust return this shape at read time.\n",
+          ),
         lowConfidence: zod
           .boolean()
           .describe("True iff the engine deemed this below the 0.6 threshold."),

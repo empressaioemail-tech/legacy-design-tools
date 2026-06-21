@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BriefingGenerationStatusResponseState } from "./briefingGenerationStatusResponseState";
+import type { EngineHonesty } from "./engineHonesty";
 
 /**
  * Wire envelope for `GET /engagements/{id}/briefing/status`. Job
@@ -44,4 +45,10 @@ longer exist. Mirrors `invalidCitationCount` — the count
 equals the array length when both are present.
  */
   invalidCitations: string[] | null;
+  /** Engine-api honesty envelope for the briefing generation run —
+confidence kind, data vintage, coverage degradation, and source.
+Persisted on `briefing_generation_jobs.engine_honesty`; was
+handler-only drift before Wave 2 OpenAPI fix.
+ */
+  engineHonesty?: EngineHonesty | null;
 }

@@ -6,10 +6,16 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PrivateRestrictionBriefingItem } from "./privateRestrictionBriefingItem";
+import type { ReadContract } from "./readContract";
 
 export interface PrivateRestrictionsBriefing {
   summary: string;
+  /**
+   * Deprecated F4 — use readContract on aggregate briefing.
+   * @deprecated
+   */
   confidence: number;
+  readContract: ReadContract;
   evaluatedAt: Date;
   items: PrivateRestrictionBriefingItem[];
 }

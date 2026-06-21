@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ReadContract } from "@workspace/api-client-react";
+import { ReadContractChrome } from "@workspace/portal-ui";
 import { FileText, Upload, CheckCircle2, ExternalLink } from "lucide-react";
 
 interface EncumbrancesResponse {
@@ -20,6 +22,7 @@ interface EncumbrancesResponse {
       clausePath: string;
       bodyText: string;
       confidence: number;
+      readContract?: ReadContract | null;
       legalWeight: "recorded" | "advisory";
       reasoningSummary?: string;
       sourceCitation: string;
@@ -31,6 +34,7 @@ interface EncumbrancesResponse {
 export interface PrivateRestrictionsBriefingProp {
   summary: string;
   confidence: number;
+  readContract?: ReadContract | null;
   evaluatedAt: string;
   items: unknown[];
 }
@@ -222,9 +226,17 @@ export function EncumbrancesPanel({
               <li key={c.id} className="border rounded-md p-3 text-sm">
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <span className="font-medium">{c.clause.clausePath}</span>
-                  <span className="sc-meta text-xs">
-                    {c.clause.legalWeight === "recorded" ? "Recorded" : "Advisory"} ·{" "}
-                    {(c.clause.confidence * 100).toFixed(0)}%
+                  <span className="sc-meta text-xs flex flex-col items-end gap-1">
+                    <span>
+                      {c.clause.legalWeight === "recorded" ? "Recorded" : "Advisory"}
+                    </span>
+                    {c.clause.readContract ? (
+                      <ReadContractChrome
+                        readContract={c.clause.readContract}
+                        testIdPrefix={`encumbrance-clause-${c.id}`}
+                        showConsequence={false}
+                      />
+                    ) : null}
                   </span>
                 </div>
                 <p className="sc-meta text-xs mb-2">{c.clause.sourceCitation}</p>
@@ -255,10 +267,15 @@ export function EncumbrancesPanel({
           <h4 className="text-xs font-medium sc-meta uppercase tracking-wide mb-2">
             Private restrictions (briefing)
           </h4>
-          <p className="text-xs sc-meta mb-2">
-            Recorded encumbrances — not municipal code. Confidence{" "}
-            {(privateRestrictions.confidence * 100).toFixed(0)}%
-          </p>
+          {privateRestrictions.readContract ? (
+            <div className="mb-2">
+              <ReadContractChrome
+                readContract={privateRestrictions.readContract}
+                testIdPrefix="private-restrictions-briefing"
+                showConsequence={false}
+              />
+            </div>
+          ) : null}
           <p className="text-sm">{privateRestrictions.summary}</p>
         </div>
       ) : null}

@@ -1405,6 +1405,102 @@ export interface EncumbrancesListResponse {
   clauses: EncumbranceClause[];
 }
 
+export type WidthedConfidenceProvenance =
+  (typeof WidthedConfidenceProvenance)[keyof typeof WidthedConfidenceProvenance];
+
+export const WidthedConfidenceProvenance = {
+  asserted: "asserted",
+  backtest: "backtest",
+  seed: "seed",
+  live: "live",
+} as const;
+
+/**
+ * F4 widthed point estimate — no bare scalar accessor.
+ */
+export interface WidthedConfidence {
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  estimate: number;
+  /** @minimum 0 */
+  n: number;
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  intervalWidth: number;
+  provenance: WidthedConfidenceProvenance;
+}
+
+export type ConsequenceAxisDerivationSource =
+  (typeof ConsequenceAxisDerivationSource)[keyof typeof ConsequenceAxisDerivationSource];
+
+export const ConsequenceAxisDerivationSource = {
+  "asce7-risk-category": "asce7-risk-category",
+  "ibc-occupancy-importance": "ibc-occupancy-importance",
+  "derived-composite": "derived-composite",
+} as const;
+
+export type ConsequenceAxisDerivationAsce7RiskCategory =
+  (typeof ConsequenceAxisDerivationAsce7RiskCategory)[keyof typeof ConsequenceAxisDerivationAsce7RiskCategory];
+
+export const ConsequenceAxisDerivationAsce7RiskCategory = {
+  I: "I",
+  II: "II",
+  III: "III",
+  IV: "IV",
+} as const;
+
+export type ConsequenceAxisStratum =
+  (typeof ConsequenceAxisStratum)[keyof typeof ConsequenceAxisStratum];
+
+export const ConsequenceAxisStratum = {
+  routine: "routine",
+  elevated: "elevated",
+  critical: "critical",
+  essential: "essential",
+} as const;
+
+export type ConsequenceAxisDerivation = {
+  source: ConsequenceAxisDerivationSource;
+  asce7RiskCategory: ConsequenceAxisDerivationAsce7RiskCategory;
+  ibcOccupancyGroup?: string;
+  ibcImportanceFactor?: number;
+  jurisdictionCode?: string;
+};
+
+/**
+ * F6 severity axis — discrete stratum, no invented scalar.
+ */
+export interface ConsequenceAxis {
+  derivation: ConsequenceAxisDerivation;
+  stratum: ConsequenceAxisStratum;
+  assertedAt: string;
+  auditRef?: string;
+}
+
+export interface ThreeAxisConfidence {
+  calibratedConfidence: WidthedConfidence;
+  assertedConfidence: WidthedConfidence;
+  consequence: ConsequenceAxis;
+}
+
+export type ReadContractModelAttribution = { [key: string]: unknown } | null;
+
+/**
+ * F4 read-contract object — confidence, n, width, and provenance as
+one inseparable object. Every confidence-emitting Cortex surface
+must return this shape at read time.
+
+ */
+export interface ReadContract {
+  axes: ThreeAxisConfidence;
+  assembledAt: string;
+  modelAttribution?: ReadContractModelAttribution;
+}
+
 export type PrivateRestrictionBriefingItemLegalWeight =
   (typeof PrivateRestrictionBriefingItemLegalWeight)[keyof typeof PrivateRestrictionBriefingItemLegalWeight];
 
@@ -1419,7 +1515,9 @@ export interface PrivateRestrictionBriefingItem {
   clausePath: string;
   bodyText: string;
   legalWeight: PrivateRestrictionBriefingItemLegalWeight;
+  /** @deprecated */
   confidence: number;
+  readContract: ReadContract;
   reasoningSummary?: string | null;
   sourceCitation: string;
   humanVerifiedAt?: string | null;
@@ -1430,7 +1528,12 @@ export interface PrivateRestrictionBriefingItem {
 
 export interface PrivateRestrictionsBriefing {
   summary: string;
+  /**
+   * Deprecated F4 — use readContract on aggregate briefing.
+   * @deprecated
+   */
   confidence: number;
+  readContract: ReadContract;
   evaluatedAt: string;
   items: PrivateRestrictionBriefingItem[];
 }
@@ -1570,6 +1673,56 @@ export const BriefingGenerationStatusResponseState = {
   failed: "failed",
 } as const;
 
+export type EngineHonestyConfidenceKind =
+  (typeof EngineHonestyConfidenceKind)[keyof typeof EngineHonestyConfidenceKind];
+
+export const EngineHonestyConfidenceKind = {
+  calibrated: "calibrated",
+  asserted: "asserted",
+  deterministic: "deterministic",
+} as const;
+
+export type EngineHonestyConfidence = {
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  value: number;
+  kind: EngineHonestyConfidenceKind;
+};
+
+export type EngineHonestyCoverage = {
+  degraded: boolean;
+  reason?: string;
+};
+
+/**
+ * Engine reasoning provenance — adapter id and optional cited atom ids
+(matches hauska-engine envelopeSourceSchema).
+
+ */
+export type EngineHonestySource = {
+  adapter: string;
+  citationIds?: string[];
+};
+
+/**
+ * Buyer-facing honesty slice of the engine-api EngineEnvelope —
+confidence kind, data acquisition vintage, coverage degradation,
+and reasoning source. Forwarded by cortex-api without flattening.
+
+ */
+export interface EngineHonesty {
+  confidence: EngineHonestyConfidence;
+  /** Acquisition date for underlying data, when known. */
+  dataVintage: string | null;
+  coverage: EngineHonestyCoverage;
+  /** Engine reasoning provenance — adapter id and optional cited atom ids
+(matches hauska-engine envelopeSourceSchema).
+ */
+  source: EngineHonestySource;
+}
+
 /**
  * Wire envelope for `GET /engagements/{id}/briefing/status`. Job
 state is process-local and best-effort; the persisted briefing
@@ -1607,6 +1760,12 @@ longer exist. Mirrors `invalidCitationCount` — the count
 equals the array length when both are present.
  */
   invalidCitations: string[] | null;
+  /** Engine-api honesty envelope for the briefing generation run —
+confidence kind, data vintage, coverage degradation, and source.
+Persisted on `briefing_generation_jobs.engine_honesty`; was
+handler-only drift before Wave 2 OpenAPI fix.
+ */
+  engineHonesty?: EngineHonesty | null;
 }
 
 /**
@@ -1660,6 +1819,8 @@ regression auditors specifically want to spot when
 comparing recent runs. Null while pending.
  */
   invalidCitationCount: number | null;
+  /** Engine-api honesty envelope for this run. */
+  engineHonesty?: EngineHonesty | null;
 }
 
 /**
@@ -4498,56 +4659,6 @@ export interface FindingSourceRef {
   label: string;
 }
 
-export type EngineHonestyConfidenceKind =
-  (typeof EngineHonestyConfidenceKind)[keyof typeof EngineHonestyConfidenceKind];
-
-export const EngineHonestyConfidenceKind = {
-  calibrated: "calibrated",
-  asserted: "asserted",
-  deterministic: "deterministic",
-} as const;
-
-export type EngineHonestyConfidence = {
-  /**
-   * @minimum 0
-   * @maximum 1
-   */
-  value: number;
-  kind: EngineHonestyConfidenceKind;
-};
-
-export type EngineHonestyCoverage = {
-  degraded: boolean;
-  reason?: string;
-};
-
-/**
- * Engine reasoning provenance — adapter id and optional cited atom ids
-(matches hauska-engine envelopeSourceSchema).
-
- */
-export type EngineHonestySource = {
-  adapter: string;
-  citationIds?: string[];
-};
-
-/**
- * Buyer-facing honesty slice of the engine-api EngineEnvelope —
-confidence kind, data acquisition vintage, coverage degradation,
-and reasoning source. Forwarded by cortex-api without flattening.
-
- */
-export interface EngineHonesty {
-  confidence: EngineHonestyConfidence;
-  /** Acquisition date for underlying data, when known. */
-  dataVintage: string | null;
-  coverage: EngineHonestyCoverage;
-  /** Engine reasoning provenance — adapter id and optional cited atom ids
-(matches hauska-engine envelopeSourceSchema).
- */
-  source: EngineHonestySource;
-}
-
 /**
  * One AIR-1 compliance finding. Wire shape mirrors
 `findingsMock.ts:82-103` so the V1-6 frontend swap is a
@@ -4574,10 +4685,15 @@ id failed to resolve.
   text: string;
   citations: FindingCitation[];
   /**
+   * Deprecated F4 — use `readContract`. Bare scalar retained for
+backward compatibility; do not render without width + provenance.
+
+   * @deprecated
    * @minimum 0
    * @maximum 1
    */
   confidence: number;
+  readContract: ReadContract;
   /** True iff the engine deemed this below the 0.6 threshold. */
   lowConfidence: boolean;
   reviewerStatusBy: FindingActor | null;

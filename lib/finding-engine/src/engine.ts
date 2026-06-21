@@ -75,6 +75,10 @@ export interface GenerateFindingsOptions {
    * touching the production ulid path.
    */
   ulid?: () => string;
+  /** S5 — override Grok model id for consequence-gated routing. */
+  grokModel?: string;
+  /** S5 — optional ensemble on high-consequence stratum (asserted weights). */
+  ensembleEnabled?: boolean;
 }
 
 /**
@@ -231,7 +235,15 @@ export async function generateFindings(
         "AIR_FINDING_LLM_MODE=grok requires a Grok client to be passed",
       );
     }
-    drafts = await callGrokGenerator(options.grokClient, input);
+    drafts = await callGrokGenerator(
+      options.grokClient,
+      input,
+      options.grokModel,
+    );
+    if (options.ensembleEnabled && options.grokModel) {
+      const secondary = await callGrokGenerator(options.grokClient, input);
+      drafts = [...drafts, ...secondary];
+    }
   } else if (mode === "anthropic") {
     if (!options.anthropicClient) {
       throw new FindingGeneratorError(

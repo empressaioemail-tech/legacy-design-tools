@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BriefingGenerationRunState } from "./briefingGenerationRunState";
+import type { EngineHonesty } from "./engineHonesty";
 
 /**
  * One historical briefing-generation attempt for an engagement.
@@ -40,4 +41,6 @@ regression auditors specifically want to spot when
 comparing recent runs. Null while pending.
  */
   invalidCitationCount: number | null;
+  /** Engine-api honesty envelope for this run. */
+  engineHonesty?: EngineHonesty | null;
 }

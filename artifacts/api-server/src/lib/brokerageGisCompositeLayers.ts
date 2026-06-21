@@ -7,6 +7,11 @@ import {
   type EngineEnvelope,
   type EngineHonesty,
 } from "../../../../lib/engine-core/src/envelope";
+import {
+  legacyHonestyToReadContract,
+  readContractForWire,
+} from "@workspace/engine-core";
+import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import type { ArcGisGeoJsonFeatureCollection } from "@workspace/adapters/arcgis";
 import type { GisLayerBbox } from "./brokerageGisLayers";
 
@@ -185,16 +190,19 @@ export function queryCompositeLayer(input: {
   layer: CompositeLayerKey;
   bbox: GisLayerBbox;
   fixture?: boolean;
-}): EngineEnvelope<CompositeLayerPayload> {
+}): EngineEnvelope<CompositeLayerPayload> & { readContract: ReadContract } {
   const payload = buildCompositeLayerFixture(input.layer, input.bbox);
   const honesty = defaultHonesty(`brokerage:composite-${input.layer}`, true);
-  return wrapEngineEnvelope(
-    {
-      ...payload,
-      fixture: input.fixture ?? payload.fixture,
-    },
-    honesty,
-  );
+  return {
+    ...wrapEngineEnvelope(
+      {
+        ...payload,
+        fixture: input.fixture ?? payload.fixture,
+      },
+      honesty,
+    ),
+    readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+  };
 }
 
 export function listCompositeLayerEndpoints(): Array<{

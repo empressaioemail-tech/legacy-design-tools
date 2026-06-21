@@ -201,12 +201,22 @@ export function FindingDetailPanel({
       </div>
 
       <div className="p-4 flex flex-col gap-4 flex-1 overflow-y-auto sc-scroll">
-        {"engineHonesty" in finding && finding.engineHonesty ? (
+        {"engineHonesty" in finding && (finding.readContract || finding.engineHonesty) ? (
           <EngineHonestyChrome
+            readContract={
+              "readContract" in finding && finding.readContract
+                ? (finding.readContract as Parameters<
+                    typeof EngineHonestyChrome
+                  >[0]["readContract"])
+                : undefined
+            }
             honesty={
-              finding.engineHonesty as Parameters<
-                typeof EngineHonestyChrome
-              >[0]["honesty"]
+              !("readContract" in finding && finding.readContract) &&
+              finding.engineHonesty
+                ? (finding.engineHonesty as Parameters<
+                    typeof EngineHonestyChrome
+                  >[0]["honesty"])
+                : undefined
             }
             testIdPrefix={`${testIdPrefix}-honesty`}
           />

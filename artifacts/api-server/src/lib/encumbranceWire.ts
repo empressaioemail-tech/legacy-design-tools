@@ -1,3 +1,8 @@
+import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import {
+  readContractFromExtractConfidence,
+  readContractForWire,
+} from "@workspace/engine-core";
 import {
   RECORDED_INSTRUMENT_SCHEMA,
   RESTRICTION_CLAUSE_SCHEMA,
@@ -40,7 +45,9 @@ export interface PrivateRestrictionBriefingItem {
   clausePath: string;
   bodyText: string;
   legalWeight: "recorded" | "advisory";
+  /** @deprecated Use readContract */
   confidence: number;
+  readContract: ReadContract;
   reasoningSummary: string | null;
   sourceCitation: string;
   humanVerifiedAt: string | null;
@@ -51,7 +58,9 @@ export interface PrivateRestrictionBriefingItem {
 
 export interface PrivateRestrictionsBriefing {
   summary: string;
+  /** @deprecated Use readContract */
   confidence: number;
+  readContract: ReadContract;
   evaluatedAt: string;
   items: PrivateRestrictionBriefingItem[];
 }
@@ -142,13 +151,21 @@ export function buildPrivateRestrictionsBriefing(
 
   const items: PrivateRestrictionBriefingItem[] = clauses.map((c) => {
     const inst = instruments.find((i) => i.id === c.instrumentId);
+    const confidence = c.clause.confidence;
+    const readContract = readContractForWire(
+      readContractFromExtractConfidence(confidence, {
+        humanVerified: !!c.clause.humanVerifiedAt,
+        assembledAt: c.clause.evaluatedAt,
+      }),
+    );
     return {
       clauseId: c.id,
       instrumentId: c.instrumentId,
       clausePath: c.clause.clausePath,
       bodyText: c.clause.bodyText,
       legalWeight: c.clause.legalWeight,
-      confidence: c.clause.confidence,
+      confidence,
+      readContract,
       reasoningSummary: c.clause.reasoningSummary ?? null,
       sourceCitation: c.clause.sourceCitation,
       humanVerifiedAt: c.clause.humanVerifiedAt ?? null,
@@ -165,6 +182,12 @@ export function buildPrivateRestrictionsBriefing(
     .sort()
     .at(-1)!;
   const verifiedCount = items.filter((i) => i.humanVerifiedAt).length;
+  const aggregateReadContract = readContractForWire(
+    readContractFromExtractConfidence(avgConfidence, {
+      n: verifiedCount,
+      assembledAt: latestEval,
+    }),
+  );
 
   return {
     summary: [
@@ -175,6 +198,7 @@ export function buildPrivateRestrictionsBriefing(
         : "No clauses human-verified yet; treat as machine-extracted until reviewed.",
     ].join(" "),
     confidence: Math.round(avgConfidence * 1000) / 1000,
+    readContract: aggregateReadContract,
     evaluatedAt: latestEval,
     items,
   };

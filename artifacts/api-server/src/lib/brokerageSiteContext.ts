@@ -19,7 +19,12 @@ import {
 } from "@workspace/adapters";
 import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
+import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import type { EngineHonesty } from "@workspace/engine-core";
+import {
+  legacyHonestyToReadContract,
+  readContractForWire,
+} from "@workspace/engine-core";
 import { createAdapterResponseCache } from "./adapterCache";
 import { placeKeyFromCoords } from "./placeLayerUtils";
 import {
@@ -58,6 +63,8 @@ export interface BrokerageSiteContextLayer {
   error?: { code: string; message: string };
   /** Sealed envelope honesty slice per layer (vintage + confidence). */
   engineHonesty?: EngineHonesty | null;
+  /** F4 read-contract — authoritative widthed confidence surface. */
+  readContract?: ReadContract | null;
 }
 
 export interface BrokerageSiteContext {
@@ -76,6 +83,8 @@ export interface FetchBrokerageSiteContextInput {
   packageTier?: InvestorPackageTier | null;
   brokerageAuthTier?: "operator" | "extension_public" | "user" | null;
   depthMeterRemaining?: number | null;
+  /** W4 — warming mode: Cotality from snapshots only; no live Cotality upstream. */
+  snapshotsOnly?: boolean;
 }
 
 function layerHonestyFromPayload(
@@ -208,6 +217,10 @@ function outcomeToLayer(
 
   if (outcome.status === "ok" && outcome.result) {
     const { result } = outcome;
+    const engineHonesty = layerHonestyFromPayload(
+      result.payload,
+      outcome.adapterKey,
+    );
     return {
       ...base,
       status: "ok",
@@ -215,10 +228,10 @@ function outcomeToLayer(
       summary: layerSummary(result.layerKind, result.payload),
       snapshotDate: result.snapshotDate,
       payload: result.payload,
-      engineHonesty: layerHonestyFromPayload(
-        result.payload,
-        outcome.adapterKey,
-      ),
+      engineHonesty,
+      readContract: engineHonesty
+        ? readContractForWire(legacyHonestyToReadContract(engineHonesty))
+        : null,
     };
   }
 
@@ -397,7 +410,11 @@ export async function fetchBrokerageSiteContext(
   const missingAdapters = adapters.filter((a) => !archived.has(a.adapterKey));
 
   let liveOutcomes: AdapterRunOutcome[] = [];
-  if (missingAdapters.length > 0) {
+  const adaptersToFetchLive = input.snapshotsOnly
+    ? missingAdapters.filter((a) => !isMeteredCotalityAdapter(a.adapterKey))
+    : missingAdapters;
+
+  if (adaptersToFetchLive.length > 0) {
     const cache = createAdapterResponseCache();
     const budgetAc = new AbortController();
     const budgetTimer = setTimeout(
@@ -406,7 +423,7 @@ export async function fetchBrokerageSiteContext(
     );
     try {
       liveOutcomes = await runAdapters({
-        adapters: [...missingAdapters],
+        adapters: [...adaptersToFetchLive],
         context: {
           parcel: {
             latitude,
@@ -454,16 +471,28 @@ export async function fetchBrokerageSiteContext(
     const archivedOutcome = archived.get(a.adapterKey);
     if (archivedOutcome) return archivedOutcome;
     return (
-      liveOutcomes.find((o) => o.adapterKey === a.adapterKey) ?? {
-        adapterKey: a.adapterKey,
-        tier: a.tier,
-        layerKind: a.layerKind,
-        status: "failed" as const,
-        error: {
-          code: "unknown" as const,
-          message: "No layer outcome",
-        },
-      }
+      liveOutcomes.find((o) => o.adapterKey === a.adapterKey) ??
+      (input.snapshotsOnly && isMeteredCotalityAdapter(a.adapterKey)
+        ? {
+            adapterKey: a.adapterKey,
+            tier: a.tier,
+            layerKind: a.layerKind,
+            status: "no-coverage" as const,
+            error: {
+              code: "no-coverage" as const,
+              message: "W4: no snapshot — live Cotality disabled during warming",
+            },
+          }
+        : {
+            adapterKey: a.adapterKey,
+            tier: a.tier,
+            layerKind: a.layerKind,
+            status: "failed" as const,
+            error: {
+              code: "unknown" as const,
+              message: "No layer outcome",
+            },
+          })
     );
   });
 

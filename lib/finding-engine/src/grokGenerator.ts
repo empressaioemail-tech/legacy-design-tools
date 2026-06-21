@@ -31,11 +31,12 @@ export function resolveGrokFindingModel(): string {
 export async function callGrokGenerator(
   client: GrokClient,
   input: GenerateFindingsInput,
+  modelOverride?: string,
 ): Promise<RawFindingDraft[]> {
   let text: string;
   try {
     text = await client.completeChat({
-      model: resolveGrokFindingModel(),
+      model: modelOverride ?? resolveGrokFindingModel(),
       maxTokens: FINDING_GROK_MAX_TOKENS,
       system: FINDING_SYSTEM_PROMPT,
       user: buildUserPrompt(input),

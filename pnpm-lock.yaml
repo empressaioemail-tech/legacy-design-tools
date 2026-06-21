@@ -184,8 +184,8 @@ importers:
         specifier: ^7.19.0
         version: 7.19.0
       '@hauska/atom-contract':
-        specifier: file:../../vendor/hauska-atom-contract-1.2.0.tgz
-        version: file:vendor/hauska-atom-contract-1.2.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: file:../../vendor/hauska-atom-contract-1.4.0.tgz
+        version: file:vendor/hauska-atom-contract-1.4.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -1657,6 +1657,9 @@ importers:
 
   lib/engine-core:
     dependencies:
+      '@hauska/atom-contract':
+        specifier: file:../../vendor/hauska-atom-contract-1.4.0.tgz
+        version: file:vendor/hauska-atom-contract-1.4.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/codes':
         specifier: workspace:*
         version: link:../codes
@@ -1776,6 +1779,18 @@ importers:
         specifier: 'catalog:'
         version: 25.3.5
 
+  lib/map-embed:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
   lib/mnml-client:
     devDependencies:
       '@types/node':
@@ -1837,6 +1852,9 @@ importers:
 
   lib/portal-ui:
     dependencies:
+      '@hauska/atom-contract':
+        specifier: file:../../vendor/hauska-atom-contract-1.4.0.tgz
+        version: file:vendor/hauska-atom-contract-1.4.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.90.21(react@19.1.0)
@@ -1852,6 +1870,9 @@ importers:
       '@workspace/briefing-diff':
         specifier: workspace:*
         version: link:../briefing-diff
+      '@workspace/engine-core':
+        specifier: workspace:*
+        version: link:../engine-core
       '@workspace/server-actor-ids':
         specifier: workspace:*
         version: link:../server-actor-ids
@@ -2181,9 +2202,9 @@ packages:
     resolution: {integrity: sha512-vhJdXwlhf0finvxzfvqXQ1bAJx3zwDSEO1m3SNXkVuD68IziibfMTWwNWabvl7DuEBZkaEGIJM02ZXnG+F2eUg==}
     engines: {node: '>=18.18.0'}
 
-  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.2.0.tgz':
-    resolution: {integrity: sha512-Tzd9oXHmFnUTKAAoqloSOLyhIikAHfoxifJFzkPseusxHVxD635Y/qkMcxa63XIH4DHn8Oa7um5CryxvzTIUdg==, tarball: file:vendor/hauska-atom-contract-1.2.0.tgz}
-    version: 1.2.0
+  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.4.0.tgz':
+    resolution: {integrity: sha512-zUvwrXDYp7U5a9SAk4vw1pVrtEaRO/qDPAzrsoq88pzd6Kpo1qBNsnP4d/tzPX+0ZwESrim93cT0YK4Pav7hIQ==, tarball: file:vendor/hauska-atom-contract-1.4.0.tgz}
+    version: 1.4.0
     engines: {node: '>=18.18.0'}
 
   '@hono/node-server@1.19.14':
@@ -6618,7 +6639,7 @@ snapshots:
       - sql.js
       - sqlite3
 
-  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.2.0.tgz(@types/pg@8.18.0)(pg@8.20.0)':
+  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.4.0.tgz(@types/pg@8.18.0)(pg@8.20.0)':
     dependencies:
       drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
       zod: 3.25.76

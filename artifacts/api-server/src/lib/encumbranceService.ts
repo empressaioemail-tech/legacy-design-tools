@@ -20,6 +20,10 @@ import {
   type EncumbranceInstrumentWire,
   type EncumbrancesListWire,
 } from "./encumbranceWire";
+import {
+  readContractForWire,
+  readContractFromExtractConfidence,
+} from "@workspace/engine-core";
 
 export type { ParsedPdfUpload };
 
@@ -64,13 +68,24 @@ async function loadEncumbrancesFromInstrumentRows(
 
   return {
     instruments: instrumentRows.map(wireInstrumentRow),
-    clauses: clauseRows.map((row) => ({
-      id: row.id,
-      instrumentId: row.instrumentId,
-      clause: rowToRestrictionClauseAtom(row),
-      sourcePage: row.sourcePage,
-      createdAt: row.createdAt.toISOString(),
-    })),
+    clauses: clauseRows.map((row) => {
+      const atom = rowToRestrictionClauseAtom(row);
+      return {
+        id: row.id,
+        instrumentId: row.instrumentId,
+        clause: {
+          ...atom,
+          readContract: readContractForWire(
+            readContractFromExtractConfidence(atom.confidence, {
+              humanVerified: !!atom.humanVerifiedAt,
+              assembledAt: atom.evaluatedAt,
+            }),
+          ),
+        },
+        sourcePage: row.sourcePage,
+        createdAt: row.createdAt.toISOString(),
+      };
+    }),
   };
 }
 

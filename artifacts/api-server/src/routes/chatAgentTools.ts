@@ -53,6 +53,12 @@ import {
   ESR_NUMBER_RE,
 } from "@workspace/atoms-l-surface";
 import { logger } from "../lib/logger";
+import {
+  deriveFindingReadContract,
+  readContractForWire,
+} from "@workspace/engine-core";
+import { loadEngagementTenantFields } from "../lib/gateFrontSeamEngagement";
+import { resolveJurisdictionTenant } from "../lib/atomAdjudicationEvidenceLedger";
 import { recordLSurfaceEvent } from "../lib/lSurfaceRoute";
 import { parseCreateResponseTaskBody } from "./responseTasks.logic";
 import {
@@ -223,7 +229,9 @@ export function composeAgentTaskDescription(input: {
   findingId: string | null;
   sourceClientCommentId: string | null;
   severity: string | null;
+  /** @deprecated Use readContractSummary */
   confidence: number | null;
+  readContractSummary: string | null;
 }): string {
   const src: string[] = [];
   if (input.findingId) src.push(`finding ${input.findingId}`);
@@ -231,7 +239,11 @@ export function composeAgentTaskDescription(input: {
     src.push(`client comment ${input.sourceClientCommentId}`);
   }
   if (input.severity) src.push(`severity ${input.severity}`);
-  if (input.confidence !== null) src.push(`confidence ${input.confidence}`);
+  if (input.readContractSummary) {
+    src.push(`read-contract ${input.readContractSummary}`);
+  } else if (input.confidence !== null) {
+    src.push(`confidence ${input.confidence}`);
+  }
   const srcSuffix = src.length > 0 ? ` (source: ${src.join("; ")})` : "";
   const footer = `[AI-drafted by the Cortex in-app agent] ${input.reasoning}${srcSuffix}`;
   const base = input.description.trim();
@@ -275,7 +287,7 @@ export const CHAT_AGENT_TOOLS: AgentToolDefinition[] = [
   {
     name: "list_findings",
     description:
-      "List the compliance findings on the current engagement's most recent submission, including severity and confidence. Use these when drafting response tasks so severity/confidence propagate onto the task.",
+      "List the compliance findings on the current engagement's most recent submission, including severity and readContract (widthed confidence + provenance). Use these when drafting response tasks so severity and readContract propagate onto the task.",
     input_schema: EMPTY_INPUT,
   },
   {
@@ -349,7 +361,7 @@ export const CHAT_AGENT_TOOLS: AgentToolDefinition[] = [
   {
     name: "create_response_tasks",
     description:
-      "Create one or more response tasks (L1) on the current engagement. Use this to push review findings or client-comment responses onto the Response Tasks board. Each task is created with state 'open', is reversible (it can be cancelled), and is stamped as AI-drafted. Always provide a one-line `reasoning`, and cite the source finding/comment plus its severity/confidence when the task derives from one.",
+      "Create one or more response tasks (L1) on the current engagement. Use this to push review findings or client-comment responses onto the Response Tasks board. Each task is created with state 'open', is reversible (it can be cancelled), and is stamped as AI-drafted. Always provide a one-line `reasoning`, and cite the source finding/comment plus its severity and readContract summary when the task derives from one.",
     input_schema: {
       type: "object",
       properties: {
@@ -383,9 +395,14 @@ export const CHAT_AGENT_TOOLS: AgentToolDefinition[] = [
                 type: "string",
                 description: "Severity carried over from the source finding.",
               },
+              readContractSummary: {
+                type: "string",
+                description:
+                  "Read-contract summary from list_findings (provenance + interval width). Prefer over bare confidence.",
+              },
               confidence: {
                 type: "number",
-                description: "Confidence carried over from the source finding.",
+                description: "Deprecated — use readContractSummary from list_findings.",
               },
               dueAt: {
                 type: "string",
@@ -550,7 +567,7 @@ export function buildAgentToolGuidance(input: {
     "When the operator asks you to push review findings or comment responses to " +
     "the task board, call create_response_tasks (it accepts one task or a batch). " +
     "Every task you create must carry a one-line `reasoning`; when a task derives " +
-    "from a finding, pass its `findingId`, `severity`, and `confidence` so the " +
+    "from a finding, pass its `findingId`, `severity`, and `readContractSummary` so the " +
     "provenance propagates. Agent-created tasks are reversible (the operator can " +
     "cancel them) and are marked as AI-drafted.\n\n" +
     "For detail-callout specs (L4) and product-spec references (L5), use " +
@@ -632,7 +649,7 @@ async function handleReadSheet(
 
 async function handleListFindings(ctx: ToolContext): Promise<ToolRunResult> {
   const [latest] = await db
-    .select({ id: submissions.id })
+    .select({ id: submissions.id, engagementId: submissions.engagementId })
     .from(submissions)
     .where(eq(submissions.engagementId, ctx.engagementId))
     .orderBy(desc(submissions.createdAt))
@@ -640,12 +657,20 @@ async function handleListFindings(ctx: ToolContext): Promise<ToolRunResult> {
   if (!latest) {
     return { resultText: asJson({ findingCount: 0, findings: [] }) };
   }
+
+  const engFields = await loadEngagementTenantFields(latest.engagementId);
+  const jurisdictionTenant =
+    engFields.found === true
+      ? resolveJurisdictionTenant(engFields)
+      : null;
+
   const rows = await db
     .select({
       id: findings.atomId,
       severity: findings.severity,
       category: findings.category,
       confidence: findings.confidence,
+      citations: findings.citations,
       status: findings.status,
       text: findings.text,
       elementRef: findings.elementRef,
@@ -653,11 +678,33 @@ async function handleListFindings(ctx: ToolContext): Promise<ToolRunResult> {
     .from(findings)
     .where(eq(findings.submissionId, latest.id))
     .limit(MAX_LIST_ROWS);
+
+  const wireFindings = await Promise.all(
+    rows.map(async (row) => {
+      const readContract = readContractForWire(
+        await deriveFindingReadContract({
+          citations: row.citations,
+          jurisdictionTenant,
+          rawModelConfidence: Number(row.confidence),
+        }),
+      );
+      return {
+        id: row.id,
+        severity: row.severity,
+        category: row.category,
+        status: row.status,
+        text: row.text,
+        elementRef: row.elementRef,
+        readContract,
+      };
+    }),
+  );
+
   return {
     resultText: asJson({
       submissionId: latest.id,
-      findingCount: rows.length,
-      findings: rows,
+      findingCount: wireFindings.length,
+      findings: wireFindings,
     }),
   };
 }
@@ -957,6 +1004,7 @@ async function handleCreateResponseTasks(
       };
     }
     const severity = optionalString(raw.severity);
+    const readContractSummary = optionalString(raw.readContractSummary);
     const confidence =
       typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
         ? raw.confidence
@@ -973,6 +1021,7 @@ async function handleCreateResponseTasks(
         sourceClientCommentId: optionalString(raw.sourceClientCommentId),
         severity,
         confidence,
+        readContractSummary,
       }),
       findingId: raw.findingId,
       sourceClientCommentId: raw.sourceClientCommentId,
@@ -1021,6 +1070,7 @@ async function handleCreateResponseTasks(
         aiOriginated: true,
         agentReasoning: reasoning,
         ...(severity ? { severity } : {}),
+        ...(readContractSummary ? { readContractSummary } : {}),
         ...(confidence !== null ? { confidence } : {}),
       },
     });

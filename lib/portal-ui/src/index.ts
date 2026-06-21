@@ -228,6 +228,7 @@ export { LowConfidencePill } from "./components/LowConfidencePill";
 export type { LowConfidencePillProps } from "./components/LowConfidencePill";
 export { EngineHonestyChrome } from "./components/EngineHonestyChrome";
 export type { EngineHonesty } from "./components/EngineHonestyChrome";
+export { ReadContractChrome } from "./components/ReadContractChrome";
 
 // Architect-side AIR-1 findings surfaces (Task #421 / V1-1 / V1-7).
 export {

@@ -51,3 +51,51 @@ export {
   unwrapEngineEnvelope,
   wrapEngineEnvelope,
 } from "./envelope";
+export type {
+  RichLedgerPayload,
+  LedgerSourceEventType,
+  AdjudicatorAtJudgment,
+  RawCountStamp,
+} from "./rawLedger";
+export {
+  buildRichLedgerPayload,
+  adjudicatorFromActor,
+} from "./rawLedger";
+export type {
+  RawConflictInput,
+  RawConflictLogPayload,
+} from "./rawConflictLog";
+export {
+  SYNTHESIS_CONFLICT_EVENT_TYPE,
+  buildRawConflictLogPayload,
+  deriveConflictTypeAtRead,
+} from "./rawConflictLog";
+export {
+  intervalWidthFromSignalCount,
+  legacyHonestyToReadContract,
+  legacyEnvelopeConfidenceToReadContract,
+  readContractToEngineHonesty,
+  readContractForWire,
+  isLowConfidenceReadContract,
+  routineConsequenceAxis,
+} from "./readContractDerive";
+export {
+  deriveFindingReadContract,
+  type DeriveFindingReadContractInput,
+} from "./findingReadContract";
+export {
+  readContractFromExtractConfidence,
+} from "./encumbranceReadContract";
+export {
+  type CodeSectionConsequenceMetadata,
+  type ConsequenceGatedRouteDecision,
+  type ConsequenceStratum,
+  type ModelRoutingTier,
+  deriveConsequenceAxisFromMetadata,
+  maxConsequenceStratum,
+  resolveConsequenceEnsembleEnabled,
+  resolveConsequenceGatedRoute,
+  resolveHighConsequenceGrokModel,
+  resolveLowConsequenceGrokModel,
+  stratumFromAsce7RiskCategory,
+} from "./consequenceGatedRouting";
