@@ -60,6 +60,7 @@ describe("filterApplicableAdapters", () => {
         "usgs:ned-elevation",
         ...COTALITY_ADAPTER_KEYS,
         "tceq:edwards-aquifer",
+        "texas:rrc-og",
         "bastrop-tx:parcels",
         "bastrop-tx:zoning",
         "bastrop-tx:floodplain",
