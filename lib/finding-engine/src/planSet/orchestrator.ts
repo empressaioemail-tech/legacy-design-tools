@@ -22,6 +22,8 @@ import {
   toPlanSetPieceInputs,
 } from "./classifier";
 import { deduplicateFindings } from "./dedupe";
+import { mergeRetrievalUsageEvents } from "../codeRetrieval";
+import { buildDeduplicatedReferences } from "../references";
 import { filterCodeSectionsForDiscipline } from "./disciplineScope";
 import type {
   OrchestratedRunMetadata,
@@ -77,6 +79,7 @@ export async function generateOrchestratedFindings(
   const allFindings: GenerateFindingsResult["findings"] = [];
   const invalidCitations: string[] = [];
   const discardedFindings: GenerateFindingsResult["discardedFindings"][number][] = [];
+  const usageEventBatches: GenerateFindingsResult["usageEvents"][number][][] = [];
   let producer: GenerateFindingsResult["producer"] = "mock";
   const generatedAt = options.now?.() ?? new Date();
 
@@ -115,9 +118,14 @@ export async function generateOrchestratedFindings(
     }
     invalidCitations.push(...pass.invalidCitations);
     discardedFindings.push(...pass.discardedFindings);
+    usageEventBatches.push([...pass.usageEvents]);
   }
 
   const { findings, deduplicatedCount } = deduplicateFindings(allFindings);
+  const references = buildDeduplicatedReferences(
+    findings,
+    input.baseInput.codeSections,
+  );
 
   return {
     findings,
@@ -125,6 +133,11 @@ export async function generateOrchestratedFindings(
     discardedFindings,
     generatedAt,
     producer,
+    references,
+    usageEvents: mergeRetrievalUsageEvents([
+      input.baseInput.codeRetrieval?.usageEvents ?? [],
+      ...usageEventBatches,
+    ]),
     orchestration: {
       orchestrated: true,
       disciplinesRun,

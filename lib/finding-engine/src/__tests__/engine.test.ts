@@ -50,11 +50,22 @@ function makeInput(
       {
         atomId: "code-bastrop-udc-4-3-2-b",
         label: "Bastrop UDC §4.3.2.B",
+        provenance: {
+          sectionIdentifier: "§4.3.2.B",
+          sectionTitle: "Setback",
+          edition: "2020",
+          sourceUrl: "https://example.test/udc/4-3-2-b",
+        },
       },
     ],
     bimElements: overrides.bimElements ?? [
       { ref: "wall:north-side-l2", label: "North wall, L2" },
     ],
+    applicableIccEditions: overrides.applicableIccEditions,
+    codeRetrieval: overrides.codeRetrieval,
+    planSetPieces: overrides.planSetPieces,
+    disciplineScope: overrides.disciplineScope,
+    attachedSheetImages: overrides.attachedSheetImages,
   };
 }
 
@@ -101,6 +112,8 @@ describe("generateFindings (mock mode)", () => {
     const result = await generateFindings(makeInput(), { mode: "mock" });
     expect(result.invalidCitations).toEqual([]);
     expect(result.discardedFindings).toEqual([]);
+    expect(result.references.length).toBeGreaterThan(0);
+    expect(result.usageEvents).toEqual([]);
   });
 
   it("stamps each finding with its submission id verbatim", async () => {
@@ -119,6 +132,24 @@ describe("generateFindings (mock mode)", () => {
       expect(f.submissionId).toBe("sub-deadbeef-1234");
       expect(f.atomId.startsWith("finding:sub-deadbeef-1234:")).toBe(true);
     }
+  });
+
+  it("echoes retrieval usage events from input codeRetrieval", async () => {
+    const usageEvents = [
+      {
+        query: "setback compliance",
+        retrievedAtomIds: ["code-bastrop-udc-4-3-2-b"],
+        retrievalMode: "substrate-gate",
+        occurredAt: "2026-06-22T12:00:00.000Z",
+      },
+    ];
+    const result = await generateFindings(
+      makeInput({
+        codeRetrieval: { mode: "gate", usageEvents },
+      }),
+      { mode: "mock" },
+    );
+    expect(result.usageEvents).toEqual(usageEvents);
   });
 });
 

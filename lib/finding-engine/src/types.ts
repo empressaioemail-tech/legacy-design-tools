@@ -113,6 +113,17 @@ export interface CodeSectionWebProvenance {
   unverifiedWebSource?: boolean;
 }
 
+/** Structured provenance on a retrieved code-section atom (gate allow-list). */
+export interface CodeSectionProvenance {
+  /** Section number or identifier (e.g. `R301.2(1)`, `§404`). */
+  sectionIdentifier: string;
+  sectionTitle: string;
+  edition: string;
+  sourceUrl: string;
+  /** Model code title when known (e.g. `IBC`, `IPMC`). */
+  codeTitle?: string;
+}
+
 export interface CodeSectionInput {
   /** The atom id used in `[[CODE:<atomId>]]` tokens. */
   atomId: string;
@@ -120,6 +131,12 @@ export interface CodeSectionInput {
   label: string;
   /** Optional snippet the prompt may quote. */
   snippet?: string;
+  /**
+   * Gate-returned provenance for formal reference-section minting.
+   * Findings may only cite atoms present in `codeSections`; references[]
+   * is projected from these rows (anti-hallucination guarantee).
+   */
+  provenance?: CodeSectionProvenance;
   /** Present on `reasoning:` / legacy `websearch:` ids — deeplink citation provenance. */
   webProvenance?: CodeSectionWebProvenance;
   /** F2 — typed consequence metadata from code-section atom (cc-agent-E). */
@@ -129,6 +146,43 @@ export interface CodeSectionInput {
     ibcImportanceFactor?: number;
     jurisdictionCode?: string;
   };
+}
+
+/** ICC model-code titles the finding pass is scoped against. */
+export const ICC_CODE_TITLE_VALUES = ["IBC", "IPMC"] as const;
+export type IccCodeTitle = (typeof ICC_CODE_TITLE_VALUES)[number];
+
+/** One applicable ICC title + edition on the engine input bundle. */
+export interface ApplicableIccEdition {
+  title: IccCodeTitle;
+  edition: string;
+}
+
+/** One formal bibliography row minted from a cited code-section atom. */
+export interface CodeReferenceEntry {
+  atomId: string;
+  sectionIdentifier: string;
+  sectionTitle: string;
+  edition: string;
+  sourceUrl: string;
+  codeTitle?: string;
+}
+
+/** Per-query retrieval observability — one event per gate/corpus query. */
+export interface RetrievalUsageEvent {
+  query: string;
+  retrievedAtomIds: ReadonlyArray<string>;
+  retrievalMode: string;
+  occurredAt: string;
+}
+
+/**
+ * Caller-supplied code-retrieval context. The engine does not fetch atoms;
+ * the route retrieves via `lib/codes` (`BRIEF_CODE_RETRIEVAL=gate` standard).
+ */
+export interface CodeRetrievalContext {
+  mode: "gate" | "mcp" | "neon";
+  usageEvents: ReadonlyArray<RetrievalUsageEvent>;
 }
 
 /**
@@ -210,6 +264,16 @@ export interface GenerateFindingsInput {
     pngBase64: string;
     label?: string;
   }>;
+  /**
+   * Applicable ICC model-code titles + editions for this pass (IBC, IPMC).
+   * Surface shells pass explicitly; api-server may derive from classification.
+   */
+  applicableIccEditions?: ReadonlyArray<ApplicableIccEdition>;
+  /**
+   * Gate/corpus retrieval seam — documents which atoms were retrieved and how.
+   * `codeSections` must be drawn from these events' atom ids.
+   */
+  codeRetrieval?: CodeRetrievalContext;
 }
 
 /**
@@ -281,6 +345,16 @@ export interface GenerateFindingsResult {
   generatedAt: Date;
   /** `mock` or `anthropic` — useful for tests + observability. */
   producer: FindingLlmMode;
+  /**
+   * Deduplicated formal bibliography for all code-section citations in
+   * `findings`. Minted only from `input.codeSections` atoms actually cited.
+   */
+  references: ReadonlyArray<CodeReferenceEntry>;
+  /**
+   * Per-query retrieval usage (passthrough from `input.codeRetrieval` when
+   * supplied). Empty when the caller omits retrieval context.
+   */
+  usageEvents: ReadonlyArray<RetrievalUsageEvent>;
 }
 
 /**

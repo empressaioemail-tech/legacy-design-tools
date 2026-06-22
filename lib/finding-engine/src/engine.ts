@@ -41,6 +41,7 @@ import {
 } from "./citationAdapter";
 import { generateMockFindings } from "./mockGenerator";
 import { buildPrecedenceFindingDrafts } from "./precedence";
+import { buildDeduplicatedReferences } from "./references";
 import {
   FINDING_MIN_TEXT_LENGTH,
   type EngineFinding,
@@ -195,6 +196,8 @@ function finalizeDrafts(
     discardedFindings,
     generatedAt,
     producer,
+    references: buildDeduplicatedReferences(findings, input.codeSections),
+    usageEvents: input.codeRetrieval?.usageEvents ?? [],
   };
 }
 

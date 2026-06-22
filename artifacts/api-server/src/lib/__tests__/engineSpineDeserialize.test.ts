@@ -68,6 +68,8 @@ describe("rehydrateSpineFindingsResult", () => {
       discardedFindings: [],
       generatedAt: now,
       producer: "mock",
+      references: [],
+      usageEvents: [],
     });
 
     expect(result.generatedAt).toBe(now);

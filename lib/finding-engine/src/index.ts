@@ -21,8 +21,14 @@ export {
   type BimElementInput,
   type BriefingSourceInput,
   type CodeSectionInput,
+  type CodeSectionProvenance,
   type CodeSectionWebProvenance,
   type ReasoningSourceLink,
+  type CodeReferenceEntry,
+  type CodeRetrievalContext,
+  type ApplicableIccEdition,
+  type IccCodeTitle,
+  type RetrievalUsageEvent,
   type EngineFinding,
   type FindingCategory,
   type FindingCitation,
@@ -38,7 +44,33 @@ export {
   FINDING_SEVERITY_VALUES,
   FINDING_STATUS_VALUES,
   FINDING_MIN_TEXT_LENGTH,
+  ICC_CODE_TITLE_VALUES,
 } from "./types";
+
+export {
+  buildDeduplicatedReferences,
+  collectCitedCodeAtomIds,
+  mintReferenceEntry,
+  reconcileReferencesWithFindings,
+  type ReferenceReconciliation,
+} from "./references";
+
+export {
+  formatReferenceLine,
+  renderFormalReferenceBlock,
+  type RenderFormalReferenceOptions,
+  type SectionIdentifierFormat,
+} from "./formalReferenceRenderer";
+
+export {
+  buildRetrievalUsageEvent,
+  isGateCodeRetrievalMode,
+  mergeRetrievalUsageEvents,
+  resolveCodeRetrievalMode,
+  type CodeRetrievalMode,
+} from "./codeRetrieval";
+
+export { parseApplicableIccEditions } from "./iccEditions";
 
 export {
   FINDING_ANTHROPIC_MODEL,

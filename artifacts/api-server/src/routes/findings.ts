@@ -49,6 +49,7 @@ import {
   findings,
   findingRuns,
   submissions,
+  submissionClassifications,
   parcelBriefings,
   briefingSources,
   materializableElements,
@@ -87,11 +88,17 @@ import {
   resolveFindingOrchestratedMode,
   type BimElementInput,
   type BriefingSourceInput,
+  type CodeRetrievalContext,
   type CodeSectionInput,
+  type ApplicableIccEdition,
   type EngineFinding,
   type FindingCitation,
   type GenerateFindingsInput,
   type GenerateFindingsResult,
+  type RetrievalUsageEvent,
+  buildRetrievalUsageEvent,
+  parseApplicableIccEditions,
+  resolveCodeRetrievalMode,
 } from "@workspace/finding-engine";
 import { FINDING_ENGINE_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
@@ -519,14 +526,23 @@ function toEngineSourceInput(s: BriefingSource): BriefingSourceInput {
  * `PROMPT_CODE_SNIPPET_MAX_CHARS` before serialization.
  */
 function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
-  const ref = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
-  const label = a.sectionTitle && a.sectionNumber
-    ? `${ref} — ${a.sectionTitle}`
+  const sectionIdentifier = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
+  const sectionTitle = a.sectionTitle ?? "";
+  const ref = sectionIdentifier;
+  const label = sectionTitle && a.sectionNumber
+    ? `${ref} — ${sectionTitle}`
     : ref;
   return {
     atomId: canonicalOverlayAtomKey(a.id),
     label,
     snippet: a.body,
+    provenance: {
+      sectionIdentifier: ref,
+      sectionTitle: sectionTitle || ref,
+      edition: a.edition,
+      sourceUrl: a.sourceUrl,
+      codeTitle: a.codeBook.trim().length > 0 ? a.codeBook : undefined,
+    },
   };
 }
 
@@ -585,7 +601,12 @@ async function resolveEngineInputs(
   sources: BriefingSource[];
   codeSections: CodeSectionInput[];
   bimElements: BimElementInput[];
+  applicableIccEditions: ApplicableIccEdition[];
+  codeRetrieval: CodeRetrievalContext;
 }> {
+  const retrievalMode = resolveCodeRetrievalMode();
+  const usageEvents: RetrievalUsageEvent[] = [];
+
   const subRows = await db
     .select({ engagementId: submissions.engagementId })
     .from(submissions)
@@ -598,8 +619,19 @@ async function resolveEngineInputs(
       sources: [],
       codeSections: [],
       bimElements: [],
+      applicableIccEditions: [],
+      codeRetrieval: { mode: retrievalMode, usageEvents },
     };
   }
+
+  const classificationRows = await db
+    .select({ applicableCodeBooks: submissionClassifications.applicableCodeBooks })
+    .from(submissionClassifications)
+    .where(eq(submissionClassifications.submissionId, submissionId))
+    .limit(1);
+  const applicableIccEditions = parseApplicableIccEditions(
+    classificationRows[0]?.applicableCodeBooks ?? [],
+  );
 
   // Load the engagement so we can resolve its jurisdiction key for
   // retrieval. Same key-resolution chain chat.ts uses (structured
@@ -690,6 +722,13 @@ async function resolveEngineInputs(
         logger: log,
       });
       codeSections = atoms.map(toCodeSectionInput);
+      usageEvents.push(
+        buildRetrievalUsageEvent({
+          query,
+          retrievedAtomIds: codeSections.map((section) => section.atomId),
+          retrievalMode: atoms[0]?.retrievalMode ?? retrievalMode,
+        }),
+      );
       log.info(
         {
           submissionId,
@@ -697,6 +736,7 @@ async function resolveEngineInputs(
           retrievedCount: codeSections.length,
           queryLength: query.length,
           queryFromBriefing: briefingNarrative !== undefined,
+          codeRetrievalMode: retrievalMode,
         },
         "finding generation: retrieval populated codeSections",
       );
@@ -779,7 +819,14 @@ async function resolveEngineInputs(
     }
   }
 
-  return { briefingNarrative, sources, codeSections, bimElements };
+  return {
+    briefingNarrative,
+    sources,
+    codeSections,
+    bimElements,
+    applicableIccEditions,
+    codeRetrieval: { mode: retrievalMode, usageEvents },
+  };
 }
 
 /**
@@ -1022,6 +1069,9 @@ async function runFindingGeneration(args: {
         codeSectionCount: inputs.codeSections.length,
         bimElementCount: inputs.bimElements.length,
         hasNarrative: !!inputs.briefingNarrative,
+        applicableIccEditionCount: inputs.applicableIccEditions.length,
+        codeRetrievalMode: inputs.codeRetrieval.mode,
+        retrievalUsageEventCount: inputs.codeRetrieval.usageEvents.length,
         spineFlags: engineSpineFlagSnapshot(),
         jurisdictionTenant,
       },
@@ -1050,6 +1100,8 @@ async function runFindingGeneration(args: {
       sources: inputs.sources.map(toEngineSourceInput),
       codeSections: inputs.codeSections,
       bimElements: inputs.bimElements,
+      applicableIccEditions: inputs.applicableIccEditions,
+      codeRetrieval: inputs.codeRetrieval,
     };
     const consequenceRoute = resolveConsequenceGatedRoute(
       inputs.codeSections.map((s) => ({ consequence: s.consequence ?? null })),
@@ -1308,6 +1360,8 @@ async function runFindingGeneration(args: {
         persistedCount: persistedRows.length,
         invalidCitationCount: result.invalidCitations.length,
         discardedFindingCount: result.discardedFindings.length,
+        referenceCount: result.references.length,
+        usageEventCount: result.usageEvents.length,
       },
       "finding generation: completed",
     );
