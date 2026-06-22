@@ -7265,6 +7265,24 @@ export const ListSubmissionFindingsResponse = zod
           "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
         ),
     ),
+    codeReferences: zod
+      .array(
+        zod
+          .object({
+            atomId: zod.string(),
+            sectionIdentifier: zod.string(),
+            sectionTitle: zod.string(),
+            edition: zod.string(),
+            sourceUrl: zod.string(),
+            codeTitle: zod.string().nullish(),
+          })
+          .describe(
+            "One formal bibliography row for a cited ICC code-section atom.\nIdentifier + heading + edition only — no section body (ICC PoC).\n",
+          ),
+      )
+      .describe(
+        "Formal bibliography from the most recent completed finding\nrun (`references[]` — identifier + heading + edition).\n",
+      ),
   })
   .describe(
     "Wire envelope for `GET \/submissions\/{id}\/findings`. Includes\nevery row scoped to the submission — AI-produced, reviewer-\nactioned, and override revisions alike. Sorting is the FE's\nresponsibility (severity then aiGeneratedAt; helper\n`compareFindings` in findingsMock.ts:533-538).\n",
@@ -7309,6 +7327,12 @@ export const GenerateSubmissionFindingsBody = zod
       .optional()
       .describe(
         "Optional subset of plan-set piece ids to include in\norchestrated decomposition (Revit sheet uuid or attached-\ndocument uuid). PDF page synthetic ids (`{docId}:pageN`)\nare matched when the parent document id is listed. Omit\nto review all plan-set pieces on the engagement.\n",
+      ),
+    iccShell: zod
+      .enum(["municipal-ipmc", "architect-ibc"])
+      .optional()
+      .describe(
+        "ICC PoC shell — municipal (`municipal-ipmc`, IPMC 2018)\nor architect (`architect-ibc`, IBC 2018). Forces gate\nretrieval against `icc-model-code` with platform-internal\naccess tier.\n",
       ),
   })
   .describe(
@@ -7385,6 +7409,25 @@ export const GetSubmissionFindingsGenerationStatusResponse = zod
         "Buyer-facing honesty slice of the engine-api EngineEnvelope —\nconfidence kind, data acquisition vintage, coverage degradation,\nand reasoning source. Forwarded by cortex-api without flattening.\n",
       )
       .nullish(),
+    codeReferences: zod
+      .array(
+        zod
+          .object({
+            atomId: zod.string(),
+            sectionIdentifier: zod.string(),
+            sectionTitle: zod.string(),
+            edition: zod.string(),
+            sourceUrl: zod.string(),
+            codeTitle: zod.string().nullish(),
+          })
+          .describe(
+            "One formal bibliography row for a cited ICC code-section atom.\nIdentifier + heading + edition only — no section body (ICC PoC).\n",
+          ),
+      )
+      .nullish()
+      .describe(
+        "Formal bibliography when `state` is `completed`; null otherwise.\n",
+      ),
   })
   .describe(
     "Wire envelope for `GET \/submissions\/{id}\/findings\/status`.\nState is persisted in `finding_runs`; the endpoint reads the\nmost recent row by `submission_id` ordered by `started_at`\nDESC. Returns `idle` when no kickoff has ever run.\n",

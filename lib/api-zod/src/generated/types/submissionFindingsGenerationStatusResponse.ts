@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { CodeReferenceEntry } from "./codeReferenceEntry";
 import type { EngineHonesty } from "./engineHonesty";
 import type { SubmissionFindingsGenerationStatusResponseState } from "./submissionFindingsGenerationStatusResponseState";
 
@@ -31,4 +32,7 @@ Null while pending.
  */
   discardedFindingCount: number | null;
   engineHonesty?: EngineHonesty | null;
+  /** Formal bibliography when `state` is `completed`; null otherwise.
+   */
+  codeReferences?: CodeReferenceEntry[] | null;
 }

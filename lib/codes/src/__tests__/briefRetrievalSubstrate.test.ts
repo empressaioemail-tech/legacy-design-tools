@@ -43,12 +43,26 @@ describe("retrieveAtomsFromSubstrate", () => {
     expect(hits[0]?.body).toBe("ADU requirements");
   });
 
-  it("returns empty array when substrate URL is unset", async () => {
-    delete process.env.BRIEF_RETRIEVAL_API_URL;
-    const hits = await retrieveAtomsFromSubstrate({
-      jurisdictionKey: "austin_tx",
-      question: "setbacks",
+  it("sends platform-internal gate headers when gateContext is set", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [] }),
+    }) as typeof fetch;
+
+    await retrieveAtomsFromSubstrate({
+      jurisdictionKey: "icc-model-code",
+      question: "egress width",
+      gateContext: {
+        accessTier: "platform-internal",
+        jurisdictionTenant: "icc-model-code",
+        surfaceKey: "plan-review-ibc",
+      },
     });
-    expect(hits).toEqual([]);
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const headers = call?.[1]?.headers as Record<string, string>;
+    expect(headers["x-hauska-access-tier"]).toBe("platform-internal");
+    expect(headers["x-hauska-jurisdiction-tenant"]).toBe("icc-model-code");
+    expect(headers["x-hauska-product"]).toBe("plan-review-ibc");
   });
 });

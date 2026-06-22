@@ -60,6 +60,8 @@ export interface RetrievedAtom {
  */
 export const MIN_VECTOR_SCORE = 0.35;
 
+import type { SubstrateGateContext } from "./briefRetrievalSubstrate.js";
+
 export interface RetrieveOptions {
   jurisdictionKey: string;
   question: string;
@@ -76,24 +78,45 @@ export interface RetrieveOptions {
    * comparable to cosine similarities).
    */
   applyMinScore?: boolean;
+  /** Gate-front headers for substrate retrieval (ICC PoC shells). */
+  gateContext?: SubstrateGateContext;
+  /**
+   * When true, substrate misses/errors do not fall back to the local Neon
+   * corpus — used for ICC model-code gate-only retrieval.
+   */
+  gateOnly?: boolean;
 }
 
 export async function retrieveAtomsForQuestion(
   opts: RetrieveOptions,
 ): Promise<RetrievedAtom[]> {
   const mode = (process.env.BRIEF_CODE_RETRIEVAL ?? "neon").toLowerCase();
-  if (mode === "gate" || mode === "mcp") {
+  if (mode === "gate" || mode === "mcp" || opts.gateOnly) {
     const { retrieveAtomsFromSubstrate } = await import(
       "./briefRetrievalSubstrate.js"
     );
     try {
       const substrateHits = await retrieveAtomsFromSubstrate(opts);
       if (substrateHits.length > 0) return substrateHits;
+      if (opts.gateOnly) {
+        opts.logger?.info?.(
+          { jurisdictionKey: opts.jurisdictionKey, mode },
+          "substrate retrieval returned no hits (gate-only — no neon fallback)",
+        );
+        return [];
+      }
       opts.logger?.warn?.(
         { jurisdictionKey: opts.jurisdictionKey, mode },
         "substrate retrieval returned no hits — falling back to neon",
       );
     } catch (err) {
+      if (opts.gateOnly) {
+        opts.logger?.warn?.(
+          { err, jurisdictionKey: opts.jurisdictionKey, mode },
+          "substrate retrieval failed (gate-only — no neon fallback)",
+        );
+        return [];
+      }
       opts.logger?.warn?.(
         { err, jurisdictionKey: opts.jurisdictionKey, mode },
         "substrate retrieval failed — falling back to neon",

@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { IccFindingShellId } from "./iccFindingShellId";
 
 /**
  * Optional body for `POST /submissions/{id}/findings/generate`.
@@ -25,4 +26,10 @@ are matched when the parent document id is listed. Omit
 to review all plan-set pieces on the engagement.
  */
   planSetPieceIds?: string[];
+  /** ICC PoC shell — municipal (`municipal-ipmc`, IPMC 2018)
+or architect (`architect-ibc`, IBC 2018). Forces gate
+retrieval against `icc-model-code` with platform-internal
+access tier.
+ */
+  iccShell?: IccFindingShellId;
 }

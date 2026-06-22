@@ -174,6 +174,11 @@ export interface RetrievalUsageEvent {
   retrievedAtomIds: ReadonlyArray<string>;
   retrievalMode: string;
   occurredAt: string;
+  /**
+   * Product/surface key under which the retrieval was billed (ICC shells:
+   * `plan-review-ipmc`, `plan-review-ibc`, …).
+   */
+  surfaceKey?: string;
 }
 
 /**

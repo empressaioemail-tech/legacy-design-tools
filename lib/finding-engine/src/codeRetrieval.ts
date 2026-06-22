@@ -31,12 +31,14 @@ export function buildRetrievalUsageEvent(args: {
   retrievedAtomIds: ReadonlyArray<string>;
   retrievalMode: string;
   occurredAt?: Date;
+  surfaceKey?: string;
 }): RetrievalUsageEvent {
   return {
     query: args.query,
     retrievedAtomIds: [...args.retrievedAtomIds],
     retrievalMode: args.retrievalMode,
     occurredAt: (args.occurredAt ?? new Date()).toISOString(),
+    ...(args.surfaceKey ? { surfaceKey: args.surfaceKey } : {}),
   };
 }
 

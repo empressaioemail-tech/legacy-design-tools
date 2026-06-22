@@ -15,6 +15,11 @@ import {
   SourceCitationPill,
   renderFindingBody,
 } from "./CodeAtomPill";
+import {
+  FormalReferenceBlock,
+  formalReferenceLabel,
+} from "./FormalReferenceBlock";
+import type { CodeReferenceEntry } from "@workspace/api-client-react";
 import { SEVERITY_PALETTE, STATUS_PALETTE } from "./severityStyles";
 import { OverrideFindingModal } from "./OverrideFindingModal";
 
@@ -25,6 +30,8 @@ export interface FindingDrillInProps {
   onShowInViewer?: (elementRef: string) => void;
   /** When false, hides Accept / Reject / Override mutation buttons. */
   isReviewer?: boolean;
+  referenceByAtomId?: ReadonlyMap<string, CodeReferenceEntry>;
+  codeReferences?: ReadonlyArray<CodeReferenceEntry>;
 }
 
 export function FindingDrillIn({
@@ -33,6 +40,8 @@ export function FindingDrillIn({
   onAfterMutate,
   onShowInViewer,
   isReviewer = true,
+  referenceByAtomId,
+  codeReferences = [],
 }: FindingDrillInProps) {
   const [overrideOpen, setOverrideOpen] = useState(false);
 
@@ -192,9 +201,11 @@ export function FindingDrillIn({
               whiteSpace: "pre-wrap",
             }}
           >
-            {renderFindingBody(finding.text).map((node, i) => (
+            {renderFindingBody(finding.text, { referenceByAtomId }).map(
+              (node, i) => (
               <Fragment key={i}>{node}</Fragment>
-            ))}
+            ),
+            )}
           </div>
           {finding.reviewerComment && (
             <div
@@ -249,13 +260,18 @@ export function FindingDrillIn({
                   }}
                 >
                   {c.kind === "code-section" ? (
-                    <CodeAtomPill atomId={c.atomId} />
+                    <CodeAtomPill
+                      atomId={c.atomId}
+                      reference={referenceByAtomId?.get(c.atomId)}
+                    />
                   ) : (
                     <SourceCitationPill sourceId={c.id} label={c.label} />
                   )}
                   <span style={{ color: "var(--text-secondary)" }}>
                     {c.kind === "code-section"
-                      ? "Code section"
+                      ? referenceByAtomId?.get(c.atomId)
+                        ? formalReferenceLabel(referenceByAtomId.get(c.atomId)!)
+                        : "Code section"
                       : "Briefing source"}
                   </span>
                 </li>
@@ -263,6 +279,12 @@ export function FindingDrillIn({
             </ul>
           )}
         </Section>
+
+        {codeReferences.length > 0 && (
+          <Section label="FORMAL REFERENCES">
+            <FormalReferenceBlock references={codeReferences} />
+          </Section>
+        )}
 
         {(finding.elementRef || finding.sourceRef) && (
           <Section label="REFERENCES">
@@ -366,9 +388,11 @@ export function FindingDrillIn({
                   lineHeight: 1.55,
                 }}
               >
-                {renderFindingBody(originalAi.text).map((node, i) => (
+                {renderFindingBody(originalAi.text, { referenceByAtomId }).map(
+                  (node, i) => (
                   <Fragment key={i}>{node}</Fragment>
-                ))}
+                ),
+                )}
               </div>
             )}
           </Section>

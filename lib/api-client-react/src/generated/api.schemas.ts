@@ -4660,6 +4660,33 @@ export interface FindingSourceRef {
 }
 
 /**
+ * One formal bibliography row for a cited ICC code-section atom.
+Identifier + heading + edition only — no section body (ICC PoC).
+
+ */
+export interface CodeReferenceEntry {
+  atomId: string;
+  sectionIdentifier: string;
+  sectionTitle: string;
+  edition: string;
+  sourceUrl: string;
+  codeTitle?: string | null;
+}
+
+/**
+ * ICC PoC shell selector. Municipal passes IPMC 2018; architect
+passes IBC 2018. Retrieval targets `icc-model-code` via gate.
+
+ */
+export type IccFindingShellId =
+  (typeof IccFindingShellId)[keyof typeof IccFindingShellId];
+
+export const IccFindingShellId = {
+  "municipal-ipmc": "municipal-ipmc",
+  "architect-ibc": "architect-ibc",
+} as const;
+
+/**
  * One AIR-1 compliance finding. Wire shape mirrors
 `findingsMock.ts:82-103` so the V1-6 frontend swap is a
 single-file change. The `id` field is the public atom id
@@ -4777,6 +4804,10 @@ responsibility (severity then aiGeneratedAt; helper
  */
 export interface ListSubmissionFindingsResponse {
   findings: Finding[];
+  /** Formal bibliography from the most recent completed finding
+run (`references[]` — identifier + heading + edition).
+ */
+  codeReferences: CodeReferenceEntry[];
 }
 
 /**
@@ -4798,6 +4829,12 @@ are matched when the parent document id is listed. Omit
 to review all plan-set pieces on the engagement.
  */
   planSetPieceIds?: string[];
+  /** ICC PoC shell — municipal (`municipal-ipmc`, IPMC 2018)
+or architect (`architect-ibc`, IBC 2018). Forces gate
+retrieval against `icc-model-code` with platform-internal
+access tier.
+ */
+  iccShell?: IccFindingShellId;
 }
 
 /**
@@ -4859,6 +4896,9 @@ Null while pending.
  */
   discardedFindingCount: number | null;
   engineHonesty?: EngineHonesty | null;
+  /** Formal bibliography when `state` is `completed`; null otherwise.
+   */
+  codeReferences?: CodeReferenceEntry[] | null;
 }
 
 export type SubmissionFindingsGenerationRunState =

@@ -108,6 +108,11 @@ export const findingRuns = pgTable(
      * Null while pending or on legacy rows predating migration 0040.
      */
     engineHonesty: jsonb("engine_honesty"),
+    /**
+     * Formal bibliography minted by the finding engine for this run
+     * (`references[]` — identifier + heading + edition only).
+     */
+    codeReferences: jsonb("code_references"),
   },
   (t) => ({
     /**

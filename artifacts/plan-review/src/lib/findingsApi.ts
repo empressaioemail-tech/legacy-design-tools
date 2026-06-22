@@ -31,14 +31,15 @@ import {
   acceptFinding as acceptFindingApi,
   createSubmissionFinding as createSubmissionFindingApi,
   generateSubmissionFindings as generateSubmissionFindingsApi,
-  getListSubmissionFindingsQueryKey,
   getGetSubmissionFindingsGenerationStatusQueryKey,
   getListSubmissionFindingsGenerationRunsQueryKey,
+  getListSubmissionFindingsQueryKey,
   getSubmissionFindingsGenerationStatus as getSubmissionFindingsGenerationStatusApi,
   listSubmissionFindings as listSubmissionFindingsApi,
   listSubmissionFindingsGenerationRuns as listSubmissionFindingsGenerationRunsApi,
   overrideFinding as overrideFindingApi,
   rejectFinding as rejectFindingApi,
+  type CodeReferenceEntry,
   type Finding as WireFinding,
   type FindingActor as WireFindingActor,
   type FindingCategory as WireFindingCategory,
@@ -63,6 +64,7 @@ export type FindingCodeCitation = WireFindingCodeCitation;
 export type FindingSeverity = WireFindingSeverity;
 export type FindingSourceCitation = WireFindingSourceCitation;
 export type FindingStatus = WireFindingStatus;
+export type { CodeReferenceEntry };
 
 /**
  * Per-submission run row. The generated wire type lives behind the
@@ -248,6 +250,22 @@ export function useListSubmissionFindings(
   });
 }
 
+/** Formal bibliography from the latest completed finding run. */
+export function useSubmissionCodeReferences(submissionId: string) {
+  return useQuery<CodeReferenceEntry[]>({
+    queryKey: [
+      ...getListSubmissionFindingsQueryKey(submissionId),
+      "codeReferences",
+    ],
+    queryFn: async () => {
+      const resp = await listSubmissionFindingsApi(submissionId);
+      return resp.codeReferences ?? [];
+    },
+    enabled: !!submissionId,
+    staleTime: 5_000,
+  });
+}
+
 /**
  * List recent generation runs for a submission. Wire envelope is
  * `{ runs: FindingRun[] }`; that's exactly what the existing
@@ -310,11 +328,16 @@ export function useGetSubmissionFindingsGenerationStatus(
  * contract (`FindingsRunsPanel`, `FindingsEmptyState`,
  * `FindingsAutoFailureBadge`).
  */
-export function useGenerateSubmissionFindings(submissionId: string) {
+export function useGenerateSubmissionFindings(
+  submissionId: string,
+  opts: { iccShell?: "municipal-ipmc" | "architect-ibc" } = {},
+) {
   const qc = useQueryClient();
   return useMutation<{ generationId: string }, unknown, void>({
     mutationFn: async () => {
-      const resp = await generateSubmissionFindingsApi(submissionId, {});
+      const resp = await generateSubmissionFindingsApi(submissionId, {
+        ...(opts.iccShell ? { iccShell: opts.iccShell } : {}),
+      });
       return { generationId: resp.generationId };
     },
     onSuccess: () => {

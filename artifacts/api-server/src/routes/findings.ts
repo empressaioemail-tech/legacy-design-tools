@@ -88,6 +88,7 @@ import {
   resolveFindingOrchestratedMode,
   type BimElementInput,
   type BriefingSourceInput,
+  type CodeReferenceEntry,
   type CodeRetrievalContext,
   type CodeSectionInput,
   type ApplicableIccEdition,
@@ -135,6 +136,13 @@ import {
 } from "../lib/engineSpineRouting";
 import { formatEngineSpineFailure } from "../lib/engineSpineClient";
 import { engineSpineFlagSnapshot } from "../lib/engineSpineFlags";
+import {
+  ICC_MODEL_CODE_JURISDICTION,
+  isIccFindingShellId,
+  resolveIccFindingShell,
+  type IccFindingShellId,
+} from "../lib/iccFindingShell";
+import { emitRetrievalUsageToGate } from "../lib/iccRetrievalUsage";
 import {
   buildProvenanceFromFindingRow,
   type ProvenanceEnvelope,
@@ -303,6 +311,11 @@ interface FindingWire {
   provenance: ProvenanceEnvelope;
   /** Transitional engine-api honesty slice; prefer readContract. */
   engineHonesty: EngineHonesty | null;
+  /**
+   * Formal bibliography from the most recent completed run (ICC PoC).
+   * Identifier + heading + edition only — no section bodies.
+   */
+  codeReferences?: CodeReferenceEntry[];
 }
 
 function actorFromRequest(req: Request): FindingActorWire | null {
@@ -596,6 +609,7 @@ function toBimElementInput(row: MaterializableElement): BimElementInput {
 async function resolveEngineInputs(
   submissionId: string,
   log: typeof logger,
+  opts: { iccShell?: IccFindingShellId } = {},
 ): Promise<{
   briefingNarrative: string | undefined;
   sources: BriefingSource[];
@@ -603,8 +617,14 @@ async function resolveEngineInputs(
   bimElements: BimElementInput[];
   applicableIccEditions: ApplicableIccEdition[];
   codeRetrieval: CodeRetrievalContext;
+  iccShell: IccFindingShellId | null;
 }> {
-  const retrievalMode = resolveCodeRetrievalMode();
+  const shellConfig = opts.iccShell
+    ? resolveIccFindingShell(opts.iccShell)
+    : null;
+  const retrievalMode: CodeRetrievalContext["mode"] = shellConfig
+    ? "gate"
+    : resolveCodeRetrievalMode();
   const usageEvents: RetrievalUsageEvent[] = [];
 
   const subRows = await db
@@ -619,19 +639,26 @@ async function resolveEngineInputs(
       sources: [],
       codeSections: [],
       bimElements: [],
-      applicableIccEditions: [],
+      applicableIccEditions: shellConfig?.applicableIccEditions ?? [],
       codeRetrieval: { mode: retrievalMode, usageEvents },
+      iccShell: opts.iccShell ?? null,
     };
   }
 
-  const classificationRows = await db
-    .select({ applicableCodeBooks: submissionClassifications.applicableCodeBooks })
-    .from(submissionClassifications)
-    .where(eq(submissionClassifications.submissionId, submissionId))
-    .limit(1);
-  const applicableIccEditions = parseApplicableIccEditions(
-    classificationRows[0]?.applicableCodeBooks ?? [],
-  );
+  const applicableIccEditions = shellConfig
+    ? shellConfig.applicableIccEditions
+    : parseApplicableIccEditions(
+        (
+          await db
+            .select({
+              applicableCodeBooks:
+                submissionClassifications.applicableCodeBooks,
+            })
+            .from(submissionClassifications)
+            .where(eq(submissionClassifications.submissionId, submissionId))
+            .limit(1)
+        )[0]?.applicableCodeBooks ?? [],
+      );
 
   // Load the engagement so we can resolve its jurisdiction key for
   // retrieval. Same key-resolution chain chat.ts uses (structured
@@ -644,14 +671,16 @@ async function resolveEngineInputs(
     .where(eq(engagements.id, sub.engagementId))
     .limit(1);
   const engagement = engRows[0];
-  const jurisdictionKey = engagement
-    ? keyFromEngagementOrSynthesize({
-        jurisdictionCity: engagement.jurisdictionCity,
-        jurisdictionState: engagement.jurisdictionState,
-        jurisdiction: engagement.jurisdiction,
-        address: engagement.address,
-      })
-    : null;
+  const jurisdictionKey = shellConfig
+    ? ICC_MODEL_CODE_JURISDICTION
+    : engagement
+      ? keyFromEngagementOrSynthesize({
+          jurisdictionCity: engagement.jurisdictionCity,
+          jurisdictionState: engagement.jurisdictionState,
+          jurisdiction: engagement.jurisdiction,
+          address: engagement.address,
+        })
+      : null;
 
   const briefingRows = await db
     .select()
@@ -715,31 +744,59 @@ async function resolveEngineInputs(
         ? rawQuery.slice(0, RETRIEVAL_QUERY_MAX_CHARS)
         : rawQuery;
     try {
-      const atoms = await retrieveAtomsForQuestion({
-        jurisdictionKey,
-        question: query,
-        limit: MAX_FINDING_RETRIEVED_ATOMS,
-        logger: log,
-      });
-      codeSections = atoms.map(toCodeSectionInput);
-      usageEvents.push(
-        buildRetrievalUsageEvent({
-          query,
-          retrievedAtomIds: codeSections.map((section) => section.atomId),
-          retrievalMode: atoms[0]?.retrievalMode ?? retrievalMode,
-        }),
-      );
-      log.info(
-        {
-          submissionId,
+      const priorBriefCodeRetrieval = process.env.BRIEF_CODE_RETRIEVAL;
+      if (shellConfig) {
+        process.env.BRIEF_CODE_RETRIEVAL = "gate";
+      }
+      try {
+        const atoms = await retrieveAtomsForQuestion({
           jurisdictionKey,
-          retrievedCount: codeSections.length,
-          queryLength: query.length,
-          queryFromBriefing: briefingNarrative !== undefined,
-          codeRetrievalMode: retrievalMode,
-        },
-        "finding generation: retrieval populated codeSections",
-      );
+          question: query,
+          limit: MAX_FINDING_RETRIEVED_ATOMS,
+          logger: log,
+          gateOnly: shellConfig != null,
+          gateContext: shellConfig
+            ? {
+                accessTier: "platform-internal",
+                jurisdictionTenant: ICC_MODEL_CODE_JURISDICTION,
+                surfaceKey: shellConfig.surfaceKey,
+              }
+            : undefined,
+        });
+        codeSections = atoms.map(toCodeSectionInput);
+        const resolvedRetrievalMode =
+          atoms[0]?.retrievalMode ?? retrievalMode;
+        usageEvents.push(
+          buildRetrievalUsageEvent({
+            query,
+            retrievedAtomIds: codeSections.map((section) => section.atomId),
+            retrievalMode: resolvedRetrievalMode,
+            surfaceKey: shellConfig?.surfaceKey,
+          }),
+        );
+        log.info(
+          {
+            submissionId,
+            jurisdictionKey,
+            retrievedCount: codeSections.length,
+            queryLength: query.length,
+            queryFromBriefing: briefingNarrative !== undefined,
+            codeRetrievalMode: retrievalMode,
+            resolvedRetrievalMode,
+            iccShell: shellConfig?.id ?? null,
+            gateOnly: shellConfig != null,
+          },
+          "finding generation: retrieval populated codeSections",
+        );
+      } finally {
+        if (shellConfig) {
+          if (priorBriefCodeRetrieval === undefined) {
+            delete process.env.BRIEF_CODE_RETRIEVAL;
+          } else {
+            process.env.BRIEF_CODE_RETRIEVAL = priorBriefCodeRetrieval;
+          }
+        }
+      }
     } catch (err) {
       // Warn-and-continue: a transient retrieval failure should not
       // burn an entire run. The engine will produce findings against
@@ -759,7 +816,7 @@ async function resolveEngineInputs(
         existingSections: codeSections,
         log: (msg, meta) => log.info(meta ?? {}, msg),
       });
-      if (grounding.sections.length > 0) {
+      if (grounding.sections.length > 0 && !shellConfig) {
         codeSections = [
           ...codeSections,
           ...grounding.sections.map((w) => ({
@@ -819,6 +876,10 @@ async function resolveEngineInputs(
     }
   }
 
+  if (shellConfig && usageEvents.length > 0) {
+    await emitRetrievalUsageToGate(usageEvents, log);
+  }
+
   return {
     briefingNarrative,
     sources,
@@ -826,6 +887,7 @@ async function resolveEngineInputs(
     bimElements,
     applicableIccEditions,
     codeRetrieval: { mode: retrievalMode, usageEvents },
+    iccShell: opts.iccShell ?? null,
   };
 }
 
@@ -996,6 +1058,7 @@ async function finalizeRun(
     invalidCitations: string[] | null;
     discardedFindingCount: number | null;
     engineHonesty?: EngineHonesty | null;
+    codeReferences?: CodeReferenceEntry[] | null;
   },
   reqLog: typeof logger,
 ): Promise<void> {
@@ -1010,6 +1073,9 @@ async function finalizeRun(
         discardedFindingCount: patch.discardedFindingCount,
         ...(patch.engineHonesty !== undefined
           ? { engineHonesty: patch.engineHonesty }
+          : {}),
+        ...(patch.codeReferences !== undefined
+          ? { codeReferences: patch.codeReferences }
           : {}),
         completedAt: new Date(),
       })
@@ -1041,10 +1107,14 @@ async function runFindingGeneration(args: {
   generationId: string;
   reqLog: typeof logger;
   planSetPieceIds?: string[];
+  iccShell?: IccFindingShellId;
 }): Promise<void> {
-  const { submissionId, generationId, reqLog, planSetPieceIds } = args;
+  const { submissionId, generationId, reqLog, planSetPieceIds, iccShell } =
+    args;
   try {
-    const inputs = await resolveEngineInputs(submissionId, reqLog);
+    const inputs = await resolveEngineInputs(submissionId, reqLog, {
+      iccShell,
+    });
     const llmClient = await getFindingLlmClient();
     const mode = getFindingLlmMode();
     const [engRow] = await db
@@ -1072,6 +1142,7 @@ async function runFindingGeneration(args: {
         applicableIccEditionCount: inputs.applicableIccEditions.length,
         codeRetrievalMode: inputs.codeRetrieval.mode,
         retrievalUsageEventCount: inputs.codeRetrieval.usageEvents.length,
+        iccShell: inputs.iccShell,
         spineFlags: engineSpineFlagSnapshot(),
         jurisdictionTenant,
       },
@@ -1349,6 +1420,7 @@ async function runFindingGeneration(args: {
         invalidCitations: [...result.invalidCitations],
         discardedFindingCount: result.discardedFindings.length,
         engineHonesty: runEngineHonesty,
+        codeReferences: [...result.references],
       },
       reqLog,
     );
@@ -1421,7 +1493,10 @@ export type FindingKickoffOutcome =
 export async function kickoffFindingGenerationForSubmission(
   submissionId: string,
   reqLog: typeof logger,
-  opts: { planSetPieceIds?: string[] } = {},
+  opts: {
+    planSetPieceIds?: string[];
+    iccShell?: IccFindingShellId;
+  } = {},
 ): Promise<FindingKickoffOutcome> {
   let kickoffRow: FindingRun;
   try {
@@ -1455,6 +1530,7 @@ export async function kickoffFindingGenerationForSubmission(
     generationId,
     reqLog,
     planSetPieceIds: opts.planSetPieceIds,
+    iccShell: opts.iccShell,
   });
 
   reqLog.info(
@@ -1515,6 +1591,9 @@ router.post(
         reqLog,
         {
           planSetPieceIds: bodyParse.data.planSetPieceIds,
+          iccShell: isIccFindingShellId(bodyParse.data.iccShell)
+            ? bodyParse.data.iccShell
+            : undefined,
         },
       );
       if (outcome.kind === "already_running") {
@@ -1570,9 +1649,14 @@ router.get(
           invalidCitationCount: null,
           invalidCitations: null,
           discardedFindingCount: null,
+          codeReferences: null,
         });
         return;
       }
+      const codeReferences =
+        run.state === "completed" && Array.isArray(run.codeReferences)
+          ? (run.codeReferences as CodeReferenceEntry[])
+          : null;
       res.json({
         generationId: run.id,
         state: run.state as FindingRunState,
@@ -1583,6 +1667,7 @@ router.get(
         invalidCitations: run.invalidCitations,
         discardedFindingCount: run.discardedFindingCount,
         engineHonesty: wireEngineHonesty(run.engineHonesty),
+        codeReferences,
       });
     } catch (err) {
       logger.error(
@@ -1713,7 +1798,23 @@ router.get(
           ),
         ),
       );
-      res.json({ findings: wire });
+
+      const [latestRunWithRefs] = await db
+        .select({ codeReferences: findingRuns.codeReferences })
+        .from(findingRuns)
+        .where(
+          and(
+            eq(findingRuns.submissionId, submissionId),
+            eq(findingRuns.state, "completed"),
+          ),
+        )
+        .orderBy(desc(findingRuns.startedAt))
+        .limit(1);
+      const codeReferences = Array.isArray(latestRunWithRefs?.codeReferences)
+        ? (latestRunWithRefs.codeReferences as CodeReferenceEntry[])
+        : [];
+
+      res.json({ findings: wire, codeReferences });
     } catch (err) {
       logger.error({ err, submissionId }, "list submission findings failed");
       res.status(500).json({ error: "Failed to list findings" });

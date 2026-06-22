@@ -8,11 +8,20 @@
 import type { OrchestratorLogger } from "./orchestrator";
 import type { RetrievedAtom } from "./retrieval";
 
+/** Gate-front context for platform-internal ICC corpus retrieval. */
+export interface SubstrateGateContext {
+  accessTier?: "platform-internal" | "public-free" | "public-paid" | "tenant-private";
+  jurisdictionTenant?: string;
+  /** Product/surface dimension for usage metering. */
+  surfaceKey?: string;
+}
+
 export interface SubstrateSearchOptions {
   jurisdictionKey: string;
   question: string;
   limit?: number;
   logger?: OrchestratorLogger;
+  gateContext?: SubstrateGateContext;
 }
 
 function resolveSubstrateBaseUrl(): string | null {
@@ -91,9 +100,21 @@ export async function retrieveAtomsFromSubstrate(
   const apiKey = resolveSubstrateApiKey();
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const jurisdictionTenant = process.env.BROKERAGE_GATE_JURISDICTION_TENANT?.trim();
+  const jurisdictionTenant =
+    opts.gateContext?.jurisdictionTenant?.trim() ||
+    process.env.BROKERAGE_GATE_JURISDICTION_TENANT?.trim();
   if (jurisdictionTenant) {
     headers["x-hauska-jurisdiction-tenant"] = jurisdictionTenant;
+  }
+
+  const accessTier = opts.gateContext?.accessTier?.trim();
+  if (accessTier) {
+    headers["x-hauska-access-tier"] = accessTier;
+  }
+
+  const surfaceKey = opts.gateContext?.surfaceKey?.trim();
+  if (surfaceKey) {
+    headers["x-hauska-product"] = surfaceKey;
   }
 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });

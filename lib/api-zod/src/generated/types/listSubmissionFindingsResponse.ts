@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { CodeReferenceEntry } from "./codeReferenceEntry";
 import type { Finding } from "./finding";
 
 /**
@@ -17,4 +18,8 @@ responsibility (severity then aiGeneratedAt; helper
  */
 export interface ListSubmissionFindingsResponse {
   findings: Finding[];
+  /** Formal bibliography from the most recent completed finding
+run (`references[]` — identifier + heading + edition).
+ */
+  codeReferences: CodeReferenceEntry[];
 }

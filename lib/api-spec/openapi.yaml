@@ -14264,6 +14264,39 @@ components:
         - id
         - label
 
+    CodeReferenceEntry:
+      type: object
+      description: |
+        One formal bibliography row for a cited ICC code-section atom.
+        Identifier + heading + edition only — no section body (ICC PoC).
+      properties:
+        atomId:
+          type: string
+        sectionIdentifier:
+          type: string
+        sectionTitle:
+          type: string
+        edition:
+          type: string
+        sourceUrl:
+          type: string
+        codeTitle:
+          type: string
+          nullable: true
+      required:
+        - atomId
+        - sectionIdentifier
+        - sectionTitle
+        - edition
+        - sourceUrl
+
+    IccFindingShellId:
+      type: string
+      enum: [municipal-ipmc, architect-ibc]
+      description: |
+        ICC PoC shell selector. Municipal passes IPMC 2018; architect
+        passes IBC 2018. Retrieval targets `icc-model-code` via gate.
+
     Finding:
       type: object
       description: |
@@ -14448,8 +14481,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Finding"
+        codeReferences:
+          type: array
+          description: |
+            Formal bibliography from the most recent completed finding
+            run (`references[]` — identifier + heading + edition).
+          items:
+            $ref: "#/components/schemas/CodeReferenceEntry"
       required:
         - findings
+        - codeReferences
 
     GenerateSubmissionFindingsBody:
       type: object
@@ -14474,6 +14515,13 @@ components:
             document uuid). PDF page synthetic ids (`{docId}:pageN`)
             are matched when the parent document id is listed. Omit
             to review all plan-set pieces on the engagement.
+        iccShell:
+          $ref: "#/components/schemas/IccFindingShellId"
+          description: |
+            ICC PoC shell — municipal (`municipal-ipmc`, IPMC 2018)
+            or architect (`architect-ibc`, IBC 2018). Forces gate
+            retrieval against `icc-model-code` with platform-internal
+            access tier.
 
     GenerateSubmissionFindingsResponse:
       type: object
@@ -14540,6 +14588,13 @@ components:
           oneOf:
             - $ref: "#/components/schemas/EngineHonesty"
           nullable: true
+        codeReferences:
+          type: array
+          nullable: true
+          description: |
+            Formal bibliography when `state` is `completed`; null otherwise.
+          items:
+            $ref: "#/components/schemas/CodeReferenceEntry"
       required:
         - generationId
         - state

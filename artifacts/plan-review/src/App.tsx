@@ -14,6 +14,10 @@ import InReview from "./pages/InReview";
 import Approved from "./pages/Approved";
 import Rejected from "./pages/Rejected";
 import ComplianceEngine from "./pages/ComplianceEngine";
+import {
+  IccArchitectShellPage,
+  IccMunicipalShellPage,
+} from "./pages/IccFindingShell";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission, RequireAudience } from "./components/permissions";
 import { DevSessionSwitcher } from "./components/DevSessionSwitcher";
@@ -57,6 +61,12 @@ function Router() {
         <RequireAudience audience="internal">
           <ComplianceEngine />
         </RequireAudience>
+      </Route>
+      <Route path="/icc/municipal">
+        <IccMunicipalShellPage />
+      </Route>
+      <Route path="/icc/architect">
+        <IccArchitectShellPage />
       </Route>
       <Route path="/firms" component={ComingSoon} />
       <Route path="/projects" component={ComingSoon} />

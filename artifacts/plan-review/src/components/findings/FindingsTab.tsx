@@ -5,6 +5,7 @@ import {
   useGenerateSubmissionFindings,
   useFindingsGenerationPolling,
   useCreateSubmissionFinding,
+  useSubmissionCodeReferences,
   describeCreateFindingError,
   compareFindings,
   FINDING_CATEGORY_LABELS,
@@ -21,6 +22,11 @@ import {
 import { FindingsRunsPanel } from "./FindingsRunsPanel";
 import { FindingDrillIn } from "./FindingDrillIn";
 import { CodeAtomPill, renderFindingBody } from "./CodeAtomPill";
+import {
+  buildReferenceByAtomId,
+  FormalReferenceBlock,
+} from "./FormalReferenceBlock";
+import type { IccFindingShellId } from "../../lib/iccFindingShellUi";
 import { SEVERITY_PALETTE, STATUS_PALETTE } from "./severityStyles";
 import { OverrideFindingModal } from "./OverrideFindingModal";
 import { AIBadge, LowConfidencePill } from "@workspace/portal-ui";
@@ -69,6 +75,8 @@ export interface FindingsTabProps {
    * value here narrows the picker without further wiring.
    */
   cannedLibraryDiscipline?: CannedFindingDiscipline;
+  /** ICC PoC — selects IPMC vs IBC shell on generate kickoff. */
+  iccShell?: IccFindingShellId;
 }
 
 interface ManualAddPrefill {
@@ -89,12 +97,18 @@ export function FindingsTab({
   onShowInViewer,
   audience = "user",
   cannedLibraryDiscipline,
+  iccShell,
 }: FindingsTabProps) {
   const [manualPrefill, setManualPrefill] = useState<ManualAddPrefill | null>(
     null,
   );
   const isReviewer = audience === "internal";
   const findingsQuery = useListSubmissionFindings(submissionId);
+  const codeReferencesQuery = useSubmissionCodeReferences(submissionId);
+  const referenceByAtomId = useMemo(
+    () => buildReferenceByAtomId(codeReferencesQuery.data ?? []),
+    [codeReferencesQuery.data],
+  );
   const findings = useMemo(
     () => (findingsQuery.data ?? []).slice().sort(compareFindings),
     [findingsQuery.data],
@@ -250,7 +264,22 @@ export function FindingsTab({
           <FindingsEmptyState
             submissionId={submissionId}
             isReviewer={isReviewer}
+            iccShell={iccShell}
           />
+        )}
+
+        {(codeReferencesQuery.data?.length ?? 0) > 0 && (
+          <div
+            data-testid="findings-formal-references"
+            style={{
+              padding: 12,
+              background: "var(--bg-default)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+            }}
+          >
+            <FormalReferenceBlock references={codeReferencesQuery.data ?? []} />
+          </div>
         )}
 
         {hasAnyFindings && !hasVisibleFindings && (
@@ -277,6 +306,7 @@ export function FindingsTab({
                 selectedFindingId={selectedFindingId}
                 onSelect={onSelectFinding}
                 isReviewer={isReviewer}
+                referenceByAtomId={referenceByAtomId}
               />
             );
           })}
@@ -291,6 +321,8 @@ export function FindingsTab({
           }}
           onShowInViewer={onShowInViewer}
           isReviewer={isReviewer}
+          referenceByAtomId={referenceByAtomId}
+          codeReferences={codeReferencesQuery.data ?? []}
         />
       )}
     </div>
@@ -381,11 +413,13 @@ function FindingsAutoFailureBadge({ submissionId }: { submissionId: string }) {
 function FindingsEmptyState({
   submissionId,
   isReviewer,
+  iccShell,
 }: {
   submissionId: string;
   isReviewer: boolean;
+  iccShell?: IccFindingShellId;
 }) {
-  const generate = useGenerateSubmissionFindings(submissionId);
+  const generate = useGenerateSubmissionFindings(submissionId, { iccShell });
   const live = useFindingsGenerationPolling(submissionId, generate.isPending);
   const isPending = generate.isPending || live?.state === "pending";
   return (
@@ -441,12 +475,14 @@ function FindingsSeverityGroup({
   selectedFindingId,
   onSelect,
   isReviewer,
+  referenceByAtomId,
 }: {
   severity: FindingSeverity;
   findings: Finding[];
   selectedFindingId: string | null;
   onSelect: (id: string | null) => void;
   isReviewer: boolean;
+  referenceByAtomId: Map<string, import("@workspace/api-client-react").CodeReferenceEntry>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const palette = SEVERITY_PALETTE[severity];
@@ -506,6 +542,7 @@ function FindingsSeverityGroup({
               selected={f.id === selectedFindingId}
               onSelect={() => onSelect(f.id === selectedFindingId ? null : f.id)}
               isReviewer={isReviewer}
+              referenceByAtomId={referenceByAtomId}
             />
           ))}
         </div>
@@ -547,11 +584,13 @@ function FindingRow({
   selected,
   onSelect,
   isReviewer,
+  referenceByAtomId,
 }: {
   finding: Finding;
   selected: boolean;
   onSelect: () => void;
   isReviewer: boolean;
+  referenceByAtomId: Map<string, import("@workspace/api-client-react").CodeReferenceEntry>;
 }) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const accept = useAcceptFinding(finding.submissionId);
@@ -661,7 +700,7 @@ function FindingRow({
           lineHeight: 1.45,
         }}
       >
-        {renderFindingBody(truncated).map((node, i) => (
+        {renderFindingBody(truncated, { referenceByAtomId }).map((node, i) => (
           <Fragment key={i}>{node}</Fragment>
         ))}
       </div>
@@ -678,7 +717,11 @@ function FindingRow({
           )
           .slice(0, 3)
           .map((c, i) => (
-            <CodeAtomPill key={`${c.atomId}-${i}`} atomId={c.atomId} />
+            <CodeAtomPill
+              key={`${c.atomId}-${i}`}
+              atomId={c.atomId}
+              reference={referenceByAtomId.get(c.atomId)}
+            />
           ))}
         {isReviewer && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
