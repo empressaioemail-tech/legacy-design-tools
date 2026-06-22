@@ -29,12 +29,30 @@ import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
 import { type SubmissionClassificationTypedPayload } from "../atoms/submission-classification.atom";
+import { wireAtomFamilyConformance } from "../lib/atomFamilyConformance";
 import {
   classificationAtomId,
   emitClassificationEvents,
 } from "@workspace/submission-classifier";
 
 const router: IRouter = Router();
+
+type SubmissionClassificationWire = SubmissionClassificationTypedPayload & {
+  accessPolicy: ReturnType<typeof wireAtomFamilyConformance>["accessPolicy"];
+  readContract: ReturnType<typeof wireAtomFamilyConformance>["readContract"];
+};
+
+function enrichSubmissionClassificationWire(
+  payload: SubmissionClassificationTypedPayload,
+): SubmissionClassificationWire {
+  const envelope = wireAtomFamilyConformance({
+    family: "submissionClassification",
+    rawConfidence: payload.confidence ?? undefined,
+    n: payload.source === "reviewer" ? 1 : 0,
+    assembledAt: payload.classifiedAt,
+  });
+  return { ...payload, ...envelope };
+}
 
 function requireReviewerAudience(req: Request, res: Response): boolean {
   if (req.session.audience === "internal") return false;
@@ -288,8 +306,8 @@ async function loadSeverityRollups(
 
 async function loadClassifications(
   submissionIds: ReadonlyArray<string>,
-): Promise<Map<string, SubmissionClassificationTypedPayload>> {
-  const out = new Map<string, SubmissionClassificationTypedPayload>();
+): Promise<Map<string, SubmissionClassificationWire>> {
+  const out = new Map<string, SubmissionClassificationWire>();
   if (submissionIds.length === 0) return out;
   const rows = await db
     .select()
@@ -302,7 +320,7 @@ async function loadClassifications(
       row.classifiedBy && typeof row.classifiedBy === "object"
         ? (row.classifiedBy as { kind: string; id: string })
         : null;
-    out.set(row.submissionId, {
+    out.set(row.submissionId, enrichSubmissionClassificationWire({
       id: classificationAtomId(row.submissionId),
       found: true,
       submissionId: row.submissionId,
@@ -313,7 +331,7 @@ async function loadClassifications(
       source: row.source as "auto" | "reviewer",
       classifiedAt: row.classifiedAt.toISOString(),
       classifiedBy,
-    });
+    }));
   }
   return out;
 }
@@ -608,7 +626,7 @@ router.post(
           ? (row.classifiedBy as { kind: string; id: string })
           : null;
       res.json({
-        classification: {
+        classification: enrichSubmissionClassificationWire({
           id: classificationAtomId(row.submissionId),
           found: true,
           submissionId: row.submissionId,
@@ -619,7 +637,7 @@ router.post(
           source: row.source as "auto" | "reviewer",
           classifiedAt: row.classifiedAt.toISOString(),
           classifiedBy,
-        } satisfies SubmissionClassificationTypedPayload,
+        }),
       });
     } catch (err) {
       reqLog.error(

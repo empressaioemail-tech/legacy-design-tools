@@ -87,6 +87,15 @@ export {
   readContractFromExtractConfidence,
 } from "./encumbranceReadContract";
 export {
+  type MutableAtomFamily,
+  FAMILY_ACCESS_POLICY,
+  normalizeAccessPolicy,
+  accessPolicyForFamily,
+  buildAssertedFallbackReadContract,
+  assembleAtomConformanceTarget,
+  validateFamilyConformance,
+} from "./atomConformance";
+export {
   type CodeSectionConsequenceMetadata,
   type ConsequenceGatedRouteDecision,
   type ConsequenceStratum,
