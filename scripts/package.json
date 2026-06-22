@@ -9,6 +9,7 @@
     "backfill:briefing-generation-ids": "tsx ./src/backfillBriefingGenerationIds.ts",
     "backfill:prior-generated-at": "tsx ./src/backfillPriorGeneratedAt.ts",
     "backfill:track1-classifications": "tsx ./src/backfillTrack1Classifications.ts",
+    "backfill:atom-conformance": "tsx ./src/backfillAtomConformance.ts",
     "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
     "ingest:brokerage-federal-data": "tsx ../scripts/ingest-opportunity-zones.mjs && tsx ../scripts/ingest-tx-special-districts.mjs",
     "publish:brokerage-federal-data-gcs": "tsx ../scripts/publish-brokerage-federal-data-gcs.mjs",

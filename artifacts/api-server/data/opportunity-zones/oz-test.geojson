@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "version": "oz-test",
+    "source": "HUD ArcGIS Opportunity_Zones FeatureServer/13",
+    "fetchedAt": "2026-06-21T21:21:31.070Z",
+    "featureCount": 1
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "GEOID10": "48453002400",
+        "geoid10": "48453002400",
+        "round": "oz-test"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": []
+      }
+    }
+  ]
+}
