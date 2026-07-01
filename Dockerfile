@@ -80,9 +80,28 @@ ENV NODE_ENV=production \
     PUPPETEER_CACHE_DIR=/app/.puppeteer-cache \
     PORT=8080 \
     SPA_STATIC_ROOT=/app/artifacts \
-    BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data
+    BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data \
+    HYDROLOGY_PYTHON=python3 \
+    HYDROLOGY_PYSHEDS_INSTALLED=1
 
 WORKDIR /app
+
+# Python sidecar for site hydrology (artifacts/hydrology-worker/run.py).
+# cortex-api spawns this via stdio; pysheds is not bundled in node:20-slim.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3 \
+      python3-pip \
+      gdal-bin \
+      libgdal-dev \
+      g++ \
+      gcc \
+ && pip3 install --break-system-packages --no-cache-dir \
+      -r artifacts/hydrology-worker/requirements.txt \
+ && apt-get purge -y gcc g++ \
+ && apt-get autoremove -y \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
 # Chrome runtime libraries for puppeteer headless. Mirrors the X11/
 # cairo/freetype set that replit.nix provides today plus the
