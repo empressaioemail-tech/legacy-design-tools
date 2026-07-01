@@ -30,6 +30,11 @@ export default defineConfig(({ command }) => {
 
   return {
     base: basePath,
+    define: {
+      // Server-side adapters (cotalityExtended, etc.) reference process.env
+      // at module load time. Stub it out so browser imports don't crash.
+      "process.env": {},
+    },
     plugins: [
       react(),
       tailwindcss(),
@@ -38,6 +43,7 @@ export default defineConfig(({ command }) => {
       alias: {
         "@": path.resolve(import.meta.dirname, "src"),
         "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+        "node:crypto": path.resolve(import.meta.dirname, "src/crypto-browser-stub.ts"),
       },
       dedupe: ["react", "react-dom"],
     },
@@ -53,6 +59,12 @@ export default defineConfig(({ command }) => {
       allowedHosts: true,
       fs: {
         strict: true,
+      },
+      proxy: {
+        "/api": {
+          target: `http://localhost:${process.env.API_PORT ?? 8080}`,
+          changeOrigin: true,
+        },
       },
     },
     preview: {
