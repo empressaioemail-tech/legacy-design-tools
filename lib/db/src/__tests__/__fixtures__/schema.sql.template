@@ -2317,24 +2317,14 @@ CREATE INDEX gtm_events_mcp_tool_payload_idx ON @@SCHEMA@@.gtm_events USING btre
 CREATE INDEX gtm_events_source_surface_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (source_surface, created_at);
 
 
--- Name: knowledge_atoms_conflict_subject_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX knowledge_atoms_conflict_subject_idx ON @@SCHEMA@@.knowledge_atoms USING btree (subject_id) WHERE (claim_type ~~ 'conflict.%'::text);
-
-
 -- Name: knowledge_atoms_dedup_key_uniq; Type: INDEX; Schema: public; Owner: -
 
-CREATE UNIQUE INDEX knowledge_atoms_dedup_key_uniq ON @@SCHEMA@@.knowledge_atoms USING btree (dedup_key) WHERE (dedup_key IS NOT NULL);
+CREATE UNIQUE INDEX knowledge_atoms_dedup_key_uniq ON @@SCHEMA@@.knowledge_atoms USING btree (dedup_key);
 
 
 -- Name: knowledge_atoms_knowledge_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX knowledge_atoms_knowledge_at_idx ON @@SCHEMA@@.knowledge_atoms USING btree (knowledge_at);
-
-
--- Name: knowledge_atoms_resolution_conflict_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX knowledge_atoms_resolution_conflict_idx ON @@SCHEMA@@.knowledge_atoms USING btree (((payload ->> 'conflict_atom_id'::text))) WHERE (claim_type ~~ 'resolution.%'::text);
 
 
 -- Name: knowledge_atoms_subject_claim_idx; Type: INDEX; Schema: public; Owner: -
