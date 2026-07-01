@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
-    "@hauska/atom-contract": "file:../../vendor/hauska-atom-contract-1.5.0.tgz",
-    "@workspace/codes-sources": "workspace:*",
+    "@hauska/atom-contract": "file:../../vendor/hauska-atom-contract-1.6.0.tgz",    "@workspace/codes-sources": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@workspace/adapters": "workspace:*",
     "@workspace/api-zod": "workspace:*",
@@ -28,7 +27,7 @@
     "@workspace/engine-core": "workspace:*",
     "@workspace/finding-engine": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
-    "@workspace/integrations-xai-grok": "workspace:*",
+    "@workspace/knowledge-atoms": "workspace:*",
     "@workspace/mnml-client": "workspace:*",
     "@workspace/plan-review-pdf": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",

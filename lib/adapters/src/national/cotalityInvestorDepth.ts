@@ -21,6 +21,18 @@ import {
 const COTALITY_AVM_MODEL =
   process.env.COTALITY_AVM_MODEL ?? "thvConsumers";
 
+function isCotalityEmptyRecordSet(value: unknown): boolean {
+  if (value == null) return false;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    if (Array.isArray(row.records)) return row.records.length === 0;
+    if (Array.isArray(row.items)) return row.items.length === 0;
+    if (row.count === 0) return true;
+  }
+  return false;
+}
+
 async function clipFor(ctx: AdapterContext, adapterKey: string) {
   return resolveCotalityClip({
     latitude: ctx.parcel.latitude,
@@ -178,6 +190,27 @@ export const cotalityLiensMortgageTaxAdapter: Adapter = {
       );
     }
 
+    const liensEmpty = isCotalityEmptyRecordSet(liens);
+    const jurisdiction =
+      ctx.jurisdiction.localKey ??
+      ctx.jurisdiction.stateKey ??
+      clipCtx.county ??
+      "unknown";
+    const checkEnd = new Date().toISOString().slice(0, 10);
+    const verifiedAbsence = liensEmpty
+      ? {
+          absenceDomain: "lien" as const,
+          whatWasChecked: "Cotality property-liens index",
+          checkScope: {
+            jurisdiction,
+            record_type: "property-lien",
+            date_range_start: "2000-01-01",
+            date_range_end: checkEnd,
+          },
+          checkMethod: "api_query" as const,
+        }
+      : undefined;
+
     const mudPid = extractMudPidAssessmentFlags(taxLatest, taxLatest);
 
     return {
@@ -199,6 +232,7 @@ export const cotalityLiensMortgageTaxAdapter: Adapter = {
           : "No MUD/PID special-district assessment flags found in Cotality tax payload (absence is not proof).",
         ...cotalityAdapterMeta(this.adapterKey, "property"),
       },
+      verifiedAbsence,
     };
   },
 };
