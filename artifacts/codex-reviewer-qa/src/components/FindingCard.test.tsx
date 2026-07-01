@@ -44,6 +44,17 @@ describe("FindingCard", () => {
     );
   });
 
+  it("derives confidence from readContract when the legacy scalar is absent", () => {
+    const finding = makeFinding({ confidence: undefined as unknown as number });
+    render(<FindingCard finding={finding} />);
+    expect(screen.getByTestId("finding-confidence").textContent).toContain(
+      "82%",
+    );
+    expect(screen.getByTestId("finding-confidence").textContent).not.toContain(
+      "NaN",
+    );
+  });
+
   it("flags a low-confidence finding", () => {
     const finding = makeFinding({ confidence: 0.4, lowConfidence: true });
     render(<FindingCard finding={finding} />);

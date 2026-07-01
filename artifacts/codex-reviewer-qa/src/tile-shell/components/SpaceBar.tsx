@@ -7,6 +7,7 @@ export function SpaceBar({
   activeTiles,
   layoutId,
   undoLabel,
+  savedSpaces,
   onApplyPreset,
   onUndo,
   onOpenPicker,
@@ -16,6 +17,7 @@ export function SpaceBar({
   activeTiles: string[];
   layoutId: string;
   undoLabel: string | null;
+  savedSpaces: Array<{ id: string; label: string }>;
   onApplyPreset: (presetId: string) => void;
   onUndo: () => void;
   onOpenPicker: () => void;
@@ -48,6 +50,20 @@ export function SpaceBar({
             style={pillStyle(active)}
           >
             {preset.label}
+          </button>
+        );
+      })}
+      {savedSpaces.map((space) => {
+        const active = space.id === activePresetId;
+        return (
+          <button
+            key={space.id}
+            type="button"
+            data-testid={`preset-${space.id}`}
+            onClick={() => onApplyPreset(space.id)}
+            style={pillStyle(active)}
+          >
+            {space.label}
           </button>
         );
       })}

@@ -26,6 +26,7 @@ import {
   citationLabel,
   describeAdjudication,
   formatConfidence,
+  resolveFindingConfidence,
   type OverrideDraft,
 } from "../lib/findings";
 import { OverrideEditor } from "./OverrideEditor";
@@ -180,7 +181,7 @@ export function FindingCard({
         }}
       >
         <span data-testid="finding-confidence">
-          Confidence {formatConfidence(finding.confidence)}
+          Confidence {formatConfidence(resolveFindingConfidence(finding))}
           {finding.lowConfidence ? " · flagged low" : ""}
         </span>
         <span data-testid="finding-timestamp">

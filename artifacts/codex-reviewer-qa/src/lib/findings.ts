@@ -48,8 +48,30 @@ export const STATUS_LABELS: Record<FindingStatus, string> = {
 };
 
 /** Format a 0–1 engine confidence score as a whole-percent string. */
-export function formatConfidence(confidence: number): string {
-  return `${Math.round(confidence * 100)}%`;
+export function formatConfidence(value: unknown): string {
+  if (value == null || value === "") return "—";
+  const n = Number(value);
+  if (!isFinite(n)) return "—";
+  return `${Math.round(n * 100)}%`;
+}
+
+/** Resolve display confidence from legacy scalar or readContract axes. */
+export function resolveFindingConfidence(finding: {
+  confidence?: number | null;
+  readContract?: {
+    axes?: {
+      calibratedConfidence?: { estimate?: number | null };
+      assertedConfidence?: { estimate?: number | null };
+    };
+  } | null;
+}): unknown {
+  if (finding.confidence != null && isFinite(Number(finding.confidence))) {
+    return finding.confidence;
+  }
+  return (
+    finding.readContract?.axes?.calibratedConfidence?.estimate ??
+    finding.readContract?.axes?.assertedConfidence?.estimate
+  );
 }
 
 /**
