@@ -30,6 +30,9 @@ export default defineConfig(({ command }) => {
 
   return {
     base: basePath,
+    define: {
+      "process.env": {},
+    },
     plugins: [
       react(),
       tailwindcss(),
@@ -38,6 +41,7 @@ export default defineConfig(({ command }) => {
       alias: {
         "@": path.resolve(import.meta.dirname, "src"),
         "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+        "node:crypto": path.resolve(import.meta.dirname, "src/crypto-browser-stub.ts"),
       },
       dedupe: ["react", "react-dom"],
     },
