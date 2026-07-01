@@ -85,6 +85,8 @@ export {
 } from "./findingReadContract";
 export {
   readContractFromExtractConfidence,
+  assertedExtractConfidence,
+  widthedConfidenceScalar,
 } from "./encumbranceReadContract";
 export {
   type MutableAtomFamily,

@@ -196,15 +196,6 @@ async function runInner(params: {
 
   const persistedUrl = await maybePersistPdfToGcs(downloadUrl, params.jobId);
 
-  await updateExportJob(params.jobId, {
-    step: "ready",
-    progressLabel: "PDF ready to download",
-    downloadUrl: persistedUrl,
-    errorCode: null,
-    errorMessage: null,
-    creditsActual,
-  });
-
   await insertCollateralExport({
     engagementId: row.engagementId,
     exportJobId: params.jobId,
@@ -215,6 +206,15 @@ async function runInner(params: {
     thumbnailUrl: CLIENT_PRESENTATION_PACK.thumbnailUrl,
     sourceAssetIds: req.assetIds,
     creditsCharged: creditsActual,
+  });
+
+  await updateExportJob(params.jobId, {
+    step: "ready",
+    progressLabel: "PDF ready to download",
+    downloadUrl: persistedUrl,
+    errorCode: null,
+    errorMessage: null,
+    creditsActual,
   });
 
   await recordMeteringEvent({
@@ -304,15 +304,6 @@ async function simulateDevExport(
     estimateCreditsForRequest({
       sheetPageCount: (req.sheetAssetIds ?? []).length,
     });
-  await updateExportJob(jobId, {
-    step: "ready",
-    progressLabel: "PDF ready (dev stub — set PLACID_API_TOKEN for live export)",
-    downloadUrl,
-    thumbnailUrl: CLIENT_PRESENTATION_PACK.thumbnailUrl,
-    creditsActual,
-    errorCode: null,
-    errorMessage: null,
-  });
   await insertCollateralExport({
     engagementId,
     exportJobId: jobId,
@@ -323,6 +314,15 @@ async function simulateDevExport(
     thumbnailUrl: CLIENT_PRESENTATION_PACK.thumbnailUrl,
     sourceAssetIds: req.assetIds,
     creditsCharged: creditsActual,
+  });
+  await updateExportJob(jobId, {
+    step: "ready",
+    progressLabel: "PDF ready (dev stub — set PLACID_API_TOKEN for live export)",
+    downloadUrl,
+    thumbnailUrl: CLIENT_PRESENTATION_PACK.thumbnailUrl,
+    creditsActual,
+    errorCode: null,
+    errorMessage: null,
   });
   await recordMeteringEvent({
     tenantId,

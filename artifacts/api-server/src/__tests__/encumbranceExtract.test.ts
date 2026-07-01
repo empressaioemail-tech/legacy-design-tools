@@ -8,6 +8,7 @@ import {
   buildPrivateRestrictionsBriefing,
   formatPrivateRestrictionsForLlm,
 } from "../lib/encumbranceWire";
+import { assertedExtractConfidence } from "@workspace/engine-core";
 
 const FIXTURE_TEXT =
   "Article VII § 4.2\nNo structure shall exceed thirty-five feet in height.\n";
@@ -77,7 +78,7 @@ describe("encumbranceExtract fixture", () => {
             parentInstrumentCid: "gcs:/objects/x",
             clausePath: "Article VII § 4.2",
             bodyText: "No structure shall exceed thirty-five feet.",
-            confidence: 0.9,
+            confidence: assertedExtractConfidence(0.9),
             extractedBy: "encumbrance-extract-v1",
             accessPolicy: "tenant-private",
             legalWeight: "recorded",
