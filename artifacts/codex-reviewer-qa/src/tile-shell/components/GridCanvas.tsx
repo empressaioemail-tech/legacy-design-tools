@@ -26,6 +26,7 @@ export function GridCanvas({
   overflowTileId: string | null;
   onSelectOverflow: (id: string) => void;
 }) {
+  const gridRef = useRef<HTMLDivElement>(null);
   const visibleIds = tileIds.slice(0, 4);
   const overflow = tileIds.length > 4 ? tileIds.slice(4) : [];
   const areas = gridAreasForTiles(visibleIds);
@@ -37,8 +38,15 @@ export function GridCanvas({
   const gridTemplateColumns = colFr.map((f) => `${f}fr`).join(" ");
   const gridTemplateRows = rowFr.map((f) => `${f}fr`).join(" ");
 
+  const colSum = colFr.reduce((a, b) => a + b, 0);
+  const rowSum = rowFr.reduce((a, b) => a + b, 0);
+  const colBoundaryPct =
+    colFr.length >= 2 && colSum > 0 ? (colFr[0]! / colSum) * 100 : null;
+  const rowBoundaryPct =
+    rowFr.length >= 2 && rowSum > 0 ? (rowFr[0]! / rowSum) * 100 : null;
+
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
       {overflow.length > 0 ? (
         <div
           style={{
@@ -71,16 +79,19 @@ export function GridCanvas({
       ) : null}
 
       <div
+        ref={gridRef}
         data-testid="grid-canvas"
         style={{
           flex: 1,
+          height: "100%",
           display: "grid",
           gridTemplateAreas: templateAreas,
           gridTemplateColumns,
           gridTemplateRows,
+          alignContent: "stretch",
           gap: 2,
           padding: 8,
-          minHeight: 400,
+          minHeight: 0,
           position: "relative",
         }}
       >
@@ -102,26 +113,24 @@ export function GridCanvas({
           );
         })}
 
-        <ResizeHandle
-          orientation="col"
-          onDrag={(delta) => {
-            if (colFr.length < 2) return;
-            const next = [...colFr];
-            next[0] = Math.max(0.2, next[0]! + delta);
-            next[1] = Math.max(0.2, next[1]! - delta);
-            onColFrChange(next);
-          }}
-        />
-        <ResizeHandle
-          orientation="row"
-          onDrag={(delta) => {
-            if (rowFr.length < 2) return;
-            const next = [...rowFr];
-            next[0] = Math.max(0.2, next[0]! + delta);
-            next[1] = Math.max(0.2, next[1]! - delta);
-            onRowFrChange(next);
-          }}
-        />
+        {colBoundaryPct !== null ? (
+          <ResizeHandle
+            orientation="col"
+            boundaryPct={colBoundaryPct}
+            containerRef={gridRef}
+            frTotal={colSum}
+            onFrChange={onColFrChange}
+          />
+        ) : null}
+        {rowBoundaryPct !== null ? (
+          <ResizeHandle
+            orientation="row"
+            boundaryPct={rowBoundaryPct}
+            containerRef={gridRef}
+            frTotal={rowSum}
+            onFrChange={onRowFrChange}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -129,22 +138,41 @@ export function GridCanvas({
 
 function ResizeHandle({
   orientation,
-  onDrag,
+  boundaryPct,
+  containerRef,
+  frTotal,
+  onFrChange,
 }: {
   orientation: "col" | "row";
-  onDrag: (delta: number) => void;
+  boundaryPct: number;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  frTotal: number;
+  onFrChange: (fr: number[]) => void;
 }) {
   const dragging = useRef(false);
 
   function onMouseDown(e: React.MouseEvent) {
     e.preventDefault();
     dragging.current = true;
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
 
     function onMove(ev: MouseEvent) {
       if (!dragging.current) return;
-      onDrag(
-        orientation === "col" ? ev.movementX * 0.01 : ev.movementY * 0.01,
-      );
+      if (orientation === "col") {
+        const ratio = Math.min(
+          0.95,
+          Math.max(0.05, (ev.clientX - rect.left) / rect.width),
+        );
+        onFrChange([ratio * frTotal, (1 - ratio) * frTotal]);
+      } else {
+        const ratio = Math.min(
+          0.95,
+          Math.max(0.05, (ev.clientY - rect.top) / rect.height),
+        );
+        onFrChange([ratio * frTotal, (1 - ratio) * frTotal]);
+      }
     }
 
     function onUp() {
@@ -169,7 +197,7 @@ function ResizeHandle({
           ? {
               top: 0,
               bottom: 0,
-              left: "50%",
+              left: `${boundaryPct}%`,
               width: 8,
               cursor: "col-resize",
               transform: "translateX(-50%)",
@@ -177,7 +205,7 @@ function ResizeHandle({
           : {
               left: 0,
               right: 0,
-              top: "50%",
+              top: `${boundaryPct}%`,
               height: 8,
               cursor: "row-resize",
               transform: "translateY(-50%)",

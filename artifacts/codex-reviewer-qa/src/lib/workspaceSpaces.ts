@@ -46,3 +46,14 @@ export function listSavedSpaceEntries(): Array<{ id: string; label: string }> {
     .sort((a, b) => a.localeCompare(b))
     .map((name) => ({ id: savedSpaceId(name), label: name }));
 }
+
+export function deleteSavedSpace(name: string): void {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const existing = loadSavedSpaces();
+  delete existing[trimmed];
+  localStorage.setItem(
+    WORKSPACE_SPACES_STORAGE_KEY,
+    JSON.stringify(existing),
+  );
+}

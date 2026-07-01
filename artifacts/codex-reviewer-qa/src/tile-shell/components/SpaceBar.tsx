@@ -12,6 +12,7 @@ export function SpaceBar({
   onUndo,
   onOpenPicker,
   onSaveSpace,
+  onDeleteSpace,
 }: {
   activePresetId: string;
   activeTiles: string[];
@@ -22,6 +23,7 @@ export function SpaceBar({
   onUndo: () => void;
   onOpenPicker: () => void;
   onSaveSpace: () => void;
+  onDeleteSpace: (spaceId: string) => void;
 }) {
   return (
     <header
@@ -56,15 +58,40 @@ export function SpaceBar({
       {savedSpaces.map((space) => {
         const active = space.id === activePresetId;
         return (
-          <button
+          <span
             key={space.id}
-            type="button"
-            data-testid={`preset-${space.id}`}
-            onClick={() => onApplyPreset(space.id)}
-            style={pillStyle(active)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
           >
-            {space.label}
-          </button>
+            <button
+              type="button"
+              data-testid={`preset-${space.id}`}
+              onClick={() => onApplyPreset(space.id)}
+              style={pillStyle(active)}
+            >
+              {space.label}
+            </button>
+            <button
+              type="button"
+              data-testid={`delete-space-${space.id}`}
+              aria-label={`Delete ${space.label}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteSpace(space.id);
+              }}
+              style={{
+                padding: "2px 6px",
+                borderRadius: 999,
+                border: "1px solid var(--border-subtle)",
+                background: "transparent",
+                color: "var(--text-muted)",
+                fontSize: 12,
+                lineHeight: 1,
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+          </span>
         );
       })}
       <button type="button" onClick={onOpenPicker} style={pillStyle(false)}>

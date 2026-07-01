@@ -14,6 +14,7 @@ import {
   listSavedSpaceEntries,
   loadSavedSpaces,
   saveCurrentSpace,
+  deleteSavedSpace,
   savedSpaceId,
   savedSpaceName,
 } from "../lib/workspaceSpaces";
@@ -182,6 +183,15 @@ function CortexShellInner({
           });
           setSavedSpaces(listSavedSpaceEntries());
           setActivePresetId(savedSpaceId(name.trim()));
+        }}
+        onDeleteSpace={(spaceId) => {
+          if (!isSavedSpaceId(spaceId)) return;
+          const name = savedSpaceName(spaceId);
+          deleteSavedSpace(name);
+          setSavedSpaces(listSavedSpaceEntries());
+          if (activePresetId === spaceId) {
+            handleApplyPreset(PRESET_SPACES[0]!.id);
+          }
         }}
       />
       <TilePicker
