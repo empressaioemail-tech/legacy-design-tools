@@ -8,6 +8,11 @@ import TopographyTile from "../tiles/Site Analysis/topography";
 import DrainageTile from "../tiles/Site Analysis/drainage";
 import HydrologyTile from "../tiles/Site Analysis/hydrology";
 import SubsurfaceTile from "../tiles/Site Analysis/subsurface";
+import PropertyBriefTile from "../tiles/property-intel/PropertyBriefTile";
+import HazardProfileTile from "../tiles/property-intel/HazardProfileTile";
+import EncumbranceTile from "../tiles/property-intel/EncumbranceTile";
+import SheetExtractionTile from "../tiles/design-accelerator/SheetExtractionTile";
+import ResponseTasksTile from "../tiles/design-accelerator/ResponseTasksTile";
 import { makeStubTile, type StubTileMeta } from "../tiles/stubFactory";
 
 type TileMeta = Omit<TileDef, "el"> & { component: () => React.ReactElement };
@@ -38,20 +43,20 @@ const TILE_META: TileMeta[] = [
   { id: "viewshed", label: "Viewshed", category: "Site Analysis", status: "planned", component: stub({ id: "viewshed", label: "Viewshed", category: "Site Analysis", status: "planned" }) },
   { id: "map", label: "Map", category: "Site Analysis", engine: "spatial", status: "live", minColShare: 0.3, component: () => <MapTile /> },
   // Property Intel
-  { id: "property-brief", label: "Property Brief", category: "Property Intel", engine: "engagement", status: "live", component: stub({ id: "property-brief", label: "Property Brief", category: "Property Intel", status: "live" }) },
-  { id: "hazard", label: "Hazard Profile", category: "Property Intel", engine: "spatial", status: "live", component: stub({ id: "hazard", label: "Hazard Profile", category: "Property Intel", status: "live" }) },
+  { id: "property-brief", label: "Property Brief", category: "Property Intel", engine: "engagement", status: "live", component: () => <PropertyBriefTile /> },
+  { id: "hazard", label: "Hazard Profile", category: "Property Intel", engine: "spatial", status: "live", component: () => <HazardProfileTile /> },
   { id: "place-dossier", label: "Place Dossier", category: "Property Intel", engine: "engagement", status: "live", component: stub({ id: "place-dossier", label: "Place Dossier", category: "Property Intel", status: "live" }) },
-  { id: "encumbrances", label: "Encumbrance Report", category: "Property Intel", engine: "engagement", status: "live", component: stub({ id: "encumbrances", label: "Encumbrance Report", category: "Property Intel", status: "live" }) },
+  { id: "encumbrances", label: "Encumbrance Report", category: "Property Intel", engine: "engagement", status: "live", component: () => <EncumbranceTile /> },
   { id: "setbacks", label: "Local Setbacks", category: "Property Intel", engine: "code", status: "live", component: stub({ id: "setbacks", label: "Local Setbacks", category: "Property Intel", status: "live" }) },
   { id: "climate-risk", label: "Climate Risk Trajectory", category: "Property Intel", status: "planned", component: stub({ id: "climate-risk", label: "Climate Risk Trajectory", category: "Property Intel", status: "planned" }) },
   { id: "insurance-estimate", label: "Insurance Cost Estimate", category: "Property Intel", status: "planned", component: stub({ id: "insurance-estimate", label: "Insurance Cost Estimate", category: "Property Intel", status: "planned" }) },
   { id: "jurisdiction-rank", label: "Jurisdiction Comparison", category: "Property Intel", status: "planned", component: stub({ id: "jurisdiction-rank", label: "Jurisdiction Comparison", category: "Property Intel", status: "planned" }) },
   // Design Accelerator
-  { id: "sheet-extraction", label: "Sheet Extraction", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "sheet-extraction", label: "Sheet Extraction", category: "Design Accelerator", status: "live" }) },
+  { id: "sheet-extraction", label: "Sheet Extraction", category: "Design Accelerator", engine: "engagement", status: "live", component: () => <SheetExtractionTile /> },
   { id: "doc-parsing", label: "Document Parsing", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "doc-parsing", label: "Document Parsing", category: "Design Accelerator", status: "live" }) },
   { id: "product-spec", label: "Product Spec Reference", category: "Design Accelerator", engine: "code", status: "live", component: stub({ id: "product-spec", label: "Product Spec Reference", category: "Design Accelerator", status: "live" }) },
   { id: "detail-callouts", label: "Detail Callout Specs", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "detail-callouts", label: "Detail Callout Specs", category: "Design Accelerator", status: "live" }) },
-  { id: "response-tasks", label: "Response Tasks", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "response-tasks", label: "Response Tasks", category: "Design Accelerator", status: "live" }) },
+  { id: "response-tasks", label: "Response Tasks", category: "Design Accelerator", engine: "engagement", status: "live", component: () => <ResponseTasksTile /> },
   { id: "bim-query", label: "BIM Model Query", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "bim-query", label: "BIM Model Query", category: "Design Accelerator", status: "live" }) },
   { id: "ifc-ingest", label: "IFC Ingest", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "ifc-ingest", label: "IFC Ingest", category: "Design Accelerator", status: "live" }) },
   { id: "engagement-match", label: "Engagement Match (Revit)", category: "Design Accelerator", engine: "engagement", status: "live", component: stub({ id: "engagement-match", label: "Engagement Match (Revit)", category: "Design Accelerator", status: "live" }) },

@@ -1,18 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
 import { useSpatial } from "../../tile-shell/providers/SpatialProvider";
 import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
 
-function resolveHauskaMapUrl(): string {
-  const raw = import.meta.env.VITE_HAUSKA_MAP_URL;
-  if (typeof raw === "string" && raw.trim().startsWith("http")) {
-    return raw.trim();
-  }
-  return "https://map.hauska.io/command-center";
-}
-
-const HAUSKA_MAP_URL = resolveHauskaMapUrl();
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN ?? "";
+const baseUrl =
+  import.meta.env.VITE_HAUSKA_MAP_URL ?? "https://map.hauska.io/command-center";
 
 export default function MapTile() {
   const { engagement } = useEngagement();
@@ -24,61 +16,64 @@ export default function MapTile() {
   const lat = engagement?.latitude ?? null;
   const lng = engagement?.longitude ?? null;
 
-  const params = new URLSearchParams();
-  if (apn) params.set("apn", apn);
-  if (jurisdiction) params.set("jurisdiction", jurisdiction);
-  if (lat != null) params.set("lat", String(lat));
-  if (lng != null) params.set("lng", String(lng));
-  params.set("mode", "embed");
-  const iframeSrc =
-    apn || jurisdiction || (lat != null && lng != null)
-      ? `${HAUSKA_MAP_URL}?${params.toString()}`
-      : `${HAUSKA_MAP_URL}?mode=embed`;
+  const iframeSrc = useMemo(() => {
+    const params = new URLSearchParams();
+    if (apn) params.set("apn", apn);
+    if (jurisdiction) params.set("jurisdiction", jurisdiction);
+    if (lat != null) params.set("lat", String(lat));
+    if (lng != null) params.set("lng", String(lng));
+    params.set("mode", "embed");
+    const qs = params.toString();
+    return qs ? `${baseUrl}?${qs}` : `${baseUrl}?mode=embed`;
+  }, [apn, jurisdiction, lat, lng]);
 
-  useEffect(() => {
+  function postMapContext() {
     const frame = iframeRef.current;
     if (!frame?.contentWindow) return;
     for (const overlay of overlays) {
-      frame.contentWindow.postMessage(
-        { type: "ADD_OVERLAY", overlay },
-        "*",
-      );
+      frame.contentWindow.postMessage({ type: "ADD_OVERLAY", overlay }, "*");
     }
-  }, [overlays]);
-
-  if (!MAPBOX_TOKEN && !HAUSKA_MAP_URL) {
-    return (
-      <div style={{ padding: 12 }}>
-        <TileStatusBanner status="live" label="Map" />
-        <p style={{ fontSize: 12 }}>Map embed URL not configured.</p>
-      </div>
-    );
+    if (apn) {
+      frame.contentWindow.postMessage({ type: "SET_PARCEL", apn }, "*");
+    }
   }
+
+  useEffect(() => {
+    postMapContext();
+  }, [overlays, apn, iframeSrc]);
 
   return (
     <div
       data-testid="map-tile"
       style={{
+        width: "100%",
+        height: "100%",
         display: "flex",
         flexDirection: "column",
-        flex: 1,
-        height: "100%",
         minHeight: 0,
         overflow: "hidden",
       }}
     >
+      <TileStatusBanner status="live" label="Map" />
+      {!import.meta.env.VITE_HAUSKA_MAP_URL ? (
+        <div
+          style={{
+            padding: "8px",
+            fontSize: "12px",
+            color: "var(--text-muted)",
+            flexShrink: 0,
+          }}
+        >
+          Set VITE_HAUSKA_MAP_URL in .env.local to use the local hauska-map.
+        </div>
+      ) : null}
       <iframe
         ref={iframeRef}
-        title="Hauska map command center"
         src={iframeSrc}
+        onLoad={postMapContext}
+        style={{ flex: 1, border: "none", width: "100%", minHeight: 0 }}
+        title="Hauska Map"
         allow="*"
-        style={{
-          flex: 1,
-          width: "100%",
-          height: "100%",
-          border: "none",
-          minHeight: 0,
-        }}
       />
       {!engagement ? (
         <p
@@ -103,6 +98,7 @@ export default function MapTile() {
           }}
         >
           Center: {lat.toFixed(5)}, {lng.toFixed(5)}
+          {apn ? ` · APN ${apn}` : ""}
         </p>
       ) : null}
     </div>

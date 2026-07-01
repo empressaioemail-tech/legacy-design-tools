@@ -135,6 +135,47 @@ export function getReport(
   return bffJson(`/engagements/${engagementId}/reports/${type}`);
 }
 
+export type PlanReviewSheetWire = {
+  sheetId: string;
+  label: string;
+  pageNumber: string;
+  snapshotId: string;
+  thumbnailUrl: string;
+  contentBody: string | null;
+  crossRefs: unknown[];
+  createdAt: string;
+};
+
+export function fetchEngagementSheets(
+  engagementId: string,
+): Promise<{ sheets: PlanReviewSheetWire[] }> {
+  return bffJson(`/engagements/${engagementId}/sheets`);
+}
+
+export function extractEngagementSheets(
+  engagementId: string,
+): Promise<{ extracted: number; message?: string }> {
+  return bffJson(`/engagements/${engagementId}/sheets/extract`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export type PlanReviewResponseTaskWire = {
+  entityId: string;
+  title: string;
+  description: string;
+  state: "open" | "in-progress" | "done" | "cancelled";
+  findingId: string | null;
+  engagementId: string;
+};
+
+export function fetchEngagementResponseTasks(
+  engagementId: string,
+): Promise<{ responseTasks: PlanReviewResponseTaskWire[] }> {
+  return bffJson(`/engagements/${engagementId}/response-tasks`);
+}
+
 export function patchFinding(
   engagementId: string,
   findingId: string,

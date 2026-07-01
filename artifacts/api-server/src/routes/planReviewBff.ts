@@ -8,13 +8,16 @@ import {
   type Request,
   type Response,
 } from "express";
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import {
   db,
   engagements,
   findings,
   submissions,
   attachedDocuments,
+  snapshots,
+  sheets,
+  responseTasks,
 } from "@workspace/db";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import {
@@ -61,6 +64,16 @@ import {
 } from "../lib/engagementEvents";
 import { autoTriggerClassificationOnSubmissionCreated } from "../lib/autoTriggerClassificationOnSubmissionCreated";
 import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindingsOnSubmissionCreated";
+import {
+  loadBriefReportResult,
+  loadEncumbrancesReportResult,
+  loadHazardReportResult,
+  runBriefReportForEngagement,
+  runHazardAdaptersForEngagement,
+} from "../lib/planReviewLayerRun";
+import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
+import { runSheetContentExtraction } from "../lib/sheetContentExtractor";
+import type { ResponseTaskAtomInstance } from "@workspace/atoms-l-surface";
 
 const planReviewObjectStorage = new ObjectStorageService();
 
@@ -95,8 +108,31 @@ function isReportType(v: string): v is ReportType {
   return (REPORT_TYPES as readonly string[]).includes(v);
 }
 
+function normalizeReportType(raw: string): ReportType | null {
+  if (raw === "property-brief") return "brief";
+  return isReportType(raw) ? raw : null;
+}
+
 function reqLog(req: Request): typeof logger {
   return (req as Request & { log?: typeof logger }).log ?? logger;
+}
+
+function resolveEngagementApn(siteContextRaw: unknown): string | null {
+  if (!siteContextRaw || typeof siteContextRaw !== "object") return null;
+  const raw = siteContextRaw as Record<string, unknown>;
+  for (const key of ["apn", "parcelApn", "parcel_id", "parcelId"]) {
+    const v = raw[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  const intake = raw.intake;
+  if (intake && typeof intake === "object") {
+    const i = intake as Record<string, unknown>;
+    for (const key of ["apn", "parcelApn"]) {
+      const v = i[key];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  }
+  return null;
 }
 
 function reviewerJurisdictionTenant(
@@ -483,7 +519,7 @@ router.get(
       name: e.name,
       jurisdiction: e.jurisdiction,
       address: e.address,
-      apn: null,
+      apn: resolveEngagementApn(e.siteContextRaw),
       applicantName: e.applicantFirm ?? e.architectOfRecordName ?? null,
       latitude: e.latitude ? Number(e.latitude) : null,
       longitude: e.longitude ? Number(e.longitude) : null,
@@ -614,8 +650,9 @@ router.post(
   requireServiceTokenOrSession,
   async (req: Request, res: Response) => {
     const engagementId = paramId(req.params.engagementId);
-    const type = paramId(req.params.type);
-    if (!isReportType(type)) {
+    const typeRaw = paramId(req.params.type);
+    const type = normalizeReportType(typeRaw);
+    if (!type) {
       res.status(400).json({ error: "invalid_report_type" });
       return;
     }
@@ -691,6 +728,40 @@ router.post(
             throw err;
           }
         }
+      } else if (type === "hazard") {
+        const outcome = await runHazardAdaptersForEngagement({
+          engagementId,
+          log,
+        });
+        if (!outcome.ok) {
+          inFlightReports.delete(flightKey);
+          res.status(outcome.status).json({ error: outcome.error });
+          return;
+        }
+        if (outcome.quotaExhausted) {
+          reportResultCache.set(flightKey, {
+            status: "ok",
+            result: { quotaExhausted: true, persisted: outcome.persisted },
+          });
+        }
+      } else if (type === "brief") {
+        const outcome = await runBriefReportForEngagement({
+          engagementId,
+          log,
+        });
+        if (!outcome.ok) {
+          inFlightReports.delete(flightKey);
+          res
+            .status(outcome.status)
+            .json({
+              error: outcome.error,
+              generationId: outcome.generationId ?? undefined,
+            });
+          return;
+        }
+      } else if (type === "encumbrances") {
+        const encResult = await loadEncumbrancesReportResult(engagementId);
+        reportResultCache.set(flightKey, encResult);
       }
       inFlightReports.delete(flightKey);
       res.status(202).json({ generationId });
@@ -709,8 +780,9 @@ router.get(
   requireServiceTokenOrSession,
   async (req: Request, res: Response) => {
     const engagementId = paramId(req.params.engagementId);
-    const type = paramId(req.params.type);
-    if (!isReportType(type)) {
+    const typeRaw = paramId(req.params.type);
+    const type = normalizeReportType(typeRaw);
+    if (!type) {
       res.status(400).json({ error: "invalid_report_type" });
       return;
     }
@@ -800,7 +872,213 @@ router.get(
     return;
   }
 
+  if (type === "hazard") {
+    const hazard = await loadHazardReportResult(engagementId);
+    if (hazard.status === "ok") {
+      const cached = reportResultCache.get(flightKey) as
+        | { result?: { quotaExhausted?: boolean } }
+        | undefined;
+      if (cached?.result?.quotaExhausted) {
+        res.json({
+          ...hazard,
+          result: {
+            ...(hazard.result as Record<string, unknown>),
+            quotaExhausted: true,
+          },
+        });
+        return;
+      }
+      res.json(hazard);
+      return;
+    }
+    res.json(hazard);
+    return;
+  }
+
+  if (type === "brief") {
+    const brief = await loadBriefReportResult(engagementId);
+    res.json(brief);
+    return;
+  }
+
+  if (type === "encumbrances") {
+    const enc = await loadEncumbrancesReportResult(engagementId);
+    res.json(enc);
+    return;
+  }
+
     res.json({ status: "not-run" });
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/sheets ───────────────────
+
+async function loadLatestSnapshotId(
+  engagementId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ id: snapshots.id })
+    .from(snapshots)
+    .where(eq(snapshots.engagementId, engagementId))
+    .orderBy(desc(snapshots.receivedAt))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+router.get(
+  "/engagements/:id/sheets",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const snapshotId = await loadLatestSnapshotId(engagementId);
+    if (!snapshotId) {
+      res.json({ sheets: [] });
+      return;
+    }
+    const rows = await db
+      .select({
+        id: sheets.id,
+        snapshotId: sheets.snapshotId,
+        engagementId: sheets.engagementId,
+        sheetNumber: sheets.sheetNumber,
+        sheetName: sheets.sheetName,
+        viewCount: sheets.viewCount,
+        revisionNumber: sheets.revisionNumber,
+        revisionDate: sheets.revisionDate,
+        thumbnailWidth: sheets.thumbnailWidth,
+        thumbnailHeight: sheets.thumbnailHeight,
+        fullWidth: sheets.fullWidth,
+        fullHeight: sheets.fullHeight,
+        sortOrder: sheets.sortOrder,
+        contentBody: sheets.contentBody,
+        createdAt: sheets.createdAt,
+      })
+      .from(sheets)
+      .where(eq(sheets.snapshotId, snapshotId))
+      .orderBy(asc(sheets.sortOrder));
+    res.json({
+      sheets: rows.map((r) => ({
+        sheetId: r.id,
+        label: r.sheetName,
+        pageNumber: r.sheetNumber,
+        snapshotId: r.snapshotId,
+        thumbnailUrl: `/api/sheets/${r.id}/thumbnail.png`,
+        contentBody: r.contentBody,
+        crossRefs: extractSheetCrossRefs(r.contentBody ?? ""),
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/sheets/extract ──────────
+
+router.post(
+  "/engagements/:id/sheets/extract",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const snapshotId = await loadLatestSnapshotId(engagementId);
+    if (!snapshotId) {
+      res.status(422).json({ error: "no_snapshot" });
+      return;
+    }
+    const rows = await db
+      .select({
+        id: sheets.id,
+        contentBody: sheets.contentBody,
+        fullPng: sheets.fullPng,
+      })
+      .from(sheets)
+      .where(eq(sheets.snapshotId, snapshotId))
+      .orderBy(asc(sheets.sortOrder));
+    const targets = rows
+      .filter((r) => !r.contentBody && r.fullPng)
+      .map((r) => ({
+        sheetId: r.id,
+        fullPng: Buffer.isBuffer(r.fullPng)
+          ? r.fullPng
+          : Buffer.from(r.fullPng as Uint8Array),
+      }));
+    if (targets.length === 0) {
+      res.json({ extracted: 0, message: "no_sheets_need_extraction" });
+      return;
+    }
+    const log = reqLog(req);
+    await runSheetContentExtraction(targets, log);
+    res.status(202).json({ extracted: targets.length });
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/response-tasks ─────────────
+
+function toPlanReviewResponseTaskWire(
+  row: typeof responseTasks.$inferSelect,
+): ResponseTaskAtomInstance {
+  const createdAtIso = row.createdAt.toISOString();
+  return {
+    entityType: "response-task",
+    entityId: row.id,
+    title: row.title,
+    description: row.description,
+    state: row.state as ResponseTaskAtomInstance["state"],
+    createdAt: createdAtIso,
+    dueAt: row.dueAt?.toISOString() ?? null,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    sourceClientCommentId: row.sourceClientCommentId,
+    findingId: row.findingId,
+    engagementId: row.engagementId,
+    actorId: row.actorId,
+    principalActorId: row.principalActorId,
+    accessPolicy: "tenant-private",
+    jurisdictionTenant: DEFAULT_TENANT_ID,
+    sourceAdapter: "legacy-design-tools",
+    contentHash: "",
+    fetchedAt: createdAtIso,
+    sourceUrl: "",
+  };
+}
+
+router.get(
+  "/engagements/:id/response-tasks",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const rows = await db
+      .select()
+      .from(responseTasks)
+      .where(eq(responseTasks.engagementId, engagementId))
+      .orderBy(desc(responseTasks.createdAt));
+    res.json({
+      responseTasks: rows.map((r) => toPlanReviewResponseTaskWire(r)),
+    });
   },
 );
 
