@@ -1,10 +1,15 @@
-import { TILE_REGISTRY } from "../tiles";
 import { TileStatusBanner } from "./TileStatusBanner";
+import type { TileCategory } from "../types";
 
-export function PlannedTile({ id }: { id: string }) {
-  const def = TILE_REGISTRY[id];
-  const label = def?.label ?? id;
-
+export function PlannedTile({
+  id,
+  label,
+  category,
+}: {
+  id: string;
+  label: string;
+  category: TileCategory;
+}) {
   return (
     <div
       data-testid={`planned-tile-${id}`}
@@ -21,6 +26,16 @@ export function PlannedTile({ id }: { id: string }) {
         label={label}
         reason="Not yet built — see cortex-reporting dispatch spec"
       />
+      <span
+        style={{
+          fontSize: 10,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--text-muted)",
+        }}
+      >
+        {category}
+      </span>
       <h3 style={{ margin: 0, fontSize: 15 }}>{label}</h3>
       <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
         Planned — not yet built. Spec reference: tile id{" "}

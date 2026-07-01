@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useLocation } from "wouter";
 import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
 import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
@@ -7,13 +7,20 @@ import {
   useListSubmissionFindings,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
-} from "@workspace/api-client-react";
-import { letterEligibleFindings, composeCommentLetterDraft } from "../../lib/commentLetter";
-import { useDraftCommentLetter } from "../../lib/commentLetterApi";
-import { sortFindings } from "../../lib/findings";
-import {
   useListEngagements,
 } from "@workspace/api-client-react";
+import {
+  letterEligibleFindings,
+  composeCommentLetterDraft,
+} from "../../lib/commentLetter";
+import { useDraftCommentLetter } from "../../lib/commentLetterApi";
+
+const sectionStyle: CSSProperties = {
+  padding: 10,
+  borderRadius: 6,
+  border: "1px solid var(--border-subtle)",
+  background: "var(--bg-elevated)",
+};
 
 export default function LetterTile() {
   const { engagementId } = useEngagement();
@@ -39,20 +46,26 @@ export default function LetterTile() {
       queryKey: getListSubmissionFindingsQueryKey(latestSubmission?.id ?? ""),
     },
   });
-  const findings = sortFindings(findingsQuery.data?.findings ?? []);
+  const findings = findingsQuery.data?.findings ?? [];
   const letterEligible = letterEligibleFindings(findings);
 
+  const composed =
+    engagement && letterEligible.length > 0
+      ? composeCommentLetterDraft({
+          engagementName: engagement.name,
+          jurisdiction: engagement.jurisdiction ?? null,
+          submittedAt: latestSubmission?.submittedAt ?? null,
+          findings,
+        })
+      : null;
+
   function handleDraft() {
-    if (!engagementId || !engagement || letterEligible.length === 0) return;
+    if (!engagementId || !engagement || !composed || letterEligible.length === 0) {
+      return;
+    }
     setError(null);
-    const draft = composeCommentLetterDraft({
-      engagementName: engagement.name,
-      jurisdiction: engagement.jurisdiction ?? null,
-      submittedAt: latestSubmission?.submittedAt ?? null,
-      findings,
-    });
     draftLetter.mutate(
-      { engagementId, draft },
+      { engagementId, draft: composed },
       {
         onSuccess: (letterId) => navigate(`/letter/${letterId}`),
         onError: () => setError("Could not draft letter."),
@@ -61,11 +74,25 @@ export default function LetterTile() {
   }
 
   return (
-    <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div
+      style={{
+        padding: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        overflow: "auto",
+        height: "100%",
+      }}
+    >
       <TileStatusBanner status="live" label="Deliverable Letter" />
       <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
-        Draft a comment letter from adjudicated findings on the latest submission.
+        Draft a comment letter from accepted findings on the latest submission.
       </p>
+      {!engagementId ? (
+        <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          Select a case from Intake & Queue first.
+        </p>
+      ) : null}
       <button
         type="button"
         data-testid="draft-comment-letter-button"
@@ -94,6 +121,32 @@ export default function LetterTile() {
       <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
         {letterEligible.length} finding{letterEligible.length === 1 ? "" : "s"} ready
       </span>
+      {composed ? (
+        <div
+          data-testid="letter-sections-preview"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          {composed.sections.map((section, index) => (
+            <article key={`${section.heading}-${index}`} style={sectionStyle}>
+              <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>{section.heading}</h4>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {section.content}
+              </p>
+            </article>
+          ))}
+        </div>
+      ) : engagementId ? (
+        <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          No accepted findings on the latest submission yet.
+        </p>
+      ) : null}
     </div>
   );
 }

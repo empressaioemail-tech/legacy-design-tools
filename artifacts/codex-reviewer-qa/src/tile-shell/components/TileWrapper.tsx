@@ -4,6 +4,7 @@ export function TileWrapper({
   tileId,
   label,
   gridArea,
+  fill = false,
   children,
   onClose,
   onFullscreen,
@@ -11,6 +12,7 @@ export function TileWrapper({
   tileId: string;
   label: string;
   gridArea: string;
+  fill?: boolean;
   children: ReactNode;
   onClose: () => void;
   onFullscreen: () => void;
@@ -22,10 +24,10 @@ export function TileWrapper({
         gridArea,
         display: "flex",
         flexDirection: "column",
-        border: "1px solid var(--border-subtle)",
+        border: "1px solid var(--border-subtle, var(--border-soft, rgba(160,220,255,0.13)))",
         borderRadius: 8,
         overflow: "hidden",
-        background: "var(--surface-1, var(--bg-base))",
+        background: "var(--surface-1, #1e2a35)",
         minHeight: 0,
       }}
     >
@@ -60,7 +62,18 @@ export function TileWrapper({
           ×
         </button>
       </div>
-      <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>{children}</div>
+      <div
+        style={{
+          flex: 1,
+          overflow: fill ? "hidden" : "auto",
+          minHeight: 0,
+          display: fill ? "flex" : "block",
+          flexDirection: fill ? "column" : undefined,
+          position: "relative",
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }

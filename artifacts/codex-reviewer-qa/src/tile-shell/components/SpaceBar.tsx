@@ -1,8 +1,9 @@
-import { useState, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
 import type { WorkspaceComposition } from "../types";
 import { PRESET_SPACES } from "../presets";
 
 export function SpaceBar({
+  activePresetId,
   activeTiles,
   layoutId,
   undoLabel,
@@ -11,6 +12,7 @@ export function SpaceBar({
   onOpenPicker,
   onSaveSpace,
 }: {
+  activePresetId: string;
   activeTiles: string[];
   layoutId: string;
   undoLabel: string | null;
@@ -35,17 +37,20 @@ export function SpaceBar({
       <span style={{ fontSize: 13, fontWeight: 700, marginRight: 8 }}>
         Cortex Workspace
       </span>
-      {PRESET_SPACES.map((preset) => (
-        <button
-          key={preset.id}
-          type="button"
-          data-testid={`preset-${preset.id}`}
-          onClick={() => onApplyPreset(preset.id)}
-          style={pillStyle(false)}
-        >
-          {preset.label}
-        </button>
-      ))}
+      {PRESET_SPACES.map((preset) => {
+        const active = preset.id === activePresetId;
+        return (
+          <button
+            key={preset.id}
+            type="button"
+            data-testid={`preset-${preset.id}`}
+            onClick={() => onApplyPreset(preset.id)}
+            style={pillStyle(active)}
+          >
+            {preset.label}
+          </button>
+        );
+      })}
       <button type="button" onClick={onOpenPicker} style={pillStyle(false)}>
         + Functions
       </button>
@@ -78,12 +83,16 @@ function pillStyle(active: boolean): CSSProperties {
   return {
     padding: "4px 12px",
     borderRadius: 999,
-    border: "1px solid var(--border-subtle)",
+    border: active
+      ? "1px solid var(--accent, var(--info-text))"
+      : "1px solid var(--border-subtle)",
     background: active ? "var(--info-dim)" : "transparent",
-    color: "var(--text-secondary)",
+    color: active ? "var(--text-primary, #e2edf5)" : "var(--text-secondary)",
     fontSize: 12,
     fontWeight: 600,
     cursor: "pointer",
+    textDecoration: active ? "underline" : "none",
+    textUnderlineOffset: 3,
   };
 }
 

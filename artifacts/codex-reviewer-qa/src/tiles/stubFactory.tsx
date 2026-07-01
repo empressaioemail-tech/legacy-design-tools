@@ -1,23 +1,62 @@
+import type React from "react";
+import type { TileCategory, TileStatus } from "../tile-shell/types";
 import { PlannedTile } from "../tile-shell/components/PlannedTile";
-import { TILE_REGISTRY } from "../tile-shell/tiles";
 import { TileStatusBanner } from "../tile-shell/components/TileStatusBanner";
 
+export type StubTileMeta = {
+  id: string;
+  label: string;
+  category: TileCategory;
+  status: TileStatus;
+  degradedReason?: string;
+};
+
+const disabledRunStyle: React.CSSProperties = {
+  padding: "8px 14px",
+  borderRadius: 6,
+  border: "1px solid var(--border-subtle)",
+  background: "var(--bg-elevated)",
+  color: "var(--text-muted)",
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "not-allowed",
+  opacity: 0.6,
+  alignSelf: "flex-start",
+};
+
 /** Factory for registry entries that mount a PlannedTile or status banner stub. */
-export function makeStubTile(id: string) {
-  const def = () => TILE_REGISTRY[id];
+export function makeStubTile(meta: StubTileMeta): () => React.ReactElement {
   return function StubTile() {
-    const tile = def();
-    if (!tile) return <PlannedTile id={id} />;
-    if (tile.status === "planned") return <PlannedTile id={id} />;
+    if (meta.status === "planned") {
+      return <PlannedTile id={meta.id} label={meta.label} category={meta.category} />;
+    }
+
+    const showDisabledRun =
+      meta.status === "degraded" || meta.status === "partial";
+
     return (
-      <div style={{ padding: 12 }}>
+      <div
+        data-testid={`stub-tile-${meta.id}`}
+        style={{
+          padding: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          height: "100%",
+        }}
+      >
         <TileStatusBanner
-          status={tile.status}
-          label={tile.label}
-          reason={tile.degradedReason}
+          status={meta.status}
+          label={meta.label}
+          reason={meta.degradedReason}
         />
-        <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          {tile.label} — shell registered; full tile UI pending.
+        {showDisabledRun ? (
+          <button type="button" disabled style={disabledRunStyle}>
+            Run
+          </button>
+        ) : null}
+        <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>
+          {meta.label} — shell registered; full tile UI pending.
         </p>
       </div>
     );

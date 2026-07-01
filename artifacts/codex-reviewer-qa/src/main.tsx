@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { initTheme } from "@workspace/portal-ui";
+import { initTheme } from "@workspace/portal-ui/theme";
 import App from "./App";
 import "./index.css";
 

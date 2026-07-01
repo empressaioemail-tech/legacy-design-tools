@@ -14,12 +14,16 @@ export default function MapTile() {
 
   const apn = engagement?.apn ?? "";
   const jurisdiction = engagement?.jurisdiction ?? "";
-  const lat = (engagement as { latitude?: number } | null)?.latitude;
-  const lng = (engagement as { longitude?: number } | null)?.longitude;
+  const lat = engagement?.latitude ?? null;
+  const lng = engagement?.longitude ?? null;
 
+  const params = new URLSearchParams();
+  if (apn) params.set("apn", apn);
+  if (jurisdiction) params.set("jurisdiction", jurisdiction);
+  params.set("mode", "embed");
   const iframeSrc =
     apn || jurisdiction
-      ? `${HAUSKA_MAP_URL}?apn=${encodeURIComponent(apn)}&jurisdiction=${encodeURIComponent(jurisdiction)}&mode=overlay`
+      ? `${HAUSKA_MAP_URL}?${params.toString()}`
       : HAUSKA_MAP_URL;
 
   useEffect(() => {
@@ -48,11 +52,12 @@ export default function MapTile() {
       style={{
         display: "flex",
         flexDirection: "column",
+        flex: 1,
         height: "100%",
-        minHeight: 240,
+        minHeight: 0,
+        overflow: "hidden",
       }}
     >
-      <TileStatusBanner status="live" label="Map" />
       <iframe
         ref={iframeRef}
         title="Hauska map command center"
@@ -60,9 +65,9 @@ export default function MapTile() {
         style={{
           flex: 1,
           width: "100%",
+          height: "100%",
           border: "none",
-          borderRadius: 6,
-          minHeight: 200,
+          minHeight: 0,
         }}
       />
       {!engagement ? (
@@ -72,12 +77,21 @@ export default function MapTile() {
             padding: "4px 8px",
             color: "var(--text-muted)",
             margin: 0,
+            flexShrink: 0,
           }}
         >
           Select an engagement to center the map on parcel context.
         </p>
       ) : lat != null && lng != null ? (
-        <p style={{ fontSize: 10, color: "var(--text-muted)", margin: 0, padding: 4 }}>
+        <p
+          style={{
+            fontSize: 10,
+            color: "var(--text-muted)",
+            margin: 0,
+            padding: 4,
+            flexShrink: 0,
+          }}
+        >
           Center: {lat.toFixed(5)}, {lng.toFixed(5)}
         </p>
       ) : null}

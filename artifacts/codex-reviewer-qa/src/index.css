@@ -1,11 +1,23 @@
 @import "tailwindcss";
 @import "@workspace/portal-ui/styles";
 
+/* Tile-shell variables — fill gaps not covered by the portal-ui theme.
+   These are the canonical values from smartcity-themes.css (charcoal variant).
+   Defined here so the shell works even if the portal-ui import doesn't resolve
+   in the local dev server (fs.strict + symlink traversal). */
+:root {
+  --surface-1: #1e2a35;
+  --border-subtle: rgba(160, 220, 255, 0.13);
+  --text-secondary: #94a8b8;
+  --accent: #2e7fff;
+  --info-dim: rgba(46, 127, 255, 0.15);
+}
+
 @layer base {
   body {
     font-family: "Inter", sans-serif;
-    background: var(--bg-base);
-    color: var(--text-primary);
+    background: var(--bg-base, #141a20);
+    color: var(--text-primary, #e2edf5);
     margin: 0;
   }
   h1, h2, h3, h4, h5, h6 {
@@ -15,4 +27,8 @@
   *::-webkit-scrollbar { width: 6px; height: 6px; }
   *::-webkit-scrollbar-track { background: transparent; }
   *::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
+}
+
+.grid-resize-handle:hover {
+  background: rgba(255, 255, 255, 0.1);
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef } from "react";
 import { getTile } from "../tiles";
 import { LAYOUTS, gridAreasForTiles } from "../layouts";
 import { TileWrapper } from "./TileWrapper";
@@ -29,7 +29,10 @@ export function GridCanvas({
   const visibleIds = tileIds.slice(0, 4);
   const overflow = tileIds.length > 4 ? tileIds.slice(4) : [];
   const areas = gridAreasForTiles(visibleIds);
-  const templateAreas = LAYOUTS[layoutId] ?? LAYOUTS["4"]!;
+  const templateAreas = (LAYOUTS[layoutId] ?? LAYOUTS["4"]!)
+    .split("/")
+    .map((s) => s.trim())
+    .join(" ");
 
   const gridTemplateColumns = colFr.map((f) => `${f}fr`).join(" ");
   const gridTemplateRows = rowFr.map((f) => `${f}fr`).join(" ");
@@ -90,6 +93,7 @@ export function GridCanvas({
               tileId={id}
               label={def.label}
               gridArea={areas[i]}
+              fill={id === "map"}
               onClose={() => onRemoveTile(id)}
               onFullscreen={() => onFullscreen(id)}
             >
@@ -130,26 +134,56 @@ function ResizeHandle({
   orientation: "col" | "row";
   onDrag: (delta: number) => void;
 }) {
-  const [dragging, setDragging] = useState(false);
+  const dragging = useRef(false);
+
+  function onMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    dragging.current = true;
+
+    function onMove(ev: MouseEvent) {
+      if (!dragging.current) return;
+      onDrag(
+        orientation === "col" ? ev.movementX * 0.01 : ev.movementY * 0.01,
+      );
+    }
+
+    function onUp() {
+      dragging.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   return (
     <div
       role="separator"
       aria-orientation={orientation === "col" ? "vertical" : "horizontal"}
-      onMouseDown={() => setDragging(true)}
-      onMouseUp={() => setDragging(false)}
-      onMouseLeave={() => setDragging(false)}
-      onMouseMove={(e) => {
-        if (!dragging) return;
-        onDrag(orientation === "col" ? e.movementX * 0.01 : e.movementY * 0.01);
-      }}
+      onMouseDown={onMouseDown}
+      className="grid-resize-handle"
       style={{
         position: "absolute",
         ...(orientation === "col"
-          ? { top: 0, bottom: 0, left: "50%", width: 6, cursor: "col-resize" }
-          : { left: 0, right: 0, top: "50%", height: 6, cursor: "row-resize" }),
+          ? {
+              top: 0,
+              bottom: 0,
+              left: "50%",
+              width: 8,
+              cursor: "col-resize",
+              transform: "translateX(-50%)",
+            }
+          : {
+              left: 0,
+              right: 0,
+              top: "50%",
+              height: 8,
+              cursor: "row-resize",
+              transform: "translateY(-50%)",
+            }),
         zIndex: 10,
-        background: dragging ? "var(--accent)" : "transparent",
+        background: "transparent",
       }}
     />
   );

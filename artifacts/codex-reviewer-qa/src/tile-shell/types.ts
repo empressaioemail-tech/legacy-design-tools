@@ -60,6 +60,8 @@ export type EngagementDetail = {
   address: string | null;
   apn: string | null;
   applicantName: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   reportResults: Record<string, EngagementReportResult>;
 };
 
