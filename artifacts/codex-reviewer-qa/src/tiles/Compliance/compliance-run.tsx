@@ -4,14 +4,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  generateSubmissionFindings,
   getGetSubmissionFindingsGenerationStatusQueryKey,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
-  useGetSubmissionFindingsGenerationStatus,
   useListCodeJurisdictions,
-  useListEngagementSubmissions,
-  useListSubmissionFindings,
 } from "@workspace/api-client-react";
 import { FindingCard } from "../../components/FindingCard";
 import { JurisdictionBar } from "../../components/JurisdictionBar";
@@ -27,8 +23,10 @@ import { useCode } from "../../tile-shell/providers/CodeProvider";
 import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
 import { runCompliancePass } from "../../lib/planReviewBff";
 import {
-  useListEngagements,
-} from "@workspace/api-client-react";
+  usePlanReviewEngagementSubmissions,
+  usePlanReviewSubmissionFindings,
+  usePlanReviewSubmissionFindingsStatus,
+} from "../../lib/planReviewBffQueries";
 
 const labelStyle: CSSProperties = {
   fontSize: 11,
@@ -54,17 +52,13 @@ export default function ComplianceRunTile() {
   const queryClient = useQueryClient();
   const [submissionId, setSubmissionId] = useState("");
 
-  const engagementsQuery = useListEngagements();
-  const selectedEngagement =
-    engagementsQuery.data?.find((e) => e.id === engagementId) ?? null;
-
   useEffect(() => {
-    if (selectedEngagement?.jurisdiction) {
-      setJurisdictionKey(selectedEngagement.jurisdiction);
+    if (engagement?.jurisdiction) {
+      setJurisdictionKey(engagement.jurisdiction);
     }
-  }, [selectedEngagement?.jurisdiction, setJurisdictionKey]);
+  }, [engagement?.jurisdiction, setJurisdictionKey]);
 
-  const submissionsQuery = useListEngagementSubmissions(engagementId ?? "", {
+  const submissionsQuery = usePlanReviewEngagementSubmissions(engagementId ?? "", {
     query: {
       queryKey: getListEngagementSubmissionsQueryKey(engagementId ?? ""),
       enabled: Boolean(engagementId),
@@ -78,7 +72,7 @@ export default function ComplianceRunTile() {
   const selectedSubmission =
     submissions.find((s) => s.id === submissionId) ?? null;
 
-  const statusQuery = useGetSubmissionFindingsGenerationStatus(submissionId, {
+  const statusQuery = usePlanReviewSubmissionFindingsStatus(submissionId, {
     query: {
       queryKey: getGetSubmissionFindingsGenerationStatusQueryKey(submissionId),
       enabled: submissionId !== "",
@@ -89,7 +83,7 @@ export default function ComplianceRunTile() {
   const status = statusQuery.data ?? null;
   const isGenerating = status?.state === "pending";
 
-  const findingsQuery = useListSubmissionFindings(submissionId, {
+  const findingsQuery = usePlanReviewSubmissionFindings(submissionId, {
     query: {
       queryKey: getListSubmissionFindingsQueryKey(submissionId),
       enabled: submissionId !== "",
@@ -118,7 +112,7 @@ export default function ComplianceRunTile() {
       if (bff.precedenceResult) {
         setPrecedenceResult(bff.precedenceResult);
       }
-      return generateSubmissionFindings(submissionId, {});
+      return bff;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -207,7 +201,7 @@ export default function ComplianceRunTile() {
       </div>
 
       <JurisdictionBar
-        engagement={selectedEngagement}
+        engagement={engagement}
         submission={selectedSubmission}
         jurisdictions={jurisdictions}
         corpusLoading={jurisdictionsQuery.isLoading}
