@@ -85,7 +85,7 @@ export const reasoningAtoms = pgTable(
     ),
     check(
       "reasoning_atoms_access_policy_check",
-      sql`${t.accessPolicy} IN ('platform-internal', 'tenant-scoped')`,
+      sql`${t.accessPolicy} IN ('public-free', 'public-paid', 'platform-internal', 'tenant-private', 'tenant-shared')`,
     ),
   ],
 );

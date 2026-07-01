@@ -1036,7 +1036,7 @@ CREATE TABLE @@SCHEMA@@.reasoning_atoms (
     access_policy text DEFAULT 'platform-internal'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT reasoning_atoms_access_policy_check CHECK ((access_policy = ANY (ARRAY['platform-internal'::text, 'tenant-scoped'::text]))),
+    CONSTRAINT reasoning_atoms_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
     CONSTRAINT reasoning_atoms_display_mode_check CHECK ((display_mode = ANY (ARRAY['deeplink'::text, 'licensed'::text]))),
     CONSTRAINT reasoning_atoms_verification_state_check CHECK ((verification_state = ANY (ARRAY['verified'::text, 'unverified-web-source'::text])))
 );

@@ -2,6 +2,8 @@ import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import {
   readContractFromExtractConfidence,
   readContractForWire,
+  assertedExtractConfidence,
+  widthedConfidenceScalar,
 } from "@workspace/engine-core";
 import {
   RECORDED_INSTRUMENT_SCHEMA,
@@ -102,7 +104,10 @@ export function rowToRestrictionClauseAtom(
     structuredFields:
       (row.structuredFields as RestrictionClauseAtomInstance["structuredFields"]) ??
       undefined,
-    confidence: Number(row.confidence),
+    confidence: assertedExtractConfidence(
+      Number(row.confidence),
+      row.humanVerifiedAt ? 1 : 0,
+    ),
     extractedBy: row.extractedBy,
     humanVerifiedAt: row.humanVerifiedAt?.toISOString(),
     verifiedByActorDid: row.verifiedByActorDid ?? undefined,
@@ -116,7 +121,7 @@ export function rowToRestrictionClauseAtom(
   if (!parsed.success) {
     throw new Error(`restriction_clause_schema_invalid: ${parsed.error.message}`);
   }
-  return parsed.data;
+  return parsed.data as RestrictionClauseAtomInstance;
 }
 
 export function pdfServeUrl(objectPath: string): string {
@@ -151,7 +156,7 @@ export function buildPrivateRestrictionsBriefing(
 
   const items: PrivateRestrictionBriefingItem[] = clauses.map((c) => {
     const inst = instruments.find((i) => i.id === c.instrumentId);
-    const confidence = c.clause.confidence;
+    const confidence = widthedConfidenceScalar(c.clause.confidence);
     const readContract = readContractForWire(
       readContractFromExtractConfidence(confidence, {
         humanVerified: !!c.clause.humanVerifiedAt,
