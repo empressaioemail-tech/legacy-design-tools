@@ -13,7 +13,7 @@ const labelStyle: CSSProperties = {
 };
 
 export default function IntakeQueueTile() {
-  const { engagementId, setEngagement, setLoading } = useEngagement();
+  const { engagementId, setEngagement, setLoading, queueRefreshToken } = useEngagement();
   const [queue, setQueue] = useState<EngagementQueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
@@ -36,7 +36,7 @@ export default function IntakeQueueTile() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [queueRefreshToken]);
 
   async function selectCase(id: string) {
     setError(null);

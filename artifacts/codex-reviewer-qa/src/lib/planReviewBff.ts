@@ -53,6 +53,67 @@ export function fetchQueue(status?: string): Promise<EngagementQueueItem[]> {
   return bffJson(`/queue${q}`);
 }
 
+export function createEngagement(body: {
+  name: string;
+  address?: string;
+  jurisdiction?: string;
+}): Promise<{ engagementId: string }> {
+  return bffJson("/engagements", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function requestDocumentUploadUrl(
+  engagementId: string,
+  body: { filename: string; contentType: string },
+): Promise<{ uploadUrl: string; gcsPath: string; objectPath: string }> {
+  return bffJson(`/engagements/${engagementId}/documents/upload-url`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function completeDocumentUpload(
+  engagementId: string,
+  body: {
+    objectPath: string;
+    filename: string;
+    contentType: string;
+    size: number;
+  },
+): Promise<{ documentId: string | null; objectPath: string }> {
+  return bffJson(`/engagements/${engagementId}/documents/complete-upload`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function createEngagementSubmission(
+  engagementId: string,
+  body?: { note?: string },
+): Promise<{ submissionId: string; engagementId: string; submittedAt: string }> {
+  return bffJson(`/engagements/${engagementId}/submissions`, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export function fetchEngagementLetter(
+  engagementId: string,
+): Promise<{ draft: string | null; generatedAt: string | null }> {
+  return bffJson(`/engagements/${engagementId}/letter`);
+}
+
+export function generateEngagementLetter(
+  engagementId: string,
+): Promise<{ draft: string; generatedAt: string }> {
+  return bffJson(`/engagements/${engagementId}/letter/generate`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function fetchEngagement(id: string): Promise<EngagementDetail> {
   return bffJson(`/engagements/${id}`);
 }

@@ -12,7 +12,9 @@ import { desc, eq } from "drizzle-orm";
 import {
   db,
   engagements,
+  findings,
   submissions,
+  attachedDocuments,
 } from "@workspace/db";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import {
@@ -48,6 +50,25 @@ import {
   getSubmissionFindingsGenerationStatusWire,
   listSubmissionFindingsWire,
 } from "./findings";
+import { parseCreateEngagementBody } from "./packages.logic";
+import { ObjectStorageService } from "../lib/objectStorage";
+import { LEGACY_INTERNAL_OWNER_USER_ID } from "../lib/anonymousOwnerCookie";
+import { isInternalSession } from "../lib/engagementOwnership";
+import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import {
+  emitEngagementSubmittedEvent,
+  SUBMISSION_INGEST_ACTOR,
+} from "../lib/engagementEvents";
+import { autoTriggerClassificationOnSubmissionCreated } from "../lib/autoTriggerClassificationOnSubmissionCreated";
+import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindingsOnSubmissionCreated";
+
+const planReviewObjectStorage = new ObjectStorageService();
+
+/** In-memory letter drafts for reviewer QA workspace (Wave 3). */
+export const planReviewLetterDrafts = new Map<
+  string,
+  { draft: string; generatedAt: string }
+>();
 
 function paramId(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
@@ -167,6 +188,222 @@ router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: R
   }
   res.json(results);
 });
+
+// ─── POST /plan-review/engagements ───────────────────────────────
+
+router.post("/engagements", requireServiceTokenOrSession, async (req: Request, res: Response) => {
+  const parsed = parseCreateEngagementBody(req.body);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const ownerUserId = isInternalSession(req.session)
+    ? LEGACY_INTERNAL_OWNER_USER_ID
+    : req.session.requestor?.kind === "user"
+      ? req.session.requestor.id
+      : null;
+  if (!ownerUserId) {
+    res.status(401).json({ error: "authentication_required" });
+    return;
+  }
+  try {
+    const nameLower = parsed.name.toLowerCase();
+    const [row] = await db
+      .insert(engagements)
+      .values({
+        name: parsed.name,
+        nameLower,
+        status: "active",
+        address: parsed.address ?? null,
+        jurisdiction: parsed.jurisdiction ?? null,
+        projectType: parsed.projectType ?? null,
+        ownerUserId,
+        tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
+      })
+      .returning();
+    if (!row) {
+      res.status(500).json({ error: "create_failed" });
+      return;
+    }
+    res.status(201).json({ engagementId: row.id });
+  } catch (err) {
+    reqLog(req).error({ err }, "plan-review create engagement failed");
+    res.status(500).json({ error: "create_failed" });
+  }
+});
+
+// ─── POST /plan-review/engagements/:id/documents/upload-url ─────
+
+router.post(
+  "/engagements/:id/documents/upload-url",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const body = req.body as { filename?: unknown; contentType?: unknown };
+    const filename =
+      typeof body.filename === "string" ? body.filename.trim() : "";
+    const contentType =
+      typeof body.contentType === "string" ? body.contentType.trim() : "";
+    if (!filename || !contentType) {
+      res.status(400).json({ error: "invalid_upload_metadata" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    try {
+      const uploadUrl = await planReviewObjectStorage.getObjectEntityUploadURL();
+      const gcsPath = planReviewObjectStorage.normalizeObjectEntityPath(uploadUrl);
+      res.json({ uploadUrl, gcsPath, objectPath: gcsPath });
+    } catch (err) {
+      reqLog(req).error({ err, engagementId }, "plan-review presign failed");
+      res.status(500).json({ error: "presign_failed" });
+    }
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/documents/complete-upload ─
+
+router.post(
+  "/engagements/:id/documents/complete-upload",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const body = req.body as {
+      objectPath?: unknown;
+      filename?: unknown;
+      contentType?: unknown;
+      size?: unknown;
+    };
+    const objectPath =
+      typeof body.objectPath === "string" ? body.objectPath : "";
+    const filename =
+      typeof body.filename === "string" ? body.filename.trim() : "";
+    const contentType =
+      typeof body.contentType === "string" ? body.contentType.trim() : "";
+    const size = typeof body.size === "number" ? body.size : 0;
+    if (
+      !objectPath.startsWith("/objects/") ||
+      !filename ||
+      !contentType ||
+      size <= 0
+    ) {
+      res.status(400).json({ error: "invalid_complete_upload_body" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    try {
+      const objectFile = await planReviewObjectStorage.getObjectEntityFile(objectPath);
+      const response = await planReviewObjectStorage.downloadObject(objectFile);
+      if (!response.body) {
+        res.status(404).json({ error: "uploaded_object_missing" });
+        return;
+      }
+      const chunks: Uint8Array[] = [];
+      const reader = response.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) chunks.push(value);
+      }
+      const fileBytes = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+      const [row] = await db
+        .insert(attachedDocuments)
+        .values({
+          engagementId,
+          title: filename,
+          documentType: "narrative",
+          extractedText: `[Uploaded ${filename} — ${contentType}, ${fileBytes.length} bytes]`,
+          originalBlobRef: objectPath,
+          actorId: LEGACY_INTERNAL_OWNER_USER_ID,
+        })
+        .returning();
+      res.status(201).json({ documentId: row?.id ?? null, objectPath });
+    } catch (err) {
+      reqLog(req).error({ err, engagementId }, "plan-review complete-upload failed");
+      res.status(500).json({ error: "complete_upload_failed" });
+    }
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/submissions ─────────────
+
+router.post(
+  "/engagements/:id/submissions",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const note =
+      typeof (req.body as { note?: unknown }).note === "string"
+        ? (req.body as { note: string }).note.trim()
+        : null;
+    try {
+      const [inserted] = await db
+        .insert(submissions)
+        .values({
+          engagementId: engagement.id,
+          jurisdiction: engagement.jurisdiction,
+          jurisdictionCity: engagement.jurisdictionCity,
+          jurisdictionState: engagement.jurisdictionState,
+          jurisdictionFips: engagement.jurisdictionFips,
+          note,
+          status: "submitted",
+        })
+        .returning();
+      if (!inserted) {
+        res.status(500).json({ error: "submission_create_failed" });
+        return;
+      }
+      const log = reqLog(req);
+      await emitEngagementSubmittedEvent(
+        getHistoryService(),
+        {
+          engagementId: engagement.id,
+          submissionId: inserted.id,
+          jurisdiction: engagement.jurisdiction,
+          jurisdictionCity: engagement.jurisdictionCity,
+          jurisdictionState: engagement.jurisdictionState,
+          note,
+          actor: SUBMISSION_INGEST_ACTOR,
+        },
+        log,
+      );
+      autoTriggerFindingsOnSubmissionCreated(inserted.id, log);
+      autoTriggerClassificationOnSubmissionCreated(inserted.id, log);
+      res.status(201).json({
+        submissionId: inserted.id,
+        engagementId: engagement.id,
+        submittedAt: inserted.submittedAt.toISOString(),
+      });
+    } catch (err) {
+      reqLog(req).error({ err, engagementId }, "plan-review create submission failed");
+      res.status(500).json({ error: "submission_create_failed" });
+    }
+  },
+);
 
 // ─── GET /plan-review/queue ──────────────────────────────────────
 
@@ -564,6 +801,93 @@ router.get(
   }
 
     res.json({ status: "not-run" });
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/letter ───────────────────
+
+router.get(
+  "/engagements/:id/letter",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const cached = planReviewLetterDrafts.get(engagementId);
+    res.json({
+      draft: cached?.draft ?? null,
+      generatedAt: cached?.generatedAt ?? null,
+    });
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/letter/generate ─────────
+
+router.post(
+  "/engagements/:id/letter/generate",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const [latestSubmission] = await db
+      .select({ id: submissions.id, submittedAt: submissions.submittedAt })
+      .from(submissions)
+      .where(eq(submissions.engagementId, engagementId))
+      .orderBy(desc(submissions.submittedAt))
+      .limit(1);
+    if (!latestSubmission) {
+      res.status(422).json({ error: "no_submission" });
+      return;
+    }
+    const findingRows = await db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, latestSubmission.id))
+      .orderBy(desc(findings.createdAt));
+    const accepted = findingRows.filter(
+      (f) => f.status === "accepted" || f.status === "overridden",
+    );
+    if (accepted.length === 0) {
+      res.status(422).json({ error: "no_accepted_findings" });
+      return;
+    }
+    const lines = accepted.map((f, i) => {
+      const text =
+        typeof f.text === "string" && f.text.trim()
+          ? f.text.trim()
+          : "Finding requires review.";
+      return `${i + 1}. ${text}`;
+    });
+    const draft = [
+      `Re: ${engagement.name}`,
+      engagement.jurisdiction ? `Jurisdiction: ${engagement.jurisdiction}` : "",
+      "",
+      "The following comments are offered for your consideration:",
+      "",
+      ...lines,
+      "",
+      "Please revise and resubmit.",
+    ]
+      .filter((line, idx, arr) => !(line === "" && arr[idx - 1] === ""))
+      .join("\n");
+    const generatedAt = new Date().toISOString();
+    planReviewLetterDrafts.set(engagementId, { draft, generatedAt });
+    res.json({ draft, generatedAt });
   },
 );
 

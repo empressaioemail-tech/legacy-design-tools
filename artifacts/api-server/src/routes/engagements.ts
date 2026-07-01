@@ -268,7 +268,7 @@ router.get("/engagements", async (req: Request, res: Response) => {
     const allEngagements = await db
       .select()
       .from(engagements)
-      .where(ownerFilter)
+      .where(ownerFilter ?? undefined)
       .orderBy(desc(engagements.updatedAt));
 
     const result = await Promise.all(

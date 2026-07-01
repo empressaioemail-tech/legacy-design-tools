@@ -18,6 +18,8 @@ type EngagementContextValue = {
   ) => void;
   loading: boolean;
   setLoading: (v: boolean) => void;
+  queueRefreshToken: number;
+  bumpQueueRefresh: () => void;
 };
 
 const EngagementContext = createContext<EngagementContextValue | null>(null);
@@ -28,6 +30,11 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     null,
   );
   const [loading, setLoading] = useState(false);
+  const [queueRefreshToken, setQueueRefreshToken] = useState(0);
+
+  const bumpQueueRefresh = useCallback(() => {
+    setQueueRefreshToken((t) => t + 1);
+  }, []);
 
   const setEngagement = useCallback(
     (id: string | null, detail?: EngagementDetail | null) => {
@@ -58,6 +65,8 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       setEngagementReportResult,
       loading,
       setLoading,
+      queueRefreshToken,
+      bumpQueueRefresh,
     }),
     [
       engagementId,
@@ -65,6 +74,8 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       setEngagement,
       setEngagementReportResult,
       loading,
+      queueRefreshToken,
+      bumpQueueRefresh,
     ],
   );
 

@@ -1,5 +1,6 @@
 import type { TileDef } from "./types";
 import IntakeQueueTile from "../tiles/Compliance/intake-queue";
+import IntakeTile from "../tiles/intake/IntakeTile";
 import ComplianceRunTile from "../tiles/Compliance/compliance-run";
 import LetterTile from "../tiles/Deliverable/letter";
 import MapTile from "../tiles/Site Analysis/map";
@@ -17,6 +18,7 @@ function stub(meta: StubTileMeta): () => React.ReactElement {
 
 const TILE_META: TileMeta[] = [
   // Compliance
+  { id: "intake", label: "Intake & Upload", category: "Compliance", engine: "engagement", status: "live", component: () => <IntakeTile /> },
   { id: "intake-queue", label: "Intake & Queue", category: "Compliance", engine: "engagement", status: "live", component: () => <IntakeQueueTile /> },
   { id: "compliance-run", label: "Compliance Run", category: "Compliance", engine: "engagement", status: "live", component: () => <ComplianceRunTile /> },
   { id: "findings-library", label: "Findings Library", category: "Compliance", engine: "engagement", status: "live", component: stub({ id: "findings-library", label: "Findings Library", category: "Compliance", status: "live" }) },
