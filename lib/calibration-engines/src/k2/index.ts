@@ -3,3 +3,4 @@ export * from "./normalizeOutcome.js";
 export * from "./retrodiction.js";
 export * from "./permitPartition.js";
 export * from "./localEditionResolve.js";
+export * from "./deposit.js";

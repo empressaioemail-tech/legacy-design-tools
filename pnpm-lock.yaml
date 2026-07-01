@@ -228,6 +228,9 @@ importers:
       '@workspace/integrations-anthropic-ai':
         specifier: workspace:*
         version: link:../../lib/integrations-anthropic-ai
+      '@workspace/integrations-xai-grok':
+        specifier: workspace:*
+        version: link:../../lib/integrations-xai-grok
       '@workspace/knowledge-atoms':
         specifier: workspace:*
         version: link:../../lib/knowledge-atoms

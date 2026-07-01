@@ -27,6 +27,7 @@
     "@workspace/engine-core": "workspace:*",
     "@workspace/finding-engine": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
+    "@workspace/integrations-xai-grok": "workspace:*",
     "@workspace/knowledge-atoms": "workspace:*",
     "@workspace/mnml-client": "workspace:*",
     "@workspace/plan-review-pdf": "workspace:*",

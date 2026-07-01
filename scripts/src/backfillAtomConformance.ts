@@ -26,10 +26,12 @@ export async function backfillAtomConformance(options?: {
 }> {
   const dryRun = options?.dryRun ?? false;
 
-  const [reasoningBefore] = await db.execute<{ count: string }>(sql`
+  const reasoningBefore = (
+    await db.execute<{ count: string }>(sql`
     SELECT COUNT(*)::text AS count FROM reasoning_atoms
     WHERE access_policy = 'tenant-scoped'
-  `);
+  `)
+  ).rows[0];
   const reasoningTenantScoped = Number(reasoningBefore?.count ?? 0);
 
   if (!dryRun && reasoningTenantScoped > 0) {
@@ -40,13 +42,18 @@ export async function backfillAtomConformance(options?: {
     `);
   }
 
-  const [inst] = await db.execute<{ count: string }>(sql`
+  const inst = (
+    await db.execute<{ count: string }>(sql`
     SELECT COUNT(*)::text AS count FROM recorded_instruments
-  `);
-  const [clauses] = await db.execute<{ count: string }>(sql`
+  `)
+  ).rows[0];
+  const clauses = (
+    await db.execute<{ count: string }>(sql`
     SELECT COUNT(*)::text AS count FROM restriction_clauses
-  `);
-  const [findings] = await db.execute<{ count: string }>(sql`
+  `)
+  ).rows[0];
+  const findings = (
+    await db.execute<{ count: string }>(sql`
     SELECT COUNT(*)::text AS count FROM atom_events
     WHERE entity_type = 'finding'
       AND event_type IN (
@@ -55,10 +62,13 @@ export async function backfillAtomConformance(options?: {
         'finding.overridden',
         'finding.generated'
       )
-  `);
-  const [classifications] = await db.execute<{ count: string }>(sql`
+  `)
+  ).rows[0];
+  const classifications = (
+    await db.execute<{ count: string }>(sql`
     SELECT COUNT(*)::text AS count FROM submission_classifications
-  `);
+  `)
+  ).rows[0];
 
   return {
     reasoningTenantScopedNormalized: dryRun
