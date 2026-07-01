@@ -16,9 +16,9 @@ import {
 } from "@workspace/db";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import {
-  precedenceReconciliationsFromCodeSections,
   isPrecedenceEngineProductionEnabled,
-} from "@workspace/finding-engine";
+  precedenceResultsFromCodeSections,
+} from "../lib/planReviewPrecedence";
 import { usdaSsurgoSoilsAdapter } from "@workspace/adapters/federal/usda-ssurgo";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { requireServiceTokenOrSession } from "../middlewares/serviceAuth";
@@ -47,7 +47,6 @@ function paramId(value: string | string[] | undefined): string {
 }
 
 const router: IRouter = Router();
-router.use(requireServiceTokenOrSession);
 
 const INTAKE_MODES = ["link", "file", "paste", "email"] as const;
 const REPORT_TYPES = [
@@ -74,7 +73,7 @@ function reqLog(req: Request): typeof logger {
 
 // ─── POST /plan-review/intake ────────────────────────────────────
 
-router.post("/plan-review/intake", async (req: Request, res: Response) => {
+router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: Response) => {
   const body = req.body as Record<string, unknown>;
   const mode = body.mode;
   const content = body.content;
@@ -152,7 +151,7 @@ router.post("/plan-review/intake", async (req: Request, res: Response) => {
 
 // ─── GET /plan-review/queue ──────────────────────────────────────
 
-router.get("/plan-review/queue", async (req: Request, res: Response) => {
+router.get("/queue", requireServiceTokenOrSession, async (req: Request, res: Response) => {
   const statusFilter =
     typeof req.query.status === "string" && req.query.status.length > 0
       ? req.query.status.split(",").map((s) => s.trim())
@@ -210,7 +209,8 @@ router.get("/plan-review/queue", async (req: Request, res: Response) => {
 // ─── GET /plan-review/engagements/:id ────────────────────────────
 
 router.get(
-  "/plan-review/engagements/:id",
+  "/engagements/:id",
+  requireServiceTokenOrSession,
   async (req: Request, res: Response) => {
     const id = paramId(req.params.id);
     if (!id) {
@@ -240,7 +240,8 @@ router.get(
 // ─── POST compliance-run (findings + precedence) ───────────────
 
 router.post(
-  "/plan-review/engagements/:id/compliance-run",
+  "/engagements/:id/compliance-run",
+  requireServiceTokenOrSession,
   async (req: Request, res: Response) => {
     const engagementId = paramId(req.params.id);
     const submissionId =
@@ -274,15 +275,7 @@ router.post(
     if (isPrecedenceEngineProductionEnabled()) {
       try {
         const inputs = await resolveEngineInputs(submissionId, log);
-        const { reconciliations } = precedenceReconciliationsFromCodeSections(
-          inputs.codeSections,
-        );
-        precedenceResult = reconciliations.map((rec) => ({
-          topic: rec.topic,
-          ruleApplied: rec.ruleApplied,
-          governingAtomId: rec.governing.atomId,
-          comparedAtomIds: rec.compared.map((c) => c.atomId),
-        }));
+        precedenceResult = precedenceResultsFromCodeSections(inputs.codeSections);
       } catch (err) {
         log.warn({ err, submissionId }, "precedence preview failed");
       }
@@ -302,7 +295,8 @@ const inFlightReports = new Map<string, string>();
 const reportResultCache = new Map<string, unknown>();
 
 router.post(
-  "/plan-review/engagements/:engagementId/reports/:type/run",
+  "/engagements/:engagementId/reports/:type/run",
+  requireServiceTokenOrSession,
   async (req: Request, res: Response) => {
     const engagementId = paramId(req.params.engagementId);
     const type = paramId(req.params.type);
@@ -398,7 +392,8 @@ router.post(
 // ─── GET /plan-review/engagements/:id/reports/:type ──────────────
 
 router.get(
-  "/plan-review/engagements/:engagementId/reports/:type",
+  "/engagements/:engagementId/reports/:type",
+  requireServiceTokenOrSession,
   async (req: Request, res: Response) => {
     const engagementId = paramId(req.params.engagementId);
     const type = paramId(req.params.type);
@@ -492,7 +487,7 @@ router.get(
 
 // ─── GET /plan-review/admin/functions ────────────────────────────
 
-router.get("/plan-review/admin/functions", (_req: Request, res: Response) => {
+router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res: Response) => {
   const precedenceLive = isPrecedenceEngineProductionEnabled();
   res.json([
     { id: "precedence", label: "Precedence Engine", category: "Compliance", status: precedenceLive ? "live" : "degraded", degradedReason: precedenceLive ? undefined : "Production gate not activated" },

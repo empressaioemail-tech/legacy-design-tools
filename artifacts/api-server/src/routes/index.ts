@@ -61,7 +61,7 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
-router.use(planReviewBffRouter);
+router.use("/plan-review", planReviewBffRouter);
 // Hauska Property Brief Chrome extension — API-key auth + extension CORS.
 router.use(brokerageBriefRouter);
 // /engagements/match must register BEFORE /engagements/:id otherwise Express
