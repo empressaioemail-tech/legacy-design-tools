@@ -860,7 +860,9 @@ router.post(
       .where(eq(findings.submissionId, latestSubmission.id))
       .orderBy(desc(findings.createdAt));
     const accepted = findingRows.filter(
-      (f) => f.status === "accepted" || f.status === "overridden",
+      (f) =>
+        f.status === "accepted" ||
+        (f.status === "overridden" && f.revisionOf != null),
     );
     if (accepted.length === 0) {
       res.status(422).json({ error: "no_accepted_findings" });
