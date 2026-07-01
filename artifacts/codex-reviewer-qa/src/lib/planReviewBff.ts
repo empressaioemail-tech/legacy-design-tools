@@ -142,3 +142,47 @@ export function runCompliancePass(
     body: JSON.stringify({ submissionId }),
   });
 }
+
+export type EngagementSubmissionSummaryWire = Awaited<
+  ReturnType<typeof fetchEngagementSubmissions>
+>;
+
+export function fetchEngagementSubmissions(
+  engagementId: string,
+): Promise<
+  Array<{
+    id: string;
+    submittedAt: string;
+    jurisdiction: string | null;
+    note: string | null;
+    discipline: string | null;
+    status: string;
+    reviewerComment: string | null;
+    respondedAt: string | null;
+    responseRecordedAt: string | null;
+    findingGenerationState: string;
+    findingGenerationError: string | null;
+    openFindingCount: number;
+  }>
+> {
+  return bffJson(`/engagements/${engagementId}/submissions`);
+}
+
+export function fetchSubmissionFindings(submissionId: string): Promise<{
+  findings: unknown[];
+}> {
+  return bffJson(`/submissions/${submissionId}/findings`);
+}
+
+export function fetchSubmissionFindingsStatus(submissionId: string): Promise<{
+  generationId: string | null;
+  state: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  invalidCitationCount: number | null;
+  invalidCitations: unknown;
+  discardedFindingCount: number | null;
+}> {
+  return bffJson(`/submissions/${submissionId}/findings/status`);
+}

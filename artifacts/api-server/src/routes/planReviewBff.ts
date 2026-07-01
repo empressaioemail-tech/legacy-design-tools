@@ -40,6 +40,14 @@ import {
   loadActiveSiteDrainageRow,
   rematerializeSiteDrainageFromLatestEvent,
 } from "../lib/siteDrainageMaterializer";
+import {
+  loadReviewerBffEngagement,
+  listReviewerEngagementSubmissions,
+} from "../lib/planReviewReviewerReads";
+import {
+  getSubmissionFindingsGenerationStatusWire,
+  listSubmissionFindingsWire,
+} from "./findings";
 
 function paramId(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
@@ -68,16 +76,6 @@ function isReportType(v: string): v is ReportType {
 
 function reqLog(req: Request): typeof logger {
   return (req as Request & { log?: typeof logger }).log ?? logger;
-}
-
-/** Reviewer BFF reads are unscoped — internal tool, not customer ownership. */
-async function loadReviewerBffEngagement(engagementId: string) {
-  const [row] = await db
-    .select()
-    .from(engagements)
-    .where(eq(engagements.id, engagementId))
-    .limit(1);
-  return row ?? null;
 }
 
 function reviewerJurisdictionTenant(
@@ -254,6 +252,66 @@ router.get(
       longitude: e.longitude ? Number(e.longitude) : null,
       reportResults: {},
     });
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/submissions ────────────────
+
+router.get(
+  "/engagements/:id/submissions",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const id = paramId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const rows = await listReviewerEngagementSubmissions(id);
+    if (rows === null) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    res.json(rows);
+  },
+);
+
+// ─── GET /plan-review/submissions/:id/findings ───────────────────
+
+router.get(
+  "/submissions/:id/findings",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const id = paramId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const payload = await listSubmissionFindingsWire(id);
+    if (!payload) {
+      res.status(404).json({ error: "submission_not_found" });
+      return;
+    }
+    res.json(payload);
+  },
+);
+
+// ─── GET /plan-review/submissions/:id/findings/status ────────────
+
+router.get(
+  "/submissions/:id/findings/status",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const id = paramId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const payload = await getSubmissionFindingsGenerationStatusWire(id);
+    if (!payload) {
+      res.status(404).json({ error: "submission_not_found" });
+      return;
+    }
+    res.json(payload);
   },
 );
 

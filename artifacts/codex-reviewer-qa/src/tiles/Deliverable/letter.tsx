@@ -3,17 +3,18 @@ import { useLocation } from "wouter";
 import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
 import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
 import {
-  useListEngagementSubmissions,
-  useListSubmissionFindings,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
-  useListEngagements,
 } from "@workspace/api-client-react";
 import {
   letterEligibleFindings,
   composeCommentLetterDraft,
 } from "../../lib/commentLetter";
 import { useDraftCommentLetter } from "../../lib/commentLetterApi";
+import {
+  usePlanReviewEngagementSubmissions,
+  usePlanReviewSubmissionFindings,
+} from "../../lib/planReviewBffQueries";
 
 const sectionStyle: CSSProperties = {
   padding: 10,
@@ -23,16 +24,12 @@ const sectionStyle: CSSProperties = {
 };
 
 export default function LetterTile() {
-  const { engagementId } = useEngagement();
+  const { engagementId, engagement } = useEngagement();
   const [, navigate] = useLocation();
   const draftLetter = useDraftCommentLetter();
   const [error, setError] = useState<string | null>(null);
 
-  const engagementsQuery = useListEngagements();
-  const engagement =
-    engagementsQuery.data?.find((e) => e.id === engagementId) ?? null;
-
-  const submissionsQuery = useListEngagementSubmissions(engagementId ?? "", {
+  const submissionsQuery = usePlanReviewEngagementSubmissions(engagementId ?? "", {
     query: {
       enabled: Boolean(engagementId),
       queryKey: getListEngagementSubmissionsQueryKey(engagementId ?? ""),
@@ -40,7 +37,7 @@ export default function LetterTile() {
   });
   const latestSubmission = submissionsQuery.data?.[0] ?? null;
 
-  const findingsQuery = useListSubmissionFindings(latestSubmission?.id ?? "", {
+  const findingsQuery = usePlanReviewSubmissionFindings(latestSubmission?.id ?? "", {
     query: {
       enabled: Boolean(latestSubmission?.id),
       queryKey: getListSubmissionFindingsQueryKey(latestSubmission?.id ?? ""),

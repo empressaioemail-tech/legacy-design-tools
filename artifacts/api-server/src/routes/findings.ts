@@ -1483,6 +1483,149 @@ router.post(
   },
 );
 
+// ─── Reviewer wire builders (shared: L3 + plan-review BFF) ─────────
+
+async function loadSubmissionRowById(submissionId: string) {
+  const [row] = await db
+    .select()
+    .from(submissions)
+    .where(eq(submissions.id, submissionId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getSubmissionFindingsGenerationStatusWire(
+  submissionId: string,
+) {
+  const sub = await loadSubmissionRowById(submissionId);
+  if (!sub) return null;
+
+  const [run] = await db
+    .select()
+    .from(findingRuns)
+    .where(eq(findingRuns.submissionId, submissionId))
+    .orderBy(desc(findingRuns.startedAt))
+    .limit(1);
+
+  if (!run) {
+    return {
+      generationId: null,
+      state: "idle" as const,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      invalidCitationCount: null,
+      invalidCitations: null,
+      discardedFindingCount: null,
+    };
+  }
+
+  return {
+    generationId: run.id,
+    state: run.state as FindingRunState,
+    startedAt: run.startedAt.toISOString(),
+    completedAt: run.completedAt ? run.completedAt.toISOString() : null,
+    error: run.error,
+    invalidCitationCount: run.invalidCitationCount,
+    invalidCitations: run.invalidCitations,
+    discardedFindingCount: run.discardedFindingCount,
+    engineHonesty: wireEngineHonesty(run.engineHonesty),
+  };
+}
+
+export async function listSubmissionFindingsWire(submissionId: string) {
+  const sub = await loadSubmissionRowById(submissionId);
+  if (!sub) return null;
+
+  const rows = await db
+    .select()
+    .from(findings)
+    .where(eq(findings.submissionId, submissionId))
+    .orderBy(desc(findings.createdAt));
+
+  const revisionOfMap = new Map<string, string>();
+  const revisionRowIds = rows
+    .map((r) => r.revisionOf)
+    .filter((v): v is string => !!v);
+  if (revisionRowIds.length > 0) {
+    const originals = await db
+      .select({ id: findings.id, atomId: findings.atomId })
+      .from(findings)
+      .where(inArray(findings.id, revisionRowIds));
+    for (const o of originals) {
+      revisionOfMap.set(o.id, o.atomId);
+    }
+  }
+
+  const acceptedByMap = new Map<string, FindingActorWire>();
+  const acceptedByIds = Array.from(
+    new Set(
+      rows
+        .map((r) => r.acceptedByReviewerId)
+        .filter((v): v is string => !!v),
+    ),
+  );
+  if (acceptedByIds.length > 0) {
+    const { hydrateActors } = await import("../lib/userLookup");
+    const hydrated = await hydrateActors(
+      acceptedByIds.map((id) => ({ kind: "user" as const, id })),
+    );
+    for (const h of hydrated) {
+      acceptedByMap.set(h.id, {
+        kind: "user",
+        id: h.id,
+        displayName: h.displayName ?? null,
+      });
+    }
+  }
+
+  const runHonestyById = new Map<string, EngineHonesty>();
+  const runIds = Array.from(
+    new Set(
+      rows.map((r) => r.findingRunId).filter((v): v is string => !!v),
+    ),
+  );
+  if (runIds.length > 0) {
+    const runRows = await db
+      .select({
+        id: findingRuns.id,
+        engineHonesty: findingRuns.engineHonesty,
+      })
+      .from(findingRuns)
+      .where(inArray(findingRuns.id, runIds));
+    for (const runRow of runRows) {
+      const honesty = wireEngineHonesty(runRow.engineHonesty);
+      if (honesty) runHonestyById.set(runRow.id, honesty);
+    }
+  }
+
+  const engFields = sub.engagementId
+    ? await loadEngagementTenantFields(sub.engagementId)
+    : { found: false as const };
+  const jurisdictionTenant =
+    engFields.found === true ? resolveJurisdictionTenant(engFields) : null;
+  const wireContext = { jurisdictionTenant };
+
+  const wire = await Promise.all(
+    rows.map((r) =>
+      toWire(
+        r,
+        r.revisionOf ? revisionOfMap.get(r.revisionOf) ?? null : null,
+        r.acceptedByReviewerId
+          ? acceptedByMap.get(r.acceptedByReviewerId) ?? {
+              kind: "user",
+              id: r.acceptedByReviewerId,
+              displayName: null,
+            }
+          : null,
+        r.findingRunId ? runHonestyById.get(r.findingRunId) ?? null : null,
+        wireContext,
+      ),
+    ),
+  );
+  return { findings: wire };
+}
+
 // ─── GET /submissions/:id/findings/status ────────────────────────
 
 router.get(
@@ -1500,36 +1643,14 @@ router.get(
     try {
       const sub = await loadSubmissionForRoute(submissionId, req, res);
       if (!sub) return;
-      const [run] = await db
-        .select()
-        .from(findingRuns)
-        .where(eq(findingRuns.submissionId, submissionId))
-        .orderBy(desc(findingRuns.startedAt))
-        .limit(1);
-      if (!run) {
-        res.json({
-          generationId: null,
-          state: "idle",
-          startedAt: null,
-          completedAt: null,
-          error: null,
-          invalidCitationCount: null,
-          invalidCitations: null,
-          discardedFindingCount: null,
-        });
+      const payload = await getSubmissionFindingsGenerationStatusWire(
+        submissionId,
+      );
+      if (!payload) {
+        res.status(404).json({ error: "submission_not_found" });
         return;
       }
-      res.json({
-        generationId: run.id,
-        state: run.state as FindingRunState,
-        startedAt: run.startedAt.toISOString(),
-        completedAt: run.completedAt ? run.completedAt.toISOString() : null,
-        error: run.error,
-        invalidCitationCount: run.invalidCitationCount,
-        invalidCitations: run.invalidCitations,
-        discardedFindingCount: run.discardedFindingCount,
-        engineHonesty: wireEngineHonesty(run.engineHonesty),
-      });
+      res.json(payload);
     } catch (err) {
       logger.error(
         { err, submissionId },
@@ -1555,111 +1676,12 @@ router.get(
     try {
       const sub = await loadSubmissionForRoute(submissionId, req, res);
       if (!sub) return;
-      const rows = await db
-        .select()
-        .from(findings)
-        .where(eq(findings.submissionId, submissionId))
-        .orderBy(desc(findings.createdAt));
-
-      // Resolve revisionOf → atom id for each row in one pass. A
-      // separate query batch keeps the wire shape decoupled from
-      // the row's internal uuid pk.
-      //
-      // Narrow the SELECT to only the row uuids actually referenced by
-      // the listed rows' `revision_of` columns — the original
-      // implementation scanned the entire `findings` table with no
-      // WHERE clause, which would unboundedly read across all tenants
-      // once findings start accumulating in production.
-      const revisionOfMap = new Map<string, string>();
-      const revisionRowIds = rows
-        .map((r) => r.revisionOf)
-        .filter((v): v is string => !!v);
-      if (revisionRowIds.length > 0) {
-        const originals = await db
-          .select({ id: findings.id, atomId: findings.atomId })
-          .from(findings)
-          .where(inArray(findings.id, revisionRowIds));
-        for (const o of originals) {
-          revisionOfMap.set(o.id, o.atomId);
-        }
+      const payload = await listSubmissionFindingsWire(submissionId);
+      if (!payload) {
+        res.status(404).json({ error: "submission_not_found" });
+        return;
       }
-
-      // Track 1 — batch-hydrate the AI-badge `acceptedBy` actor envelope
-      // for rows that have been accepted at least once. Single-pass user
-      // lookup keyed on `acceptedByReviewerId`.
-      const acceptedByMap = new Map<string, FindingActorWire>();
-      const acceptedByIds = Array.from(
-        new Set(
-          rows
-            .map((r) => r.acceptedByReviewerId)
-            .filter((v): v is string => !!v),
-        ),
-      );
-      if (acceptedByIds.length > 0) {
-        const { hydrateActors } = await import("../lib/userLookup");
-        const hydrated = await hydrateActors(
-          acceptedByIds.map((id) => ({ kind: "user" as const, id })),
-        );
-        for (const h of hydrated) {
-          acceptedByMap.set(h.id, {
-            kind: "user",
-            id: h.id,
-            displayName: h.displayName ?? null,
-          });
-        }
-      }
-
-      const runHonestyById = new Map<string, EngineHonesty>();
-      const runIds = Array.from(
-        new Set(
-          rows
-            .map((r) => r.findingRunId)
-            .filter((v): v is string => !!v),
-        ),
-      );
-      if (runIds.length > 0) {
-        const runRows = await db
-          .select({
-            id: findingRuns.id,
-            engineHonesty: findingRuns.engineHonesty,
-          })
-          .from(findingRuns)
-          .where(inArray(findingRuns.id, runIds));
-        for (const runRow of runRows) {
-          const honesty = wireEngineHonesty(runRow.engineHonesty);
-          if (honesty) runHonestyById.set(runRow.id, honesty);
-        }
-      }
-
-      const engFields = sub.engagementId
-        ? await loadEngagementTenantFields(sub.engagementId)
-        : { found: false as const };
-      const jurisdictionTenant =
-        engFields.found === true
-          ? resolveJurisdictionTenant(engFields)
-          : null;
-      const wireContext = { jurisdictionTenant };
-
-      const wire = await Promise.all(
-        rows.map((r) =>
-          toWire(
-            r,
-            r.revisionOf ? revisionOfMap.get(r.revisionOf) ?? null : null,
-            r.acceptedByReviewerId
-              ? acceptedByMap.get(r.acceptedByReviewerId) ?? {
-                  kind: "user",
-                  id: r.acceptedByReviewerId,
-                  displayName: null,
-                }
-              : null,
-            r.findingRunId
-              ? runHonestyById.get(r.findingRunId) ?? null
-              : null,
-            wireContext,
-          ),
-        ),
-      );
-      res.json({ findings: wire });
+      res.json(payload);
     } catch (err) {
       logger.error({ err, submissionId }, "list submission findings failed");
       res.status(500).json({ error: "Failed to list findings" });
