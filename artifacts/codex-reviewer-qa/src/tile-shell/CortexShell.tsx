@@ -13,13 +13,16 @@ import type { TileStatus } from "./types";
 import { useEngagement } from "./providers/EngagementProvider";
 
 function CortexShellInner({
+  initialPresetId,
   initialTiles,
   initialLayoutId,
 }: {
+  initialPresetId: string;
   initialTiles: string[];
   initialLayoutId: string;
 }) {
   const { engagementId } = useEngagement();
+  const [activePresetId, setActivePresetId] = useState(initialPresetId);
   const [activeTiles, setActiveTiles] = useState(initialTiles);
   const [layoutId, setLayoutId] = useState(initialLayoutId);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -69,6 +72,7 @@ function CortexShellInner({
   function handleApplyPreset(presetId: string) {
     const preset = PRESET_SPACES.find((p) => p.id === presetId);
     if (!preset) return;
+    setActivePresetId(presetId);
     applySnapshot(
       snapshotState(engagementId ?? undefined, preset.tiles, preset.layoutId, preset.label),
       `${preset.label} space loaded`,
@@ -97,7 +101,14 @@ function CortexShellInner({
   }
 
   function handleRemoveTile(id: string) {
-    setActiveTiles((prev) => prev.filter((t) => t !== id));
+    setActiveTiles((prev) => {
+      const next = prev.filter((t) => t !== id);
+      const nextLayout = layoutIdForTileCount(next.length);
+      setLayoutId(nextLayout);
+      setColFr(Array(parseLayoutCols(nextLayout)).fill(1));
+      setRowFr(Array(parseLayoutRows(nextLayout)).fill(1));
+      return next;
+    });
   }
 
   if (fullscreenId) {
@@ -126,6 +137,7 @@ function CortexShellInner({
       }}
     >
       <SpaceBar
+        activePresetId={activePresetId}
         activeTiles={activeTiles}
         layoutId={layoutId}
         undoLabel={undoLabel}
@@ -178,6 +190,7 @@ export function CortexShell({
       <SpatialProvider>
         <CodeProvider>
           <CortexShellInner
+            initialPresetId={preset.id}
             initialTiles={preset.tiles}
             initialLayoutId={preset.layoutId}
           />

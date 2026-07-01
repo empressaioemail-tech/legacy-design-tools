@@ -2,10 +2,17 @@ import { TILE_CATEGORIES, TILE_REGISTRY } from "../tiles";
 import type { TileStatus } from "../types";
 
 const STATUS_DOT: Record<TileStatus, string> = {
-  live: "var(--success-text, #22c55e)",
-  degraded: "var(--danger-text)",
-  partial: "var(--warning-text)",
-  planned: "var(--text-muted)",
+  live: "#22c55e",
+  degraded: "var(--danger-text, #f87171)",
+  partial: "var(--warning-text, #fbbf24)",
+  planned: "var(--text-muted, #94a8b8)",
+};
+
+const STATUS_LABEL: Record<TileStatus, string> = {
+  live: "Live",
+  degraded: "Degraded",
+  partial: "Partial",
+  planned: "Planned",
 };
 
 export function TilePicker({
@@ -111,8 +118,20 @@ export function TilePicker({
                             background: STATUS_DOT[status],
                             flexShrink: 0,
                           }}
+                          aria-hidden
                         />
                         <span style={{ flex: 1 }}>{tile.label}</span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: STATUS_DOT[status],
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          {STATUS_LABEL[status]}
+                        </span>
                       </button>
                     </li>
                   );
