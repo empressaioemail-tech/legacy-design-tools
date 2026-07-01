@@ -577,7 +577,7 @@ function toBimElementInput(row: MaterializableElement): BimElementInput {
  *     materializable-element rows hang off briefing_id, so without a
  *     briefing there is nothing to surface).
  */
-async function resolveEngineInputs(
+export async function resolveEngineInputs(
   submissionId: string,
   log: typeof logger,
 ): Promise<{

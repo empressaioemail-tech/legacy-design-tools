@@ -30,6 +30,7 @@ export {
 } from "./accessibilityDemo";
 
 export { buildPrecedenceFindingDrafts, precedenceReconciliationsFromCodeSections } from "./productionWire";
+export { isPrecedenceEngineProductionEnabled } from "./productionGate";
 
 export type {
   ApplicableRequirement,

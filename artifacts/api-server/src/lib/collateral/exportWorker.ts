@@ -49,7 +49,13 @@ export function runCollateralExportJob(params: {
 }): void {
   void runInner(params).catch((err) => {
     logger.error({ err, jobId: params.jobId }, "collateral export job crashed");
-    void failJob(params.jobId, "placid", "Unexpected error during PDF export");
+    void failJob(
+      params.jobId,
+      "placid",
+      "Unexpected error during PDF export",
+    ).catch(() => {
+      // Pool may already be closed during test teardown — avoid unhandled rejection.
+    });
   });
 }
 

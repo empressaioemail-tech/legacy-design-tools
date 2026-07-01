@@ -39,6 +39,27 @@ const { setupRouteTests } = await import("./setup");
 let getApp: () => Express;
 const signingSecret = "test-collateral-signing-secret-32b!!";
 
+/** Background export jobs outlive the HTTP response — drain before teardown. */
+const pendingExportJobIds: string[] = [];
+
+async function waitForExportJobTerminal(
+  jobId: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const poll = await request(getApp()).get(
+      `/api/collateral/export-jobs/${jobId}`,
+    );
+    if (poll.status === 200) {
+      const step = poll.body.step as string;
+      if (step === "ready" || step === "failed") return;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`export job ${jobId} did not reach a terminal state`);
+}
+
 setupRouteTests((g) => {
   getApp = g;
 });
@@ -51,7 +72,10 @@ beforeEach(() => {
 
 afterEach(async () => {
   delete process.env.PLACID_API_TOKEN;
-  await new Promise((r) => setTimeout(r, 50));
+  const jobs = pendingExportJobIds.splice(0);
+  for (const jobId of jobs) {
+    await waitForExportJobTerminal(jobId);
+  }
 });
 
 async function seedEngagement() {
@@ -98,6 +122,7 @@ describe("collateral export job", () => {
       });
     expect(exportRes.status).toBe(202);
     const jobId = exportRes.body.jobId;
+    pendingExportJobIds.push(jobId);
     expect(jobId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
@@ -137,6 +162,7 @@ describe("collateral export job", () => {
         textFields: { project_name: "X" },
       });
     const jobId = exportRes.body.jobId;
+    pendingExportJobIds.push(jobId);
     const token = createCollateralAssetToken({
       jobId,
       assetKey: "render:not-in-job",

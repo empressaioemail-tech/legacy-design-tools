@@ -15,11 +15,15 @@ import {
   FHA_DOOR_CLEARANCE_ATOM_ID,
   A1171_DOOR_CLEARANCE_ATOM_ID,
 } from "./accessibilityDemo";
-import { detectStandardDescriptor } from "./standardRegistry";
+import {
+  detectStandardDescriptor,
+  codeSectionToRequirementShell,
+} from "./standardRegistry";
 import {
   reconcileRequirementsByTopic,
   formatPrecedenceFindingText,
 } from "./reconcile";
+import { isPrecedenceEngineProductionEnabled } from "./productionGate";
 
 /** Known accessibility topic patterns — hero GTM path (door maneuvering clearance). */
 const KNOWN_ACCESSIBILITY_SECTIONS: ReadonlyArray<{
@@ -75,35 +79,71 @@ function sectionToRequirement(section: CodeSectionInput): ApplicableRequirement 
     exact ??
     KNOWN_ACCESSIBILITY_SECTIONS.find((k) => k.atomIdPattern.test(section.atomId));
 
-  if (!pattern) return null;
+  if (pattern) {
+    const detected = detectStandardDescriptor(section.atomId, section.label);
+    if (!detected) return null;
+
+    const isAccessibility =
+      detected.authority === "federal" ||
+      detected.standardKey === "a117.1-2021" ||
+      detected.standardKey === "ada-2010" ||
+      detected.standardKey === "fha-design-manual" ||
+      (detected.authority === "local-amendment" &&
+        /door|clearance|maneuver|404/i.test(`${section.atomId} ${section.label}`));
+
+    if (!isAccessibility) return null;
+
+    return {
+      atomId: section.atomId,
+      standardKey: detected.standardKey,
+      standardLabel: detected.standardLabel,
+      authority: detected.authority,
+      topic: pattern.topic,
+      dimension: pattern.dimension,
+      requirementKind: pattern.requirementKind,
+      numericValue: pattern.numericValue,
+      numericUnit: pattern.numericUnit,
+      citationLabel: section.label,
+      snippet: section.snippet,
+      confidence: section.webProvenance?.confidence ?? pattern.confidence,
+    };
+  }
+
+  return generalMunicipalModelRequirement(section);
+}
+
+/** Municipal + I-Code reconciliation when production gate is on. */
+function generalMunicipalModelRequirement(
+  section: CodeSectionInput,
+): ApplicableRequirement | null {
+  if (!isPrecedenceEngineProductionEnabled()) return null;
 
   const detected = detectStandardDescriptor(section.atomId, section.label);
   if (!detected) return null;
+  if (
+    detected.authority !== "model-code" &&
+    detected.authority !== "local-amendment"
+  ) {
+    return null;
+  }
 
-  // Accessibility domain only — skip undetected or non-accessibility model codes
-  const isAccessibility =
-    detected.authority === "federal" ||
-    detected.standardKey === "a117.1-2021" ||
-    detected.standardKey === "ada-2010" ||
-    detected.standardKey === "fha-design-manual" ||
-    (detected.authority === "local-amendment" &&
-      /door|clearance|maneuver|404/i.test(`${section.atomId} ${section.label}`));
+  const sectionToken =
+    section.label.match(/§?\s*(\d+(?:\.\d+)*)/)?.[1] ??
+    section.atomId.match(/(\d+(?:\.\d+)+)/)?.[1];
+  if (!sectionToken) return null;
 
-  if (!isAccessibility) return null;
+  const shell = codeSectionToRequirementShell(
+    section,
+    `code-section-${sectionToken}`,
+    "requirement",
+  );
 
   return {
-    atomId: section.atomId,
-    standardKey: detected.standardKey,
-    standardLabel: detected.standardLabel,
-    authority: detected.authority,
-    topic: pattern.topic,
-    dimension: pattern.dimension,
-    requirementKind: pattern.requirementKind,
-    numericValue: pattern.numericValue,
-    numericUnit: pattern.numericUnit,
-    citationLabel: section.label,
-    snippet: section.snippet,
-    confidence: section.webProvenance?.confidence ?? pattern.confidence,
+    ...shell,
+    topic: `code-section-${sectionToken}`,
+    dimension: "requirement",
+    requirementKind: "qualitative",
+    confidence: section.webProvenance?.confidence ?? 0.72,
   };
 }
 
@@ -141,8 +181,16 @@ export function precedenceReconciliationsFromCodeSections(
     return { reconciliations: [] as ReturnType<typeof reconcileRequirementsByTopic>["reconciliations"] };
   }
 
+  const hasMunicipalModel =
+    isPrecedenceEngineProductionEnabled() &&
+    requirements.some((r) => r.authority === "local-amendment") &&
+    requirements.some((r) => r.authority === "model-code");
+
   return reconcileRequirementsByTopic({
     requirements,
-    options: { domain: "accessibility", federalPreempts: true },
+    options: {
+      domain: hasMunicipalModel ? "general" : "accessibility",
+      federalPreempts: !hasMunicipalModel,
+    },
   });
 }
