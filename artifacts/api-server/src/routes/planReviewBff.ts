@@ -23,13 +23,12 @@ import { usdaSsurgoSoilsAdapter } from "@workspace/adapters/federal/usda-ssurgo"
 import { AdapterRunError } from "@workspace/adapters/types";
 import { requireServiceTokenOrSession } from "../middlewares/serviceAuth";
 import { logger } from "../lib/logger";
-import { loadEngagementForSession } from "../lib/engagementOwnership";
 import {
   findEngagementInFlightFindingRun,
   loadOpenFindingCountBySubmissionIds,
 } from "../lib/findingRunsEngagement";
 import { kickoffFindingGenerationForSubmission, resolveEngineInputs } from "./findings";
-import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
+import { resolveJurisdictionTenant } from "../lib/atomAdjudicationEvidenceLedger";
 import { getHistoryService } from "../atoms/registry";
 import { ingestSiteTopography } from "../lib/siteTopographyIngest";
 import {
@@ -69,6 +68,28 @@ function isReportType(v: string): v is ReportType {
 
 function reqLog(req: Request): typeof logger {
   return (req as Request & { log?: typeof logger }).log ?? logger;
+}
+
+/** Reviewer BFF reads are unscoped — internal tool, not customer ownership. */
+async function loadReviewerBffEngagement(engagementId: string) {
+  const [row] = await db
+    .select()
+    .from(engagements)
+    .where(eq(engagements.id, engagementId))
+    .limit(1);
+  return row ?? null;
+}
+
+function reviewerJurisdictionTenant(
+  engagement: typeof engagements.$inferSelect,
+): string | null {
+  return resolveJurisdictionTenant({
+    cortexJurisdictionKey: engagement.cortexJurisdictionKey,
+    jurisdictionCity: engagement.jurisdictionCity,
+    jurisdictionState: engagement.jurisdictionState,
+    jurisdiction: engagement.jurisdiction,
+    address: engagement.address,
+  });
 }
 
 // ─── POST /plan-review/intake ────────────────────────────────────
@@ -217,12 +238,11 @@ router.get(
       res.status(400).json({ error: "missing_id" });
       return;
     }
-    const loaded = await loadEngagementForSession(id, req.session);
-    if (!loaded.ok) {
-      res.status(loaded.status).json({ error: loaded.error });
+    const e = await loadReviewerBffEngagement(id);
+    if (!e) {
+      res.status(404).json({ error: "engagement_not_found" });
       return;
     }
-    const e = loaded.engagement;
     res.json({
       id: e.id,
       name: e.name,
@@ -316,22 +336,20 @@ router.post(
     inFlightReports.set(flightKey, generationId);
 
     const log = reqLog(req);
-    const tenantScope = await assertEngagementServiceTenantScope(
-      req,
-      engagementId,
-    );
-    if (!tenantScope.ok) {
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
       inFlightReports.delete(flightKey);
-      res.status(tenantScope.status).json(tenantScope.body);
+      res.status(404).json({ error: "engagement_not_found" });
       return;
     }
+    const jurisdictionTenant = reviewerJurisdictionTenant(engagement);
 
     try {
       if (type === "topography") {
         await ingestSiteTopography({
           engagementId,
           history: getHistoryService(),
-          jurisdictionTenant: tenantScope.jurisdictionTenant,
+          jurisdictionTenant,
           log,
         });
       } else if (
@@ -341,7 +359,7 @@ router.post(
         await ingestSiteDrainage({
           engagementId,
           history: getHistoryService(),
-          jurisdictionTenant: tenantScope.jurisdictionTenant,
+          jurisdictionTenant,
           log,
         });
       } else if (type === "subsurface") {
@@ -404,6 +422,12 @@ router.get(
     const flightKey = `${engagementId}:${type}`;
     if (inFlightReports.has(flightKey)) {
       res.json({ status: "running" });
+      return;
+    }
+
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
       return;
     }
 
