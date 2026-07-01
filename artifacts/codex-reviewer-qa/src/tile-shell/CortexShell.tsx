@@ -9,6 +9,14 @@ import { PRESET_SPACES } from "./presets";
 import { layoutIdForTileCount, parseLayoutCols, parseLayoutRows } from "./layouts";
 import { getTile } from "./tiles";
 import { fetchAdminFunctions } from "../lib/planReviewBff";
+import {
+  isSavedSpaceId,
+  listSavedSpaceEntries,
+  loadSavedSpaces,
+  saveCurrentSpace,
+  savedSpaceId,
+  savedSpaceName,
+} from "../lib/workspaceSpaces";
 import type { TileStatus } from "./types";
 import { useEngagement } from "./providers/EngagementProvider";
 
@@ -33,6 +41,7 @@ function CortexShellInner({
   const [liveStatuses, setLiveStatuses] = useState<Record<string, TileStatus>>(
     {},
   );
+  const [savedSpaces, setSavedSpaces] = useState(() => listSavedSpaceEntries());
 
   const [colFr, setColFr] = useState(() =>
     Array(parseLayoutCols(initialLayoutId)).fill(1),
@@ -70,6 +79,19 @@ function CortexShellInner({
   );
 
   function handleApplyPreset(presetId: string) {
+    if (isSavedSpaceId(presetId)) {
+      const name = savedSpaceName(presetId);
+      const snap = loadSavedSpaces()[name];
+      if (!snap) return;
+      setActivePresetId(presetId);
+      applySnapshot(
+        snapshotState(engagementId ?? undefined, snap.tileIds, snap.layoutId, name),
+        `${name} space loaded`,
+      );
+      setColFr([...snap.colFr]);
+      setRowFr([...snap.rowFr]);
+      return;
+    }
     const preset = PRESET_SPACES.find((p) => p.id === presetId);
     if (!preset) return;
     setActivePresetId(presetId);
@@ -141,17 +163,25 @@ function CortexShellInner({
         activeTiles={activeTiles}
         layoutId={layoutId}
         undoLabel={undoLabel}
+        savedSpaces={savedSpaces}
         onApplyPreset={handleApplyPreset}
         onUndo={handleUndo}
         onOpenPicker={() => setPickerOpen(true)}
         onSaveSpace={() => {
-          const snap = snapshotState(
-            engagementId ?? undefined,
-            activeTiles,
+          const preset =
+            PRESET_SPACES.find((p) => p.id === activePresetId) ??
+            savedSpaces.find((s) => s.id === activePresetId);
+          const defaultName = preset?.label ?? "My space";
+          const name = window.prompt("Space name:", defaultName);
+          if (!name?.trim()) return;
+          saveCurrentSpace(name.trim(), {
+            tileIds: [...activeTiles],
             layoutId,
-            "saved",
-          );
-          localStorage.setItem("cortex-saved-space", JSON.stringify(snap));
+            colFr: [...colFr],
+            rowFr: [...rowFr],
+          });
+          setSavedSpaces(listSavedSpaceEntries());
+          setActivePresetId(savedSpaceId(name.trim()));
         }}
       />
       <TilePicker

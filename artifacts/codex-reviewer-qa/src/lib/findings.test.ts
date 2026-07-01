@@ -5,6 +5,7 @@ import {
   citationLabel,
   describeAdjudication,
   formatConfidence,
+  resolveFindingConfidence,
   sortFindings,
 } from "./findings";
 
@@ -13,6 +14,31 @@ describe("formatConfidence", () => {
     expect(formatConfidence(0.82)).toBe("82%");
     expect(formatConfidence(1)).toBe("100%");
     expect(formatConfidence(0)).toBe("0%");
+  });
+
+  it("returns an em dash for null, undefined, and non-numeric values", () => {
+    expect(formatConfidence(null)).toBe("—");
+    expect(formatConfidence(undefined)).toBe("—");
+    expect(formatConfidence("not-a-number")).toBe("—");
+  });
+});
+
+describe("resolveFindingConfidence", () => {
+  it("prefers the legacy scalar when present", () => {
+    expect(
+      resolveFindingConfidence({
+        confidence: 0.75,
+        readContract: makeFinding().readContract,
+      }),
+    ).toBe(0.75);
+  });
+
+  it("falls back to readContract calibrated estimate", () => {
+    expect(
+      resolveFindingConfidence({
+        readContract: makeFinding().readContract,
+      }),
+    ).toBe(0.82);
   });
 });
 

@@ -31,6 +31,7 @@ import {
   SEVERITY_LABELS,
   citationLabel,
   formatConfidence,
+  resolveFindingConfidence,
   sortFindings,
 } from "./findings";
 
@@ -122,7 +123,7 @@ function composeCommentBody(finding: Finding): string {
   lines.push("", `Code cited: ${cited}`);
 
   lines.push(
-    `Engine confidence: ${formatConfidence(finding.confidence)}${
+    `Engine confidence: ${formatConfidence(resolveFindingConfidence(finding))}${
       finding.lowConfidence ? " (flagged low confidence)" : ""
     }`,
   );

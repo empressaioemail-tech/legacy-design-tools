@@ -3,8 +3,15 @@ import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
 import { useSpatial } from "../../tile-shell/providers/SpatialProvider";
 import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
 
-const HAUSKA_MAP_URL =
-  import.meta.env.VITE_HAUSKA_MAP_URL ?? "https://map.hauska.io/command-center";
+function resolveHauskaMapUrl(): string {
+  const raw = import.meta.env.VITE_HAUSKA_MAP_URL;
+  if (typeof raw === "string" && raw.trim().startsWith("http")) {
+    return raw.trim();
+  }
+  return "https://map.hauska.io/command-center";
+}
+
+const HAUSKA_MAP_URL = resolveHauskaMapUrl();
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN ?? "";
 
 export default function MapTile() {
@@ -20,11 +27,13 @@ export default function MapTile() {
   const params = new URLSearchParams();
   if (apn) params.set("apn", apn);
   if (jurisdiction) params.set("jurisdiction", jurisdiction);
+  if (lat != null) params.set("lat", String(lat));
+  if (lng != null) params.set("lng", String(lng));
   params.set("mode", "embed");
   const iframeSrc =
-    apn || jurisdiction
+    apn || jurisdiction || (lat != null && lng != null)
       ? `${HAUSKA_MAP_URL}?${params.toString()}`
-      : HAUSKA_MAP_URL;
+      : `${HAUSKA_MAP_URL}?mode=embed`;
 
   useEffect(() => {
     const frame = iframeRef.current;
@@ -62,6 +71,7 @@ export default function MapTile() {
         ref={iframeRef}
         title="Hauska map command center"
         src={iframeSrc}
+        allow="*"
         style={{
           flex: 1,
           width: "100%",
