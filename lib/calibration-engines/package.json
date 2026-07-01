@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./m1": "./src/m1/index.ts",
+    "./k2": "./src/k2/index.ts",
     "./raw-events": "./src/raw-events/index.ts"
   },
   "scripts": {

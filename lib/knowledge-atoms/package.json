@@ -1,5 +1,5 @@
 {
-  "name": "@workspace/engine-core",
+  "name": "@workspace/knowledge-atoms",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,9 @@
   },
   "dependencies": {
     "@hauska/atom-contract": "file:../../vendor/hauska-atom-contract-1.6.0.tgz",
-    "@workspace/codes": "workspace:*",
     "@workspace/db": "workspace:*",
-    "drizzle-orm": "catalog:"
+    "drizzle-orm": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

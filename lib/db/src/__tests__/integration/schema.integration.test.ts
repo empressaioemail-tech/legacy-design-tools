@@ -152,6 +152,7 @@ describe("lib/db schema integration", () => {
         // GTM observation layer — Property Brief extension consent + events.
         "gtm_consent",
         "gtm_events",
+        "knowledge_atoms",
         "materializable_elements",
         "package_share_comments",
         "package_shares",

@@ -105,6 +105,11 @@ export type AdapterLocalKey =
 export interface AdapterContext {
   parcel: AdapterParcelContext;
   jurisdiction: AdapterJurisdiction;
+  /**
+   * Subject node id (`parcel_*`) for knowledge-atom deposits when the
+   * caller has resolved one. Optional — absence emit is skipped when absent.
+   */
+  subjectId?: string | null;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
   /**
@@ -138,6 +143,22 @@ export interface AdapterResult {
   payload: Record<string, unknown>;
   /** Optional free-text note (e.g. "fell back to OSM after county GIS 503"). */
   note?: string | null;
+  /**
+   * When the adapter completed a scoped registry query with zero records,
+   * carries the verified-absence deposit hint for the ingest path.
+   */
+  verifiedAbsence?: {
+    absenceDomain: string;
+    whatWasChecked: string;
+    checkScope: {
+      jurisdiction: string;
+      record_type: string;
+      date_range_start: string;
+      date_range_end: string;
+    };
+    checkMethod: "api_query" | "public_record_pull" | "registry_lookup";
+    checkDate?: string;
+  };
 }
 
 /** Failure verdict — adapter ran but the upstream said no / errored. */

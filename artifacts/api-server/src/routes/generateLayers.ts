@@ -53,6 +53,7 @@ import {
 } from "@workspace/adapters";
 import { GenerateEngagementLayersParams } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
+import { emitVerifiedAbsenceFromAdapterOutcomes } from "../lib/knowledgeAtomIngest";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import { logger } from "../lib/logger";
@@ -553,6 +554,7 @@ router.post(
     const lng = engRow.longitude ? Number(engRow.longitude) : NaN;
     const haveCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
+    const subjectId = `parcel_${engagementId}`;
     const ctx: AdapterContext = {
       parcel: haveCoords
         ? {
@@ -569,6 +571,7 @@ router.post(
           // coverage" with "engagement was missing a geocode".
           { latitude: NaN, longitude: NaN },
       jurisdiction,
+      subjectId,
       // QA-22 — per-adapter network budget floor. `resolveAdapterTimeoutMs`
       // reads the optional `ADAPTER_TIMEOUT_MS` env override; the runner
       // takes `max(adapter.timeoutMs, context.timeoutMs)`, so the
@@ -847,6 +850,24 @@ router.post(
       );
       res.status(500).json({ error: "Failed to persist adapter results" });
       return;
+    }
+
+    try {
+      const absenceEmitted = await emitVerifiedAbsenceFromAdapterOutcomes({
+        outcomes,
+        subjectId,
+      });
+      if (absenceEmitted > 0) {
+        reqLog.info(
+          { engagementId, absenceEmitted },
+          "generate-layers: verified-absence atoms emitted",
+        );
+      }
+    } catch (err) {
+      reqLog.warn(
+        { err, engagementId },
+        "generate-layers: verified-absence emit failed (continuing)",
+      );
     }
 
     // Best-effort event emission per persisted row, awaited but never
