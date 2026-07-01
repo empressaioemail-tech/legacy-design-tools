@@ -86,23 +86,6 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-# Python sidecar for site hydrology (artifacts/hydrology-worker/run.py).
-# cortex-api spawns this via stdio; pysheds is not bundled in node:20-slim.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      python3 \
-      python3-pip \
-      gdal-bin \
-      libgdal-dev \
-      g++ \
-      gcc \
- && pip3 install --break-system-packages --no-cache-dir \
-      -r artifacts/hydrology-worker/requirements.txt \
- && apt-get purge -y gcc g++ \
- && apt-get autoremove -y \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
-
 # Chrome runtime libraries for puppeteer headless. Mirrors the X11/
 # cairo/freetype set that replit.nix provides today plus the
 # upstream-recommended deps from the puppeteer troubleshooting docs.
@@ -148,12 +131,26 @@ RUN apt-get update \
       poppler-utils \
       wget \
       xdg-utils \
+      python3 \
+      python3-pip \
+      gdal-bin \
+      libgdal-dev \
+      g++ \
+      gcc \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
 # node:20-slim ships a built-in `node` user (uid/gid 1000). Use it
 # rather than running as root.
 COPY --from=build --chown=node:node /app /app
+
+# Python sidecar for site hydrology (artifacts/hydrology-worker/run.py).
+RUN pip3 install --break-system-packages --no-cache-dir \
+      -r artifacts/hydrology-worker/requirements.txt \
+ && apt-get purge -y gcc g++ \
+ && apt-get autoremove -y \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
 USER node
 
