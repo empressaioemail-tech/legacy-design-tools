@@ -31,6 +31,10 @@ export const USDA_SSURGO_MAPUNIT_LAYER =
 export const USDA_SSURGO_SDA_ENDPOINT =
   "https://sdmdataaccess.sc.egov.usda.gov/tabular/post.rest";
 
+/** Fallback SDA endpoint (newer Tabular service path). */
+export const USDA_SSURGO_SDA_ENDPOINT_FALLBACK =
+  "https://sdmdataaccess.sc.egov.usda.gov/Tabular/SDMTabularService/post.rest";
+
 export const USDA_SSURGO_PROVIDER_LABEL =
   "USDA NRCS Soil Survey Geographic Database (SSURGO)";
 
@@ -117,17 +121,18 @@ interface SdaTableRow {
   [key: string]: unknown;
 }
 
-async function querySdaSoils(
+async function querySdaSoilsAtEndpoint(
   ctx: AdapterContext,
   longitude: number,
   latitude: number,
+  endpoint: string,
 ): Promise<SdaTableRow | null> {
   const body = new URLSearchParams({
     query: buildSdaSoilQuery(longitude, latitude),
     format: "JSON+COLUMNNAME",
   });
   const { response: res, attempts } = await fetchWithRetry(
-    USDA_SSURGO_SDA_ENDPOINT,
+    endpoint,
     {
       method: "POST",
       headers: {
@@ -141,9 +146,15 @@ async function querySdaSoils(
       fetchImpl: ctx.fetchImpl,
       signal: ctx.signal,
       upstreamLabel: "USDA Soil Data Access",
+      maxAttempts: 3,
+      baseDelayMs: 1_000,
+      captureThrowsAsResult: true,
     },
   );
   if (!res.ok) {
+    if (res.status === 599 && attempts >= 3) {
+      return null;
+    }
     throw new AdapterRunError(
       "upstream-error",
       `USDA Soil Data Access responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
@@ -168,6 +179,47 @@ async function querySdaSoils(
   if (!Array.isArray(table) || table.length === 0) return null;
   const row = table[0];
   return row && typeof row === "object" ? (row as SdaTableRow) : null;
+}
+
+async function querySdaSoils(
+  ctx: AdapterContext,
+  longitude: number,
+  latitude: number,
+): Promise<SdaTableRow | null> {
+  try {
+    const primary = await querySdaSoilsAtEndpoint(
+      ctx,
+      longitude,
+      latitude,
+      USDA_SSURGO_SDA_ENDPOINT,
+    );
+    if (primary) return primary;
+  } catch (err) {
+    if (
+      err instanceof AdapterRunError &&
+      (err.code === "network-error" || err.code === "upstream-error")
+    ) {
+      // fall through to alternate endpoint
+    } else {
+      throw err;
+    }
+  }
+  try {
+    return await querySdaSoilsAtEndpoint(
+      ctx,
+      longitude,
+      latitude,
+      USDA_SSURGO_SDA_ENDPOINT_FALLBACK,
+    );
+  } catch (err) {
+    if (err instanceof AdapterRunError) {
+      throw new AdapterRunError(
+        "network-error",
+        "USDA endpoint unreachable after 3 attempts on primary and fallback SDA hosts.",
+      );
+    }
+    throw err;
+  }
 }
 
 function pickString(value: unknown): string | null {

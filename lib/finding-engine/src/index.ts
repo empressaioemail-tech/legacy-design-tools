@@ -121,4 +121,5 @@ export {
   type StandardDescriptor,
   buildPrecedenceFindingDrafts,
   precedenceReconciliationsFromCodeSections,
+  isPrecedenceEngineProductionEnabled,
 } from "./precedence";

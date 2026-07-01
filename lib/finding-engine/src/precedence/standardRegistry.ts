@@ -41,10 +41,10 @@ const STANDARD_PATTERNS: ReadonlyArray<{
     },
   },
   {
-    pattern: /\bamendment\b|\blocal amend/i,
+    pattern: /\b(bastrop|cedar-hill|municode|municipal|city-of-)/i,
     descriptor: {
       standardKey: "local-amendment",
-      standardLabel: "Local code amendment",
+      standardLabel: "Local municipal code",
       authority: "local-amendment",
     },
   },
