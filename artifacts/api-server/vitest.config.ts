@@ -9,6 +9,25 @@ export default defineConfig({
   // graph. Pure-server tests don't render React; the plugin is a no-op
   // for them.
   plugins: [react()],
+  resolve: {
+    // The `@hauska/*` workspace packages carry a "workspace" export condition
+    // pointing at their TS source (./src). Without this, vite/vitest falls back
+    // to the "import"/"require" conditions → dist/, which is not built in the
+    // CI Test job (packages aren't prebuilt there), so a *value* import of
+    // @hauska/cortex-client (TILE_CAPABILITIES) fails to resolve. Type-only
+    // imports never hit this resolver, which is why the pre-existing type
+    // imports resolved fine. Mirrors codex-reviewer-qa/vite.config.ts.
+    conditions: ["workspace"],
+  },
+  // Vitest runs test files through the SSR module graph (pool: "forks"), whose
+  // resolver reads ssr.resolve.conditions, NOT the top-level resolve.conditions
+  // above. Set it here too so the "workspace" → ./src condition is honored when
+  // the test worker resolves @hauska/cortex-client at runtime.
+  ssr: {
+    resolve: {
+      conditions: ["workspace"],
+    },
+  },
   test: {
     environment: "node",
     setupFiles: [
@@ -43,6 +62,7 @@ export default defineConfig({
           "@workspace/codes",
           "@workspace/codes-sources",
           "@hauska/atom-contract",
+          "@hauska/cortex-client",
           "@workspace/codes-sources",
           "@workspace/integrations-anthropic-ai",
           "@workspace/api-zod",
