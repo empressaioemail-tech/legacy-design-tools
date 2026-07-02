@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import "./shell.css";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngagementProvider } from "./providers/EngagementProvider";
 import { SpatialProvider } from "./providers/SpatialProvider";
 import { CodeProvider } from "./providers/CodeProvider";
@@ -7,7 +8,15 @@ import { DocumentViewerNavigationProvider } from "./providers/DocumentViewerNavi
 import { SpaceBar, snapshotState, type SnapshotState } from "./components/SpaceBar";
 import { TilePicker } from "./components/TilePicker";
 import { GridCanvas } from "./components/GridCanvas";
-import { AddressSearchBox } from "./components/AddressSearchBox";
+import { HeaderSearchBar } from "./components/HeaderSearchBar";
+import { ShellToolbar } from "./components/ShellToolbar";
+import { ModuleMap } from "./components/ModuleMap";
+import {
+  FloatingTileLayer,
+  type FloatingTile,
+  type FloatRect,
+} from "./components/FloatingTileLayer";
+import { TileHost, createSlotRegistry } from "./components/TileHost";
 import { layoutIdForTileCount, parseLayoutCols, parseLayoutRows } from "./layouts";
 import type { PresetSpace, TileCategory, TileDef, TileStatus } from "./types";
 import {
@@ -21,21 +30,26 @@ export type SpaceSnapshot = {
   layoutId: string;
   colFr: number[];
   rowFr: number[];
+  /** Layout mode of the saved space. Optional for backward compatibility. */
+  layoutMode?: "grid" | "list";
 };
 
 /**
  * The saved-space persistence surface the shell drives. The app supplies a
- * concrete implementation (localStorage-backed in legacy-design-tools). Kept
- * as a prop object so the package carries no app-lib dependency.
+ * concrete implementation. All list/load/save/delete are async so the app may
+ * back them with a server store (BFF, tenant-keyed) with an optional
+ * localStorage fast-path. Sync localStorage impls still satisfy this by
+ * returning resolved values.
  */
 export type SavedSpacesApi = {
   savedSpaceId: (name: string) => string;
   isSavedSpaceId: (id: string) => boolean;
   savedSpaceName: (id: string) => string;
-  loadSavedSpaces: () => Record<string, SpaceSnapshot>;
-  saveCurrentSpace: (name: string, state: SpaceSnapshot) => void;
-  listSavedSpaceEntries: () => Array<{ id: string; label: string }>;
-  deleteSavedSpace: (name: string) => void;
+  /** Load one space snapshot by name (null if missing). */
+  loadSavedSpace: (name: string) => Promise<SpaceSnapshot | null>;
+  saveCurrentSpace: (name: string, state: SpaceSnapshot) => Promise<void>;
+  listSavedSpaceEntries: () => Promise<Array<{ id: string; label: string }>>;
+  deleteSavedSpace: (name: string) => Promise<void>;
 };
 
 /** A live-status wire entry as returned by the admin-functions endpoint. */
@@ -43,51 +57,28 @@ export type AdminFunctionStatus = { id: string; status: string };
 
 export type CortexShellProps = {
   initialPresetId?: string;
-  /** Resolve a tile definition by id. Supplied from the app tile registry. */
   getTile: (id: string) => TileDef | undefined;
-  /** All tiles, used by the picker. Supplied from the app tile registry. */
   allTiles: TileDef[];
-  /** Ordered category labels for the picker. */
   categories: readonly TileCategory[];
-  /** Preset spaces. Supplied from the app presets module. */
   presets: PresetSpace[];
-  /** Fetches live tile statuses for registry badges. */
   fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
-  /** Saved-space persistence surface. */
   savedSpaces: SavedSpacesApi;
-  /**
-   * Export the selected engagement's deliverable PDF. Supplied by the app
-   * (which owns the BFF client + browser download). When present, the SpaceBar
-   * shows an Export action while an engagement is selected. Keeps the package
-   * free of any app-lib / BFF-client dependency.
-   */
   onExportEngagement?: (engagementId: string) => Promise<void> | void;
-  /**
-   * Geocode a free-text address query into a parcel for the shared active-parcel
-   * context (top-bar address-search box — setter #2). App-supplied because the
-   * app owns the BFF client. When present, the SpaceBar shows the search box.
-   */
+  /** Geocode a free-text address query into a parcel (header search). */
   onAddressSearch?: (query: string) => Promise<ActiveParcel | null>;
-  /**
-   * Optional hook fired after an address-search parcel is written to the shared
-   * context — e.g. resolve/create an engagement for the parcel and load detail.
-   */
+  /** Optional debounced typeahead preview for the header search. */
+  onAddressPreview?: (query: string) => Promise<ActiveParcel | null>;
   onAddressResolved?: (parcel: ActiveParcel) => Promise<void> | void;
 };
 
-type CortexShellInnerProps = {
+type CortexShellInnerProps = Omit<
+  CortexShellProps,
+  "initialPresetId" | "presets"
+> & {
   initialPresetId: string;
   initialTiles: string[];
   initialLayoutId: string;
-  getTile: (id: string) => TileDef | undefined;
-  allTiles: TileDef[];
-  categories: readonly TileCategory[];
   presets: PresetSpace[];
-  fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
-  savedSpaces: SavedSpacesApi;
-  onExportEngagement?: (engagementId: string) => Promise<void> | void;
-  onAddressSearch?: (query: string) => Promise<ActiveParcel | null>;
-  onAddressResolved?: (parcel: ActiveParcel) => Promise<void> | void;
 };
 
 function CortexShellInner({
@@ -102,12 +93,13 @@ function CortexShellInner({
   savedSpaces: spacesApi,
   onExportEngagement,
   onAddressSearch,
+  onAddressPreview,
   onAddressResolved,
 }: CortexShellInnerProps) {
   const {
     isSavedSpaceId,
     listSavedSpaceEntries,
-    loadSavedSpaces,
+    loadSavedSpace,
     saveCurrentSpace,
     deleteSavedSpace,
     savedSpaceId,
@@ -124,6 +116,7 @@ function CortexShellInner({
       setExporting(false),
     );
   }, [engagementId, onExportEngagement, exporting]);
+
   const [activePresetId, setActivePresetId] = useState(initialPresetId);
   const [activeTiles, setActiveTiles] = useState(initialTiles);
   const [layoutId, setLayoutId] = useState(initialLayoutId);
@@ -135,7 +128,16 @@ function CortexShellInner({
   const [liveStatuses, setLiveStatuses] = useState<Record<string, TileStatus>>(
     {},
   );
-  const [savedSpaces, setSavedSpaces] = useState(() => listSavedSpaceEntries());
+  const [savedSpaces, setSavedSpaces] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+
+  // Phase 2/3/5 state.
+  const [editing, setEditing] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<"grid" | "list">("grid");
+  const [floats, setFloats] = useState<FloatingTile[]>([]);
+  const [moduleMapOpen, setModuleMapOpen] = useState(false);
+  const zCounter = useRef(0);
 
   const [colFr, setColFr] = useState(() =>
     Array(parseLayoutCols(initialLayoutId)).fill(1),
@@ -144,19 +146,44 @@ function CortexShellInner({
     Array(parseLayoutRows(initialLayoutId)).fill(1),
   );
 
+  // Mount-once slot registry: GridCanvas / FloatingTileLayer register slot DOM
+  // nodes; TileHost portals each tile's element into its current slot.
+  const slots = useMemo(() => createSlotRegistry(), []);
+  const registerSlot = slots.registry.register;
+
+  // The union of ids that must be mounted: active grid/list tiles + floats. A
+  // floated tile stays mounted (its slot is the pane). We render each once here.
+  const floatIds = useMemo(() => floats.map((f) => f.id), [floats]);
+  const gridIds = useMemo(
+    () => activeTiles.filter((id) => !floatIds.includes(id)),
+    [activeTiles, floatIds],
+  );
+  const mountedIds = useMemo(
+    () => Array.from(new Set([...activeTiles, ...floatIds])),
+    [activeTiles, floatIds],
+  );
+
   useEffect(() => {
     fetchAdminFunctions()
       .then((tiles) => {
         const map: Record<string, TileStatus> = {};
-        for (const t of tiles) {
-          map[t.id] = t.status as TileStatus;
-        }
+        for (const t of tiles) map[t.id] = t.status as TileStatus;
         setLiveStatuses(map);
       })
       .catch(() => {
         /* registry badges fall back to static tile status */
       });
   }, [fetchAdminFunctions]);
+
+  const refreshSpaces = useCallback(() => {
+    void listSavedSpaceEntries()
+      .then(setSavedSpaces)
+      .catch(() => setSavedSpaces([]));
+  }, [listSavedSpaceEntries]);
+
+  useEffect(() => {
+    refreshSpaces();
+  }, [refreshSpaces]);
 
   const applySnapshot = useCallback(
     (snap: SnapshotState, label: string | null) => {
@@ -175,15 +202,22 @@ function CortexShellInner({
   function handleApplyPreset(presetId: string) {
     if (isSavedSpaceId(presetId)) {
       const name = savedSpaceName(presetId);
-      const snap = loadSavedSpaces()[name];
-      if (!snap) return;
-      setActivePresetId(presetId);
-      applySnapshot(
-        snapshotState(engagementId ?? undefined, snap.tileIds, snap.layoutId, name),
-        `${name} space loaded`,
-      );
-      setColFr([...snap.colFr]);
-      setRowFr([...snap.rowFr]);
+      void loadSavedSpace(name).then((snap) => {
+        if (!snap) return;
+        setActivePresetId(presetId);
+        applySnapshot(
+          snapshotState(
+            engagementId ?? undefined,
+            snap.tileIds,
+            snap.layoutId,
+            name,
+          ),
+          `${name} space loaded`,
+        );
+        setColFr([...snap.colFr]);
+        setRowFr([...snap.rowFr]);
+        setLayoutMode(snap.layoutMode ?? "grid");
+      });
       return;
     }
     const preset = presets.find((p) => p.id === presetId);
@@ -193,6 +227,7 @@ function CortexShellInner({
       snapshotState(engagementId ?? undefined, preset.tiles, preset.layoutId, preset.label),
       `${preset.label} space loaded`,
     );
+    setLayoutMode("grid");
   }
 
   function handleUndo() {
@@ -203,15 +238,19 @@ function CortexShellInner({
     setUndoLabel(null);
   }
 
+  function relayout(next: string[]) {
+    const nextLayout = layoutIdForTileCount(next.length);
+    setLayoutId(nextLayout);
+    setColFr(Array(parseLayoutCols(nextLayout)).fill(1));
+    setRowFr(Array(parseLayoutRows(nextLayout)).fill(1));
+  }
+
   function handleToggleTile(id: string) {
     setActiveTiles((prev) => {
       const next = prev.includes(id)
         ? prev.filter((t) => t !== id)
         : [...prev, id];
-      const nextLayout = layoutIdForTileCount(next.length);
-      setLayoutId(nextLayout);
-      setColFr(Array(parseLayoutCols(nextLayout)).fill(1));
-      setRowFr(Array(parseLayoutRows(nextLayout)).fill(1));
+      relayout(next);
       return next;
     });
   }
@@ -219,11 +258,102 @@ function CortexShellInner({
   function handleRemoveTile(id: string) {
     setActiveTiles((prev) => {
       const next = prev.filter((t) => t !== id);
-      const nextLayout = layoutIdForTileCount(next.length);
-      setLayoutId(nextLayout);
-      setColFr(Array(parseLayoutCols(nextLayout)).fill(1));
-      setRowFr(Array(parseLayoutRows(nextLayout)).fill(1));
+      relayout(next);
       return next;
+    });
+    setFloats((prev) => prev.filter((f) => f.id !== id));
+  }
+
+  // Drag-to-reorder: SWAP the two tiles' positions in the active array (the
+  // count-keyed grid template re-places them by array order).
+  const handleReorder = useCallback((dragId: string, dropId: string) => {
+    setActiveTiles((prev) => {
+      const i = prev.indexOf(dragId);
+      const j = prev.indexOf(dropId);
+      if (i < 0 || j < 0) return prev;
+      const next = [...prev];
+      next[i] = dropId;
+      next[j] = dragId;
+      return next;
+    });
+  }, []);
+
+  // Pop a tile out into a floating pane. It stays in activeTiles (so it docks
+  // back into the same template slot) but renders in the float layer; the grid
+  // reflows to the remaining docked tiles.
+  const handlePopOut = useCallback((id: string) => {
+    setFloats((prev) => {
+      if (prev.some((f) => f.id === id)) return prev;
+      const offset = prev.length * 28;
+      return [
+        ...prev,
+        {
+          id,
+          rect: { x: 120 + offset, y: 120 + offset, w: 480, h: 360 },
+          z: ++zCounter.current,
+        },
+      ];
+    });
+  }, []);
+
+  const handleDock = useCallback((id: string) => {
+    setFloats((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const handleFloatRect = useCallback((id: string, rect: FloatRect) => {
+    setFloats((prev) => prev.map((f) => (f.id === id ? { ...f, rect } : f)));
+  }, []);
+
+  const handleFloatFocus = useCallback((id: string) => {
+    setFloats((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, z: ++zCounter.current } : f)),
+    );
+  }, []);
+
+  const labelFor = useCallback(
+    (id: string) => getTile(id)?.label ?? id,
+    [getTile],
+  );
+
+  // Grid reflows to the DOCKED (non-floated) tiles so popped-out panes free up
+  // template space; docking back returns the tile and the grid reflows again.
+  useEffect(() => {
+    setLayoutId((prev) => {
+      const want = layoutIdForTileCount(gridIds.length);
+      if (want === prev) return prev;
+      setColFr(Array(parseLayoutCols(want)).fill(1));
+      setRowFr(Array(parseLayoutRows(want)).fill(1));
+      return want;
+    });
+  }, [gridIds.length]);
+
+  function saveSpace() {
+    const preset =
+      presets.find((p) => p.id === activePresetId) ??
+      savedSpaces.find((s) => s.id === activePresetId);
+    const defaultName = preset?.label ?? "My space";
+    const name = window.prompt("Space name:", defaultName);
+    if (!name?.trim()) return;
+    void Promise.resolve(
+      saveCurrentSpace(name.trim(), {
+        tileIds: [...activeTiles],
+        layoutId,
+        colFr: [...colFr],
+        rowFr: [...rowFr],
+        layoutMode,
+      }),
+    ).then(() => {
+      refreshSpaces();
+      setActivePresetId(savedSpaceId(name.trim()));
+    });
+  }
+
+  function deleteSpace(spaceId: string) {
+    if (!isSavedSpaceId(spaceId)) return;
+    const name = savedSpaceName(spaceId);
+    void Promise.resolve(deleteSavedSpace(name)).then(() => {
+      refreshSpaces();
+      if (activePresetId === spaceId) handleApplyPreset(presets[0]!.id);
     });
   }
 
@@ -252,6 +382,14 @@ function CortexShellInner({
         background: "var(--h-surface-0)",
       }}
     >
+      {onAddressSearch ? (
+        <HeaderSearchBar
+          onGeocode={onAddressSearch}
+          onPreview={onAddressPreview}
+          onResolved={onAddressResolved}
+        />
+      ) : null}
+
       <SpaceBar
         presets={presets}
         activePresetId={activePresetId}
@@ -261,45 +399,22 @@ function CortexShellInner({
         savedSpaces={savedSpaces}
         onApplyPreset={handleApplyPreset}
         onUndo={handleUndo}
-        onExport={
-          onExportEngagement && engagementId ? handleExport : undefined
-        }
+        onExport={onExportEngagement && engagementId ? handleExport : undefined}
         exporting={exporting}
-        addressSearch={
-          onAddressSearch ? (
-            <AddressSearchBox
-              onGeocode={onAddressSearch}
-              onResolved={onAddressResolved}
-            />
-          ) : undefined
-        }
         onOpenPicker={() => setPickerOpen(true)}
-        onSaveSpace={() => {
-          const preset =
-            presets.find((p) => p.id === activePresetId) ??
-            savedSpaces.find((s) => s.id === activePresetId);
-          const defaultName = preset?.label ?? "My space";
-          const name = window.prompt("Space name:", defaultName);
-          if (!name?.trim()) return;
-          saveCurrentSpace(name.trim(), {
-            tileIds: [...activeTiles],
-            layoutId,
-            colFr: [...colFr],
-            rowFr: [...rowFr],
-          });
-          setSavedSpaces(listSavedSpaceEntries());
-          setActivePresetId(savedSpaceId(name.trim()));
-        }}
-        onDeleteSpace={(spaceId) => {
-          if (!isSavedSpaceId(spaceId)) return;
-          const name = savedSpaceName(spaceId);
-          deleteSavedSpace(name);
-          setSavedSpaces(listSavedSpaceEntries());
-          if (activePresetId === spaceId) {
-            handleApplyPreset(presets[0]!.id);
-          }
-        }}
+        onSaveSpace={saveSpace}
+        onDeleteSpace={deleteSpace}
       />
+
+      <ShellToolbar
+        editing={editing}
+        onToggleEditing={() => setEditing((v) => !v)}
+        layoutMode={layoutMode}
+        onLayoutModeChange={setLayoutMode}
+        floatCount={floats.length}
+        onOpenModuleMap={() => setModuleMapOpen(true)}
+      />
+
       <TilePicker
         open={pickerOpen}
         tiles={allTiles}
@@ -309,19 +424,54 @@ function CortexShellInner({
         onToggleTile={handleToggleTile}
         liveStatuses={liveStatuses}
       />
+
       <GridCanvas
-        tileIds={activeTiles}
+        tileIds={gridIds}
         getTile={getTile}
         layoutId={layoutId}
         colFr={colFr}
         rowFr={rowFr}
+        editing={editing}
+        layoutMode={layoutMode}
+        registerSlot={registerSlot}
         onColFrChange={setColFr}
         onRowFrChange={setRowFr}
+        onReorder={handleReorder}
         onRemoveTile={handleRemoveTile}
         onFullscreen={setFullscreenId}
+        onPopOut={handlePopOut}
         overflowTileId={overflowTileId}
         onSelectOverflow={setOverflowTileId}
       />
+
+      <FloatingTileLayer
+        floats={floats}
+        labelFor={labelFor}
+        registerSlot={registerSlot}
+        onDock={handleDock}
+        onRectChange={handleFloatRect}
+        onFocus={handleFloatFocus}
+      />
+
+      {/* Mount-once tile content: rendered here, portaled into the current slot
+          (grid cell, list section, or floating pane) so reflow never remounts. */}
+      <TileHost
+        activeIds={mountedIds}
+        render={(id) => getTile(id)?.el() ?? null}
+        getSlot={slots.get}
+        subscribe={slots.subscribe}
+      />
+
+      {moduleMapOpen ? (
+        <ModuleMap
+          tiles={allTiles}
+          onClose={() => setModuleMapOpen(false)}
+          onAddTile={(id) => {
+            if (!activeTiles.includes(id)) handleToggleTile(id);
+            setModuleMapOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -336,10 +486,10 @@ export function CortexShell({
   savedSpaces,
   onExportEngagement,
   onAddressSearch,
+  onAddressPreview,
   onAddressResolved,
 }: CortexShellProps) {
-  const preset =
-    presets.find((p) => p.id === initialPresetId) ?? presets[0]!;
+  const preset = presets.find((p) => p.id === initialPresetId) ?? presets[0]!;
 
   return (
     <EngagementProvider>
@@ -359,6 +509,7 @@ export function CortexShell({
                 savedSpaces={savedSpaces}
                 onExportEngagement={onExportEngagement}
                 onAddressSearch={onAddressSearch}
+                onAddressPreview={onAddressPreview}
                 onAddressResolved={onAddressResolved}
               />
             </DocumentViewerNavigationProvider>

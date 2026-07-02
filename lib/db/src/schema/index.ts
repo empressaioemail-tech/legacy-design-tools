@@ -67,3 +67,4 @@ export * from "./brokerageInstallClaims";
 export * from "./userUsageMetering";
 export * from "./knowledgeAtoms";
 export * from "./engagementAnnotations";
+export * from "./savedWorkspaceSpaces";

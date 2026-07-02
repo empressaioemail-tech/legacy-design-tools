@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from "react";
+import { type CSSProperties } from "react";
 import type { PresetSpace, WorkspaceComposition } from "../types";
 
 export function SpaceBar({
@@ -15,7 +15,6 @@ export function SpaceBar({
   onDeleteSpace,
   onExport,
   exporting,
-  addressSearch,
 }: {
   presets: PresetSpace[];
   activePresetId: string;
@@ -36,8 +35,6 @@ export function SpaceBar({
    */
   onExport?: () => void;
   exporting?: boolean;
-  /** The top-bar address-search box (setter #2). Rendered when supplied. */
-  addressSearch?: ReactNode;
 }) {
   return (
     <header
@@ -130,7 +127,6 @@ export function SpaceBar({
         </button>
       ) : null}
       <span style={{ flex: 1 }} />
-      {addressSearch ?? null}
       <span style={{ fontSize: 11, color: "var(--h-text-muted)" }}>
         {activeTiles.length} tile{activeTiles.length === 1 ? "" : "s"} · layout {layoutId}
       </span>

@@ -1,0 +1,200 @@
+/*
+ * Tile-shell layout CSS. The edit/view "fuse" toggle and list/report layout are
+ * pure CSS over a single class on the grid container (adapted from the trading
+ * app's FocusShell fs-seamless pattern) — the SAME DOM in both modes, so
+ * flipping edit<->view never remounts a tile.
+ */
+
+/* ── Grid container ─────────────────────────────────────────────── */
+.ts-tilegrid {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  align-content: stretch;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+}
+
+/* Edit mode: full chrome — visible gaps + padding so tiles read as cards. */
+.ts-tilegrid.ts-edit {
+  gap: 8px;
+  padding: 8px;
+  background: var(--h-surface-0);
+}
+
+/* View mode fuse: drop padding to 0, gap to a hairline, paint the grid
+ * background the border colour so the inter-tile gaps read as dividers, and
+ * strip each tile's own border/radius/shadow + hide its header. The grid reads
+ * as one continuous screen instead of a set of windowed cards. */
+.ts-tilegrid.ts-seamless {
+  padding: 0;
+  gap: 1px;
+  background: var(--h-border-subtle);
+  overflow: hidden;
+}
+.ts-tilegrid.ts-seamless .ts-tile {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.ts-tilegrid.ts-seamless .ts-tile-head {
+  display: none;
+}
+
+/* Solo (single tile / fullscreen-in-grid): fully chrome-free. */
+.ts-tilegrid.ts-solo {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.ts-tilegrid.ts-solo .ts-tile {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.ts-tilegrid.ts-solo .ts-tile-head {
+  display: none;
+}
+
+/* ── Tile ───────────────────────────────────────────────────────── */
+.ts-tile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--h-border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--h-surface-1);
+  min-height: 0;
+}
+.ts-tile.ts-drop-target {
+  outline: 2px dashed var(--h-accent);
+  outline-offset: -2px;
+}
+.ts-tile.ts-dragging {
+  opacity: 0.5;
+}
+
+.ts-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--h-border-subtle);
+  background: var(--h-surface-1);
+}
+.ts-tile-head.ts-draggable {
+  cursor: grab;
+}
+.ts-tile-head.ts-draggable:active {
+  cursor: grabbing;
+}
+.ts-tile-grip {
+  color: var(--h-text-muted);
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+}
+
+/* ── Resize splitters ───────────────────────────────────────────── */
+/* Hover-reveal in view mode; always visible in edit mode. */
+.ts-resize-handle {
+  position: absolute;
+  z-index: 10;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.ts-tilegrid:hover .ts-resize-handle,
+.ts-tilegrid.ts-edit .ts-resize-handle {
+  opacity: 1;
+}
+.ts-resize-handle:hover {
+  background: var(--h-accent);
+}
+.ts-resize-handle.ts-col {
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  transform: translateX(-50%);
+}
+.ts-resize-handle.ts-row {
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  transform: translateY(-50%);
+}
+
+/* ── List / report layout ───────────────────────────────────────── */
+/* A seamless vertical stack for reporting-style views: each tile becomes a
+ * full-width section, no card chrome, hairline dividers between sections. */
+.ts-tilelist {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  background: var(--h-surface-0);
+}
+.ts-tilelist .ts-tile {
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--h-border-subtle);
+  flex: 0 0 auto;
+}
+.ts-tilelist .ts-tile-body {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+/* In list edit mode keep a light header so tiles are reorderable/removable. */
+.ts-tilelist.ts-view .ts-tile-head {
+  display: none;
+}
+
+.ts-tile-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+.ts-tile-body.ts-fill {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Floating (docked-out) tile pane ────────────────────────────── */
+.ts-float-pane {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--h-border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--h-surface-1);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.ts-float-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--h-border-subtle);
+  background: var(--h-surface-2);
+  cursor: move;
+  user-select: none;
+}
+.ts-float-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.ts-float-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+}

@@ -98,6 +98,30 @@ export type CortexClient = {
   getSubmissionFindingsStatus: (
     submissionId: string,
   ) => Promise<SubmissionFindingsStatus>
+
+  // ─── Saved workspace spaces (Phase 2 shell experience) ──────────
+  listSavedSpaces: () => Promise<SavedSpaceSummary[]>
+  loadSavedSpace: (name: string) => Promise<SavedSpaceRecord | null>
+  saveSpace: (name: string, snapshot: unknown) => Promise<{ id: string; name: string }>
+  deleteSpace: (name: string) => Promise<void>
+  shareSpace: (name: string) => Promise<{ shareToken: string }>
+  loadSharedSpace: (token: string) => Promise<{ name: string; snapshot: unknown }>
+}
+
+/** A saved-space list entry (name + id, no snapshot body). */
+export type SavedSpaceSummary = {
+  id: string
+  name: string
+  shareToken: string | null
+  updatedAt: string
+}
+
+/** A full saved-space record (with its snapshot body). */
+export type SavedSpaceRecord = {
+  id: string
+  name: string
+  snapshot: unknown
+  shareToken: string | null
 }
 
 export function createCortexClient(config: CortexClientConfig): CortexClient {
@@ -258,6 +282,48 @@ export function createCortexClient(config: CortexClientConfig): CortexClient {
     getSubmissionFindingsStatus(submissionId) {
       return doFetch<SubmissionFindingsStatus>(
         `/plan-review/submissions/${submissionId}/findings/status`,
+      )
+    },
+
+    listSavedSpaces() {
+      return doFetch<SavedSpaceSummary[]>(`/plan-review/spaces`)
+    },
+
+    async loadSavedSpace(name) {
+      try {
+        return await doFetch<SavedSpaceRecord>(
+          `/plan-review/spaces/by-name/${encodeURIComponent(name)}`,
+        )
+      } catch (err) {
+        if (err instanceof CortexApiError && err.status === 404) return null
+        throw err
+      }
+    },
+
+    saveSpace(name, snapshot) {
+      return doFetch<{ id: string; name: string }>(`/plan-review/spaces`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, snapshot }),
+      })
+    },
+
+    async deleteSpace(name) {
+      await doFetch<{ ok: boolean }>(
+        `/plan-review/spaces/by-name/${encodeURIComponent(name)}`,
+        { method: 'DELETE' },
+      )
+    },
+
+    shareSpace(name) {
+      return doFetch<{ shareToken: string }>(
+        `/plan-review/spaces/by-name/${encodeURIComponent(name)}/share`,
+        { method: 'POST', body: '{}' },
+      )
+    },
+
+    loadSharedSpace(token) {
+      return doFetch<{ name: string; snapshot: unknown }>(
+        `/plan-review/spaces/shared/${encodeURIComponent(token)}`,
       )
     },
   }

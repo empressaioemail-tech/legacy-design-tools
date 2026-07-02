@@ -1,18 +1,39 @@
-import { useRef, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from "react";
 import type { TileDef } from "../types";
 import { LAYOUTS, gridAreasForTiles } from "../layouts";
 import { TileWrapper } from "./TileWrapper";
 
+/**
+ * The tile canvas. Renders tiles as a CSS-Grid of cards (grid mode) or a
+ * seamless vertical stack (list/report mode), in either edit or view mode.
+ *
+ * Tile CONTENT is NOT rendered here — each tile's body registers a slot node
+ * with the shared slot registry, and TileHost portals the mount-once tile
+ * element into it. This keeps reorder/resize/edit-view/list-grid transitions
+ * remount-free for heavy tiles.
+ */
 export function GridCanvas({
   tileIds,
   getTile,
   layoutId,
   colFr,
   rowFr,
+  editing,
+  layoutMode,
+  registerSlot,
   onColFrChange,
   onRowFrChange,
+  onReorder,
   onRemoveTile,
   onFullscreen,
+  onPopOut,
   overflowTileId,
   onSelectOverflow,
 }: {
@@ -21,16 +42,28 @@ export function GridCanvas({
   layoutId: string;
   colFr: number[];
   rowFr: number[];
+  editing: boolean;
+  /** 'grid' = card grid; 'list' = seamless vertical report stack. */
+  layoutMode: "grid" | "list";
+  /** Register a tile-body slot node so TileHost can portal content in. */
+  registerSlot: (id: string, node: HTMLElement | null) => void;
   onColFrChange: (cols: number[]) => void;
   onRowFrChange: (rows: number[]) => void;
+  /** Swap two tiles in the active-tiles array (drag-to-reorder). */
+  onReorder: (dragId: string, dropId: string) => void;
   onRemoveTile: (id: string) => void;
   onFullscreen: (id: string | null) => void;
+  onPopOut: (id: string) => void;
   overflowTileId: string | null;
   onSelectOverflow: (id: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
-  const visibleIds = tileIds.slice(0, 4);
-  const overflow = tileIds.length > 4 ? tileIds.slice(4) : [];
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropId, setDropId] = useState<string | null>(null);
+
+  const isList = layoutMode === "list";
+  const visibleIds = isList ? tileIds : tileIds.slice(0, 4);
+  const overflow = !isList && tileIds.length > 4 ? tileIds.slice(4) : [];
   const areas = gridAreasForTiles(visibleIds);
   const templateAreas = (LAYOUTS[layoutId] ?? LAYOUTS["4"]!)
     .split("/")
@@ -46,6 +79,65 @@ export function GridCanvas({
     colFr.length >= 2 && colSum > 0 ? (colFr[0]! / colSum) * 100 : null;
   const rowBoundaryPct =
     rowFr.length >= 2 && rowSum > 0 ? (rowFr[0]! / rowSum) * 100 : null;
+
+  function handleDrop(target: string) {
+    if (dragId && dragId !== target) onReorder(dragId, target);
+    setDragId(null);
+    setDropId(null);
+  }
+
+  function tile(id: string, gridArea?: string) {
+    const def = getTile(id);
+    if (!def) return null;
+    return (
+      <TileWrapper
+        key={id}
+        tileId={id}
+        label={def.label}
+        gridArea={gridArea}
+        fill={id === "map"}
+        editing={editing}
+        dragging={dragId === id}
+        dropTarget={editing && dropId === id && dragId !== id}
+        onClose={() => onRemoveTile(id)}
+        onFullscreen={() => onFullscreen(id)}
+        onPopOut={() => onPopOut(id)}
+        onDragStart={() => setDragId(id)}
+        onDragEnd={() => {
+          setDragId(null);
+          setDropId(null);
+        }}
+        onDragOverTile={(e: ReactDragEvent) => {
+          e.preventDefault();
+          if (dropId !== id) setDropId(id);
+        }}
+        onDropTile={() => handleDrop(id)}
+      >
+        <SlotAnchor id={id} registerSlot={registerSlot} />
+      </TileWrapper>
+    );
+  }
+
+  if (isList) {
+    return (
+      <div
+        data-testid="tile-list"
+        className={`ts-tilelist ${editing ? "ts-edit" : "ts-view"}`}
+      >
+        {visibleIds.map((id) => tile(id))}
+      </div>
+    );
+  }
+
+  const solo = visibleIds.length === 1;
+  const gridClass = [
+    "ts-tilegrid",
+    editing ? "ts-edit" : "ts-view",
+    !editing && !solo ? "ts-seamless" : "",
+    solo ? "ts-solo" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
@@ -83,37 +175,15 @@ export function GridCanvas({
       <div
         ref={gridRef}
         data-testid="grid-canvas"
+        className={gridClass}
         style={{
           flex: 1,
-          height: "100%",
-          display: "grid",
           gridTemplateAreas: templateAreas,
           gridTemplateColumns,
           gridTemplateRows,
-          alignContent: "stretch",
-          gap: 2,
-          padding: 8,
-          minHeight: 0,
-          position: "relative",
         }}
       >
-        {visibleIds.map((id, i) => {
-          const def = getTile(id);
-          if (!def) return null;
-          return (
-            <TileWrapper
-              key={id}
-              tileId={id}
-              label={def.label}
-              gridArea={areas[i]}
-              fill={id === "map"}
-              onClose={() => onRemoveTile(id)}
-              onFullscreen={() => onFullscreen(id)}
-            >
-              {def.el()}
-            </TileWrapper>
-          );
-        })}
+        {visibleIds.map((id, i) => tile(id, areas[i]))}
 
         {colBoundaryPct !== null ? (
           <ResizeHandle
@@ -135,6 +205,32 @@ export function GridCanvas({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The DOM node a tile's mount-once content is portaled into. Registers itself
+ * with the slot registry on mount and unregisters on unmount, so TileHost
+ * re-targets the portal as the layout reflows.
+ */
+function SlotAnchor({
+  id,
+  registerSlot,
+}: {
+  id: string;
+  registerSlot: (id: string, node: HTMLElement | null) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    registerSlot(id, ref.current);
+    return () => registerSlot(id, null);
+  }, [id, registerSlot]);
+  return (
+    <div
+      ref={ref}
+      data-tile-slot={id}
+      style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}
+    />
   );
 }
 
@@ -192,29 +288,12 @@ function ResizeHandle({
       role="separator"
       aria-orientation={orientation === "col" ? "vertical" : "horizontal"}
       onMouseDown={onMouseDown}
-      className="grid-resize-handle"
-      style={{
-        position: "absolute",
-        ...(orientation === "col"
-          ? {
-              top: 0,
-              bottom: 0,
-              left: `${boundaryPct}%`,
-              width: 8,
-              cursor: "col-resize",
-              transform: "translateX(-50%)",
-            }
-          : {
-              left: 0,
-              right: 0,
-              top: `${boundaryPct}%`,
-              height: 8,
-              cursor: "row-resize",
-              transform: "translateY(-50%)",
-            }),
-        zIndex: 10,
-        background: "transparent",
-      }}
+      className={`ts-resize-handle ts-${orientation}`}
+      style={
+        orientation === "col"
+          ? { left: `${boundaryPct}%` }
+          : { top: `${boundaryPct}%` }
+      }
     />
   );
 }
