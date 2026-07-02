@@ -186,6 +186,9 @@ importers:
       '@hauska/atom-contract':
         specifier: file:../../vendor/hauska-atom-contract-1.6.0.tgz
         version: file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
+      '@hauska/cortex-client':
+        specifier: workspace:*
+        version: link:../../packages/cortex-client
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -2090,6 +2093,10 @@ importers:
         version: 5.9.3
 
   packages/tile-shell:
+    dependencies:
+      '@hauska/design-tokens':
+        specifier: workspace:*
+        version: link:../design-tokens
     devDependencies:
       '@types/react':
         specifier: ^19

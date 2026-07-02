@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 export function TileWrapper({
   tileId,
@@ -24,10 +24,10 @@ export function TileWrapper({
         gridArea,
         display: "flex",
         flexDirection: "column",
-        border: "1px solid var(--border-subtle, var(--border-soft, rgba(160,220,255,0.13)))",
+        border: "1px solid var(--h-border-subtle)",
         borderRadius: 8,
         overflow: "hidden",
-        background: "var(--surface-1, #1e2a35)",
+        background: "var(--h-surface-1)",
         minHeight: 0,
       }}
     >
@@ -37,8 +37,8 @@ export function TileWrapper({
           alignItems: "center",
           gap: 6,
           padding: "4px 8px",
-          borderBottom: "1px solid var(--border-subtle)",
-          background: "var(--bg-elevated)",
+          borderBottom: "1px solid var(--h-border-subtle)",
+          background: "var(--h-surface-1)",
           cursor: "grab",
         }}
       >
@@ -78,11 +78,11 @@ export function TileWrapper({
   );
 }
 
-const chromeButtonStyle: React.CSSProperties = {
+const chromeButtonStyle: CSSProperties = {
   border: "none",
   background: "transparent",
   cursor: "pointer",
   fontSize: 14,
-  color: "var(--text-secondary)",
+  color: "var(--h-text-muted)",
   padding: "2px 6px",
 };

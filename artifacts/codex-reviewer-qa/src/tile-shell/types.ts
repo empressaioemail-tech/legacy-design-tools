@@ -1,70 +1,19 @@
-import type React from "react";
+// Shell/registry types now live in the @hauska/tile-shell package (the single
+// authoritative TileDef). Re-export them so app modules keep importing from
+// "../tile-shell/types" unchanged.
+export type {
+  TileDef,
+  TileCategory,
+  TileStatus,
+  WorkspaceComposition,
+  OverlaySpec,
+  PresetSpace,
+  EngagementDetail,
+  EngagementReportResult,
+  PrecedenceResultWire,
+} from "@hauska/tile-shell";
 
-export type TileStatus = "live" | "degraded" | "partial" | "planned";
-
-export type TileCategory =
-  | "Compliance"
-  | "Site Analysis"
-  | "Property Intel"
-  | "Design Accelerator"
-  | "Deliverable"
-  | "Market";
-
-export type TileDef = {
-  id: string;
-  label: string;
-  category: TileCategory;
-  engine?: "engagement" | "spatial" | "code";
-  el: () => React.ReactElement;
-  minColShare?: number;
-  status: TileStatus;
-  degradedReason?: string;
-};
-
-export type WorkspaceComposition = {
-  engagementId?: string;
-  tiles: string[];
-  layoutId: string;
-  why: string;
-};
-
-export type PresetSpace = {
-  id: string;
-  label: string;
-  tiles: string[];
-  layoutId: string;
-};
-
-export type OverlaySpec = {
-  id: string;
-  kind: string;
-  label: string;
-  geojson?: {
-    type: string;
-    features: unknown[];
-  };
-  opacity?: number;
-};
-
-export type EngagementReportResult = {
-  status: "running" | "not-run" | "error" | "ok";
-  result?: unknown;
-  error?: string;
-  generationId?: string;
-};
-
-export type EngagementDetail = {
-  id: string;
-  name: string;
-  jurisdiction: string | null;
-  address: string | null;
-  apn: string | null;
-  applicantName: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  reportResults: Record<string, EngagementReportResult>;
-};
-
+// App-only types the package shell does not need.
 export type EngagementQueueItem = {
   id: string;
   engagementId: string;
@@ -85,11 +34,4 @@ export type IntakeParseResult = {
   clientNotes: string;
   unverifiedFields: string[];
   sources: Array<{ kind: string; label: string }>;
-};
-
-export type PrecedenceResultWire = {
-  topic: string;
-  ruleApplied: string;
-  governingAtomId: string;
-  comparedAtomIds: string[];
 };

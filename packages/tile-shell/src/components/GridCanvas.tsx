@@ -1,10 +1,11 @@
-import { useRef } from "react";
-import { getTile } from "../tiles";
+import { useRef, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import type { TileDef } from "../types";
 import { LAYOUTS, gridAreasForTiles } from "../layouts";
 import { TileWrapper } from "./TileWrapper";
 
 export function GridCanvas({
   tileIds,
+  getTile,
   layoutId,
   colFr,
   rowFr,
@@ -16,6 +17,7 @@ export function GridCanvas({
   onSelectOverflow,
 }: {
   tileIds: string[];
+  getTile: (id: string) => TileDef | undefined;
   layoutId: string;
   colFr: number[];
   rowFr: number[];
@@ -51,13 +53,13 @@ export function GridCanvas({
         <div
           style={{
             padding: "6px 12px",
-            borderBottom: "1px solid var(--border-subtle)",
+            borderBottom: "1px solid var(--h-border-subtle)",
             display: "flex",
             gap: 6,
             flexWrap: "wrap",
           }}
         >
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Overflow:</span>
+          <span style={{ fontSize: 11, color: "var(--h-text-muted)" }}>Overflow:</span>
           {overflow.map((id) => (
             <button
               key={id}
@@ -67,9 +69,9 @@ export function GridCanvas({
                 fontSize: 11,
                 padding: "2px 8px",
                 borderRadius: 4,
-                border: "1px solid var(--border-subtle)",
+                border: "1px solid var(--h-border-subtle)",
                 background:
-                  overflowTileId === id ? "var(--info-dim)" : "transparent",
+                  overflowTileId === id ? "var(--h-surface-2)" : "transparent",
               }}
             >
               {getTile(id)?.label ?? id}
@@ -145,13 +147,13 @@ function ResizeHandle({
 }: {
   orientation: "col" | "row";
   boundaryPct: number;
-  containerRef: React.RefObject<HTMLDivElement | null>;
+  containerRef: RefObject<HTMLDivElement | null>;
   frTotal: number;
   onFrChange: (fr: number[]) => void;
 }) {
   const dragging = useRef(false);
 
-  function onMouseDown(e: React.MouseEvent) {
+  function onMouseDown(e: ReactMouseEvent) {
     e.preventDefault();
     dragging.current = true;
     const container = containerRef.current;

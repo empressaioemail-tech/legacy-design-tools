@@ -13,9 +13,29 @@ export default defineConfig({
   resolve: {
     // Mirror the `@/*` alias from `vite.config.ts` so test files (and
     // any app modules they pull in) can resolve `@/...` imports.
+    //
+    // The `@hauska/*` workspace packages publish only a built `dist/`
+    // (bare `import "react"` that vitest's transform pipeline cannot
+    // resolve). Alias them to their TS source for tests so the react
+    // plugin transforms them and `react` resolves normally.
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
+      "@hauska/tile-shell": path.resolve(
+        import.meta.dirname,
+        "../../packages/tile-shell/src/index.ts",
+      ),
+      "@hauska/cortex-tiles": path.resolve(
+        import.meta.dirname,
+        "../../packages/cortex-tiles/src/index.ts",
+      ),
+      "@hauska/cortex-client": path.resolve(
+        import.meta.dirname,
+        "../../packages/cortex-client/src/index.ts",
+      ),
     },
+    // Mirror vite.config.ts so a single React copy is used when the
+    // aliased `@hauska/*` source is transformed from outside the app root.
+    dedupe: ["react", "react-dom"],
   },
   test: {
     environment: "happy-dom",

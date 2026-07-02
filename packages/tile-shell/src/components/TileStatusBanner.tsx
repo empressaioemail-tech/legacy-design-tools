@@ -13,10 +13,10 @@ export function TileStatusBanner({
 
   const tone =
     status === "planned"
-      ? { bg: "var(--text-muted)", text: "var(--bg-base)" }
+      ? { bg: "var(--h-text-muted)", text: "var(--h-surface-0)" }
       : status === "partial"
-        ? { bg: "var(--warning-dim)", text: "var(--warning-text)" }
-        : { bg: "var(--danger-dim)", text: "var(--danger-text)" };
+        ? { bg: "var(--h-warning)", text: "var(--h-surface-0)" }
+        : { bg: "var(--h-error)", text: "var(--h-surface-0)" };
 
   const statusLabel =
     status === "planned"

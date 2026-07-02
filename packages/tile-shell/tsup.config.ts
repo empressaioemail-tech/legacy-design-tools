@@ -3,5 +3,5 @@ export default defineConfig({
   entry: ['src/index.ts'],
   format: ['cjs', 'esm'],
   dts: true,
-  external: ['react', 'react-dom'],
+  external: ['react', 'react-dom', '@hauska/design-tokens/tokens.css'],
 })

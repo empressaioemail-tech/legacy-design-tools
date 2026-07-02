@@ -18,9 +18,10 @@ import {
   useOverrideFinding,
   useRejectFinding,
 } from "../../lib/reviewApi";
-import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
-import { useCode } from "../../tile-shell/providers/CodeProvider";
-import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
+import { useEngagement } from "@hauska/tile-shell";
+import { useCode } from "@hauska/tile-shell";
+import { TileStatusBanner } from "@hauska/tile-shell";
+import { TileErrorBoundary } from "@hauska/cortex-tiles";
 import { runCompliancePass } from "../../lib/planReviewBff";
 import {
   usePlanReviewEngagementSubmissions,
@@ -46,7 +47,7 @@ const selectStyle: CSSProperties = {
   fontSize: 13,
 };
 
-export default function ComplianceRunTile() {
+function ComplianceRunTileInner() {
   const { engagementId, engagement } = useEngagement();
   const { setJurisdictionKey, setPrecedenceResult } = useCode();
   const queryClient = useQueryClient();
@@ -238,5 +239,21 @@ export default function ComplianceRunTile() {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * OPTION 3 (per Track C Phase 3 dispatch): this tile stays app-resident because
+ * it depends on @workspace/api-client-react generated query-key helpers, the
+ * app-only FindingCard / JurisdictionBar components, and the app-lib review
+ * mutation hooks (useAcceptFinding/useOverrideFinding/useRejectFinding). Moving
+ * it would force the entire review-page contract into the package interface.
+ * It is still wrapped in the shared TileErrorBoundary from @hauska/cortex-tiles.
+ */
+export default function ComplianceRunTile() {
+  return (
+    <TileErrorBoundary label="Compliance Run">
+      <ComplianceRunTileInner />
+    </TileErrorBoundary>
   );
 }
