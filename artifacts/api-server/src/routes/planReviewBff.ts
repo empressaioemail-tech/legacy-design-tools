@@ -8,7 +8,8 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { randomUUID } from "crypto";
 import {
   db,
   engagements,
@@ -75,6 +76,11 @@ import {
 } from "../lib/planReviewLayerRun";
 import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
 import { runSheetContentExtraction } from "../lib/sheetContentExtractor";
+import {
+  extractAnnotationCoordinates,
+  getPdfPageCount,
+  rasterizePdfPage,
+} from "../lib/annotationPipeline";
 import type { ResponseTaskAtomInstance } from "@workspace/atoms-l-surface";
 import type {
   QueueRow,
@@ -1781,6 +1787,403 @@ router.post(
       error: "dwg_conversion_unavailable",
       detail:
         "Server-side DWG->PDF conversion requires LibreOffice in the Cloud Run image; not installed. Attach a PDF or IFC instead.",
+    });
+  },
+);
+
+// ─── AI-vision annotation generation (Track F Phase 1) ──────────
+//
+// Async pipeline: rasterize each PDF page of an engagement's attached plan
+// set, ask a vision model for a bounding box per FAILING finding, and
+// persist the result into `engagement_annotations`.
+//
+// TWO HARD, NON-NEGOTIABLE INVARIANTS:
+//   (1) IDEMPOTENT — running generation twice for the same submission must
+//       NOT create duplicate annotations (pre-run skip-set + per-insert
+//       re-check).
+//   (2) Every generated annotation's confidence is
+//       `{ value, kind: 'asserted' }` — NEVER 'calibrated'. An AI-vision
+//       coordinate is asserted-with-provenance, not earned/calibrated
+//       (company structural commitment #2).
+
+/** Failing = blocker|concern; advisory is not failing. */
+const FAILING_SEVERITIES = ["blocker", "concern"] as const;
+/** Exclude rejected/overridden — only live findings get annotations. */
+const ANNOTATABLE_STATUSES = [
+  "ai-produced",
+  "accepted",
+  "promoted-to-architect",
+] as const;
+
+/** Confidence stamped on every AI-vision annotation. Asserted, never calibrated. */
+const AI_ANNOTATION_CONFIDENCE = { value: 0.75, kind: "asserted" } as const;
+
+type AnnotationJob = {
+  status: "pending" | "running" | "done" | "error";
+  progress: number;
+  total: number;
+  error?: string;
+  createdAt: number;
+};
+
+/** In-memory job state, keyed by jobId. Process-local (fine for v1). */
+const annotationJobs = new Map<string, AnnotationJob>();
+
+/**
+ * In-flight generation guard keyed `${engagementId}:${submissionId}`, mapped to
+ * the live jobId. Prevents a double-click / concurrent POST from launching two
+ * generation passes for the same submission (which would race past the
+ * idempotency pre-check and duplicate annotations). Mirrors the `inFlightReports`
+ * single-flight guard used by the reports/run route.
+ */
+const inFlightAnnotationJobs = new Map<string, string>();
+
+/** Evict terminal jobs older than this so the map does not grow unbounded. */
+const ANNOTATION_JOB_TTL_MS = 30 * 60 * 1000;
+
+/** Prune finished (done/error) jobs past their TTL. Cheap; called on kickoff. */
+function pruneAnnotationJobs(): void {
+  const now = Date.now();
+  for (const [id, job] of annotationJobs) {
+    if (
+      (job.status === "done" || job.status === "error") &&
+      now - job.createdAt > ANNOTATION_JOB_TTL_MS
+    ) {
+      annotationJobs.delete(id);
+    }
+  }
+}
+
+type Location2dShape = {
+  submissionId?: unknown;
+};
+
+/**
+ * Load the engagement's failing findings (severity blocker|concern, status
+ * in the annotatable set), joined findings->submissions on the engagement,
+ * deduplicated by findings.id.
+ */
+async function loadFailingFindingsForEngagement(engagementId: string): Promise<
+  Array<{ id: string; atomId: string; category: string; text: string }>
+> {
+  const rows = await db
+    .select({
+      id: findings.id,
+      atomId: findings.atomId,
+      category: findings.category,
+      text: findings.text,
+    })
+    .from(findings)
+    .innerJoin(submissions, eq(findings.submissionId, submissions.id))
+    .where(
+      and(
+        eq(submissions.engagementId, engagementId),
+        inArray(findings.severity, [...FAILING_SEVERITIES]),
+        inArray(findings.status, [...ANNOTATABLE_STATUSES]),
+      ),
+    );
+  const byId = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) byId.set(r.id, r);
+  return [...byId.values()];
+}
+
+/**
+ * IDEMPOTENCY defense-in-depth: does an AI annotation already exist for this
+ * (engagementId, findingId, submissionId) triple? Filters location2d in JS
+ * because the submissionId lives inside the jsonb blob.
+ */
+async function aiAnnotationExists(
+  engagementId: string,
+  findingId: string,
+  submissionId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select()
+    .from(engagementAnnotations)
+    .where(
+      and(
+        eq(engagementAnnotations.engagementId, engagementId),
+        eq(engagementAnnotations.findingId, findingId),
+      ),
+    );
+  return rows.some(
+    (r) =>
+      r.author === "ai" &&
+      (r.location2d as Location2dShape | null)?.submissionId === submissionId,
+  );
+}
+
+/**
+ * Async runner. Loads failing findings, computes the not-yet-annotated work
+ * list (pre-run idempotency), fetches the first loadable PDF, and for each
+ * page rasterizes once then asks the vision model to place every still-open
+ * finding. Each insert re-checks idempotency (defense-in-depth) and stamps
+ * asserted confidence. Never throws out — sets job.status='error' instead.
+ */
+async function runAnnotationGeneration(
+  jobId: string,
+  engagementId: string,
+  submissionId: string,
+): Promise<void> {
+  const job = annotationJobs.get(jobId);
+  if (job) job.status = "running";
+
+  try {
+    // 1. Failing findings for the engagement.
+    const failing = await loadFailingFindingsForEngagement(engagementId);
+
+    // 2. IDEMPOTENCY (pre-run): existing ai annotations for this submission.
+    const existing = await db
+      .select()
+      .from(engagementAnnotations)
+      .where(eq(engagementAnnotations.engagementId, engagementId));
+    const alreadyAnnotated = new Set<string>();
+    for (const r of existing) {
+      if (
+        r.author === "ai" &&
+        (r.location2d as Location2dShape | null)?.submissionId ===
+          submissionId &&
+        r.findingId
+      ) {
+        alreadyAnnotated.add(r.findingId);
+      }
+    }
+    const workList = failing.filter((f) => !alreadyAnnotated.has(f.id));
+
+    const cur = annotationJobs.get(jobId);
+    if (cur) cur.total = workList.length;
+
+    if (workList.length === 0) {
+      const done = annotationJobs.get(jobId);
+      if (done) {
+        done.status = "done";
+        done.progress = done.total;
+      }
+      return;
+    }
+
+    // 3. Fetch the first attached document that loads as a PDF.
+    const docRows = await db
+      .select()
+      .from(attachedDocuments)
+      .where(eq(attachedDocuments.engagementId, engagementId));
+
+    let pdfBuffer: Buffer | null = null;
+    let pageCount = 0;
+    for (const doc of docRows) {
+      const ref = doc.originalBlobRef;
+      if (!ref || !ref.startsWith("/objects/")) continue;
+      try {
+        const bytes = await planReviewObjectStorage.getObjectEntityBytes(ref);
+        const count = await getPdfPageCount(bytes);
+        if (count > 0) {
+          pdfBuffer = bytes;
+          pageCount = count;
+          break;
+        }
+      } catch (dlErr) {
+        logger.warn(
+          { dlErr, engagementId, objectPath: ref },
+          "annotation generation: object download/parse failed",
+        );
+      }
+    }
+
+    // No loadable PDF — nothing to annotate, finish clean (not an error).
+    if (!pdfBuffer || pageCount === 0) {
+      const done = annotationJobs.get(jobId);
+      if (done) {
+        done.status = "done";
+        done.progress = done.total;
+      }
+      return;
+    }
+
+    // 4. Per page: rasterize once, then place every still-open finding.
+    const placed = new Set<string>();
+    for (let page = 1; page <= pageCount; page += 1) {
+      const remaining = workList.filter((f) => !placed.has(f.id));
+      if (remaining.length === 0) break;
+
+      let imageBase64: string;
+      try {
+        imageBase64 = await rasterizePdfPage(pdfBuffer, page);
+      } catch (rasterErr) {
+        logger.warn(
+          { rasterErr, engagementId, page },
+          "annotation generation: page rasterize failed",
+        );
+        continue;
+      }
+
+      await Promise.all(
+        remaining.map(async (finding) => {
+          // First-match-wins guard: a finding may match on multiple pages.
+          if (placed.has(finding.id)) return;
+          try {
+            const bbox = await extractAnnotationCoordinates(imageBase64, {
+              findingId: finding.id,
+              codeSection: finding.atomId || finding.category,
+              description: finding.text,
+            });
+            if (!bbox) return;
+            if (placed.has(finding.id)) return;
+
+            // IDEMPOTENCY (defense-in-depth): re-check before inserting so a
+            // re-run after a partial failure never duplicates.
+            const exists = await aiAnnotationExists(
+              engagementId,
+              finding.id,
+              submissionId,
+            );
+            if (exists) {
+              placed.add(finding.id);
+              return;
+            }
+
+            await db.insert(engagementAnnotations).values({
+              engagementId,
+              author: "ai",
+              kind: "finding",
+              findingId: finding.id,
+              confidence: AI_ANNOTATION_CONFIDENCE,
+              location2d: {
+                submissionId,
+                page,
+                bbox: [
+                  bbox.x,
+                  bbox.y,
+                  bbox.x + bbox.width,
+                  bbox.y + bbox.height,
+                ],
+                label: finding.atomId || finding.category,
+              },
+            });
+            placed.add(finding.id);
+            const p = annotationJobs.get(jobId);
+            if (p) p.progress += 1;
+          } catch (findingErr) {
+            logger.warn(
+              { findingErr, engagementId, findingId: finding.id, page },
+              "annotation generation: per-finding placement failed",
+            );
+          }
+        }),
+      );
+    }
+
+    const doneJob = annotationJobs.get(jobId);
+    if (doneJob) {
+      doneJob.status = "done";
+      doneJob.progress = doneJob.total;
+    }
+    logger.info(
+      { engagementId, submissionId, placed: placed.size, total: workList.length },
+      "annotation generation complete",
+    );
+  } catch (err) {
+    const errJob = annotationJobs.get(jobId);
+    if (errJob) {
+      errJob.status = "error";
+      errJob.error = String(err);
+    }
+    logger.error(
+      { err, engagementId, submissionId, jobId },
+      "annotation generation failed",
+    );
+  }
+}
+
+// ─── POST /plan-review/engagements/:id/annotations/generate ─────
+
+router.post(
+  "/engagements/:id/annotations/generate",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const body = req.body as { submissionId?: unknown };
+    if (typeof body.submissionId !== "string" || !body.submissionId.trim()) {
+      res.status(400).json({ error: "missing_submission_id" });
+      return;
+    }
+    const submissionId = body.submissionId.trim();
+
+    pruneAnnotationJobs();
+
+    // Single-flight: if a generation for this exact submission is already
+    // running, return its jobId rather than launching a duplicate pass (a
+    // concurrent double-click would otherwise race past the idempotency
+    // pre-check and duplicate annotations).
+    const flightKey = `${engagementId}:${submissionId}`;
+    const existingJobId = inFlightAnnotationJobs.get(flightKey);
+    if (existingJobId) {
+      const existing = annotationJobs.get(existingJobId);
+      if (existing && (existing.status === "pending" || existing.status === "running")) {
+        res.status(202).json({ jobId: existingJobId });
+        return;
+      }
+      // Stale mapping (job already terminal) — clear and fall through.
+      inFlightAnnotationJobs.delete(flightKey);
+    }
+
+    const jobId = randomUUID();
+    annotationJobs.set(jobId, {
+      status: "pending",
+      progress: 0,
+      total: 0,
+      createdAt: Date.now(),
+    });
+    inFlightAnnotationJobs.set(flightKey, jobId);
+
+    // Fire-and-forget. runAnnotationGeneration swallows its own errors into
+    // job state; the extra catch guards against a synchronous throw. The
+    // in-flight guard is released in all cases.
+    void (async () => {
+      try {
+        await runAnnotationGeneration(jobId, engagementId, submissionId);
+      } catch (err) {
+        const j = annotationJobs.get(jobId);
+        if (j) {
+          j.status = "error";
+          j.error = String(err);
+        }
+      } finally {
+        if (inFlightAnnotationJobs.get(flightKey) === jobId) {
+          inFlightAnnotationJobs.delete(flightKey);
+        }
+      }
+    })();
+
+    res.status(202).json({ jobId });
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/annotations/generate/:jobId ─
+
+router.get(
+  "/engagements/:id/annotations/generate/:jobId",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const jobId = paramId(req.params.jobId);
+    const job = jobId ? annotationJobs.get(jobId) : undefined;
+    if (!job) {
+      res.status(404).json({ error: "job_not_found" });
+      return;
+    }
+    res.status(200).json({
+      status: job.status,
+      progress: job.progress,
+      total: job.total,
+      ...(job.error ? { error: job.error } : {}),
     });
   },
 );
