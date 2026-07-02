@@ -1,0 +1,16 @@
+{
+  "name": "@hauska/cortex-tiles",
+  "version": "0.1.0",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.mjs", "require": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
+  "dependencies": {
+    "@hauska/cortex-client": "workspace:*",
+    "@hauska/tile-shell": "workspace:*",
+    "@hauska/design-tokens": "workspace:*"
+  },
+  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19" },
+  "scripts": { "build": "tsup", "dev": "tsup --watch" }
+}
