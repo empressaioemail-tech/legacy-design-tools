@@ -51,6 +51,13 @@ export type CortexShellProps = {
   fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
   /** Saved-space persistence surface. */
   savedSpaces: SavedSpacesApi;
+  /**
+   * Export the selected engagement's deliverable PDF. Supplied by the app
+   * (which owns the BFF client + browser download). When present, the SpaceBar
+   * shows an Export action while an engagement is selected. Keeps the package
+   * free of any app-lib / BFF-client dependency.
+   */
+  onExportEngagement?: (engagementId: string) => Promise<void> | void;
 };
 
 type CortexShellInnerProps = {
@@ -63,6 +70,7 @@ type CortexShellInnerProps = {
   presets: PresetSpace[];
   fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
   savedSpaces: SavedSpacesApi;
+  onExportEngagement?: (engagementId: string) => Promise<void> | void;
 };
 
 function CortexShellInner({
@@ -75,6 +83,7 @@ function CortexShellInner({
   presets,
   fetchAdminFunctions,
   savedSpaces: spacesApi,
+  onExportEngagement,
 }: CortexShellInnerProps) {
   const {
     isSavedSpaceId,
@@ -87,6 +96,15 @@ function CortexShellInner({
   } = spacesApi;
 
   const { engagementId } = useEngagement();
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = useCallback(() => {
+    if (!engagementId || !onExportEngagement || exporting) return;
+    setExporting(true);
+    void Promise.resolve(onExportEngagement(engagementId)).finally(() =>
+      setExporting(false),
+    );
+  }, [engagementId, onExportEngagement, exporting]);
   const [activePresetId, setActivePresetId] = useState(initialPresetId);
   const [activeTiles, setActiveTiles] = useState(initialTiles);
   const [layoutId, setLayoutId] = useState(initialLayoutId);
@@ -224,6 +242,10 @@ function CortexShellInner({
         savedSpaces={savedSpaces}
         onApplyPreset={handleApplyPreset}
         onUndo={handleUndo}
+        onExport={
+          onExportEngagement && engagementId ? handleExport : undefined
+        }
+        exporting={exporting}
         onOpenPicker={() => setPickerOpen(true)}
         onSaveSpace={() => {
           const preset =
@@ -285,6 +307,7 @@ export function CortexShell({
   presets,
   fetchAdminFunctions,
   savedSpaces,
+  onExportEngagement,
 }: CortexShellProps) {
   const preset =
     presets.find((p) => p.id === initialPresetId) ?? presets[0]!;
@@ -305,6 +328,7 @@ export function CortexShell({
                 presets={presets}
                 fetchAdminFunctions={fetchAdminFunctions}
                 savedSpaces={savedSpaces}
+                onExportEngagement={onExportEngagement}
               />
             </DocumentViewerNavigationProvider>
           </AnnotationSelectionProvider>

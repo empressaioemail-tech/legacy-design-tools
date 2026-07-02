@@ -299,7 +299,14 @@ export default function DocumentViewerTile() {
     setExportError(null);
     try {
       const { url } = await exportEngagementPdf(engagementId);
-      window.open(url, "_blank", "noopener,noreferrer");
+      // Trigger a browser download (not a new tab) with a meaningful filename.
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `review-${engagementId.slice(0, 8)}.pdf`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (err: unknown) {
       setExportError(err instanceof Error ? err.message : "Export failed");
     } finally {

@@ -1,7 +1,7 @@
 import { CortexShell } from "@hauska/tile-shell";
 import { getTile, ALL_TILES, TILE_CATEGORIES } from "./tiles";
 import { PRESET_SPACES } from "./presets";
-import { fetchAdminFunctions } from "../lib/planReviewBff";
+import { fetchAdminFunctions, exportEngagementPdf } from "../lib/planReviewBff";
 import {
   isSavedSpaceId,
   listSavedSpaceEntries,
@@ -31,6 +31,19 @@ export default function AppCortexShell({
       categories={TILE_CATEGORIES}
       presets={PRESET_SPACES}
       fetchAdminFunctions={fetchAdminFunctions}
+      onExportEngagement={async (engagementId) => {
+        // App owns the BFF client + the browser download; the SpaceBar in
+        // @hauska/tile-shell only fires this callback. Trigger a download
+        // (not a new tab), matching the DocumentViewerTile export path.
+        const { url } = await exportEngagementPdf(engagementId);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `review-${engagementId.slice(0, 8)}.pdf`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }}
       savedSpaces={{
         isSavedSpaceId,
         listSavedSpaceEntries,
