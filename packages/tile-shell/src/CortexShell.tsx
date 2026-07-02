@@ -5,31 +5,85 @@ import { CodeProvider } from "./providers/CodeProvider";
 import { SpaceBar, snapshotState, type SnapshotState } from "./components/SpaceBar";
 import { TilePicker } from "./components/TilePicker";
 import { GridCanvas } from "./components/GridCanvas";
-import { PRESET_SPACES } from "./presets";
 import { layoutIdForTileCount, parseLayoutCols, parseLayoutRows } from "./layouts";
-import { getTile } from "./tiles";
-import { fetchAdminFunctions } from "../lib/planReviewBff";
-import {
-  isSavedSpaceId,
-  listSavedSpaceEntries,
-  loadSavedSpaces,
-  saveCurrentSpace,
-  deleteSavedSpace,
-  savedSpaceId,
-  savedSpaceName,
-} from "../lib/workspaceSpaces";
-import type { TileStatus } from "./types";
+import type { PresetSpace, TileCategory, TileDef, TileStatus } from "./types";
 import { useEngagement } from "./providers/EngagementProvider";
+
+/** Snapshot shape persisted by a saved space. */
+export type SpaceSnapshot = {
+  tileIds: string[];
+  layoutId: string;
+  colFr: number[];
+  rowFr: number[];
+};
+
+/**
+ * The saved-space persistence surface the shell drives. The app supplies a
+ * concrete implementation (localStorage-backed in legacy-design-tools). Kept
+ * as a prop object so the package carries no app-lib dependency.
+ */
+export type SavedSpacesApi = {
+  savedSpaceId: (name: string) => string;
+  isSavedSpaceId: (id: string) => boolean;
+  savedSpaceName: (id: string) => string;
+  loadSavedSpaces: () => Record<string, SpaceSnapshot>;
+  saveCurrentSpace: (name: string, state: SpaceSnapshot) => void;
+  listSavedSpaceEntries: () => Array<{ id: string; label: string }>;
+  deleteSavedSpace: (name: string) => void;
+};
+
+/** A live-status wire entry as returned by the admin-functions endpoint. */
+export type AdminFunctionStatus = { id: string; status: string };
+
+export type CortexShellProps = {
+  initialPresetId?: string;
+  /** Resolve a tile definition by id. Supplied from the app tile registry. */
+  getTile: (id: string) => TileDef | undefined;
+  /** All tiles, used by the picker. Supplied from the app tile registry. */
+  allTiles: TileDef[];
+  /** Ordered category labels for the picker. */
+  categories: readonly TileCategory[];
+  /** Preset spaces. Supplied from the app presets module. */
+  presets: PresetSpace[];
+  /** Fetches live tile statuses for registry badges. */
+  fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
+  /** Saved-space persistence surface. */
+  savedSpaces: SavedSpacesApi;
+};
+
+type CortexShellInnerProps = {
+  initialPresetId: string;
+  initialTiles: string[];
+  initialLayoutId: string;
+  getTile: (id: string) => TileDef | undefined;
+  allTiles: TileDef[];
+  categories: readonly TileCategory[];
+  presets: PresetSpace[];
+  fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
+  savedSpaces: SavedSpacesApi;
+};
 
 function CortexShellInner({
   initialPresetId,
   initialTiles,
   initialLayoutId,
-}: {
-  initialPresetId: string;
-  initialTiles: string[];
-  initialLayoutId: string;
-}) {
+  getTile,
+  allTiles,
+  categories,
+  presets,
+  fetchAdminFunctions,
+  savedSpaces: spacesApi,
+}: CortexShellInnerProps) {
+  const {
+    isSavedSpaceId,
+    listSavedSpaceEntries,
+    loadSavedSpaces,
+    saveCurrentSpace,
+    deleteSavedSpace,
+    savedSpaceId,
+    savedSpaceName,
+  } = spacesApi;
+
   const { engagementId } = useEngagement();
   const [activePresetId, setActivePresetId] = useState(initialPresetId);
   const [activeTiles, setActiveTiles] = useState(initialTiles);
@@ -63,7 +117,7 @@ function CortexShellInner({
       .catch(() => {
         /* registry badges fall back to static tile status */
       });
-  }, []);
+  }, [fetchAdminFunctions]);
 
   const applySnapshot = useCallback(
     (snap: SnapshotState, label: string | null) => {
@@ -93,7 +147,7 @@ function CortexShellInner({
       setRowFr([...snap.rowFr]);
       return;
     }
-    const preset = PRESET_SPACES.find((p) => p.id === presetId);
+    const preset = presets.find((p) => p.id === presetId);
     if (!preset) return;
     setActivePresetId(presetId);
     applySnapshot(
@@ -141,7 +195,7 @@ function CortexShellInner({
         <button
           type="button"
           onClick={() => setFullscreenId(null)}
-          style={{ padding: 8, alignSelf: "flex-start" }}
+          style={{ padding: "var(--h-space-sm)", alignSelf: "flex-start" }}
         >
           ← Exit fullscreen
         </button>
@@ -156,10 +210,11 @@ function CortexShellInner({
         height: "100vh",
         display: "flex",
         flexDirection: "column",
-        background: "var(--bg-base)",
+        background: "var(--h-surface-0)",
       }}
     >
       <SpaceBar
+        presets={presets}
         activePresetId={activePresetId}
         activeTiles={activeTiles}
         layoutId={layoutId}
@@ -170,7 +225,7 @@ function CortexShellInner({
         onOpenPicker={() => setPickerOpen(true)}
         onSaveSpace={() => {
           const preset =
-            PRESET_SPACES.find((p) => p.id === activePresetId) ??
+            presets.find((p) => p.id === activePresetId) ??
             savedSpaces.find((s) => s.id === activePresetId);
           const defaultName = preset?.label ?? "My space";
           const name = window.prompt("Space name:", defaultName);
@@ -190,12 +245,14 @@ function CortexShellInner({
           deleteSavedSpace(name);
           setSavedSpaces(listSavedSpaceEntries());
           if (activePresetId === spaceId) {
-            handleApplyPreset(PRESET_SPACES[0]!.id);
+            handleApplyPreset(presets[0]!.id);
           }
         }}
       />
       <TilePicker
         open={pickerOpen}
+        tiles={allTiles}
+        categories={categories}
         activeTiles={activeTiles}
         onClose={() => setPickerOpen(false)}
         onToggleTile={handleToggleTile}
@@ -203,6 +260,7 @@ function CortexShellInner({
       />
       <GridCanvas
         tileIds={activeTiles}
+        getTile={getTile}
         layoutId={layoutId}
         colFr={colFr}
         rowFr={rowFr}
@@ -219,11 +277,15 @@ function CortexShellInner({
 
 export function CortexShell({
   initialPresetId = "plan-review",
-}: {
-  initialPresetId?: string;
-}) {
+  getTile,
+  allTiles,
+  categories,
+  presets,
+  fetchAdminFunctions,
+  savedSpaces,
+}: CortexShellProps) {
   const preset =
-    PRESET_SPACES.find((p) => p.id === initialPresetId) ?? PRESET_SPACES[0]!;
+    presets.find((p) => p.id === initialPresetId) ?? presets[0]!;
 
   return (
     <EngagementProvider>
@@ -233,6 +295,12 @@ export function CortexShell({
             initialPresetId={preset.id}
             initialTiles={preset.tiles}
             initialLayoutId={preset.layoutId}
+            getTile={getTile}
+            allTiles={allTiles}
+            categories={categories}
+            presets={presets}
+            fetchAdminFunctions={fetchAdminFunctions}
+            savedSpaces={savedSpaces}
           />
         </CodeProvider>
       </SpatialProvider>

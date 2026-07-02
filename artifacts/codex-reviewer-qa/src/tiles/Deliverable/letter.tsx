@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
-import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
+import { useEngagement } from "@hauska/tile-shell";
+import { TileStatusBanner } from "@hauska/tile-shell";
+import { TileErrorBoundary } from "@hauska/cortex-tiles";
 import {
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
@@ -15,7 +16,7 @@ import {
   usePlanReviewSubmissionFindings,
 } from "../../lib/planReviewBffQueries";
 
-export default function LetterTile() {
+function LetterTileInner() {
   const { engagementId } = useEngagement();
   const [draft, setDraft] = useState("");
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
@@ -210,6 +211,21 @@ export default function LetterTile() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * OPTION 3 (per Track C Phase 3 dispatch): this tile stays app-resident because
+ * it depends on @workspace/api-client-react query-key helpers, the app-lib
+ * commentLetter (letterEligibleFindings) module, and the app-lib react-query
+ * hooks. It is still wrapped in the shared TileErrorBoundary from
+ * @hauska/cortex-tiles.
+ */
+export default function LetterTile() {
+  return (
+    <TileErrorBoundary label="Deliverable Letter">
+      <LetterTileInner />
+    </TileErrorBoundary>
   );
 }
 

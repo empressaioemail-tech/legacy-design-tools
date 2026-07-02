@@ -14,10 +14,10 @@ export function PlannedTile({
     <div
       data-testid={`planned-tile-${id}`}
       style={{
-        padding: 16,
+        padding: "var(--h-space-md)",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: "var(--h-space-sm)",
         height: "100%",
       }}
     >
@@ -31,13 +31,13 @@ export function PlannedTile({
           fontSize: 10,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
-          color: "var(--text-muted)",
+          color: "var(--h-text-muted)",
         }}
       >
         {category}
       </span>
       <h3 style={{ margin: 0, fontSize: 15 }}>{label}</h3>
-      <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
+      <p style={{ margin: 0, fontSize: 12, color: "var(--h-text-muted)" }}>
         Planned — not yet built. Spec reference: tile id{" "}
         <code>{id}</code> in the cortex function registry.
       </p>

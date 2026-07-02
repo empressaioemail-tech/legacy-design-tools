@@ -1,8 +1,8 @@
 import { type CSSProperties } from "react";
-import type { WorkspaceComposition } from "../types";
-import { PRESET_SPACES } from "../presets";
+import type { PresetSpace, WorkspaceComposition } from "../types";
 
 export function SpaceBar({
+  presets,
   activePresetId,
   activeTiles,
   layoutId,
@@ -14,6 +14,7 @@ export function SpaceBar({
   onSaveSpace,
   onDeleteSpace,
 }: {
+  presets: PresetSpace[];
   activePresetId: string;
   activeTiles: string[];
   layoutId: string;
@@ -32,16 +33,16 @@ export function SpaceBar({
         display: "flex",
         flexWrap: "wrap",
         alignItems: "center",
-        gap: 8,
+        gap: "var(--h-space-sm)",
         padding: "10px 16px",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--bg-elevated)",
+        borderBottom: "1px solid var(--h-border-subtle)",
+        background: "var(--h-surface-1)",
       }}
     >
       <span style={{ fontSize: 13, fontWeight: 700, marginRight: 8 }}>
         Cortex Workspace
       </span>
-      {PRESET_SPACES.map((preset) => {
+      {presets.map((preset) => {
         const active = preset.id === activePresetId;
         return (
           <button
@@ -81,9 +82,9 @@ export function SpaceBar({
               style={{
                 padding: "2px 6px",
                 borderRadius: 999,
-                border: "1px solid var(--border-subtle)",
+                border: "1px solid var(--h-border-subtle)",
                 background: "transparent",
-                color: "var(--text-muted)",
+                color: "var(--h-text-muted)",
                 fontSize: 12,
                 lineHeight: 1,
                 cursor: "pointer",
@@ -101,7 +102,7 @@ export function SpaceBar({
         Save this space
       </button>
       <span style={{ flex: 1 }} />
-      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+      <span style={{ fontSize: 11, color: "var(--h-text-muted)" }}>
         {activeTiles.length} tile{activeTiles.length === 1 ? "" : "s"} · layout {layoutId}
       </span>
       {undoLabel ? (
@@ -111,8 +112,8 @@ export function SpaceBar({
           onClick={onUndo}
           style={{
             ...pillStyle(true),
-            background: "var(--info-dim)",
-            color: "var(--info-text)",
+            background: "var(--h-surface-2)",
+            color: "var(--h-accent)",
           }}
         >
           ✦ {undoLabel} · Undo
@@ -127,10 +128,10 @@ function pillStyle(active: boolean): CSSProperties {
     padding: "4px 12px",
     borderRadius: 999,
     border: active
-      ? "1px solid var(--accent, var(--info-text))"
-      : "1px solid var(--border-subtle)",
-    background: active ? "var(--info-dim)" : "transparent",
-    color: active ? "var(--text-primary, #e2edf5)" : "var(--text-secondary)",
+      ? "1px solid var(--h-accent)"
+      : "1px solid var(--h-border-subtle)",
+    background: active ? "var(--h-surface-2)" : "transparent",
+    color: active ? "var(--h-text-primary)" : "var(--h-text-muted)",
     fontSize: 12,
     fontWeight: 600,
     cursor: "pointer",

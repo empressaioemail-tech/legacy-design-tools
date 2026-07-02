@@ -74,6 +74,12 @@ import {
 import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
 import { runSheetContentExtraction } from "../lib/sheetContentExtractor";
 import type { ResponseTaskAtomInstance } from "@workspace/atoms-l-surface";
+import type {
+  QueueRow,
+  EngagementDetail,
+  LetterDraft,
+  TileDefWire,
+} from "@hauska/cortex-client";
 
 const planReviewObjectStorage = new ObjectStorageService();
 
@@ -481,21 +487,20 @@ router.get("/queue", requireServiceTokenOrSession, async (req: Request, res: Res
   const inflightByEngagement = new Map(inflight);
 
   const now = Date.now();
-  res.json(
-    filtered.map((row) => ({
-      id: row.id,
-      engagementId: row.engagementId,
-      engagementName: row.engagementName,
-      status: row.status,
-      reportRunState: inflightByEngagement.get(row.engagementId)
-        ? "running"
-        : null,
-      openFindingCount: openCounts.get(row.id) ?? 0,
-      daysInQueue: Math.floor(
-        (now - new Date(row.submittedAt).getTime()) / 86_400_000,
-      ),
-    })),
-  );
+  const queueRows: QueueRow[] = filtered.map((row) => ({
+    id: row.id,
+    engagementId: row.engagementId,
+    engagementName: row.engagementName,
+    status: row.status,
+    reportRunState: inflightByEngagement.get(row.engagementId)
+      ? "running"
+      : null,
+    openFindingCount: openCounts.get(row.id) ?? 0,
+    daysInQueue: Math.floor(
+      (now - new Date(row.submittedAt).getTime()) / 86_400_000,
+    ),
+  }));
+  res.json(queueRows);
 });
 
 // ─── GET /plan-review/engagements/:id ────────────────────────────
@@ -514,7 +519,7 @@ router.get(
       res.status(404).json({ error: "engagement_not_found" });
       return;
     }
-    res.json({
+    const detail: EngagementDetail = {
       id: e.id,
       name: e.name,
       jurisdiction: e.jurisdiction,
@@ -524,7 +529,8 @@ router.get(
       latitude: e.latitude ? Number(e.latitude) : null,
       longitude: e.longitude ? Number(e.longitude) : null,
       reportResults: {},
-    });
+    };
+    res.json(detail);
   },
 );
 
@@ -1099,10 +1105,11 @@ router.get(
       return;
     }
     const cached = planReviewLetterDrafts.get(engagementId);
-    res.json({
+    const letter: LetterDraft = {
       draft: cached?.draft ?? null,
       generatedAt: cached?.generatedAt ?? null,
-    });
+    };
+    res.json(letter);
   },
 );
 
@@ -1167,7 +1174,8 @@ router.post(
       .join("\n");
     const generatedAt = new Date().toISOString();
     planReviewLetterDrafts.set(engagementId, { draft, generatedAt });
-    res.json({ draft, generatedAt });
+    const generated: LetterDraft = { draft, generatedAt };
+    res.json(generated);
   },
 );
 
@@ -1175,14 +1183,15 @@ router.post(
 
 router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res: Response) => {
   const precedenceLive = isPrecedenceEngineProductionEnabled();
-  res.json([
+  const functions: TileDefWire[] = [
     { id: "precedence", label: "Precedence Engine", category: "Compliance", status: precedenceLive ? "live" : "degraded", degradedReason: precedenceLive ? undefined : "Production gate not activated" },
     { id: "hydrology", label: "Hydrology", category: "Site Analysis", status: process.env.HYDROLOGY_PYSHEDS_INSTALLED === "1" ? "live" : "degraded", degradedReason: "pysheds not installed in Cloud Run worker." },
     { id: "subsurface", label: "Subsurface Suitability", category: "Site Analysis", status: "partial", degradedReason: "SSURGO ECONNRESET — USDA TLS issue." },
     { id: "icc-ingest", label: "ICC Code Connect Ingest", category: "Compliance", status: "partial", degradedReason: "Credentials live; API contract not verified." },
     { id: "avm", label: "AVM / Valuation", category: "Market", status: "partial", degradedReason: "Cotality AVM keys present; not fully wired." },
     { id: "rent-comps", label: "Rent / Comps", category: "Market", status: "partial", degradedReason: "Cotality demo quota: 100 req/day, expires ~2026-07-06." },
-  ]);
+  ];
+  res.json(functions);
 });
 
 export default router;

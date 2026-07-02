@@ -1,11 +1,10 @@
-import { TILE_CATEGORIES, TILE_REGISTRY } from "../tiles";
-import type { TileStatus } from "../types";
+import type { TileCategory, TileDef, TileStatus } from "../types";
 
 const STATUS_DOT: Record<TileStatus, string> = {
-  live: "#22c55e",
-  degraded: "var(--danger-text, #f87171)",
-  partial: "var(--warning-text, #fbbf24)",
-  planned: "var(--text-muted, #94a8b8)",
+  live: "var(--h-success)",
+  degraded: "var(--h-error)",
+  partial: "var(--h-warning)",
+  planned: "var(--h-text-muted)",
 };
 
 const STATUS_LABEL: Record<TileStatus, string> = {
@@ -17,12 +16,16 @@ const STATUS_LABEL: Record<TileStatus, string> = {
 
 export function TilePicker({
   open,
+  tiles: allTiles,
+  categories,
   activeTiles,
   onClose,
   onToggleTile,
   liveStatuses,
 }: {
   open: boolean;
+  tiles: TileDef[];
+  categories: readonly TileCategory[];
   activeTiles: string[];
   onClose: () => void;
   onToggleTile: (id: string) => void;
@@ -40,8 +43,8 @@ export function TilePicker({
         bottom: 0,
         width: 320,
         zIndex: 50,
-        background: "var(--bg-elevated)",
-        borderRight: "1px solid var(--border-subtle)",
+        background: "var(--h-surface-1)",
+        borderRight: "1px solid var(--h-border-subtle)",
         boxShadow: "4px 0 24px rgba(0,0,0,0.15)",
         display: "flex",
         flexDirection: "column",
@@ -53,7 +56,7 @@ export function TilePicker({
           display: "flex",
           alignItems: "center",
           padding: "12px 16px",
-          borderBottom: "1px solid var(--border-subtle)",
+          borderBottom: "1px solid var(--h-border-subtle)",
         }}
       >
         <span style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>
@@ -64,10 +67,8 @@ export function TilePicker({
         </button>
       </div>
       <div style={{ overflow: "auto", flex: 1, padding: 12 }}>
-        {TILE_CATEGORIES.map((category) => {
-          const tiles = Object.values(TILE_REGISTRY).filter(
-            (t) => t.category === category,
-          );
+        {categories.map((category) => {
+          const tiles = allTiles.filter((t) => t.category === category);
           return (
             <section key={category} style={{ marginBottom: 16 }}>
               <h3
@@ -75,7 +76,7 @@ export function TilePicker({
                   fontSize: 11,
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
-                  color: "var(--text-muted)",
+                  color: "var(--h-text-muted)",
                   margin: "0 0 8px",
                 }}
               >
@@ -98,10 +99,10 @@ export function TilePicker({
                           padding: "8px 10px",
                           borderRadius: 6,
                           border: active
-                            ? "1px solid var(--accent)"
-                            : "1px solid var(--border-subtle)",
+                            ? "1px solid var(--h-accent)"
+                            : "1px solid var(--h-border-subtle)",
                           background: active
-                            ? "var(--info-dim)"
+                            ? "var(--h-surface-2)"
                             : "transparent",
                           cursor: "pointer",
                           fontSize: 12,
