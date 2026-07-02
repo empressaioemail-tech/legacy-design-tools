@@ -36,7 +36,7 @@ import { attachedDocuments } from "./attachedDocuments";
  *
  * Idempotency: the engine mints a deterministic `atomDid` from the source blob
  * CID plus the atom's own content hash, so re-ingesting the same file returns
- * the same DIDs. The unique index on `(attached_document_id, atom_did)` lets the
+ * the same DIDs. The unique index on `(document_id, atom_did)` lets the
  * persist path upsert-on-conflict so a re-ingest updates rather than duplicates.
  * `atom_did` is NOT NULL, so the plain unique index behaves as intended (there
  * are no NULL-distinct surprises).
