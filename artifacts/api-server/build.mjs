@@ -29,6 +29,17 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
+    // The `@hauska/*` workspace packages carry a "workspace" export condition
+    // pointing at their TS source (./src). Their dist/ is NOT prebuilt in the
+    // Docker build context, so a *value* import (e.g. TILE_CAPABILITIES from
+    // @hauska/cortex-client in planReviewBff.ts) would resolve to the missing
+    // dist/index.mjs and fail. Honor "workspace" first so esbuild bundles the
+    // TS source directly; keep import/default for every other dependency.
+    // Type-only imports are erased before resolution, which is why the
+    // pre-existing type imports built fine without this. Mirrors the
+    // resolve.conditions:["workspace"] in codex-reviewer-qa/vite.config.ts and
+    // artifacts/api-server/vitest.config.ts.
+    conditions: ["workspace", "import", "default"],
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
     // Examples of unbundleable packages:
