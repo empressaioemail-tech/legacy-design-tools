@@ -10,7 +10,7 @@
     "@hauska/cortex-client": "workspace:*",
     "@hauska/tile-shell": "workspace:*",
     "@hauska/design-tokens": "workspace:*",
-    "@hauska/map-renderer": "^0.1.0",
+    "@hauska/map-renderer": "^0.1.1",
     "maplibre-gl": "^5.24.0"
   },
   "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19" },
