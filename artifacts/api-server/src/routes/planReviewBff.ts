@@ -82,6 +82,7 @@ import type {
   LetterDraft,
   TileDefWire,
 } from "@hauska/cortex-client";
+import { TILE_CAPABILITIES } from "@hauska/cortex-client";
 
 const planReviewObjectStorage = new ObjectStorageService();
 
@@ -1455,6 +1456,29 @@ router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res
   ];
   res.json(functions);
 });
+
+// ─── GET /plan-review/admin/tile-registry ─────────────────────────
+//
+// The FULL machine-readable tile capability registry (all entries with
+// requires / produces / modes / mcpTools). This is DISTINCT from
+// /admin/functions above, which is a status-only summary of the handful of
+// non-live tiles. compose_workspace (Hauska MCP server) reads this route to
+// decide which tiles a given engagement context can satisfy.
+//
+// Source of truth: TILE_CAPABILITIES in @hauska/cortex-client, the same array
+// the SPA derives its TILE_REGISTRY from — so the endpoint and the app cannot
+// drift. Served verbatim; capability metadata is non-sensitive tile
+// descriptors. Auth is requireServiceTokenOrSession, consistent with every
+// other plan-review BFF route: the MCP server presents
+// `Authorization: Bearer <service-token>` (must be valid); the browser SPA
+// reaches it via the no-header session path.
+router.get(
+  "/admin/tile-registry",
+  requireServiceTokenOrSession,
+  (_req: Request, res: Response) => {
+    res.json(TILE_CAPABILITIES);
+  },
+);
 
 // ─── Engagement annotations (Track D Phase 2) ───────────────────
 //
