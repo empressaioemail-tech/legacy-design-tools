@@ -53,6 +53,9 @@ export function HeaderSearchBar({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ActiveParcel | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  // The exact query string that produced `preview`, so run() never commits a
+  // preview resolved for a since-edited query.
+  const [previewQuery, setPreviewQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const previewSeq = useRef(0);
 
@@ -73,9 +76,11 @@ export function HeaderSearchBar({
   const run = useCallback(async () => {
     const q = query.trim();
     if (!q || busy) return;
-    // If a debounced preview already resolved this exact query, commit it
-    // directly (avoids a redundant second geocode round-trip).
-    if (preview && preview.address && previewOpen) {
+    // If a debounced preview already resolved THIS EXACT query, commit it
+    // directly (avoids a redundant second geocode). Only fast-path when the
+    // preview belongs to the current query — otherwise fall through and geocode
+    // q fresh, so a since-edited query never commits a stale preview.
+    if (preview && preview.address && previewOpen && previewQuery === q) {
       commit(preview);
       return;
     }
@@ -93,7 +98,7 @@ export function HeaderSearchBar({
     } finally {
       setBusy(false);
     }
-  }, [query, busy, preview, previewOpen, onGeocode, commit]);
+  }, [query, busy, preview, previewOpen, previewQuery, onGeocode, commit]);
 
   // Debounced typeahead preview. Only active when the app supplies onPreview.
   useEffect(() => {
@@ -102,6 +107,7 @@ export function HeaderSearchBar({
     if (q.length < 4) {
       setPreview(null);
       setPreviewOpen(false);
+      setPreviewQuery("");
       return;
     }
     const seq = ++previewSeq.current;
@@ -111,6 +117,7 @@ export function HeaderSearchBar({
         // Ignore stale responses (a newer keystroke superseded this one).
         if (seq !== previewSeq.current) return;
         setPreview(p);
+        setPreviewQuery(p != null ? q : "");
         setPreviewOpen(p != null);
       } catch {
         if (seq !== previewSeq.current) return;
@@ -126,6 +133,7 @@ export function HeaderSearchBar({
     setError(null);
     setPreview(null);
     setPreviewOpen(false);
+    setPreviewQuery("");
     inputRef.current?.focus();
   }, []);
 

@@ -138,6 +138,13 @@ function CortexShellInner({
   const [floats, setFloats] = useState<FloatingTile[]>([]);
   const [moduleMapOpen, setModuleMapOpen] = useState(false);
   const zCounter = useRef(0);
+  // When a preset/snapshot supplies an explicit layout + track sizes, skip the
+  // next count-derived reflow so it is not clobbered. The reflow effect keys on
+  // the docked-tile signature and is otherwise the single source of layout.
+  const skipReflowRef = useRef(false);
+  // Seed with the initial preset's tile signature so the first mount keeps the
+  // preset's (possibly non-count-derived) layout instead of reflowing it.
+  const lastGridSigRef = useRef(initialTiles.join("|"));
 
   const [colFr, setColFr] = useState(() =>
     Array(parseLayoutCols(initialLayoutId)).fill(1),
@@ -190,6 +197,9 @@ function CortexShellInner({
       setUndoStack(
         snapshotState(engagementId ?? undefined, activeTiles, layoutId, "undo"),
       );
+      // The snapshot carries an explicit layout; do not let the count-derived
+      // reflow effect override it on this tile-set change.
+      skipReflowRef.current = true;
       setActiveTiles(snap.tiles);
       setLayoutId(snap.layoutId);
       setUndoLabel(label);
@@ -238,29 +248,14 @@ function CortexShellInner({
     setUndoLabel(null);
   }
 
-  function relayout(next: string[]) {
-    const nextLayout = layoutIdForTileCount(next.length);
-    setLayoutId(nextLayout);
-    setColFr(Array(parseLayoutCols(nextLayout)).fill(1));
-    setRowFr(Array(parseLayoutRows(nextLayout)).fill(1));
-  }
-
   function handleToggleTile(id: string) {
-    setActiveTiles((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((t) => t !== id)
-        : [...prev, id];
-      relayout(next);
-      return next;
-    });
+    setActiveTiles((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
+    );
   }
 
   function handleRemoveTile(id: string) {
-    setActiveTiles((prev) => {
-      const next = prev.filter((t) => t !== id);
-      relayout(next);
-      return next;
-    });
+    setActiveTiles((prev) => prev.filter((t) => t !== id));
     setFloats((prev) => prev.filter((f) => f.id !== id));
   }
 
@@ -315,17 +310,26 @@ function CortexShellInner({
     [getTile],
   );
 
-  // Grid reflows to the DOCKED (non-floated) tiles so popped-out panes free up
-  // template space; docking back returns the tile and the grid reflows again.
+  // The SINGLE source of layout truth for the grid: whenever the DOCKED
+  // (non-floated) tile set changes — add, remove, pop-out, or dock-back — derive
+  // the count-keyed template and reset the fractional tracks. Keyed on the
+  // docked-id SIGNATURE (not just length) so a change that keeps the count but
+  // swaps membership still reflows correctly, and so removing a floated tile
+  // (which changes activeTiles but not the docked count) does not leave a stale
+  // oversized template. An explicit preset/snapshot layout skips one reflow.
+  const gridSig = gridIds.join("|");
   useEffect(() => {
-    setLayoutId((prev) => {
-      const want = layoutIdForTileCount(gridIds.length);
-      if (want === prev) return prev;
-      setColFr(Array(parseLayoutCols(want)).fill(1));
-      setRowFr(Array(parseLayoutRows(want)).fill(1));
-      return want;
-    });
-  }, [gridIds.length]);
+    if (gridSig === lastGridSigRef.current) return;
+    lastGridSigRef.current = gridSig;
+    if (skipReflowRef.current) {
+      skipReflowRef.current = false;
+      return;
+    }
+    const want = layoutIdForTileCount(gridIds.length);
+    setLayoutId(want);
+    setColFr(Array(parseLayoutCols(want)).fill(1));
+    setRowFr(Array(parseLayoutRows(want)).fill(1));
+  }, [gridSig, gridIds.length]);
 
   function saveSpace() {
     const preset =

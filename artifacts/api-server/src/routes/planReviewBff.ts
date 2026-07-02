@@ -2214,7 +2214,15 @@ function resolveSavedSpaceOwner(req: Request): SavedSpaceOwner | null {
 function isValidSnapshot(body: unknown): body is Record<string, unknown> {
   if (!body || typeof body !== "object") return false;
   const s = body as Record<string, unknown>;
-  return Array.isArray(s.tileIds) && typeof s.layoutId === "string";
+  // Match the shell's SpaceSnapshot shape the loader assumes (tileIds,
+  // layoutId, colFr, rowFr) so a stored snapshot can't throw on load by
+  // spreading a missing colFr/rowFr. layoutMode is optional.
+  return (
+    Array.isArray(s.tileIds) &&
+    typeof s.layoutId === "string" &&
+    Array.isArray(s.colFr) &&
+    Array.isArray(s.rowFr)
+  );
 }
 
 // GET /plan-review/spaces — list the caller's saved spaces (name + id only).
