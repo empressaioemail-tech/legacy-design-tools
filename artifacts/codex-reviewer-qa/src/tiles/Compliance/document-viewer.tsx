@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   PDFViewer,
   PageControls,
@@ -9,13 +9,20 @@ import {
   type MarkupTool,
   type Annotation,
 } from "@hauska/document-viewer";
-import { useEngagement, TileStatusBanner } from "@hauska/tile-shell";
+import {
+  useEngagement,
+  TileStatusBanner,
+  useAnnotationSelection,
+  useDocumentViewerNavigation,
+} from "@hauska/tile-shell";
 import {
   fetchEngagementDocuments,
   fetchEngagementSubmissions,
   fetchEngagementAnnotations,
   createEngagementAnnotation,
   exportEngagementPdf,
+  generateEngagementAnnotations,
+  getAnnotationGenerationStatus,
   type EngagementDocumentWire,
   type EngagementAnnotationWire,
 } from "../../lib/planReviewBff";
@@ -50,6 +57,8 @@ function isPdfDocument(doc: EngagementDocumentWire): boolean {
 
 export default function DocumentViewerTile() {
   const { engagementId } = useEngagement();
+  const { selectAnnotation } = useAnnotationSelection();
+  const { onRequestPage, publishFindingPages } = useDocumentViewerNavigation();
 
   const [documents, setDocuments] = useState<EngagementDocumentWire[]>([]);
   const [submissions, setSubmissions] = useState<
@@ -71,6 +80,15 @@ export default function DocumentViewerTile() {
   // Export state.
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  // AI-annotation generation state.
+  const [generating, setGenerating] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [genProgress, setGenProgress] = useState<{
+    progress: number;
+    total: number;
+  }>({ progress: 0, total: 0 });
 
   const refetchAnnotations = useMemo(
     () => async (id: string) => {
@@ -158,6 +176,123 @@ export default function DocumentViewerTile() {
     [annotations, page],
   );
 
+  // Phase 3 (DISPLAY-ONLY): 3D annotations for the DWGViewer. Elements are
+  // highlighted by IFC globalId when APS is configured; with no APS creds the
+  // DWGViewer sits in its named fallback and this has no effect.
+  const annotations3d = useMemo(
+    () =>
+      annotations
+        .filter((a) => a.location3d != null)
+        .map((a) => ({
+          globalId: a.location3d!.globalId,
+          label: a.location3d!.label,
+        })),
+    [annotations],
+  );
+
+  // Finding-card click -> page jump (viewer side): subscribe to the nav bus.
+  // onRequestPage returns its own unsubscribe, which we return from the effect
+  // so React cleans up the subscription. Guard the page into [1, pageCount||p].
+  useEffect(
+    () =>
+      onRequestPage((p) => {
+        setPage((_prev) => {
+          const upper = pageCount || p;
+          return Math.min(Math.max(1, p), Math.max(1, upper));
+        });
+      }),
+    [onRequestPage, pageCount],
+  );
+
+  // Publish the finding->page map whenever annotations change. First/lowest
+  // page wins if a finding has multiple located annotations.
+  useEffect(() => {
+    const map: Record<string, number> = {};
+    for (const a of annotations) {
+      const fid = a.findingId;
+      const page2d = a.location2d?.page;
+      if (!fid || typeof page2d !== "number") continue;
+      const existing = map[fid];
+      if (existing === undefined || page2d < existing) {
+        map[fid] = page2d;
+      }
+    }
+    publishFindingPages(map);
+  }, [annotations, publishFindingPages]);
+
+  // Stable ref to the latest refetch, so the polling effect can call it on
+  // terminal status WITHOUT depending on it (effect stays keyed on jobId only).
+  const refetchRef = useRef(refetchAnnotations);
+  refetchRef.current = refetchAnnotations;
+  const engagementIdRef = useRef(engagementId);
+  engagementIdRef.current = engagementId;
+
+  // Poll generation status while a job is in flight. Depends ONLY on jobId:
+  // it starts when jobId is set (by the button onClick) and stops on terminal
+  // status (interval cleared) or when jobId clears. Generation is NEVER
+  // triggered from an effect, so the post-completion refetch cannot re-fire it.
+  useEffect(() => {
+    if (!jobId) return;
+    const eid = engagementIdRef.current;
+    if (!eid) return;
+    let stopped = false;
+    const interval = setInterval(() => {
+      void getAnnotationGenerationStatus(eid, jobId)
+        .then((s) => {
+          if (stopped) return;
+          setGenProgress({ progress: s.progress, total: s.total });
+          if (s.status === "done" || s.status === "error") {
+            stopped = true;
+            clearInterval(interval);
+            if (s.status === "error") {
+              setGenerateError(s.error ?? "Annotation generation failed");
+            }
+            setGenerating(false);
+            setJobId(null);
+            void refetchRef.current(eid);
+          }
+        })
+        .catch((err: unknown) => {
+          if (stopped) return;
+          stopped = true;
+          clearInterval(interval);
+          setGenerateError(
+            err instanceof Error ? err.message : "Status check failed",
+          );
+          setGenerating(false);
+          setJobId(null);
+        });
+    }, 3000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, [jobId]);
+
+  const hasAiAnnotations = useMemo(
+    () => annotations.some((a) => a.author === "ai"),
+    [annotations],
+  );
+
+  async function onGenerateAnnotations() {
+    if (!engagementId || !activeSubmissionId) return;
+    setGenerateError(null);
+    setGenProgress({ progress: 0, total: 0 });
+    setGenerating(true);
+    try {
+      const { jobId: newJobId } = await generateEngagementAnnotations(
+        engagementId,
+        activeSubmissionId,
+      );
+      setJobId(newJobId);
+    } catch (err: unknown) {
+      setGenerating(false);
+      setGenerateError(
+        err instanceof Error ? err.message : "Failed to start generation",
+      );
+    }
+  }
+
   async function onExport() {
     if (!engagementId) return;
     setExporting(true);
@@ -244,11 +379,48 @@ export default function DocumentViewerTile() {
             >
               {exporting ? "Exporting…" : "Export annotated PDF"}
             </button>
+
+            {generating ? (
+              <span
+                role="status"
+                style={{ fontSize: 12, color: "var(--text-muted)" }}
+              >
+                {genProgress.total > 0
+                  ? `Generating… ${genProgress.progress}/${genProgress.total}`
+                  : "Generating…"}
+              </span>
+            ) : engagementId &&
+              documents.length > 0 &&
+              activeSubmissionId &&
+              !hasAiAnnotations ? (
+              <button
+                type="button"
+                data-testid="generate-annotations-button"
+                onClick={() => void onGenerateAnnotations()}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid var(--border-subtle)",
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Generate AI Annotations
+              </button>
+            ) : null}
           </div>
 
           {exportError ? (
             <div role="alert" style={{ fontSize: 12, color: "var(--danger-text)" }}>
               {exportError}
+            </div>
+          ) : null}
+
+          {generateError ? (
+            <div role="alert" style={{ fontSize: 12, color: "var(--danger-text)" }}>
+              {generateError}
             </div>
           ) : null}
 
@@ -270,6 +442,7 @@ export default function DocumentViewerTile() {
                   engagementId={engagementId}
                   currentUser="reviewer"
                   submissionId={activeSubmissionId ?? undefined}
+                  onSelectFinding={selectAnnotation}
                 />
                 <PageControls
                   page={page}
@@ -283,7 +456,7 @@ export default function DocumentViewerTile() {
               // Non-PDF (DWG/RVT/IFC): APS is not configured in this
               // environment, so DWGViewer renders its named fallback notice.
               <div style={{ height: 480 }}>
-                <DWGViewer />
+                <DWGViewer annotations3d={annotations3d} />
               </div>
             )
           ) : (

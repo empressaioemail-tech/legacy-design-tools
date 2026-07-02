@@ -98,6 +98,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // chain), but listed explicitly per the "if a route writes to it, it's
   // in this list" invariant so the annotation-route suite starts clean.
   "engagement_annotations",
+  // Track F Phase 1 — annotation-generation seeds attached_documents.
+  // Cascades off `engagements`, but listed explicitly per the "if a route
+  // writes to it, it's in this list" invariant.
+  "attached_documents",
   // Task #431 — reviewer↔architect inline reply thread. Cascades off
   // `submissions`, but listed explicitly per the "if a route writes
   // to it, it's in this list" invariant.

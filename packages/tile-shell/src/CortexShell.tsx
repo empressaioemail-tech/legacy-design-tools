@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { EngagementProvider } from "./providers/EngagementProvider";
 import { SpatialProvider } from "./providers/SpatialProvider";
 import { CodeProvider } from "./providers/CodeProvider";
+import { AnnotationSelectionProvider } from "./providers/AnnotationSelectionProvider";
+import { DocumentViewerNavigationProvider } from "./providers/DocumentViewerNavigationProvider";
 import { SpaceBar, snapshotState, type SnapshotState } from "./components/SpaceBar";
 import { TilePicker } from "./components/TilePicker";
 import { GridCanvas } from "./components/GridCanvas";
@@ -291,17 +293,21 @@ export function CortexShell({
     <EngagementProvider>
       <SpatialProvider>
         <CodeProvider>
-          <CortexShellInner
-            initialPresetId={preset.id}
-            initialTiles={preset.tiles}
-            initialLayoutId={preset.layoutId}
-            getTile={getTile}
-            allTiles={allTiles}
-            categories={categories}
-            presets={presets}
-            fetchAdminFunctions={fetchAdminFunctions}
-            savedSpaces={savedSpaces}
-          />
+          <AnnotationSelectionProvider>
+            <DocumentViewerNavigationProvider>
+              <CortexShellInner
+                initialPresetId={preset.id}
+                initialTiles={preset.tiles}
+                initialLayoutId={preset.layoutId}
+                getTile={getTile}
+                allTiles={allTiles}
+                categories={categories}
+                presets={presets}
+                fetchAdminFunctions={fetchAdminFunctions}
+                savedSpaces={savedSpaces}
+              />
+            </DocumentViewerNavigationProvider>
+          </AnnotationSelectionProvider>
         </CodeProvider>
       </SpatialProvider>
     </EngagementProvider>

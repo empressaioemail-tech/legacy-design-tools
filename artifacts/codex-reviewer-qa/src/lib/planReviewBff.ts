@@ -371,6 +371,30 @@ export async function deleteEngagementAnnotation(
   }
 }
 
+export function generateEngagementAnnotations(
+  engagementId: string,
+  submissionId: string,
+): Promise<{ jobId: string }> {
+  return bffJson(`/engagements/${engagementId}/annotations/generate`, {
+    method: "POST",
+    body: JSON.stringify({ submissionId }),
+  });
+}
+
+export function getAnnotationGenerationStatus(
+  engagementId: string,
+  jobId: string,
+): Promise<{
+  status: "pending" | "running" | "done" | "error";
+  progress: number;
+  total: number;
+  error?: string;
+}> {
+  return bffJson(
+    `/engagements/${engagementId}/annotations/generate/${jobId}`,
+  );
+}
+
 export function fetchSubmissionFindingsStatus(submissionId: string): Promise<{
   generationId: string | null;
   state: string;

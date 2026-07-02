@@ -115,7 +115,15 @@ function AnnotationCallout(props: AnnotationCalloutProps): ReactNode {
 
   return (
     <g
-      style={{ cursor: clickable ? 'pointer' : 'default' }}
+      style={{
+        cursor: clickable ? 'pointer' : 'default',
+        // The parent <svg> is pointerEvents:'none' while no markup tool is
+        // active (so drawing does not intercept clicks), and that inherits
+        // down to every child. Re-enable pointer events on a clickable callout
+        // so the bidirectional callout->finding highlight works in the normal
+        // (no-tool) viewing state, not only while a markup tool is selected.
+        pointerEvents: clickable ? 'all' : 'none',
+      }}
       onClick={handleClick}
       role={clickable ? 'button' : undefined}
       aria-label={loc.label}

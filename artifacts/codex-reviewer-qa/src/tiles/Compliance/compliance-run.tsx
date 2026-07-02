@@ -21,6 +21,10 @@ import {
 import { useEngagement } from "@hauska/tile-shell";
 import { useCode } from "@hauska/tile-shell";
 import { TileStatusBanner } from "@hauska/tile-shell";
+import {
+  useAnnotationSelection,
+  useDocumentViewerNavigation,
+} from "@hauska/tile-shell";
 import { TileErrorBoundary } from "@hauska/cortex-tiles";
 import { runCompliancePass } from "../../lib/planReviewBff";
 import {
@@ -50,6 +54,8 @@ const selectStyle: CSSProperties = {
 function ComplianceRunTileInner() {
   const { engagementId, engagement } = useEngagement();
   const { setJurisdictionKey, setPrecedenceResult } = useCode();
+  const { selectedFindingId } = useAnnotationSelection();
+  const { requestPage, findingPages } = useDocumentViewerNavigation();
   const queryClient = useQueryClient();
   const [submissionId, setSubmissionId] = useState("");
 
@@ -214,6 +220,13 @@ function ComplianceRunTileInner() {
             <FindingCard
               key={finding.id}
               finding={finding}
+              highlighted={finding.id === selectedFindingId}
+              onSelect={(id) => {
+                const p = findingPages[id];
+                if (typeof p === "number") {
+                  requestPage(p, id);
+                }
+              }}
               onAccept={(id) => acceptMutation.mutate(id)}
               onReject={(id) => rejectMutation.mutate(id)}
               onOverride={(id, draft) =>

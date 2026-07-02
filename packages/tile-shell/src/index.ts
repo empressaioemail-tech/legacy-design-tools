@@ -19,6 +19,14 @@ export { PlannedTile } from './components/PlannedTile'
 export { EngagementProvider, useEngagement } from './providers/EngagementProvider'
 export { SpatialProvider, useSpatial } from './providers/SpatialProvider'
 export { CodeProvider, useCode } from './providers/CodeProvider'
+export {
+  AnnotationSelectionProvider,
+  useAnnotationSelection,
+} from './providers/AnnotationSelectionProvider'
+export {
+  DocumentViewerNavigationProvider,
+  useDocumentViewerNavigation,
+} from './providers/DocumentViewerNavigationProvider'
 
 export {
   LAYOUTS,

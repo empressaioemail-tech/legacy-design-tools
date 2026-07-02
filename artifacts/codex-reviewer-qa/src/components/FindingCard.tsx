@@ -17,7 +17,7 @@
  * editor, and the server-stamped adjudication attribution + timestamp.
  * A card with no handlers is read-only (used by the FindingCard tests).
  */
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Finding, FindingSeverity } from "@workspace/api-client-react";
 import {
   CATEGORY_LABELS,
@@ -66,6 +66,10 @@ export interface FindingCardProps {
   busy?: boolean;
   /** Override-failure message for this finding, if any. */
   overrideError?: string | null;
+  /** Track F — highlight this card (e.g. its annotation callout was clicked). */
+  highlighted?: boolean;
+  /** Track F — fired when the card body (not the action buttons) is clicked. */
+  onSelect?: (findingId: string) => void;
 }
 
 export function FindingCard({
@@ -75,15 +79,27 @@ export function FindingCard({
   onOverride,
   busy,
   overrideError,
+  highlighted,
+  onSelect,
 }: FindingCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const severity = SEVERITY_COLORS[finding.severity];
   const hasActions = Boolean(onAccept && onReject && onOverride);
   const adjudication = describeAdjudication(finding);
+  const rootRef = useRef<HTMLElement | null>(null);
+
+  // Track F — scroll into view when this card becomes highlighted.
+  useEffect(() => {
+    if (highlighted) {
+      rootRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [highlighted]);
 
   return (
     <article
+      ref={rootRef}
       data-testid="finding-card"
+      onClick={onSelect ? () => onSelect(finding.id) : undefined}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -92,6 +108,10 @@ export function FindingCard({
         borderRadius: 8,
         border: "1px solid var(--border-subtle)",
         background: "var(--surface-2, var(--bg-elevated))",
+        cursor: onSelect ? "pointer" : undefined,
+        outline: highlighted
+          ? "2px solid var(--accent, var(--info-text))"
+          : undefined,
       }}
     >
       <header style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -236,19 +256,22 @@ export function FindingCard({
 
       {/* CDX-4 — accept / edit / reject. */}
       {hasActions && isEditing ? (
-        <OverrideEditor
-          finding={finding}
-          busy={busy}
-          onSubmit={(draft) => {
-            onOverride?.(finding.id, draft);
-            setIsEditing(false);
-          }}
-          onCancel={() => setIsEditing(false)}
-        />
+        <div onClick={(e) => e.stopPropagation()}>
+          <OverrideEditor
+            finding={finding}
+            busy={busy}
+            onSubmit={(draft) => {
+              onOverride?.(finding.id, draft);
+              setIsEditing(false);
+            }}
+            onCancel={() => setIsEditing(false)}
+          />
+        </div>
       ) : hasActions ? (
         <div
           data-testid="finding-actions"
           style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+          onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
