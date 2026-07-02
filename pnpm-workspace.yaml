@@ -39,6 +39,7 @@ minimumReleaseAge: 1440
 
 minimumReleaseAgeExclude:
   - stripe-replit-sync
+  - '@hauska/map-renderer'
 
 onlyBuiltDependencies:
   - '@swc/core'
