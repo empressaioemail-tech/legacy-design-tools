@@ -101,9 +101,13 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       ...(prev ?? EMPTY_PARCEL),
       ...parcel,
     }));
-    // If the caller scoped the parcel to a specific engagement id, adopt it as
-    // the active engagement id (detail is loaded separately by the caller).
-    if (parcel.engagementId !== undefined) {
+    // The caller may scope the parcel to a specific engagement id. Only ADOPT a
+    // concrete engagement id; a null/undefined id here means "a bare parcel
+    // selection" (address-search / map-click) and must NOT null out a currently
+    // loaded engagement's id — the override, being coordinate-bearing, becomes
+    // the authority in the `activeParcel` memo below without disturbing the
+    // engagement selection (so engagement report tiles keep working).
+    if (parcel.engagementId) {
       setEngagementId(parcel.engagementId);
     }
   }, []);
@@ -121,10 +125,37 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // Derive the unified active parcel. The loaded engagement is the authority;
-  // a parcel-only override fills fields the engagement does not carry (or drives
-  // the whole thing when no engagement is loaded).
+  // Derive the unified active parcel.
+  //
+  // Precedence rule: a coordinate-bearing override (a fresh address-search or
+  // map-click that landed a lat/lng) is what the workspace is NOW looking at, so
+  // it WINS over the loaded engagement's parcel fields — otherwise searching a
+  // new address while an engagement is loaded would silently keep showing the
+  // engagement's parcel. The engagementId is preserved (report tiles still work)
+  // but the spatial identity follows the selection.
+  //
+  // When the override carries no coordinates (e.g. an engagement is loaded and
+  // no separate parcel was selected), the engagement is the authority and the
+  // override only fills fields the engagement lacks.
   const activeParcel = useMemo<ActiveParcel>(() => {
+    const overrideHasCoords =
+      parcelOverride != null &&
+      parcelOverride.lat != null &&
+      parcelOverride.lng != null;
+
+    if (overrideHasCoords) {
+      return {
+        // Keep the engagement id if one is loaded so engagement-scoped tiles
+        // (compliance, letter, findings) still resolve.
+        engagementId: engagement?.id ?? parcelOverride!.engagementId ?? engagementId,
+        apn: parcelOverride!.apn ?? engagement?.apn ?? null,
+        jurisdiction: parcelOverride!.jurisdiction ?? engagement?.jurisdiction ?? null,
+        address: parcelOverride!.address ?? engagement?.address ?? null,
+        lat: parcelOverride!.lat,
+        lng: parcelOverride!.lng,
+      };
+    }
+
     if (engagement) {
       return {
         engagementId: engagement.id,
