@@ -195,6 +195,10 @@ describe("lib/db schema integration", () => {
         // bim-model / regenerate briefing). Resolved implicitly by
         // the matching domain action's atom-history event.
         "reviewer_requests",
+        // Phase 2 shell experience — server-persisted, shareable named
+        // workspace-layout spaces (tenant-ready). Sorts before
+        // `sheet_content_extractions` (`sav` < `she`) per `ORDER BY tablename`.
+        "saved_workspace_spaces",
         // Cortex L2 (Lane C.4 / C.4.2) — structured sheet-content
         // extraction atoms (OCR segments + annotations).
         "sheet_content_extractions",

@@ -35,6 +35,11 @@ import { userRateLimitMiddleware } from "../middlewares/userRateLimit";
  */
 export const TRUNCATE_TABLES: readonly string[] = [
   "engagements",
+  // Phase 2 shell experience — server-persisted workspace spaces. A standalone
+  // table with NO FK to engagements, so the engagements CASCADE does not clear
+  // it; must be truncated explicitly so the saved-spaces route suite starts
+  // from a known-empty state.
+  "saved_workspace_spaces",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",

@@ -20,6 +20,7 @@ import {
   snapshots,
   sheets,
   responseTasks,
+  savedWorkspaceSpaces,
 } from "@workspace/db";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import {
@@ -2175,6 +2176,277 @@ router.get(
       total: job.total,
       ...(job.error ? { error: job.error } : {}),
     });
+  },
+);
+
+// ─── Saved workspace spaces (Phase 2 shell experience) ────────────
+// Server-persisted, shareable named workspace layouts. Replaces the
+// localStorage-only saved-spaces store. Rows are keyed by (tenantId,
+// ownerUserId) so the store becomes tenant-private cleanly when the auth build
+// lands — today it resolves the anonymous/internal owner + default tenant,
+// exactly like the engagement-create route above.
+//
+// The `snapshot` body is the shell's SpaceSnapshot (tileIds, layoutId, colFr,
+// rowFr, layoutMode). It is stored verbatim as JSONB — the shell owns its
+// shape; the server only guards the envelope.
+
+type SavedSpaceOwner = { tenantId: string; ownerUserId: string };
+
+/**
+ * Resolve the (tenant, owner) the saved-spaces rows are keyed on. Mirrors the
+ * engagement-create resolution: internal sessions map to the legacy internal
+ * owner; a user requestor maps to its id; otherwise 401. Tenancy is the default
+ * tenant until auth lands.
+ */
+function resolveSavedSpaceOwner(req: Request): SavedSpaceOwner | null {
+  const ownerUserId = isInternalSession(req.session)
+    ? LEGACY_INTERNAL_OWNER_USER_ID
+    : req.session.requestor?.kind === "user"
+      ? req.session.requestor.id
+      : null;
+  if (!ownerUserId) return null;
+  return {
+    tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
+    ownerUserId,
+  };
+}
+
+function isValidSnapshot(body: unknown): body is Record<string, unknown> {
+  if (!body || typeof body !== "object") return false;
+  const s = body as Record<string, unknown>;
+  // Match the shell's SpaceSnapshot shape the loader assumes (tileIds,
+  // layoutId, colFr, rowFr) so a stored snapshot can't throw on load by
+  // spreading a missing colFr/rowFr. layoutMode is optional.
+  return (
+    Array.isArray(s.tileIds) &&
+    typeof s.layoutId === "string" &&
+    Array.isArray(s.colFr) &&
+    Array.isArray(s.rowFr)
+  );
+}
+
+// GET /plan-review/spaces — list the caller's saved spaces (name + id only).
+router.get(
+  "/spaces",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const owner = resolveSavedSpaceOwner(req);
+    if (!owner) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      const rows = await db
+        .select({
+          id: savedWorkspaceSpaces.id,
+          name: savedWorkspaceSpaces.name,
+          shareToken: savedWorkspaceSpaces.shareToken,
+          updatedAt: savedWorkspaceSpaces.updatedAt,
+        })
+        .from(savedWorkspaceSpaces)
+        .where(
+          and(
+            eq(savedWorkspaceSpaces.tenantId, owner.tenantId),
+            eq(savedWorkspaceSpaces.ownerUserId, owner.ownerUserId),
+          ),
+        )
+        .orderBy(desc(savedWorkspaceSpaces.updatedAt));
+      res.json(
+        rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          shareToken: r.shareToken ?? null,
+          updatedAt: r.updatedAt,
+        })),
+      );
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review list spaces failed");
+      res.status(500).json({ error: "list_failed" });
+    }
+  },
+);
+
+// GET /plan-review/spaces/by-name/:name — load one space snapshot by name.
+router.get(
+  "/spaces/by-name/:name",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const owner = resolveSavedSpaceOwner(req);
+    if (!owner) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const name = String(req.params.name);
+    try {
+      const [row] = await db
+        .select()
+        .from(savedWorkspaceSpaces)
+        .where(
+          and(
+            eq(savedWorkspaceSpaces.tenantId, owner.tenantId),
+            eq(savedWorkspaceSpaces.ownerUserId, owner.ownerUserId),
+            eq(savedWorkspaceSpaces.name, name),
+          ),
+        )
+        .limit(1);
+      if (!row) {
+        res.status(404).json({ error: "space_not_found" });
+        return;
+      }
+      res.json({
+        id: row.id,
+        name: row.name,
+        snapshot: row.snapshot,
+        shareToken: row.shareToken ?? null,
+      });
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review load space failed");
+      res.status(500).json({ error: "load_failed" });
+    }
+  },
+);
+
+// PUT /plan-review/spaces — upsert a named space (save/update by name).
+router.put(
+  "/spaces",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const owner = resolveSavedSpaceOwner(req);
+    if (!owner) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const body = req.body as { name?: unknown; snapshot?: unknown };
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) {
+      res.status(400).json({ error: "name_required" });
+      return;
+    }
+    if (!isValidSnapshot(body?.snapshot)) {
+      res.status(400).json({ error: "invalid_snapshot" });
+      return;
+    }
+    try {
+      const [row] = await db
+        .insert(savedWorkspaceSpaces)
+        .values({
+          tenantId: owner.tenantId,
+          ownerUserId: owner.ownerUserId,
+          name,
+          snapshot: body.snapshot,
+        })
+        .onConflictDoUpdate({
+          target: [
+            savedWorkspaceSpaces.tenantId,
+            savedWorkspaceSpaces.ownerUserId,
+            savedWorkspaceSpaces.name,
+          ],
+          set: { snapshot: body.snapshot, updatedAt: new Date() },
+        })
+        .returning();
+      res.status(200).json({ id: row?.id, name });
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review save space failed");
+      res.status(500).json({ error: "save_failed" });
+    }
+  },
+);
+
+// DELETE /plan-review/spaces/by-name/:name — remove a named space.
+router.delete(
+  "/spaces/by-name/:name",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const owner = resolveSavedSpaceOwner(req);
+    if (!owner) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      await db
+        .delete(savedWorkspaceSpaces)
+        .where(
+          and(
+            eq(savedWorkspaceSpaces.tenantId, owner.tenantId),
+            eq(savedWorkspaceSpaces.ownerUserId, owner.ownerUserId),
+            eq(savedWorkspaceSpaces.name, String(req.params.name)),
+          ),
+        );
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review delete space failed");
+      res.status(500).json({ error: "delete_failed" });
+    }
+  },
+);
+
+// POST /plan-review/spaces/by-name/:name/share — mint (or return) a share token.
+router.post(
+  "/spaces/by-name/:name/share",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const owner = resolveSavedSpaceOwner(req);
+    if (!owner) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      const [existing] = await db
+        .select()
+        .from(savedWorkspaceSpaces)
+        .where(
+          and(
+            eq(savedWorkspaceSpaces.tenantId, owner.tenantId),
+            eq(savedWorkspaceSpaces.ownerUserId, owner.ownerUserId),
+            eq(savedWorkspaceSpaces.name, String(req.params.name)),
+          ),
+        )
+        .limit(1);
+      if (!existing) {
+        res.status(404).json({ error: "space_not_found" });
+        return;
+      }
+      const shareToken = existing.shareToken ?? randomUUID();
+      if (!existing.shareToken) {
+        await db
+          .update(savedWorkspaceSpaces)
+          .set({ shareToken, updatedAt: new Date() })
+          .where(eq(savedWorkspaceSpaces.id, existing.id));
+      }
+      res.json({ shareToken });
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review share space failed");
+      res.status(500).json({ error: "share_failed" });
+    }
+  },
+);
+
+// GET /plan-review/spaces/shared/:token — read-only fetch by share link.
+// Deliberately NOT owner-scoped (that is the point of a share link), but still
+// tenant-private-ready: a shared space is only reachable via its unguessable
+// token, and never pooled or listed cross-tenant.
+router.get(
+  "/spaces/shared/:token",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    try {
+      const [row] = await db
+        .select({
+          name: savedWorkspaceSpaces.name,
+          snapshot: savedWorkspaceSpaces.snapshot,
+        })
+        .from(savedWorkspaceSpaces)
+        .where(eq(savedWorkspaceSpaces.shareToken, String(req.params.token)))
+        .limit(1);
+      if (!row) {
+        res.status(404).json({ error: "share_not_found" });
+        return;
+      }
+      res.json({ name: row.name, snapshot: row.snapshot });
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review load shared space failed");
+      res.status(500).json({ error: "load_failed" });
+    }
   },
 );
 

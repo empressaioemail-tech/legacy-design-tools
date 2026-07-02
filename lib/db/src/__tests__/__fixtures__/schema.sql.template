@@ -1212,6 +1212,20 @@ CREATE TABLE @@SCHEMA@@.reviewer_requests (
 );
 
 
+-- Name: saved_workspace_spaces; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.saved_workspace_spaces (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    owner_user_id text NOT NULL,
+    name text NOT NULL,
+    snapshot jsonb NOT NULL,
+    share_token text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: sheet_content_extractions; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheet_content_extractions (
@@ -1867,6 +1881,12 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
     ADD CONSTRAINT reviewer_requests_pkey PRIMARY KEY (id);
 
 
+-- Name: saved_workspace_spaces saved_workspace_spaces_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.saved_workspace_spaces
+    ADD CONSTRAINT saved_workspace_spaces_pkey PRIMARY KEY (id);
+
+
 -- Name: sheet_content_extractions sheet_content_extractions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
@@ -2501,6 +2521,21 @@ CREATE INDEX reviewer_requests_pending_idx ON @@SCHEMA@@.reviewer_requests USING
 -- Name: reviewer_requests_target_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX reviewer_requests_target_idx ON @@SCHEMA@@.reviewer_requests USING btree (target_entity_type, target_entity_id, status);
+
+
+-- Name: saved_workspace_spaces_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX saved_workspace_spaces_owner_idx ON @@SCHEMA@@.saved_workspace_spaces USING btree (tenant_id, owner_user_id, updated_at);
+
+
+-- Name: saved_workspace_spaces_owner_name_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX saved_workspace_spaces_owner_name_uidx ON @@SCHEMA@@.saved_workspace_spaces USING btree (tenant_id, owner_user_id, name);
+
+
+-- Name: saved_workspace_spaces_share_token_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX saved_workspace_spaces_share_token_uidx ON @@SCHEMA@@.saved_workspace_spaces USING btree (share_token);
 
 
 -- Name: sheet_content_extractions_engagement_idx; Type: INDEX; Schema: public; Owner: -
