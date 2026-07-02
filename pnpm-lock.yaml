@@ -2061,8 +2061,8 @@ importers:
         specifier: workspace:*
         version: link:../design-tokens
       '@hauska/map-renderer':
-        specifier: ^0.1.0
-        version: 0.1.0(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        specifier: ^0.1.1
+        version: 0.1.1(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@hauska/tile-shell':
         specifier: workspace:*
         version: link:../tile-shell
@@ -2343,8 +2343,8 @@ packages:
     version: 1.6.0
     engines: {node: '>=18.18.0'}
 
-  '@hauska/map-renderer@0.1.0':
-    resolution: {integrity: sha512-N1hOzh6Da44gOX10I0jPmDCvz+e7Bw902vKb8rksc8J2GrNIghfNabFvNVq1yPLU0I2ObkLUoNRprwI7ZQpdwQ==}
+  '@hauska/map-renderer@0.1.1':
+    resolution: {integrity: sha512-u+M6ONZFbQWbgRoP3Vunw7sNGMNCgwHeN8zjyjls2ubQHfy4hMTLfJLZ9Q1Jfa5kw8EpX9jwEq7qf5TQSTB0JQ==}
     peerDependencies:
       react: '>=18'
       react-dom: '>=18'
@@ -7119,7 +7119,7 @@ snapshots:
       - sql.js
       - sqlite3
 
-  '@hauska/map-renderer@0.1.0(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
+  '@hauska/map-renderer@0.1.1(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
     dependencies:
       '@hauska/atom-contract': 1.5.0(@types/pg@8.18.0)(pg@8.20.0)
       maplibre-gl: 5.24.0
