@@ -4,7 +4,7 @@ export const PRESET_SPACES: PresetSpace[] = [
   {
     id: "plan-review",
     label: "Plan Review",
-    tiles: ["intake", "intake-queue", "compliance-run", "letter", "map"],
+    tiles: ["intake", "intake-queue", "document-viewer", "compliance-run", "letter", "map"],
     layoutId: "6",
   },
   {
@@ -22,7 +22,7 @@ export const PRESET_SPACES: PresetSpace[] = [
   {
     id: "design-accelerator",
     label: "Design Accelerator",
-    tiles: ["sheet-extraction", "response-tasks", "map"],
+    tiles: ["sheet-extraction", "document-viewer", "response-tasks", "map"],
     layoutId: "3r",
   },
 ];

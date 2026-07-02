@@ -8,10 +8,11 @@ import {
   type Request,
   type Response,
 } from "express";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
   db,
   engagements,
+  engagementAnnotations,
   findings,
   submissions,
   attachedDocuments,
@@ -54,7 +55,8 @@ import {
   listSubmissionFindingsWire,
 } from "./findings";
 import { parseCreateEngagementBody } from "./packages.logic";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, signObjectEntityGetUrl } from "../lib/objectStorage";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { LEGACY_INTERNAL_OWNER_USER_ID } from "../lib/anonymousOwnerCookie";
 import { isInternalSession } from "../lib/engagementOwnership";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
@@ -378,6 +380,266 @@ router.post(
     } catch (err) {
       reqLog(req).error({ err, engagementId }, "plan-review complete-upload failed");
       res.status(500).json({ error: "complete_upload_failed" });
+    }
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/documents ─────────────────
+//
+// Lists the engagement's attached documents as viewable entries, each with a
+// short-lived SIGNED GCS GET url resolved from `original_blob_ref`. Documents
+// whose blob ref is not an `/objects/<id>` path (or fail to sign) still appear
+// with `url: null` so the tile can render the name even when the bytes aren't
+// viewable.
+
+router.get(
+  "/engagements/:id/documents",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    try {
+      const rows = await db
+        .select()
+        .from(attachedDocuments)
+        .where(eq(attachedDocuments.engagementId, engagementId))
+        .orderBy(asc(attachedDocuments.createdAt));
+
+      const documents = await Promise.all(
+        rows.map(async (row) => {
+          let url: string | null = null;
+          if (row.originalBlobRef.startsWith("/objects/")) {
+            try {
+              url = await signObjectEntityGetUrl(row.originalBlobRef, 3600);
+            } catch (signErr) {
+              // One bad blob ref must not 500 the whole list — surface the row
+              // with a null url so the tile can still show its name.
+              reqLog(req).warn(
+                { signErr, engagementId, documentId: row.id },
+                "plan-review sign document url failed",
+              );
+              url = null;
+            }
+          }
+          return {
+            id: row.id,
+            title: row.title,
+            documentType: row.documentType,
+            url,
+            createdAt: row.createdAt.toISOString(),
+          };
+        }),
+      );
+
+      res.json({ documents });
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId },
+        "plan-review list documents failed",
+      );
+      res.status(500).json({ error: "list_documents_failed" });
+    }
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/export ───────────────────
+//
+// Assembles a downloadable annotated plan set as a single PDF and returns a
+// short-lived signed GET url. Uses pdf-lib (pure JS) to build a cover page and
+// copy the pages of every loadable PDF document attached to the engagement.
+// Non-PDF attachments (DWG, images) are skipped. For v1 annotations are counted
+// on the cover page and drawn as simple rectangles when a location2d bbox maps
+// to a copied page; the real AI-annotation render lands with Track F.
+
+router.post(
+  "/engagements/:id/export",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+
+    // Read the full bytes of a stored object entity, returning null on any
+    // failure (missing object, access denied, malformed ref) so one bad
+    // document never aborts the whole export.
+    const downloadObjectBytes = async (
+      objectPath: string,
+    ): Promise<Buffer | null> => {
+      try {
+        if (!objectPath.startsWith("/objects/")) return null;
+        return await planReviewObjectStorage.getObjectEntityBytes(objectPath);
+      } catch (dlErr) {
+        reqLog(req).warn(
+          { dlErr, engagementId, objectPath },
+          "plan-review export: object download failed",
+        );
+        return null;
+      }
+    };
+
+    try {
+      const [docRows, annotationRows] = await Promise.all([
+        db
+          .select()
+          .from(attachedDocuments)
+          .where(eq(attachedDocuments.engagementId, engagementId))
+          .orderBy(asc(attachedDocuments.createdAt)),
+        db
+          .select()
+          .from(engagementAnnotations)
+          .where(eq(engagementAnnotations.engagementId, engagementId)),
+      ]);
+
+      const outDoc = await PDFDocument.create();
+      const helvetica = await outDoc.embedFont(StandardFonts.Helvetica);
+      const helveticaBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
+
+      // Cover page.
+      const cover = outDoc.addPage([612, 792]); // US Letter
+      const drawLine = (
+        text: string,
+        y: number,
+        size: number,
+        bold = false,
+      ): void => {
+        cover.drawText(text, {
+          x: 54,
+          y,
+          size,
+          font: bold ? helveticaBold : helvetica,
+          color: rgb(0.1, 0.1, 0.12),
+        });
+      };
+      drawLine("Annotated Plan Set", 720, 24, true);
+      drawLine(engagement.name ?? "Engagement", 690, 14, true);
+      const jurisdictionLine =
+        engagement.jurisdiction ??
+        [engagement.jurisdictionCity, engagement.jurisdictionState]
+          .filter(Boolean)
+          .join(", ") ??
+        "Jurisdiction not set";
+      drawLine(jurisdictionLine || "Jurisdiction not set", 668, 12);
+      drawLine(`Generated ${new Date().toISOString()}`, 648, 10);
+
+      // We track loadable source docs so the summary line is accurate; count
+      // them after the copy loop below.
+      let loadableDocCount = 0;
+
+      // Map each copied PDF document to the page-index range it occupies in the
+      // output so we can place annotations by (submissionId-agnostic) document
+      // order. v1 keeps it simple: annotations with a location2d.page draw onto
+      // the Nth copied page of the FIRST loadable document (best-effort), never
+      // crashing on an out-of-range page.
+      const copiedPageRefs: Array<ReturnType<typeof outDoc.getPage>> = [];
+
+      for (const row of docRows) {
+        const looksPdf =
+          row.title.toLowerCase().endsWith(".pdf") ||
+          row.documentType === "narrative";
+        // We still attempt load for anything (PDFDocument.load throws on
+        // non-PDF, which we catch), but skip the byte download for refs that
+        // are clearly not ours.
+        const bytes = await downloadObjectBytes(row.originalBlobRef);
+        if (!bytes) continue;
+        try {
+          const srcDoc = await PDFDocument.load(bytes, {
+            ignoreEncryption: true,
+          });
+          const pageIndices = srcDoc.getPageIndices();
+          const copied = await outDoc.copyPages(srcDoc, pageIndices);
+          for (const p of copied) {
+            outDoc.addPage(p);
+            copiedPageRefs.push(p);
+          }
+          loadableDocCount += 1;
+        } catch (loadErr) {
+          // Not a loadable PDF (DWG/image/corrupt) — skip, don't crash.
+          reqLog(req).warn(
+            { loadErr, engagementId, documentId: row.id, looksPdf },
+            "plan-review export: document not a loadable PDF, skipping",
+          );
+        }
+      }
+
+      // Best-effort annotation rectangles onto the copied pages.
+      for (const ann of annotationRows) {
+        const loc = ann.location2d as
+          | {
+              page?: unknown;
+              bbox?: unknown;
+            }
+          | null
+          | undefined;
+        if (!loc || typeof loc !== "object") continue;
+        const pageNum =
+          typeof loc.page === "number" && Number.isFinite(loc.page)
+            ? loc.page
+            : null;
+        const bbox = Array.isArray(loc.bbox) ? loc.bbox : null;
+        if (pageNum == null || !bbox || bbox.length < 4) continue;
+        const pageIdx = pageNum - 1; // location2d.page is 1-indexed
+        const page = copiedPageRefs[pageIdx];
+        if (!page) continue;
+        const [x1, y1, x2, y2] = bbox as number[];
+        if (![x1, y1, x2, y2].every((n) => typeof n === "number")) continue;
+        try {
+          const { width, height } = page.getSize();
+          // bbox is 0-1 normalized, origin top-left; pdf-lib origin is
+          // bottom-left, so flip the y axis.
+          const rx = Math.min(x1, x2) * width;
+          const rw = Math.abs(x2 - x1) * width;
+          const ryTop = Math.min(y1, y2) * height;
+          const rh = Math.abs(y2 - y1) * height;
+          const ry = height - ryTop - rh;
+          page.drawRectangle({
+            x: rx,
+            y: ry,
+            width: rw,
+            height: rh,
+            borderColor: rgb(0.85, 0.15, 0.15),
+            borderWidth: 1.5,
+          });
+        } catch {
+          // Never crash on a malformed bbox / page geometry.
+        }
+      }
+
+      drawLine(
+        `${annotationRows.length} annotation${annotationRows.length === 1 ? "" : "s"}, ${loadableDocCount} source document${loadableDocCount === 1 ? "" : "s"}`,
+        620,
+        11,
+      );
+
+      const pdfBytes = await outDoc.save();
+      const buffer = Buffer.from(pdfBytes);
+
+      // Persist the bytes and mint a short-lived GET url. uploadObjectEntityFromBuffer
+      // writes into the private object dir and returns the canonical /objects/<id>
+      // path (no presign/PUT round-trip needed).
+      const objectPath = await planReviewObjectStorage.uploadObjectEntityFromBuffer(
+        buffer,
+        "application/pdf",
+      );
+      const url = await signObjectEntityGetUrl(objectPath, 3600);
+      res.json({ url });
+    } catch (err) {
+      reqLog(req).error({ err, engagementId }, "plan-review export failed");
+      res.status(500).json({ error: "export_failed" });
     }
   },
 );
@@ -1193,5 +1455,310 @@ router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res
   ];
   res.json(functions);
 });
+
+// ─── Engagement annotations (Track D Phase 2) ───────────────────
+//
+// Engagement-scoped 2D/3D unified annotations (markup / finding overlays).
+// Distinct from the submission-scoped `reviewer_annotations` routes/table —
+// do not conflate. The wire shape mirrors `@hauska/document-viewer`'s
+// `Annotation` type so the DocumentViewerTile round-trips it verbatim.
+
+const ANNOTATION_KINDS = [
+  "finding",
+  "redline",
+  "shape",
+  "text",
+  "stamp",
+  "dimension",
+] as const;
+type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
+
+function isAnnotationKind(v: unknown): v is AnnotationKind {
+  return (
+    typeof v === "string" &&
+    (ANNOTATION_KINDS as readonly string[]).includes(v)
+  );
+}
+
+type AnnotationWire = {
+  id: string;
+  engagementId: string;
+  author: string;
+  kind: AnnotationKind;
+  findingId?: string;
+  confidence?: unknown;
+  createdAt: string;
+  location2d?: unknown;
+  location3d?: unknown;
+};
+
+function annotationRowToWire(
+  row: typeof engagementAnnotations.$inferSelect,
+): AnnotationWire {
+  return {
+    id: row.id,
+    engagementId: row.engagementId,
+    author: row.author,
+    kind: row.kind as AnnotationKind,
+    findingId: row.findingId ?? undefined,
+    confidence: row.confidence ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+    location2d: row.location2d ?? undefined,
+    location3d: row.location3d ?? undefined,
+  };
+}
+
+// ─── GET /plan-review/engagements/:id/annotations ───────────────
+
+router.get(
+  "/engagements/:id/annotations",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    try {
+      const rows = await db
+        .select()
+        .from(engagementAnnotations)
+        .where(eq(engagementAnnotations.engagementId, engagementId))
+        .orderBy(asc(engagementAnnotations.createdAt));
+      res.json({ annotations: rows.map(annotationRowToWire) });
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId },
+        "plan-review list annotations failed",
+      );
+      res.status(500).json({ error: "list_annotations_failed" });
+    }
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/annotations ──────────────
+
+router.post(
+  "/engagements/:id/annotations",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const body = req.body as {
+      author?: unknown;
+      kind?: unknown;
+      findingId?: unknown;
+      confidence?: unknown;
+      location2d?: unknown;
+      location3d?: unknown;
+    };
+    if (!isAnnotationKind(body.kind)) {
+      res.status(400).json({ error: "invalid_annotation_kind" });
+      return;
+    }
+    const author =
+      typeof body.author === "string" && body.author.trim()
+        ? body.author.trim()
+        : "reviewer";
+    const findingId =
+      typeof body.findingId === "string" && body.findingId.trim()
+        ? body.findingId.trim()
+        : null;
+    try {
+      const [row] = await db
+        .insert(engagementAnnotations)
+        .values({
+          engagementId,
+          author,
+          kind: body.kind,
+          findingId,
+          confidence: body.confidence ?? null,
+          location2d: body.location2d ?? null,
+          location3d: body.location3d ?? null,
+        })
+        .returning();
+      if (!row) {
+        res.status(500).json({ error: "annotation_create_failed" });
+        return;
+      }
+      res.status(201).json({ annotation: annotationRowToWire(row) });
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId },
+        "plan-review create annotation failed",
+      );
+      res.status(500).json({ error: "create_annotation_failed" });
+    }
+  },
+);
+
+// ─── DELETE /plan-review/engagements/:id/annotations/:annotationId ─
+
+router.delete(
+  "/engagements/:id/annotations/:annotationId",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    const annotationId = paramId(req.params.annotationId);
+    if (!engagementId || !annotationId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    try {
+      const deleted = await db
+        .delete(engagementAnnotations)
+        .where(
+          and(
+            eq(engagementAnnotations.id, annotationId),
+            eq(engagementAnnotations.engagementId, engagementId),
+          ),
+        )
+        .returning({ id: engagementAnnotations.id });
+      if (deleted.length === 0) {
+        res.status(404).json({ error: "annotation_not_found" });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId, annotationId },
+        "plan-review delete annotation failed",
+      );
+      res.status(500).json({ error: "delete_annotation_failed" });
+    }
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/aps-viewer-token ─────────────
+//
+// Mints a short-lived Autodesk Platform Services (APS) viewer token for the
+// DWGViewer component. APS credentials are NOT configured in this environment
+// today (no APS_CLIENT_ID / APS_CLIENT_SECRET), so this route returns a NAMED
+// 501 rather than a 500. When creds appear, it performs the standard APS v2
+// two-legged (client_credentials) auth and returns { accessToken, expiresIn }.
+
+router.get(
+  "/engagements/:id/aps-viewer-token",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+
+    const clientId = process.env.APS_CLIENT_ID;
+    const clientSecret = process.env.APS_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      // Named not-configured path (AUTH-001 companion). The DWGViewer treats this
+      // as its fallback signal, not an error to surface to the reviewer.
+      res.status(501).json({
+        error: "aps_not_configured",
+        detail:
+          "APS_CLIENT_ID/APS_CLIENT_SECRET not set in this environment",
+      });
+      return;
+    }
+
+    try {
+      const basic = Buffer.from(`${clientId}:${clientSecret}`).toString(
+        "base64",
+      );
+      const body = new URLSearchParams({
+        grant_type: "client_credentials",
+        scope: "viewables:read data:read",
+      });
+      const apsRes = await fetch(
+        "https://developer.api.autodesk.com/authentication/v2/token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${basic}`,
+          },
+          body: body.toString(),
+        },
+      );
+      if (!apsRes.ok) {
+        const detail = await apsRes.text();
+        // NOTE: a 403 AUTH-001 here means the Autodesk ACCOUNT lacks APS API
+        // entitlement (backend/support-gated), NOT an app/secret bug — a fresh,
+        // correctly-configured app still 403s until the account is entitled.
+        res.status(502).json({
+          error: "aps_auth_failed",
+          status: apsRes.status,
+          detail,
+        });
+        return;
+      }
+      const json = (await apsRes.json()) as {
+        access_token?: string;
+        expires_in?: number;
+      };
+      if (!json.access_token || typeof json.expires_in !== "number") {
+        res.status(502).json({
+          error: "aps_auth_failed",
+          status: apsRes.status,
+          detail: "APS token response missing access_token/expires_in",
+        });
+        return;
+      }
+      res.json({ accessToken: json.access_token, expiresIn: json.expires_in });
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId },
+        "plan-review aps-viewer-token failed",
+      );
+      res.status(502).json({
+        error: "aps_auth_failed",
+        detail: "network error contacting Autodesk auth",
+      });
+    }
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/dwg-convert ─────────────────
+//
+// The specified LibreOffice DWG->PDF fallback: `soffice --headless --convert-to
+// pdf`. Deferred and returns a NAMED 501 because (a) soffice is NOT in the Cloud
+// Run runtime image (root Dockerfile ships poppler-utils/pdftoppm only, no
+// LibreOffice), and (b) DWG import requires the LibreOffice DWG import filter,
+// whose fidelity is unverified. When the image gains soffice, the conversion
+// wiring point is HERE (feed the produced PDF to the PDFViewer path).
+
+router.post(
+  "/engagements/:id/dwg-convert",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    res.status(501).json({
+      error: "dwg_conversion_unavailable",
+      detail:
+        "Server-side DWG->PDF conversion requires LibreOffice in the Cloud Run image; not installed. Attach a PDF or IFC instead.",
+    });
+  },
+);
 
 export default router;

@@ -639,6 +639,21 @@ CREATE TABLE @@SCHEMA@@.detail_callout_specs (
 );
 
 
+-- Name: engagement_annotations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.engagement_annotations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    author text NOT NULL,
+    kind text NOT NULL,
+    finding_id uuid,
+    confidence jsonb,
+    location2d jsonb,
+    location3d jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: engagement_packages; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.engagement_packages (
@@ -1666,6 +1681,12 @@ ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
     ADD CONSTRAINT detail_callout_specs_pkey PRIMARY KEY (id);
 
 
+-- Name: engagement_annotations engagement_annotations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_annotations
+    ADD CONSTRAINT engagement_annotations_pkey PRIMARY KEY (id);
+
+
 -- Name: engagement_packages engagement_packages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.engagement_packages
@@ -2317,6 +2338,11 @@ CREATE INDEX gtm_events_mcp_tool_payload_idx ON @@SCHEMA@@.gtm_events USING btre
 CREATE INDEX gtm_events_source_surface_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (source_surface, created_at);
 
 
+-- Name: idx_annotations_engagement; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX idx_annotations_engagement ON @@SCHEMA@@.engagement_annotations USING btree (engagement_id);
+
+
 -- Name: knowledge_atoms_dedup_key_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX knowledge_atoms_dedup_key_uniq ON @@SCHEMA@@.knowledge_atoms USING btree (dedup_key);
@@ -2683,6 +2709,18 @@ ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
 
 ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
     ADD CONSTRAINT detail_callout_specs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: engagement_annotations engagement_annotations_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_annotations
+    ADD CONSTRAINT engagement_annotations_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: engagement_annotations engagement_annotations_finding_id_findings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_annotations
+    ADD CONSTRAINT engagement_annotations_finding_id_findings_id_fk FOREIGN KEY (finding_id) REFERENCES @@SCHEMA@@.findings(id) ON DELETE SET NULL;
 
 
 -- Name: engagement_packages engagement_packages_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
