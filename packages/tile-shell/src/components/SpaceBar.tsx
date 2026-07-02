@@ -13,6 +13,8 @@ export function SpaceBar({
   onOpenPicker,
   onSaveSpace,
   onDeleteSpace,
+  onExport,
+  exporting,
 }: {
   presets: PresetSpace[];
   activePresetId: string;
@@ -25,6 +27,14 @@ export function SpaceBar({
   onOpenPicker: () => void;
   onSaveSpace: () => void;
   onDeleteSpace: (spaceId: string) => void;
+  /**
+   * Export the current engagement's deliverable PDF. Supplied by the app
+   * (which owns the BFF client) and only present when an engagement is
+   * selected — the button renders only when this is defined so the package
+   * carries no app-lib dependency.
+   */
+  onExport?: () => void;
+  exporting?: boolean;
 }) {
   return (
     <header
@@ -101,6 +111,21 @@ export function SpaceBar({
       <button type="button" onClick={onSaveSpace} style={pillStyle(false)}>
         Save this space
       </button>
+      {onExport ? (
+        <button
+          type="button"
+          data-testid="spacebar-export"
+          title="Export deliverable PDF"
+          onClick={onExport}
+          disabled={exporting}
+          style={{
+            ...pillStyle(false),
+            cursor: exporting ? "not-allowed" : "pointer",
+          }}
+        >
+          {exporting ? "Exporting…" : "↓ Export"}
+        </button>
+      ) : null}
       <span style={{ flex: 1 }} />
       <span style={{ fontSize: 11, color: "var(--h-text-muted)" }}>
         {activeTiles.length} tile{activeTiles.length === 1 ? "" : "s"} · layout {layoutId}

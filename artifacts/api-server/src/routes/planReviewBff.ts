@@ -57,7 +57,7 @@ import {
 } from "./findings";
 import { parseCreateEngagementBody } from "./packages.logic";
 import { ObjectStorageService, signObjectEntityGetUrl } from "../lib/objectStorage";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { assembleDeliverable } from "../lib/assembleDeliverable";
 import { LEGACY_INTERNAL_OWNER_USER_ID } from "../lib/anonymousOwnerCookie";
 import { isInternalSession } from "../lib/engagementOwnership";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
@@ -459,12 +459,13 @@ router.get(
 
 // ─── POST /plan-review/engagements/:id/export ───────────────────
 //
-// Assembles a downloadable annotated plan set as a single PDF and returns a
-// short-lived signed GET url. Uses pdf-lib (pure JS) to build a cover page and
-// copy the pages of every loadable PDF document attached to the engagement.
-// Non-PDF attachments (DWG, images) are skipped. For v1 annotations are counted
-// on the cover page and drawn as simple rectangles when a location2d bbox maps
-// to a copied page; the real AI-annotation render lands with Track F.
+// Assembles a downloadable review deliverable as a single PDF and returns a
+// 24h signed GET url. Delegates the full render to assembleDeliverable():
+// title page (brand + metadata + fail/pass summary), annotated plan pages
+// (every page of every loadable source PDF, with numbered red-circle callouts
+// on each annotation's mapped page), findings summary (multi-page overflow),
+// and the review letter (when a draft is present). Non-PDF attachments are
+// skipped; one bad document never aborts the export.
 
 router.post(
   "/engagements/:id/export",
@@ -483,8 +484,8 @@ router.post(
 
     // Read the full bytes of a stored object entity, returning null on any
     // failure (missing object, access denied, malformed ref) so one bad
-    // document never aborts the whole export.
-    const downloadObjectBytes = async (
+    // document never aborts the whole export. Only /objects/ paths are ours.
+    const fetchSourcePdfBytes = async (
       objectPath: string,
     ): Promise<Buffer | null> => {
       try {
@@ -500,7 +501,15 @@ router.post(
     };
 
     try {
-      const [docRows, annotationRows] = await Promise.all([
+      // Findings have no engagementId column — key on submissionId. Get the
+      // engagement's submission ids, then the findings for those submissions.
+      const submissionRows = await db
+        .select({ id: submissions.id })
+        .from(submissions)
+        .where(eq(submissions.engagementId, engagementId));
+      const submissionIds = submissionRows.map((r) => r.id);
+
+      const [docRows, annotationRows, findingRows] = await Promise.all([
         db
           .select()
           .from(attachedDocuments)
@@ -510,139 +519,64 @@ router.post(
           .select()
           .from(engagementAnnotations)
           .where(eq(engagementAnnotations.engagementId, engagementId)),
+        submissionIds.length > 0
+          ? db
+              .select()
+              .from(findings)
+              .where(inArray(findings.submissionId, submissionIds))
+          : Promise.resolve([] as (typeof findings.$inferSelect)[]),
       ]);
 
-      const outDoc = await PDFDocument.create();
-      const helvetica = await outDoc.embedFont(StandardFonts.Helvetica);
-      const helveticaBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
+      const letter = planReviewLetterDrafts.get(engagementId) ?? null;
 
-      // Cover page.
-      const cover = outDoc.addPage([612, 792]); // US Letter
-      const drawLine = (
-        text: string,
-        y: number,
-        size: number,
-        bold = false,
-      ): void => {
-        cover.drawText(text, {
-          x: 54,
-          y,
-          size,
-          font: bold ? helveticaBold : helvetica,
-          color: rgb(0.1, 0.1, 0.12),
-        });
-      };
-      drawLine("Annotated Plan Set", 720, 24, true);
-      drawLine(engagement.name ?? "Engagement", 690, 14, true);
-      const jurisdictionLine =
-        engagement.jurisdiction ??
-        [engagement.jurisdictionCity, engagement.jurisdictionState]
-          .filter(Boolean)
-          .join(", ") ??
-        "Jurisdiction not set";
-      drawLine(jurisdictionLine || "Jurisdiction not set", 668, 12);
-      drawLine(`Generated ${new Date().toISOString()}`, 648, 10);
+      const pdfBytes = await assembleDeliverable({
+        engagement: {
+          id: engagementId,
+          name: engagement.name,
+          address: engagement.address,
+          jurisdiction: engagement.jurisdiction,
+          jurisdictionCity: engagement.jurisdictionCity,
+          jurisdictionState: engagement.jurisdictionState,
+          applicantFirm: engagement.applicantFirm,
+        },
+        findings: findingRows.map((f) => ({
+          id: f.id,
+          severity: f.severity,
+          category: f.category,
+          status: f.status,
+          text: f.text,
+          confidence: f.confidence,
+          citations: f.citations,
+        })),
+        annotations: annotationRows
+          // Track F populates author='ai', kind='finding'; render every
+          // annotation carrying a 2D location so manual markups still show.
+          .filter((a) => a.location2d != null)
+          .map((a) => ({
+            id: a.id,
+            findingId: a.findingId,
+            location2d: a.location2d,
+          })),
+        documents: docRows.map((d) => ({
+          id: d.id,
+          title: d.title,
+          documentType: d.documentType,
+          originalBlobRef: d.originalBlobRef,
+        })),
+        letter,
+        fetchSourcePdfBytes,
+      });
 
-      // We track loadable source docs so the summary line is accurate; count
-      // them after the copy loop below.
-      let loadableDocCount = 0;
-
-      // Map each copied PDF document to the page-index range it occupies in the
-      // output so we can place annotations by (submissionId-agnostic) document
-      // order. v1 keeps it simple: annotations with a location2d.page draw onto
-      // the Nth copied page of the FIRST loadable document (best-effort), never
-      // crashing on an out-of-range page.
-      const copiedPageRefs: Array<ReturnType<typeof outDoc.getPage>> = [];
-
-      for (const row of docRows) {
-        const looksPdf =
-          row.title.toLowerCase().endsWith(".pdf") ||
-          row.documentType === "narrative";
-        // We still attempt load for anything (PDFDocument.load throws on
-        // non-PDF, which we catch), but skip the byte download for refs that
-        // are clearly not ours.
-        const bytes = await downloadObjectBytes(row.originalBlobRef);
-        if (!bytes) continue;
-        try {
-          const srcDoc = await PDFDocument.load(bytes, {
-            ignoreEncryption: true,
-          });
-          const pageIndices = srcDoc.getPageIndices();
-          const copied = await outDoc.copyPages(srcDoc, pageIndices);
-          for (const p of copied) {
-            outDoc.addPage(p);
-            copiedPageRefs.push(p);
-          }
-          loadableDocCount += 1;
-        } catch (loadErr) {
-          // Not a loadable PDF (DWG/image/corrupt) — skip, don't crash.
-          reqLog(req).warn(
-            { loadErr, engagementId, documentId: row.id, looksPdf },
-            "plan-review export: document not a loadable PDF, skipping",
-          );
-        }
-      }
-
-      // Best-effort annotation rectangles onto the copied pages.
-      for (const ann of annotationRows) {
-        const loc = ann.location2d as
-          | {
-              page?: unknown;
-              bbox?: unknown;
-            }
-          | null
-          | undefined;
-        if (!loc || typeof loc !== "object") continue;
-        const pageNum =
-          typeof loc.page === "number" && Number.isFinite(loc.page)
-            ? loc.page
-            : null;
-        const bbox = Array.isArray(loc.bbox) ? loc.bbox : null;
-        if (pageNum == null || !bbox || bbox.length < 4) continue;
-        const pageIdx = pageNum - 1; // location2d.page is 1-indexed
-        const page = copiedPageRefs[pageIdx];
-        if (!page) continue;
-        const [x1, y1, x2, y2] = bbox as number[];
-        if (![x1, y1, x2, y2].every((n) => typeof n === "number")) continue;
-        try {
-          const { width, height } = page.getSize();
-          // bbox is 0-1 normalized, origin top-left; pdf-lib origin is
-          // bottom-left, so flip the y axis.
-          const rx = Math.min(x1, x2) * width;
-          const rw = Math.abs(x2 - x1) * width;
-          const ryTop = Math.min(y1, y2) * height;
-          const rh = Math.abs(y2 - y1) * height;
-          const ry = height - ryTop - rh;
-          page.drawRectangle({
-            x: rx,
-            y: ry,
-            width: rw,
-            height: rh,
-            borderColor: rgb(0.85, 0.15, 0.15),
-            borderWidth: 1.5,
-          });
-        } catch {
-          // Never crash on a malformed bbox / page geometry.
-        }
-      }
-
-      drawLine(
-        `${annotationRows.length} annotation${annotationRows.length === 1 ? "" : "s"}, ${loadableDocCount} source document${loadableDocCount === 1 ? "" : "s"}`,
-        620,
-        11,
-      );
-
-      const pdfBytes = await outDoc.save();
       const buffer = Buffer.from(pdfBytes);
 
-      // Persist the bytes and mint a short-lived GET url. uploadObjectEntityFromBuffer
-      // writes into the private object dir and returns the canonical /objects/<id>
-      // path (no presign/PUT round-trip needed).
+      // Persist the bytes and mint a 24h signed GET url.
+      // uploadObjectEntityFromBuffer writes into the private object dir and
+      // returns the canonical /objects/uploads/<uuid> path.
       const objectPath = await planReviewObjectStorage.uploadObjectEntityFromBuffer(
         buffer,
         "application/pdf",
       );
-      const url = await signObjectEntityGetUrl(objectPath, 3600);
+      const url = await signObjectEntityGetUrl(objectPath, 60 * 60 * 24);
       res.json({ url });
     } catch (err) {
       reqLog(req).error({ err, engagementId }, "plan-review export failed");

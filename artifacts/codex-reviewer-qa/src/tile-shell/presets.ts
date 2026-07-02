@@ -25,4 +25,12 @@ export const PRESET_SPACES: PresetSpace[] = [
     tiles: ["sheet-extraction", "document-viewer", "response-tasks", "map"],
     layoutId: "3r",
   },
+  {
+    // Print View — a lean layout for printing/exporting: findings + the review
+    // letter only, no map. Pair with the SpaceBar Export action.
+    id: "print",
+    label: "Print View",
+    tiles: ["compliance-run", "letter"],
+    layoutId: "2h",
+  },
 ];
