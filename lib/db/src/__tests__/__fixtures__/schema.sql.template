@@ -2535,7 +2535,7 @@ CREATE UNIQUE INDEX saved_workspace_spaces_owner_name_uidx ON @@SCHEMA@@.saved_w
 
 -- Name: saved_workspace_spaces_share_token_uidx; Type: INDEX; Schema: public; Owner: -
 
-CREATE UNIQUE INDEX saved_workspace_spaces_share_token_uidx ON @@SCHEMA@@.saved_workspace_spaces USING btree (share_token) WHERE (share_token IS NOT NULL);
+CREATE UNIQUE INDEX saved_workspace_spaces_share_token_uidx ON @@SCHEMA@@.saved_workspace_spaces USING btree (share_token);
 
 
 -- Name: sheet_content_extractions_engagement_idx; Type: INDEX; Schema: public; Owner: -

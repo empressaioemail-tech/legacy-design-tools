@@ -34,7 +34,10 @@ CREATE UNIQUE INDEX saved_workspace_spaces_owner_name_uidx
 CREATE INDEX saved_workspace_spaces_owner_idx
   ON saved_workspace_spaces (tenant_id, owner_user_id, updated_at);
 
--- Share-link lookup: fetch a space read-only by its token.
+-- Share-link lookup: fetch a space read-only by its token. Plain unique index
+-- on a nullable column — Postgres treats NULLs as distinct, so un-shared rows
+-- (share_token NULL) coexist while any minted token is unique. Matches the
+-- drizzle schema so the fixture-drift check (which pushes the drizzle schema)
+-- stays in sync.
 CREATE UNIQUE INDEX saved_workspace_spaces_share_token_uidx
-  ON saved_workspace_spaces (share_token)
-  WHERE share_token IS NOT NULL;
+  ON saved_workspace_spaces (share_token);

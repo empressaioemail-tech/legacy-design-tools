@@ -52,6 +52,12 @@ export const savedWorkspaceSpaces = pgTable(
       t.ownerUserId,
       t.updatedAt,
     ),
+    // Share-link lookup. A plain unique index on a nullable column: Postgres
+    // treats NULLs as distinct, so many un-shared rows (share_token NULL)
+    // coexist while any minted token is unique. Declared here (not just in the
+    // migration) so the drizzle-kit push the fixture-drift check runs produces
+    // it, keeping the committed schema fixture in sync.
+    uniqueIndex("saved_workspace_spaces_share_token_uidx").on(t.shareToken),
   ],
 );
 
