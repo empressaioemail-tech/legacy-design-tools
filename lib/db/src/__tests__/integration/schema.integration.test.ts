@@ -133,6 +133,11 @@ describe("lib/db schema integration", () => {
         "deliverable_letters",
         // Cortex L4 (Lane C.4 / C.4.4) — Revit detail-callout specs.
         "detail_callout_specs",
+        // Track D Phase 2 — engagement-scoped 2D/3D unified annotation
+        // (markup / finding overlay). Distinct from `reviewer_annotations`
+        // (submission-scoped scratch notes). Sorts before
+        // `engagement_packages` (`_a` < `_p`) per `ORDER BY tablename`.
+        "engagement_annotations",
         // Cockpit IA — engagement deliverable packages (client, publisher, jurisdiction).
         "engagement_packages",
         "engagements",

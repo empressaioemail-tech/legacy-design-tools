@@ -16,6 +16,7 @@ import {
 } from "@hauska/cortex-tiles";
 // Option-3 app-resident tiles (kept in the app; still error-boundary-wrapped).
 import ComplianceRunTile from "../tiles/Compliance/compliance-run";
+import DocumentViewerTile from "../tiles/Compliance/document-viewer";
 import LetterTile from "../tiles/Deliverable/letter";
 import { makeStubTile, type StubTileMeta } from "../tiles/stubFactory";
 
@@ -62,6 +63,18 @@ const TILE_META: TileMeta[] = [
     modes: ["full", "card", "raw"],
     mcpTools: ["run_compliance_pass", "get_compliance_findings"],
     component: () => <ComplianceRunTile />,
+  },
+  {
+    id: "document-viewer",
+    label: "Document Viewer",
+    category: "Compliance",
+    engine: "engagement",
+    status: "live",
+    requires: { engagementId: true, uploadedDocuments: true },
+    produces: { annotations: true },
+    modes: ["full"],
+    mcpTools: [],
+    component: () => <DocumentViewerTile />,
   },
   {
     id: "findings-library",

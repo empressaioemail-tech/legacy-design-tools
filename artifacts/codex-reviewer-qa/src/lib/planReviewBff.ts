@@ -276,6 +276,101 @@ export function fetchSubmissionFindings(submissionId: string): Promise<{
   return bffJson(`/submissions/${submissionId}/findings`);
 }
 
+// ─── Document Viewer (Track D) ──────────────────────────────────
+
+export type EngagementDocumentWire = {
+  id: string;
+  title: string;
+  documentType: string;
+  url: string | null;
+  createdAt: string;
+};
+
+export function fetchEngagementDocuments(
+  engagementId: string,
+): Promise<{ documents: EngagementDocumentWire[] }> {
+  return bffJson(`/engagements/${engagementId}/documents`);
+}
+
+export function exportEngagementPdf(
+  engagementId: string,
+): Promise<{ url: string }> {
+  return bffJson(`/engagements/${engagementId}/export`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+/**
+ * Mirrors the package `Annotation` model (location2d/location3d unified).
+ * Kept as a wire type so the tile can pass it straight to the package
+ * components without a mapping layer.
+ */
+export type EngagementAnnotationWire = {
+  id: string;
+  engagementId: string;
+  author: string;
+  kind: "finding" | "redline" | "shape" | "text" | "stamp" | "dimension";
+  findingId?: string;
+  confidence?: unknown;
+  createdAt: string;
+  location2d?: {
+    submissionId: string;
+    page: number;
+    bbox: [number, number, number, number];
+    label: string;
+  };
+  location3d?: {
+    globalId: string;
+    elementId: string;
+    face?: number;
+    label: string;
+  };
+};
+
+export function fetchEngagementAnnotations(
+  engagementId: string,
+): Promise<{ annotations: EngagementAnnotationWire[] }> {
+  return bffJson(`/engagements/${engagementId}/annotations`);
+}
+
+export function createEngagementAnnotation(
+  engagementId: string,
+  body: {
+    author?: string;
+    kind: EngagementAnnotationWire["kind"];
+    findingId?: string;
+    confidence?: unknown;
+    location2d?: EngagementAnnotationWire["location2d"];
+    location3d?: EngagementAnnotationWire["location3d"];
+  },
+): Promise<{ annotation: EngagementAnnotationWire }> {
+  return bffJson(`/engagements/${engagementId}/annotations`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteEngagementAnnotation(
+  engagementId: string,
+  annotationId: string,
+): Promise<void> {
+  // The DELETE route replies 204 with no body, so we cannot route it through
+  // `bffJson` (which always parses JSON). Handle it directly.
+  const res = await fetch(
+    `${BASE}/engagements/${engagementId}/annotations/${annotationId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof body === "object" && body && "error" in body
+        ? String((body as { error: unknown }).error)
+        : `Request failed (${res.status})`,
+    );
+  }
+}
+
 export function fetchSubmissionFindingsStatus(submissionId: string): Promise<{
   generationId: string | null;
   state: string;

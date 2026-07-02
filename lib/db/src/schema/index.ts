@@ -66,3 +66,4 @@ export * from "./userAuthCredentials";
 export * from "./brokerageInstallClaims";
 export * from "./userUsageMetering";
 export * from "./knowledgeAtoms";
+export * from "./engagementAnnotations";

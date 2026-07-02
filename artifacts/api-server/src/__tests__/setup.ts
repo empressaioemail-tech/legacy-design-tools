@@ -93,6 +93,11 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // explicitly per the "if a route writes to it, it's in this list"
   // invariant.
   "reviewer_annotations",
+  // Track D Phase 2 — engagement-scoped 2D/3D annotations. Cascades off
+  // `engagements` (and `finding_id` is ON DELETE SET NULL, no cascade
+  // chain), but listed explicitly per the "if a route writes to it, it's
+  // in this list" invariant so the annotation-route suite starts clean.
+  "engagement_annotations",
   // Task #431 — reviewer↔architect inline reply thread. Cascades off
   // `submissions`, but listed explicitly per the "if a route writes
   // to it, it's in this list" invariant.
