@@ -32,4 +32,8 @@ export type {
   EngagementSubmissionCreated,
   EngagementSubmissionSummary,
   SubmissionFindingsStatus,
+  EngagementDocument,
+  DataroomAtomChip,
+  DataroomIngestResult,
+  AssertedConfidence,
 } from './types'

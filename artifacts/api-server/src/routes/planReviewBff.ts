@@ -76,6 +76,12 @@ import {
   runHazardAdaptersForEngagement,
 } from "../lib/planReviewLayerRun";
 import { resolvePlace } from "../lib/placeResolve";
+import {
+  ingestDataroomDocument,
+  loadDataroomAtomsForDocument,
+  loadDataroomAtomsForEngagement,
+} from "../lib/dataroomIngest";
+import { EngineSpineError } from "../lib/engineSpineClient";
 import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
 import { runSheetContentExtraction } from "../lib/sheetContentExtractor";
 import {
@@ -510,6 +516,133 @@ router.get(
         "plan-review list documents failed",
       );
       res.status(500).json({ error: "list_documents_failed" });
+    }
+  },
+);
+
+// ─── POST /plan-review/engagements/:id/documents/:docId/ingest ───
+//
+// The "file becomes atoms" surface. Proxies the engagement's uploaded file to
+// the engine `POST /v1/document-ingest` pipeline (server-to-server, gate-front
+// seam) and persists the returned atoms into `dataroom_document_atoms`. The
+// atoms come back as cited, confidence-graded chips linked to
+// `sourceDocumentCid`. FIREWALL: the proxy sends NO accessPolicy for the
+// user upload; the engine clamps to tenant-private and we persist exactly what
+// it returns — no auto-publish path exists here.
+
+router.post(
+  "/engagements/:id/documents/:docId/ingest",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    const documentId = paramId(req.params.docId);
+    if (!engagementId || !documentId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    try {
+      const result = await ingestDataroomDocument({
+        engagementId,
+        documentId,
+        jurisdictionTenant: reviewerJurisdictionTenant(engagement),
+      });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof Error && err.message === "document_not_found") {
+        res.status(404).json({ error: "document_not_found" });
+        return;
+      }
+      if (
+        err instanceof Error &&
+        err.message === "document_has_no_ingestible_blob"
+      ) {
+        res.status(422).json({ error: "document_has_no_ingestible_blob" });
+        return;
+      }
+      if (err instanceof EngineSpineError) {
+        // Engine unreachable / rejected — surface a 502 (never a 500) so the
+        // tile can show a degraded banner rather than a crash.
+        reqLog(req).error(
+          { err, engagementId, documentId, code: err.code },
+          "plan-review dataroom ingest engine error",
+        );
+        res.status(502).json({ error: "engine_ingest_failed", code: err.code });
+        return;
+      }
+      reqLog(req).error(
+        { err, engagementId, documentId },
+        "plan-review dataroom ingest failed",
+      );
+      res.status(500).json({ error: "dataroom_ingest_failed" });
+    }
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/documents/:docId/atoms ─────
+//
+// The persisted atom chips for one dataroom file (no re-ingest).
+
+router.get(
+  "/engagements/:id/documents/:docId/atoms",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    const documentId = paramId(req.params.docId);
+    if (!engagementId || !documentId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    try {
+      const atoms = await loadDataroomAtomsForDocument(documentId);
+      res.json({ atoms });
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId, documentId },
+        "plan-review dataroom atoms load failed",
+      );
+      res.status(500).json({ error: "dataroom_atoms_load_failed" });
+    }
+  },
+);
+
+// ─── GET /plan-review/engagements/:id/dataroom-atoms ─────────────
+//
+// The persisted atom chips for EVERY dataroom file in the engagement, keyed by
+// documentId — the Dataroom tile's one-shot hydrate on open.
+
+router.get(
+  "/engagements/:id/dataroom-atoms",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const engagementId = paramId(req.params.id);
+    if (!engagementId) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const engagement = await loadReviewerBffEngagement(engagementId);
+    if (!engagement) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    try {
+      const atomsByDocument = await loadDataroomAtomsForEngagement(engagementId);
+      res.json({ atomsByDocument });
+    } catch (err) {
+      reqLog(req).error(
+        { err, engagementId },
+        "plan-review dataroom engagement atoms load failed",
+      );
+      res.status(500).json({ error: "dataroom_atoms_load_failed" });
     }
   },
 );

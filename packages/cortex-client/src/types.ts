@@ -255,6 +255,56 @@ export type SubmissionFindingsStatus = {
   discardedFindingCount: number | null
 }
 
+// ─── Dataroom / Files tile (Phase 2) ─────────────────────────────
+// The engine document-ingest pipeline mints CLAIM atoms from an uploaded file
+// (point-to model). These shapes mirror what the BFF returns after proxying
+// `POST /v1/document-ingest` and persisting the result. Confidence is ALWAYS
+// the asserted widthed `{ kind, value, intervalWidth, n }` shape — never a
+// bare number — per structural commitment #1.
+
+export type AssertedConfidence = {
+  kind: 'asserted' | 'calibrated'
+  value: number
+  intervalWidth: number
+  n: number
+}
+
+/** One cited, confidence-graded atom extracted from a dataroom file. */
+export type DataroomAtomChip = {
+  atomDid: string
+  entityType: string
+  /** Engine-resolved (clamped) access policy — shown, never user-editable. */
+  accessPolicy: string
+  storageRelation: string
+  confidence: AssertedConfidence
+  verificationStatus: string
+  /** The pinned source-document CID this atom cites back to. */
+  sourceDocumentCid: string
+}
+
+/** POST /engagements/:id/documents/:docId/ingest result. */
+export type DataroomIngestResult = {
+  documentId: string
+  status: 'ok' | 'empty' | 'degraded'
+  sourceDocumentCid: string | null
+  classification: {
+    documentType?: string
+    adapter?: string
+    score?: number
+  } | null
+  atoms: DataroomAtomChip[]
+  reason?: string
+}
+
+// GET /engagements/:id/documents — element shape (Dataroom file list).
+export type EngagementDocument = {
+  id: string
+  title: string
+  documentType: string
+  url: string | null
+  createdAt: string
+}
+
 // ─── Opaque report payloads (noted) ──────────────────────────────
 // annotations, hazard, brief, encumbrances reports are returned by the
 // api-server as ReportResult with opaque `result` bodies (Record<string,

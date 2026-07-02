@@ -8,6 +8,7 @@ import { TILE_CAPABILITIES, type TileCapability } from "@hauska/cortex-client";
 import {
   IntakeQueueTile,
   IntakeTile,
+  DataroomTile,
   MapTile,
   TopographyTile,
   DrainageTile,
@@ -53,6 +54,7 @@ function stubFor(cap: TileCapability): () => React.ReactElement {
 const COMPONENTS: Record<string, () => React.ReactElement> = {
   intake: () => <IntakeTile />,
   "intake-queue": () => <IntakeQueueTile />,
+  dataroom: () => <DataroomTile />,
   "compliance-run": () => <ComplianceRunTile />,
   "document-viewer": () => <DocumentViewerTile />,
   topography: () => <TopographyTile />,

@@ -18,6 +18,9 @@ export { FindingsLibraryTile } from './compliance/FindingsLibraryTile'
 // Intake
 export { IntakeTile } from './intake/IntakeTile'
 
+// Dataroom / Files
+export { DataroomTile } from './dataroom/DataroomTile'
+
 // Site Analysis
 export { MapTile } from './map/MapTile'
 export { TopographyTile } from './site-analysis/TopographyTile'
