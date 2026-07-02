@@ -29,17 +29,24 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
-    // The `@hauska/*` workspace packages carry a "workspace" export condition
-    // pointing at their TS source (./src). Their dist/ is NOT prebuilt in the
-    // Docker build context, so a *value* import (e.g. TILE_CAPABILITIES from
-    // @hauska/cortex-client in planReviewBff.ts) would resolve to the missing
-    // dist/index.mjs and fail. Honor "workspace" first so esbuild bundles the
-    // TS source directly; keep import/default for every other dependency.
+    // Add ONLY the custom "workspace" export condition. The `@hauska/*`
+    // workspace packages carry it pointing at their TS source (./src); their
+    // dist/ is NOT prebuilt in the Docker build context, so a *value* import
+    // (e.g. TILE_CAPABILITIES from @hauska/cortex-client in planReviewBff.ts)
+    // would otherwise resolve to the missing dist/index.mjs and fail the build.
+    //
+    // CRITICAL: do NOT also list "import"/"default" here. esbuild layers this
+    // list on top of its format/platform defaults, but listing "import"
+    // explicitly promotes it ABOVE "require" for every dual-package dependency
+    // — which flips pg (and others) from their CJS entry to a broken ESM
+    // wrapper and crashes the container at boot ("Class extends value
+    // #<Object>"). "workspace" is a bespoke condition only the @hauska/*
+    // packages declare, so adding just it changes resolution for nothing else.
     // Type-only imports are erased before resolution, which is why the
     // pre-existing type imports built fine without this. Mirrors the
     // resolve.conditions:["workspace"] in codex-reviewer-qa/vite.config.ts and
     // artifacts/api-server/vitest.config.ts.
-    conditions: ["workspace", "import", "default"],
+    conditions: ["workspace"],
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
     // Examples of unbundleable packages:
