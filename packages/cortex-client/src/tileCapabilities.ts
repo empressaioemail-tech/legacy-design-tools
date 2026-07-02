@@ -314,6 +314,21 @@ export const TILE_CAPABILITIES: TileCapability[] = [
     mcpTools: ['get_place_dossier'],
   },
   {
+    id: 'dataroom',
+    label: 'Dataroom / Files',
+    category: 'Property Intel',
+    engine: 'engagement',
+    status: 'live',
+    // Lists the engagement's uploaded files and turns each into cited,
+    // confidence-graded atoms via the engine document-ingest pipeline
+    // (BFF proxy, not an MCP tool yet). Requires an engagement + at least
+    // one uploaded document to extract from (upload happens in-tile).
+    requires: { engagementId: true },
+    produces: {},
+    modes: ['full', 'card', 'raw'],
+    mcpTools: [],
+  },
+  {
     id: 'encumbrances',
     label: 'Encumbrance Report',
     category: 'Property Intel',

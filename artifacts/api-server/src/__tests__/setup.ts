@@ -107,6 +107,11 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // Cascades off `engagements`, but listed explicitly per the "if a route
   // writes to it, it's in this list" invariant.
   "attached_documents",
+  // Phase 2 Dataroom/Files tile — document->atom association. Cascades off
+  // both `attached_documents` and `engagements`, but listed explicitly per
+  // the "if a route writes to it, it's in this list" invariant so the
+  // dataroom ingest-route suite starts clean.
+  "dataroom_document_atoms",
   // Task #431 — reviewer↔architect inline reply thread. Cascades off
   // `submissions`, but listed explicitly per the "if a route writes
   // to it, it's in this list" invariant.

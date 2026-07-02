@@ -122,6 +122,10 @@ describe("lib/db schema integration", () => {
         "cotality_property_attr_cache",
         "cotality_spatial_tile_cache",
         "coverage_requests",
+        // Phase 2 Dataroom/Files tile — document->atom association.
+        // One row per engine-ingested extracted atom, pointing back to the
+        // pinned source_document_cid (point-to model).
+        "dataroom_document_atoms",
         // PLR-11 — derived-state side table for the issued plan-set
         // PDF (one row per recorded approval event).
         "decision_pdf_artifacts",

@@ -68,3 +68,4 @@ export * from "./userUsageMetering";
 export * from "./knowledgeAtoms";
 export * from "./engagementAnnotations";
 export * from "./savedWorkspaceSpaces";
+export * from "./dataroomDocumentAtoms";

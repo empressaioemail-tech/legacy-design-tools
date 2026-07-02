@@ -15,6 +15,9 @@ import type {
   EngagementSubmissionSummary,
   SubmissionFindings,
   SubmissionFindingsStatus,
+  EngagementDocument,
+  DataroomIngestResult,
+  DataroomAtomChip,
 } from './types'
 
 export type CortexClientConfig = {
@@ -98,6 +101,26 @@ export type CortexClient = {
   getSubmissionFindingsStatus: (
     submissionId: string,
   ) => Promise<SubmissionFindingsStatus>
+
+  // ─── Dataroom / Files tile (Phase 2) ────────────────────────────
+  /** List the files attached to an engagement (the Dataroom collection). */
+  listEngagementDocuments: (
+    engagementId: string,
+  ) => Promise<{ documents: EngagementDocument[] }>
+  /** Ingest one file through the engine and get back its cited atom chips. */
+  ingestDataroomDocument: (
+    engagementId: string,
+    documentId: string,
+  ) => Promise<DataroomIngestResult>
+  /** Persisted atom chips for one file (no re-ingest). */
+  getDataroomDocumentAtoms: (
+    engagementId: string,
+    documentId: string,
+  ) => Promise<{ atoms: DataroomAtomChip[] }>
+  /** Persisted atom chips for every file, keyed by documentId (hydrate). */
+  getDataroomAtoms: (
+    engagementId: string,
+  ) => Promise<{ atomsByDocument: Record<string, DataroomAtomChip[]> }>
 
   // ─── Saved workspace spaces (Phase 2 shell experience) ──────────
   listSavedSpaces: () => Promise<SavedSpaceSummary[]>
@@ -282,6 +305,31 @@ export function createCortexClient(config: CortexClientConfig): CortexClient {
     getSubmissionFindingsStatus(submissionId) {
       return doFetch<SubmissionFindingsStatus>(
         `/plan-review/submissions/${submissionId}/findings/status`,
+      )
+    },
+
+    listEngagementDocuments(engagementId) {
+      return doFetch<{ documents: EngagementDocument[] }>(
+        `/plan-review/engagements/${engagementId}/documents`,
+      )
+    },
+
+    ingestDataroomDocument(engagementId, documentId) {
+      return doFetch<DataroomIngestResult>(
+        `/plan-review/engagements/${engagementId}/documents/${documentId}/ingest`,
+        { method: 'POST', body: '{}' },
+      )
+    },
+
+    getDataroomDocumentAtoms(engagementId, documentId) {
+      return doFetch<{ atoms: DataroomAtomChip[] }>(
+        `/plan-review/engagements/${engagementId}/documents/${documentId}/atoms`,
+      )
+    },
+
+    getDataroomAtoms(engagementId) {
+      return doFetch<{ atomsByDocument: Record<string, DataroomAtomChip[]> }>(
+        `/plan-review/engagements/${engagementId}/dataroom-atoms`,
       )
     },
 
