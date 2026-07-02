@@ -9,14 +9,24 @@ function TopographyTileInner() {
   const { pushOverlay } = useSpatial()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [summary, setSummary] = useState<string | null>(null)
 
   async function handleRun() {
     if (!engagementId) return
     setBusy(true)
     setError(null)
+    setSummary(null)
     try {
       await client.runReport(engagementId, 'topography')
       const report = await client.getReport(engagementId, 'topography')
+      if (report.status === 'not-run') {
+        setError('No topography yet — ensure the parcel is geocoded, then retry.')
+        return
+      }
+      if (report.status === 'error') {
+        setError(report.error ?? 'Topography run failed')
+        return
+      }
       setEngagementReportResult('topography', {
         status: report.status === 'ok' ? 'ok' : 'error',
         result: report.result,
@@ -28,6 +38,7 @@ function TopographyTileInner() {
         }
       )?.contoursGeoJson
       if (geojson) {
+        // SEAM: kind === map-renderer OverlaySpec.layerKey (MapTile.toMapOverlays).
         pushOverlay({
           id: 'topography-contours',
           kind: 'topography-contours',
@@ -35,6 +46,10 @@ function TopographyTileInner() {
           geojson,
           opacity: 0.7,
         })
+        const n = Array.isArray(geojson.features) ? geojson.features.length : 0
+        setSummary(`${n} contour line${n === 1 ? '' : 's'} generated · pushed to Map overlay stack.`)
+      } else {
+        setSummary('Topography ran, but no contour geometry was returned.')
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Topography run failed')
@@ -62,6 +77,11 @@ function TopographyTileInner() {
       >
         {busy ? 'Running…' : 'Run topography'}
       </button>
+      {summary ? (
+        <span style={{ fontSize: 'var(--h-text-sm)', color: 'var(--h-success)' }}>
+          {summary}
+        </span>
+      ) : null}
       {error ? (
         <span style={{ fontSize: 'var(--h-text-sm)', color: 'var(--h-error)' }}>
           {error}

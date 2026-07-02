@@ -1,4 +1,5 @@
-import { CortexShell } from "@hauska/tile-shell";
+import { CortexShell, type ActiveParcel } from "@hauska/tile-shell";
+import { useCortexClient } from "@hauska/cortex-tiles";
 import { getTile, ALL_TILES, TILE_CATEGORIES } from "./tiles";
 import { PRESET_SPACES } from "./presets";
 import { fetchAdminFunctions, exportEngagementPdf } from "../lib/planReviewBff";
@@ -23,6 +24,7 @@ export default function AppCortexShell({
 }: {
   initialPresetId?: string;
 }) {
+  const client = useCortexClient();
   return (
     <CortexShell
       initialPresetId={initialPresetId}
@@ -31,6 +33,24 @@ export default function AppCortexShell({
       categories={TILE_CATEGORIES}
       presets={PRESET_SPACES}
       fetchAdminFunctions={fetchAdminFunctions}
+      onAddressSearch={async (query): Promise<ActiveParcel | null> => {
+        // Setter #2: geocode the query and set the shared active-parcel.
+        // The app owns the BFF client; @hauska/tile-shell stays client-free.
+        // A bare address search scopes the parcel (apn / lat / lng /
+        // jurisdiction) WITHOUT auto-creating an engagement — a read gesture
+        // should not write. Address-scoped tiles keyed on apn/jurisdiction
+        // (setbacks, map, compact property summary) react immediately;
+        // engagement-scoped report runs still select/create via intake.
+        const g = await client.geocode({ address: query });
+        return {
+          engagementId: null,
+          apn: g.apn,
+          jurisdiction: g.jurisdiction,
+          address: g.address ?? query,
+          lat: g.lat,
+          lng: g.lng,
+        };
+      }}
       onExportEngagement={async (engagementId) => {
         // App owns the BFF client + the browser download; the SpaceBar in
         // @hauska/tile-shell only fires this callback. Trigger a download

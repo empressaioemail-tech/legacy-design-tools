@@ -13,10 +13,16 @@ export { SpaceBar, snapshotState } from './components/SpaceBar'
 export type { SnapshotState } from './components/SpaceBar'
 export { TileWrapper } from './components/TileWrapper'
 export { TilePicker } from './components/TilePicker'
+export { AddressSearchBox } from './components/AddressSearchBox'
 export { TileStatusBanner } from './components/TileStatusBanner'
 export { PlannedTile } from './components/PlannedTile'
 
-export { EngagementProvider, useEngagement } from './providers/EngagementProvider'
+export {
+  EngagementProvider,
+  useEngagement,
+  useActiveParcel,
+} from './providers/EngagementProvider'
+export type { ActiveParcel } from './providers/EngagementProvider'
 export { SpatialProvider, useSpatial } from './providers/SpatialProvider'
 export { CodeProvider, useCode } from './providers/CodeProvider'
 export {

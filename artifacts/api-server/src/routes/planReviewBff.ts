@@ -74,6 +74,7 @@ import {
   runBriefReportForEngagement,
   runHazardAdaptersForEngagement,
 } from "../lib/planReviewLayerRun";
+import { resolvePlace } from "../lib/placeResolve";
 import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
 import { runSheetContentExtraction } from "../lib/sheetContentExtractor";
 import {
@@ -282,6 +283,61 @@ router.post("/engagements", requireServiceTokenOrSession, async (req: Request, r
     res.status(500).json({ error: "create_failed" });
   }
 });
+
+// ─── POST /plan-review/geocode ──────────────────────────────────
+// Forward-geocode an address (or reverse-project lat/lng) into a parcel
+// identity for the shared active-parcel context. Backs the shell top-bar
+// address-search box. Same auth as every other plan-review route
+// (requireServiceTokenOrSession) so the workspace reaches it on the cookie
+// session it already holds — the brokerage /place/resolve route is gated by
+// brokerageAuth + CORS, which the workspace does not carry.
+router.post(
+  "/geocode",
+  requireServiceTokenOrSession,
+  async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as {
+      address?: unknown;
+      lat?: unknown;
+      lng?: unknown;
+    };
+    const address =
+      typeof body.address === "string" && body.address.trim()
+        ? body.address.trim()
+        : undefined;
+    const lat = typeof body.lat === "number" ? body.lat : undefined;
+    const lng = typeof body.lng === "number" ? body.lng : undefined;
+    if (!address && (lat == null || lng == null)) {
+      res.status(400).json({ error: "address_or_latlng_required" });
+      return;
+    }
+    try {
+      const result = await resolvePlace(
+        lat != null && lng != null
+          ? { lat, lng, address }
+          : { address: address! },
+      );
+      if ("errorClass" in result) {
+        const status = result.errorClass === "geocode_miss" ? 422 : 400;
+        res.status(status).json({ error: result.error, message: result.message });
+        return;
+      }
+      res.json({
+        placeKey: result.placeKey,
+        apn: result.ll_uuid,
+        jurisdiction: result.jurisdiction_key,
+        address: address ?? null,
+        lat: result.geocode.lat,
+        lng: result.geocode.lng,
+        city: result.geocode.city,
+        state: result.geocode.state,
+        confidence: result.geocode.confidence,
+      });
+    } catch (err) {
+      reqLog(req).error({ err }, "plan-review geocode failed");
+      res.status(502).json({ error: "geocode_failed" });
+    }
+  },
+);
 
 // ─── POST /plan-review/engagements/:id/documents/upload-url ─────
 

@@ -7,9 +7,13 @@ import { DocumentViewerNavigationProvider } from "./providers/DocumentViewerNavi
 import { SpaceBar, snapshotState, type SnapshotState } from "./components/SpaceBar";
 import { TilePicker } from "./components/TilePicker";
 import { GridCanvas } from "./components/GridCanvas";
+import { AddressSearchBox } from "./components/AddressSearchBox";
 import { layoutIdForTileCount, parseLayoutCols, parseLayoutRows } from "./layouts";
 import type { PresetSpace, TileCategory, TileDef, TileStatus } from "./types";
-import { useEngagement } from "./providers/EngagementProvider";
+import {
+  useEngagement,
+  type ActiveParcel,
+} from "./providers/EngagementProvider";
 
 /** Snapshot shape persisted by a saved space. */
 export type SpaceSnapshot = {
@@ -58,6 +62,17 @@ export type CortexShellProps = {
    * free of any app-lib / BFF-client dependency.
    */
   onExportEngagement?: (engagementId: string) => Promise<void> | void;
+  /**
+   * Geocode a free-text address query into a parcel for the shared active-parcel
+   * context (top-bar address-search box — setter #2). App-supplied because the
+   * app owns the BFF client. When present, the SpaceBar shows the search box.
+   */
+  onAddressSearch?: (query: string) => Promise<ActiveParcel | null>;
+  /**
+   * Optional hook fired after an address-search parcel is written to the shared
+   * context — e.g. resolve/create an engagement for the parcel and load detail.
+   */
+  onAddressResolved?: (parcel: ActiveParcel) => Promise<void> | void;
 };
 
 type CortexShellInnerProps = {
@@ -71,6 +86,8 @@ type CortexShellInnerProps = {
   fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
   savedSpaces: SavedSpacesApi;
   onExportEngagement?: (engagementId: string) => Promise<void> | void;
+  onAddressSearch?: (query: string) => Promise<ActiveParcel | null>;
+  onAddressResolved?: (parcel: ActiveParcel) => Promise<void> | void;
 };
 
 function CortexShellInner({
@@ -84,6 +101,8 @@ function CortexShellInner({
   fetchAdminFunctions,
   savedSpaces: spacesApi,
   onExportEngagement,
+  onAddressSearch,
+  onAddressResolved,
 }: CortexShellInnerProps) {
   const {
     isSavedSpaceId,
@@ -246,6 +265,14 @@ function CortexShellInner({
           onExportEngagement && engagementId ? handleExport : undefined
         }
         exporting={exporting}
+        addressSearch={
+          onAddressSearch ? (
+            <AddressSearchBox
+              onGeocode={onAddressSearch}
+              onResolved={onAddressResolved}
+            />
+          ) : undefined
+        }
         onOpenPicker={() => setPickerOpen(true)}
         onSaveSpace={() => {
           const preset =
@@ -308,6 +335,8 @@ export function CortexShell({
   fetchAdminFunctions,
   savedSpaces,
   onExportEngagement,
+  onAddressSearch,
+  onAddressResolved,
 }: CortexShellProps) {
   const preset =
     presets.find((p) => p.id === initialPresetId) ?? presets[0]!;
@@ -329,6 +358,8 @@ export function CortexShell({
                 fetchAdminFunctions={fetchAdminFunctions}
                 savedSpaces={savedSpaces}
                 onExportEngagement={onExportEngagement}
+                onAddressSearch={onAddressSearch}
+                onAddressResolved={onAddressResolved}
               />
             </DocumentViewerNavigationProvider>
           </AnnotationSelectionProvider>

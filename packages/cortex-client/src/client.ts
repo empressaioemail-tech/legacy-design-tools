@@ -6,6 +6,7 @@ import type {
   Sheet,
   ResponseTask,
   IntakeParseResult,
+  GeocodeResult,
   ComplianceRunResult,
   TileDefWire,
   DocumentUploadUrl,
@@ -60,6 +61,12 @@ export type CortexClient = {
     mode: 'link' | 'file' | 'paste' | 'email'
     content: string | string[]
   }) => Promise<IntakeParseResult[]>
+  /** Forward-geocode an address (or reverse a lat/lng) into a parcel identity. */
+  geocode: (body: {
+    address?: string
+    lat?: number
+    lng?: number
+  }) => Promise<GeocodeResult>
   runCompliancePass: (
     engagementId: string,
     submissionId: string,
@@ -192,6 +199,13 @@ export function createCortexClient(config: CortexClientConfig): CortexClient {
 
     parseIntake(body) {
       return doFetch<IntakeParseResult[]>(`/plan-review/intake`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+    },
+
+    geocode(body) {
+      return doFetch<GeocodeResult>(`/plan-review/geocode`, {
         method: 'POST',
         body: JSON.stringify(body),
       })
