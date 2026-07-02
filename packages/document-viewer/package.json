@@ -1,10 +1,25 @@
 {
   "name": "@hauska/document-viewer",
   "version": "0.1.0",
+  "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "workspace": "./src/index.ts", "types": "./dist/index.d.ts", "import": "./dist/index.mjs", "require": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "workspace": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
   "dependencies": { "pdfjs-dist": "^4" },
   "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19" },

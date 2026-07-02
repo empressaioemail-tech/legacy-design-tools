@@ -1,11 +1,29 @@
 {
   "name": "@hauska/cortex-tiles",
   "version": "0.1.0",
+  "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "workspace": "./src/index.ts", "types": "./dist/index.d.ts", "import": "./dist/index.mjs", "require": "./dist/index.js" } },
-  "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
+  "exports": {
+    ".": {
+      "workspace": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
   "dependencies": {
     "@hauska/cortex-client": "workspace:*",
     "@hauska/tile-shell": "workspace:*",
