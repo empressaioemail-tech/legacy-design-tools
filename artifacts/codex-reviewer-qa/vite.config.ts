@@ -42,6 +42,11 @@ export default defineConfig(({ command }) => {
     },
     plugins: [react(), tailwindcss()],
     resolve: {
+      // The `@hauska/*` workspace packages carry a "workspace" export
+      // condition pointing at their TS source (mirrors tsconfig.base's
+      // customConditions). Honor it here so the production build resolves
+      // them from source without a prebuilt dist/ in the Docker context.
+      conditions: ["workspace"],
       alias: {
         "@": path.resolve(import.meta.dirname, "src"),
         "node:crypto": path.resolve(import.meta.dirname, "src/crypto-browser-stub.ts"),
