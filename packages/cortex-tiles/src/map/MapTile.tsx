@@ -1,68 +1,20 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
+import { FloatingMap } from '@hauska/map-renderer'
+import '@hauska/map-renderer/styles.css'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import { useEngagement, useSpatial, TileStatusBanner } from '@hauska/tile-shell'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 
-const baseUrl =
-  import.meta.env.VITE_HAUSKA_MAP_URL ?? 'https://map.hauska.io/command-center'
-
-// ─── SWAP SEAM ────────────────────────────────────────────────────
-// MapSurface is the single import seam for the map renderer. Today it is the
-// iframe embed of the external hauska-map command center, which centers on the
-// parcel (lat/lng/apn) and renders SpatialProvider overlays via postMessage.
-// This is the accepted fallback while @hauska/map-renderer is unpublished
-// (npm view @hauska/map-renderer -> 404).
-//   SWAP SEAM: replace <MapSurface/> below with <FloatingMap/> from
-//   @hauska/map-renderer when that package publishes. The props (apn,
-//   jurisdiction, lat, lng, overlays) are the intended renderer contract.
-type MapSurfaceProps = {
-  apn: string
-  jurisdiction: string
-  lat: number | null
-  lng: number | null
-  overlays: ReturnType<typeof useSpatial>['overlays']
-}
-
-function MapSurface({ apn, jurisdiction, lat, lng, overlays }: MapSurfaceProps) {
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-
-  const iframeSrc = useMemo(() => {
-    const params = new URLSearchParams()
-    if (apn) params.set('apn', apn)
-    if (jurisdiction) params.set('jurisdiction', jurisdiction)
-    if (lat != null) params.set('lat', String(lat))
-    if (lng != null) params.set('lng', String(lng))
-    params.set('mode', 'embed')
-    const qs = params.toString()
-    return qs ? `${baseUrl}?${qs}` : `${baseUrl}?mode=embed`
-  }, [apn, jurisdiction, lat, lng])
-
-  function postMapContext() {
-    const frame = iframeRef.current
-    if (!frame?.contentWindow) return
-    for (const overlay of overlays) {
-      frame.contentWindow.postMessage({ type: 'ADD_OVERLAY', overlay }, '*')
-    }
-    if (apn) {
-      frame.contentWindow.postMessage({ type: 'SET_PARCEL', apn }, '*')
-    }
-  }
-
-  useEffect(() => {
-    postMapContext()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlays, apn, iframeSrc])
-
-  return (
-    <iframe
-      ref={iframeRef}
-      src={iframeSrc}
-      onLoad={postMapContext}
-      style={{ flex: 1, border: 'none', width: '100%', minHeight: 0 }}
-      title="Hauska Map"
-      allow="*"
-    />
-  )
-}
+// The map renders through @hauska/map-renderer (ADR-024 shared-surface package),
+// replacing the prior iframe embed of the external hauska-map command center.
+// floating={false} yields a plain filled container the tile positions itself.
+// The parcel prop drives the flyTo recenter on the engagement parcel.
+//
+// Overlay rendering: FloatingMap's `overlays` prop is reserved and not yet wired
+// in the renderer (map-renderer @0.1.0). SpatialProvider overlays therefore do
+// not draw on the map yet; this matches prior behavior (the old iframe posted
+// ADD_OVERLAY messages that the console never handled). Live overlays land when
+// map-renderer ships setOverlays (tracked as the 0.1.1 follow-up).
 
 function MapTileInner() {
   const { engagement } = useEngagement()
@@ -72,6 +24,16 @@ function MapTileInner() {
   const jurisdiction = engagement?.jurisdiction ?? ''
   const lat = engagement?.latitude ?? null
   const lng = engagement?.longitude ?? null
+
+  const center = useMemo(
+    () => (lat != null && lng != null ? { latitude: lat, longitude: lng } : undefined),
+    [lat, lng],
+  )
+
+  const parcel = useMemo(
+    () => (lat != null && lng != null ? { apn, lat, lng } : null),
+    [apn, lat, lng],
+  )
 
   return (
     <div
@@ -86,24 +48,12 @@ function MapTileInner() {
       }}
     >
       <TileStatusBanner status="live" label="Map" />
-      {!import.meta.env.VITE_HAUSKA_MAP_URL ? (
-        <div
-          style={{
-            padding: 'var(--h-space-sm)',
-            fontSize: 'var(--h-text-sm)',
-            color: 'var(--h-text-muted)',
-            flexShrink: 0,
-          }}
-        >
-          Set VITE_HAUSKA_MAP_URL in .env.local to use the local hauska-map.
-        </div>
-      ) : null}
-      <MapSurface
-        apn={apn}
-        jurisdiction={jurisdiction}
-        lat={lat}
-        lng={lng}
-        overlays={overlays}
+      <FloatingMap
+        floating={false}
+        center={center}
+        parcel={parcel}
+        address={jurisdiction || undefined}
+        style={{ flex: 1, minHeight: 0 }}
       />
       {!engagement ? (
         <p
@@ -129,6 +79,7 @@ function MapTileInner() {
         >
           Center: {lat.toFixed(5)}, {lng.toFixed(5)}
           {apn ? ` · APN ${apn}` : ''}
+          {overlays.length ? ` · ${overlays.length} overlay${overlays.length === 1 ? '' : 's'} pending` : ''}
         </p>
       ) : null}
     </div>
