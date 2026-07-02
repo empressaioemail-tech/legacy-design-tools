@@ -8,10 +8,53 @@ import {
 } from "react";
 import type { EngagementDetail, EngagementReportResult } from "../types";
 
+/**
+ * The single shared active-parcel identity read by every address-scoped tile.
+ *
+ * There is ONE authority for "what property is the workspace looking at" and it
+ * lives here, on the engagement context. Tiles must NOT hold their own apn /
+ * lat / lng / jurisdiction — they read `activeParcel` (or the `engagement`) from
+ * this provider. The three setters (intake-queue row-click, the top-bar address
+ * search, and map-click) all route through `setEngagement` / `setActiveParcel`
+ * so the map, the property brief, the hazard profile, setbacks, encumbrances,
+ * and every other address-scoped surface react to the same selection.
+ */
+export type ActiveParcel = {
+  engagementId: string | null;
+  apn: string | null;
+  jurisdiction: string | null;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+};
+
+const EMPTY_PARCEL: ActiveParcel = {
+  engagementId: null,
+  apn: null,
+  jurisdiction: null,
+  address: null,
+  lat: null,
+  lng: null,
+};
+
 type EngagementContextValue = {
   engagementId: string | null;
   engagement: EngagementDetail | null;
+  /**
+   * The unified active-parcel identity, derived from the current engagement and
+   * layered with any parcel-only selection (address search / map-click that has
+   * no engagement yet). This is the field address-scoped tiles read.
+   */
+  activeParcel: ActiveParcel;
   setEngagement: (id: string | null, detail?: EngagementDetail | null) => void;
+  /**
+   * Set the active parcel WITHOUT (necessarily) a full engagement — used by the
+   * address-search box and by map-click. Passing an engagementId here scopes the
+   * parcel to that engagement; omitting it sets an engagement-less parcel that
+   * apn/jurisdiction-scoped tiles can still key on. Setting a parcel that
+   * matches the current engagement leaves the engagement selection intact.
+   */
+  setActiveParcel: (parcel: Partial<ActiveParcel>) => void;
   setEngagementReportResult: (
     type: string,
     result: EngagementReportResult,
@@ -29,6 +72,13 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
   const [engagement, setEngagementState] = useState<EngagementDetail | null>(
     null,
   );
+  // A parcel selection that is NOT (yet) backed by a loaded engagement — set by
+  // the address-search box or a map-click on a parcel with no engagement.
+  // Cleared whenever a real engagement is selected so the engagement is the
+  // authority when one exists.
+  const [parcelOverride, setParcelOverride] = useState<ActiveParcel | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [queueRefreshToken, setQueueRefreshToken] = useState(0);
 
@@ -40,9 +90,27 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     (id: string | null, detail?: EngagementDetail | null) => {
       setEngagementId(id);
       setEngagementState(detail ?? null);
+      // A concrete engagement is now the authority; drop any parcel-only override.
+      setParcelOverride(null);
     },
     [],
   );
+
+  const setActiveParcel = useCallback((parcel: Partial<ActiveParcel>) => {
+    setParcelOverride((prev) => ({
+      ...(prev ?? EMPTY_PARCEL),
+      ...parcel,
+    }));
+    // The caller may scope the parcel to a specific engagement id. Only ADOPT a
+    // concrete engagement id; a null/undefined id here means "a bare parcel
+    // selection" (address-search / map-click) and must NOT null out a currently
+    // loaded engagement's id — the override, being coordinate-bearing, becomes
+    // the authority in the `activeParcel` memo below without disturbing the
+    // engagement selection (so engagement report tiles keep working).
+    if (parcel.engagementId) {
+      setEngagementId(parcel.engagementId);
+    }
+  }, []);
 
   const setEngagementReportResult = useCallback(
     (type: string, result: EngagementReportResult) => {
@@ -57,11 +125,59 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Derive the unified active parcel.
+  //
+  // Precedence rule: a coordinate-bearing override (a fresh address-search or
+  // map-click that landed a lat/lng) is what the workspace is NOW looking at, so
+  // it WINS over the loaded engagement's parcel fields — otherwise searching a
+  // new address while an engagement is loaded would silently keep showing the
+  // engagement's parcel. The engagementId is preserved (report tiles still work)
+  // but the spatial identity follows the selection.
+  //
+  // When the override carries no coordinates (e.g. an engagement is loaded and
+  // no separate parcel was selected), the engagement is the authority and the
+  // override only fills fields the engagement lacks.
+  const activeParcel = useMemo<ActiveParcel>(() => {
+    const overrideHasCoords =
+      parcelOverride != null &&
+      parcelOverride.lat != null &&
+      parcelOverride.lng != null;
+
+    if (overrideHasCoords) {
+      return {
+        // Keep the engagement id if one is loaded so engagement-scoped tiles
+        // (compliance, letter, findings) still resolve.
+        engagementId: engagement?.id ?? parcelOverride!.engagementId ?? engagementId,
+        apn: parcelOverride!.apn ?? engagement?.apn ?? null,
+        jurisdiction: parcelOverride!.jurisdiction ?? engagement?.jurisdiction ?? null,
+        address: parcelOverride!.address ?? engagement?.address ?? null,
+        lat: parcelOverride!.lat,
+        lng: parcelOverride!.lng,
+      };
+    }
+
+    if (engagement) {
+      return {
+        engagementId: engagement.id,
+        apn: engagement.apn ?? parcelOverride?.apn ?? null,
+        jurisdiction:
+          engagement.jurisdiction ?? parcelOverride?.jurisdiction ?? null,
+        address: engagement.address ?? parcelOverride?.address ?? null,
+        lat: engagement.latitude ?? parcelOverride?.lat ?? null,
+        lng: engagement.longitude ?? parcelOverride?.lng ?? null,
+      };
+    }
+    if (parcelOverride) return parcelOverride;
+    return { ...EMPTY_PARCEL, engagementId };
+  }, [engagement, parcelOverride, engagementId]);
+
   const value = useMemo(
     () => ({
       engagementId,
       engagement,
+      activeParcel,
       setEngagement,
+      setActiveParcel,
       setEngagementReportResult,
       loading,
       setLoading,
@@ -71,7 +187,9 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     [
       engagementId,
       engagement,
+      activeParcel,
       setEngagement,
+      setActiveParcel,
       setEngagementReportResult,
       loading,
       queueRefreshToken,
@@ -92,4 +210,13 @@ export function useEngagement(): EngagementContextValue {
     throw new Error("useEngagement must be used within EngagementProvider");
   }
   return ctx;
+}
+
+/**
+ * Convenience hook for address-scoped tiles: returns the single shared active
+ * parcel. Equivalent to `useEngagement().activeParcel` — provided so tiles read
+ * an obviously-shared surface rather than reaching for engagement internals.
+ */
+export function useActiveParcel(): ActiveParcel {
+  return useEngagement().activeParcel;
 }

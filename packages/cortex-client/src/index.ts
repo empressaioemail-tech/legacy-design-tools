@@ -23,6 +23,7 @@ export type {
   Sheet,
   ResponseTask,
   IntakeParseResult,
+  GeocodeResult,
   PrecedenceResultWire,
   ComplianceRunResult,
   TileDefWire,

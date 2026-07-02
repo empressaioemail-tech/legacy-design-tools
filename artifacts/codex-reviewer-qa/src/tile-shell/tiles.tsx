@@ -18,6 +18,10 @@ import {
   EncumbranceTile,
   SheetExtractionTile,
   ResponseTasksTile,
+  FindingsLibraryTile,
+  LocalSetbacksTile,
+  DocumentParsingTile,
+  ProductSpecReferenceTile,
 } from "@hauska/cortex-tiles";
 // Option-3 app-resident tiles (kept in the app; still error-boundary-wrapped).
 import ComplianceRunTile from "../tiles/Compliance/compliance-run";
@@ -61,6 +65,10 @@ const COMPONENTS: Record<string, () => React.ReactElement> = {
   encumbrances: () => <EncumbranceTile />,
   "sheet-extraction": () => <SheetExtractionTile />,
   "response-tasks": () => <ResponseTasksTile />,
+  "findings-library": () => <FindingsLibraryTile />,
+  setbacks: () => <LocalSetbacksTile />,
+  "doc-parsing": () => <DocumentParsingTile />,
+  "product-spec": () => <ProductSpecReferenceTile />,
   letter: () => <LetterTile />,
 };
 

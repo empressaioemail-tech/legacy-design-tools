@@ -13,6 +13,7 @@ export { TileErrorBoundary } from './TileErrorBoundary'
 
 // Compliance
 export { IntakeQueueTile } from './compliance/IntakeQueueTile'
+export { FindingsLibraryTile } from './compliance/FindingsLibraryTile'
 
 // Intake
 export { IntakeTile } from './intake/IntakeTile'
@@ -28,8 +29,11 @@ export { SubsurfaceTile } from './site-analysis/SubsurfaceTile'
 export { PropertyBriefTile } from './property-intel/PropertyBriefTile'
 export { HazardProfileTile } from './property-intel/HazardProfileTile'
 export { EncumbranceTile } from './property-intel/EncumbranceTile'
+export { LocalSetbacksTile } from './property-intel/LocalSetbacksTile'
 export { ReportTileShell } from './property-intel/ReportTileShell'
 
 // Design Accelerator
 export { SheetExtractionTile } from './design-accelerator/SheetExtractionTile'
 export { ResponseTasksTile } from './design-accelerator/ResponseTasksTile'
+export { DocumentParsingTile } from './design-accelerator/DocumentParsingTile'
+export { ProductSpecReferenceTile } from './design-accelerator/ProductSpecReferenceTile'

@@ -149,6 +149,21 @@ export type ResponseTask = {
   engagementId: string
 }
 
+// ─── Geocode ─────────────────────────────────────────────────────
+// From the plan-review BFF POST /geocode route (wraps resolvePlace). Drives the
+// shell top-bar address-search box → shared active-parcel context.
+export type GeocodeResult = {
+  placeKey: string
+  apn: string | null
+  jurisdiction: string | null
+  address: string | null
+  lat: number
+  lng: number
+  city: string | null
+  state: string | null
+  confidence: 'high' | 'coordinates' | 'low'
+}
+
 // ─── Intake ──────────────────────────────────────────────────────
 // Matches IntakeParseResult (tile-shell/types.ts app-only type) and the
 // api-server POST /intake res.json() elements.
