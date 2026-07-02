@@ -9,8 +9,7 @@ import {
   type MarkupTool,
   type Annotation,
 } from "@hauska/document-viewer";
-import { useEngagement } from "../../tile-shell/providers/EngagementProvider";
-import { TileStatusBanner } from "../../tile-shell/components/TileStatusBanner";
+import { useEngagement, TileStatusBanner } from "@hauska/tile-shell";
 import {
   fetchEngagementDocuments,
   fetchEngagementSubmissions,
