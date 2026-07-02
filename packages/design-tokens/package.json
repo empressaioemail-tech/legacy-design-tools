@@ -1,6 +1,16 @@
 {
   "name": "@hauska/design-tokens",
   "version": "0.1.0",
+  "license": "MIT",
   "main": "./tokens.css",
-  "exports": { ".": "./tokens.css", "./tokens.css": "./tokens.css" }
+  "exports": {
+    ".": "./tokens.css",
+    "./tokens.css": "./tokens.css"
+  },
+  "files": [
+    "tokens.css"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

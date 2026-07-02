@@ -1,10 +1,27 @@
 {
   "name": "@hauska/tile-shell",
   "version": "0.1.0",
+  "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "workspace": "./src/index.ts", "types": "./dist/index.d.ts", "import": "./dist/index.mjs", "require": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "workspace": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.mjs"
+    },
+    "./index.css": "./dist/index.css",
+    "./dist/index.css": "./dist/index.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": { "@hauska/design-tokens": "workspace:*" },
   "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
   "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19" },

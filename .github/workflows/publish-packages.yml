@@ -1,0 +1,122 @@
+name: Publish Packages
+
+# Publishes the @hauska component-library packages that live in this repo to
+# npm, in dependency order. Idempotent: a version already on the registry is
+# skipped, never re-published (npm forbids re-publishing a version anyway).
+#
+# The workspace-cross-package deps use the `workspace:*` protocol; `pnpm publish`
+# rewrites those to the real published version in the packed tarball. The
+# `workspace` export condition stays pointing at ./src for the monorepo's own
+# vite/tsc, but external consumers resolving the tarball land on ./dist because
+# they do not pass --conditions=workspace.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack only, do not publish (verify tarballs)"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "packages-v*"
+
+jobs:
+  publish:
+    name: Build and publish @hauska packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages in dependency order
+        run: |
+          set -euo pipefail
+          # design-tokens is CSS-only (no build script). The React/TS packages
+          # build to dist via tsup. Order does not matter for the build itself
+          # (each package is externalized from its @hauska deps), but we build
+          # the leaves first for clarity.
+          pnpm --filter "@hauska/cortex-client" run build
+          pnpm --filter "@hauska/tile-shell" run build
+          pnpm --filter "@hauska/document-viewer" run build
+          pnpm --filter "@hauska/cortex-tiles" run build
+
+      - name: Publish in dependency order (idempotent)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          publish_pkg() {
+            local dir="$1"
+            local name
+            local version
+            name=$(node -p "require('./packages/${dir}/package.json').name")
+            version=$(node -p "require('./packages/${dir}/package.json').version")
+
+            # Idempotency: skip if this exact version is already on npm.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "SKIP ${name}@${version} — already on npm"
+              return 0
+            fi
+
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "DRY_RUN pack ${name}@${version}"
+              ( cd "packages/${dir}" && pnpm pack )
+            else
+              echo "PUBLISH ${name}@${version}"
+              # --no-git-checks: the tag/dispatch ref may be detached.
+              # pnpm publish rewrites workspace:* to the real version.
+              ( cd "packages/${dir}" && pnpm publish --access public --no-git-checks )
+            fi
+          }
+
+          # Wave 1: zero-@hauska-dep leaves.
+          publish_pkg design-tokens
+          publish_pkg cortex-client
+
+          # Wave 2: depend only on already-published leaves (or no @hauska dep).
+          publish_pkg tile-shell
+          publish_pkg document-viewer
+
+          # Wave 3: depends on cortex-client + tile-shell + design-tokens (npm)
+          # plus @hauska/map-renderer@^0.1.1 (already on npm) + maplibre-gl peer.
+          publish_pkg cortex-tiles
+
+      - name: Verify published versions
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          for name in design-tokens cortex-client tile-shell document-viewer cortex-tiles; do
+            echo "@hauska/${name}: $(npm view @hauska/${name} version)"
+          done
