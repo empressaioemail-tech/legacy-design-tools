@@ -2268,7 +2268,7 @@ router.get(
       res.status(401).json({ error: "authentication_required" });
       return;
     }
-    const name = req.params.name;
+    const name = String(req.params.name);
     try {
       const [row] = await db
         .select()
@@ -2361,7 +2361,7 @@ router.delete(
           and(
             eq(savedWorkspaceSpaces.tenantId, owner.tenantId),
             eq(savedWorkspaceSpaces.ownerUserId, owner.ownerUserId),
-            eq(savedWorkspaceSpaces.name, req.params.name),
+            eq(savedWorkspaceSpaces.name, String(req.params.name)),
           ),
         );
       res.status(200).json({ ok: true });
@@ -2390,7 +2390,7 @@ router.post(
           and(
             eq(savedWorkspaceSpaces.tenantId, owner.tenantId),
             eq(savedWorkspaceSpaces.ownerUserId, owner.ownerUserId),
-            eq(savedWorkspaceSpaces.name, req.params.name),
+            eq(savedWorkspaceSpaces.name, String(req.params.name)),
           ),
         )
         .limit(1);
@@ -2428,7 +2428,7 @@ router.get(
           snapshot: savedWorkspaceSpaces.snapshot,
         })
         .from(savedWorkspaceSpaces)
-        .where(eq(savedWorkspaceSpaces.shareToken, req.params.token))
+        .where(eq(savedWorkspaceSpaces.shareToken, String(req.params.token)))
         .limit(1);
       if (!row) {
         res.status(404).json({ error: "share_not_found" });
