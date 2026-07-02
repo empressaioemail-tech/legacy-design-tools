@@ -572,6 +572,23 @@ CREATE TABLE @@SCHEMA@@.coverage_requests (
 );
 
 
+-- Name: dataroom_document_atoms; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.dataroom_document_atoms (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    document_id uuid NOT NULL,
+    engagement_id uuid NOT NULL,
+    atom_did text NOT NULL,
+    entity_type text NOT NULL,
+    access_policy text NOT NULL,
+    storage_relation text NOT NULL,
+    confidence jsonb NOT NULL,
+    verification_status text NOT NULL,
+    source_document_cid text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: decision_pdf_artifacts; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.decision_pdf_artifacts (
@@ -1671,6 +1688,12 @@ ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
     ADD CONSTRAINT coverage_requests_pkey PRIMARY KEY (id);
 
 
+-- Name: dataroom_document_atoms dataroom_document_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.dataroom_document_atoms
+    ADD CONSTRAINT dataroom_document_atoms_pkey PRIMARY KEY (id);
+
+
 -- Name: decision_pdf_artifacts decision_pdf_artifacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
@@ -2258,6 +2281,21 @@ CREATE INDEX coverage_requests_engagement_idx ON @@SCHEMA@@.coverage_requests US
 CREATE INDEX coverage_requests_open_idx ON @@SCHEMA@@.coverage_requests USING btree (status, created_at);
 
 
+-- Name: dataroom_document_atoms_doc_atom_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX dataroom_document_atoms_doc_atom_uniq ON @@SCHEMA@@.dataroom_document_atoms USING btree (document_id, atom_did);
+
+
+-- Name: dataroom_document_atoms_document_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX dataroom_document_atoms_document_idx ON @@SCHEMA@@.dataroom_document_atoms USING btree (document_id);
+
+
+-- Name: dataroom_document_atoms_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX dataroom_document_atoms_engagement_idx ON @@SCHEMA@@.dataroom_document_atoms USING btree (engagement_id);
+
+
 -- Name: decision_pdf_artifacts_submission_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX decision_pdf_artifacts_submission_idx ON @@SCHEMA@@.decision_pdf_artifacts USING btree (submission_id, rendered_at);
@@ -2720,6 +2758,18 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
     ADD CONSTRAINT coverage_requests_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: dataroom_document_atoms dataroom_document_atoms_document_id_attached_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.dataroom_document_atoms
+    ADD CONSTRAINT dataroom_document_atoms_document_id_attached_documents_id_fk FOREIGN KEY (document_id) REFERENCES @@SCHEMA@@.attached_documents(id) ON DELETE CASCADE;
+
+
+-- Name: dataroom_document_atoms dataroom_document_atoms_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.dataroom_document_atoms
+    ADD CONSTRAINT dataroom_document_atoms_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: decision_pdf_artifacts decision_pdf_artifacts_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
