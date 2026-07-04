@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { generateBriefing, resolveBriefingLlmMode } from "../engine";
+import {
+  generateBriefing,
+  resolveBriefingLlmMode,
+  BriefingLlmModeConfigError,
+} from "../engine";
 import type { BriefingSourceInput, GenerateBriefingInput } from "../types";
 
 const src = (overrides: Partial<BriefingSourceInput>): BriefingSourceInput => ({
@@ -121,11 +125,56 @@ describe("resolveBriefingLlmMode", () => {
     }
   });
 
-  it("treats unknown env values as mock", () => {
+  it("returns mock only when BRIEFING_LLM_MODE === 'mock' explicitly", () => {
+    const original = process.env.BRIEFING_LLM_MODE;
+    process.env.BRIEFING_LLM_MODE = "mock";
+    try {
+      expect(resolveBriefingLlmMode()).toBe("mock");
+    } finally {
+      if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
+      else process.env.BRIEFING_LLM_MODE = original;
+    }
+  });
+
+  it("throws BriefingLlmModeConfigError when BRIEFING_LLM_MODE is unset", () => {
+    const original = process.env.BRIEFING_LLM_MODE;
+    delete process.env.BRIEFING_LLM_MODE;
+    try {
+      expect(() => resolveBriefingLlmMode()).toThrow(
+        BriefingLlmModeConfigError,
+      );
+      expect(() => resolveBriefingLlmMode()).toThrow(
+        /BRIEFING_LLM_MODE is not set/,
+      );
+    } finally {
+      if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
+      else process.env.BRIEFING_LLM_MODE = original;
+    }
+  });
+
+  it("throws BriefingLlmModeConfigError when BRIEFING_LLM_MODE is empty", () => {
+    const original = process.env.BRIEFING_LLM_MODE;
+    process.env.BRIEFING_LLM_MODE = "  ";
+    try {
+      expect(() => resolveBriefingLlmMode()).toThrow(
+        BriefingLlmModeConfigError,
+      );
+    } finally {
+      if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
+      else process.env.BRIEFING_LLM_MODE = original;
+    }
+  });
+
+  it("throws on unknown env values instead of silently mocking", () => {
     const original = process.env.BRIEFING_LLM_MODE;
     process.env.BRIEFING_LLM_MODE = "openai";
     try {
-      expect(resolveBriefingLlmMode()).toBe("mock");
+      expect(() => resolveBriefingLlmMode()).toThrow(
+        BriefingLlmModeConfigError,
+      );
+      expect(() => resolveBriefingLlmMode()).toThrow(
+        /unrecognized value "openai"/,
+      );
     } finally {
       if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
       else process.env.BRIEFING_LLM_MODE = original;

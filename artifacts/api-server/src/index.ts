@@ -87,9 +87,11 @@ try {
   process.exit(1);
 }
 
-// Fail-fast on misconfigured briefing-engine env: when
-// BRIEFING_LLM_MODE=grok we require XAI_API_KEY; when anthropic we
-// require the AI Integrations env vars. Mock mode boots clean.
+// Fail-fast on misconfigured briefing-engine env: BRIEFING_LLM_MODE
+// is required (unset or unknown values throw — no implicit mock);
+// when grok we require XAI_API_KEY; when anthropic we require the AI
+// Integrations env vars. Mock mode must be requested explicitly with
+// BRIEFING_LLM_MODE=mock and then boots clean.
 try {
   validateBriefingEngineEnvAtBoot();
 } catch (err) {

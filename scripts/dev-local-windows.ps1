@@ -48,6 +48,9 @@ if (-not $env:AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
 if (-not $env:AI_INTEGRATIONS_ANTHROPIC_API_KEY) {
   $env:AI_INTEGRATIONS_ANTHROPIC_API_KEY = "dev-key-not-real"
 }
+# BRIEFING_LLM_MODE is required (fail-loud when unset); dev explicitly
+# requests the deterministic mock generator.
+if (-not $env:BRIEFING_LLM_MODE) { $env:BRIEFING_LLM_MODE = "mock" }
 
 # GCS ADC for GLB/sheet serve (Replit sidecar :1106 is not available on Windows).
 $DefaultGcpKey = "C:\Users\cente\google-cloud-sdk\smartcity-agent-key.json"
@@ -83,6 +86,7 @@ if (Test-Path '$EnvLocal') {
 if (-not `$env:SNAPSHOT_SECRET) { `$env:SNAPSHOT_SECRET = 'dev-local-snapshot-secret' }
 if (-not `$env:AI_INTEGRATIONS_ANTHROPIC_BASE_URL) { `$env:AI_INTEGRATIONS_ANTHROPIC_BASE_URL = 'http://127.0.0.1:9' }
 if (-not `$env:AI_INTEGRATIONS_ANTHROPIC_API_KEY) { `$env:AI_INTEGRATIONS_ANTHROPIC_API_KEY = 'dev-key-not-real' }
+if (-not `$env:BRIEFING_LLM_MODE) { `$env:BRIEFING_LLM_MODE = 'mock' }
 if (-not `$env:GOOGLE_APPLICATION_CREDENTIALS -and (Test-Path '$DefaultGcpKey')) {
   `$env:GOOGLE_APPLICATION_CREDENTIALS = '$DefaultGcpKey'
 }

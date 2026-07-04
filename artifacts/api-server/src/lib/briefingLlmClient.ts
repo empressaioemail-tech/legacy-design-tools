@@ -2,7 +2,8 @@
  * Briefing-engine LLM client. Mirrors the {@link findingLlmClient}
  * pattern: lazy singleton off `BRIEFING_LLM_MODE`.
  *
- *   - `mock` (default): null — deterministic mock generator.
+ *   - `mock` (must be explicit — unset env fails loud): null —
+ *     deterministic mock generator.
  *   - `grok`: xAI Grok via `@workspace/integrations-xai-grok`.
  *   - `anthropic`: Anthropic Claude Sonnet 4.5 (Spec 51 / DA-PI-3).
  *

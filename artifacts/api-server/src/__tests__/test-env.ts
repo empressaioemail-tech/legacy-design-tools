@@ -10,6 +10,13 @@
  */
 process.env.NODE_ENV = "test";
 
+// Briefing engine: BRIEFING_LLM_MODE is now required (fail-loud when
+// unset — no implicit mock default). Tests want the deterministic mock
+// generator, so request it explicitly here.
+if (!process.env.BRIEFING_LLM_MODE?.trim()) {
+  process.env.BRIEFING_LLM_MODE = "mock";
+}
+
 // C3 BFF: spine client requires a configured engine-api URL at runtime.
 // Integration tests delegate spine routing to local engines via
 // engine-spine-test-setup.ts; this dummy URL satisfies any direct client use.
