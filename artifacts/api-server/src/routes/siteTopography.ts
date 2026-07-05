@@ -28,6 +28,7 @@ import {
 import { z } from "zod";
 import { logger } from "../lib/logger";
 import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { verifyGateContext } from "../middlewares/gateContextVerification";
 import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { getHistoryService } from "../atoms/registry";
 import {
@@ -42,6 +43,7 @@ import {
 const router: IRouter = Router();
 
 router.use(requireGateEngineServiceAuth);
+router.use(verifyGateContext);
 
 const REFRESH_BODY_SCHEMA = z
   .object({

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { db, engagements, recordedInstruments, restrictionClauses } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { verifyGateContext } from "../middlewares/gateContextVerification";
 import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { consumePdfUpload } from "../lib/encumbranceMultipart";
 import {
@@ -20,6 +21,7 @@ export { loadEncumbrancesForEngagement } from "../lib/encumbranceService";
 const router: IRouter = Router();
 
 router.use(requireGateEngineServiceAuth);
+router.use(verifyGateContext);
 
 const ENGAGEMENT_PARAMS = z.object({ id: z.string().uuid() });
 const CLAUSE_VERIFY_PARAMS = z.object({

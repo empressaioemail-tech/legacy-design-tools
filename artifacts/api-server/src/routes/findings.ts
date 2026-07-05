@@ -117,6 +117,7 @@ import {
 } from "../lib/findingLlmClient";
 import { publishSubmissionFindingEvent } from "../lib/submissionLiveEvents";
 import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { verifyGateContext } from "../middlewares/gateContextVerification";
 import {
   assertSubmissionServiceTenantScope,
   loadEngagementTenantFields,
@@ -157,6 +158,7 @@ import { PdfRenderError } from "../lib/pdfPageRenderer";
 const router: IRouter = Router();
 
 router.use(requireGateEngineServiceAuth);
+router.use(verifyGateContext);
 
 /** Pinned event-type constants — break compilation on a rename. */
 const FINDING_GENERATED_EVENT_TYPE: FindingEventType = FINDING_EVENT_TYPES[0];

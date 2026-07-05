@@ -70,6 +70,7 @@ import {
 } from "@workspace/briefing-engine";
 import { logger } from "../lib/logger";
 import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { verifyGateContext } from "../middlewares/gateContextVerification";
 import {
   loadEngagementTenantFields,
   assertEngagementServiceTenantScope,
@@ -1935,6 +1936,7 @@ export async function kickoffBriefingGeneration(args: {
 router.post(
   "/engagements/:id/briefing/generate",
   requireGateEngineServiceAuth,
+  verifyGateContext,
   async (req: Request, res: Response) => {
     const paramsParse = GenerateEngagementBriefingParams.safeParse(req.params);
     if (!paramsParse.success) {
