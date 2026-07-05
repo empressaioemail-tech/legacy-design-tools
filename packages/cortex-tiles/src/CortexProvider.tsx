@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { ReactNode } from 'react'
-import type { CortexClient } from '@hauska/cortex-client'
+import type { CortexClient } from '@empressaio/cortex-client'
 
 const CortexContext = createContext<CortexClient | null>(null)
 

@@ -1,9 +1,9 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { useEngagement } from '@hauska/tile-shell'
-import type { CortexClient } from '@hauska/cortex-client'
+import { useEngagement } from '@empressaio/tile-shell'
+import type { CortexClient } from '@empressaio/cortex-client'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
-import { TileStatusBanner } from '@hauska/tile-shell'
+import { TileStatusBanner } from '@empressaio/tile-shell'
 
 type BriefNarrative = {
   sectionA?: string | null

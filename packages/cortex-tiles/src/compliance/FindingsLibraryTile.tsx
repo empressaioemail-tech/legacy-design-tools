@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { useEngagement, TileStatusBanner } from '@hauska/tile-shell'
-import type { EngagementSubmissionSummary } from '@hauska/cortex-client'
+import { useEngagement, TileStatusBanner } from '@empressaio/tile-shell'
+import type { EngagementSubmissionSummary } from '@empressaio/cortex-client'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 

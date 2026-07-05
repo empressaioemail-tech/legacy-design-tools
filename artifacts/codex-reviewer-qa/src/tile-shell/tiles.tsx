@@ -1,9 +1,9 @@
 import type { TileDef } from "./types";
-// Capability fields are the single source of truth in @hauska/cortex-client
+// Capability fields are the single source of truth in @empressaio/cortex-client
 // (React-free). This module DERIVES its registry from TILE_CAPABILITIES and
 // attaches the React `el` factories — so the app and the server-side
 // GET /api/plan-review/admin/tile-registry endpoint cannot drift.
-import { TILE_CAPABILITIES, type TileCapability } from "@hauska/cortex-client";
+import { TILE_CAPABILITIES, type TileCapability } from "@empressaio/cortex-client";
 // Package-resident tiles (moved in Track C Phase 3) — named exports.
 import {
   IntakeQueueTile,
@@ -26,7 +26,7 @@ import {
   ComplianceRunTile,
   DocumentViewerTile,
   LetterTile,
-} from "@hauska/cortex-tiles";
+} from "@empressaio/cortex-tiles";
 // Option-3 app-resident tiles (kept in the app; still error-boundary-wrapped).
 import { makeStubTile, type StubTileMeta } from "../tiles/stubFactory";
 

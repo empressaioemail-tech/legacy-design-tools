@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useEngagement, TileStatusBanner } from '@hauska/tile-shell'
+import { useEngagement, TileStatusBanner } from '@empressaio/tile-shell'
 import type {
   EngagementDocument,
   DataroomAtomChip,
   AssertedConfidence,
-} from '@hauska/cortex-client'
+} from '@empressaio/cortex-client'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 

@@ -9,7 +9,7 @@ import {
   EngagementProvider,
   useEngagement,
   type EngagementDetail,
-} from "@hauska/tile-shell";
+} from "@empressaio/tile-shell";
 
 // A headless probe that exposes the shared active-parcel + the three setters.
 let api: ReturnType<typeof useEngagement>;

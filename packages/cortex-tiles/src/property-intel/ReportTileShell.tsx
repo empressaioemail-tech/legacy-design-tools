@@ -1,5 +1,5 @@
 import { type CSSProperties } from 'react'
-import { TileStatusBanner } from '@hauska/tile-shell'
+import { TileStatusBanner } from '@empressaio/tile-shell'
 
 export const runButtonStyle = (disabled: boolean): CSSProperties => ({
   padding: 'var(--h-space-sm) 14px',

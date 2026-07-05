@@ -1,7 +1,7 @@
 import { getTile } from "../tile-shell/tiles";
-import { EngagementProvider } from "@hauska/tile-shell";
-import { SpatialProvider } from "@hauska/tile-shell";
-import { CodeProvider } from "@hauska/tile-shell";
+import { EngagementProvider } from "@empressaio/tile-shell";
+import { SpatialProvider } from "@empressaio/tile-shell";
+import { CodeProvider } from "@empressaio/tile-shell";
 
 export default function TileDevPage({ tileId }: { tileId: string }) {
   const def = getTile(tileId);

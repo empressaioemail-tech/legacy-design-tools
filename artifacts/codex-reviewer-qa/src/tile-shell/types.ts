@@ -1,4 +1,4 @@
-// Shell/registry types now live in the @hauska/tile-shell package (the single
+// Shell/registry types now live in the @empressaio/tile-shell package (the single
 // authoritative TileDef). Re-export them so app modules keep importing from
 // "../tile-shell/types" unchanged.
 export type {
@@ -11,7 +11,7 @@ export type {
   EngagementDetail,
   EngagementReportResult,
   PrecedenceResultWire,
-} from "@hauska/tile-shell";
+} from "@empressaio/tile-shell";
 
 // App-only types the package shell does not need.
 export type EngagementQueueItem = {

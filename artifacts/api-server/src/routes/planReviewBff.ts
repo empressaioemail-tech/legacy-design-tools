@@ -95,8 +95,8 @@ import type {
   EngagementDetail,
   LetterDraft,
   TileDefWire,
-} from "@hauska/cortex-client";
-import { TILE_CAPABILITIES } from "@hauska/cortex-client";
+} from "@empressaio/cortex-client";
+import { TILE_CAPABILITIES } from "@empressaio/cortex-client";
 
 const planReviewObjectStorage = new ObjectStorageService();
 
@@ -1595,7 +1595,7 @@ router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res
 // non-live tiles. compose_workspace (Hauska MCP server) reads this route to
 // decide which tiles a given engagement context can satisfy.
 //
-// Source of truth: TILE_CAPABILITIES in @hauska/cortex-client, the same array
+// Source of truth: TILE_CAPABILITIES in @empressaio/cortex-client, the same array
 // the SPA derives its TILE_REGISTRY from — so the endpoint and the app cannot
 // drift. Served verbatim; capability metadata is non-sensitive tile
 // descriptors. Auth is requireServiceTokenOrSession, consistent with every
@@ -1614,7 +1614,7 @@ router.get(
 //
 // Engagement-scoped 2D/3D unified annotations (markup / finding overlays).
 // Distinct from the submission-scoped `reviewer_annotations` routes/table —
-// do not conflate. The wire shape mirrors `@hauska/document-viewer`'s
+// do not conflate. The wire shape mirrors `@empressaio/document-viewer`'s
 // `Annotation` type so the DocumentViewerTile round-trips it verbatim.
 
 const ANNOTATION_KINDS = [

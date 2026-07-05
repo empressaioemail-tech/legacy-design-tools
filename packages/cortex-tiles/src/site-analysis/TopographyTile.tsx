@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react'
-import { useEngagement, useSpatial, TileStatusBanner } from '@hauska/tile-shell'
+import { useEngagement, useSpatial, TileStatusBanner } from '@empressaio/tile-shell'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 

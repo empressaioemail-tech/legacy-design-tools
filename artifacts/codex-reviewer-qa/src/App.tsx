@@ -1,7 +1,7 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { CortexProvider } from "@hauska/cortex-tiles";
-import { createCortexClient } from "@hauska/cortex-client";
+import { CortexProvider } from "@empressaio/cortex-tiles";
+import { createCortexClient } from "@empressaio/cortex-client";
 import CortexShell from "./tile-shell/AppCortexShell";
 import TileDevPage from "./tile-dev/TileDevPage";
 import CommentLetterPage from "./pages/CommentLetterPage";

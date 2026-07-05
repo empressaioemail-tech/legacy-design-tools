@@ -1,5 +1,5 @@
-import type { CortexClient } from "@hauska/cortex-client";
-import type { SavedSpacesApi, SpaceSnapshot } from "@hauska/tile-shell";
+import type { CortexClient } from "@empressaio/cortex-client";
+import type { SavedSpacesApi, SpaceSnapshot } from "@empressaio/tile-shell";
 
 export type { SpaceSnapshot };
 
