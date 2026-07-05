@@ -1,30 +1,30 @@
 name: Cloud Run Deploy (cortex-api)
 
-# Cloud Run deploy for the `cortex-api` service â€” the legacy-design-tools
-# Replit â†’ Cloud Run cutover target (Decision 0.20 â‘ : net-new service
+# Cloud Run deploy for the `cortex-api` service — the legacy-design-tools
+# Replit → Cloud Run cutover target (Decision 0.20 ①: net-new service
 # `cortex-api` in the smartcity-os GCP project, us-central1). See
 # docs/deploy.md.
 #
 # Two trigger surfaces:
-# - `push` to `main` runs `build-and-push` only â€” tags <sha> + latest and
+# - `push` to `main` runs `build-and-push` only — tags <sha> + latest and
 #   pushes the image to Artifact Registry. Does NOT deploy, NOT migrate,
 #   NOT touch traffic. The image just sits in the registry until a
 #   deliberate `workflow_dispatch` picks it up.
 # - `workflow_dispatch` with an `action` input runs exactly one of four
 #   deliberate operator-triggered jobs (Phase 2, P2-1 + P2-2):
-#     * `deploy-canary`   â€” create a new revision tagged `canary` at 0%
+#     * `deploy-canary`   — create a new revision tagged `canary` at 0%
 #       traffic (adds --no-traffic when the service already exists; the
 #       first-ever create cannot use --no-traffic per gcloud).
-#     * `run-migrations`  â€” apply pending lib/db/drizzle/*.sql files
+#     * `run-migrations`  — apply pending lib/db/drizzle/*.sql files
 #       to the production DB via `_schema_migrations` tracking. First
 #       run requires `bootstrap=true` to seed the tracker on a DB that
 #       is already at the migration head.
-#     * `shift-traffic`   â€” route 100% traffic to the canary-tagged
+#     * `shift-traffic`   — route 100% traffic to the canary-tagged
 #       revision and smoke-probe production /api/healthz.
-#     * `rollback`        â€” route 100% traffic back to a named prior
+#     * `rollback`        — route 100% traffic back to a named prior
 #       revision (`rollback_revision` input).
 #
-# HARD CONSTRAINTS â€” do not relax:
+# HARD CONSTRAINTS — do not relax:
 # - Traffic shifts and DB migrations are NEVER coupled to `push`. The
 #   shift-traffic / rollback / run-migrations jobs only run on
 #   workflow_dispatch and gate on `inputs.action`; they are unreachable
@@ -32,8 +32,8 @@ name: Cloud Run Deploy (cortex-api)
 #   separate deliberate operator action.
 # - build-and-push stays push-triggered and image-only. It does not
 #   deploy, it does not migrate, it does not shift traffic.
-# - Canary discipline: the canonical canary sequence is deploy-canary â†’
-#   run-migrations â†’ smoke â†’ shift-traffic, separate dispatches each.
+# - Canary discipline: the canonical canary sequence is deploy-canary →
+#   run-migrations → smoke → shift-traffic, separate dispatches each.
 #   See 90_runbooks/cloud_run_canary_deploy.md.
 #
 # Toolchain (pnpm 10, Node 20) intentionally mirrors .github/workflows/pr-checks.yml.
@@ -55,17 +55,17 @@ on:
           - shift-traffic
           - rollback
       image_tag:
-        description: "deploy-canary only â€” image tag (sha preferred; 'latest' = the most recent build-and-push)"
+        description: "deploy-canary only — image tag (sha preferred; 'latest' = the most recent build-and-push)"
         required: false
         default: latest
         type: string
       rollback_revision:
-        description: "rollback only â€” revision name to send 100% traffic to (e.g. cortex-api-00017-gex)"
+        description: "rollback only — revision name to send 100% traffic to (e.g. cortex-api-00017-gex)"
         required: false
         default: ""
         type: string
       bootstrap:
-        description: "run-migrations only â€” first-run flag: seed _schema_migrations with every existing file marked applied (use when the DB is already at the head)"
+        description: "run-migrations only — first-run flag: seed _schema_migrations with every existing file marked applied (use when the DB is already at the head)"
         required: false
         default: false
         type: boolean
@@ -167,7 +167,7 @@ jobs:
         #
         # Object paths (artifacts/api-server/src/lib/objectStorage.ts):
         # parseObjectPath expects `/<bucket>/<prefix>`. PUBLIC entries must
-        # not end with `/` â€” search joins `${searchPath}/${filePath}`.
+        # not end with `/` — search joins `${searchPath}/${filePath}`.
         # PRIVATE_OBJECT_DIR is the prefix before the code-appended
         # `/uploads/<uuid>` (use `.../.private`, not `.../.private/uploads`).
         #
@@ -225,12 +225,12 @@ jobs:
           HOST="${BASE_URL#https://}"
           HOST="${HOST#http://}"
           echo ""
-          echo "Canary tag URL (smoke /api/healthz here; after first deploy, default URL may share traffic â€” see job log above):"
+          echo "Canary tag URL (smoke /api/healthz here; after first deploy, default URL may share traffic — see job log above):"
           echo "  https://canary---${HOST}"
 
-  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  # Phase 2 â€” operator-triggered deploy lifecycle jobs.
-  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # ────────────────────────────────────────────────────────────────────
+  # Phase 2 — operator-triggered deploy lifecycle jobs.
+  # ────────────────────────────────────────────────────────────────────
   # Each gates on `inputs.action`; only ever reachable from a deliberate
   # workflow_dispatch. Never from a push.
 
@@ -293,7 +293,7 @@ jobs:
       - name: Fetch DATABASE_URL from Secret Manager
         # `::add-mask::` keeps the connection string out of the GHA log.
         # The deploy SA has `roles/secretmanager.secretAccessor` per
-        # docs/deploy.md Â§4; the same binding the Cloud Run runtime uses.
+        # docs/deploy.md §4; the same binding the Cloud Run runtime uses.
         run: |
           set -euo pipefail
           URL=$(gcloud secrets versions access latest \
@@ -364,7 +364,7 @@ jobs:
           STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/api/healthz")
           echo "GET ${BASE_URL}/api/healthz -> HTTP ${STATUS}"
           if [ "$STATUS" != "200" ]; then
-            echo "::error::Production /api/healthz returned HTTP ${STATUS} after traffic shift â€” investigate before declaring the shift done"
+            echo "::error::Production /api/healthz returned HTTP ${STATUS} after traffic shift — investigate before declaring the shift done"
             exit 1
           fi
 
