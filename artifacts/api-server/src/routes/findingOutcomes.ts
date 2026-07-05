@@ -13,6 +13,7 @@ import {
 } from "express";
 import { z } from "zod";
 import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAuth";
+import { verifyGateContext } from "../middlewares/gateContextVerification";
 import {
   RecordFindingOutcomeBody,
   handleRecordFindingOutcome,
@@ -22,6 +23,7 @@ import {
 const router: IRouter = Router();
 
 router.use(requireGateEngineServiceAuth);
+router.use(verifyGateContext);
 
 function requireOutcomeCaptureAudience(req: Request, res: Response): boolean {
   if (req.serviceAuth) return false;
