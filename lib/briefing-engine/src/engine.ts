@@ -6,9 +6,10 @@
  * citations the validator stripped.
  *
  * Mode is selected from env (`BRIEFING_LLM_MODE`) when not passed
- * explicitly. Default is `mock` — same convention as the DXF
- * converter (`DXF_CONVERTER_MODE`) so dev / CI work out-of-the-box
- * without an API key.
+ * explicitly. The env var is REQUIRED: an unset or unrecognized value
+ * throws {@link BriefingLlmModeConfigError} instead of silently
+ * falling back to mock (silent-mock-in-prod footgun). Dev / CI must
+ * opt in explicitly with `BRIEFING_LLM_MODE=mock`.
  */
 
 import type Anthropic from "@anthropic-ai/sdk";
@@ -59,15 +60,45 @@ export interface GenerateBriefingOptions {
 }
 
 /**
+ * Thrown when `BRIEFING_LLM_MODE` is unset or set to an unrecognized
+ * value. Deliberately loud: a briefing silently produced by the mock
+ * generator in production is worse than a boot failure.
+ */
+export class BriefingLlmModeConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BriefingLlmModeConfigError";
+  }
+}
+
+/**
  * Resolve the engine mode from env. The route layer can override at
  * call time; this helper exists so a single source of truth backs both
  * the route's startup log and the engine's runtime branch.
+ *
+ * Fails loud when `BRIEFING_LLM_MODE` is unset or unrecognized — mock
+ * mode must be requested explicitly (`BRIEFING_LLM_MODE=mock`). This
+ * matches the api-server client posture (`briefingLlmClient.ts` hard
+ * fails when grok / anthropic modes lack their API keys).
  */
 export function resolveBriefingLlmMode(): BriefingLlmMode {
-  const raw = (process.env.BRIEFING_LLM_MODE ?? "mock").toLowerCase();
-  if (raw === "grok") return "grok";
-  if (raw === "anthropic") return "anthropic";
-  return "mock";
+  const raw = process.env.BRIEFING_LLM_MODE;
+  if (raw === undefined || raw.trim() === "") {
+    throw new BriefingLlmModeConfigError(
+      "BRIEFING_LLM_MODE is not set. Set it explicitly to one of " +
+        '"grok", "anthropic", or "mock" (mock is never an implicit ' +
+        "default — silent mock output in production is the failure " +
+        "mode this guard exists to prevent).",
+    );
+  }
+  const mode = raw.trim().toLowerCase();
+  if (mode === "grok") return "grok";
+  if (mode === "anthropic") return "anthropic";
+  if (mode === "mock") return "mock";
+  throw new BriefingLlmModeConfigError(
+    `BRIEFING_LLM_MODE has unrecognized value "${raw}". Expected one ` +
+      'of "grok", "anthropic", or "mock".',
+  );
 }
 
 const HEAVY_SECTION_SET: ReadonlySet<string> = new Set(HEAVY_SECTIONS);

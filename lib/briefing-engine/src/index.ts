@@ -15,6 +15,7 @@
 export {
   generateBriefing,
   resolveBriefingLlmMode,
+  BriefingLlmModeConfigError,
   type GenerateBriefingOptions,
 } from "./engine";
 
