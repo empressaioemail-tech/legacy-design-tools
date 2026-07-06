@@ -522,9 +522,18 @@ function toEngineSourceInput(s: BriefingSource): BriefingSourceInput {
  */
 function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
   const ref = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
-  const label = a.sectionTitle && a.sectionNumber
+  let label = a.sectionTitle && a.sectionNumber
     ? `${ref} — ${a.sectionTitle}`
     : ref;
+  
+  // Honest labeling: ICC model-code atoms must be identifiable as model code,
+  // not the jurisdiction's adopted code. Append " (ICC model code)" to the
+  // label so citations render correctly.
+  if (a.codeSource === "icc-model-code") {
+    const bookPrefix = a.codeBook ? `${a.codeBook} ` : "";
+    label = `${bookPrefix}${ref} (ICC model code)`;
+  }
+  
   return {
     atomId: canonicalOverlayAtomKey(a.id),
     label,
