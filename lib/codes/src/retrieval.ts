@@ -32,6 +32,8 @@ export interface RetrievedAtom {
   score: number;
   /** "vector" | "lexical" */
   retrievalMode: string;
+  /** Source marker to distinguish ICC model code from jurisdiction-adopted code. */
+  codeSource?: "icc-model-code" | "jurisdiction";
 }
 
 /**
@@ -76,31 +78,63 @@ export interface RetrieveOptions {
    * comparable to cosine similarities).
    */
   applyMinScore?: boolean;
+  /**
+   * When true, supplement jurisdiction retrieval with ICC model-code corpus.
+   * Defaults to the value of FINDINGS_ICC_MODEL_CODE_SUPPLEMENT env var.
+   * The supplement runs via substrate retrieval and degrades gracefully when
+   * BRIEF_RETRIEVAL_API_URL is unset or the call fails.
+   */
+  includeIccModelCodeSupplement?: boolean;
 }
 
 export async function retrieveAtomsForQuestion(
   opts: RetrieveOptions,
 ): Promise<RetrievedAtom[]> {
   const mode = (process.env.BRIEF_CODE_RETRIEVAL ?? "neon").toLowerCase();
+  let primaryAtoms: RetrievedAtom[] = [];
+  
   if (mode === "gate" || mode === "mcp") {
     const { retrieveAtomsFromSubstrate } = await import(
       "./briefRetrievalSubstrate.js"
     );
     try {
       const substrateHits = await retrieveAtomsFromSubstrate(opts);
-      if (substrateHits.length > 0) return substrateHits;
-      opts.logger?.warn?.(
-        { jurisdictionKey: opts.jurisdictionKey, mode },
-        "substrate retrieval returned no hits — falling back to neon",
-      );
+      if (substrateHits.length > 0) {
+        primaryAtoms = substrateHits;
+      } else {
+        opts.logger?.warn?.(
+          { jurisdictionKey: opts.jurisdictionKey, mode },
+          "substrate retrieval returned no hits — falling back to neon",
+        );
+        primaryAtoms = await retrieveAtomsFromNeon(opts);
+      }
     } catch (err) {
       opts.logger?.warn?.(
         { err, jurisdictionKey: opts.jurisdictionKey, mode },
         "substrate retrieval failed — falling back to neon",
       );
+      primaryAtoms = await retrieveAtomsFromNeon(opts);
     }
+  } else {
+    primaryAtoms = await retrieveAtomsFromNeon(opts);
   }
-  return retrieveAtomsFromNeon(opts);
+
+  // Tag primary atoms as jurisdiction-sourced
+  primaryAtoms.forEach((atom) => {
+    atom.codeSource = "jurisdiction";
+  });
+
+  // Supplement with ICC model code if enabled
+  const supplementEnabled = 
+    opts.includeIccModelCodeSupplement ??
+    (process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT ?? "true").toLowerCase() === "true";
+  
+  if (supplementEnabled && process.env.BRIEF_RETRIEVAL_API_URL) {
+    const supplementAtoms = await retrieveIccModelCodeSupplement(opts);
+    return [...primaryAtoms, ...supplementAtoms];
+  }
+
+  return primaryAtoms;
 }
 
 async function retrieveAtomsFromNeon(
@@ -221,6 +255,54 @@ async function retrieveAtomsFromNeon(
     score,
     retrievalMode: "lexical",
   }));
+}
+
+/**
+ * Supplement jurisdiction retrieval with ICC model-code corpus atoms.
+ * 
+ * Runs a secondary substrate call to `jurisdictionKey='icc-model-code'` and
+ * tags results with `codeSource='icc-model-code'` for honest labeling.
+ * Degrades gracefully (logs + returns []) when substrate is unavailable.
+ * 
+ * The supplement is capped at 6 atoms to augment rather than swamp
+ * jurisdiction-specific sections.
+ */
+async function retrieveIccModelCodeSupplement(
+  opts: RetrieveOptions,
+): Promise<RetrievedAtom[]> {
+  const { retrieveAtomsFromSubstrate } = await import(
+    "./briefRetrievalSubstrate.js"
+  );
+  
+  const supplementLimit = 6;
+  
+  try {
+    const iccAtoms = await retrieveAtomsFromSubstrate({
+      jurisdictionKey: "icc-model-code",
+      question: opts.question,
+      limit: supplementLimit,
+      logger: opts.logger,
+    });
+    
+    iccAtoms.forEach((atom) => {
+      atom.codeSource = "icc-model-code";
+    });
+    
+    if (iccAtoms.length > 0) {
+      opts.logger?.info?.(
+        { count: iccAtoms.length },
+        "ICC model-code supplement: retrieved atoms",
+      );
+    }
+    
+    return iccAtoms;
+  } catch (err) {
+    opts.logger?.warn?.(
+      { err },
+      "ICC model-code supplement: retrieval failed — skipping supplement",
+    );
+    return [];
+  }
 }
 
 /**
