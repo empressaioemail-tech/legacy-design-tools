@@ -14,6 +14,8 @@ export { TileErrorBoundary } from './TileErrorBoundary'
 // Compliance
 export { IntakeQueueTile } from './compliance/IntakeQueueTile'
 export { FindingsLibraryTile } from './compliance/FindingsLibraryTile'
+export { ComplianceRunTile } from './compliance/ComplianceRunTile'
+export { DocumentViewerTile } from './compliance/DocumentViewerTile'
 
 // Intake
 export { IntakeTile } from './intake/IntakeTile'
@@ -40,3 +42,6 @@ export { SheetExtractionTile } from './design-accelerator/SheetExtractionTile'
 export { ResponseTasksTile } from './design-accelerator/ResponseTasksTile'
 export { DocumentParsingTile } from './design-accelerator/DocumentParsingTile'
 export { ProductSpecReferenceTile } from './design-accelerator/ProductSpecReferenceTile'
+
+// Deliverable
+export { LetterTile } from './deliverable/LetterTile'

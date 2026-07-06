@@ -2060,6 +2060,9 @@ importers:
       '@hauska/design-tokens':
         specifier: workspace:*
         version: link:../design-tokens
+      '@hauska/document-viewer':
+        specifier: workspace:*
+        version: link:../document-viewer
       '@hauska/map-renderer':
         specifier: ^0.1.1
         version: 0.1.1(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
