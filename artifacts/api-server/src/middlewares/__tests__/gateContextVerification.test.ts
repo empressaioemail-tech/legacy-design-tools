@@ -373,9 +373,14 @@ describe("gateContextVerification middleware", () => {
     });
 
     it("rejects malformed payload with 401", () => {
+      // The signature must be VALID over the malformed payload: the
+      // middleware checks the signature first (correct security order),
+      // so an unsigned garbage payload reports SIGNATURE_INVALID, never
+      // reaching the parse stage this test targets.
+      const malformed = "not-valid-base64url!!!";
       const req = mockReq({
-        "x-hauska-gate-context": "not-valid-base64url!!!",
-        "x-hauska-gate-signature": "deadbeef",
+        "x-hauska-gate-context": malformed,
+        "x-hauska-gate-signature": signPayload(malformed, TEST_KEY),
       });
       const res = mockRes();
       const next = vi.fn();
