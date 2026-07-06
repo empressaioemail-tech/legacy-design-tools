@@ -23,11 +23,11 @@ import {
   LocalSetbacksTile,
   DocumentParsingTile,
   ProductSpecReferenceTile,
+  ComplianceRunTile,
+  DocumentViewerTile,
+  LetterTile,
 } from "@hauska/cortex-tiles";
 // Option-3 app-resident tiles (kept in the app; still error-boundary-wrapped).
-import ComplianceRunTile from "../tiles/Compliance/compliance-run";
-import DocumentViewerTile from "../tiles/Compliance/document-viewer";
-import LetterTile from "../tiles/Deliverable/letter";
 import { makeStubTile, type StubTileMeta } from "../tiles/stubFactory";
 
 function stub(meta: StubTileMeta): () => React.ReactElement {
