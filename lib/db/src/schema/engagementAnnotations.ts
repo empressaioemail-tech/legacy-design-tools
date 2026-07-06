@@ -15,7 +15,7 @@ import { findings } from "./findings";
  * (`location3d`: `{ globalId, elementId, face?, label }`), plus an optional
  * back-link to the `finding` it visualizes.
  *
- * `kind` is plain `text` (the closed set lives in the `@hauska/document-viewer`
+ * `kind` is plain `text` (the closed set lives in the `@empressaio/document-viewer`
  * `AnnotationKind` union and is validated at the route layer); `author` is
  * plain `text` (opaque id from the identity layer or the literal `'ai'`), for
  * the same reason `findings.accepted_by_reviewer_id` /

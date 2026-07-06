@@ -1,5 +1,5 @@
 {
-  "name": "@hauska/design-tokens",
+  "name": "@empressaio/design-tokens",
   "version": "0.1.0",
   "license": "MIT",
   "main": "./tokens.css",

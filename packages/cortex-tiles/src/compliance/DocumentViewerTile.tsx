@@ -7,13 +7,13 @@ import {
   DWGViewer,
   type MarkupTool,
   type Annotation,
-} from '@hauska/document-viewer'
+} from '@empressaio/document-viewer'
 import {
   useEngagement,
   TileStatusBanner,
   useAnnotationSelection,
   useDocumentViewerNavigation,
-} from '@hauska/tile-shell'
+} from '@empressaio/tile-shell'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 

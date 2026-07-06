@@ -177,6 +177,9 @@ importers:
 
   artifacts/api-server:
     dependencies:
+      '@empressaio/cortex-client':
+        specifier: workspace:*
+        version: link:../../packages/cortex-client
       '@gltf-transform/core':
         specifier: ^4.3.0
         version: 4.3.0
@@ -186,9 +189,6 @@ importers:
       '@hauska/atom-contract':
         specifier: file:../../vendor/hauska-atom-contract-1.6.0.tgz
         version: file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
-      '@hauska/cortex-client':
-        specifier: workspace:*
-        version: link:../../packages/cortex-client
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -373,19 +373,19 @@ importers:
 
   artifacts/codex-reviewer-qa:
     devDependencies:
-      '@hauska/cortex-client':
+      '@empressaio/cortex-client':
         specifier: workspace:*
         version: link:../../packages/cortex-client
-      '@hauska/cortex-tiles':
+      '@empressaio/cortex-tiles':
         specifier: workspace:*
         version: link:../../packages/cortex-tiles
-      '@hauska/design-tokens':
+      '@empressaio/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
-      '@hauska/document-viewer':
+      '@empressaio/document-viewer':
         specifier: workspace:*
         version: link:../../packages/document-viewer
-      '@hauska/tile-shell':
+      '@empressaio/tile-shell':
         specifier: workspace:*
         version: link:../../packages/tile-shell
       '@tailwindcss/vite':
@@ -2054,21 +2054,21 @@ importers:
 
   packages/cortex-tiles:
     dependencies:
-      '@hauska/cortex-client':
+      '@empressaio/cortex-client':
         specifier: workspace:*
         version: link:../cortex-client
-      '@hauska/design-tokens':
+      '@empressaio/design-tokens':
         specifier: workspace:*
         version: link:../design-tokens
-      '@hauska/document-viewer':
+      '@empressaio/document-viewer':
         specifier: workspace:*
         version: link:../document-viewer
+      '@empressaio/tile-shell':
+        specifier: workspace:*
+        version: link:../tile-shell
       '@hauska/map-renderer':
         specifier: ^0.1.1
         version: 0.1.1(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
-      '@hauska/tile-shell':
-        specifier: workspace:*
-        version: link:../tile-shell
       maplibre-gl:
         specifier: ^5.24.0
         version: 5.24.0
@@ -2109,7 +2109,7 @@ importers:
 
   packages/tile-shell:
     dependencies:
-      '@hauska/design-tokens':
+      '@empressaio/design-tokens':
         specifier: workspace:*
         version: link:../design-tokens
     devDependencies:

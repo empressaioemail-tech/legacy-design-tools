@@ -2,7 +2,7 @@
  * Drift guard for the tile capability registry served at
  * GET /api/plan-review/admin/tile-registry.
  *
- * The registry is the single source of truth in @hauska/cortex-client that
+ * The registry is the single source of truth in @empressaio/cortex-client that
  * BOTH the SPA (tiles.tsx) and this api-server route read. These assertions
  * lock the contract compose_workspace depends on: every entry carries the four
  * capability fields (requires / produces / modes / mcpTools), ids are unique,
@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import {
   TILE_CAPABILITIES,
   TILE_CAPABILITY_BY_ID,
-} from "@hauska/cortex-client";
+} from "@empressaio/cortex-client";
 
 describe("tile capability registry (admin/tile-registry contract)", () => {
   it("has at least the full 46-entry registry", () => {

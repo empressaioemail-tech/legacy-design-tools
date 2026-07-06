@@ -1,4 +1,4 @@
-import '@hauska/design-tokens/tokens.css'
+import '@empressaio/design-tokens/tokens.css'
 
 export { CortexShell } from './CortexShell'
 export type {

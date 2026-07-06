@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useEngagement } from '@hauska/tile-shell'
+import { useEngagement } from '@empressaio/tile-shell'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 import { ReportTileShell } from './ReportTileShell'

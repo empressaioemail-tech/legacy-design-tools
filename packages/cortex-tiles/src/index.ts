@@ -1,4 +1,4 @@
-// @hauska/cortex-tiles — package-resident Cortex tile components.
+// @empressaio/cortex-tiles — package-resident Cortex tile components.
 //
 // Every exported tile wraps its inner implementation in TileErrorBoundary and
 // reads its data through useCortexClient() (no app dependency). The app's

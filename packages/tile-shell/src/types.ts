@@ -65,7 +65,7 @@ export type OverlaySpec = {
 }
 
 export type EngagementReportResult = {
-  // Superset of the plan-review report statuses. Matches @hauska/cortex-client
+  // Superset of the plan-review report statuses. Matches @empressaio/cortex-client
   // ReportStatus so a client-fetched Engagement assigns cleanly into the shell.
   status: 'running' | 'not-run' | 'error' | 'ok' | 'degraded' | 'unavailable'
   result?: unknown

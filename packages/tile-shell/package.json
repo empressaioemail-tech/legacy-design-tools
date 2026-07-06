@@ -1,5 +1,5 @@
 {
-  "name": "@hauska/tile-shell",
+  "name": "@empressaio/tile-shell",
   "version": "0.1.0",
   "license": "MIT",
   "main": "./dist/index.js",
@@ -22,7 +22,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": { "@hauska/design-tokens": "workspace:*" },
+  "dependencies": { "@empressaio/design-tokens": "workspace:*" },
   "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
   "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19" },
   "scripts": { "build": "tsup", "dev": "tsup --watch" }

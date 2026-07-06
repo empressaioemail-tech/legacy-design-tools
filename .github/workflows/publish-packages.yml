@@ -1,6 +1,6 @@
 name: Publish Packages
 
-# Publishes the @hauska component-library packages that live in this repo to
+# Publishes the @empressaio component-library packages that live in this repo to
 # npm, in dependency order. Idempotent: a version already on the registry is
 # skipped, never re-published (npm forbids re-publishing a version anyway).
 #
@@ -23,7 +23,7 @@ on:
 
 jobs:
   publish:
-    name: Build and publish @hauska packages
+    name: Build and publish @empressaio packages
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -63,12 +63,12 @@ jobs:
           set -euo pipefail
           # design-tokens is CSS-only (no build script). The React/TS packages
           # build to dist via tsup. Order does not matter for the build itself
-          # (each package is externalized from its @hauska deps), but we build
+          # (each package is externalized from its @empressaio deps), but we build
           # the leaves first for clarity.
-          pnpm --filter "@hauska/cortex-client" run build
-          pnpm --filter "@hauska/tile-shell" run build
-          pnpm --filter "@hauska/document-viewer" run build
-          pnpm --filter "@hauska/cortex-tiles" run build
+          pnpm --filter "@empressaio/cortex-client" run build
+          pnpm --filter "@empressaio/tile-shell" run build
+          pnpm --filter "@empressaio/document-viewer" run build
+          pnpm --filter "@empressaio/cortex-tiles" run build
 
       - name: Publish in dependency order (idempotent)
         env:
@@ -101,11 +101,11 @@ jobs:
             fi
           }
 
-          # Wave 1: zero-@hauska-dep leaves.
+          # Wave 1: zero-@empressaio-dep leaves.
           publish_pkg design-tokens
           publish_pkg cortex-client
 
-          # Wave 2: depend only on already-published leaves (or no @hauska dep).
+          # Wave 2: depend only on already-published leaves (or no @empressaio dep).
           publish_pkg tile-shell
           publish_pkg document-viewer
 
@@ -118,5 +118,5 @@ jobs:
         run: |
           set -euo pipefail
           for name in design-tokens cortex-client tile-shell document-viewer cortex-tiles; do
-            echo "@hauska/${name}: $(npm view @hauska/${name} version)"
+            echo "@empressaio/${name}: $(npm view @empressaio/${name} version)"
           done

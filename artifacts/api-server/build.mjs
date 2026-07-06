@@ -29,10 +29,10 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
-    // Add ONLY the custom "workspace" export condition. The `@hauska/*`
+    // Add ONLY the custom "workspace" export condition. The `@empressaio/*`
     // workspace packages carry it pointing at their TS source (./src); their
     // dist/ is NOT prebuilt in the Docker build context, so a *value* import
-    // (e.g. TILE_CAPABILITIES from @hauska/cortex-client in planReviewBff.ts)
+    // (e.g. TILE_CAPABILITIES from @empressaio/cortex-client in planReviewBff.ts)
     // would otherwise resolve to the missing dist/index.mjs and fail the build.
     //
     // CRITICAL: do NOT also list "import"/"default" here. esbuild layers this
@@ -40,7 +40,7 @@ async function buildAll() {
     // explicitly promotes it ABOVE "require" for every dual-package dependency
     // — which flips pg (and others) from their CJS entry to a broken ESM
     // wrapper and crashes the container at boot ("Class extends value
-    // #<Object>"). "workspace" is a bespoke condition only the @hauska/*
+    // #<Object>"). "workspace" is a bespoke condition only the @empressaio/*
     // packages declare, so adding just it changes resolution for nothing else.
     // Type-only imports are erased before resolution, which is why the
     // pre-existing type imports built fine without this. Mirrors the

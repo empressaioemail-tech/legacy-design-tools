@@ -1,6 +1,6 @@
 import type React from "react";
 import type { TileCategory, TileStatus } from "../tile-shell/types";
-import { PlannedTile, TileStatusBanner } from "@hauska/tile-shell";
+import { PlannedTile, TileStatusBanner } from "@empressaio/tile-shell";
 
 export type StubTileMeta = {
   id: string;
