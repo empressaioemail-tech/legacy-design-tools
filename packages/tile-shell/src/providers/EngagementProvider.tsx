@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -26,7 +27,11 @@ export type ActiveParcel = {
   address: string | null;
   lat: number | null;
   lng: number | null;
+  projectDid?: string | null;
+  label?: string | null;
 };
+
+export type ActiveContext = ActiveParcel;
 
 const EMPTY_PARCEL: ActiveParcel = {
   engagementId: null,
@@ -63,12 +68,25 @@ type EngagementContextValue = {
   setLoading: (v: boolean) => void;
   queueRefreshToken: number;
   bumpQueueRefresh: () => void;
+  contextEpoch: number;
 };
 
 const EngagementContext = createContext<EngagementContextValue | null>(null);
 
-export function EngagementProvider({ children }: { children: ReactNode }) {
-  const [engagementId, setEngagementId] = useState<string | null>(null);
+type EngagementProviderProps = {
+  children: ReactNode;
+  initialParcel?: Partial<ActiveParcel>;
+  onActiveParcelChange?: (p: ActiveParcel) => void;
+};
+
+function EngagementProviderInner({
+  children,
+  initialParcel,
+  onActiveParcelChange,
+}: EngagementProviderProps) {
+  const [engagementId, setEngagementId] = useState<string | null>(
+    initialParcel?.engagementId ?? null,
+  );
   const [engagement, setEngagementState] = useState<EngagementDetail | null>(
     null,
   );
@@ -77,10 +95,16 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
   // Cleared whenever a real engagement is selected so the engagement is the
   // authority when one exists.
   const [parcelOverride, setParcelOverride] = useState<ActiveParcel | null>(
-    null,
+    initialParcel
+      ? {
+          ...EMPTY_PARCEL,
+          ...initialParcel,
+        }
+      : null,
   );
   const [loading, setLoading] = useState(false);
   const [queueRefreshToken, setQueueRefreshToken] = useState(0);
+  const [contextEpoch, setContextEpoch] = useState(0);
 
   const bumpQueueRefresh = useCallback(() => {
     setQueueRefreshToken((t) => t + 1);
@@ -92,6 +116,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       setEngagementState(detail ?? null);
       // A concrete engagement is now the authority; drop any parcel-only override.
       setParcelOverride(null);
+      setContextEpoch((e) => e + 1);
     },
     [],
   );
@@ -110,6 +135,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     if (parcel.engagementId) {
       setEngagementId(parcel.engagementId);
     }
+    setContextEpoch((e) => e + 1);
   }, []);
 
   const setEngagementReportResult = useCallback(
@@ -145,14 +171,14 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
 
     if (overrideHasCoords) {
       return {
-        // Keep the engagement id if one is loaded so engagement-scoped tiles
-        // (compliance, letter, findings) still resolve.
         engagementId: engagement?.id ?? parcelOverride!.engagementId ?? engagementId,
         apn: parcelOverride!.apn ?? engagement?.apn ?? null,
         jurisdiction: parcelOverride!.jurisdiction ?? engagement?.jurisdiction ?? null,
         address: parcelOverride!.address ?? engagement?.address ?? null,
         lat: parcelOverride!.lat,
         lng: parcelOverride!.lng,
+        projectDid: parcelOverride!.projectDid ?? null,
+        label: parcelOverride!.label ?? null,
       };
     }
 
@@ -165,11 +191,19 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
         address: engagement.address ?? parcelOverride?.address ?? null,
         lat: engagement.latitude ?? parcelOverride?.lat ?? null,
         lng: engagement.longitude ?? parcelOverride?.lng ?? null,
+        projectDid: parcelOverride?.projectDid ?? null,
+        label: parcelOverride?.label ?? null,
       };
     }
     if (parcelOverride) return parcelOverride;
     return { ...EMPTY_PARCEL, engagementId };
   }, [engagement, parcelOverride, engagementId]);
+
+  useEffect(() => {
+    if (onActiveParcelChange) {
+      onActiveParcelChange(activeParcel);
+    }
+  }, [activeParcel, onActiveParcelChange]);
 
   const value = useMemo(
     () => ({
@@ -183,6 +217,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       setLoading,
       queueRefreshToken,
       bumpQueueRefresh,
+      contextEpoch,
     }),
     [
       engagementId,
@@ -194,6 +229,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       loading,
       queueRefreshToken,
       bumpQueueRefresh,
+      contextEpoch,
     ],
   );
 
@@ -202,6 +238,33 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       {children}
     </EngagementContext.Provider>
   );
+}
+
+/**
+ * EngagementProvider: THE single shared active-parcel / engagement authority for
+ * the workspace.
+ *
+ * Context adoption: if a parent EngagementProvider already exists, this provider
+ * renders `children` directly against the parent's state WITHOUT creating a
+ * second state layer. This defuses nested CortexShell mounts (e.g. a panel-mounted
+ * shell inside a root provider) from shadowing the hoisted root context.
+ * NOTE: when adopting, this provider's own `initialParcel` / `onActiveParcelChange`
+ * props are intentionally ignored — the parent owns hydration and persistence.
+ *
+ * New in 0.2.0:
+ * - `initialParcel` seeds the initial state (merge over null defaults).
+ * - `onActiveParcelChange` is called after every state commit with the new parcel.
+ * - `contextEpoch` increments on every setEngagement / setActiveParcel commit;
+ *   tiles use it to discard stale in-flight fetches after a context switch.
+ */
+export function EngagementProvider(props: EngagementProviderProps) {
+  const parentContext = useContext(EngagementContext);
+
+  if (parentContext) {
+    return <>{props.children}</>;
+  }
+
+  return <EngagementProviderInner {...props} />;
 }
 
 export function useEngagement(): EngagementContextValue {

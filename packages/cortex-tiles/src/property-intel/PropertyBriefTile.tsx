@@ -67,7 +67,7 @@ function PropertyBriefTileInner({
   children?: (data: BriefResult | null) => React.ReactNode
 }) {
   const client = useCortexClient()
-  const { engagementId, activeParcel } = useEngagement()
+  const { engagementId, activeParcel, contextEpoch } = useEngagement()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -79,6 +79,7 @@ function PropertyBriefTileInner({
   // without requiring a manual Run.
   useEffect(() => {
     let cancelled = false
+    const startEpoch = contextEpoch
     if (!engagementId) {
       setResult(null)
       return
@@ -86,7 +87,7 @@ function PropertyBriefTileInner({
     client
       .getReport<BriefResult>(engagementId, 'property-brief')
       .then((r) => {
-        if (cancelled) return
+        if (cancelled || contextEpoch !== startEpoch) return
         if (r.status === 'ok' && r.result) setResult(r.result)
       })
       .catch(() => {
@@ -95,7 +96,7 @@ function PropertyBriefTileInner({
     return () => {
       cancelled = true
     }
-  }, [engagementId, client])
+  }, [engagementId, client, contextEpoch])
 
   async function handleRun() {
     if (!engagementId) return

@@ -1,6 +1,6 @@
 {
   "name": "@empressaio/tile-shell",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -24,6 +24,6 @@
   },
   "dependencies": { "@empressaio/design-tokens": "workspace:*" },
   "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
-  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19" },
-  "scripts": { "build": "tsup", "dev": "tsup --watch" }
+  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19", "vitest": "^3", "happy-dom": "^16", "@testing-library/react": "^16", "react": "^19", "react-dom": "^19" },
+  "scripts": { "build": "tsup", "dev": "tsup --watch", "test": "vitest run", "test:watch": "vitest" }
 }

@@ -43,7 +43,7 @@ function toMapOverlays(overlays: OverlaySpec[]): MapOverlaySpec[] {
 }
 
 function MapTileInner() {
-  const { activeParcel, setActiveParcel } = useEngagement()
+  const { activeParcel, setActiveParcel, contextEpoch } = useEngagement()
   const { overlays } = useSpatial()
 
   const { apn, jurisdiction, lat, lng } = activeParcel
