@@ -475,7 +475,7 @@ async function loadSubmissionForRoute(
   req: Request,
   res: Response,
 ): Promise<Submission | null> {
-  const loaded = await loadSubmissionForSession(submissionId, req.session);
+  const loaded = await loadSubmissionForSession(submissionId, req.session, req.serviceAuth);
   if (!loaded.ok) {
     res.status(loaded.status).json({ error: loaded.error });
     return null;
