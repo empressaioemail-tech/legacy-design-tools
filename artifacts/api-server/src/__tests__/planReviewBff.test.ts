@@ -96,6 +96,68 @@ describe("plan-review BFF reviewer reads", () => {
     });
   });
 
+  it("GET /plan-review/reviewer/engagements lists all engagements without owner filtering", async () => {
+    await db.insert(engagements).values([
+      {
+        name: "Another Engagement",
+        nameLower: "another engagement",
+        ownerUserId: "different-owner",
+        jurisdiction: "austin-tx",
+        address: "100 Main St, Austin TX",
+      },
+      {
+        name: "Third Engagement",
+        nameLower: "third engagement",
+        ownerUserId: "yet-another-owner",
+        jurisdiction: "dallas-tx",
+        address: "200 Elm St, Dallas TX",
+      },
+    ]);
+
+    const [eng1, eng2, eng3] = await db
+      .select({ id: engagements.id })
+      .from(engagements)
+      .orderBy(engagements.name);
+
+    await db.insert(submissions).values([
+      { engagementId: eng1!.id, jurisdiction: "bastrop-tx", status: "submitted" },
+      { engagementId: eng1!.id, jurisdiction: "bastrop-tx", status: "approved" },
+      { engagementId: eng2!.id, jurisdiction: "austin-tx", status: "submitted" },
+    ]);
+
+    const res = await request(getApp()).get(`/api/plan-review/reviewer/engagements`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThanOrEqual(3);
+
+    const e1 = res.body.find((e: { id: string }) => e.id === eng1!.id);
+    expect(e1).toBeDefined();
+    expect(e1.name).toBe("146 S Fredricksburg");
+    expect(e1.address).toBe("146 S Fredricksburg, Bastrop TX");
+    expect(e1.jurisdiction).toBe("bastrop-tx");
+    expect(e1.status).toBe("active");
+    expect(e1.submissionCount).toBe(2);
+    expect(typeof e1.updatedAt).toBe("string");
+
+    const e2 = res.body.find((e: { id: string }) => e.id === eng2!.id);
+    expect(e2).toBeDefined();
+    expect(e2.submissionCount).toBe(1);
+
+    const e3 = res.body.find((e: { id: string }) => e.id === eng3!.id);
+    expect(e3).toBeDefined();
+    expect(e3.submissionCount).toBe(0);
+  });
+
+  it("GET /plan-review/reviewer/engagements returns empty array when no engagements exist", async () => {
+    await db.delete(engagements);
+    const res = await request(getApp()).get(`/api/plan-review/reviewer/engagements`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(0);
+  });
+
   it("GET /plan-review/engagements/:id returns engagement without session ownership", async () => {
     const [row] = await db
       .select({ id: engagements.id })

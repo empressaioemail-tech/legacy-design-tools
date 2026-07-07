@@ -21,6 +21,17 @@ export type QueueRow = {
   daysInQueue: number
 }
 
+// Reviewer-scoped engagement listing (GET /plan-review/reviewer/engagements).
+export type ReviewerEngagementRow = {
+  id: string
+  name: string
+  address: string | null
+  jurisdiction: string | null
+  status: string
+  submissionCount: number
+  updatedAt: string
+}
+
 // ─── Reports ─────────────────────────────────────────────────────
 // The api-server GET /engagements/:id/reports/:type emits these statuses:
 //   ok | running | not-run | error | unavailable

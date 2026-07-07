@@ -1,5 +1,5 @@
-/**
- * Plan-review BFF — browser-safe aggregation over existing engine routes.
+﻿/**
+ * Plan-review BFF â€” browser-safe aggregation over existing engine routes.
  * Mounted at `/api/plan-review/*`.
  */
 import {
@@ -8,7 +8,7 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -170,7 +170,7 @@ function reviewerJurisdictionTenant(
   });
 }
 
-// ─── POST /plan-review/intake ────────────────────────────────────
+// â”€â”€â”€ POST /plan-review/intake â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: Response) => {
   const body = req.body as Record<string, unknown>;
@@ -248,7 +248,7 @@ router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: R
   res.json(results);
 });
 
-// ─── POST /plan-review/engagements ───────────────────────────────
+// â”€â”€â”€ POST /plan-review/engagements â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post("/engagements", requireServiceTokenOrSession, async (req: Request, res: Response) => {
   const parsed = parseCreateEngagementBody(req.body);
@@ -291,12 +291,12 @@ router.post("/engagements", requireServiceTokenOrSession, async (req: Request, r
   }
 });
 
-// ─── POST /plan-review/geocode ──────────────────────────────────
+// â”€â”€â”€ POST /plan-review/geocode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Forward-geocode an address (or reverse-project lat/lng) into a parcel
 // identity for the shared active-parcel context. Backs the shell top-bar
 // address-search box. Same auth as every other plan-review route
 // (requireServiceTokenOrSession) so the workspace reaches it on the cookie
-// session it already holds — the brokerage /place/resolve route is gated by
+// session it already holds â€” the brokerage /place/resolve route is gated by
 // brokerageAuth + CORS, which the workspace does not carry.
 router.post(
   "/geocode",
@@ -346,7 +346,7 @@ router.post(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/documents/upload-url ─────
+// â”€â”€â”€ POST /plan-review/engagements/:id/documents/upload-url â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/documents/upload-url",
@@ -382,7 +382,7 @@ router.post(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/documents/complete-upload ─
+// â”€â”€â”€ POST /plan-review/engagements/:id/documents/complete-upload â”€
 
 router.post(
   "/engagements/:id/documents/complete-upload",
@@ -441,7 +441,7 @@ router.post(
           engagementId,
           title: filename,
           documentType: "narrative",
-          extractedText: `[Uploaded ${filename} — ${contentType}, ${fileBytes.length} bytes]`,
+          extractedText: `[Uploaded ${filename} â€” ${contentType}, ${fileBytes.length} bytes]`,
           originalBlobRef: objectPath,
           actorId: LEGACY_INTERNAL_OWNER_USER_ID,
         })
@@ -454,7 +454,7 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/documents ─────────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/documents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Lists the engagement's attached documents as viewable entries, each with a
 // short-lived SIGNED GCS GET url resolved from `original_blob_ref`. Documents
@@ -490,7 +490,7 @@ router.get(
             try {
               url = await signObjectEntityGetUrl(row.originalBlobRef, 3600);
             } catch (signErr) {
-              // One bad blob ref must not 500 the whole list — surface the row
+              // One bad blob ref must not 500 the whole list â€” surface the row
               // with a null url so the tile can still show its name.
               reqLog(req).warn(
                 { signErr, engagementId, documentId: row.id },
@@ -520,7 +520,7 @@ router.get(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/documents/:docId/ingest ───
+// â”€â”€â”€ POST /plan-review/engagements/:id/documents/:docId/ingest â”€â”€â”€
 //
 // The "file becomes atoms" surface. Proxies the engagement's uploaded file to
 // the engine `POST /v1/document-ingest` pipeline (server-to-server, gate-front
@@ -528,7 +528,7 @@ router.get(
 // atoms come back as cited, confidence-graded chips linked to
 // `sourceDocumentCid`. FIREWALL: the proxy sends NO accessPolicy for the
 // user upload; the engine clamps to tenant-private and we persist exactly what
-// it returns — no auto-publish path exists here.
+// it returns â€” no auto-publish path exists here.
 
 router.post(
   "/engagements/:id/documents/:docId/ingest",
@@ -565,7 +565,7 @@ router.post(
         return;
       }
       if (err instanceof EngineSpineError) {
-        // Engine unreachable / rejected — surface a 502 (never a 500) so the
+        // Engine unreachable / rejected â€” surface a 502 (never a 500) so the
         // tile can show a degraded banner rather than a crash.
         reqLog(req).error(
           { err, engagementId, documentId, code: err.code },
@@ -583,7 +583,7 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/documents/:docId/atoms ─────
+// â”€â”€â”€ GET /plan-review/engagements/:id/documents/:docId/atoms â”€â”€â”€â”€â”€
 //
 // The persisted atom chips for one dataroom file (no re-ingest).
 
@@ -615,10 +615,10 @@ router.get(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/dataroom-atoms ─────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/dataroom-atoms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // The persisted atom chips for EVERY dataroom file in the engagement, keyed by
-// documentId — the Dataroom tile's one-shot hydrate on open.
+// documentId â€” the Dataroom tile's one-shot hydrate on open.
 
 router.get(
   "/engagements/:id/dataroom-atoms",
@@ -647,7 +647,7 @@ router.get(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/export ───────────────────
+// â”€â”€â”€ POST /plan-review/engagements/:id/export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Assembles a downloadable review deliverable as a single PDF and returns a
 // 24h signed GET url. Delegates the full render to assembleDeliverable():
@@ -691,7 +691,7 @@ router.post(
     };
 
     try {
-      // Findings have no engagementId column — key on submissionId. Get the
+      // Findings have no engagementId column â€” key on submissionId. Get the
       // engagement's submission ids, then the findings for those submissions.
       const submissionRows = await db
         .select({ id: submissions.id })
@@ -775,7 +775,7 @@ router.post(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/submissions ─────────────
+// â”€â”€â”€ POST /plan-review/engagements/:id/submissions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/submissions",
@@ -840,7 +840,7 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/queue ──────────────────────────────────────
+// â”€â”€â”€ GET /plan-review/queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get("/queue", requireServiceTokenOrSession, async (req: Request, res: Response) => {
   const statusFilter =
@@ -896,7 +896,52 @@ router.get("/queue", requireServiceTokenOrSession, async (req: Request, res: Res
   res.json(queueRows);
 });
 
-// ─── GET /plan-review/engagements/:id ────────────────────────────
+// â”€â”€â”€ GET /plan-review/reviewer/engagements â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+router.get("/reviewer/engagements", requireServiceTokenOrSession, async (req: Request, res: Response) => {
+  const engagementRows = await db
+    .select({
+      id: engagements.id,
+      name: engagements.name,
+      address: engagements.address,
+      jurisdiction: engagements.jurisdiction,
+      status: engagements.status,
+      updatedAt: engagements.updatedAt,
+    })
+    .from(engagements)
+    .orderBy(desc(engagements.updatedAt))
+    .limit(100);
+
+  // inArray([]) builds invalid SQL â€” skip the counts query on an empty listing.
+  const submissionCounts = engagementRows.length === 0
+    ? []
+    : await db
+        .select({
+          engagementId: submissions.engagementId,
+          count: sql<number>`cast(count(*) as int)`,
+        })
+        .from(submissions)
+        .where(inArray(submissions.engagementId, engagementRows.map((e) => e.id)))
+        .groupBy(submissions.engagementId);
+
+  const countsByEngagement = new Map(
+    submissionCounts.map((row) => [row.engagementId, Number(row.count) || 0]),
+  );
+
+  const result = engagementRows.map((e) => ({
+    id: e.id,
+    name: e.name,
+    address: e.address,
+    jurisdiction: e.jurisdiction,
+    status: e.status,
+    submissionCount: countsByEngagement.get(e.id) ?? 0,
+    updatedAt: e.updatedAt.toISOString(),
+  }));
+
+  res.json(result);
+});
+
+// â”€â”€â”€ GET /plan-review/engagements/:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/engagements/:id",
@@ -927,7 +972,7 @@ router.get(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/submissions ────────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/submissions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/engagements/:id/submissions",
@@ -947,7 +992,7 @@ router.get(
   },
 );
 
-// ─── GET /plan-review/submissions/:id/findings ───────────────────
+// â”€â”€â”€ GET /plan-review/submissions/:id/findings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/submissions/:id/findings",
@@ -967,7 +1012,7 @@ router.get(
   },
 );
 
-// ─── GET /plan-review/submissions/:id/findings/status ────────────
+// â”€â”€â”€ GET /plan-review/submissions/:id/findings/status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/submissions/:id/findings/status",
@@ -987,7 +1032,7 @@ router.get(
   },
 );
 
-// ─── POST compliance-run (findings + precedence) ───────────────
+// â”€â”€â”€ POST compliance-run (findings + precedence) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/compliance-run",
@@ -1039,7 +1084,7 @@ router.post(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/reports/:type/run ───────
+// â”€â”€â”€ POST /plan-review/engagements/:id/reports/:type/run â”€â”€â”€â”€â”€â”€â”€
 
 const inFlightReports = new Map<string, string>();
 const reportResultCache = new Map<string, unknown>();
@@ -1172,7 +1217,7 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/reports/:type ──────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/reports/:type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/engagements/:engagementId/reports/:type",
@@ -1310,7 +1355,7 @@ router.get(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/sheets ───────────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/sheets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function loadLatestSnapshotId(
   engagementId: string,
@@ -1379,7 +1424,7 @@ router.get(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/sheets/extract ──────────
+// â”€â”€â”€ POST /plan-review/engagements/:id/sheets/extract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/sheets/extract",
@@ -1427,7 +1472,7 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/response-tasks ─────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/response-tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function toPlanReviewResponseTaskWire(
   row: typeof responseTasks.$inferSelect,
@@ -1481,7 +1526,7 @@ router.get(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/letter ───────────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/letter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/engagements/:id/letter",
@@ -1506,7 +1551,7 @@ router.get(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/letter/generate ─────────
+// â”€â”€â”€ POST /plan-review/engagements/:id/letter/generate â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/letter/generate",
@@ -1572,14 +1617,14 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/admin/functions ────────────────────────────
+// â”€â”€â”€ GET /plan-review/admin/functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res: Response) => {
   const precedenceLive = isPrecedenceEngineProductionEnabled();
   const functions: TileDefWire[] = [
     { id: "precedence", label: "Precedence Engine", category: "Compliance", status: precedenceLive ? "live" : "degraded", degradedReason: precedenceLive ? undefined : "Production gate not activated" },
     { id: "hydrology", label: "Hydrology", category: "Site Analysis", status: process.env.HYDROLOGY_PYSHEDS_INSTALLED === "1" ? "live" : "degraded", degradedReason: "pysheds not installed in Cloud Run worker." },
-    { id: "subsurface", label: "Subsurface Suitability", category: "Site Analysis", status: "partial", degradedReason: "SSURGO ECONNRESET — USDA TLS issue." },
+    { id: "subsurface", label: "Subsurface Suitability", category: "Site Analysis", status: "partial", degradedReason: "SSURGO ECONNRESET â€” USDA TLS issue." },
     { id: "icc-ingest", label: "ICC Code Connect Ingest", category: "Compliance", status: "partial", degradedReason: "Credentials live; API contract not verified." },
     { id: "avm", label: "AVM / Valuation", category: "Market", status: "partial", degradedReason: "Cotality AVM keys present; not fully wired." },
     { id: "rent-comps", label: "Rent / Comps", category: "Market", status: "partial", degradedReason: "Cotality demo quota: 100 req/day, expires ~2026-07-06." },
@@ -1587,7 +1632,7 @@ router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res
   res.json(functions);
 });
 
-// ─── GET /plan-review/admin/tile-registry ─────────────────────────
+// â”€â”€â”€ GET /plan-review/admin/tile-registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // The FULL machine-readable tile capability registry (all entries with
 // requires / produces / modes / mcpTools). This is DISTINCT from
@@ -1596,7 +1641,7 @@ router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res
 // decide which tiles a given engagement context can satisfy.
 //
 // Source of truth: TILE_CAPABILITIES in @empressaio/cortex-client, the same array
-// the SPA derives its TILE_REGISTRY from — so the endpoint and the app cannot
+// the SPA derives its TILE_REGISTRY from â€” so the endpoint and the app cannot
 // drift. Served verbatim; capability metadata is non-sensitive tile
 // descriptors. Auth is requireServiceTokenOrSession, consistent with every
 // other plan-review BFF route: the MCP server presents
@@ -1610,10 +1655,10 @@ router.get(
   },
 );
 
-// ─── Engagement annotations (Track D Phase 2) ───────────────────
+// â”€â”€â”€ Engagement annotations (Track D Phase 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Engagement-scoped 2D/3D unified annotations (markup / finding overlays).
-// Distinct from the submission-scoped `reviewer_annotations` routes/table —
+// Distinct from the submission-scoped `reviewer_annotations` routes/table â€”
 // do not conflate. The wire shape mirrors `@empressaio/document-viewer`'s
 // `Annotation` type so the DocumentViewerTile round-trips it verbatim.
 
@@ -1662,7 +1707,7 @@ function annotationRowToWire(
   };
 }
 
-// ─── GET /plan-review/engagements/:id/annotations ───────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/annotations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.get(
   "/engagements/:id/annotations",
@@ -1690,7 +1735,7 @@ router.get(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/annotations ──────────────
+// â”€â”€â”€ POST /plan-review/engagements/:id/annotations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/annotations",
@@ -1754,7 +1799,7 @@ router.post(
   },
 );
 
-// ─── DELETE /plan-review/engagements/:id/annotations/:annotationId ─
+// â”€â”€â”€ DELETE /plan-review/engagements/:id/annotations/:annotationId â”€
 
 router.delete(
   "/engagements/:id/annotations/:annotationId",
@@ -1791,7 +1836,7 @@ router.delete(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/aps-viewer-token ─────────────
+// â”€â”€â”€ GET /plan-review/engagements/:id/aps-viewer-token â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Mints a short-lived Autodesk Platform Services (APS) viewer token for the
 // DWGViewer component. APS credentials are NOT configured in this environment
@@ -1849,7 +1894,7 @@ router.get(
       if (!apsRes.ok) {
         const detail = await apsRes.text();
         // NOTE: a 403 AUTH-001 here means the Autodesk ACCOUNT lacks APS API
-        // entitlement (backend/support-gated), NOT an app/secret bug — a fresh,
+        // entitlement (backend/support-gated), NOT an app/secret bug â€” a fresh,
         // correctly-configured app still 403s until the account is entitled.
         res.status(502).json({
           error: "aps_auth_failed",
@@ -1884,7 +1929,7 @@ router.get(
   },
 );
 
-// ─── POST /plan-review/engagements/:id/dwg-convert ─────────────────
+// â”€â”€â”€ POST /plan-review/engagements/:id/dwg-convert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // The specified LibreOffice DWG->PDF fallback: `soffice --headless --convert-to
 // pdf`. Deferred and returns a NAMED 501 because (a) soffice is NOT in the Cloud
@@ -1915,24 +1960,24 @@ router.post(
   },
 );
 
-// ─── AI-vision annotation generation (Track F Phase 1) ──────────
+// â”€â”€â”€ AI-vision annotation generation (Track F Phase 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Async pipeline: rasterize each PDF page of an engagement's attached plan
 // set, ask a vision model for a bounding box per FAILING finding, and
 // persist the result into `engagement_annotations`.
 //
 // TWO HARD, NON-NEGOTIABLE INVARIANTS:
-//   (1) IDEMPOTENT — running generation twice for the same submission must
+//   (1) IDEMPOTENT â€” running generation twice for the same submission must
 //       NOT create duplicate annotations (pre-run skip-set + per-insert
 //       re-check).
 //   (2) Every generated annotation's confidence is
-//       `{ value, kind: 'asserted' }` — NEVER 'calibrated'. An AI-vision
+//       `{ value, kind: 'asserted' }` â€” NEVER 'calibrated'. An AI-vision
 //       coordinate is asserted-with-provenance, not earned/calibrated
 //       (company structural commitment #2).
 
 /** Failing = blocker|concern; advisory is not failing. */
 const FAILING_SEVERITIES = ["blocker", "concern"] as const;
-/** Exclude rejected/overridden — only live findings get annotations. */
+/** Exclude rejected/overridden â€” only live findings get annotations. */
 const ANNOTATABLE_STATUSES = [
   "ai-produced",
   "accepted",
@@ -2042,7 +2087,7 @@ async function aiAnnotationExists(
  * list (pre-run idempotency), fetches the first loadable PDF, and for each
  * page rasterizes once then asks the vision model to place every still-open
  * finding. Each insert re-checks idempotency (defense-in-depth) and stamps
- * asserted confidence. Never throws out — sets job.status='error' instead.
+ * asserted confidence. Never throws out â€” sets job.status='error' instead.
  */
 async function runAnnotationGeneration(
   jobId: string,
@@ -2113,7 +2158,7 @@ async function runAnnotationGeneration(
       }
     }
 
-    // No loadable PDF — nothing to annotate, finish clean (not an error).
+    // No loadable PDF â€” nothing to annotate, finish clean (not an error).
     if (!pdfBuffer || pageCount === 0) {
       const done = annotationJobs.get(jobId);
       if (done) {
@@ -2218,7 +2263,7 @@ async function runAnnotationGeneration(
   }
 }
 
-// ─── POST /plan-review/engagements/:id/annotations/generate ─────
+// â”€â”€â”€ POST /plan-review/engagements/:id/annotations/generate â”€â”€â”€â”€â”€
 
 router.post(
   "/engagements/:id/annotations/generate",
@@ -2255,7 +2300,7 @@ router.post(
         res.status(202).json({ jobId: existingJobId });
         return;
       }
-      // Stale mapping (job already terminal) — clear and fall through.
+      // Stale mapping (job already terminal) â€” clear and fall through.
       inFlightAnnotationJobs.delete(flightKey);
     }
 
@@ -2291,7 +2336,7 @@ router.post(
   },
 );
 
-// ─── GET /plan-review/engagements/:id/annotations/generate/:jobId ─
+// â”€â”€â”€ GET /plan-review/engagements/:id/annotations/generate/:jobId â”€
 
 router.get(
   "/engagements/:id/annotations/generate/:jobId",
@@ -2312,15 +2357,15 @@ router.get(
   },
 );
 
-// ─── Saved workspace spaces (Phase 2 shell experience) ────────────
+// â”€â”€â”€ Saved workspace spaces (Phase 2 shell experience) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Server-persisted, shareable named workspace layouts. Replaces the
 // localStorage-only saved-spaces store. Rows are keyed by (tenantId,
 // ownerUserId) so the store becomes tenant-private cleanly when the auth build
-// lands — today it resolves the anonymous/internal owner + default tenant,
+// lands â€” today it resolves the anonymous/internal owner + default tenant,
 // exactly like the engagement-create route above.
 //
 // The `snapshot` body is the shell's SpaceSnapshot (tileIds, layoutId, colFr,
-// rowFr, layoutMode). It is stored verbatim as JSONB — the shell owns its
+// rowFr, layoutMode). It is stored verbatim as JSONB â€” the shell owns its
 // shape; the server only guards the envelope.
 
 type SavedSpaceOwner = { tenantId: string; ownerUserId: string };
@@ -2358,7 +2403,7 @@ function isValidSnapshot(body: unknown): body is Record<string, unknown> {
   );
 }
 
-// GET /plan-review/spaces — list the caller's saved spaces (name + id only).
+// GET /plan-review/spaces â€” list the caller's saved spaces (name + id only).
 router.get(
   "/spaces",
   requireServiceTokenOrSession,
@@ -2399,7 +2444,7 @@ router.get(
   },
 );
 
-// GET /plan-review/spaces/by-name/:name — load one space snapshot by name.
+// GET /plan-review/spaces/by-name/:name â€” load one space snapshot by name.
 router.get(
   "/spaces/by-name/:name",
   requireServiceTokenOrSession,
@@ -2439,7 +2484,7 @@ router.get(
   },
 );
 
-// PUT /plan-review/spaces — upsert a named space (save/update by name).
+// PUT /plan-review/spaces â€” upsert a named space (save/update by name).
 router.put(
   "/spaces",
   requireServiceTokenOrSession,
@@ -2485,7 +2530,7 @@ router.put(
   },
 );
 
-// DELETE /plan-review/spaces/by-name/:name — remove a named space.
+// DELETE /plan-review/spaces/by-name/:name â€” remove a named space.
 router.delete(
   "/spaces/by-name/:name",
   requireServiceTokenOrSession,
@@ -2513,7 +2558,7 @@ router.delete(
   },
 );
 
-// POST /plan-review/spaces/by-name/:name/share — mint (or return) a share token.
+// POST /plan-review/spaces/by-name/:name/share â€” mint (or return) a share token.
 router.post(
   "/spaces/by-name/:name/share",
   requireServiceTokenOrSession,
@@ -2554,7 +2599,7 @@ router.post(
   },
 );
 
-// GET /plan-review/spaces/shared/:token — read-only fetch by share link.
+// GET /plan-review/spaces/shared/:token â€” read-only fetch by share link.
 // Deliberately NOT owner-scoped (that is the point of a share link), but still
 // tenant-private-ready: a shared space is only reachable via its unguessable
 // token, and never pooled or listed cross-tenant.

@@ -1,5 +1,6 @@
 import type {
   QueueRow,
+  ReviewerEngagementRow,
   EngagementDetail,
   ReportResult,
   LetterDraft,
@@ -32,6 +33,7 @@ export type CortexClient = {
   // ─── Typed plan-review BFF convenience methods ─────────────────
   // Consumer supplies baseUrl (e.g. "/api"); these hit "/plan-review/...".
   getQueue: (status?: string) => Promise<QueueRow[]>
+  getReviewerEngagements: () => Promise<ReviewerEngagementRow[]>
   getEngagement: (id: string) => Promise<EngagementDetail>
   runReport: (
     engagementId: string,
@@ -179,6 +181,10 @@ export function createCortexClient(config: CortexClientConfig): CortexClient {
     getQueue(status) {
       const q = status ? `?status=${encodeURIComponent(status)}` : ''
       return doFetch<QueueRow[]>(`/plan-review/queue${q}`)
+    },
+
+    getReviewerEngagements() {
+      return doFetch<ReviewerEngagementRow[]>(`/plan-review/reviewer/engagements`)
     },
 
     getEngagement(id) {
