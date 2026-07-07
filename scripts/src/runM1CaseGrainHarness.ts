@@ -54,7 +54,10 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const DEFAULT_CORPUS_SNAPSHOT = "P:/hauska-engine/services/retrieval-api/corpus/snapshot.json";
 const DEFAULT_OUT_DIR = "./artifacts/calibration-runs";
 const DEFAULT_GCLOUD = "C:\\Users\\cente\\google-cloud-sdk\\bin\\gcloud.cmd";
-const DEFAULT_INBOX = "P:/legacy-design-tools/_inbox";
+// Report lands NEXT TO the deposits by default — never in an absolute path
+// outside this clone (the prior harnesses wrote into the operator's persistent
+// clone at P:/legacy-design-tools/_inbox; a task clone must not touch it).
+const DEFAULT_INBOX = DEFAULT_OUT_DIR;
 
 const GCS_ROOT = "gs://hauska-calibration-raw";
 
@@ -293,7 +296,9 @@ async function loadSanAntonioPermits(
 async function main() {
   console.log("=== M1-C case-grain harness ===");
   console.log(`Mode: ${FIXTURES_MODE ? "FIXTURES" : "GCS-backed"}`);
-  console.log(`Corpus snapshot: ${CORPUS_SNAPSHOT_PATH}`);
+  console.log(
+    `Corpus snapshot: ${FIXTURES_MODE ? "(fixtures — no snapshot read)" : CORPUS_SNAPSHOT_PATH}`,
+  );
   console.log(`Output dir: ${CALIBRATION_OUT_DIR}`);
   console.log("");
 
