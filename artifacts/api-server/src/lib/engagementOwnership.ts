@@ -173,6 +173,7 @@ export async function loadEngagementForSession(
 export async function loadSubmissionForSession(
   submissionId: string,
   session: SessionUser,
+  serviceAuth?: { tenantId: string; jurisdictionTenant: string | null; platformInternal: boolean },
 ): Promise<
   | { ok: true; submission: typeof submissions.$inferSelect; engagement: Engagement }
   | { ok: false; status: 401 | 404; error: string }
@@ -188,6 +189,16 @@ export async function loadSubmissionForSession(
     .limit(1);
   if (!row) {
     return { ok: false, status: 404, error: "submission_not_found" };
+  }
+  // Service-token requests get reviewer-grade access — same rule as
+  // loadEngagementForSession above (the command center drives the plan-review
+  // lifecycle through the proxy's service key).
+  if (serviceAuth !== undefined) {
+    return {
+      ok: true,
+      submission: row.submission,
+      engagement: row.engagement,
+    };
   }
   if (isInternalSession(session)) {
     return {
