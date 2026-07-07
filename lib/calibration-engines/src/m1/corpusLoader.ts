@@ -49,6 +49,7 @@ export function loadCorpusForJurisdiction(args: {
   snapshot: { atoms?: Record<string, CorpusSnapshotAtom>; links?: AtomLinkLike[] };
   jurisdictionTenant: string;
   queryWeights?: number[];
+  queryWeightMode?: "uniform" | "available";
 }): { atoms: LoadedCorpusAtom[]; linkIndex: CorpusLinkIndex } {
   const entries = Object.entries(args.snapshot.atoms ?? {}).filter(
     ([, v]) =>
@@ -88,7 +89,9 @@ export function loadCorpusForJurisdiction(args: {
 
   const sparseWeights =
     args.queryWeights ??
-    buildSparseQueryWeights(entries.length);
+    (args.queryWeightMode === "available"
+      ? throwOnFabricatedWeights()
+      : buildSparseQueryWeights(entries.length));
 
   const atoms: LoadedCorpusAtom[] = entries.map(([atomId, v], idx) => {
     const sectionNumber = v.sectionNumber ?? "";
@@ -129,6 +132,13 @@ function buildSparseQueryWeights(atomCount: number): number[] {
     weights[i * Math.floor(atomCount / hotCount)] = 1 + (i % 5);
   }
   return weights;
+}
+
+function throwOnFabricatedWeights(): never {
+  throw new Error(
+    'queryWeightMode="available" requires real queryWeights argument — ' +
+      'F1 atom-grain attribution does not exist yet; fabricated weights are disabled per 05 spec honest-input rule.',
+  );
 }
 
 const SOURCE_QUALITY_BASELINE: Record<string, number> = {

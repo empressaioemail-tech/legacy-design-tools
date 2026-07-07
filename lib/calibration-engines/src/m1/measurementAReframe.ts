@@ -130,6 +130,7 @@ export function runThreeMetricM1(args: {
   targetFraction?: number;
   wTargetRanking?: number;
   baseLambda?: number;
+  lambdaSource?: "cold-start-prior" | "amendment-history";
 }): ThreeMetricM1Result {
   const observationYears = args.observationYears ?? 12;
   const wTarget = args.wTargetRanking ?? W_TARGET_RANKING;
@@ -160,6 +161,7 @@ export function runThreeMetricM1(args: {
     targetFraction,
     wTargetRanking: wTarget,
     baseLambda,
+    lambdaSource: args.lambdaSource,
   });
 
   const provenanceByClass: CoverageHonesty["provenanceByClass"] = {

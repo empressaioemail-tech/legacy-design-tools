@@ -191,4 +191,135 @@ describe("runMeasurementAv2", () => {
     expect(sectionPlus.earnedFraction).toBeGreaterThan(0.5);
     expect(result.caseMatchRate).toBe(1);
   });
+
+  it("propagates lambdaSource when explicitly provided", () => {
+    const snapshot = {
+      atoms: {
+        a1: {
+          entityType: "code-section",
+          entityId: "test_tx/code/a1",
+          jurisdictionTenant: "test_tx",
+          sectionNumber: "25-1-1",
+          sourceType: "municode",
+        },
+      },
+    };
+    const { atoms, linkIndex } = loadCorpusForJurisdiction({
+      snapshot,
+      jurisdictionTenant: "test_tx",
+      queryWeights: [1],
+    });
+
+    const deposits = [
+      {
+        entityId: "finding:backtest:1",
+        occurredAt: "2020-01-01T00:00:00.000Z",
+        payload: {
+          subjectKey: "test_tx:variance:1",
+          calibrationProvenance: "backtest",
+          rawCounts: { successCount: 1, trialCount: 1 },
+        },
+        citations: [{ kind: "code-section", atomId: "a1" }],
+        cortexJurisdictionKey: "test:tx",
+      },
+    ];
+
+    const resultWithAmendmentHistory = runMeasurementAv2({
+      atoms,
+      deposits,
+      entityIdToAtomId: linkIndex.entityIdToAtomId,
+      queryWeightMode: "uniform",
+      jurisdictionTenant: "test_tx",
+      baseLambda: 0.32,
+      lambdaSource: "amendment-history",
+    });
+
+    expect(resultWithAmendmentHistory.lambdaSource).toBe("amendment-history");
+    expect(resultWithAmendmentHistory.lambdaPriorUsed).toBe(0.32);
+
+    const resultWithColdStart = runMeasurementAv2({
+      atoms,
+      deposits,
+      entityIdToAtomId: linkIndex.entityIdToAtomId,
+      queryWeightMode: "uniform",
+      jurisdictionTenant: "test_tx",
+      lambdaSource: "cold-start-prior",
+    });
+
+    expect(resultWithColdStart.lambdaSource).toBe("cold-start-prior");
+    expect(resultWithColdStart.lambdaPriorUsed).toBe(0.02);
+  });
+});
+
+describe("corpus loader queryWeightMode honesty", () => {
+  it("throws when queryWeightMode='available' without real weights", () => {
+    const snapshot = {
+      atoms: {
+        a1: {
+          entityType: "code-section",
+          entityId: "test_tx/code/a1",
+          jurisdictionTenant: "test_tx",
+          sectionNumber: "25-1-1",
+        },
+      },
+    };
+
+    expect(() => {
+      loadCorpusForJurisdiction({
+        snapshot,
+        jurisdictionTenant: "test_tx",
+        queryWeightMode: "available",
+      });
+    }).toThrow(/F1 atom-grain attribution does not exist/);
+  });
+
+  it("allows queryWeightMode='available' when real weights provided", () => {
+    const snapshot = {
+      atoms: {
+        a1: {
+          entityType: "code-section",
+          entityId: "test_tx/code/a1",
+          jurisdictionTenant: "test_tx",
+          sectionNumber: "25-1-1",
+        },
+      },
+    };
+
+    const { atoms } = loadCorpusForJurisdiction({
+      snapshot,
+      jurisdictionTenant: "test_tx",
+      queryWeightMode: "available",
+      queryWeights: [5],
+    });
+
+    expect(atoms).toHaveLength(1);
+    expect(atoms[0]!.queryWeight).toBe(5);
+  });
+
+  it("defaults to uniform when queryWeightMode not specified", () => {
+    const snapshot = {
+      atoms: {
+        a1: {
+          entityType: "code-section",
+          entityId: "test_tx/code/a1",
+          jurisdictionTenant: "test_tx",
+          sectionNumber: "25-1-1",
+        },
+        a2: {
+          entityType: "code-section",
+          entityId: "test_tx/code/a2",
+          jurisdictionTenant: "test_tx",
+          sectionNumber: "25-1-2",
+        },
+      },
+    };
+
+    const { atoms } = loadCorpusForJurisdiction({
+      snapshot,
+      jurisdictionTenant: "test_tx",
+    });
+
+    expect(atoms).toHaveLength(2);
+    expect(atoms[0]!.queryWeight).toBeGreaterThan(0);
+  });
 });
