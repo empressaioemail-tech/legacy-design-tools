@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { PropertyBriefTile } from './PropertyBriefTile'
-import { EngagementProvider } from '@empressaio/tile-shell'
-import { CortexClientProvider } from '../CortexProvider'
+import { EngagementProvider, useEngagement } from '@empressaio/tile-shell'
+import { CortexProvider } from '../CortexProvider'
 import type { CortexClient } from '@empressaio/cortex-client'
 
 describe('PropertyBriefTile epoch guard', () => {
@@ -36,17 +36,20 @@ describe('PropertyBriefTile epoch guard', () => {
     )
 
     function TestWrapper() {
-      const { setEngagement: setEng } = require('@empressaio/tile-shell').useEngagement()
+      // ESM import, NOT require(): a require() here resolves a second module
+      // instance of tile-shell and splits the React context — the exact
+      // dual-instance failure mode the A5 design guards against.
+      const { setEngagement: setEng } = useEngagement()
       setEngagement = setEng
       return <PropertyBriefTile mode="full" />
     }
 
     const { container } = render(
-      <CortexClientProvider client={mockClient}>
+      <CortexProvider client={mockClient}>
         <EngagementProvider initialParcel={{ engagementId: 'eng-1' }}>
           <TestWrapper />
         </EngagementProvider>
-      </CortexClientProvider>
+      </CortexProvider>
     )
 
     expect(getReportSpy).toHaveBeenCalledWith('eng-1', 'property-brief')
@@ -79,11 +82,11 @@ describe('PropertyBriefTile epoch guard', () => {
     getReportSpy.mockResolvedValue(briefResult)
 
     const { container } = render(
-      <CortexClientProvider client={mockClient}>
+      <CortexProvider client={mockClient}>
         <EngagementProvider initialParcel={{ engagementId: 'eng-stable' }}>
           <PropertyBriefTile mode="full" />
         </EngagementProvider>
-      </CortexClientProvider>
+      </CortexProvider>
     )
 
     await waitFor(() => {
