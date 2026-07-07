@@ -35,14 +35,18 @@ type GateContextMode = "off" | "log" | "enforce";
  * Route patterns for the six gate-fronted routers. The middleware only
  * enforces verification on these routes; other routes pass through
  * without triggering gate_context_missing logs.
+ *
+ * Patterns use optional `/api` prefix because routers are mounted inside
+ * `/api` parent router, so `req.path` is mount-relative at runtime.
  */
 const GATE_FRONTED_ROUTE_PATTERNS = [
-  /^\/api\/engagements\/[^/]+\/encumbrances/,
-  /^\/api\/engagements\/[^/]+\/site-topography/,
-  /^\/api\/engagements\/[^/]+\/site-drainage/,
-  /^\/api\/submissions\/[^/]+\/findings/,
-  /^\/api\/findings\/[^/]+\/(accept|reject|override)/,
-  /^\/api\/findings\/outcome-observations/,
+  /^(?:\/api)?\/engagements\/[^/]+\/briefing(?:\/|$)/,
+  /^(?:\/api)?\/engagements\/[^/]+\/encumbrances(?:\/|$)/,
+  /^(?:\/api)?\/engagements\/[^/]+\/site-drainage(?:\/|$)/,
+  /^(?:\/api)?\/engagements\/[^/]+\/site-topography(?:\/|$)/,
+  /^(?:\/api)?\/findings\/[^/]+\/(accept|reject|override|outcome)(?:\/|$)/,
+  /^(?:\/api)?\/findings\/outcome-observations(?:\/|$)/,
+  /^(?:\/api)?\/submissions\/[^/]+\/findings(?:\/|$)/,
 ];
 
 function isGateFrontedRoute(path: string): boolean {
@@ -155,6 +159,12 @@ export const verifyGateContext: RequestHandler = (
         signedPlatformInternal: ctx.platformInternal,
         plainPlatformInternal,
       });
+
+      // Enforce mode: reject forged plain headers (Finding 4)
+      if (mode === "enforce") {
+        res.status(401).json({ error: "gate_context_mismatch" });
+        return;
+      }
     } else {
       logger.info({
         event: "gate_context_verified",
@@ -168,6 +178,15 @@ export const verifyGateContext: RequestHandler = (
     }
 
     req.gateContext = ctx;
+
+    // Overwrite req.serviceAuth with verified context in enforce mode to
+    // prevent downstream handlers from reading forged plain-header values
+    // (Finding 4)
+    if (mode === "enforce" && req.serviceAuth) {
+      req.serviceAuth.jurisdictionTenant = ctx.tenant;
+      req.serviceAuth.platformInternal = ctx.platformInternal;
+    }
+
     next();
   } catch (err) {
     if (err instanceof GateContextVerificationError) {
