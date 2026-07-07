@@ -350,8 +350,12 @@ router.post("/engagements", async (req: Request, res: Response) => {
   }
 });
 
-async function fetchEngagementDetail(id: string, session: Request["session"]) {
-  const loaded = await loadEngagementForSession(id, session);
+async function fetchEngagementDetail(
+  id: string,
+  session: Request["session"],
+  serviceAuth?: Request["serviceAuth"],
+) {
+  const loaded = await loadEngagementForSession(id, session, serviceAuth);
   if (!loaded.ok) return loaded;
   const e = loaded.engagement;
 
@@ -381,7 +385,7 @@ router.get("/engagements/:id", async (req: Request, res: Response) => {
   }
 
   try {
-    const out = await fetchEngagementDetail(params.data.id, req.session);
+    const out = await fetchEngagementDetail(params.data.id, req.session, req.serviceAuth);
     if (!out.ok) {
       res.status(out.status).json({ error: out.error });
       return;
@@ -408,7 +412,7 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
   const body = bodyParse.data;
 
   try {
-    const loaded = await loadEngagementForSession(params.data.id, req.session);
+    const loaded = await loadEngagementForSession(params.data.id, req.session, req.serviceAuth);
     if (!loaded.ok) {
       res.status(loaded.status).json({ error: loaded.error });
       return;
@@ -606,7 +610,7 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
       }
     }
 
-    const out = await fetchEngagementDetail(existing.id, req.session);
+    const out = await fetchEngagementDetail(existing.id, req.session, req.serviceAuth);
     if (!out.ok) {
       res.status(out.status).json({ error: out.error });
       return;
@@ -626,7 +630,7 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
   }
 
   try {
-    const loaded = await loadEngagementForSession(params.data.id, req.session);
+    const loaded = await loadEngagementForSession(params.data.id, req.session, req.serviceAuth);
     if (!loaded.ok) {
       res.status(loaded.status).json({ error: loaded.error });
       return;
@@ -721,7 +725,7 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
       );
     }
 
-    const out = await fetchEngagementDetail(existing.id, req.session);
+    const out = await fetchEngagementDetail(existing.id, req.session, req.serviceAuth);
     if (!out.ok) {
       res.status(out.status).json({ error: out.error });
       return;
@@ -789,7 +793,7 @@ router.get(
     }
 
     try {
-      const loaded = await loadEngagementForSession(params.data.id, req.session);
+      const loaded = await loadEngagementForSession(params.data.id, req.session, req.serviceAuth);
       if (!loaded.ok) {
         res.status(loaded.status).json({ error: loaded.error });
         return;
@@ -864,7 +868,7 @@ router.post(
     }
 
     try {
-      const loaded = await loadEngagementForSession(params.data.id, req.session);
+      const loaded = await loadEngagementForSession(params.data.id, req.session, req.serviceAuth);
       if (!loaded.ok) {
         res.status(loaded.status).json({ error: loaded.error });
         return;

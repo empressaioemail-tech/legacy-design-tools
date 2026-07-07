@@ -147,16 +147,21 @@ export function denyEngagementAccess(
 export async function loadEngagementForSession(
   engagementId: string,
   session: SessionUser,
+  serviceAuth?: { tenantId: string; jurisdictionTenant: string | null; platformInternal: boolean },
 ): Promise<
   | { ok: true; engagement: Engagement }
   | { ok: false; status: 401 | 404; error: string }
 > {
+  // Service-token authenticated requests get reviewer-grade access (skip owner filter)
+  const skipOwnerFilter = serviceAuth !== undefined;
   const [row] = await db
     .select()
     .from(engagements)
     .where(
-      engagementOwnerAnd(session, eq(engagements.id, engagementId)) ??
-        eq(engagements.id, engagementId),
+      skipOwnerFilter
+        ? eq(engagements.id, engagementId)
+        : (engagementOwnerAnd(session, eq(engagements.id, engagementId)) ??
+            eq(engagements.id, engagementId)),
     )
     .limit(1);
   if (!row) {
