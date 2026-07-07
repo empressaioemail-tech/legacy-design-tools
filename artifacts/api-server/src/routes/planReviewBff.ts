@@ -896,6 +896,48 @@ router.get("/queue", requireServiceTokenOrSession, async (req: Request, res: Res
   res.json(queueRows);
 });
 
+// ─── GET /plan-review/reviewer/engagements ───────────────────────────
+
+router.get("/reviewer/engagements", requireServiceTokenOrSession, async (req: Request, res: Response) => {
+  const engagementRows = await db
+    .select({
+      id: engagements.id,
+      name: engagements.name,
+      address: engagements.address,
+      jurisdiction: engagements.jurisdiction,
+      status: engagements.status,
+      updatedAt: engagements.updatedAt,
+    })
+    .from(engagements)
+    .orderBy(desc(engagements.updatedAt))
+    .limit(100);
+
+  const submissionCounts = await db
+    .select({
+      engagementId: submissions.engagementId,
+      count: sql<number>`cast(count(*) as int)`,
+    })
+    .from(submissions)
+    .where(inArray(submissions.engagementId, engagementRows.map((e) => e.id)))
+    .groupBy(submissions.engagementId);
+
+  const countsByEngagement = new Map(
+    submissionCounts.map((row) => [row.engagementId, Number(row.count) || 0]),
+  );
+
+  const result = engagementRows.map((e) => ({
+    id: e.id,
+    name: e.name,
+    address: e.address,
+    jurisdiction: e.jurisdiction,
+    status: e.status,
+    submissionCount: countsByEngagement.get(e.id) ?? 0,
+    updatedAt: e.updatedAt.toISOString(),
+  }));
+
+  res.json(result);
+});
+
 // ─── GET /plan-review/engagements/:id ────────────────────────────
 
 router.get(
