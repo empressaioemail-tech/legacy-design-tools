@@ -299,9 +299,19 @@ export function decisionReadSlice(
 
   const sliceRead = sectionPlus.sliceEarnedFractionAtReadGrain;
   const sliceAmend = sectionPlus.sliceEarnedFraction;
+  const sliceN = result.coverage.adjudicatedAtomCount;
+
+  // A tiny slice earning 100% is not decision-grade — the 05 spec's floor
+  // principle ("n exceeds a small floor so two agreeing reviews cannot fake
+  // precision") applies to the DECISION line too. Below the dense-signal
+  // floor, report the slice honestly instead of a PASS.
+  const SLICE_DECISION_FLOOR = 3;
+  if (sliceN < SLICE_DECISION_FLOOR) {
+    return `**INSUFFICIENT SLICE (n=${sliceN} adjudicated atoms < floor ${SLICE_DECISION_FLOOR}) — slice metric not decision-grade.** Citation-lineage attribution reached too few atoms for the slice fraction (${(sliceAmend * 100).toFixed(1)}%) to mean anything. Corpus-uniform contextualizer: ${(corpusRead * 100).toFixed(1)}%. Un-adjudicated tail: ${result.coverage.unAdjudicatedAtomCount} atoms (${(result.coverage.unAdjudicatedShare * 100).toFixed(1)}%) carry asserted-with-provenance. Match rate ${(result.caseMatchRate * 100).toFixed(1)}% (outcome-label heuristic). The bottleneck is deposit→atom lineage attribution, not earning arithmetic.`;
+  }
 
   if (sliceAmend >= targetFraction) {
-    return `**PASS (slice metric).** Adjudication-weighted slice earns ${(sliceAmend * 100).toFixed(1)}% at section-plus-dependents (read-grain: ${(sliceRead * 100).toFixed(1)}%) vs ${(targetFraction * 100).toFixed(0)}% target. Corpus-uniform contextualizer: ${(corpusRead * 100).toFixed(1)}%. Un-adjudicated tail: ${result.coverage.unAdjudicatedAtomCount} atoms (${(result.coverage.unAdjudicatedShare * 100).toFixed(1)}%) carry asserted-with-provenance. Match rate ${(result.caseMatchRate * 100).toFixed(1)}%.`;
+    return `**PASS (slice metric, n=${sliceN} adjudicated atoms).** Adjudication-weighted slice earns ${(sliceAmend * 100).toFixed(1)}% at section-plus-dependents (read-grain: ${(sliceRead * 100).toFixed(1)}%) vs ${(targetFraction * 100).toFixed(0)}% target. Corpus-uniform contextualizer: ${(corpusRead * 100).toFixed(1)}%. Un-adjudicated tail: ${result.coverage.unAdjudicatedAtomCount} atoms (${(result.coverage.unAdjudicatedShare * 100).toFixed(1)}%) carry asserted-with-provenance. Match rate ${(result.caseMatchRate * 100).toFixed(1)}%.`;
   }
 
   if (sliceRead >= targetFraction) {

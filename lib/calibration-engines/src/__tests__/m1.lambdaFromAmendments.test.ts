@@ -64,11 +64,19 @@ describe("lambdaFromAmendments", () => {
       jurisdictionTenant: "austin_tx",
     });
 
-    expect(results.size).toBe(1);
+    // family entry + the jurisdiction-level rollup (bare-tenant key)
+    expect(results.size).toBe(2);
     const familyResult = results.get("austin_tx:25-2");
     expect(familyResult).toBeDefined();
     expect(familyResult!.amendmentCount).toBe(4);
     expect(familyResult!.source).toBe("amendment-history");
+
+    const rollup = results.get("austin_tx");
+    expect(rollup).toBeDefined();
+    expect(rollup!.amendmentCount).toBe(4);
+    expect(rollup!.source).toBe("amendment-history");
+    expect(rollup!.rate).toBeGreaterThan(0.3);
+    expect(rollup!.rate).toBeLessThan(0.35);
 
     const spanYears = familyResult!.observationYears;
     expect(spanYears).toBeGreaterThan(12);
@@ -109,7 +117,12 @@ describe("lambdaFromAmendments", () => {
       observationYears: 3,
     });
 
-    expect(results.size).toBe(2);
+    // two family entries + the jurisdiction-level rollup
+    expect(results.size).toBe(3);
+    const rollup = results.get("austin_tx");
+    expect(rollup).toBeDefined();
+    expect(rollup!.amendmentCount).toBe(3);
+    expect(rollup!.rate).toBeCloseTo(3 / 3, 2);
     const family25_2 = results.get("austin_tx:25-2");
     const family25_3 = results.get("austin_tx:25-3");
 
@@ -146,8 +159,11 @@ describe("lambdaFromAmendments", () => {
       observationYears: 2,
     });
 
-    expect(austinResults.size).toBe(1);
+    // family entry + rollup; the SA amendment must not leak in
+    expect(austinResults.size).toBe(2);
     expect(austinResults.get("austin_tx:25-2")).toBeDefined();
+    expect(austinResults.get("austin_tx")).toBeDefined();
+    expect(austinResults.get("austin_tx")!.amendmentCount).toBe(1);
     expect(austinResults.get("san_antonio_tx:35-1")).toBeUndefined();
   });
 });

@@ -104,6 +104,25 @@ export function lambdaFromAmendments(args: {
     });
   }
 
+  // Jurisdiction-level rollup, keyed by the bare tenant: total amendment
+  // events across families over the observation window. Consumers that
+  // read one baseLambda per jurisdiction (`.get(jurisdictionTenant)`) hit
+  // this entry — without it they silently fell through to the cold-start
+  // prior even when amendment history existed (the family entries are
+  // keyed "<tenant>:<family>").
+  if (results.size > 0) {
+    const totalAmendments = amendmentAtoms.length;
+    const windows = [...results.values()].map((r) => r.observationYears);
+    const window = args.observationYears ?? Math.max(...windows, 1);
+    results.set(args.jurisdictionTenant, {
+      group: args.jurisdictionTenant,
+      rate: totalAmendments / window,
+      amendmentCount: totalAmendments,
+      observationYears: window,
+      source: "amendment-history",
+    });
+  }
+
   // If no family-level results computed, fall back to jurisdiction-level cold-start.
   if (results.size === 0) {
     results.set(args.jurisdictionTenant, {
