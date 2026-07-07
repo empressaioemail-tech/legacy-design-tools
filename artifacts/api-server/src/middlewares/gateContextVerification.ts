@@ -7,7 +7,8 @@
  *     byte-identical to pre-T1 behavior
  *   - `log` (default when GATE_CONTEXT_SIGNING_KEY set): verify and emit
  *     structured logs; NEVER reject requests (build-and-stage default)
- *   - `enforce`: 401 on missing/invalid gate context
+ *   - `enforce`: 401 on forged tenant claims (signed context absent but
+ *     plain tenant-claiming headers present); allow anonymous requests
  *
  * The prod flip from log→enforce is explicitly operator-gated; nothing
  * built here may change current prod behavior by default.
@@ -30,6 +31,24 @@ const GATE_SIGNATURE_HEADER = "x-hauska-gate-signature";
 
 type GateContextMode = "off" | "log" | "enforce";
 
+/**
+ * Route patterns for the six gate-fronted routers. The middleware only
+ * enforces verification on these routes; other routes pass through
+ * without triggering gate_context_missing logs.
+ */
+const GATE_FRONTED_ROUTE_PATTERNS = [
+  /^\/api\/engagements\/[^/]+\/encumbrances/,
+  /^\/api\/engagements\/[^/]+\/site-topography/,
+  /^\/api\/engagements\/[^/]+\/site-drainage/,
+  /^\/api\/submissions\/[^/]+\/findings/,
+  /^\/api\/findings\/[^/]+\/(accept|reject|override)/,
+  /^\/api\/findings\/outcome-observations/,
+];
+
+function isGateFrontedRoute(path: string): boolean {
+  return GATE_FRONTED_ROUTE_PATTERNS.some((pattern) => pattern.test(path));
+}
+
 function getGateContextMode(): GateContextMode {
   const key = process.env.GATE_CONTEXT_SIGNING_KEY;
   if (!key) return "off";
@@ -41,6 +60,17 @@ function getGateContextMode(): GateContextMode {
 
 function getSigningKey(): string | null {
   return process.env.GATE_CONTEXT_SIGNING_KEY?.trim() || null;
+}
+
+/**
+ * Check if a request carries plain tenant-claiming headers (the forgery
+ * vector T1 closes). Returns true when EITHER plain header is present
+ * and non-empty.
+ */
+function hasPlainTenantClaims(req: Request): boolean {
+  const tenant = readGateJurisdictionTenant(req);
+  const platformInternal = readGatePlatformInternal(req);
+  return tenant !== null || platformInternal;
 }
 
 declare global {
@@ -70,25 +100,35 @@ export const verifyGateContext: RequestHandler = (
     return;
   }
 
+  // Scope the middleware: only gate-fronted routes trigger verification
+  if (!isGateFrontedRoute(req.path)) {
+    next();
+    return;
+  }
+
   const payloadB64 = req.header(GATE_CONTEXT_HEADER);
   const signature = req.header(GATE_SIGNATURE_HEADER);
 
   if (!payloadB64 || !signature) {
-    if (mode === "enforce") {
-      logger.info({
-        event: "gate_context_missing",
+    // Enforce semantics: reject forged tenant claims only
+    if (mode === "enforce" && hasPlainTenantClaims(req)) {
+      logger.warn({
+        event: "gate_context_required",
         path: req.path,
         method: req.method,
+        reason: "plain_tenant_headers_without_signature",
       });
       res.status(401).json({ error: "gate_context_required" });
       return;
     }
 
+    // Log mode OR enforce mode with no tenant claims → allow through
     logger.info({
       event: "gate_context_missing",
       path: req.path,
       method: req.method,
       mode,
+      hasPlainTenantClaims: hasPlainTenantClaims(req),
     });
     next();
     return;
