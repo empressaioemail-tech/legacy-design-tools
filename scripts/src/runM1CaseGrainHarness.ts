@@ -442,7 +442,9 @@ async function main() {
     const amendmentHazards = lambdaFromAmendments({
       snapshot: snapshot as { atoms?: Record<string, AmendmentAtom> },
       jurisdictionTenant: jurisdiction,
-      observationYears: 12.6,
+      // No observationYears override: the util infers each jurisdiction's
+      // window from its own amendment dates (Austin 12.81y vs SA 11.19y —
+      // a shared override flattens the per-city hazards to one number).
     });
 
     let baseLambda = 0.02;
