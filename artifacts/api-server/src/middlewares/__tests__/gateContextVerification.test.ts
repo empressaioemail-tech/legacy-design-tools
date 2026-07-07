@@ -43,13 +43,13 @@ function buildSignedContext(
   return { payload, signature };
 }
 
-function mockReq(headers: Record<string, string> = {}): Request {
+function mockReq(headers: Record<string, string> = {}, path = "/api/engagements/test-id/encumbrances"): Request {
   const lower = new Map(
     Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
   );
   return {
     header: (name: string) => lower.get(name.toLowerCase()),
-    path: "/test/path",
+    path,
     method: "GET",
   } as unknown as Request;
 }
@@ -235,7 +235,7 @@ describe("gateContextVerification middleware", () => {
       expect(res.status).not.toHaveBeenCalled();
     });
 
-    it("detects mismatch between signed and plain headers", () => {
+    it("detects mismatch between signed and plain headers but only warns (never rejects)", () => {
       const ctx: GateContext = {
         v: 1,
         tenant: "bastrop_tx",
@@ -259,6 +259,37 @@ describe("gateContextVerification middleware", () => {
 
       verifyGateContext(req, res, next);
 
+      expect(next).toHaveBeenCalledOnce();
+      expect(res.status).not.toHaveBeenCalled();
+      expect(req.gateContext).toEqual(ctx);
+    });
+
+    it("never rejects signed/plain mismatch in log mode (only warns)", () => {
+      // Same forgery attack as enforce mode, but log mode only warns
+      const ctx: GateContext = {
+        v: 1,
+        tenant: "bastrop_tx",
+        product: "architect",
+        tier: "pro",
+        keyId: null,
+        platformInternal: false,
+        iat: nowSec,
+        exp: nowSec + 300,
+      };
+      const { payload, signature } = buildSignedContext(ctx, TEST_KEY);
+
+      const req = mockReq({
+        "x-hauska-gate-context": payload,
+        "x-hauska-gate-signature": signature,
+        "x-hauska-jurisdiction-tenant": "elgin_tx",
+        "x-hauska-platform-internal": "true",
+      });
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      // Log mode: passes through despite mismatch
       expect(next).toHaveBeenCalledOnce();
       expect(res.status).not.toHaveBeenCalled();
       expect(req.gateContext).toEqual(ctx);
@@ -299,8 +330,36 @@ describe("gateContextVerification middleware", () => {
       expect(req.gateContext).toEqual(ctx);
     });
 
-    it("rejects missing headers with 401", () => {
+    it("rejects missing context with plain tenant headers (forged claim)", () => {
+      const req = mockReq({
+        "x-hauska-jurisdiction-tenant": "bastrop_tx",
+      });
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({ error: "gate_context_required" });
+    });
+
+    it("allows missing context with no tenant headers (anonymous)", () => {
       const req = mockReq();
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(res.status).not.toHaveBeenCalled();
+      expect(req.gateContext).toBeUndefined();
+    });
+
+    it("rejects missing context with platform-internal header (forged claim)", () => {
+      const req = mockReq({
+        "x-hauska-platform-internal": "true",
+      });
       const res = mockRes();
       const next = vi.fn();
 
@@ -373,10 +432,6 @@ describe("gateContextVerification middleware", () => {
     });
 
     it("rejects malformed payload with 401", () => {
-      // The signature must be VALID over the malformed payload: the
-      // middleware checks the signature first (correct security order),
-      // so an unsigned garbage payload reports SIGNATURE_INVALID, never
-      // reaching the parse stage this test targets.
       const malformed = "not-valid-base64url!!!";
       const req = mockReq({
         "x-hauska-gate-context": malformed,
@@ -393,6 +448,210 @@ describe("gateContextVerification middleware", () => {
         error: "gate_context_invalid",
         code: "MALFORMED",
       });
+    });
+
+    it("rejects signed/plain mismatch (forgery attack) with 401", () => {
+      // Attack: valid signed context for tenant A + plain headers claiming tenant B
+      const ctx: GateContext = {
+        v: 1,
+        tenant: "bastrop_tx",
+        product: "architect",
+        tier: "pro",
+        keyId: null,
+        platformInternal: false,
+        iat: nowSec,
+        exp: nowSec + 300,
+      };
+      const { payload, signature } = buildSignedContext(ctx, TEST_KEY);
+
+      const req = mockReq({
+        "x-hauska-gate-context": payload,
+        "x-hauska-gate-signature": signature,
+        "x-hauska-jurisdiction-tenant": "elgin_tx",
+        "x-hauska-platform-internal": "false",
+      });
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({ error: "gate_context_mismatch" });
+    });
+
+    it("overwrites req.serviceAuth with verified context after successful verification", () => {
+      const ctx: GateContext = {
+        v: 1,
+        tenant: "bastrop_tx",
+        product: "architect",
+        tier: "pro",
+        keyId: null,
+        platformInternal: true,
+        iat: nowSec,
+        exp: nowSec + 300,
+      };
+      const { payload, signature } = buildSignedContext(ctx, TEST_KEY);
+
+      const req = mockReq({
+        "x-hauska-gate-context": payload,
+        "x-hauska-gate-signature": signature,
+        "x-hauska-jurisdiction-tenant": "bastrop_tx",
+        "x-hauska-platform-internal": "true",
+      });
+
+      // Simulate requireGateEngineServiceAuth having populated req.serviceAuth
+      // with forged plain-header values before verifyGateContext runs
+      req.serviceAuth = {
+        tenantId: "00000000-0000-4000-8000-000000000001",
+        jurisdictionTenant: "elgin_tx",
+        platformInternal: false,
+      };
+
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(res.status).not.toHaveBeenCalled();
+      // Verified signed context overwrites the forged plain values
+      expect(req.serviceAuth.jurisdictionTenant).toBe("bastrop_tx");
+      expect(req.serviceAuth.platformInternal).toBe(true);
+    });
+  });
+
+  describe("route scoping", () => {
+    beforeEach(() => {
+      process.env.GATE_CONTEXT_SIGNING_KEY = TEST_KEY;
+      process.env.GATE_CONTEXT_MODE = "enforce";
+    });
+
+    it("scopes to gate-fronted routes (mount-relative form)", () => {
+      // Routers are mounted inside /api parent, so req.path is mount-relative
+      const gateFrontedPaths = [
+        "/engagements/uuid/briefing",
+        "/engagements/uuid/briefing/generate",
+        "/engagements/uuid/briefing/status",
+        "/engagements/uuid/briefing/runs",
+        "/engagements/uuid/briefing/export.pdf",
+        "/engagements/uuid/encumbrances",
+        "/engagements/uuid/encumbrances/upload",
+        "/engagements/uuid/site-topography",
+        "/engagements/uuid/site-topography/refresh",
+        "/engagements/uuid/site-drainage",
+        "/engagements/uuid/site-drainage/design-storms",
+        "/submissions/uuid/findings",
+        "/submissions/uuid/findings/generate",
+        "/findings/uuid/accept",
+        "/findings/uuid/reject",
+        "/findings/uuid/override",
+        "/findings/uuid/outcome",
+        "/findings/outcome-observations",
+      ];
+
+      for (const path of gateFrontedPaths) {
+        const req = mockReq({
+          "x-hauska-jurisdiction-tenant": "bastrop_tx",
+        }, path);
+        const res = mockRes();
+        const next = vi.fn();
+
+        verifyGateContext(req, res, next);
+
+        expect(next, `path ${path} should be rejected`).not.toHaveBeenCalled();
+        expect(res.status, `path ${path} should be rejected`).toHaveBeenCalledWith(401);
+        vi.clearAllMocks();
+      }
+    });
+
+    it("scopes to gate-fronted routes (absolute form with /api prefix)", () => {
+      // Optional /api prefix branch for tests that construct absolute paths
+      const req = mockReq({
+        "x-hauska-jurisdiction-tenant": "bastrop_tx",
+      }, "/api/engagements/uuid/encumbrances");
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+    });
+
+    it("does not scope to non-gate-fronted routes", () => {
+      const nonGateFrontedPaths = [
+        "/api/codes/jurisdictions",
+        "/api/engagements",
+        "/api/engagements/uuid",
+        "/api/health",
+        "/api/session",
+      ];
+
+      for (const path of nonGateFrontedPaths) {
+        const req = mockReq({
+          "x-hauska-jurisdiction-tenant": "bastrop_tx",
+        }, path);
+        const res = mockRes();
+        const next = vi.fn();
+
+        verifyGateContext(req, res, next);
+
+        expect(next, `path ${path} should pass through`).toHaveBeenCalledOnce();
+        expect(res.status, `path ${path} should not reject`).not.toHaveBeenCalled();
+        vi.clearAllMocks();
+      }
+    });
+  });
+
+  describe("resolveGateTenantContext behavior", () => {
+    it("uses gateContext in enforce mode", () => {
+      process.env.GATE_CONTEXT_SIGNING_KEY = TEST_KEY;
+      process.env.GATE_CONTEXT_MODE = "enforce";
+
+      const ctx: GateContext = {
+        v: 1,
+        tenant: "bastrop_tx",
+        product: "architect",
+        tier: "pro",
+        keyId: null,
+        platformInternal: true,
+        iat: nowSec,
+        exp: nowSec + 300,
+      };
+      const { payload, signature } = buildSignedContext(ctx, TEST_KEY);
+
+      const req = mockReq({
+        "x-hauska-gate-context": payload,
+        "x-hauska-gate-signature": signature,
+        "x-hauska-jurisdiction-tenant": "bastrop_tx",
+        "x-hauska-platform-internal": "true",
+      });
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(req.gateContext?.tenant).toBe("bastrop_tx");
+      expect(req.gateContext?.platformInternal).toBe(true);
+    });
+
+    it("uses plain headers in log mode", () => {
+      process.env.GATE_CONTEXT_SIGNING_KEY = TEST_KEY;
+      delete process.env.GATE_CONTEXT_MODE;
+
+      const req = mockReq({
+        "x-hauska-jurisdiction-tenant": "bastrop_tx",
+        "x-hauska-platform-internal": "true",
+      });
+      const res = mockRes();
+      const next = vi.fn();
+
+      verifyGateContext(req, res, next);
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(req.gateContext).toBeUndefined();
     });
   });
 });

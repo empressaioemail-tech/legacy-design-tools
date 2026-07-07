@@ -50,11 +50,49 @@ export function readGatePlatformInternal(req: Request): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-export function buildGateServiceAuth(req: Request): GateServiceAuth {
+function getGateContextMode(): "off" | "log" | "enforce" {
+  const key = process.env.GATE_CONTEXT_SIGNING_KEY;
+  if (!key) return "off";
+
+  const mode = process.env.GATE_CONTEXT_MODE?.trim().toLowerCase();
+  if (mode === "enforce") return "enforce";
+  return "log";
+}
+
+/**
+ * Resolve tenant context from verified gate context in enforce mode, or
+ * plain headers in log/off modes. Used by gate-fronted handlers to read
+ * tenant identity after the middleware has verified the request.
+ *
+ * In enforce mode, this returns tenant/platformInternal from
+ * `req.gateContext` ONLY (never plain headers), closing the forgery hole.
+ * In log/off modes, preserves today's behavior by reading plain headers.
+ */
+export function resolveGateTenantContext(req: Request): {
+  jurisdictionTenant: string | null;
+  platformInternal: boolean;
+} {
+  const mode = getGateContextMode();
+
+  if (mode === "enforce" && req.gateContext) {
+    return {
+      jurisdictionTenant: req.gateContext.tenant,
+      platformInternal: req.gateContext.platformInternal,
+    };
+  }
+
   return {
-    tenantId: DEFAULT_TENANT_ID,
     jurisdictionTenant: readGateJurisdictionTenant(req),
     platformInternal: readGatePlatformInternal(req),
+  };
+}
+
+export function buildGateServiceAuth(req: Request): GateServiceAuth {
+  const resolved = resolveGateTenantContext(req);
+  return {
+    tenantId: DEFAULT_TENANT_ID,
+    jurisdictionTenant: resolved.jurisdictionTenant,
+    platformInternal: resolved.platformInternal,
   };
 }
 
