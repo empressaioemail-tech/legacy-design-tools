@@ -2085,6 +2085,12 @@ importers:
       happy-dom:
         specifier: ^16
         version: 16.8.1
+      react:
+        specifier: ^19
+        version: 19.1.0
+      react-dom:
+        specifier: ^19
+        version: 19.1.0(react@19.1.0)
       tsup:
         specifier: ^8
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
