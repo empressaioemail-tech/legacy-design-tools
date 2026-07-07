@@ -44,7 +44,7 @@ export type MeasurementAv2Result = {
   targetFraction: number;
   wTargetRanking: number;
   lambdaPriorUsed: number;
-  lambdaSource: "cold-start-prior";
+  lambdaSource: "cold-start-prior" | "amendment-history";
   atomCount: number;
   caseCount: number;
   caseMatchRate: number;
@@ -98,10 +98,12 @@ export function runMeasurementAv2(args: {
   targetFraction?: number;
   wTargetRanking?: number;
   baseLambda?: number;
+  lambdaSource?: "cold-start-prior" | "amendment-history";
 }): MeasurementAv2Result {
   const observationYears = args.observationYears ?? 12;
   const wTarget = args.wTargetRanking ?? W_TARGET_RANKING;
   const baseLambda = args.baseLambda ?? AMENDMENT_HAZARD_COLD_START_PRIOR;
+  const lambdaSource = args.lambdaSource ?? "cold-start-prior";
 
   const jurisdictionCases = caseSignalsFromDeposits(args.deposits).filter(
     (c) => c.jurisdictionTenant === args.jurisdictionTenant,
@@ -190,7 +192,7 @@ export function runMeasurementAv2(args: {
     targetFraction: args.targetFraction ?? MEASUREMENT_A_TARGET,
     wTargetRanking: wTarget,
     lambdaPriorUsed: baseLambda,
-    lambdaSource: "cold-start-prior",
+    lambdaSource,
     atomCount: args.atoms.length,
     caseCount: jurisdictionCases.length,
     caseMatchRate: caseMatchRate(jurisdictionCases),

@@ -15,6 +15,7 @@
     "measure:k2-v3": "tsx ./src/runK2V3Harness.ts",
     "measure:m1-v3": "tsx ./src/runM1v3Harness.ts",
     "measure:m1-three-metric": "tsx ./src/runM1ThreeMetricHarness.ts",
+    "measure:m1-case-grain": "tsx ./src/runM1CaseGrainHarness.ts",
     "diagnose:m1-v2": "tsx ./src/runM1v2Diagnosis.ts",
     "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
     "ingest:brokerage-federal-data": "tsx ../scripts/ingest-opportunity-zones.mjs && tsx ../scripts/ingest-tx-special-districts.mjs",

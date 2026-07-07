@@ -7,4 +7,5 @@ export * from "./corpusLoader.js";
 export * from "./caseGrain.js";
 export * from "./pooledRead.js";
 export * from "./measurementAReframe.js";
+export * from "./lambdaFromAmendments.js";
 export * from "./types.js";
