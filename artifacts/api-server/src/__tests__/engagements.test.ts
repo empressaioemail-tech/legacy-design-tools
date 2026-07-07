@@ -1068,3 +1068,94 @@ describe("POST /api/engagements/:id/submissions — auto AI plan review", () => 
     errSpy.mockRestore();
   });
 });
+
+describe("Service-token reviewer-grade access", () => {
+  it("service-token session reads an engagement it does not own (200)", async () => {
+    const eng = await seedEngagement({
+      name: "Service Token Test Engagement",
+      address: "123 Service Way",
+      ownerUserId: "different-owner-123",
+    });
+
+    // Request with service token (simulated by setting req.serviceAuth)
+    // Since we can't easily inject serviceAuth middleware in tests, we'll
+    // use the pattern from plan-review BFF tests
+    const { getServiceApiKey } = await import("../lib/serviceToken");
+    const serviceKey = getServiceApiKey();
+
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}`)
+      .set("Authorization", `Bearer ${serviceKey}`);
+    
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(eng.id);
+    expect(res.body.name).toBe("Service Token Test Engagement");
+  });
+
+  it("service-token session creates a submission and reads it back (201, 200)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement({
+      name: "Service Token Submission Test",
+      address: "456 Service Lane",
+      ownerUserId: "different-owner-456",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+      jurisdictionFips: "4950150",
+    });
+
+    const { getServiceApiKey } = await import("../lib/serviceToken");
+    const serviceKey = getServiceApiKey();
+
+    // Create submission
+    const createRes = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .set("Authorization", `Bearer ${serviceKey}`)
+      .send({ note: "Service token submission test" });
+    
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.submissionId).toBeDefined();
+
+    // Read submissions back
+    const listRes = await request(getApp())
+      .get(`/api/engagements/${eng.id}/submissions`)
+      .set("Authorization", `Bearer ${serviceKey}`);
+    
+    expect(listRes.status).toBe(200);
+    expect(Array.isArray(listRes.body)).toBe(true);
+    expect(listRes.body.length).toBeGreaterThan(0);
+    expect(listRes.body[0].note).toBe("Service token submission test");
+  });
+
+  it("owner-user scoping still applies to normal user sessions (404)", async () => {
+    const eng = await seedEngagement({
+      name: "Owner Scoping Test",
+      address: "789 Private Way",
+      ownerUserId: "owner-abc",
+    });
+
+    // Try to access with a different user session (not service token)
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}`)
+      .set("x-requestor", "user:owner-xyz");
+    
+    // Should get 404 because the engagement belongs to owner-abc, not owner-xyz
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("engagement_not_found");
+  });
+
+  it("normal user can access their own engagement (200)", async () => {
+    const eng = await seedEngagement({
+      name: "Owner Match Test",
+      address: "321 Owner Ave",
+      ownerUserId: "owner-def",
+    });
+
+    // Access with the matching owner
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}`)
+      .set("x-requestor", "user:owner-def");
+    
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(eng.id);
+  });
+});
