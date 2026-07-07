@@ -21,6 +21,7 @@ import { layoutIdForTileCount, parseLayoutCols, parseLayoutRows } from "./layout
 import type { PresetSpace, TileCategory, TileDef, TileStatus } from "./types";
 import {
   useEngagement,
+  type ActiveContext,
   type ActiveParcel,
 } from "./providers/EngagementProvider";
 
@@ -32,6 +33,13 @@ export type SpaceSnapshot = {
   rowFr: number[];
   /** Layout mode of the saved space. Optional for backward compatibility. */
   layoutMode?: "grid" | "list";
+  /**
+   * Optional pinned active context (project/address/parcel) for this space.
+   * When present, loading the space EXPOSES the pinned context to the caller
+   * (via return/callback) but does NOT auto-apply it over a live context. The
+   * app decides whether to prompt the user or silently adopt.
+   */
+  context?: ActiveContext;
 };
 
 /**

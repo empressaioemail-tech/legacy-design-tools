@@ -29,7 +29,7 @@ export {
   useEngagement,
   useActiveParcel,
 } from './providers/EngagementProvider'
-export type { ActiveParcel } from './providers/EngagementProvider'
+export type { ActiveParcel, ActiveContext } from './providers/EngagementProvider'
 export { SpatialProvider, useSpatial } from './providers/SpatialProvider'
 export { CodeProvider, useCode } from './providers/CodeProvider'
 export {
