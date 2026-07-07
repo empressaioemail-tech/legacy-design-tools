@@ -912,14 +912,17 @@ router.get("/reviewer/engagements", requireServiceTokenOrSession, async (req: Re
     .orderBy(desc(engagements.updatedAt))
     .limit(100);
 
-  const submissionCounts = await db
-    .select({
-      engagementId: submissions.engagementId,
-      count: sql<number>`cast(count(*) as int)`,
-    })
-    .from(submissions)
-    .where(inArray(submissions.engagementId, engagementRows.map((e) => e.id)))
-    .groupBy(submissions.engagementId);
+  // inArray([]) builds invalid SQL — skip the counts query on an empty listing.
+  const submissionCounts = engagementRows.length === 0
+    ? []
+    : await db
+        .select({
+          engagementId: submissions.engagementId,
+          count: sql<number>`cast(count(*) as int)`,
+        })
+        .from(submissions)
+        .where(inArray(submissions.engagementId, engagementRows.map((e) => e.id)))
+        .groupBy(submissions.engagementId);
 
   const countsByEngagement = new Map(
     submissionCounts.map((row) => [row.engagementId, Number(row.count) || 0]),
