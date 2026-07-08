@@ -58,13 +58,13 @@ describe("GET /api/brokerage/v1/map-data/gis-layers", () => {
     expect(Array.isArray(res.body.layers)).toBe(true);
   });
 
-  it("returns 403 for anonymous request", async () => {
+  it("returns 401 for anonymous request (auth middleware, before the tier gate)", async () => {
     const res = await request(getApp()).get(
       "/api/brokerage/v1/map-data/gis-layers",
     );
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("tier_required");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 
   it("returns 403 for free-tier brokerage user (extension public key)", async () => {
@@ -91,12 +91,12 @@ describe("GET /api/brokerage/v1/map-data/composite-layers", () => {
     expect(Array.isArray(res.body.layers)).toBe(true);
   });
 
-  it("returns 403 for anonymous request", async () => {
+  it("returns 401 for anonymous request (auth middleware, before the tier gate)", async () => {
     const res = await request(getApp()).get(
       "/api/brokerage/v1/map-data/composite-layers",
     );
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("tier_required");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 });
