@@ -97,4 +97,29 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "setback_table_not_found" });
   });
+
+  it("normalizes jurisdiction keys: underscores→hyphens, uppercase→lowercase", async () => {
+    const bastropUnderscore = await request(getApp()).get(
+      "/api/local/setbacks/bastrop_tx",
+    );
+    expect(bastropUnderscore.status).toBe(200);
+    expect(bastropUnderscore.body.jurisdictionKey).toBe("bastrop-tx");
+
+    const bastropUppercase = await request(getApp()).get(
+      "/api/local/setbacks/BASTROP-TX",
+    );
+    expect(bastropUppercase.status).toBe(200);
+    expect(bastropUppercase.body.jurisdictionKey).toBe("bastrop-tx");
+
+    const bastropCanonical = await request(getApp()).get(
+      "/api/local/setbacks/bastrop-tx",
+    );
+    expect(bastropCanonical.status).toBe(200);
+    expect(bastropCanonical.body.jurisdictionKey).toBe("bastrop-tx");
+
+    const unknownNormalized = await request(getApp()).get(
+      "/api/local/setbacks/UNKNOWN_KEY",
+    );
+    expect(unknownNormalized.status).toBe(404);
+  });
 });

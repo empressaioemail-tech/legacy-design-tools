@@ -53,6 +53,7 @@ import {
   federalGisLayerFixtureGeoJson,
   isFederalGisProxyLayer,
 } from "../lib/brokerageGisFederalLayers";
+import { isBrokerageServiceCaller } from "../middlewares/brokerageServiceAuth";
 
 function mapDataMaxInstallOverride(
   installId: string | null,
@@ -75,6 +76,10 @@ async function resolveMapDataPackageTier(
   packageTier: ReturnType<typeof resolveInvestorPackageTier>;
   profileRow: typeof brokerageUserProfiles.$inferSelect | null;
 }> {
+  if (isBrokerageServiceCaller(req)) {
+    return { packageTier: "max", profileRow: null };
+  }
+
   const subjectId = req.session?.requestor?.id ?? null;
   let profileRow: typeof brokerageUserProfiles.$inferSelect | null = null;
   if (subjectId) {
