@@ -11,6 +11,7 @@ import { z } from "zod";
 import { db, placeLayerSnapshots } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { brokerageAuth } from "../middlewares/brokerageAuth";
+import { isBrokerageServiceCaller } from "../middlewares/brokerageServiceAuth";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
 import {
@@ -54,7 +55,16 @@ const RESOLVE_BODY = z
 export const brokeragePlaceRouter: IRouter = Router();
 
 brokeragePlaceRouter.use(brokerageCors);
-brokeragePlaceRouter.use(brokerageAuth);
+// Service callers (SERVICE_API_KEY Bearer) are authenticated by the outer
+// requireBrokerageAuthOrServiceToken on brokerageV1; the inner brokerageAuth
+// only knows install/user auth and would 401 them (the #232/#234/#236 class).
+brokeragePlaceRouter.use((req: Request, res: Response, next) => {
+  if (isBrokerageServiceCaller(req)) {
+    next();
+    return;
+  }
+  brokerageAuth(req, res, next);
+});
 
 brokeragePlaceRouter.post("/resolve", async (req: Request, res: Response) => {
   const parse = RESOLVE_BODY.safeParse(req.body);
