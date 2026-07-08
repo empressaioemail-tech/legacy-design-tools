@@ -54,12 +54,23 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
 
 /**
+ * Normalize a jurisdiction key to the canonical format expected by the
+ * setback table lookup: lowercase with hyphens. The geocode path emits
+ * keys with underscores (e.g. `bastrop_tx`), but the JSON files are
+ * keyed with hyphens (`bastrop-tx.json`).
+ */
+function normalizeJurisdictionKey(key: string): string {
+  return key.toLowerCase().replace(/_/g, "-");
+}
+
+/**
  * Returns the setback table for a jurisdiction key, or null if no table
  * exists. The briefing engine should treat null as "no codified
  * dimensional rules available — fall back to base IBC/IRC".
  */
 export function getSetbackTable(jurisdictionKey: string): SetbackTable | null {
-  return SETBACK_TABLES[jurisdictionKey] ?? null;
+  const normalized = normalizeJurisdictionKey(jurisdictionKey);
+  return SETBACK_TABLES[normalized] ?? null;
 }
 
 /**
