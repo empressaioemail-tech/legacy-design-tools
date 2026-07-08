@@ -61,21 +61,63 @@ function parsePrecedenceReasoning(text: string): {
   };
 }
 
-/** Split citation atom ids by namespace before DB hydration (UUID corpus vs reasoning-layer). */
+/**
+ * Check if a string looks like a UUID (8-4-4-4-12 hex pattern).
+ * Used to distinguish DB corpus atom ids from retrieval-supplement ids.
+ */
+function looksLikeUuid(str: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+/**
+ * Check if an atom id is a retrieval-supplement id (like icc-model-code/edition/section).
+ * These are NOT stored in the DB; provenance must be synthesized from the id structure.
+ */
+function isRetrievalSupplementAtomId(atomId: string): boolean {
+  // Retrieval-supplement ids contain slashes and are not UUIDs
+  return atomId.includes("/") && !looksLikeUuid(atomId);
+}
+
+/**
+ * Extract jurisdiction from a retrieval-supplement atom id.
+ * E.g., "icc-model-code/2018-international-building-code-6th-printing/1612-3" → "icc-model-code"
+ */
+function extractJurisdictionFromSupplementId(atomId: string): string {
+  const parts = atomId.split("/");
+  return parts[0] ?? atomId;
+}
+
+/**
+ * Build a source label from a retrieval-supplement jurisdiction.
+ * Aligns with the labeling in findings.ts `toCodeSectionInput`.
+ */
+function labelForRetrievalJurisdiction(jurisdiction: string): string {
+  if (jurisdiction === "icc-model-code") {
+    return "ICC model code";
+  }
+  // Future supplement jurisdictions can be mapped here
+  return jurisdiction;
+}
+
+/** Split citation atom ids by namespace before DB hydration (UUID corpus vs reasoning-layer vs retrieval-supplement). */
 export function partitionProvenanceAtomIds(atomIds: readonly string[]): {
   corpusAtomIds: string[];
   reasoningAtomIds: string[];
+  supplementAtomIds: string[];
 } {
   const corpusAtomIds: string[] = [];
   const reasoningAtomIds: string[] = [];
+  const supplementAtomIds: string[] = [];
   for (const raw of atomIds) {
     if (isReasoningOverlayAtomId(raw)) {
       reasoningAtomIds.push(raw);
+    } else if (isRetrievalSupplementAtomId(raw)) {
+      supplementAtomIds.push(raw);
     } else {
       corpusAtomIds.push(canonicalOverlayAtomKey(raw));
     }
   }
-  return { corpusAtomIds, reasoningAtomIds };
+  return { corpusAtomIds, reasoningAtomIds, supplementAtomIds };
 }
 
 export async function hydrateProvenanceSources(
@@ -83,7 +125,7 @@ export async function hydrateProvenanceSources(
 ): Promise<ProvenanceSourceEntry[]> {
   if (atomIds.length === 0) return [];
 
-  const { corpusAtomIds, reasoningAtomIds } =
+  const { corpusAtomIds, reasoningAtomIds, supplementAtomIds } =
     partitionProvenanceAtomIds(atomIds);
 
   const corpusRows =
@@ -143,6 +185,26 @@ export async function hydrateProvenanceSources(
           ? "verified"
           : "unverified-web-source",
       sourceName: primary?.sourceName,
+    });
+  }
+
+  // Build provenance for retrieval-supplement atoms without DB lookup.
+  // These ids come from the retrieval system (e.g., icc-model-code/edition/section)
+  // and are NOT stored in the code_atoms table.
+  for (const id of supplementAtomIds) {
+    const jurisdiction = extractJurisdictionFromSupplementId(id);
+    const sourceName = labelForRetrievalJurisdiction(jurisdiction);
+    // Extract edition from the id if possible (second segment)
+    const parts = id.split("/");
+    const edition = parts[1] ?? "";
+    
+    byId.set(id, {
+      atomId: id,
+      deeplink: "", // No direct deeplink for retrieval supplements
+      edition,
+      retrievedAt: new Date().toISOString(),
+      verificationState: "verified", // Retrieval supplements are considered verified
+      sourceName,
     });
   }
 
@@ -214,7 +276,32 @@ export async function buildProvenanceFromFindingRow(
     : [];
   const atomIds = atomIdsFromCitations(citations);
   const precedence = parsePrecedenceReasoning(row.text);
-  const sources = await hydrateProvenanceSources(atomIds);
+  
+  let sources: ProvenanceSourceEntry[] = [];
+  try {
+    sources = await hydrateProvenanceSources(atomIds);
+  } catch (error) {
+    // Defense in depth: if provenance hydration fails for this finding,
+    // log the error and return a minimal envelope rather than crashing
+    // the entire findings listing.
+    console.warn(
+      `Failed to hydrate provenance sources for finding ${row.atomId}:`,
+      error instanceof Error ? error.message : String(error),
+      `atomIds:`,
+      atomIds,
+    );
+    
+    // Return minimal provenance entries with just the atom IDs
+    sources = atomIds.map((atomId) => ({
+      atomId,
+      deeplink: "",
+      edition: "",
+      retrievedAt: row.aiGeneratedAt.toISOString(),
+      verificationState: "unverified-web-source" as const,
+      sourceName: undefined,
+    }));
+  }
+  
   const editions = sources.map((s) => s.edition).filter(Boolean);
 
   return {

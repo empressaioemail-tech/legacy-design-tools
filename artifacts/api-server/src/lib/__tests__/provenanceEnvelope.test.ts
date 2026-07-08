@@ -63,6 +63,7 @@ describe("provenanceEnvelope", () => {
     expect(partitionProvenanceAtomIds(mixed)).toEqual({
       corpusAtomIds: [CORPUS_UUID_LOWER],
       reasoningAtomIds: [REASONING_ID, "websearch:irc-2021:irc-r302"],
+      supplementAtomIds: [],
     });
   });
 
@@ -74,6 +75,7 @@ describe("provenanceEnvelope", () => {
     ).toEqual({
       corpusAtomIds: [CORPUS_UUID_LOWER],
       reasoningAtomIds: [],
+      supplementAtomIds: [],
     });
   });
 
@@ -86,11 +88,32 @@ describe("provenanceEnvelope", () => {
     expect(partitionProvenanceAtomIds(atomIds)).toEqual({
       corpusAtomIds: [CORPUS_UUID_LOWER],
       reasoningAtomIds: [REASONING_ID, "reasoning:irc-2021:irc-r302-1"],
+      supplementAtomIds: [],
     });
     expect(atomIdsFromCitations([
       { kind: "code-section", atomId: REASONING_ID },
       { kind: "code-section", atomId: CORPUS_UUID },
       { kind: "code-section", atomId: "reasoning:irc-2021:irc-r302-1" },
     ])).toEqual(atomIds);
+  });
+
+  it("partitionProvenanceAtomIds separates retrieval-supplement ids from corpus UUIDs", () => {
+    const supplementId = "icc-model-code/2018-international-building-code-6th-printing/1612-3";
+    const atomIds = [CORPUS_UUID, supplementId, REASONING_ID];
+    expect(partitionProvenanceAtomIds(atomIds)).toEqual({
+      corpusAtomIds: [CORPUS_UUID_LOWER],
+      reasoningAtomIds: [REASONING_ID],
+      supplementAtomIds: [supplementId],
+    });
+  });
+
+  it("partitionProvenanceAtomIds recognizes multiple retrieval-supplement patterns", () => {
+    const iccId = "icc-model-code/2018-international-building-code-6th-printing/1612-3";
+    const iccId2 = "icc-model-code/2021-international-residential-code/r301-2";
+    expect(partitionProvenanceAtomIds([iccId, iccId2])).toEqual({
+      corpusAtomIds: [],
+      reasoningAtomIds: [],
+      supplementAtomIds: [iccId, iccId2],
+    });
   });
 });
