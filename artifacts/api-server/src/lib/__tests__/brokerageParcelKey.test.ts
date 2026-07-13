@@ -217,6 +217,33 @@ describe("existing-key compatibility", () => {
     expect(parcelKeyKind("")).toBeNull();
   });
 
+  it("mixed state: when a site-context CLIP outranks an apn capture, the kind follows the winning key", async () => {
+    // Cotality is dark on the capture path (no credentials), so capture
+    // falls through to the county-GIS apn key...
+    mockPointQuery.mockResolvedValue(travisFeature({ PROP_ID: "999888" }));
+    const captured = await captureParcelKey({
+      address: "111 Congress Ave, Austin, TX",
+      ...AUSTIN,
+    });
+    expect(captured.keyKind).toBe("apn");
+
+    // ...but the site-context layers produced a CLIP (that rail was
+    // alive). The brief route resolves the key with the CLIP winning;
+    // the emitted kind must classify the WINNING key, never echo the
+    // capture's own kind (a CLIP labeled "apn" is the defect).
+    const siteContextClip: string | null = "1234567890";
+    const parcelKey = siteContextClip ?? captured.parcelKey;
+    expect(parcelKey).toBe("1234567890");
+    expect(parcelKeyKind(parcelKey)).toBe("clip");
+    expect(parcelKeyKind(parcelKey)).not.toBe(captured.keyKind);
+
+    // Inverse mixed state: no site-context CLIP — the captured apn key
+    // wins and classifies as "apn".
+    const noClip: string | null = null;
+    const fallbackKey = noClip ?? captured.parcelKey;
+    expect(parcelKeyKind(fallbackKey)).toBe("apn");
+  });
+
   it("keeps geo keys at 5 decimal places", () => {
     expect(formatGeoParcelKey(30.123456789, -97.987654321)).toBe(
       "geo:30.12346,-97.98765",

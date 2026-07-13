@@ -97,7 +97,10 @@ import {
   getOrCreateBrokerageUserProfile,
   packageTierFromProfile,
 } from "../lib/brokerageUserProfile";
-import { captureParcelKey } from "../lib/brokerageParcelKey";
+import {
+  captureParcelKey,
+  parcelKeyKind as classifyParcelKey,
+} from "../lib/brokerageParcelKey";
 import {
   resolveInvestorPackageTier,
   depthMeterAllowance,
@@ -799,7 +802,10 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       llUuid: parcelClip ?? undefined,
       parcelClip: parcelClip ?? undefined,
       parcelKey: parcelKey ?? undefined,
-      parcelKeyKind: parcelCapture?.keyKind ?? (parcelClip ? "clip" : null),
+      // Kind derives from the key that actually won (site-context CLIP
+      // outranks the captured apn:/geo: key), never from the capture's
+      // own kind — a mixed state must not label a CLIP as "apn".
+      parcelKeyKind: parcelKey ? classifyParcelKey(parcelKey) : null,
       parcelKeySource: parcelCapture?.source ?? null,
       apn: parcelCapture?.apn ?? null,
       countyFips: parcelCapture?.countyFips ?? null,
