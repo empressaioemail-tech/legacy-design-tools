@@ -221,6 +221,10 @@ describe("lib/db schema integration", () => {
         // append-only letter log). Cascades off `submissions`.
         "submission_communications",
         "submissions",
+        // Central TX county-GIS parcels provider (0051) — read-through
+        // tile cache keyed (tile_key, county_fips); neutral of (and
+        // parallel to) the dormant Cotality spatial-tile cache tables.
+        "tx_parcel_tile_cache",
         // Task #29 — hosted login credentials + per-user metering.
         "user_auth_credentials",
         "user_usage_metering",

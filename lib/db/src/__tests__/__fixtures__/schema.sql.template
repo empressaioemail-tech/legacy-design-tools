@@ -1384,6 +1384,19 @@ CREATE TABLE @@SCHEMA@@.submissions (
 );
 
 
+-- Name: tx_parcel_tile_cache; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tile_key text NOT NULL,
+    county_fips text NOT NULL,
+    payload jsonb NOT NULL,
+    feature_count integer DEFAULT 0 NOT NULL,
+    fetched_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL
+);
+
+
 -- Name: user_auth_credentials; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.user_auth_credentials (
@@ -1974,6 +1987,12 @@ ALTER TABLE ONLY @@SCHEMA@@.submission_communications
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_pkey PRIMARY KEY (id);
+
+
+-- Name: tx_parcel_tile_cache tx_parcel_tile_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_parcel_tile_cache
+    ADD CONSTRAINT tx_parcel_tile_cache_pkey PRIMARY KEY (id);
 
 
 -- Name: user_auth_credentials user_auth_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2634,6 +2653,16 @@ CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (e
 -- Name: submissions_submitted_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
+
+
+-- Name: tx_parcel_tile_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_parcel_tile_cache_expires_idx ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (expires_at);
+
+
+-- Name: tx_parcel_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX tx_parcel_tile_cache_uniq ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (tile_key, county_fips);
 
 
 -- Name: viewpoint_renders_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
