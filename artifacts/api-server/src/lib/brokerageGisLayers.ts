@@ -33,6 +33,14 @@ import {
   getGeocodeClip,
   putGeocodeClip,
 } from "./brokerageGisCache";
+import {
+  TX_COUNTY_PARCEL_DISCLAIMER,
+  queryTxCountyParcelsGeoJson,
+  resolveTxParcelCounty,
+  txCountyAdapterKey,
+  txCountyProviderLabel,
+  txParcelProviderMode,
+} from "./brokerageTxParcels";
 
 const FEMA_NFHL_FLOOD_ZONES =
   "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28";
@@ -119,6 +127,13 @@ export type GisLayerGeoJsonResult = GisLayerEndpoint & {
   featureCount: number;
   queryMode: "pin" | "bbox";
   truncated?: boolean;
+  /**
+   * Set on county-GIS-served parcels: county appraisal-district polygons
+   * are informational, not survey grade. `disclaimer` carries the
+   * operator-facing wording.
+   */
+  notSurveyGrade?: boolean;
+  disclaimer?: string;
 };
 
 type SpatialParcelRow = Record<string, unknown>;
@@ -611,6 +626,39 @@ export async function queryGisLayerGeoJson(input: {
         "parse-error",
         "latitude and longitude are required for pin-intersect parcel queries",
       );
+    }
+
+    // Central TX county-GIS provider, in front of the dormant Cotality
+    // Spatial Tile branch below. Requests inside a supported county are
+    // served live from that county's public ArcGIS parcel service; a
+    // county upstream failure propagates honestly (named AdapterRunError)
+    // instead of falling through to the dead-keyed Cotality 502. Outside
+    // the supported counties — or with TX_PARCEL_PROVIDER=off — the
+    // Cotality branch runs exactly as before.
+    if (txParcelProviderMode() === "county-gis") {
+      const county = resolveTxParcelCounty({
+        bbox,
+        latitude: input.latitude,
+        longitude: input.longitude,
+      });
+      if (county) {
+        const countyResult = await queryTxCountyParcelsGeoJson({
+          county,
+          bbox,
+          latitude: input.latitude,
+          longitude: input.longitude,
+          forceRefresh: input.forceRefresh,
+        });
+        return {
+          ...endpoint,
+          serviceUrl: county.serviceUrl,
+          provider: txCountyProviderLabel(county),
+          adapterKey: txCountyAdapterKey(county),
+          ...countyResult,
+          notSurveyGrade: true,
+          disclaimer: TX_COUNTY_PARCEL_DISCLAIMER,
+        };
+      }
     }
 
     const result = await queryCotalityParcelsGeoJson({

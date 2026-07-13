@@ -9,6 +9,8 @@ vi.mock("../brokerageGisCache", () => ({
   putPropertyAttr: vi.fn(async () => {}),
   getGeocodeClip: vi.fn(async () => null),
   putGeocodeClip: vi.fn(async () => {}),
+  getTxParcelTile: vi.fn(async () => null),
+  putTxParcelTile: vi.fn(async () => {}),
 }));
 
 import { normalizeGisLayerBbox, buildParcelsGeoJsonFromSpatialRows } from "../brokerageGisLayers";
