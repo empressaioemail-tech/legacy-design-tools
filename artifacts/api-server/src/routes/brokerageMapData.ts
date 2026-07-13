@@ -390,6 +390,10 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
       truncated: result.truncated ?? false,
       geojson: result.geojson,
       packageTier,
+      // County-GIS-served parcels are informational, not survey grade —
+      // surface the provider's honesty fields when present.
+      ...(result.notSurveyGrade ? { notSurveyGrade: true } : {}),
+      ...(result.disclaimer ? { disclaimer: result.disclaimer } : {}),
     });
   } catch (err) {
     if (err instanceof AdapterRunError) {

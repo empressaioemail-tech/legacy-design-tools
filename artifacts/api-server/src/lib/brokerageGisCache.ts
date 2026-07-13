@@ -25,6 +25,7 @@ import {
   cotalitySpatialTileCache,
   cotalityPropertyAttrCache,
   cotalityGeocodeCache,
+  txParcelTileCache,
 } from "@workspace/db";
 import { and, eq, gt, sql } from "drizzle-orm";
 import type { Logger } from "pino";
@@ -343,5 +344,103 @@ export async function putGeocodeClip(
       });
   } catch (err) {
     log.warn({ err, addrNorm }, "gisCache: geocode put failed");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Central TX county-GIS parcel tile cache (tx_parcel_tile_cache, 0051)
+// ---------------------------------------------------------------------------
+
+/** Parcels change slowly — 30 days, same as the Cotality tile default. */
+export const DEFAULT_TX_PARCEL_TILE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
+
+export function getTxParcelTileCacheTtlMs(
+  envValue: string | undefined = process.env.TX_PARCEL_TILE_CACHE_TTL_MS,
+): number {
+  return ttlFromEnv(envValue, DEFAULT_TX_PARCEL_TILE_CACHE_TTL_MS);
+}
+
+export interface TxParcelTileCacheHit {
+  payload: unknown;
+  featureCount: number;
+  cachedAt: Date;
+}
+
+/**
+ * Read-through cache for the Central TX county-GIS parcels provider
+ * (`brokerageTxParcels.ts`). Keyed `(tile_key, county_fips)` in the
+ * neutral `tx_parcel_tile_cache` table — deliberately NOT the Cotality
+ * spatial-tile table, so the dormant Cotality path stays untouched.
+ * Same failure isolation as the Cotality caches: no get/put may throw.
+ */
+export async function getTxParcelTile(
+  key: string,
+  countyFips: string,
+  opts?: { log?: Logger; ttlMs?: number },
+): Promise<TxParcelTileCacheHit | null> {
+  const ttlMs = opts?.ttlMs ?? getTxParcelTileCacheTtlMs();
+  if (ttlMs <= 0) return null;
+  const log = opts?.log ?? defaultLogger;
+  try {
+    const rows = await db
+      .select({
+        payload: txParcelTileCache.payload,
+        featureCount: txParcelTileCache.featureCount,
+        fetchedAt: txParcelTileCache.fetchedAt,
+      })
+      .from(txParcelTileCache)
+      .where(
+        and(
+          eq(txParcelTileCache.tileKey, key),
+          eq(txParcelTileCache.countyFips, countyFips),
+          gt(txParcelTileCache.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      payload: row.payload,
+      featureCount: row.featureCount,
+      cachedAt: row.fetchedAt,
+    };
+  } catch (err) {
+    log.warn({ err, tileKey: key, countyFips }, "gisCache: tx-parcel-tile get failed");
+    return null;
+  }
+}
+
+export async function putTxParcelTile(
+  key: string,
+  countyFips: string,
+  payload: unknown,
+  featureCount: number,
+  opts?: { log?: Logger; ttlMs?: number },
+): Promise<void> {
+  const ttlMs = opts?.ttlMs ?? getTxParcelTileCacheTtlMs();
+  if (ttlMs <= 0) return;
+  const log = opts?.log ?? defaultLogger;
+  try {
+    const expiresAt = new Date(Date.now() + ttlMs);
+    await db
+      .insert(txParcelTileCache)
+      .values({
+        tileKey: key,
+        countyFips,
+        payload: payload as Record<string, unknown>,
+        featureCount,
+        expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: [txParcelTileCache.tileKey, txParcelTileCache.countyFips],
+        set: {
+          payload: payload as Record<string, unknown>,
+          featureCount,
+          expiresAt,
+          fetchedAt: sql`now()`,
+        },
+      });
+  } catch (err) {
+    log.warn({ err, tileKey: key, countyFips }, "gisCache: tx-parcel-tile put failed");
   }
 }

@@ -93,6 +93,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "cotality_spatial_tile_cache",
   "cotality_property_attr_cache",
   "cotality_geocode_cache",
+  // Central TX county-GIS parcels tile cache (0051) — read-through cache
+  // for the county provider in front of the dormant Cotality spatial-tile
+  // path; reset between cases for the same hit/miss-assertion reason.
+  "tx_parcel_tile_cache",
   // Wave 2 Sprint C / Spec 307 — reviewer-annotation rows. Cascades
   // off `submissions` (which cascades off `engagements`), but listed
   // explicitly per the "if a route writes to it, it's in this list"
