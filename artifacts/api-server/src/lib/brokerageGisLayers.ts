@@ -34,10 +34,10 @@ import {
   putGeocodeClip,
 } from "./brokerageGisCache";
 import {
-  TX_COUNTY_PARCEL_DISCLAIMER,
   queryTxCountyParcelsGeoJson,
   resolveTxParcelCounty,
   txCountyAdapterKey,
+  txCountyDisclaimer,
   txCountyProviderLabel,
   txParcelProviderMode,
 } from "./brokerageTxParcels";
@@ -628,13 +628,15 @@ export async function queryGisLayerGeoJson(input: {
       );
     }
 
-    // Central TX county-GIS provider, in front of the dormant Cotality
+    // Central TX county provider, in front of the dormant Cotality
     // Spatial Tile branch below. Requests inside a supported county are
-    // served live from that county's public ArcGIS parcel service; a
-    // county upstream failure propagates honestly (named AdapterRunError)
-    // instead of falling through to the dead-keyed Cotality 502. Outside
-    // the supported counties — or with TX_PARCEL_PROVIDER=off — the
-    // Cotality branch runs exactly as before.
+    // served live from that county's public ArcGIS parcel service — or,
+    // for the store-backed counties (Hays/Comal, no live county GIS),
+    // from the self-hosted txgio_parcel store. A county upstream failure
+    // propagates honestly (named AdapterRunError) instead of falling
+    // through to the dead-keyed Cotality 502. Outside the supported
+    // counties — or with TX_PARCEL_PROVIDER=off — the Cotality branch
+    // runs exactly as before.
     if (txParcelProviderMode() === "county-gis") {
       const county = resolveTxParcelCounty({
         bbox,
@@ -656,7 +658,7 @@ export async function queryGisLayerGeoJson(input: {
           adapterKey: txCountyAdapterKey(county),
           ...countyResult,
           notSurveyGrade: true,
-          disclaimer: TX_COUNTY_PARCEL_DISCLAIMER,
+          disclaimer: txCountyDisclaimer(county),
         };
       }
     }

@@ -22,19 +22,25 @@
  *     comparison". When an input side is missing the sub-signal is
  *     `unknown` — never guessed.
  *
- * Coverage: geocoded point inside one of the five supported Central TX
- * counties (48453 Travis / 48491 Williamson / 48029 Bexar / 48021
- * Bastrop / 48055 Caldwell — the `txCountyApn` routing table shared with
- * the #243 parcel-key path). Everywhere else is an honest no-coverage.
+ * Coverage: geocoded point inside one of the supported Central TX
+ * counties in the `txCountyApn` routing table (shared with the #243
+ * parcel-key path): 48453 Travis / 48491 Williamson / 48029 Bexar /
+ * 48021 Bastrop / 48055 Caldwell via live county ArcGIS, plus 48209
+ * Hays / 48091 Comal via the self-hosted TxGIO parcel geometry store
+ * (no live county GIS exists there). Everywhere else is an honest
+ * no-coverage.
  *
  * Plumbing: the adapters are gated on `ctx.cadLookup` (see
  * {@link CadPropertyLookup} in ../types) — the api-server injects a
  * drizzle-backed accessor on the brief site-context path; paths without
  * the accessor never match `appliesTo`. Point→(countyFips, propId)
- * resolution reuses the shared county ArcGIS lookup
- * (`resolveCountyApnByPoint`), so a live run costs one county GIS point
- * query + one local Postgres read per adapter; the brief path's
- * permanent place-layer snapshots make live runs once-per-place.
+ * resolution reuses the shared county lookup
+ * (`resolveCountyApnByPoint`); the TxGIO-store counties additionally
+ * gate on the injected `ctx.parcelPointLookup` (same db-free injection
+ * pattern), so a live run costs one county GIS point query (or one
+ * local geometry read) + one local Postgres read per adapter; the
+ * brief path's permanent place-layer snapshots make live runs
+ * once-per-place.
  */
 
 import {
@@ -288,11 +294,14 @@ export function deriveOwnerOccupancy(
 }
 
 /**
- * Gate: geocoded point inside one of the five supported counties AND the
+ * Gate: geocoded point inside one of the supported counties AND the
  * CAD store accessor is injected AND the resolved jurisdiction does not
  * contradict Texas. The bbox routing is the authoritative geometry gate;
  * the state check only rejects contexts whose resolver already landed on
- * a different state.
+ * a different state. TxGIO-store counties (Hays/Comal) additionally
+ * require the injected `parcelPointLookup` — without it the point
+ * cannot resolve to a parcel, so the adapters gate off rather than run
+ * into a guaranteed miss.
  */
 function cadApplies(ctx: AdapterContext): boolean {
   if (!ctx.cadLookup) return false;
@@ -307,13 +316,18 @@ function cadApplies(ctx: AdapterContext): boolean {
   ) {
     return false;
   }
-  return resolveCountyApnSource(latitude, longitude) !== null;
+  const county = resolveCountyApnSource(latitude, longitude);
+  if (!county) return false;
+  if (county.lookup === "txgio-store" && !ctx.parcelPointLookup) return false;
+  return true;
 }
 
 interface ResolvedCadRow {
   county: CountyApnSource;
   propId: string;
   gisSourceUrl: string;
+  /** Which backend resolved the parcel — live county GIS or the TxGIO store. */
+  resolutionProvider: "county-gis" | "txgio";
   row: CadPropertyLookupRow;
 }
 
@@ -328,7 +342,7 @@ async function resolveCadRow(ctx: AdapterContext): Promise<ResolvedCadRow> {
   if (!county) {
     throw new AdapterRunError(
       "no-coverage",
-      "Point is outside the supported Central TX counties (Travis, Williamson, Bexar, Bastrop, Caldwell).",
+      "Point is outside the supported Central TX counties (Travis, Williamson, Bexar, Bastrop, Caldwell, Hays, Comal).",
     );
   }
   if (!ctx.cadLookup) {
@@ -337,16 +351,25 @@ async function resolveCadRow(ctx: AdapterContext): Promise<ResolvedCadRow> {
       "CAD property store accessor not available on this path.",
     );
   }
+  if (county.lookup === "txgio-store" && !ctx.parcelPointLookup) {
+    throw new AdapterRunError(
+      "no-coverage",
+      `${county.name} County resolves via the self-hosted parcel geometry store, which is not available on this path.`,
+    );
+  }
   const resolution = await resolveCountyApnByPoint({
     latitude,
     longitude,
     fetchImpl: ctx.fetchImpl,
     signal: ctx.signal,
+    parcelPointLookup: ctx.parcelPointLookup,
   });
   if (!resolution) {
     throw new AdapterRunError(
       "no-coverage",
-      `No parcel at this point in the ${county.name} County GIS.`,
+      county.lookup === "txgio-store"
+        ? `No parcel at this point in the self-hosted ${county.name} County parcel geometry (TxGIO/StratMap).`
+        : `No parcel at this point in the ${county.name} County GIS.`,
     );
   }
   const row = await ctx.cadLookup(county.fips, resolution.apn);
@@ -360,6 +383,7 @@ async function resolveCadRow(ctx: AdapterContext): Promise<ResolvedCadRow> {
     county,
     propId: resolution.apn,
     gisSourceUrl: resolution.sourceUrl,
+    resolutionProvider: resolution.provider,
     row,
   };
 }
@@ -380,7 +404,7 @@ function provenanceFields(resolved: ResolvedCadRow): Record<string, unknown> {
      */
     sourceVintage: row.sourceVintage,
     parcelResolution: {
-      provider: "county-gis",
+      provider: resolved.resolutionProvider,
       sourceUrl: resolved.gisSourceUrl,
     },
     retrievedAt: new Date().toISOString(),

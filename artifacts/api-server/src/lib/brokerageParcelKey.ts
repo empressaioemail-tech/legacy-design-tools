@@ -7,8 +7,10 @@
  *   2. Cotality CLIP resolution — attempted ONLY when property credentials
  *      are configured, bounded by a short timeout; failure falls through
  *      instead of failing capture (a dark vendor never breaks capture).
- *   3. County-GIS APN — `apn:<countyFips>:<apn>` from the public county
- *      appraisal-district point lookup (`brokerageParcelApn.ts`).
+ *   3. County APN — `apn:<countyFips>:<apn>` from the public county
+ *      appraisal-district point lookup (`brokerageParcelApn.ts`): live
+ *      county ArcGIS for the #242 counties, the self-hosted TxGIO
+ *      parcel geometry store for Hays/Comal (provider "txgio").
  *   4. Geo key — `geo:<lat-5dp>,<lng-5dp>`, always available once the
  *      input geocodes or carries coordinates.
  *
@@ -27,6 +29,7 @@ import {
 } from "@workspace/adapters/national/cotalityClient";
 import { geocodeAddress } from "@workspace/site-context/server";
 import { resolveCountyApnByPoint } from "./brokerageParcelApn";
+import { makeTxgioParcelPointLookup } from "./txgioParcelStore";
 
 export type ParcelKeySource =
   | "address-geocode"
@@ -37,7 +40,7 @@ export type ParcelKeySource =
 export type ParcelKeyKind = "clip" | "apn" | "geo";
 
 export interface ParcelKeyProvenance {
-  provider: "cotality" | "county-gis" | "user-paste" | "geocode";
+  provider: "cotality" | "county-gis" | "txgio" | "user-paste" | "geocode";
   sourceUrl: string | null;
   retrievedAt: string;
 }
@@ -231,6 +234,9 @@ export async function captureParcelKey(
     const apnHit = await resolveCountyApnByPoint({
       latitude: lat!,
       longitude: lon!,
+      // Store-backed counties (Hays/Comal): resolve against the
+      // self-hosted TxGIO parcel geometry.
+      parcelPointLookup: makeTxgioParcelPointLookup(),
     });
     if (apnHit) {
       return {

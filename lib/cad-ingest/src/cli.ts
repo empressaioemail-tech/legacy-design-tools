@@ -38,7 +38,7 @@ import { parsePacsExport } from "./pacs/parser";
 import { classifyOrionHeader, parseOrionExport } from "./orion/parser";
 import { HeaderIndex, readCsvRows } from "./csv";
 import { upsertCadProperties, DEFAULT_BATCH_SIZE } from "./ingest";
-import { downloadToFile, isUrl } from "./download";
+import { deriveVintage, downloadToFile, isUrl } from "./download";
 import { extractCadDrop, ORION_ENTRY_FILTER, PACS_ENTRY_FILTER } from "./zip";
 
 const { Pool } = pg;
@@ -183,9 +183,20 @@ async function main(): Promise<void> {
   } else {
     inputs = { propertyFile: input };
   }
-  if (values["improvement-file"]) inputs.improvementFile = values["improvement-file"];
-  if (values["owner-file"]) inputs.ownerFile = values["owner-file"];
-  if (values["segment-file"]) inputs.segmentFile = values["segment-file"];
+  // Override files accept URLs exactly like --file does (they used to
+  // be passed through verbatim and ENOENT on URLs).
+  async function resolveOverride(
+    value: string | undefined,
+  ): Promise<string | undefined> {
+    if (value === undefined) return undefined;
+    return isUrl(value) ? await downloadToFile(value, workDir, log) : value;
+  }
+  const improvementOverride = await resolveOverride(values["improvement-file"]);
+  const ownerOverride = await resolveOverride(values["owner-file"]);
+  const segmentOverride = await resolveOverride(values["segment-file"]);
+  if (improvementOverride) inputs.improvementFile = improvementOverride;
+  if (ownerOverride) inputs.ownerFile = ownerOverride;
+  if (segmentOverride) inputs.segmentFile = segmentOverride;
 
   const taxYearArg =
     values["tax-year"] !== undefined ? Number(values["tax-year"]) : undefined;
@@ -199,11 +210,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const vintage =
-    values.vintage ??
-    basename(values.file.split(/[?#]/)[0], extname(values.file.split(/[?#]/)[0]))
-      .toLowerCase()
-      .replace(/\s+/g, "-");
+  const vintage = values.vintage ?? deriveVintage(values.file);
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
 
   log(`county=${county.fips} (${county.name} / ${county.cad}) format=${county.format}`);

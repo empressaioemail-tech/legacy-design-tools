@@ -15,6 +15,14 @@
  *   Bastrop    48021  Bastrop_County_Parcels FS/0     (native SR 2277)
  *   Caldwell   48055  Caldwell_CAD_Parcel_Map FS/1    (attribute-thin)
  *
+ * Store-backed counties (feat/txgio-parcel-geometry) — no live county
+ * GIS exists, so bbox/pin requests are served from the self-hosted
+ * `txgio_parcel` store (TxGIO/StratMap Land Parcels, loaded by the
+ * txgio-ingest CLI; `source: "txgio-store"`, provider `"txgio"`):
+ *
+ *   Hays       48209  txgio_parcel (stratmap25, WGS84)
+ *   Comal      48091  txgio_parcel (stratmap25, WGS84)
+ *
  * County attributes are normalized to a compact feature-properties shape
  * (apn / situsAddress / owner / landUseCode / landUseDescription where the
  * county provides them) plus provenance (`provider: "county-gis"`,
@@ -42,6 +50,10 @@ import {
 } from "@workspace/adapters/arcgis";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { tileKey, getTxParcelTile, putTxParcelTile } from "./brokerageGisCache";
+import {
+  queryTxgioParcelsGeoJson,
+  TXGIO_PARCEL_DISCLAIMER,
+} from "./txgioParcelStore";
 import type { GisLayerBbox } from "./brokerageGisLayers";
 
 /**
@@ -84,7 +96,15 @@ export interface TxParcelCounty {
   name: string;
   /** Five-digit county FIPS, e.g. "48453". */
   fips: string;
-  /** ArcGIS layer URL (query endpoint is `<serviceUrl>/query`). */
+  /**
+   * Where the county's parcels come from — a live county ArcGIS
+   * service (default) or the self-hosted `txgio_parcel` store.
+   */
+  source?: "arcgis" | "txgio-store";
+  /**
+   * "arcgis": layer URL (query endpoint is `<serviceUrl>/query`).
+   * "txgio-store": the TxGIO per-county resource URL — provenance only.
+   */
   serviceUrl: string;
   /** Generous WGS84 bounding box for county routing. */
   bbox: GisLayerBbox;
@@ -92,7 +112,7 @@ export interface TxParcelCounty {
   centroid: { latitude: number; longitude: number };
   /** True when the service exposes little beyond geometry + parcel id. */
   attributesDegraded?: boolean;
-  /** County-specific attribute normalization. */
+  /** County-specific attribute normalization ("arcgis" only). */
   normalizeProps: (props: Record<string, unknown>) => Record<string, unknown>;
 }
 
@@ -216,6 +236,34 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
       }),
   },
   {
+    name: "Hays",
+    fips: "48209",
+    source: "txgio-store",
+    // No live queryable Hays county GIS — served from the self-hosted
+    // TxGIO store. serviceUrl is the program resource (provenance).
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48209_lp.zip",
+    // Routing bbox from the stratmap25 Hays shapefile header
+    // ([-98.2975, 29.7525, -97.7089, 30.3565]), padded. Matches the
+    // txCountyApn entry.
+    bbox: { westLng: -98.31, southLat: 29.74, eastLng: -97.7, northLat: 30.37 },
+    centroid: { latitude: 30.058, longitude: -98.031 },
+    normalizeProps: (p) => p,
+  },
+  {
+    name: "Comal",
+    fips: "48091",
+    source: "txgio-store",
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48091_lp.zip",
+    // Routing bbox from the stratmap25 Comal shapefile header
+    // ([-98.6463, 29.5942, -97.9991, 30.0380]), padded. Matches the
+    // txCountyApn entry.
+    bbox: { westLng: -98.66, southLat: 29.58, eastLng: -97.99, northLat: 30.05 },
+    centroid: { latitude: 29.808, longitude: -98.278 },
+    normalizeProps: (p) => p,
+  },
+  {
     name: "Caldwell",
     fips: "48055",
     serviceUrl:
@@ -284,11 +332,22 @@ export function resolveTxParcelCounty(input: {
 }
 
 export function txCountyProviderLabel(county: TxParcelCounty): string {
-  return `${county.name} County GIS parcels`;
+  return county.source === "txgio-store"
+    ? `${county.name} County parcels (TxGIO/StratMap)`
+    : `${county.name} County GIS parcels`;
 }
 
 export function txCountyAdapterKey(county: TxParcelCounty): string {
-  return `county-gis:parcels:${county.fips}`;
+  return county.source === "txgio-store"
+    ? `txgio:parcels:${county.fips}`
+    : `county-gis:parcels:${county.fips}`;
+}
+
+/** Provider-appropriate not-survey-grade disclaimer for the layer result. */
+export function txCountyDisclaimer(county: TxParcelCounty): string {
+  return county.source === "txgio-store"
+    ? TXGIO_PARCEL_DISCLAIMER
+    : TX_COUNTY_PARCEL_DISCLAIMER;
 }
 
 /**
@@ -346,6 +405,20 @@ export async function queryTxCountyParcelsGeoJson(input: {
   const { county } = input;
   const isBbox = Boolean(input.bbox);
   const label = txCountyProviderLabel(county);
+
+  // Store-backed counties (no live county GIS): serve from the local
+  // txgio_parcel table. No tile cache — the table IS the store. The
+  // store reader throws the same named AdapterRunError shape on empty
+  // coverage, keeping failure honesty identical to the live path.
+  if (county.source === "txgio-store") {
+    return await queryTxgioParcelsGeoJson({
+      countyFips: county.fips,
+      countyName: county.name,
+      bbox: input.bbox,
+      latitude: input.latitude,
+      longitude: input.longitude,
+    });
+  }
 
   if (isBbox && input.bbox && !input.forceRefresh) {
     const key = tileKey("parcels", input.bbox);

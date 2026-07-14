@@ -146,6 +146,33 @@ export type CadPropertyLookup = (
 ) => Promise<CadPropertyLookupRow | null>;
 
 /**
+ * One point->parcel hit out of the self-hosted TxGIO parcel geometry
+ * store (`txgio_parcel`, feat/txgio-parcel-geometry).
+ */
+export interface ParcelGeometryPointHit {
+  /** CAD property id of the containing parcel (as stored). */
+  propId: string;
+  /** Human-readable source URL for provenance (TxGIO resource). */
+  sourceUrl: string;
+}
+
+/**
+ * Injected point->parcel lookup against the self-hosted TxGIO parcel
+ * geometry store, for counties that have NO live queryable county GIS
+ * (Hays 48209, Comal 48091). Same injection pattern as
+ * {@link CadPropertyLookup}: adapters in this package are
+ * HTTP-fetch-shaped and must not import `@workspace/db`, so the
+ * api-server injects a drizzle-backed implementation (grid-cell scan +
+ * point-in-polygon) when it builds the brief site-context
+ * `AdapterContext`. Null means no parcel contains the point.
+ */
+export type ParcelGeometryPointLookup = (
+  countyFips: string,
+  latitude: number,
+  longitude: number,
+) => Promise<ParcelGeometryPointHit | null>;
+
+/**
  * Runtime context passed to every adapter. `fetchImpl` is dependency-
  * injected so unit tests can hand-stub the network without touching the
  * upstream services. `signal` is forwarded into `fetch` so the runner
@@ -168,6 +195,14 @@ export interface AdapterContext {
    * table; the `cad:*` adapters gate themselves off when it is absent.
    */
   cadLookup?: CadPropertyLookup;
+  /**
+   * Self-hosted parcel-geometry point lookup for the store-backed
+   * counties (Hays/Comal — no live county GIS). Optional service
+   * injection — see {@link ParcelGeometryPointLookup}. When absent,
+   * the `cad:*` adapters gate the store-backed counties off and the
+   * ArcGIS-backed counties are unaffected.
+   */
+  parcelPointLookup?: ParcelGeometryPointLookup;
   /**
    * Per-adapter network timeout (ms). Defaults to 15s in the runner —
    * adapters typically respond in <1s, so a hard cap here protects the

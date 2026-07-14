@@ -230,6 +230,10 @@ describe("lib/db schema integration", () => {
         // tile cache keyed (tile_key, county_fips); neutral of (and
         // parallel to) the dormant Cotality spatial-tile cache tables.
         "tx_parcel_tile_cache",
+        // feat/txgio-parcel-geometry (0053) — self-hosted TxGIO/StratMap
+        // parcel geometry store for counties without a live county GIS
+        // (Hays/Comal); keyed (county_fips, tile_key, feature_index).
+        "txgio_parcel",
         // Task #29 — hosted login credentials + per-user metering.
         "user_auth_credentials",
         "user_usage_metering",

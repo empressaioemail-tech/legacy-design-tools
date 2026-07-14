@@ -31,6 +31,27 @@ export function filenameFromUrl(url: string): string {
 }
 
 /**
+ * Derive a `source_vintage` label from the CLI's `--file` argument
+ * (local path or URL): strip query/hash and the extension, URL-decode
+ * percent escapes, lowercase, collapse whitespace to dashes.
+ *
+ * The URL-decode matters: deriving straight off a URL used to store
+ * labels like `2026%20preliminary%20appraisal%20export%20supp%200_07072026`
+ * (Travis) — the encoded form leaked into `cad_property.source_vintage`.
+ */
+export function deriveVintage(fileArg: string): string {
+  const withoutQuery = fileArg.split(/[?#]/)[0];
+  let base = withoutQuery.split(/[\\/]/).pop() ?? withoutQuery;
+  try {
+    base = decodeURIComponent(base);
+  } catch {
+    // Malformed percent escape — keep the raw basename.
+  }
+  const withoutExt = base.replace(/\.[^.]+$/, "");
+  return withoutExt.toLowerCase().replace(/\s+/g, "-");
+}
+
+/**
  * Download `url` into `destDir`, following redirects. Returns the
  * local file path.
  */
