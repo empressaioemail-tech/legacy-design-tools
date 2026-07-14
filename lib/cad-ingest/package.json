@@ -4,23 +4,27 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./txgio-geo": "./src/txgio/geo.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "cad-ingest": "tsx src/cli.ts"
+    "cad-ingest": "tsx src/cli.ts",
+    "txgio-ingest": "tsx src/txgio/cli.ts"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "^8.20.0",
+    "shapefile": "^0.6.6",
     "yauzl": "^3.2.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/pg": "^8.18.0",
+    "@types/shapefile": "^0.6.4",
     "@types/yauzl": "^2.10.3",
     "@vitest/coverage-v8": "catalog:",
     "tsx": "catalog:",

@@ -441,6 +441,90 @@ describe("cad:* coverage gate", () => {
   });
 });
 
+describe("cad:* store-backed counties (Hays/Comal via txgio_parcel)", () => {
+  const SAN_MARCOS_POINT = { latitude: 29.8833, longitude: -97.9414 };
+
+  /** Hays-shaped row (Orion ingest, PR #245/#246 conventions). */
+  const HAYS_ROW: CadPropertyLookupRow = {
+    ...ROW_10001,
+    countyFips: "48209",
+    propId: "12310",
+    situsAddress: "707 UHLAND RD",
+    situsCity: "SAN MARCOS",
+    situsZip: "78666",
+    ownerName: "DELEON FELIX",
+  };
+
+  function haysCtx(overrides: Partial<AdapterContext> = {}): AdapterContext {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("store-backed county must not hit the network");
+    });
+    return {
+      parcel: { ...SAN_MARCOS_POINT, state: "TX" },
+      jurisdiction: { stateKey: "texas", localKey: null },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      cadLookup: async () => HAYS_ROW,
+      parcelPointLookup: async () => ({
+        propId: "12310",
+        sourceUrl: "https://data.geographic.texas.gov/txgio-test",
+      }),
+      ...overrides,
+    };
+  }
+
+  it("serves Hays via the injected geometry lookup — no network at all", async () => {
+    const cadLookup = vi.fn(async () => HAYS_ROW);
+    const parcelPointLookup = vi.fn(async () => ({
+      propId: "12310",
+      sourceUrl: "https://data.geographic.texas.gov/txgio-test",
+    }));
+    const outcomes = await runAdapters({
+      adapters: [...CAD_ADAPTERS],
+      context: haysCtx({ cadLookup, parcelPointLookup }),
+    });
+    for (const o of outcomes) {
+      expect(o.status, o.adapterKey).toBe("ok");
+      expect(o.result?.provider).toBe("Hays Central Appraisal District");
+      const resolution = o.result?.payload.parcelResolution as Record<string, unknown>;
+      expect(resolution.provider).toBe("txgio");
+      expect(resolution.sourceUrl).toBe(
+        "https://data.geographic.texas.gov/txgio-test",
+      );
+    }
+    expect(parcelPointLookup).toHaveBeenCalledWith(
+      "48209",
+      SAN_MARCOS_POINT.latitude,
+      SAN_MARCOS_POINT.longitude,
+    );
+    expect(cadLookup).toHaveBeenCalledWith("48209", "12310");
+  });
+
+  it("gates OFF when the geometry lookup is not injected (resolution impossible)", () => {
+    const ctx = haysCtx({ parcelPointLookup: undefined });
+    for (const adapter of CAD_ADAPTERS) {
+      expect(adapter.appliesTo(ctx), adapter.adapterKey).toBe(false);
+    }
+    // The ArcGIS counties are unaffected by the missing injection.
+    const caldwell: AdapterContext = {
+      parcel: { ...CALDWELL_POINT, state: "TX" },
+      jurisdiction: { stateKey: "texas", localKey: null },
+      cadLookup: async () => ROW_10001,
+    };
+    expect(cadPropertyAdapter.appliesTo(caldwell)).toBe(true);
+  });
+
+  it("is an honest no-coverage when no ingested parcel contains the point", async () => {
+    const outcomes = await runAdapters({
+      adapters: [cadPropertyAdapter],
+      context: haysCtx({ parcelPointLookup: async () => null }),
+    });
+    expect(outcomes[0].status).toBe("no-coverage");
+    expect(outcomes[0].error?.message).toMatch(
+      /self-hosted Hays County parcel geometry \(TxGIO\/StratMap\)/,
+    );
+  });
+});
+
 describe("summarizeCadPayload dispatcher", () => {
   it("returns null for non-cad layer kinds and malformed payloads", () => {
     expect(summarizeCadPayload("fema-nfhl-flood-zone", { kind: "flood-zone" })).toBeNull();

@@ -36,3 +36,26 @@ export {
   PACS_ENTRY_FILTER,
   ORION_ENTRY_FILTER,
 } from "./zip";
+export * from "./txgio/geo";
+export {
+  TXGIO_COUNTIES,
+  resolveTxgioCounty,
+  txgioDownloadUrl,
+} from "./txgio/counties";
+export type { TxgioCounty } from "./txgio/counties";
+export {
+  normalizeTxgioFeature,
+  assertWgs84Prj,
+  TXGIO_ENTRY_FILTER,
+} from "./txgio/parse";
+export type { TxgioParcelRecord, TxgioFeature } from "./txgio/parse";
+export {
+  deleteCountyParcels,
+  upsertTxgioParcels,
+  TXGIO_DEFAULT_BATCH_SIZE,
+} from "./txgio/ingest";
+export type {
+  TxgioIngestDb,
+  TxgioUpsertOptions,
+  TxgioUpsertSummary,
+} from "./txgio/ingest";

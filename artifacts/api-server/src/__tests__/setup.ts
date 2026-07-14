@@ -214,6 +214,14 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // "if a route writes to it, it's in this list" invariant so future
   // adapter-route suites start from a known-empty state.
   "cad_property",
+  // feat/txgio-parcel-geometry — self-hosted TxGIO/StratMap parcel
+  // geometry store (Hays/Comal). No FK to anything (loaded by the
+  // @workspace/cad-ingest txgio-ingest CLI, read by the parcels
+  // gis-layer + the point->prop_id resolver), so the engagements
+  // truncate does not clear it. Listed per the "if a route writes to
+  // it, it's in this list" invariant so store-backed route suites
+  // start from a known-empty state.
+  "txgio_parcel",
 ];
 
 /**

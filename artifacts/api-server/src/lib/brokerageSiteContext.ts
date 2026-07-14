@@ -41,6 +41,7 @@ import {
 } from "./brokerageTierGate";
 import { providerSourceKindForKey } from "./providerCatalog";
 import { makeCadPropertyLookup } from "./cadPropertyLookup";
+import { makeTxgioParcelPointLookup } from "./txgioParcelStore";
 
 /** Wall-clock budget for one brief site-context fetch (all adapters). */
 export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 45_000;
@@ -450,6 +451,9 @@ export async function fetchBrokerageSiteContext(
           // import @workspace/db themselves). Latest-tax-year read from
           // the cad_property store.
           cadLookup: makeCadPropertyLookup(),
+          // Point->parcel geometry lookup for the TxGIO-store counties
+          // (Hays/Comal — no live county GIS). Same injection pattern.
+          parcelPointLookup: makeTxgioParcelPointLookup(),
         },
         cache,
       });

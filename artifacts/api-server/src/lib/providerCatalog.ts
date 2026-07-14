@@ -78,6 +78,20 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     sourceKind: "local-adapter",
   },
   {
+    // Self-hosted TxGIO/StratMap land-parcel geometry store
+    // (feat/txgio-parcel-geometry, `txgio:parcels:<fips>` keys from
+    // brokerageTxParcels.ts for the counties with no live county GIS —
+    // Hays/Comal). Public-domain state program data served from our own
+    // Postgres — free public record, zero marginal cost per read, never
+    // metered. Per-jurisdiction parcel data, so `local-adapter`, same
+    // reasoning as `county-gis:`.
+    prefix: "txgio:",
+    label: "TxGIO/StratMap Land Parcels (public record)",
+    metered: false,
+    freeBaselineKeys: new Set(),
+    sourceKind: "local-adapter",
+  },
+  {
     // Dormant since the 2026-06-17 Regrid purge. Listed so the dormant
     // keys keep their historical semantics — unmetered, tier-default
     // sourceKind — instead of picking up accidental new behavior.

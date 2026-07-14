@@ -22,6 +22,7 @@
     "@workspace/atoms-l-surface": "workspace:*",
     "@workspace/briefing-engine": "workspace:*",
     "@workspace/briefing-pdf-tokens": "workspace:*",
+    "@workspace/cad-ingest": "workspace:*",
     "@workspace/codes": "workspace:*",
     "@workspace/coverage": "workspace:*",
     "@workspace/comment-letter": "workspace:*",

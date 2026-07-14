@@ -71,3 +71,4 @@ export * from "./engagementAnnotations";
 export * from "./savedWorkspaceSpaces";
 export * from "./dataroomDocumentAtoms";
 export * from "./cadProperty";
+export * from "./txgioParcel";

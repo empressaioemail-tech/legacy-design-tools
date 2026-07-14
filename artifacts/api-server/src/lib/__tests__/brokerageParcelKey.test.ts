@@ -197,11 +197,13 @@ describe("county APN resolution", () => {
     expect(hit).toBeNull();
   });
 
-  it("covers the five ratified counties with distinct FIPS", () => {
+  it("covers the seven supported counties with distinct FIPS (five live-GIS + two txgio-store)", () => {
     expect(COUNTY_APN_SOURCES.map((c) => c.fips).sort()).toEqual([
       "48021",
       "48029",
       "48055",
+      "48091", // Comal — self-hosted TxGIO store (no live county GIS)
+      "48209", // Hays — self-hosted TxGIO store (no live county GIS)
       "48453",
       "48491",
     ]);
