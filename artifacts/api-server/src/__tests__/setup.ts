@@ -207,6 +207,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "brokerage_install_claims",
   "user_usage_metering",
   "workspace_settings",
+  // feat/cad-property-store — provider-neutral CAD property-attribute
+  // store. No FK to anything (loaded by the @workspace/cad-ingest batch
+  // CLI, read by future Property Brief slot adapters), so the
+  // engagements truncate above does not clear it. Listed per the
+  // "if a route writes to it, it's in this list" invariant so future
+  // adapter-route suites start from a known-empty state.
+  "cad_property",
 ];
 
 /**

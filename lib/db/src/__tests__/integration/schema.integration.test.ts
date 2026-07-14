@@ -104,6 +104,11 @@ describe("lib/db schema integration", () => {
         "brokerage_workspace_attachments",
         "brokerage_workspace_shares",
         "brokerage_workspaces",
+        // feat/cad-property-store — provider-neutral county appraisal
+        // district (CAD) property-attribute store keyed
+        // (county_fips, prop_id, tax_year); loaded by the
+        // @workspace/cad-ingest batch CLI from free CAD bulk exports.
+        "cad_property",
         // PLR-10 — tenant-scoped canned-finding library curated by
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.
