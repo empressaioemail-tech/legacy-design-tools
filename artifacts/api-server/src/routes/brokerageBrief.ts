@@ -97,7 +97,10 @@ import {
   getOrCreateBrokerageUserProfile,
   packageTierFromProfile,
 } from "../lib/brokerageUserProfile";
-import { captureParcelKey } from "../lib/brokerageParcelKey";
+import {
+  captureParcelKey,
+  parcelKeyKind as classifyParcelKey,
+} from "../lib/brokerageParcelKey";
 import {
   resolveInvestorPackageTier,
   depthMeterAllowance,
@@ -723,6 +726,10 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
 
   const llUuid = extractLlUuidFromSiteContext(siteContext);
   const parcelClip = siteContext.parcelClip ?? parcelCapture?.clip ?? llUuid ?? null;
+  // Provider-neutral join key: CLIP when any rail produced one, else the
+  // captured apn:/geo: key. Null only when capture and site-context both
+  // failed to produce any parcel identity.
+  const parcelKey = parcelClip ?? parcelCapture?.parcelKey ?? null;
 
   const buyBox = (profileRow?.buyBoxJson ?? {}) as {
     capRateFloor?: number;
@@ -794,7 +801,15 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       url: page_url ?? null,
       llUuid: parcelClip ?? undefined,
       parcelClip: parcelClip ?? undefined,
+      parcelKey: parcelKey ?? undefined,
+      // Kind derives from the key that actually won (site-context CLIP
+      // outranks the captured apn:/geo: key), never from the capture's
+      // own kind — a mixed state must not label a CLIP as "apn".
+      parcelKeyKind: parcelKey ? classifyParcelKey(parcelKey) : null,
       parcelKeySource: parcelCapture?.source ?? null,
+      apn: parcelCapture?.apn ?? null,
+      countyFips: parcelCapture?.countyFips ?? null,
+      parcelKeyProvenance: parcelCapture?.provenance ?? null,
     },
     jurisdiction: jurisdictionKey,
     corpusStatus,
@@ -881,7 +896,10 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
       address,
       sourceListingUrl: page_url ?? null,
       runId,
-      llUuid,
+      // Parcel join key for the workspace: CLIP when available (legacy
+      // key space), else the neutral apn:/geo: key so a dark Cotality
+      // rail no longer strands workspaces with no parcel identity.
+      llUuid: parcelKey,
       latitude: geocode?.lat,
       longitude: geocode?.lon,
       ownerUserId: authenticatedUser ?? undefined,
