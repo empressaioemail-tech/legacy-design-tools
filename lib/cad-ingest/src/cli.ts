@@ -28,7 +28,7 @@
 import { parseArgs } from "node:util";
 import { mkdtemp, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, join } from "node:path";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { resolveCounty } from "./counties";
