@@ -11,17 +11,22 @@ function DrainageTileInner() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
+  const [degradedReason, setDegradedReason] = useState<string | null>(null)
 
   async function handleRun() {
     if (!engagementId) return
     setBusy(true)
     setError(null)
     setSummary(null)
+    setDegradedReason(null)
     try {
       await client.runReport(engagementId, 'drainage')
       const report = await client.getReport(engagementId, 'drainage')
       if (report.status === 'not-run') {
-        setError('No drainage yet — ensure the parcel is geocoded, then retry.')
+        // The run POST surfaces real failures as 4xx/5xx (caught below),
+        // so a lingering not-run here means no drainage result exists yet
+        // for this engagement — never blame geocoding for it.
+        setError('No drainage result recorded yet — retry, and run Topography first if it has not run.')
         return
       }
       if (report.status === 'error') {
@@ -35,6 +40,14 @@ function DrainageTileInner() {
       const result = report.result as {
         flowLinesGeoJson?: { type: string; features: unknown[] }
         drainageZonesGeoJson?: { type: string; features: unknown[] }
+        hydrologyDegraded?: boolean
+        hydrologyDegradedReason?: string | null
+      }
+      if (result?.hydrologyDegraded) {
+        setDegradedReason(
+          result.hydrologyDegradedReason ??
+            'pysheds unavailable; native D8 fallback',
+        )
       }
       const pushed: string[] = []
       // SEAM: kind === map-renderer OverlaySpec.layerKey (MapTile.toMapOverlays).
@@ -84,7 +97,15 @@ function DrainageTileInner() {
         gap: 'var(--h-space-sm)',
       }}
     >
-      <TileStatusBanner status="live" label="Drainage" />
+      {degradedReason ? (
+        <TileStatusBanner
+          status="degraded"
+          label="Drainage"
+          reason={degradedReason}
+        />
+      ) : (
+        <TileStatusBanner status="live" label="Drainage" />
+      )}
       <button
         type="button"
         data-testid="drainage-run"

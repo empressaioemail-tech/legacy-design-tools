@@ -65,6 +65,8 @@ export async function materializeSiteDrainageFromEvent(
             hydrologyLibrary: payload.hydrology.library,
             hydrologyLibraryVersion: payload.hydrology.libraryVersion,
             hydrologyRouting: payload.hydrology.routing,
+            hydrologyDegraded: payload.hydrology.degraded ?? false,
+            hydrologyDegradedReason: payload.hydrology.degradedReason ?? null,
             accumulationThreshold: payload.hydrology.accumulationThreshold,
             drainageZonesGeoJson: payload.outputs.drainageZonesGeoJson,
             flowLinesGeoJson: payload.outputs.flowLinesGeoJson,

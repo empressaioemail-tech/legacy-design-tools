@@ -206,8 +206,10 @@ export const TILE_CAPABILITIES: TileCapability[] = [
     label: 'Hydrology',
     category: 'Site Analysis',
     engine: 'spatial',
-    status: 'degraded',
-    degradedReason: 'pysheds not installed in Cloud Run worker.',
+    // Runs on engine-api (pysheds sidecar, native D8 fallback). Per-run
+    // degradation is carried on the report result (hydrologyDegraded +
+    // reason), not asserted statically here.
+    status: 'live',
     requires: { engagementId: true },
     produces: { spatialOverlays: true },
     modes: ['full', 'card', 'raw'],
@@ -218,8 +220,10 @@ export const TILE_CAPABILITIES: TileCapability[] = [
     label: 'Subsurface Suitability',
     category: 'Site Analysis',
     engine: 'spatial',
-    status: 'partial',
-    degradedReason: 'SSURGO ECONNRESET — USDA TLS issue.',
+    // SSURGO attributes resolve via USDA Soil Data Access (SDA); the
+    // legacy gSSURGO ArcGIS host is enrichment-only. Failures surface
+    // per-run on the report result.
+    status: 'live',
     requires: { engagementId: true },
     produces: { spatialOverlays: true },
     modes: ['full', 'card', 'raw'],

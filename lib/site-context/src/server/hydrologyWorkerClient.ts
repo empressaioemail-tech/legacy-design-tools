@@ -36,6 +36,14 @@ export interface HydrologyWorkerSuccess {
   flowLinesGeoJson: GeoJsonFeatureCollection;
   rainfallResultGeoJson: GeoJsonFeatureCollection | null;
   pourPoint: { lng: number; lat: number };
+  /**
+   * True when pysheds was unavailable (missing, crashed, or timed out)
+   * and the native D8 fallback produced this result. Mirrors the
+   * hauska-engine worker contract so spine responses round-trip.
+   */
+  fallbackUsed?: boolean;
+  /** Why the pysheds path was skipped when {@link fallbackUsed} is true. */
+  fallbackReason?: string;
 }
 
 export type HydrologyWorkerResult =
@@ -150,8 +158,10 @@ export async function runHydrologyWorker(
     await writeFile(demPath, Buffer.from(req.demBytes));
     const result = await spawnPyshedsWorker(demPath, req);
     if (result.status === "ok") return result;
-    // Fall back to native when Python sidecar unavailable.
-    return runHydrologyNative({
+    // Fall back to native when Python sidecar unavailable — and say so,
+    // so consumers can render an honest degraded label instead of
+    // presenting native-D8 output as the pysheds result.
+    const native = runHydrologyNative({
       width: req.width,
       height: req.height,
       elevation: req.elevation,
@@ -161,6 +171,11 @@ export async function runHydrologyWorker(
       rainfallDepthMm: req.rainfallDepthMm,
       accumulationThreshold: req.accumulationThreshold,
     });
+    return {
+      ...native,
+      fallbackUsed: true,
+      fallbackReason: result.message,
+    };
   } catch (err) {
     return {
       status: "error",

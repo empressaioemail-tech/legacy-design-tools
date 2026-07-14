@@ -51,11 +51,15 @@ function SubsurfaceTileInner() {
         gap: 'var(--h-space-sm)',
       }}
     >
-      <TileStatusBanner
-        status="partial"
-        label="Subsurface Suitability"
-        reason="SSURGO ECONNRESET — USDA TLS issue."
-      />
+      {error ? (
+        <TileStatusBanner
+          status="degraded"
+          label="Subsurface Suitability"
+          reason={error}
+        />
+      ) : (
+        <TileStatusBanner status="live" label="Subsurface Suitability" />
+      )}
       <button
         type="button"
         data-testid="subsurface-run"
