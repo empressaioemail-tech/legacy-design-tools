@@ -131,6 +131,39 @@ function inputSignature(parts: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 
+/** Bound for the GCS DEM download (the one await with no native timeout). */
+const DEM_DOWNLOAD_TIMEOUT_MS = Number(
+  process.env.SITE_DRAINAGE_DEM_DOWNLOAD_TIMEOUT_MS ?? 60_000,
+);
+
+export class PhaseTimeoutError extends Error {
+  constructor(label: string, budgetMs: number) {
+    super(`${label} exceeded ${budgetMs}ms`);
+    this.name = "PhaseTimeoutError";
+  }
+}
+
+async function withPhaseTimeout<T>(
+  work: Promise<T>,
+  budgetMs: number,
+  label: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new PhaseTimeoutError(label, budgetMs)),
+      budgetMs,
+    );
+  });
+  // Swallow the orphan's rejection if the timeout wins the race.
+  work.catch(() => {});
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function bboxCenter(bbox: BboxWgs84): { lng: number; lat: number } {
   return {
     lng: (bbox.westLng + bbox.eastLng) / 2,
@@ -225,6 +258,20 @@ export async function ingestSiteDrainage(
       : bboxCenter(catchmentBbox);
 
   const spineCtx = { jurisdictionTenant: args.jurisdictionTenant ?? null };
+
+  // Phase timing — the 2026-07-14 live incident was a drainage run that
+  // exceeded 180s with no way to tell which await ate the budget. Every
+  // phase is stamped and logged at the end (and on the failure paths the
+  // partial map rides along in the reason).
+  const phaseStart = Date.now();
+  let phaseMark = phaseStart;
+  const phaseMs: Record<string, number> = {};
+  const markPhase = (name: string): void => {
+    const now = Date.now();
+    phaseMs[name] = now - phaseMark;
+    phaseMark = now;
+  };
+
   let rainfallForcing: RainfallForcingSource;
   try {
     rainfallForcing = await routeResolveRainfallForcing(
@@ -246,6 +293,7 @@ export async function ingestSiteDrainage(
       code: "engine-api-unreachable",
     };
   }
+  markPhase("rainfallForcing");
   const rainfallDepthMm = rainfallForcingDepthMm(rainfallForcing);
 
   const latestDrainage = await args.history.latestEvent({
@@ -253,17 +301,28 @@ export async function ingestSiteDrainage(
     entityType: "site-drainage",
     entityId: args.engagementId,
   });
+  markPhase("latestEvent");
 
+  // GCS download bounded — an unbounded storage stream was the one await
+  // in this pipeline with no timeout of its own.
   let demBytes: Buffer;
   try {
-    demBytes = await storage.getObjectEntityBytes(topoPayload.dem.gcsObjectPath);
+    demBytes = await withPhaseTimeout(
+      storage.getObjectEntityBytes(topoPayload.dem.gcsObjectPath),
+      DEM_DOWNLOAD_TIMEOUT_MS,
+      `DEM download from ${topoPayload.dem.gcsObjectPath}`,
+    );
   } catch (err) {
     return {
       status: "upstream-error",
       reason: err instanceof Error ? err.message : String(err),
-      code: "dem-download-failed",
+      code:
+        err instanceof PhaseTimeoutError
+          ? "dem-download-timeout"
+          : "dem-download-failed",
     };
   }
+  markPhase("demDownload");
 
   let parsed;
   try {
@@ -275,6 +334,7 @@ export async function ingestSiteDrainage(
       code: "geotiff-parse-failed",
     };
   }
+  markPhase("demParse");
 
   // Threshold must reflect the parsed DEM grid — topo stores the USGS
   // request size (bbox × resolution), which can exceed the returned raster
@@ -360,10 +420,11 @@ export async function ingestSiteDrainage(
     const { code, message } = formatEngineSpineFailure(err);
     return {
       status: "upstream-error",
-      reason: `engine-api hydrology drainage failed (${code}): ${message}`,
+      reason: `engine-api hydrology drainage failed (${code}): ${message} (phaseMs=${JSON.stringify(phaseMs)})`,
       code: "engine-api-unreachable",
     };
   }
+  markPhase("engineDrainage");
 
   if (hydrology.status !== "ok") {
     return {
@@ -372,6 +433,19 @@ export async function ingestSiteDrainage(
       code: hydrology.code,
     };
   }
+
+  log.info(
+    {
+      engagementId: args.engagementId,
+      phaseMs,
+      totalMs: Date.now() - phaseStart,
+      demBytes: demBytes.byteLength,
+      demGrid: `${parsed.width}x${parsed.height}`,
+      library: hydrology.library,
+      fallbackUsed: hydrology.fallbackUsed ?? false,
+    },
+    "site-drainage ingest: phase timings",
+  );
 
   const flowLineCount = hydrology.flowLinesGeoJson.features.length;
   const drainageZoneCount = hydrology.drainageZonesGeoJson.features.length;
