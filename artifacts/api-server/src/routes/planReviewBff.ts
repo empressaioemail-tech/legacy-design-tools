@@ -45,6 +45,12 @@ import {
 } from "../lib/siteTopographyMaterializer";
 import { ingestSiteDrainage } from "../lib/siteDrainageIngest";
 import {
+  isInFlightRunStale,
+  reportRunWatchdogBudgetMs,
+  runWithWatchdog,
+  type InFlightReportRun,
+} from "../lib/reportRunWatchdog";
+import {
   loadActiveSiteDrainageRow,
   rematerializeSiteDrainageFromLatestEvent,
 } from "../lib/siteDrainageMaterializer";
@@ -1086,7 +1092,7 @@ router.post(
 
 // â”€â”€â”€ POST /plan-review/engagements/:id/reports/:type/run â”€â”€â”€â”€â”€â”€â”€
 
-const inFlightReports = new Map<string, string>();
+const inFlightReports = new Map<string, InFlightReportRun>();
 const reportResultCache = new Map<string, unknown>();
 
 /**
@@ -1129,15 +1135,27 @@ router.post(
       return;
     }
     const flightKey = `${engagementId}:${type}`;
-    if (inFlightReports.has(flightKey)) {
-      res.status(409).json({
-        error: "report_already_running",
-        generationId: inFlightReports.get(flightKey),
-      });
-      return;
+    const existing = inFlightReports.get(flightKey);
+    if (existing) {
+      // Watchdog: a stuck previous run must never block retries forever.
+      if (isInFlightRunStale(existing, Date.now())) {
+        inFlightReports.delete(flightKey);
+        recordReportRunFailure(
+          flightKey,
+          "watchdog-stale",
+          `previous run ${existing.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+        );
+      } else {
+        res.status(409).json({
+          error: "report_already_running",
+          generationId: existing.generationId,
+          startedAt: new Date(existing.startedAt).toISOString(),
+        });
+        return;
+      }
     }
     const generationId = `gen-${Date.now()}`;
-    inFlightReports.set(flightKey, generationId);
+    inFlightReports.set(flightKey, { generationId, startedAt: Date.now() });
 
     const log = reqLog(req);
     const engagement = await loadReviewerBffEngagement(engagementId);
@@ -1148,14 +1166,47 @@ router.post(
     }
     const jurisdictionTenant = reviewerJurisdictionTenant(engagement);
 
+    const watchdogBudgetMs = reportRunWatchdogBudgetMs();
+    const watchdogTimeout = (
+      siblingKey: string | null,
+    ): void => {
+      const reason = `run exceeded the ${watchdogBudgetMs}ms watchdog budget; a downstream await did not settle in time`;
+      inFlightReports.delete(flightKey);
+      recordReportRunFailure(flightKey, "watchdog-timeout", reason);
+      if (siblingKey) {
+        recordReportRunFailure(siblingKey, "watchdog-timeout", reason);
+      }
+      log.error(
+        { engagementId, type, generationId, watchdogBudgetMs },
+        "plan-review report run watchdog fired — returning 504",
+      );
+      res.status(504).json({ error: "watchdog-timeout", reason });
+    };
+    const lateSettleLogger =
+      (label: string) => (outcome: { ok: boolean; detail: string }) => {
+        log.warn(
+          { engagementId, type, generationId, ok: outcome.ok, detail: outcome.detail },
+          `plan-review ${label} run settled after watchdog timeout (result discarded)`,
+        );
+      };
+
     try {
       if (type === "topography") {
-        const topoResult = await ingestSiteTopography({
-          engagementId,
-          history: getHistoryService(),
-          jurisdictionTenant,
-          log,
-        });
+        const raced = await runWithWatchdog(
+          ingestSiteTopography({
+            engagementId,
+            history: getHistoryService(),
+            jurisdictionTenant,
+            log,
+          }),
+          watchdogBudgetMs,
+          lateSettleLogger("topography"),
+        );
+        if (raced.timedOut) {
+          watchdogTimeout(null);
+          return;
+        }
+        const topoResult = raced.result;
         if (topoResult.status !== "ok") {
           inFlightReports.delete(flightKey);
           const reason = topoResult.reason;
@@ -1178,12 +1229,22 @@ router.post(
         type === "drainage" ||
         type === "hydrology"
       ) {
-        const drainageResult = await ingestSiteDrainage({
-          engagementId,
-          history: getHistoryService(),
-          jurisdictionTenant,
-          log,
-        });
+        const siblingKey = `${engagementId}:${type === "drainage" ? "hydrology" : "drainage"}`;
+        const raced = await runWithWatchdog(
+          ingestSiteDrainage({
+            engagementId,
+            history: getHistoryService(),
+            jurisdictionTenant,
+            log,
+          }),
+          watchdogBudgetMs,
+          lateSettleLogger("drainage"),
+        );
+        if (raced.timedOut) {
+          watchdogTimeout(siblingKey);
+          return;
+        }
+        const drainageResult = raced.result;
         if (drainageResult.status !== "ok") {
           inFlightReports.delete(flightKey);
           const reason = drainageResult.reason;
@@ -1312,8 +1373,30 @@ router.get(
       return;
     }
     const flightKey = `${engagementId}:${type}`;
-    if (inFlightReports.has(flightKey)) {
-      res.json({ status: "running" });
+    const inFlight = inFlightReports.get(flightKey);
+    if (inFlight) {
+      // Watchdog backstop: if the run handler itself was starved (e.g.
+      // CPU-throttled after a client disconnect) its in-process timer may
+      // never fire — the status GET independently expires stale runs so
+      // "running" can never be a forever state.
+      if (isInFlightRunStale(inFlight, Date.now())) {
+        inFlightReports.delete(flightKey);
+        recordReportRunFailure(
+          flightKey,
+          "watchdog-stale",
+          `run ${inFlight.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+        );
+        res.json({
+          status: "error",
+          error: `watchdog-stale: run ${inFlight.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+        });
+        return;
+      }
+      res.json({
+        status: "running",
+        generationId: inFlight.generationId,
+        startedAt: new Date(inFlight.startedAt).toISOString(),
+      });
       return;
     }
 
