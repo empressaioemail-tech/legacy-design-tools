@@ -91,6 +91,14 @@ describe("providerCatalog metering", () => {
     expect(entry?.label).toBe("County Appraisal District (public record)");
   });
 
+  it("explicitly never meters txgio keys (public-domain store, zero marginal cost)", () => {
+    expect(isMeteredAdapterKey("txgio:parcels:48209")).toBe(false);
+    expect(isMeteredAdapterKey("txgio:parcels:48091")).toBe(false);
+    const entry = providerCatalogEntryForKey("txgio:parcels:48209");
+    expect(entry?.metered).toBe(false);
+    expect(entry?.sourceKind).toBe("local-adapter");
+  });
+
   it("keeps regrid dormant semantics (unmetered)", () => {
     for (const key of REGRID_KEYS) {
       expect(isMeteredAdapterKey(key)).toBe(false);

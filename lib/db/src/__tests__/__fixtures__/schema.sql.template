@@ -1424,6 +1424,30 @@ CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
 );
 
 
+-- Name: txgio_parcel; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.txgio_parcel (
+    county_fips text NOT NULL,
+    tile_key text NOT NULL,
+    feature_index integer NOT NULL,
+    prop_id text,
+    geo_id text,
+    owner_name text,
+    situs_address text,
+    situs_city text,
+    situs_state text,
+    situs_zip text,
+    geometry jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: user_auth_credentials; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.user_auth_credentials (
@@ -2026,6 +2050,12 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_parcel_tile_cache
     ADD CONSTRAINT tx_parcel_tile_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: txgio_parcel txgio_parcel_county_fips_tile_key_feature_index_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.txgio_parcel
+    ADD CONSTRAINT txgio_parcel_county_fips_tile_key_feature_index_pk PRIMARY KEY (county_fips, tile_key, feature_index);
 
 
 -- Name: user_auth_credentials user_auth_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2696,6 +2726,11 @@ CREATE INDEX tx_parcel_tile_cache_expires_idx ON @@SCHEMA@@.tx_parcel_tile_cache
 -- Name: tx_parcel_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX tx_parcel_tile_cache_uniq ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (tile_key, county_fips);
+
+
+-- Name: txgio_parcel_prop_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX txgio_parcel_prop_idx ON @@SCHEMA@@.txgio_parcel USING btree (county_fips, prop_id);
 
 
 -- Name: viewpoint_renders_engagement_created_idx; Type: INDEX; Schema: public; Owner: -

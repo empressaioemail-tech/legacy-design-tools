@@ -24,6 +24,15 @@ vi.mock("../brokerageGisCache", () => ({
   putTxParcelTile: vi.fn(async () => {}),
 }));
 
+// Store-backed counties (Hays/Comal) delegate to the txgio_parcel
+// store reader — mocked here (the integration suite covers the real
+// drizzle reader over real geometry). The disclaimer/url constants
+// stay real.
+vi.mock("../txgioParcelStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../txgioParcelStore")>();
+  return { ...actual, queryTxgioParcelsGeoJson: vi.fn() };
+});
+
 import { AdapterRunError } from "@workspace/adapters/types";
 import {
   TX_PARCEL_COUNTIES,
@@ -33,11 +42,16 @@ import {
   resolveTxParcelCounty,
   queryTxCountyParcelsGeoJson,
   txCountyAdapterKey,
+  txCountyDisclaimer,
   txCountyProviderLabel,
   type TxParcelCounty,
 } from "../brokerageTxParcels";
 import { queryGisLayerGeoJson } from "../brokerageGisLayers";
 import { getTxParcelTile, putTxParcelTile } from "../brokerageGisCache";
+import {
+  queryTxgioParcelsGeoJson,
+  TXGIO_PARCEL_DISCLAIMER,
+} from "../txgioParcelStore";
 import { TX_COUNTY_PARCEL_FIXTURES } from "./__fixtures__/txCountyParcels";
 
 function countyByName(name: string): TxParcelCounty {
@@ -468,5 +482,127 @@ describe("labels", () => {
     const bexar = countyByName("Bexar");
     expect(txCountyAdapterKey(bexar)).toBe("county-gis:parcels:48029");
     expect(txCountyProviderLabel(bexar)).toBe("Bexar County GIS parcels");
+  });
+
+  it("store-backed counties label as TxGIO with txgio: adapter keys and their own disclaimer", () => {
+    const hays = countyByName("Hays");
+    expect(hays.source).toBe("txgio-store");
+    expect(txCountyAdapterKey(hays)).toBe("txgio:parcels:48209");
+    expect(txCountyProviderLabel(hays)).toBe("Hays County parcels (TxGIO/StratMap)");
+    expect(txCountyDisclaimer(hays)).toBe(TXGIO_PARCEL_DISCLAIMER);
+    expect(txCountyDisclaimer(countyByName("Bexar"))).toBe(TX_COUNTY_PARCEL_DISCLAIMER);
+  });
+});
+
+describe("store-backed counties (Hays/Comal — feat/txgio-parcel-geometry)", () => {
+  const SAN_MARCOS_BBOX = {
+    westLng: -97.945,
+    southLat: 29.88,
+    eastLng: -97.94,
+    northLat: 29.885,
+  };
+
+  const STORE_RESULT = {
+    geojson: {
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "Polygon", coordinates: [] },
+          properties: {
+            apn: "12310",
+            provider: "txgio",
+            countyFips: "48209",
+            countyName: "Hays",
+            notSurveyGrade: true,
+          },
+        },
+      ],
+    },
+    featureCount: 1,
+    queryMode: "bbox" as const,
+  };
+
+  it("routes San Marcos to Hays and New Braunfels to Comal", () => {
+    expect(resolveTxParcelCounty({ bbox: SAN_MARCOS_BBOX })?.fips).toBe("48209");
+    expect(
+      resolveTxParcelCounty({ latitude: 29.703, longitude: -98.1245 })?.fips,
+    ).toBe("48091");
+  });
+
+  it("REGRESSION: Austin/Lockhart routing is unchanged by the new bboxes", () => {
+    expect(resolveTxParcelCounty({ bbox: BBOXES.austin })?.fips).toBe("48453");
+    expect(
+      resolveTxParcelCounty({ latitude: 29.885, longitude: -97.673 })?.fips,
+    ).toBe("48055");
+  });
+
+  it("delegates to the store reader — no upstream fetch, no tile cache", async () => {
+    vi.mocked(queryTxgioParcelsGeoJson).mockResolvedValueOnce(STORE_RESULT);
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("store-backed county must not fetch upstream");
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const county = countyByName("Hays");
+    const result = await queryTxCountyParcelsGeoJson({
+      county,
+      bbox: SAN_MARCOS_BBOX,
+    });
+    expect(result).toEqual(STORE_RESULT);
+    expect(queryTxgioParcelsGeoJson).toHaveBeenCalledWith({
+      countyFips: "48209",
+      countyName: "Hays",
+      bbox: SAN_MARCOS_BBOX,
+      latitude: undefined,
+      longitude: undefined,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getTxParcelTile).not.toHaveBeenCalled();
+    expect(putTxParcelTile).not.toHaveBeenCalled();
+  });
+
+  it("dispatcher serves a Hays bbox with the TxGIO honesty envelope", async () => {
+    vi.mocked(queryTxgioParcelsGeoJson).mockResolvedValueOnce(STORE_RESULT);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("store-backed county must not fetch upstream");
+      }),
+    );
+
+    const result = await queryGisLayerGeoJson({
+      layer: "parcels",
+      bbox: SAN_MARCOS_BBOX,
+    });
+    expect(result.provider).toBe("Hays County parcels (TxGIO/StratMap)");
+    expect(result.adapterKey).toBe("txgio:parcels:48209");
+    expect(result.serviceUrl).toContain("data.geographic.texas.gov");
+    expect(result.notSurveyGrade).toBe(true);
+    expect(result.disclaimer).toBe(TXGIO_PARCEL_DISCLAIMER);
+    expect(result.featureCount).toBe(1);
+    expect(result.queryMode).toBe("bbox");
+  });
+
+  it("propagates the store reader's named no-coverage error (no Cotality fallthrough)", async () => {
+    vi.mocked(queryTxgioParcelsGeoJson).mockRejectedValueOnce(
+      new AdapterRunError(
+        "no-coverage",
+        "Comal County parcels (TxGIO/StratMap) has no ingested parcel polygons for this query.",
+      ),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("must not fall through to Cotality");
+      }),
+    );
+    await expect(
+      queryGisLayerGeoJson({
+        layer: "parcels",
+        latitude: 29.703,
+        longitude: -98.1245,
+      }),
+    ).rejects.toThrow(/Comal County parcels \(TxGIO\/StratMap\) has no ingested/);
   });
 });

@@ -210,6 +210,32 @@ describe("filterApplicableAdapters", () => {
     expect(withoutAccessor).toEqual([]);
   });
 
+  it("gates the cad:* adapters in a TxGIO-store county (Hays) on the injected geometry lookup", () => {
+    // feat/txgio-parcel-geometry — Hays/Comal have no live county GIS;
+    // point->parcel resolution needs the injected store lookup, so the
+    // cad:* adapters triple-gate there: point + cadLookup +
+    // parcelPointLookup.
+    const ctx: AdapterContext = {
+      parcel: { latitude: 29.8833, longitude: -97.9414, state: "TX" }, // San Marcos
+      jurisdiction: { stateKey: "texas", localKey: null },
+      cadLookup: async () => null,
+      parcelPointLookup: async () => null,
+    };
+    const withLookup = filterApplicableAdapters(ctx)
+      .map((a) => a.adapterKey)
+      .filter((k) => k.startsWith("cad:"))
+      .sort();
+    expect(withLookup).toEqual(["cad:owner-occupancy", "cad:property", "cad:tax"]);
+
+    const withoutLookup = filterApplicableAdapters({
+      ...ctx,
+      parcelPointLookup: undefined,
+    })
+      .map((a) => a.adapterKey)
+      .filter((k) => k.startsWith("cad:"));
+    expect(withoutLookup).toEqual([]);
+  });
+
   it("returns [] when the parcel has no geocode (NaN coordinates)", () => {
     const ctx: AdapterContext = {
       parcel: { latitude: NaN, longitude: NaN },

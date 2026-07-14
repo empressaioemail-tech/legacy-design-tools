@@ -1,0 +1,221 @@
+/**
+ * TxGIO parcel store readers against a REAL local Postgres — proves
+ * the two store reads end to end over real Hays geometry: seed
+ * `txgio_parcel` rows (bucketed with the same geo helpers the ingest
+ * CLI uses), then exercise the drizzle-backed point lookup
+ * (`makeTxgioParcelPointLookup`) and the bbox/pin GeoJSON reader
+ * (`queryTxgioParcelsGeoJson`).
+ *
+ * Same withTestSchema harness as the cad-ingest / cadBriefAdapters
+ * integration suites. Skipped when no DATABASE_URL / TEST_DATABASE_URL
+ * is available locally; CI always provides one.
+ */
+
+import { describe, expect, it } from "vitest";
+import { withTestSchema } from "@workspace/db/testing";
+import { txgioParcel } from "@workspace/db/schema";
+import { AdapterRunError } from "@workspace/adapters/types";
+import {
+  bboxOfGeometry,
+  cellKeysForBbox,
+  type GeoJsonGeometry,
+} from "@workspace/cad-ingest/txgio-geo";
+import {
+  makeTxgioParcelPointLookup,
+  queryTxgioParcelsGeoJson,
+  txgioSourceUrl,
+} from "../lib/txgioParcelStore";
+
+const hasDb =
+  process.env.TEST_DATABASE_URL !== undefined ||
+  process.env.DATABASE_URL !== undefined;
+
+/**
+ * Real TxGIO stratmap25 Hays feature — Prop_ID 12310 (707 Uhland Rd,
+ * San Marcos), extracted verbatim from the program shapefile. Mirrors
+ * lib/cad-ingest/src/__tests__/__fixtures__/txgioHaysParcel.ts.
+ */
+const HAYS_12310_GEOMETRY: GeoJsonGeometry = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [-97.91233033799995, 29.89560583900004],
+      [-97.91294211699994, 29.89508246300005],
+      [-97.91295020199999, 29.895076204000077],
+      [-97.91297140099994, 29.895094855000025],
+      [-97.91313552599996, 29.89523915700005],
+      [-97.91252467199996, 29.895773322000025],
+      [-97.91233033799995, 29.89560583900004],
+    ],
+  ],
+};
+const INSIDE_12310 = { latitude: 29.8953539541429, longitude: -97.91274065628568 };
+
+/** Synthetic neighbor spanning two grid cells (crosses lng -97.92). */
+const SPANNING_GEOMETRY: GeoJsonGeometry = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [-97.9215, 29.8952],
+      [-97.9185, 29.8952],
+      [-97.9185, 29.8958],
+      [-97.9215, 29.8958],
+      [-97.9215, 29.8952],
+    ],
+  ],
+};
+
+function rowsFor(
+  countyFips: string,
+  featureIndex: number,
+  geometry: GeoJsonGeometry,
+  attrs: Partial<typeof txgioParcel.$inferInsert>,
+): (typeof txgioParcel.$inferInsert)[] {
+  const bbox = bboxOfGeometry(geometry)!;
+  const cells = cellKeysForBbox(bbox)!;
+  return cells.map((tileKey) => ({
+    countyFips,
+    tileKey,
+    featureIndex,
+    geometry: geometry as unknown as Record<string, unknown>,
+    westLng: bbox.westLng,
+    southLat: bbox.southLat,
+    eastLng: bbox.eastLng,
+    northLat: bbox.northLat,
+    sourceFile: "stratmap25-landparcels_48209_lp.zip",
+    sourceVintage: "stratmap25-landparcels_48209_hays_202503",
+    ...attrs,
+  }));
+}
+
+const SEED = [
+  ...rowsFor("48209", 1, HAYS_12310_GEOMETRY, {
+    propId: "12310",
+    geoId: "10-0017-2347-00000-3",
+    ownerName: "DELEON FELIX",
+    situsAddress: "707 UHLAND RD, SAN MARCOS, TX 78666",
+    situsCity: "SAN MARCOS",
+    situsState: "TX",
+    situsZip: "78666",
+  }),
+  // Same cell, overlapping the lookup point, but WITHOUT a prop id —
+  // the point lookup must skip it (it cannot join the CAD roll).
+  ...rowsFor("48209", 2, HAYS_12310_GEOMETRY, { propId: null }),
+  ...rowsFor("48209", 3, SPANNING_GEOMETRY, { propId: "99001" }),
+];
+
+describe.skipIf(!hasDb)("txgio_parcel store readers over real geometry", () => {
+  it("point lookup ray-casts to the containing parcel and skips id-less rows", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(SEED);
+      const lookup = makeTxgioParcelPointLookup(db);
+
+      const hit = await lookup("48209", INSIDE_12310.latitude, INSIDE_12310.longitude);
+      expect(hit).toEqual({
+        propId: "12310",
+        sourceUrl: txgioSourceUrl("48209"),
+      });
+
+      // Outside every seeded polygon (same cell) — honest null.
+      expect(await lookup("48209", 29.8951, -97.9135)).toBeNull();
+      // Wrong county — honest null.
+      expect(await lookup("48091", INSIDE_12310.latitude, INSIDE_12310.longitude)).toBeNull();
+    });
+  });
+
+  it("bbox read serves the county-provider feature shape and dedupes cell-spanning features", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(SEED);
+
+      const res = await queryTxgioParcelsGeoJson({
+        countyFips: "48209",
+        countyName: "Hays",
+        bbox: { westLng: -97.925, southLat: 29.894, eastLng: -97.911, northLat: 29.897 },
+        database: db,
+      });
+      expect(res.queryMode).toBe("bbox");
+      // Feature 3 spans two cells (two rows) but must appear once.
+      expect(res.featureCount).toBe(3);
+      const features = res.geojson.features as Array<{
+        geometry: GeoJsonGeometry;
+        properties: Record<string, unknown>;
+      }>;
+      const apns = features.map((f) => f.properties.apn).filter(Boolean).sort();
+      expect(apns).toEqual(["12310", "99001"]);
+
+      const f12310 = features.find((f) => f.properties.apn === "12310")!;
+      expect(f12310.geometry.type).toBe("Polygon");
+      expect(f12310.properties).toMatchObject({
+        provider: "txgio",
+        countyFips: "48209",
+        countyName: "Hays",
+        sourceUrl: txgioSourceUrl("48209"),
+        sourceVintage: "stratmap25-landparcels_48209_hays_202503",
+        notSurveyGrade: true,
+        situsAddress: "707 UHLAND RD, SAN MARCOS, TX 78666",
+        owner: "DELEON FELIX",
+      });
+      expect(typeof f12310.properties.retrievedAt).toBe("string");
+      // No fabricated CLIP on this path.
+      expect(f12310.properties.clip).toBeUndefined();
+    });
+  });
+
+  it("pin read returns exactly the containing parcels", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(SEED);
+      const res = await queryTxgioParcelsGeoJson({
+        countyFips: "48209",
+        countyName: "Hays",
+        latitude: INSIDE_12310.latitude,
+        longitude: INSIDE_12310.longitude,
+        database: db,
+      });
+      expect(res.queryMode).toBe("pin");
+      // 12310 and its id-less twin both contain the point; the spanning
+      // rectangle does not.
+      expect(res.featureCount).toBe(2);
+      const apns = (res.geojson.features as Array<{ properties: Record<string, unknown> }>)
+        .map((f) => f.properties.apn)
+        .filter(Boolean);
+      expect(apns).toEqual(["12310"]);
+    });
+  });
+
+  it("throws the named no-coverage error where nothing is ingested", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(SEED);
+      await expect(
+        queryTxgioParcelsGeoJson({
+          countyFips: "48091",
+          countyName: "Comal",
+          bbox: { westLng: -98.2, southLat: 29.7, eastLng: -98.1, northLat: 29.75 },
+          database: db,
+        }),
+      ).rejects.toThrowError(AdapterRunError);
+      await expect(
+        queryTxgioParcelsGeoJson({
+          countyFips: "48091",
+          countyName: "Comal",
+          bbox: { westLng: -98.2, southLat: 29.7, eastLng: -98.1, northLat: 29.75 },
+          database: db,
+        }),
+      ).rejects.toThrow(/Comal County parcels \(TxGIO\/StratMap\) has no ingested parcel/);
+    });
+  });
+
+  it("falls back to the bbox-column scan for viewports beyond the cell ceiling", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(SEED);
+      // ~1 degree square — far over TXGIO_MAX_BBOX_CELLS, so the reader
+      // takes the DISTINCT ON bbox-column path. Same three features.
+      const res = await queryTxgioParcelsGeoJson({
+        countyFips: "48209",
+        countyName: "Hays",
+        bbox: { westLng: -98.4, southLat: 29.4, eastLng: -97.4, northLat: 30.4 },
+        database: db,
+      });
+      expect(res.featureCount).toBe(3);
+    });
+  });
+});
