@@ -1089,6 +1089,34 @@ router.post(
 const inFlightReports = new Map<string, string>();
 const reportResultCache = new Map<string, unknown>();
 
+/**
+ * Last failed run per engagement+type (instance-local, best-effort).
+ *
+ * The topography/drainage ingests return typed failure results instead of
+ * throwing. This route used to discard those results, answer 202, and let
+ * the status GET report "not-run" forever — the UI then blamed geocoding
+ * ("ensure the parcel is geocoded") for what was actually an upstream or
+ * spine failure. Failures now (a) return a real 4xx/5xx from the run POST
+ * and (b) land here so the status GET can answer `{ status: "error" }`
+ * with the true reason instead of "not-run".
+ */
+const lastReportRunFailure = new Map<
+  string,
+  { error: string; reason: string; at: string }
+>();
+
+function recordReportRunFailure(
+  flightKey: string,
+  error: string,
+  reason: string,
+): void {
+  lastReportRunFailure.set(flightKey, {
+    error,
+    reason,
+    at: new Date().toISOString(),
+  });
+}
+
 router.post(
   "/engagements/:engagementId/reports/:type/run",
   requireServiceTokenOrSession,
@@ -1122,22 +1150,68 @@ router.post(
 
     try {
       if (type === "topography") {
-        await ingestSiteTopography({
+        const topoResult = await ingestSiteTopography({
           engagementId,
           history: getHistoryService(),
           jurisdictionTenant,
           log,
         });
+        if (topoResult.status !== "ok") {
+          inFlightReports.delete(flightKey);
+          const reason = topoResult.reason;
+          const code =
+            topoResult.status === "upstream-error"
+              ? topoResult.code
+              : topoResult.status;
+          recordReportRunFailure(flightKey, code, reason);
+          log.warn(
+            { engagementId, type, code, reason },
+            "plan-review topography run failed",
+          );
+          res
+            .status(topoResult.status === "no-parcel-coverage" ? 422 : 502)
+            .json({ error: code, reason });
+          return;
+        }
+        lastReportRunFailure.delete(flightKey);
       } else if (
         type === "drainage" ||
         type === "hydrology"
       ) {
-        await ingestSiteDrainage({
+        const drainageResult = await ingestSiteDrainage({
           engagementId,
           history: getHistoryService(),
           jurisdictionTenant,
           log,
         });
+        if (drainageResult.status !== "ok") {
+          inFlightReports.delete(flightKey);
+          const reason = drainageResult.reason;
+          const code =
+            drainageResult.status === "upstream-error"
+              ? drainageResult.code
+              : drainageResult.status;
+          recordReportRunFailure(flightKey, code, reason);
+          // drainage + hydrology share one ingest; mirror the failure to
+          // the sibling key so either status GET answers honestly.
+          recordReportRunFailure(
+            `${engagementId}:${type === "drainage" ? "hydrology" : "drainage"}`,
+            code,
+            reason,
+          );
+          log.warn(
+            { engagementId, type, code, reason },
+            "plan-review drainage run failed",
+          );
+          res
+            .status(drainageResult.status === "no-topography" ? 409 : 502)
+            .json({ error: code, reason });
+          return;
+        }
+        lastReportRunFailure.delete(flightKey);
+        lastReportRunFailure.delete(
+          `${engagementId}:${type === "drainage" ? "hydrology" : "drainage"}`,
+        );
       } else if (type === "subsurface") {
         const [eng] = await db
           .select({
@@ -1164,9 +1238,16 @@ router.post(
           reportResultCache.set(flightKey, { status: "ok", result });
         } catch (err) {
           if (err instanceof AdapterRunError && err.code === "network-error") {
+            // Keep the true upstream failure text — "USDA endpoint
+            // unreachable" alone hid which host/endpoint actually failed.
             reportResultCache.set(flightKey, {
               status: "unavailable",
-              reason: "USDA endpoint unreachable",
+              reason: err.message || "USDA endpoint unreachable",
+            });
+          } else if (err instanceof AdapterRunError) {
+            reportResultCache.set(flightKey, {
+              status: "unavailable",
+              reason: `${err.code}: ${err.message}`,
             });
           } else {
             throw err;
@@ -1251,6 +1332,14 @@ router.get(
           log: reqLog(req),
         });
         if (replayed.status === "no-event") {
+          const failure = lastReportRunFailure.get(flightKey);
+          if (failure) {
+            res.json({
+              status: "error",
+              error: `${failure.error}: ${failure.reason}`,
+            });
+            return;
+          }
           res.json({ status: "not-run" });
           return;
         }
@@ -1280,6 +1369,14 @@ router.get(
           log: reqLog(req),
         });
         if (replayed.status === "no-event") {
+          const failure = lastReportRunFailure.get(flightKey);
+          if (failure) {
+            res.json({
+              status: "error",
+              error: `${failure.error}: ${failure.reason}`,
+            });
+            return;
+          }
           res.json({ status: "not-run" });
           return;
         }
@@ -1296,6 +1393,8 @@ router.get(
           flowLinesGeoJson: ps.flowLinesGeoJson ?? null,
           drainageZonesGeoJson: ps.drainageZonesGeoJson ?? null,
           hydrologyLibrary: ps.hydrologyLibrary ?? null,
+          hydrologyDegraded: ps.hydrologyDegraded ?? false,
+          hydrologyDegradedReason: ps.hydrologyDegradedReason ?? null,
         },
       });
       return;
@@ -1623,8 +1722,14 @@ router.get("/admin/functions", requireServiceTokenOrSession, (_req: Request, res
   const precedenceLive = isPrecedenceEngineProductionEnabled();
   const functions: TileDefWire[] = [
     { id: "precedence", label: "Precedence Engine", category: "Compliance", status: precedenceLive ? "live" : "degraded", degradedReason: precedenceLive ? undefined : "Production gate not activated" },
-    { id: "hydrology", label: "Hydrology", category: "Site Analysis", status: process.env.HYDROLOGY_PYSHEDS_INSTALLED === "1" ? "live" : "degraded", degradedReason: "pysheds not installed in Cloud Run worker." },
-    { id: "subsurface", label: "Subsurface Suitability", category: "Site Analysis", status: "partial", degradedReason: "SSURGO ECONNRESET â€” USDA TLS issue." },
+    // Hydrology runs on the engine-api spine (pysheds sidecar with native
+    // D8 fallback); per-run degradation is reported on the drainage /
+    // hydrology report result (`hydrologyDegraded` + reason), not here.
+    { id: "hydrology", label: "Hydrology", category: "Site Analysis", status: "live" },
+    // Subsurface soils resolve through USDA Soil Data Access (SDA); the
+    // legacy gSSURGO ArcGIS host is enrichment-only. Per-run failures are
+    // reported on the subsurface report result.
+    { id: "subsurface", label: "Subsurface Suitability", category: "Site Analysis", status: "live" },
     { id: "icc-ingest", label: "ICC Code Connect Ingest", category: "Compliance", status: "partial", degradedReason: "Credentials live; API contract not verified." },
     { id: "avm", label: "AVM / Valuation", category: "Market", status: "partial", degradedReason: "Cotality AVM keys present; not fully wired." },
     { id: "rent-comps", label: "Rent / Comps", category: "Market", status: "partial", degradedReason: "Cotality demo quota: 100 req/day, expires ~2026-07-06." },

@@ -1,3 +1,8 @@
-pysheds>=0.3.5
-numpy>=1.26.0
-rasterio>=1.3.0
+# Pinned upper bounds (parity with hauska-engine): pysheds 0.5 (current
+# latest) still calls np.in1d, which NumPy 2.x removed — an unpinned
+# resolve (pysheds 0.5 + numpy 2.4) imports fine but crashes
+# grid.accumulation with AttributeError at runtime, silently forcing the
+# native-D8 fallback. Keep numpy <2 until pysheds ships NumPy-2 support.
+pysheds>=0.3.5,<0.6
+numpy>=1.26.0,<2.0
+rasterio>=1.3.0,<1.5

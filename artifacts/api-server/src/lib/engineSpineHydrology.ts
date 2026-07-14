@@ -3,6 +3,15 @@
  *
  * DEM fetch, drainage worker, and rainfall forcing unconditionally call
  * engine-api /v1/hydrology/* through the gate-front seam.
+ *
+ * Envelope note: engine-api seals every /v1 response in the uniform
+ * EngineEnvelope (`{ payload, confidence, dataVintage, coverage,
+ * source }`) since the gate-front seam seal. These routes MUST unwrap
+ * via {@link unwrapSpineResponse} — reading fields off the raw body
+ * silently yields `undefined` (the exact failure mode that rendered
+ * drainage "not-run" forever in production). `unwrapSpineResponse`
+ * also tolerates a bare legacy payload, so a pre-envelope engine-api
+ * keeps working.
  */
 
 import type { BboxWgs84 } from "@workspace/site-context/server";
@@ -23,6 +32,7 @@ import {
   rehydrateSpineHydrologyWorkerResult,
   rehydrateSpineRainfallForcingSource,
 } from "./engineSpineDeserialize";
+import { unwrapSpineResponse } from "./engineSpineEnvelope";
 
 export interface SpineHydrologyContext {
   jurisdictionTenant: string | null;
@@ -38,12 +48,7 @@ export async function routeFetchUsgs3depDem(
     jurisdictionTenant: ctx.jurisdictionTenant,
   });
 
-  const payload = await postEngineSpine<{
-    widthPx: number;
-    heightPx: number;
-    bbox: BboxWgs84;
-    demBytesBase64: string;
-  }>({
+  const raw = await postEngineSpine<unknown>({
     path: "/v1/hydrology/dem",
     body: {
       bbox,
@@ -52,6 +57,19 @@ export async function routeFetchUsgs3depDem(
     gateFront,
     timeoutMs: opts.timeoutMs ?? 120_000,
   });
+
+  const { payload } = unwrapSpineResponse<{
+    widthPx: number;
+    heightPx: number;
+    bbox: BboxWgs84;
+    demBytesBase64: string;
+  }>(raw, { fallbackSource: "usgs:3dep-dem" });
+
+  if (typeof payload?.demBytesBase64 !== "string") {
+    throw new Error(
+      "engine-api /v1/hydrology/dem response carried no demBytesBase64 payload",
+    );
+  }
 
   const bytes = Buffer.from(payload.demBytesBase64, "base64");
   const fetchedAt = new Date().toISOString();
@@ -77,7 +95,7 @@ export async function routeRunHydrologyWorker(
   });
 
   const demBytes = Buffer.from(req.demBytes);
-  const payload = await postEngineSpine<HydrologyWorkerResult>({
+  const raw = await postEngineSpine<unknown>({
     path: "/v1/hydrology/drainage",
     body: {
       demBytesBase64: demBytes.toString("base64"),
@@ -93,7 +111,44 @@ export async function routeRunHydrologyWorker(
     timeoutMs: 180_000,
   });
 
-  return rehydrateSpineHydrologyWorkerResult(payload);
+  const { payload } = unwrapSpineResponse<
+    | HydrologyWorkerResult
+    | { status: "error"; error?: { code?: string; message?: string } }
+  >(raw, { fallbackSource: "hydrology:drainage" });
+
+  // Engine worker-error responses nest the failure as
+  // `{ status: "error", error: { code, message } }`; flatten to the
+  // HydrologyWorkerResult error contract this BFF's ingest consumes.
+  if (
+    payload &&
+    typeof payload === "object" &&
+    (payload as { status?: unknown }).status === "error"
+  ) {
+    const nested = (payload as { error?: { code?: string; message?: string } })
+      .error;
+    const flat = payload as { code?: string; message?: string };
+    return {
+      status: "error",
+      code: nested?.code ?? flat.code ?? "engine-worker-error",
+      message:
+        nested?.message ?? flat.message ?? "engine-api hydrology worker failed",
+    };
+  }
+
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    (payload as { status?: unknown }).status !== "ok"
+  ) {
+    return {
+      status: "error",
+      code: "engine-invalid-response",
+      message:
+        "engine-api /v1/hydrology/drainage returned an unrecognized payload shape",
+    };
+  }
+
+  return rehydrateSpineHydrologyWorkerResult(payload as HydrologyWorkerResult);
 }
 
 export async function routeResolveRainfallForcing(
@@ -105,7 +160,7 @@ export async function routeResolveRainfallForcing(
     jurisdictionTenant: ctx.jurisdictionTenant,
   });
 
-  const payload = await postEngineSpine<RainfallForcingSource>({
+  const raw = await postEngineSpine<unknown>({
     path: "/v1/hydrology/rainfall-forcing",
     body: {
       latitude: input.lat,
@@ -117,6 +172,28 @@ export async function routeResolveRainfallForcing(
     },
     gateFront,
   });
+
+  const { payload } = unwrapSpineResponse<RainfallForcingSource>(raw, {
+    fallbackSource: "rainfall-forcing",
+  });
+
+  // The engine's rainfall route degrades to `{ status: "empty", message }`
+  // when the upstream Atlas-14 fetch fails; surface it as a typed throw so
+  // the ingest maps it to an honest upstream-error instead of persisting a
+  // forcing record with no `kind`.
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    typeof (payload as { kind?: unknown }).kind !== "string"
+  ) {
+    const message =
+      payload && typeof payload === "object"
+        ? String((payload as { message?: unknown }).message ?? "")
+        : "";
+    throw new Error(
+      `engine-api rainfall-forcing returned no forcing source${message ? `: ${message}` : ""}`,
+    );
+  }
 
   return rehydrateSpineRainfallForcingSource(payload);
 }

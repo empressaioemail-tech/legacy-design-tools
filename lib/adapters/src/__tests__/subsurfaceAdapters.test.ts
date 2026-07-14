@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { usdaSsurgoSoilsAdapter } from "../federal/usda-ssurgo";
+import {
+  parseSdaTableRows,
+  parseSsurgoWfsGml,
+  usdaSsurgoSoilsAdapter,
+} from "../federal/usda-ssurgo";
 import { usgsGeologyAdapter } from "../federal/usgs-geology";
 import { usgsGroundwaterAdapter } from "../federal/usgs-groundwater";
 import { usgsSeismicAdapter, deriveSiteClassFromShrinkSwell } from "../federal/usgs-seismic";
@@ -163,6 +167,126 @@ describe("USDA SSURGO soils adapter", () => {
     expect(second[0].status).toBe("ok");
     expect(second[0].fromCache).toBe(true);
     expect(fetchImpl.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it("succeeds via SDA when the gSSURGO ArcGIS host resets TLS", async () => {
+    // The gSSURGO host (nrcsgeoservices) TLS-resets from Cloud Run; the
+    // adapter must not fail when SDA answered (the old Promise.all did).
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("gssurgo")) {
+        throw new TypeError("fetch failed: ECONNRESET");
+      }
+      if (url.includes("sdmdataaccess.sc.egov.usda.gov")) {
+        return jsonResponse(ssurgoSdaTable);
+      }
+      return jsonResponse({}, 404);
+    });
+    const outcomes = await runAdapters({
+      adapters: [usdaSsurgoSoilsAdapter],
+      context: { ...bastrop, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("ok");
+    const payload = outcomes[0].result?.payload as {
+      musym: string | null;
+      areaSymbol: string | null;
+      waterTableDepthMinFeet: number | null;
+      gssurgoEnrichmentAvailable: boolean;
+    };
+    expect(payload.musym).toBe("Pf");
+    expect(payload.areaSymbol).toBe("TX021");
+    // wtdepannmin is centimeters on the wire (60 cm ≈ 2.0 ft).
+    expect(payload.waterTableDepthMinFeet).toBe(2);
+    expect(payload.gssurgoEnrichmentAvailable).toBe(false);
+  }, 30_000);
+
+  it("fails with network-error only when BOTH SDA and gSSURGO are unreachable", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError("fetch failed: ECONNRESET");
+    });
+    const outcomes = await runAdapters({
+      adapters: [usdaSsurgoSoilsAdapter],
+      context: { ...bastrop, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("failed");
+    expect(outcomes[0].error?.code).toBe("network-error");
+  }, 60_000);
+});
+
+describe("SDA JSON+COLUMNNAME table parsing", () => {
+  it("zips the header row onto value rows (real wire shape)", () => {
+    const rows = parseSdaTableRows({
+      Table: [
+        ["mukey", "musym", "muname"],
+        ["393475", "Oa", "Oakalla silty clay loam"],
+        ["393653", "Tn", "Tinn clay"],
+      ],
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ mukey: "393475", musym: "Oa" });
+    expect(rows[1]).toMatchObject({ mukey: "393653", muname: "Tinn clay" });
+  });
+
+  it("tolerates legacy object rows", () => {
+    const rows = parseSdaTableRows({
+      Table: [{ mukey: "1", musym: "Xx" }],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].musym).toBe("Xx");
+  });
+
+  it("returns empty for missing or empty tables", () => {
+    expect(parseSdaTableRows({})).toEqual([]);
+    expect(parseSdaTableRows({ Table: [] })).toEqual([]);
+    expect(parseSdaTableRows(null)).toEqual([]);
+  });
+});
+
+describe("SDA WFS GML parsing", () => {
+  const bbox = {
+    westLng: -97.932,
+    southLat: 29.871,
+    eastLng: -97.9245,
+    northLat: 29.8772,
+  };
+
+  it("parses lat,lng GML2 coordinates into GeoJSON [lng, lat] rings", () => {
+    const gml = `
+<wfs:FeatureCollection xmlns:ms="x" xmlns:gml="y" xmlns:wfs="z">
+  <gml:featureMember>
+    <ms:mapunitpoly>
+      <ms:mupolygonkey>558575913</ms:mupolygonkey>
+      <ms:areasymbol>TX604</ms:areasymbol>
+      <ms:musym>Oa</ms:musym>
+      <ms:mukey>393475</ms:mukey>
+      <ms:multiPolygon>
+        <gml:MultiPolygon srsName="EPSG:4326">
+          <gml:polygonMember>
+            <gml:Polygon>
+              <gml:outerBoundaryIs>
+                <gml:LinearRing>
+                  <gml:coordinates>29.8710,-97.9320 29.8710,-97.9245 29.8772,-97.9245 29.8710,-97.9320</gml:coordinates>
+                </gml:LinearRing>
+              </gml:outerBoundaryIs>
+            </gml:Polygon>
+          </gml:polygonMember>
+        </gml:MultiPolygon>
+      </ms:multiPolygon>
+    </ms:mapunitpoly>
+  </gml:featureMember>
+</wfs:FeatureCollection>`;
+    const features = parseSsurgoWfsGml(gml, bbox);
+    expect(features).toHaveLength(1);
+    expect(features[0].properties.mukey).toBe("393475");
+    expect(features[0].properties.musym).toBe("Oa");
+    expect(features[0].geometry.type).toBe("MultiPolygon");
+    expect(features[0].geometry.coordinates[0][0][0]).toEqual([
+      -97.932, 29.871,
+    ]);
+  });
+
+  it("returns no features for an empty collection", () => {
+    expect(parseSsurgoWfsGml("<wfs:FeatureCollection/>", bbox)).toEqual([]);
   });
 });
 

@@ -180,6 +180,13 @@ jobs:
         # --allow-unauthenticated: CI is non-interactive; without an explicit
         # flag, gcloud prompts and fails. Phase 1A uses curl /api/healthz smoke;
         # tighten to --no-allow-unauthenticated + identity tokens before prod.
+        #
+        # --no-cpu-throttling: REGRESSION GUARD (2026-06 cotality-pdf-vision
+        # incident). Default request-based throttling starves fire-and-forget
+        # work kicked off after the HTTP response (finding generation after
+        # the 202). The flag was applied manually to the service; every
+        # deploy-canary re-created the revision WITHOUT it until it was baked
+        # here. Do not remove.
         run: |
           set -euo pipefail
           IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
@@ -205,6 +212,7 @@ jobs:
             --max-instances=10 \
             --concurrency=80 \
             --timeout=300 \
+            --no-cpu-throttling \
             --service-account=${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }} \
             --allow-unauthenticated \
             --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=anthropic,BRIEFING_LLM_MODE=anthropic,CLASSIFICATION_LLM_MODE=anthropic,AIR_FINDING_ORCHESTRATED=1,ENGINE_API_URL=https://hauska-engine-api-h7gvu7rgcq-uc.a.run.app,ENGINE_SPINE_FINDINGS=1,ENGINE_SPINE_FINDINGS_ORCHESTRATED=1,ENGINE_SPINE_BRIEFING=1,ENGINE_SPINE_HYDROLOGY=1,ENGINE_SPINE_TOPOGRAPHY=1,PRECEDENCE_ENGINE_PRODUCTION=1,HYDROLOGY_PYSHEDS_INSTALLED=1,MNML_RENDER_MODE=mock,RENDERS_PROD_ENABLED=false,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private,ICC_ES_REPORT_URL_TEMPLATE=https://icc-es.org/report-listing/?search_api_fulltext={ESR},BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data,CORTEX_USER_DAILY_API_LIMIT=1000000,FINDINGS_ICC_MODEL_CODE_SUPPLEMENT=true,GATE_CONTEXT_MODE=enforce \

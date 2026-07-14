@@ -4,30 +4,48 @@ import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 import { runButtonStyle } from './TopographyTile'
 
+type HydrologyReportResult = {
+  flowLinesGeoJson?: { type: string; features: unknown[] }
+  hydrologyLibrary?: string | null
+  hydrologyDegraded?: boolean
+  hydrologyDegradedReason?: string | null
+}
+
 function HydrologyTileInner() {
   const client = useCortexClient()
   const { engagementId, setEngagementReportResult } = useEngagement()
   const { pushOverlay } = useSpatial()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [degradedReason, setDegradedReason] = useState<string | null>(null)
+  const [library, setLibrary] = useState<string | null>(null)
 
   async function handleRun() {
     if (!engagementId) return
     setBusy(true)
     setError(null)
+    setDegradedReason(null)
     try {
       await client.runReport(engagementId, 'hydrology')
       const report = await client.getReport(engagementId, 'hydrology')
+      if (report.status === 'error') {
+        setError(report.error ?? 'Hydrology run failed')
+        return
+      }
       setEngagementReportResult('hydrology', {
         status: report.status === 'ok' ? 'ok' : 'error',
         result: report.result,
         error: report.error,
       })
-      const flowLines = (
-        report.result as {
-          flowLinesGeoJson?: { type: string; features: unknown[] }
-        }
-      )?.flowLinesGeoJson
+      const result = report.result as HydrologyReportResult | undefined
+      setLibrary(result?.hydrologyLibrary ?? null)
+      setDegradedReason(
+        result?.hydrologyDegraded
+          ? (result.hydrologyDegradedReason ??
+              'pysheds unavailable; native D8 fallback')
+          : null,
+      )
+      const flowLines = result?.flowLinesGeoJson
       if (flowLines) {
         pushOverlay({
           id: 'hydrology-flow',
@@ -52,11 +70,15 @@ function HydrologyTileInner() {
         gap: 'var(--h-space-sm)',
       }}
     >
-      <TileStatusBanner
-        status="degraded"
-        label="Hydrology"
-        reason="pysheds not installed in Cloud Run worker."
-      />
+      {degradedReason ? (
+        <TileStatusBanner
+          status="degraded"
+          label="Hydrology"
+          reason={degradedReason}
+        />
+      ) : (
+        <TileStatusBanner status="live" label="Hydrology" />
+      )}
       <button
         type="button"
         data-testid="hydrology-run"
@@ -66,6 +88,11 @@ function HydrologyTileInner() {
       >
         {busy ? 'Running…' : 'Run hydrology'}
       </button>
+      {library ? (
+        <span style={{ fontSize: 'var(--h-text-sm)', opacity: 0.75 }}>
+          Engine: {library}
+        </span>
+      ) : null}
       {error ? (
         <span style={{ fontSize: 'var(--h-text-sm)', color: 'var(--h-error)' }}>
           {error}

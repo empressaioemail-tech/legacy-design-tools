@@ -73,6 +73,9 @@ export interface SiteDrainageEventPayload {
     flowLineCount: number;
     drainageZoneCount: number;
     pourPoint: { lng: number; lat: number };
+    /** True when the pysheds worker was unavailable and native D8 ran. */
+    degraded?: boolean;
+    degradedReason?: string;
   };
   rainfall: {
     depthInches: number;
@@ -396,6 +399,14 @@ export async function ingestSiteDrainage(
       flowLineCount,
       drainageZoneCount,
       pourPoint: hydrology.pourPoint,
+      ...(hydrology.fallbackUsed
+        ? {
+            degraded: true,
+            degradedReason:
+              hydrology.fallbackReason ??
+              "pysheds unavailable; native D8 fallback",
+          }
+        : {}),
     },
     rainfall: {
       depthInches: rainfallForcing.depthInches,
