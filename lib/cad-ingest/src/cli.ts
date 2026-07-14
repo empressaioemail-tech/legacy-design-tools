@@ -119,7 +119,11 @@ async function discoverFiles(
 }
 
 async function main(): Promise<void> {
+  // pnpm forwards the `--` separator into argv; drop it so parseArgs
+  // does not treat everything after it as positionals.
+  const args = process.argv.slice(2).filter((a) => a !== "--");
   const { values } = parseArgs({
+    args,
     options: {
       county: { type: "string" },
       file: { type: "string" },
