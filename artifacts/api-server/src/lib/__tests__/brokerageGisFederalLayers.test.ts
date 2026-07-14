@@ -30,12 +30,12 @@ describe("listFederalGisLayerEndpoints", () => {
     ]);
   });
 
-  it("marks ssurgo-soils degraded pending USDA upstream TLS fix", () => {
+  it("serves ssurgo-soils from the SDA WFS host, no longer statically degraded", () => {
     const ssurgo = listFederalGisLayerEndpoints().find(
       (l) => l.layer === "ssurgo-soils",
     );
-    expect(ssurgo?.degraded).toBe(true);
-    expect(ssurgo?.degradedReason).toMatch(/ECONNRESET/i);
+    expect(ssurgo?.degraded).toBeUndefined();
+    expect(ssurgo?.serviceUrl).toContain("sdmdataaccess.sc.egov.usda.gov");
   });
 });
 
@@ -149,6 +149,136 @@ USGS	293801097320001	Test GW	GW	30.1105	-97.3186
     expect(result.geojson.features[0]).toMatchObject({
       geometry: { type: "Point" },
     });
+    vi.unstubAllGlobals();
+  });
+
+  it("serves ssurgo-soils polygons from the SDA WFS with SDA attribute enrichment", async () => {
+    // Trimmed from a verbatim live SDA WFS response (2026-07-14):
+    // GML2, <gml:coordinates> pairs are lat,lng.
+    const wfsGml = `<?xml version='1.0' encoding="UTF-8" ?>
+<wfs:FeatureCollection xmlns:ms="http://mapserver.gis.umn.edu/mapserver" xmlns:wfs="http://www.opengis.net/wfs" xmlns:gml="http://www.opengis.net/gml">
+  <gml:featureMember>
+    <ms:mapunitpoly>
+      <ms:mupolygonkey>558575913</ms:mupolygonkey>
+      <ms:areasymbol>TX604</ms:areasymbol>
+      <ms:musym>Oa</ms:musym>
+      <ms:nationalmusym>2t26q</ms:nationalmusym>
+      <ms:mukey>393475</ms:mukey>
+      <ms:muareaacres>21.5</ms:muareaacres>
+      <ms:multiPolygon>
+        <gml:MultiPolygon srsName="EPSG:4326">
+          <gml:polygonMember>
+            <gml:Polygon>
+              <gml:outerBoundaryIs>
+                <gml:LinearRing>
+                  <gml:coordinates>29.8710,-97.9320 29.8710,-97.9245 29.8772,-97.9245 29.8772,-97.9320 29.8710,-97.9320</gml:coordinates>
+                </gml:LinearRing>
+              </gml:outerBoundaryIs>
+            </gml:Polygon>
+          </gml:polygonMember>
+        </gml:MultiPolygon>
+      </ms:multiPolygon>
+    </ms:mapunitpoly>
+  </gml:featureMember>
+</wfs:FeatureCollection>`;
+    const sdaAttrs = {
+      Table: [
+        ["mukey", "muname", "compname", "drainagecl", "hydgrp", "comppct_r", "shrinkswell"],
+        ["393475", "Oakalla silty clay loam", "Oakalla", "Well drained", "B", "90", "High"],
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes(".wfs")) {
+          return new Response(wfsGml, {
+            status: 200,
+            headers: { "content-type": "text/xml" },
+          });
+        }
+        if (url.includes("post.rest")) {
+          return new Response(JSON.stringify(sdaAttrs), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+
+    const { queryFederalGisLayerGeoJson } = await import(
+      "../brokerageGisFederalLayers"
+    );
+    const result = await queryFederalGisLayerGeoJson({
+      layer: "ssurgo-soils",
+      bbox: {
+        westLng: -97.932,
+        southLat: 29.871,
+        eastLng: -97.9245,
+        northLat: 29.8772,
+      },
+    });
+    expect(result.featureCount).toBe(1);
+    const feature = result.geojson.features[0] as {
+      geometry: { type: string; coordinates: number[][][][] };
+      properties: Record<string, unknown>;
+    };
+    expect(feature.geometry.type).toBe("MultiPolygon");
+    // lat,lng wire pairs must come back as GeoJSON [lng, lat].
+    expect(feature.geometry.coordinates[0][0][0]).toEqual([-97.932, 29.871]);
+    expect(feature.properties.mukey).toBe("393475");
+    expect(feature.properties.muname).toBe("Oakalla silty clay loam");
+    expect(feature.properties.shrinkswell).toBe("High");
+    expect(feature.properties.foundationRiskScore).toBe(4);
+    expect(feature.properties.foundationRiskBand).toBe("high");
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to the gSSURGO ArcGIS host when the SDA WFS is unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes(".wfs")) {
+          throw new TypeError("fetch failed: ECONNRESET");
+        }
+        if (url.includes("nrcsgeoservices") && url.includes("/query")) {
+          return new Response(
+            JSON.stringify({
+              type: "FeatureCollection",
+              features: [
+                {
+                  type: "Feature",
+                  geometry: { type: "Polygon", coordinates: [] },
+                  properties: { MUSYM: "Pf", shrinkswell: "Moderate" },
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+
+    const { queryFederalGisLayerGeoJson } = await import(
+      "../brokerageGisFederalLayers"
+    );
+    const result = await queryFederalGisLayerGeoJson({
+      layer: "ssurgo-soils",
+      bbox: {
+        westLng: -97.932,
+        southLat: 29.871,
+        eastLng: -97.9245,
+        northLat: 29.8772,
+      },
+    });
+    expect(result.featureCount).toBe(1);
+    const props = (
+      result.geojson.features[0] as { properties: Record<string, unknown> }
+    ).properties;
+    expect(props.foundationRiskScore).toBe(3);
     vi.unstubAllGlobals();
   });
 });

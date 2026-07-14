@@ -125,23 +125,44 @@ export const ssurgoMapUnitFeature = {
   ],
 };
 
+/**
+ * Real SDA `format=JSON+COLUMNNAME` wire shape: `Table` is an array of
+ * arrays whose FIRST row is the column names (verified against the live
+ * endpoint 2026-07-14). The previous object-row fixture never matched
+ * the real wire and masked a parser bug that read the header row as data.
+ */
 export const ssurgoSdaTable = {
   Table: [
-    {
-      mukey: "123456",
-      musym: "Pf",
-      muname: "Pflugerville-Rock outcrop complex, 1 to 8 percent slopes",
-      drainsubclass: "Well drained",
-      brockdepmin: 0,
-      brockdepmax: 20,
-      wtdepannmin: 60,
-      wtdepannmax: 72,
-      compname: "Pflugerville",
-      drainagecl: "Well drained",
-      hydgrp: "C",
-      slope_r: 5,
-      shrinkswell: "Moderate",
-    },
+    [
+      "mukey",
+      "musym",
+      "muname",
+      "areasymbol",
+      "brockdepmin",
+      "wtdepannmin",
+      "drclassdcd",
+      "hydgrpdcd",
+      "compname",
+      "drainagecl",
+      "hydgrp",
+      "slope_r",
+      "shrinkswell",
+    ],
+    [
+      "123456",
+      "Pf",
+      "Pflugerville-Rock outcrop complex, 1 to 8 percent slopes",
+      "TX021",
+      "0",
+      "60",
+      "Well drained",
+      "C",
+      "Pflugerville",
+      "Well drained",
+      "C",
+      "5",
+      "Moderate",
+    ],
   ],
 };
 

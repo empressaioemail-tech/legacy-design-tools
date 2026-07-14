@@ -10,7 +10,10 @@ import {
 } from "@workspace/adapters/arcgis";
 import {
   USDA_SSURGO_MAPUNIT_LAYER,
+  USDA_SSURGO_WFS_ENDPOINT,
+  fetchSsurgoWfsPolygons,
   foundationRiskScoreFromShrinkSwell,
+  querySdaMapunitAttributesByMukeys,
 } from "@workspace/adapters/federal/usda-ssurgo";
 import {
   TEXAS_RRC_PIPELINES_LAYER,
@@ -63,14 +66,13 @@ export function listFederalGisLayerEndpoints(): GisLayerEndpoint[] {
   return [
     endpoint(
       "ssurgo-soils",
-      USDA_SSURGO_MAPUNIT_LAYER,
-      "USDA NRCS gSSURGO",
+      USDA_SSURGO_WFS_ENDPOINT,
+      "USDA SDA WFS (SSURGO map units)",
       "usda:ssurgo-soils",
-      {
-        degraded: true,
-        degradedReason:
-          "USDA gSSURGO upstream intermittently unreachable from Cloud Run (TLS ECONNRESET); fixture mode available.",
-      },
+      // Primary source is the SDA WFS on sdmdataaccess (healthy host);
+      // the gSSURGO ArcGIS host — which TLS-resets from Cloud Run — is
+      // retained only as a fallback, so the layer is no longer statically
+      // degraded. Per-request failures still surface as degraded results.
     ),
     endpoint(
       "groundwater",
@@ -343,20 +345,81 @@ export async function queryFederalGisLayerGeoJson(input: {
   }
 
   if (input.layer === "ssurgo-soils") {
-    const geojson = await arcgisEnvelopeQueryGeoJson({
-      serviceUrl: USDA_SSURGO_MAPUNIT_LAYER,
-      bbox,
-      outFields: "*",
-      upstreamLabel: "USDA gSSURGO",
-    });
-    const enriched = enrichSsurgoGeoJson(geojson);
-    return {
-      ...meta,
-      geojson: enriched,
-      featureCount: enriched.features.length,
-      queryMode: "bbox",
-      truncated: geojson.truncated,
-    };
+    // Primary: SDA WFS polygons (sdmdataaccess — the host that actually
+    // answers from Cloud Run) + one SDA tabular round trip for muname /
+    // shrink-swell / HSG so the foundation-risk choropleth has real
+    // inputs. Fallback: the legacy gSSURGO ArcGIS envelope query for
+    // networks where that host is reachable.
+    try {
+      const wfs = await fetchSsurgoWfsPolygons({ bbox });
+      if (wfs.features.length === 0) {
+        throw new AdapterRunError(
+          "no-coverage",
+          "No SSURGO map-unit polygons in this viewport.",
+        );
+      }
+      const mukeys = wfs.features
+        .map((f) => f.properties.mukey)
+        .filter((k): k is string => typeof k === "string" && k.length > 0);
+      let attrsByMukey: Awaited<
+        ReturnType<typeof querySdaMapunitAttributesByMukeys>
+      > = new Map();
+      try {
+        attrsByMukey = await querySdaMapunitAttributesByMukeys({}, mukeys);
+      } catch {
+        // Attribute enrichment is best-effort; polygons alone still render.
+      }
+      const withAttrs = {
+        type: "FeatureCollection" as const,
+        features: wfs.features.map((f) => {
+          const mukey = f.properties.mukey;
+          const extra =
+            typeof mukey === "string" ? attrsByMukey.get(mukey) : undefined;
+          return {
+            ...f,
+            properties: {
+              ...f.properties,
+              ...(extra
+                ? {
+                    muname: extra.muname,
+                    MUNAME: extra.muname,
+                    shrinkswell: extra.shrinkswell,
+                    hydgrp: extra.hydgrp,
+                    drainagecl: extra.drainagecl,
+                  }
+                : {}),
+            },
+          };
+        }),
+      };
+      const enriched = enrichSsurgoGeoJson(withAttrs);
+      return {
+        ...meta,
+        geojson: enriched,
+        featureCount: enriched.features.length,
+        queryMode: "bbox",
+        truncated: wfs.truncated,
+      };
+    } catch (err) {
+      if (err instanceof AdapterRunError && err.code === "no-coverage") {
+        throw err;
+      }
+      // WFS unavailable — try the legacy ArcGIS host before degrading.
+      const geojson = await arcgisEnvelopeQueryGeoJson({
+        serviceUrl: USDA_SSURGO_MAPUNIT_LAYER,
+        bbox,
+        outFields: "*",
+        upstreamLabel: "USDA gSSURGO",
+      });
+      const enriched = enrichSsurgoGeoJson(geojson);
+      return {
+        ...meta,
+        geojson: enriched,
+        featureCount: enriched.features.length,
+        queryMode: "bbox",
+        truncated: geojson.truncated,
+      };
+    }
   }
 
   if (input.layer === "groundwater") {
