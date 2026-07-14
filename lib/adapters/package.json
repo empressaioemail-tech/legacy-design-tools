@@ -30,9 +30,11 @@
     "./local/grand-county-ut": "./src/local/grand-county-ut.ts",
     "./local/lemhi-county-id": "./src/local/lemhi-county-id.ts",
     "./local/bastrop-tx": "./src/local/bastrop-tx.ts",
+    "./local/cad": "./src/local/cad.ts",
     "./local/summaries": "./src/local/summaries.ts",
     "./setbacks": "./src/local/setbacks/index.ts",
-    "./arcgis": "./src/arcgis.ts"
+    "./arcgis": "./src/arcgis.ts",
+    "./txCountyApn": "./src/txCountyApn.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

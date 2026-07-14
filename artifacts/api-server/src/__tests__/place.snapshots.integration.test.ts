@@ -159,6 +159,19 @@ describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
           payload: { inOpportunityZone: false, ozRound: "oz-1.0" },
         },
       },
+      // feat/cad-brief-adapters — the free tier carries the cad:*
+      // adapters; a deterministic outcome per adapter is required so
+      // the empty-archive snapshot suppresses a live re-run on the
+      // second dossier read (same as cotality:zoning above).
+      ...["cad:property", "cad:tax", "cad:owner-occupancy"].map(
+        (adapterKey) => ({
+          adapterKey,
+          tier: "local",
+          layerKind: adapterKey.replace(":", "-"),
+          status: "no-coverage" as const,
+          error: { code: "no-coverage" as const, message: "no roll row" },
+        }),
+      ),
     ]);
   });
 

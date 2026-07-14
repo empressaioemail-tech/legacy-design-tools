@@ -51,6 +51,7 @@ import {
   bastropZoningAdapter,
   bastropFloodAdapter,
 } from "./local/bastrop-tx";
+import { CAD_ADAPTERS } from "./local/cad";
 
 /**
  * QA-22 SCOPE B closeout (2026-05-23) — `fcc:broadband` is gated off
@@ -150,6 +151,12 @@ export const LOCAL_ADAPTERS: ReadonlyArray<Adapter> = [
   bastropParcelsAdapter,
   bastropZoningAdapter,
   bastropFloodAdapter,
+  // feat/cad-brief-adapters — Property Brief slots from the cad_property
+  // store (five Central TX counties). Double-gated: geocoded point inside
+  // a supported county AND `ctx.cadLookup` injected (brief site-context
+  // path only) — the engagement generate-layers path never injects the
+  // accessor, so these are inert there.
+  ...CAD_ADAPTERS,
 ];
 
 /**

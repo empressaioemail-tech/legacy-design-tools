@@ -166,6 +166,50 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
+  it("adds the cad:* adapters only for a geocoded point inside a supported Central TX county WITH the store accessor injected (brief path)", () => {
+    // feat/cad-brief-adapters — the cad:* adapters double-gate on (a) a
+    // geocoded point inside one of the five supported counties and (b)
+    // the injected `ctx.cadLookup` accessor. The pre-existing contexts in
+    // this file use (0, 0) coordinates and no accessor, which is why the
+    // cad keys appear in none of the expectations above — including the
+    // Texas/Bastrop one.
+    const ctx: AdapterContext = {
+      parcel: { latitude: 30.2672, longitude: -97.7431, state: "TX" }, // Austin
+      jurisdiction: { stateKey: "texas", localKey: null },
+      cadLookup: async () => null,
+    };
+    const keys = filterApplicableAdapters(ctx).map((a) => a.adapterKey).sort();
+    expect(keys).toEqual(
+      [
+        "fema:nfhl-flood-zone",
+        "epa:ejscreen",
+        "usgs:ned-elevation",
+        // Wave-1 subsurface adapters gate on a REAL US lat/lng, so they
+        // apply here even though the (0, 0) contexts above exclude them.
+        "usda:ssurgo-soils",
+        "usgs:geology",
+        "usgs:groundwater",
+        "usgs:seismic",
+        ...COTALITY_ADAPTER_KEYS,
+        "tceq:edwards-aquifer",
+        "texas:rrc-og",
+        "cad:property",
+        "cad:tax",
+        "cad:owner-occupancy",
+      ].sort(),
+    );
+
+    // Without the accessor (engagement generate-layers path) the same
+    // point matches nothing cad:*.
+    const withoutAccessor = filterApplicableAdapters({
+      ...ctx,
+      cadLookup: undefined,
+    })
+      .map((a) => a.adapterKey)
+      .filter((k) => k.startsWith("cad:"));
+    expect(withoutAccessor).toEqual([]);
+  });
+
   it("returns [] when the parcel has no geocode (NaN coordinates)", () => {
     const ctx: AdapterContext = {
       parcel: { latitude: NaN, longitude: NaN },

@@ -151,6 +151,20 @@ describe.skipIf(!hasDb)("fetchBrokerageSiteContext snapshots (integration)", () 
           payload: { inOpportunityZone: false, ozRound: "oz-1.0" },
         },
       },
+      // feat/cad-brief-adapters — the free tier now carries the three
+      // cad:* adapters. Deterministic no-coverage here (the mocked run
+      // is a Collin County point, outside the five supported counties)
+      // so the empty-archive snapshot suppresses a live re-run, same as
+      // cotality:zoning above.
+      ...["cad:property", "cad:tax", "cad:owner-occupancy"].map(
+        (adapterKey) => ({
+          adapterKey,
+          tier: "local",
+          layerKind: adapterKey.replace(":", "-"),
+          status: "no-coverage" as const,
+          error: { code: "no-coverage" as const, message: "outside counties" },
+        }),
+      ),
     ]);
 
     const { fetchBrokerageSiteContext } = await import(

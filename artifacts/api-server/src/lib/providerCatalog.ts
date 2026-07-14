@@ -64,6 +64,20 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     sourceKind: "local-adapter",
   },
   {
+    // County appraisal-district roll data (feat/cad-brief-adapters).
+    // The rows come from free CAD bulk exports ingested into the local
+    // `cad_property` store (PR #245) — free public record, zero marginal
+    // cost per read, never metered. Per-jurisdiction (per-CAD) data is
+    // exactly what the AdapterSourceKind doc scopes OUT of
+    // `national-aggregator`, so like `county-gis:` these are
+    // `local-adapter`.
+    prefix: "cad:",
+    label: "County Appraisal District (public record)",
+    metered: false,
+    freeBaselineKeys: new Set(),
+    sourceKind: "local-adapter",
+  },
+  {
     // Dormant since the 2026-06-17 Regrid purge. Listed so the dormant
     // keys keep their historical semantics — unmetered, tier-default
     // sourceKind — instead of picking up accidental new behavior.

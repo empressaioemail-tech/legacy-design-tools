@@ -42,6 +42,10 @@ const FREE_ADAPTER_KEYS = [
   "fema:nfhl-flood-zone",
   "cotality:parcels",
   "cotality:zoning",
+  // feat/cad-brief-adapters — free county appraisal-district slots.
+  "cad:property",
+  "cad:tax",
+  "cad:owner-occupancy",
   "national:opportunity-zone",
 ];
 
@@ -160,7 +164,10 @@ describe("fetchBrokerageSiteContext", () => {
     expect(runInput?.adapters?.map((a: { adapterKey: string }) => a.adapterKey)).toEqual(
       FREE_ADAPTER_KEYS,
     );
-    expect(ctx.layers).toHaveLength(4);
+    // The cad:* store accessor is service-injected into the adapter context.
+    expect(typeof runInput?.context?.cadLookup).toBe("function");
+    // 4 mocked outcomes + 3 cad adapters with no outcome from the mock.
+    expect(ctx.layers).toHaveLength(7);
     expect(ctx.parcelClip).toBe("1234567890");
 
     expect(
@@ -198,6 +205,31 @@ describe("fetchBrokerageSiteContext", () => {
         "fema:nfhl-flood-zone": { kind: "flood-zone", floodZone: "X" },
         "cotality:zoning": {},
         "national:opportunity-zone": { inOpportunityZone: false },
+        "cad:property": {
+          kind: "cad-property",
+          cadName: "Bastrop Central Appraisal District",
+          taxYear: 2026,
+          sourceVintage: "2026-preliminary",
+          marketValue: 100000,
+          valueBasis: "county-assessed",
+        },
+        "cad:tax": {
+          kind: "cad-tax",
+          cadName: "Bastrop Central Appraisal District",
+          taxYear: 2026,
+          sourceVintage: "2026-preliminary",
+          assessedValue: 100000,
+          exemptions: [{ code: "HS", label: "Homestead" }],
+        },
+        "cad:owner-occupancy": {
+          kind: "cad-owner-occupancy",
+          cadName: "Bastrop Central Appraisal District",
+          taxYear: 2026,
+          sourceVintage: "2026-preliminary",
+          signal: "likely-owner-occupied",
+          homesteadExemption: true,
+          mailingMatchesSitus: "same",
+        },
       };
       const payload = payloads[adapterKey];
       if (!payload) return null;
@@ -218,7 +250,133 @@ describe("fetchBrokerageSiteContext", () => {
     expect(runAdaptersMock).not.toHaveBeenCalled();
     expect(ctx.layers.every((l) => l.fromArchive)).toBe(true);
     expect(writePlaceLayerSnapshotMock).not.toHaveBeenCalled();
-    expect(ctx.layers).toHaveLength(4);
+    expect(ctx.layers).toHaveLength(7);
+  });
+
+  it("renders cad:* outcomes as brief layers with honest summaries and roll-vintage honesty (integration shape)", async () => {
+    runAdaptersMock.mockResolvedValue([
+      {
+        adapterKey: "cad:property",
+        tier: "local",
+        layerKind: "cad-property",
+        status: "ok",
+        result: {
+          adapterKey: "cad:property",
+          tier: "local",
+          layerKind: "cad-property",
+          sourceKind: "local-adapter",
+          provider: "Bastrop Central Appraisal District",
+          snapshotDate: "2026-07-13T00:00:00.000Z",
+          payload: {
+            kind: "cad-property",
+            cadName: "Bastrop Central Appraisal District",
+            countyFips: "48021",
+            countyName: "Bastrop",
+            propId: "88213",
+            taxYear: 2026,
+            sourceVintage: "2026-preliminary-supp0",
+            ownerName: "SAMPLE OWNER",
+            situsAddress: "251 COOL WATER DR",
+            situsCity: "BASTROP",
+            yearBuilt: 2004,
+            livingAreaSqft: 1850,
+            landAcres: 1.02,
+            propertyUseCode: "A1",
+            landValue: 90000,
+            improvementValue: 210000,
+            marketValue: 300000,
+            valueBasis: "county-assessed",
+          },
+        },
+      },
+      {
+        adapterKey: "cad:tax",
+        tier: "local",
+        layerKind: "cad-tax",
+        status: "ok",
+        result: {
+          adapterKey: "cad:tax",
+          tier: "local",
+          layerKind: "cad-tax",
+          sourceKind: "local-adapter",
+          provider: "Bastrop Central Appraisal District",
+          snapshotDate: "2026-07-13T00:00:00.000Z",
+          payload: {
+            kind: "cad-tax",
+            cadName: "Bastrop Central Appraisal District",
+            taxYear: 2026,
+            sourceVintage: "2026-preliminary-supp0",
+            assessedValue: 285000,
+            exemptionCodes: ["HS", "OV65"],
+            exemptions: [
+              { code: "HS", label: "Homestead" },
+              { code: "OV65", label: "Over-65" },
+            ],
+            valueBasis: "county-assessed",
+          },
+        },
+      },
+      {
+        adapterKey: "cad:owner-occupancy",
+        tier: "local",
+        layerKind: "cad-owner-occupancy",
+        status: "ok",
+        result: {
+          adapterKey: "cad:owner-occupancy",
+          tier: "local",
+          layerKind: "cad-owner-occupancy",
+          sourceKind: "local-adapter",
+          provider: "Bastrop Central Appraisal District",
+          snapshotDate: "2026-07-13T00:00:00.000Z",
+          payload: {
+            kind: "cad-owner-occupancy",
+            cadName: "Bastrop Central Appraisal District",
+            taxYear: 2026,
+            sourceVintage: "2026-preliminary-supp0",
+            signal: "likely-absentee",
+            basis: ["no-homestead-exemption", "mailing-differs-from-situs"],
+            homesteadExemption: false,
+            mailingMatchesSitus: "different",
+            method:
+              "derived from CAD homestead exemption + mailing/situs comparison",
+          },
+        },
+      },
+    ]);
+
+    const ctx = await fetchBrokerageSiteContext({
+      latitude: 30.11,
+      longitude: -97.32,
+      address: "251 Cool Water Dr, Bastrop, TX 78602",
+      jurisdictionCity: "Bastrop",
+      jurisdictionState: "TX",
+      packageTier: "free",
+    });
+
+    const property = ctx.layers.find((l) => l.layerKind === "cad-property");
+    expect(property?.status).toBe("ok");
+    expect(property?.provider).toBe("Bastrop Central Appraisal District");
+    // HONESTY: assessed labeling, never a market estimate / AVM.
+    expect(property?.summary).toContain("CAD market value (assessed): $300,000");
+    expect(property?.summary).not.toMatch(/AVM|market estimate/i);
+    // engineHonesty carries the CAD roll drop as the data vintage.
+    expect(property?.engineHonesty?.dataVintage).toBe("2026-preliminary-supp0");
+    expect(property?.readContract).toBeTruthy();
+
+    const tax = ctx.layers.find((l) => l.layerKind === "cad-tax");
+    expect(tax?.summary).toContain("CAD assessed value $285,000 (tax year 2026)");
+    expect(tax?.summary).toContain("Homestead (HS), Over-65 (OV65)");
+
+    const occ = ctx.layers.find((l) => l.layerKind === "cad-owner-occupancy");
+    expect(occ?.summary).toContain("Likely absentee owner");
+    expect(occ?.summary).toContain(
+      "derived from CAD homestead exemption + mailing/situs comparison",
+    );
+
+    // The layers flow into the LLM context block like every other slot.
+    const llm = formatSiteContextForLlm(ctx);
+    expect(llm).toContain("cad-property (Bastrop Central Appraisal District)");
+    expect(llm).toContain("Likely absentee owner");
   });
 });
 

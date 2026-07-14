@@ -2,7 +2,7 @@
  * Investor radar package tiers — Free / Pro / Max (75i, 08).
  */
 
-import { FEDERAL_ADAPTERS } from "@workspace/adapters/registry";
+import { ALL_ADAPTERS } from "@workspace/adapters/registry";
 import { isTceqEdwardsEnabled } from "@workspace/adapters/registry";
 import type { Adapter } from "@workspace/adapters/types";
 import { opportunityZoneAdapter } from "./opportunityZoneAdapter";
@@ -23,6 +23,15 @@ const FREE_KEYS = new Set([
   "fema:nfhl-flood-zone",
   "cotality:parcels",
   "cotality:zoning",
+  // feat/cad-brief-adapters — county appraisal-district slots. Free
+  // public record read from the local cad_property store (zero marginal
+  // cost, unmetered per the provider catalog), so every tier gets the
+  // honest owner/value/tax/occupancy baseline even while the paid
+  // Cotality property adapters are dark. Coverage self-gates to the
+  // five supported Central TX counties via appliesTo.
+  "cad:property",
+  "cad:tax",
+  "cad:owner-occupancy",
   "national:opportunity-zone",
 ]);
 
@@ -53,12 +62,21 @@ const MAX_EXTRA_KEYS = new Set([
   "tceq:edwards-aquifer",
 ]);
 
-function federalByKey(): Map<string, Adapter> {
-  return new Map(FEDERAL_ADAPTERS.map((a) => [a.adapterKey, a]));
+/**
+ * Key→adapter index over the FULL registry, not just the federal tier.
+ * Before feat/cad-brief-adapters this indexed FEDERAL_ADAPTERS only,
+ * which silently made every non-federal key in the tier sets dead —
+ * `tceq:edwards-aquifer` (MAX + PB-008 env gate) never actually reached
+ * the brief path because the state-tier adapter wasn't in the map.
+ * Indexing ALL_ADAPTERS is still allowlist-shaped: only keys named in
+ * the tier sets are picked.
+ */
+function adapterByKey(): Map<string, Adapter> {
+  return new Map(ALL_ADAPTERS.map((a) => [a.adapterKey, a]));
 }
 
 function pickKeys(keys: Set<string>): Adapter[] {
-  const map = federalByKey();
+  const map = adapterByKey();
   const out: Adapter[] = [];
   for (const key of keys) {
     const adapter = map.get(key);

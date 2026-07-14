@@ -82,6 +82,15 @@ describe("providerCatalog metering", () => {
     expect(entry?.metered).toBe(false);
   });
 
+  it("explicitly never meters cad keys (free public record from the local store)", () => {
+    for (const key of ["cad:property", "cad:tax", "cad:owner-occupancy"]) {
+      expect(isMeteredAdapterKey(key), key).toBe(false);
+    }
+    const entry = providerCatalogEntryForKey("cad:property");
+    expect(entry?.metered).toBe(false);
+    expect(entry?.label).toBe("County Appraisal District (public record)");
+  });
+
   it("keeps regrid dormant semantics (unmetered)", () => {
     for (const key of REGRID_KEYS) {
       expect(isMeteredAdapterKey(key)).toBe(false);
@@ -113,6 +122,12 @@ describe("providerCatalog sourceKind", () => {
     expect(providerSourceKindForKey("county-gis:parcels:48453")).toBe(
       "local-adapter",
     );
+  });
+
+  it("labels cad keys local-adapter (per-CAD public roll data)", () => {
+    for (const key of ["cad:property", "cad:tax", "cad:owner-occupancy"]) {
+      expect(providerSourceKindForKey(key), key).toBe("local-adapter");
+    }
   });
 
   it("returns undefined for regrid and unknown prefixes so call sites keep their tier default", () => {
