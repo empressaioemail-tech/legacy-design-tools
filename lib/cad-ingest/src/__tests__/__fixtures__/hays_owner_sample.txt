@@ -1,0 +1,5 @@
+"RecordType","PropertyID","QuickRefID","PropertyNumber","OwnerID","OwnerQuickRefID","OwnerPropertyNumber","OwnerName","Address1","Address2","Address3","City","State","Zip","OwnershipPercent","ConfidentialOwner","ExemptionList","HSCapAdj","CurrHSCapAdj","CBLCapAdj","CurrCBLCapAdj"
+"2","12350","R10041","10-0001-0037-00000-2","O0027513","R10041","10-0001-0037-00000-2","BARRENTINE MELVIN W & CECILIA D","3950 FM 967 ","","","BUDA","TX","78610-3339","100.000000","False","AG","0","0","0","0"
+"2","11924","R10001","10-0001-0002-00000-2","O0120808","R10001","10-0001-0002-00000-2","TF HARPER & ASSOCIATES LP","1685 S FM 1626 ","","","BUDA","TX","78610-9478","100.000000","False","CBL","0","0","565874","17815"
+"2","12300","R100362","11-8356-000A-00200-2","O0135448","R100362","11-8356-000A-00200-2","LOPEZ JASMINE & SALINAS JOSE A","3761 COTTON GIN RD ","","","UHLAND","TX","78640-2911","100.000000","False","HS","0","0","0","0"
+"2","12074","R10015","10-0001-0016-00001-2","O0143057","R10015","10-0001-0016-00001-2","3690 FM 967 LLC","16023 ARBOR TRL ","","","BUDA","TX","78610-9374","100.000000","False","","0","0","0","0"

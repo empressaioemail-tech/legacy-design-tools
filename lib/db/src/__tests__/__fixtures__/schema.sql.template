@@ -330,6 +330,33 @@ CREATE TABLE @@SCHEMA@@.brokerage_workspaces (
 );
 
 
+-- Name: cad_property; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cad_property (
+    county_fips text NOT NULL,
+    prop_id text NOT NULL,
+    tax_year integer NOT NULL,
+    owner_name text,
+    owner_mailing_address text,
+    situs_address text,
+    situs_city text,
+    situs_zip text,
+    legal_description text,
+    exemption_codes text[],
+    land_value bigint,
+    improvement_value bigint,
+    market_value bigint,
+    assessed_value bigint,
+    year_built integer,
+    living_area_sqft integer,
+    land_acres numeric(14,4),
+    property_use_code text,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: canned_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.canned_findings (
@@ -1597,6 +1624,12 @@ ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_shares
 
 ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspaces
     ADD CONSTRAINT brokerage_workspaces_pkey PRIMARY KEY (id);
+
+
+-- Name: cad_property cad_property_county_fips_prop_id_tax_year_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property
+    ADD CONSTRAINT cad_property_county_fips_prop_id_tax_year_pk PRIMARY KEY (county_fips, prop_id, tax_year);
 
 
 -- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -

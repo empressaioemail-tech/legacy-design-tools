@@ -74,6 +74,9 @@
     },
     {
       "path": "./lib/atoms-l-surface"
+    },
+    {
+      "path": "./lib/cad-ingest"
     }
   ]
 }
