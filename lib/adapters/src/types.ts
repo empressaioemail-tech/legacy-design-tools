@@ -97,6 +97,55 @@ export type AdapterLocalKey =
   | "bastrop-tx";
 
 /**
+ * One `cad_property` row as the `cad:*` adapters read it — a structural
+ * mirror of `@workspace/db`'s `CadPropertyRow` (feat/cad-property-store,
+ * PR #245) narrowed to the fields the Property Brief slots consume.
+ * Defined here rather than imported so this package keeps its "no
+ * `@workspace/db` import" boundary; the drizzle row is structurally
+ * assignable.
+ *
+ * All value fields are whole dollars. `landAcres` is the numeric(14,4)
+ * column's decimal string. `exemptionCodes` is null when the export had
+ * no exemption data for the row, `[]`/populated when it did.
+ */
+export interface CadPropertyLookupRow {
+  countyFips: string;
+  propId: string;
+  taxYear: number;
+  ownerName: string | null;
+  ownerMailingAddress: string | null;
+  situsAddress: string | null;
+  situsCity: string | null;
+  situsZip: string | null;
+  legalDescription: string | null;
+  exemptionCodes: string[] | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  marketValue: number | null;
+  assessedValue: number | null;
+  yearBuilt: number | null;
+  livingAreaSqft: number | null;
+  landAcres: string | null;
+  propertyUseCode: string | null;
+  /** Export drop label, e.g. `2026-preliminary-supp0`. */
+  sourceVintage: string;
+}
+
+/**
+ * Injected accessor the `cad:*` adapters use to read the `cad_property`
+ * store. Adapters in this package are HTTP-fetch-shaped and must not
+ * import `@workspace/db`; the api-server injects a drizzle-backed
+ * implementation (latest `tax_year` for the `(countyFips, propId)` pair)
+ * when it builds the brief site-context `AdapterContext`. Paths that do
+ * not inject it (the engagement generate-layers route) simply never
+ * match the `cad:*` adapters' `appliesTo`.
+ */
+export type CadPropertyLookup = (
+  countyFips: string,
+  propId: string,
+) => Promise<CadPropertyLookupRow | null>;
+
+/**
  * Runtime context passed to every adapter. `fetchImpl` is dependency-
  * injected so unit tests can hand-stub the network without touching the
  * upstream services. `signal` is forwarded into `fetch` so the runner
@@ -112,6 +161,13 @@ export interface AdapterContext {
   subjectId?: string | null;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  /**
+   * County appraisal-district store accessor for the `cad:*` adapters.
+   * Optional service injection — see {@link CadPropertyLookup}. Absent
+   * on paths that cannot (or should not) reach the `cad_property`
+   * table; the `cad:*` adapters gate themselves off when it is absent.
+   */
+  cadLookup?: CadPropertyLookup;
   /**
    * Per-adapter network timeout (ms). Defaults to 15s in the runner —
    * adapters typically respond in <1s, so a hard cap here protects the

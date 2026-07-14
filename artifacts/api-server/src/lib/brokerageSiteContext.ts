@@ -19,6 +19,7 @@ import {
 } from "@workspace/adapters";
 import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
+import { summarizeCadPayload } from "@workspace/adapters/local/cad";
 import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import type { EngineHonesty } from "@workspace/engine-core";
 import {
@@ -39,6 +40,7 @@ import {
   type InvestorPackageTier,
 } from "./brokerageTierGate";
 import { providerSourceKindForKey } from "./providerCatalog";
+import { makeCadPropertyLookup } from "./cadPropertyLookup";
 
 /** Wall-clock budget for one brief site-context fetch (all adapters). */
 export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 45_000;
@@ -93,12 +95,17 @@ function layerHonestyFromPayload(
   adapterKey: string,
 ): EngineHonesty | null {
   if (!payload) return null;
+  // `sourceVintage` first — the cad:* adapters carry the CAD roll export
+  // drop label (e.g. "2026-preliminary-supp0") there, which is the honest
+  // data vintage; fetch time would overstate freshness.
   const vintage =
-    typeof payload.snapshotDate === "string"
-      ? payload.snapshotDate
-      : typeof payload.retrievedAt === "string"
-        ? payload.retrievedAt
-        : null;
+    typeof payload.sourceVintage === "string"
+      ? payload.sourceVintage
+      : typeof payload.snapshotDate === "string"
+        ? payload.snapshotDate
+        : typeof payload.retrievedAt === "string"
+          ? payload.retrievedAt
+          : null;
   return {
     confidence: { value: 0.72, kind: "asserted" },
     dataVintage: vintage,
@@ -193,6 +200,7 @@ function layerSummary(
   return (
     summarizeFederalPayload(layerKind, payload) ??
     summarizeStatePayload(layerKind, payload) ??
+    summarizeCadPayload(layerKind, payload) ??
     summarizeCotalityPayload(layerKind, payload)
   );
 }
@@ -438,6 +446,10 @@ export async function fetchBrokerageSiteContext(
           },
           jurisdiction: { ...jurisdiction, partnerCity },
           signal: budgetAc.signal,
+          // Service injection for the cad:* adapters (they must not
+          // import @workspace/db themselves). Latest-tax-year read from
+          // the cad_property store.
+          cadLookup: makeCadPropertyLookup(),
         },
         cache,
       });

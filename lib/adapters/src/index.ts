@@ -10,6 +10,8 @@
 export {
   type Adapter,
   type AdapterContext,
+  type CadPropertyLookup,
+  type CadPropertyLookupRow,
   type AdapterError,
   type AdapterJurisdiction,
   type AdapterLocalKey,
