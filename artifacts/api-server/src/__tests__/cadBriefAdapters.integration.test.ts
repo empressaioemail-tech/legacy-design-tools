@@ -82,7 +82,7 @@ describe.skipIf(!hasDb)("cad:* adapters over a real cad_property store", () => {
 
       // County GIS point lookup stubbed (exit-bounded test, no live
       // network); everything after the propId resolution is real.
-      const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const fetchImpl = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url = String(input);
         if (url.includes("Caldwell_CAD_Parcel_Map")) {
           return new Response(
