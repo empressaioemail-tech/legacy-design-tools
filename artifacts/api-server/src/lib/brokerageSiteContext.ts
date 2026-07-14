@@ -34,10 +34,11 @@ import {
 import {
   adaptersForInvestorTier,
   depthMeterAllowance,
-  isMeteredCotalityAdapter,
+  isMeteredAdapter,
   resolveInvestorPackageTier,
   type InvestorPackageTier,
 } from "./brokerageTierGate";
+import { providerSourceKindForKey } from "./providerCatalog";
 
 /** Wall-clock budget for one brief site-context fetch (all adapters). */
 export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 45_000;
@@ -197,7 +198,10 @@ function layerSummary(
 }
 
 function adapterSourceKind(adapter: Adapter): AdapterResult["sourceKind"] {
-  if (adapter.adapterKey.startsWith("cotality:")) return "national-aggregator";
+  // Provider-catalog override first (cotality: → national-aggregator,
+  // county-gis: → local-adapter); tier default below is unchanged.
+  const catalogKind = providerSourceKindForKey(adapter.adapterKey);
+  if (catalogKind) return catalogKind;
   if (adapter.adapterKey.startsWith("national:")) return "federal-adapter";
   if (adapter.tier === "state") return "state-adapter";
   return "federal-adapter";
@@ -336,7 +340,7 @@ function applyDepthMeter(
   if (depthMeterRemaining == null) return adapters;
   let budget = depthMeterRemaining;
   return adapters.filter((a) => {
-    if (!isMeteredCotalityAdapter(a.adapterKey)) return true;
+    if (!isMeteredAdapter(a.adapterKey)) return true;
     if (budget <= 0) return false;
     budget -= 1;
     return true;
@@ -411,7 +415,7 @@ export async function fetchBrokerageSiteContext(
 
   let liveOutcomes: AdapterRunOutcome[] = [];
   const adaptersToFetchLive = input.snapshotsOnly
-    ? missingAdapters.filter((a) => !isMeteredCotalityAdapter(a.adapterKey))
+    ? missingAdapters.filter((a) => !isMeteredAdapter(a.adapterKey))
     : missingAdapters;
 
   if (adaptersToFetchLive.length > 0) {
@@ -472,7 +476,7 @@ export async function fetchBrokerageSiteContext(
     if (archivedOutcome) return archivedOutcome;
     return (
       liveOutcomes.find((o) => o.adapterKey === a.adapterKey) ??
-      (input.snapshotsOnly && isMeteredCotalityAdapter(a.adapterKey)
+      (input.snapshotsOnly && isMeteredAdapter(a.adapterKey)
         ? {
             adapterKey: a.adapterKey,
             tier: a.tier,

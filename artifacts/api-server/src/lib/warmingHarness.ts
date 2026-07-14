@@ -12,7 +12,7 @@ import { FEDERAL_ADAPTERS } from "@workspace/adapters/registry";
 import { geocodeAddress } from "@workspace/site-context/server";
 import { keyFromEngagement } from "@workspace/codes";
 import { fetchBrokerageSiteContext } from "./brokerageSiteContext";
-import { isMeteredCotalityAdapter } from "./brokerageTierGate";
+import { isMeteredAdapter } from "./brokerageTierGate";
 
 /** Cotality adapter keys that MUST be snapshot-backed during warming. */
 export const WARMING_COTALITY_ADAPTER_KEYS = [
@@ -205,7 +205,7 @@ export async function runWarmingCascade(
 
   for (const layer of siteContext.layers) {
     if (
-      isMeteredCotalityAdapter(layer.adapterKey) &&
+      isMeteredAdapter(layer.adapterKey) &&
       !layer.fromArchive &&
       layer.status === "ok"
     ) {

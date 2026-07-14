@@ -6,6 +6,7 @@ import { FEDERAL_ADAPTERS } from "@workspace/adapters/registry";
 import { isTceqEdwardsEnabled } from "@workspace/adapters/registry";
 import type { Adapter } from "@workspace/adapters/types";
 import { opportunityZoneAdapter } from "./opportunityZoneAdapter";
+import { isMeteredAdapterKey } from "./providerCatalog";
 
 export type InvestorPackageTier = "free" | "pro" | "max";
 
@@ -97,16 +98,18 @@ export function adaptersForInvestorTier(
   return [...pickKeys(maxKeys), opportunityZoneAdapter];
 }
 
-/** Cotality-backed adapters that count against the depth meter (COGS guard). */
-const FREE_COTALITY_BASELINE_KEYS = new Set([
-  "cotality:parcels",
-  "cotality:zoning",
-]);
-
-export function isMeteredCotalityAdapter(adapterKey: string): boolean {
-  if (!adapterKey.startsWith("cotality:")) return false;
-  return !FREE_COTALITY_BASELINE_KEYS.has(adapterKey);
+/**
+ * Adapters that count against the depth meter (COGS guard). Metering
+ * posture per provider prefix lives in the provider catalog: `cotality:`
+ * is metered minus its free-baseline keys (parcels/zoning); `county-gis:`
+ * is free public record, never metered; unknown prefixes are unmetered.
+ */
+export function isMeteredAdapter(adapterKey: string): boolean {
+  return isMeteredAdapterKey(adapterKey);
 }
+
+/** @deprecated Use {@link isMeteredAdapter} — metering is provider-neutral now. */
+export const isMeteredCotalityAdapter = isMeteredAdapter;
 
 export function depthMeterAllowance(tier: InvestorPackageTier): number {
   return INVESTOR_DEPTH_METER_DEFAULTS[tier].maxPaidAdapterCalls;
