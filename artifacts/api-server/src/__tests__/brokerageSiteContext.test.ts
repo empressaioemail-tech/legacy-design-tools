@@ -46,6 +46,8 @@ const FREE_ADAPTER_KEYS = [
   "cad:property",
   "cad:tax",
   "cad:owner-occupancy",
+  // feat/permits-brief-slot — owned Austin/SA issued-permit corpus.
+  "permits:record",
   "national:opportunity-zone",
 ];
 
@@ -166,8 +168,9 @@ describe("fetchBrokerageSiteContext", () => {
     );
     // The cad:* store accessor is service-injected into the adapter context.
     expect(typeof runInput?.context?.cadLookup).toBe("function");
-    // 4 mocked outcomes + 3 cad adapters with no outcome from the mock.
-    expect(ctx.layers).toHaveLength(7);
+    // 4 mocked outcomes + 4 store-backed adapters (3 cad + permits)
+    // with no outcome from the mock.
+    expect(ctx.layers).toHaveLength(8);
     expect(ctx.parcelClip).toBe("1234567890");
 
     expect(
@@ -230,6 +233,9 @@ describe("fetchBrokerageSiteContext", () => {
           homesteadExemption: true,
           mailingMatchesSitus: "same",
         },
+        // feat/permits-brief-slot — archived no-coverage snapshot
+        // (Bastrop is outside the covered Austin/SA permit metros).
+        "permits:record": {},
       };
       const payload = payloads[adapterKey];
       if (!payload) return null;
@@ -250,7 +256,7 @@ describe("fetchBrokerageSiteContext", () => {
     expect(runAdaptersMock).not.toHaveBeenCalled();
     expect(ctx.layers.every((l) => l.fromArchive)).toBe(true);
     expect(writePlaceLayerSnapshotMock).not.toHaveBeenCalled();
-    expect(ctx.layers).toHaveLength(7);
+    expect(ctx.layers).toHaveLength(8);
   });
 
   it("renders cad:* outcomes as brief layers with honest summaries and roll-vintage honesty (integration shape)", async () => {

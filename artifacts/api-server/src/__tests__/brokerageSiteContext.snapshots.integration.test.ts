@@ -165,6 +165,17 @@ describe.skipIf(!hasDb)("fetchBrokerageSiteContext snapshots (integration)", () 
           error: { code: "no-coverage" as const, message: "outside counties" },
         }),
       ),
+      // feat/permits-brief-slot — the free tier also carries
+      // permits:record. Deterministic no-coverage here (Collin County
+      // point, outside the covered Austin/SA metros), same empty-archive
+      // suppression as the cad:* trio above.
+      {
+        adapterKey: "permits:record",
+        tier: "local",
+        layerKind: "permits-history",
+        status: "no-coverage" as const,
+        error: { code: "no-coverage" as const, message: "outside covered metros" },
+      },
     ]);
 
     const { fetchBrokerageSiteContext } = await import(
