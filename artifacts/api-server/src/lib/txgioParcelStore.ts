@@ -28,19 +28,26 @@
  *
  * Land-use coloring: TxGIO parcel features carry NO land-use code (the
  * StratMap parcel program ships geometry + owner/situs only), so the
- * extension's choropheth renders neutral on the Hays/Comal layer while
+ * extension's choropleth renders neutral on the Hays/Comal layer while
  * live county-GIS counties (which return USECD/PropUse) color. To close
  * that gap, `queryTxgioParcelsGeoJson` batch-joins each returned tile's
  * parcel ids to the `cad_property` roll (PR #245) on the SAME key the
  * `cad:*` brief adapters use — `(county_fips, normalizeCadPropId(prop_id))`
  * — and merges the CAD `property_use_code` onto the feature as
- * `landUseCode`, matching the shape the live county providers emit
- * (Bexar/Travis code-only, no description). One query per tile, not per
- * feature. Land-use comes from a DIFFERENT source than geometry (the
- * appraisal roll, not the parcel program), so an enriched feature also
- * carries `landUseSource: "cad-roll"` + the CAD `sourceVintage` as
- * provenance. A county with no CAD roll loaded (Comal today) gets zero
- * join hits and stays honestly neutral — never a fabricated code.
+ * `landUseCode` plus a mapped `landUseDescription`, the same pair the
+ * Williamson county provider emits. The description is NOT cosmetic:
+ * the extension's paint expression (`gis-map-paint.js`) exact-matches
+ * only zoning-style codes (P-5/SFR/MF/COM/AG...) and otherwise buckets
+ * by KEYWORD in `landUseDescription` ("single"/"multi"/"commercial"/
+ * "agric"/...), so a PTAD code like `A1` colors only through its
+ * description — see `ptadLandUseDescription` for the mapping, derived
+ * from the live cad_property code distribution. One query per tile,
+ * not per feature. Land-use comes from a DIFFERENT source than
+ * geometry (the appraisal roll, not the parcel program), so an
+ * enriched feature also carries `landUseSource: "cad-roll"` + the CAD
+ * `sourceVintage` as provenance. A county with no CAD roll loaded
+ * (Comal today) gets zero join hits and stays honestly neutral —
+ * never a fabricated code or description.
  *
  * TxGIO land parcels are informational, not survey grade (the
  * program's own disclaimer) — every feature carries
@@ -167,6 +174,81 @@ export function makeTxgioParcelPointLookup(
 }
 
 /**
+ * PTAD state-classification code -> human land-use description for the
+ * map choropleth.
+ *
+ * `cad_property.property_use_code` values are Texas comptroller (PTAD)
+ * state classification codes, sometimes CAD-extended with a digit
+ * suffix. Mapping derived from the ACTUAL code distribution in the
+ * deployment `cad_property` store (queried 2026-07-15; 557,388 coded
+ * rows — Travis 453,710 / Bastrop 71,954 / Caldwell 31,724; Hays and
+ * Williamson rows carry NULL codes today, see module header):
+ *
+ *   A1 321,512 / A4 54,681 / A2 16,366 / A3 3,395 ...  class A —
+ *     single-family residential (incl. mobile-home/condo variants)
+ *   B2 10,326 / B1 2,223 / B4 1,123, BB..BF locals      class B —
+ *     multifamily residential (duplex, apartment)
+ *   C1 39,805 / C3 7,646 / C 1,064                      class C —
+ *     vacant lots and tracts
+ *   D1 9,535 / D2 1,689 / D4 1,087 / D3 235             class D —
+ *     qualified open-space / ag land (D2 = improvements on ag land)
+ *   E1 13,389 / E2 4,881 / E3 3,846 / E 2,055 / E4 60   class E —
+ *     rural land + farm/ranch improvements (E1 = farm/ranch house)
+ *   F1 14,921 / F4 2,892 / F5 1,287 / F3 829 / F2 148   class F —
+ *     commercial (F2 = industrial)
+ *   J1..J6 (~82)                                        utilities
+ *   M1 14,143 / M3 8,500                                mobile homes
+ *   O1 13,135 / O 2,400                                 residential
+ *     inventory (builder lots)
+ *   S1 1                                                special inv.
+ *   XV 1,744 / EX 277 / EX1..EX9 / XA XG XJ XR XU / X   exempt
+ *
+ * Descriptions are worded so the client choropleth's keyword matching
+ * lands each class in the right color bucket (`gis-map-paint.js`
+ * matches "single"/"multi"/"apartment"/"commercial"/"industrial"/
+ * "agric"/"farm"/"residential"/... inside `landUseDescription`).
+ * Unknown codes get NO description — the raw code still serves, but a
+ * category is never guessed.
+ */
+export function ptadLandUseDescription(rawCode: string): string | null {
+  const code = rawCode.trim().toUpperCase();
+  if (!code) return null;
+  if (code.startsWith("EX") || code.startsWith("X")) {
+    return "Exempt property";
+  }
+  switch (code[0]) {
+    case "A":
+      return "Single-family residential";
+    case "B":
+      return "Multifamily residential";
+    case "C":
+      return "Vacant lot or tract";
+    case "D":
+      return code.startsWith("D2")
+        ? "Improvements on agricultural land"
+        : "Agricultural / qualified open-space land";
+    case "E":
+      return code.startsWith("E1")
+        ? "Rural single-family residential (farm/ranch improvement)"
+        : "Rural farm or ranch land";
+    case "F":
+      return code.startsWith("F2")
+        ? "Industrial real property"
+        : "Commercial real property";
+    case "J":
+      return "Utility";
+    case "M":
+      return "Mobile home (residential)";
+    case "O":
+      return "Residential inventory (builder lots)";
+    case "S":
+      return "Special inventory";
+    default:
+      return null;
+  }
+}
+
+/**
  * Land-use attributes joined out of the CAD roll for one tile's parcels,
  * keyed by the CAD-normalized prop id (leading zeros stripped). Only the
  * cheap attrs the extension colors on are carried.
@@ -264,6 +346,13 @@ function toFeature(
     const hit = landUse.get(normalizeCadPropId(row.propId));
     if (hit) {
       properties.landUseCode = hit.landUseCode;
+      // The paint expression buckets PTAD codes by keyword in the
+      // description — without it the feature stays neutral (see the
+      // ptadLandUseDescription doc). Unknown codes stay code-only.
+      const landUseDescription = ptadLandUseDescription(hit.landUseCode);
+      if (landUseDescription) {
+        properties.landUseDescription = landUseDescription;
+      }
       properties.landUseSource = hit.landUseSource;
       properties.landUseVintage = hit.landUseVintage;
     }
