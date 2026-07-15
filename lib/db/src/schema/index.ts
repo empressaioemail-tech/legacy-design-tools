@@ -72,3 +72,4 @@ export * from "./savedWorkspaceSpaces";
 export * from "./dataroomDocumentAtoms";
 export * from "./cadProperty";
 export * from "./txgioParcel";
+export * from "./buildingPermits";

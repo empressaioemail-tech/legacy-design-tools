@@ -104,6 +104,11 @@ describe("lib/db schema integration", () => {
         "brokerage_workspace_attachments",
         "brokerage_workspace_shares",
         "brokerage_workspaces",
+        // feat/building-permit-store — provider-neutral municipal
+        // building-permit store keyed (county_fips, prop_id, permit_id);
+        // loaded by the @workspace/permit-ingest batch CLI from free
+        // open-data permit exports (Austin 48453, San Antonio 48029).
+        "building_permits",
         // feat/cad-property-store — provider-neutral county appraisal
         // district (CAD) property-attribute store keyed
         // (county_fips, prop_id, tax_year); loaded by the

@@ -222,6 +222,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // it, it's in this list" invariant so store-backed route suites
   // start from a known-empty state.
   "txgio_parcel",
+  // feat/building-permit-store — provider-neutral municipal building
+  // permit store (Austin 48453 / San Antonio 48029). No FK to anything
+  // (loaded by the @workspace/permit-ingest batch CLI, read by a future
+  // Property Brief permits:* slot adapter), so the engagements truncate
+  // does not clear it. Listed per the "if a route writes to it, it's in
+  // this list" invariant so future adapter-route suites start empty.
+  "building_permits",
 ];
 
 /**

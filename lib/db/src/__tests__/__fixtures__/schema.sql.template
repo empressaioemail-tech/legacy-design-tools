@@ -330,6 +330,24 @@ CREATE TABLE @@SCHEMA@@.brokerage_workspaces (
 );
 
 
+-- Name: building_permits; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.building_permits (
+    county_fips text NOT NULL,
+    prop_id text NOT NULL,
+    permit_id text NOT NULL,
+    issued_date date,
+    applied_date date,
+    work_class text,
+    status text,
+    description text,
+    permit_type text,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: cad_property; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.cad_property (
@@ -1648,6 +1666,12 @@ ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_shares
 
 ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspaces
     ADD CONSTRAINT brokerage_workspaces_pkey PRIMARY KEY (id);
+
+
+-- Name: building_permits building_permits_county_fips_prop_id_permit_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.building_permits
+    ADD CONSTRAINT building_permits_county_fips_prop_id_permit_id_pk PRIMARY KEY (county_fips, prop_id, permit_id);
 
 
 -- Name: cad_property cad_property_county_fips_prop_id_tax_year_pk; Type: CONSTRAINT; Schema: public; Owner: -

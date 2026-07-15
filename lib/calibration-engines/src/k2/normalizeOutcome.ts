@@ -6,6 +6,10 @@ import {
   classifySanAntonioPermitDomain,
   scopeFromPermitDomain,
 } from "./permitPartition.js";
+import {
+  extractAustinPermitFields,
+  extractSanAntonioPermitFields,
+} from "./permitColumns.js";
 
 /** Normalized outcome record — K1_OUTCOME_LANDING_SCHEMA pass. */
 export type NormalizedOutcomeRecord = {
@@ -81,29 +85,26 @@ export function normalizeAustinPermitRow(
   row: Record<string, string>,
   edition: ResolvedEdition | null,
 ): NormalizedOutcomeRecord | null {
-  const issued = parseFlexibleDate(row["Issued Date"] ?? row["issued_date"]);
-  const applied = parseFlexibleDate(row["Applied Date"] ?? row["applied_date"]);
+  const fields = extractAustinPermitFields(row);
+  const issued = parseFlexibleDate(fields.issuedDateRaw);
+  const applied = parseFlexibleDate(fields.appliedDateRaw);
   const caseDate = issued ?? applied;
   if (!caseDate) return null;
 
-  const permitNum = (row["Permit Num"] ?? row["permit_number"] ?? "").trim();
-  if (!permitNum) return null;
+  if (!fields.permitId) return null;
 
   const domain = classifyAustinPermitDomain(row);
-  const { label } = mapPermitOutcomeDetailed(
-    row["Status Current"] ?? row["status"] ?? "",
-    row["Work Class"] ?? "",
-  );
+  const { label } = mapPermitOutcomeDetailed(fields.status, fields.workClass);
 
   return {
     outcomeId: randomUUID(),
-    subjectKey: `austin_tx:permit:${permitNum}`,
+    subjectKey: `austin_tx:permit:${fields.permitId}`,
     caseDate,
     outcomeLabel: label,
     outcomeKind: "permit",
     editionInEffect: edition,
     jurisdictionTenant: "austin_tx",
-    parcelKey: row["TCAD ID"]?.trim() || null,
+    parcelKey: fields.parcelKey || null,
     rawSource: row,
     scope: scopeFromPermitDomain(domain),
     provisionDomain: domain,
@@ -143,28 +144,24 @@ export function normalizeSanAntonioPermitRow(
   row: Record<string, string>,
   edition: ResolvedEdition | null,
 ): NormalizedOutcomeRecord | null {
-  const issued =
-    parseFlexibleDate(row["ISSUEDATE"] ?? row["Issue Date"] ?? row["issue_date"]) ??
-    parseFlexibleDate(row["PERMIT_DATE"]);
+  const fields = extractSanAntonioPermitFields(row);
+  const issued = parseFlexibleDate(fields.issuedDateRaw);
   if (!issued) return null;
 
-  const permitId = (
-    row["PERMIT"] ?? row["Permit Number"] ?? row["PERMIT_NUMBER"] ?? ""
-  ).trim();
-  if (!permitId) return null;
+  if (!fields.permitId) return null;
 
-  const status = (row["STATUS"] ?? row["Status"] ?? "issued").trim();
+  const status = fields.status || "issued";
   const domain = classifySanAntonioPermitDomain(row);
 
   return {
     outcomeId: randomUUID(),
-    subjectKey: `san_antonio_tx:permit:${permitId}`,
+    subjectKey: `san_antonio_tx:permit:${fields.permitId}`,
     caseDate: issued,
-    outcomeLabel: mapPermitOutcome(status, row["WORK_TYPE"] ?? ""),
+    outcomeLabel: mapPermitOutcome(status, fields.workClass),
     outcomeKind: "permit",
     editionInEffect: edition,
     jurisdictionTenant: "san_antonio_tx",
-    parcelKey: row["PARCEL"]?.trim() || null,
+    parcelKey: fields.parcelKey || null,
     rawSource: row,
     scope: scopeFromPermitDomain(domain),
     provisionDomain: domain,
