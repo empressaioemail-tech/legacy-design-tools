@@ -32,6 +32,13 @@ const FREE_KEYS = new Set([
   "cad:property",
   "cad:tax",
   "cad:owner-occupancy",
+  // feat/permits-brief-slot — the rehab-reality slot from the OWNED
+  // Austin/SA issued-permit corpus (`permit_record` store). Free public
+  // record read locally (zero marginal cost, unmetered per the provider
+  // catalog); coverage self-gates to the two covered metros via
+  // appliesTo, everywhere else honestly no-coverage. Replaces the
+  // dormant `cotality:permits` (still listed at Pro) on the brief path.
+  "permits:record",
   "national:opportunity-zone",
 ]);
 

@@ -1497,6 +1497,9 @@ importers:
 
   lib/cad-ingest:
     dependencies:
+      '@workspace/adapters':
+        specifier: workspace:*
+        version: link:../adapters
       '@workspace/db':
         specifier: workspace:*
         version: link:../db

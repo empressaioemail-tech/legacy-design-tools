@@ -210,6 +210,61 @@ describe("filterApplicableAdapters", () => {
     expect(withoutAccessor).toEqual([]);
   });
 
+  it("adds permits:record only for a covered metro point WITH the accessor AND a matchable address (brief path)", () => {
+    // feat/permits-brief-slot — triple gate: point inside a covered
+    // metro (Austin / San Antonio), injected `ctx.permitLookup`, and a
+    // subject address that yields a street-line match key. The other
+    // contexts in this file carry no permitLookup, which is why the key
+    // appears in none of the expectations above.
+    const ctx: AdapterContext = {
+      parcel: {
+        latitude: 30.2672,
+        longitude: -97.7431, // Austin
+        address: "12800 Pearce Ln, Austin, TX 78617",
+        state: "TX",
+      },
+      jurisdiction: { stateKey: "texas", localKey: null },
+      permitLookup: async () => ({
+        rows: [],
+        totalMatched: 0,
+        earliestIssued: null,
+        latestIssued: null,
+      }),
+    };
+    const withAccessor = filterApplicableAdapters(ctx)
+      .map((a) => a.adapterKey)
+      .filter((k) => k.startsWith("permits:"));
+    expect(withAccessor).toEqual(["permits:record"]);
+
+    // Without the accessor (engagement generate-layers path): inert.
+    expect(
+      filterApplicableAdapters({ ...ctx, permitLookup: undefined })
+        .map((a) => a.adapterKey)
+        .filter((k) => k.startsWith("permits:")),
+    ).toEqual([]);
+
+    // Bastrop is Central TX but NOT a covered permit metro — honest
+    // non-eligibility, no websearch fallback at this layer.
+    expect(
+      filterApplicableAdapters({
+        ...ctx,
+        parcel: { ...ctx.parcel, latitude: 30.104, longitude: -97.31 },
+      })
+        .map((a) => a.adapterKey)
+        .filter((k) => k.startsWith("permits:")),
+    ).toEqual([]);
+
+    // No usable street key (address-based match) → inert.
+    expect(
+      filterApplicableAdapters({
+        ...ctx,
+        parcel: { ...ctx.parcel, address: null },
+      })
+        .map((a) => a.adapterKey)
+        .filter((k) => k.startsWith("permits:")),
+    ).toEqual([]);
+  });
+
   it("gates the cad:* adapters in a TxGIO-store county (Hays) on the injected geometry lookup", () => {
     // feat/txgio-parcel-geometry — Hays/Comal have no live county GIS;
     // point->parcel resolution needs the injected store lookup, so the
