@@ -6,6 +6,7 @@ export type {
   SavedSpacesApi,
   SpaceSnapshot,
   AdminFunctionStatus,
+  InitialSpaceSeed,
 } from './CortexShell'
 
 export { GridCanvas } from './components/GridCanvas'

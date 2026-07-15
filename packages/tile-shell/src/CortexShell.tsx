@@ -63,6 +63,20 @@ export type SavedSpacesApi = {
 /** A live-status wire entry as returned by the admin-functions endpoint. */
 export type AdminFunctionStatus = { id: string; status: string };
 
+/**
+ * A space seed applied ONCE on first mount instead of the default preset. The
+ * app supplies this when it resolves a deep-link (`?share=<token>` /
+ * `?space=<name>`) before render: the shell opens directly on the shared/named
+ * space (tiles + layout) with its pinned parcel context adopted, rather than the
+ * hardcoded initial preset. When absent, mount is unchanged (default preset).
+ */
+export type InitialSpaceSeed = {
+  /** The persisted snapshot to open the workspace on. */
+  snapshot: SpaceSnapshot;
+  /** Optional label (space name) for the active-preset id / undo copy. */
+  label?: string;
+};
+
 export type CortexShellProps = {
   initialPresetId?: string;
   getTile: (id: string) => TileDef | undefined;
@@ -71,6 +85,13 @@ export type CortexShellProps = {
   presets: PresetSpace[];
   fetchAdminFunctions: () => Promise<AdminFunctionStatus[]>;
   savedSpaces: SavedSpacesApi;
+  /**
+   * Optional deep-link seed. When present, the shell opens on this space's
+   * snapshot (tiles/layout/tracks) and adopts its pinned parcel context, instead
+   * of the default preset. Resolved by the app from a `?share=`/`?space=` URL
+   * param before render.
+   */
+  initialSpaceSeed?: InitialSpaceSeed | null;
   onExportEngagement?: (engagementId: string) => Promise<void> | void;
   /** Geocode a free-text address query into a parcel (header search). */
   onAddressSearch?: (query: string) => Promise<ActiveParcel | null>;
@@ -81,11 +102,15 @@ export type CortexShellProps = {
 
 type CortexShellInnerProps = Omit<
   CortexShellProps,
-  "initialPresetId" | "presets"
+  "initialPresetId" | "presets" | "initialSpaceSeed"
 > & {
   initialPresetId: string;
   initialTiles: string[];
   initialLayoutId: string;
+  /** Optional seed tracks/mode carried by a deep-link space (over preset defaults). */
+  initialColFr?: number[];
+  initialRowFr?: number[];
+  initialLayoutMode?: "grid" | "list";
   presets: PresetSpace[];
 };
 
@@ -93,6 +118,9 @@ function CortexShellInner({
   initialPresetId,
   initialTiles,
   initialLayoutId,
+  initialColFr,
+  initialRowFr,
+  initialLayoutMode,
   getTile,
   allTiles,
   categories,
@@ -142,7 +170,9 @@ function CortexShellInner({
 
   // Phase 2/3/5 state.
   const [editing, setEditing] = useState(false);
-  const [layoutMode, setLayoutMode] = useState<"grid" | "list">("grid");
+  const [layoutMode, setLayoutMode] = useState<"grid" | "list">(
+    initialLayoutMode ?? "grid",
+  );
   const [floats, setFloats] = useState<FloatingTile[]>([]);
   const [moduleMapOpen, setModuleMapOpen] = useState(false);
   const zCounter = useRef(0);
@@ -154,11 +184,17 @@ function CortexShellInner({
   // preset's (possibly non-count-derived) layout instead of reflowing it.
   const lastGridSigRef = useRef(initialTiles.join("|"));
 
+  // A deep-link seed carries explicit fractional tracks; honor them over the
+  // count-derived even split so the shared space opens at its saved proportions.
   const [colFr, setColFr] = useState(() =>
-    Array(parseLayoutCols(initialLayoutId)).fill(1),
+    initialColFr && initialColFr.length === parseLayoutCols(initialLayoutId)
+      ? [...initialColFr]
+      : Array(parseLayoutCols(initialLayoutId)).fill(1),
   );
   const [rowFr, setRowFr] = useState(() =>
-    Array(parseLayoutRows(initialLayoutId)).fill(1),
+    initialRowFr && initialRowFr.length === parseLayoutRows(initialLayoutId)
+      ? [...initialRowFr]
+      : Array(parseLayoutRows(initialLayoutId)).fill(1),
   );
 
   // Mount-once slot registry: GridCanvas / FloatingTileLayer register slot DOM
@@ -496,6 +532,7 @@ export function CortexShell({
   presets,
   fetchAdminFunctions,
   savedSpaces,
+  initialSpaceSeed,
   onExportEngagement,
   onAddressSearch,
   onAddressPreview,
@@ -503,16 +540,36 @@ export function CortexShell({
 }: CortexShellProps) {
   const preset = presets.find((p) => p.id === initialPresetId) ?? presets[0]!;
 
+  // Deep-link seed resolution. When the app hands us a resolved shared/named
+  // space (from a `?share=`/`?space=` URL param), open the workspace directly on
+  // that snapshot: its tiles/layout/tracks/mode over the default preset, and its
+  // pinned parcel context adopted as the initial active parcel. The
+  // `savedSpaceId(label)` id keeps the SpaceBar's active-preset highlight and the
+  // save-over-name flow consistent with an in-app space load.
+  const seed = initialSpaceSeed ?? null;
+  const seedSnap = seed?.snapshot ?? null;
+  const initialPresetIdResolved =
+    seed && seed.label ? savedSpaces.savedSpaceId(seed.label) : preset.id;
+  const initialTiles = seedSnap?.tileIds ?? preset.tiles;
+  const initialLayoutId = seedSnap?.layoutId ?? preset.layoutId;
+  const initialColFr = seedSnap?.colFr;
+  const initialRowFr = seedSnap?.rowFr;
+  const initialLayoutMode = seedSnap?.layoutMode;
+  const initialParcel = seedSnap?.context ?? undefined;
+
   return (
-    <EngagementProvider>
+    <EngagementProvider initialParcel={initialParcel}>
       <SpatialProvider>
         <CodeProvider>
           <AnnotationSelectionProvider>
             <DocumentViewerNavigationProvider>
               <CortexShellInner
-                initialPresetId={preset.id}
-                initialTiles={preset.tiles}
-                initialLayoutId={preset.layoutId}
+                initialPresetId={initialPresetIdResolved}
+                initialTiles={initialTiles}
+                initialLayoutId={initialLayoutId}
+                initialColFr={initialColFr}
+                initialRowFr={initialRowFr}
+                initialLayoutMode={initialLayoutMode}
                 getTile={getTile}
                 allTiles={allTiles}
                 categories={categories}
