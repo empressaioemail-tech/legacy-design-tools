@@ -4,12 +4,14 @@
  * Two publishers, one shape:
  *  - Hays CAD ships quoted-CSV `.txt` drops (hayscad.com/data-downloads/,
  *    layout: "Copy-of-PropertyDataExport-CSV-Layout.pdf"). Record types
- *    live in separate files: 1 = Property, 2 = Owner, 5 = ImpSegment.
+ *    live in separate files: 1 = Property, 2 = Owner, 3 = Land,
+ *    5 = ImpSegment.
  *  - Williamson (WCAD) serves the same export through its Socrata
  *    portal (data.wcad.org): "Property - PropertyDataExport"
  *    (ij43-xknu) has identical columns lowercased and no RecordType
  *    column; "Owner" (bbia-wsxs) is a variant with `fullname`,
- *    pre-joined `mailingaddress`, `exemptionlist` and `primaryowner`.
+ *    pre-joined `mailingaddress`, `exemptionlist` and `primaryowner`;
+ *    "Land - PropertyDataExport" (2ckt-cqwj) carries the state code.
  *
  * The parser is header-driven and case-insensitive, so both publishers
  * flow through the same code. Files are classified by their header
@@ -27,9 +29,12 @@
  *  - owner: first owner row per property wins, except a
  *    `primaryowner=1` row (WCAD) replaces a non-primary one.
  *  - exemptions: `ExemptionList` split on `|`/`,`/`;`, uppercased.
- *  - property_use_code: not present in Orion property records (land
- *    state codes live in the record-3 Land file, which is not wired
- *    in v1) — always null here.
+ *  - property_use_code: the Texas PTAD state category code (A1, E1,
+ *    D1, ...) from the record-3 Land file's `StateCode` column, keyed
+ *    on PropertyID. A property has one land row per land segment; the
+ *    primary segment (lowest `Sequence`) wins. Raw code only, no
+ *    fabricated description (matches the PACS `state_cd` flow). Null
+ *    when no land file is supplied or a property has no land row.
  */
 
 import type { CadPropertyRecord, ParseCounters } from "../types";
@@ -44,13 +49,28 @@ import {
   wholeNumberOrNull,
 } from "../normalize";
 
-export type OrionFileKind = "property" | "owner" | "segment" | "unknown";
+export type OrionFileKind =
+  | "property"
+  | "owner"
+  | "land"
+  | "segment"
+  | "unknown";
 
-/** Classify an Orion CSV by its header row. */
+/**
+ * Classify an Orion CSV by its header row.
+ *
+ * Order matters: the property, owner, and land files all share
+ * PropertyID, but each carries a discriminating column. The land file
+ * is identified by `LandType` + `StateCode` (its `Description`/`Acres`
+ * overlap the segment file, but the segment file carries `ActYrBuilt`
+ * and no `StateCode`), and the segment check must run before the land
+ * check would matter because both lack a property/owner marker.
+ */
 export function classifyOrionHeader(header: HeaderIndex): OrionFileKind {
   if (header.has("marketvalue") && header.has("situs")) return "property";
   if (header.has("ownername") || header.has("fullname")) return "owner";
   if (header.has("actyrbuilt")) return "segment";
+  if (header.has("landtype") && header.has("statecode")) return "land";
   return "unknown";
 }
 
@@ -152,6 +172,47 @@ export async function readOrionSegments(
   return rollups;
 }
 
+interface OrionLandPick {
+  stateCode: string;
+  /** Lowest `Sequence` seen for this property; the primary land segment. */
+  sequence: number;
+}
+
+/**
+ * Read a Land file (record 3 / WCAD Socrata "Land - PropertyDataExport")
+ * and pick one state code per property. A property has one land row per
+ * land segment; the primary segment (lowest `Sequence`) wins so the map
+ * colors by the property's principal land use. Rows with no `StateCode`
+ * are ignored; a property with only blank-code rows resolves to null.
+ */
+export async function readOrionLand(
+  filePath: string,
+): Promise<Map<string, string>> {
+  const picks = new Map<string, OrionLandPick>();
+  let header: HeaderIndex | null = null;
+  for await (const row of readCsvRows(filePath)) {
+    if (header === null) {
+      header = new HeaderIndex(row);
+      continue;
+    }
+    const propId = stripLeadingZeros(header.get(row, "propertyid").trim());
+    if (propId.length === 0) continue;
+    const stateCode = textOrNull(header.get(row, "statecode"));
+    if (stateCode === null) continue;
+    // Sequence orders land segments; blank/unparsable sorts last so a
+    // coded row always beats it. Ties keep the first row seen.
+    const seqRaw = wholeNumberOrNull(header.get(row, "sequence"));
+    const sequence = seqRaw !== null ? seqRaw : Number.MAX_SAFE_INTEGER;
+    const existing = picks.get(propId);
+    if (existing === undefined || sequence < existing.sequence) {
+      picks.set(propId, { stateCode, sequence });
+    }
+  }
+  const out = new Map<string, string>();
+  for (const [propId, pick] of picks) out.set(propId, pick.stateCode);
+  return out;
+}
+
 function currOrPlain(
   header: HeaderIndex,
   row: string[],
@@ -171,6 +232,7 @@ export interface OrionParseOptions {
   /** The roll year this export describes (not present in the rows). */
   taxYear: number;
   ownerFile?: string;
+  landFile?: string;
   segmentFile?: string;
   limit?: number;
 }
@@ -183,6 +245,9 @@ export async function* parseOrionExport(
   const owners = opts.ownerFile
     ? await readOrionOwners(opts.ownerFile)
     : new Map<string, OrionOwner>();
+  const land = opts.landFile
+    ? await readOrionLand(opts.landFile)
+    : new Map<string, string>();
   const segments = opts.segmentFile
     ? await readOrionSegments(opts.segmentFile)
     : new Map<string, OrionSegmentRollup>();
@@ -247,7 +312,7 @@ export async function* parseOrionExport(
       yearBuilt: segment?.yearBuilt ?? null,
       livingAreaSqft: squareFootage ?? segment?.mainAreaSqft ?? null,
       landAcres: explicitAcresOrNull(header.get(row, "legalacres")),
-      propertyUseCode: null,
+      propertyUseCode: land.get(propId) ?? null,
     };
     if (opts.limit !== undefined && counters.rowsParsed >= opts.limit) break;
   }

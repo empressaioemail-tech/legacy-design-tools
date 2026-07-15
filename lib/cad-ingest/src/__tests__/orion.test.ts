@@ -11,7 +11,12 @@
 import { describe, expect, it } from "vitest";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseOrionExport } from "../orion/parser";
+import {
+  classifyOrionHeader,
+  parseOrionExport,
+  readOrionLand,
+} from "../orion/parser";
+import { HeaderIndex } from "../csv";
 import { newCounters } from "../types";
 import type { CadPropertyRecord } from "../types";
 
@@ -26,11 +31,12 @@ async function collect(opts: Parameters<typeof parseOrionExport>[0]) {
 }
 
 describe("Orion PropertyDataExport parser (Hays)", () => {
-  it("joins property + owner + segment records", async () => {
+  it("joins property + owner + land + segment records", async () => {
     const { records, counters } = await collect({
       countyFips: "48209",
       propertyFile: fx("hays_property_sample.txt"),
       ownerFile: fx("hays_owner_sample.txt"),
+      landFile: fx("hays_land_sample.txt"),
       segmentFile: fx("hays_segment_sample.txt"),
       taxYear: 2025,
     });
@@ -54,7 +60,7 @@ describe("Orion PropertyDataExport parser (Hays)", () => {
       yearBuilt: 2003, // MA segment
       livingAreaSqft: 1568,
       landAcres: "1.0360",
-      propertyUseCode: null,
+      propertyUseCode: "A1", // record-3 Land StateCode
     });
 
     // 0 sqft + no MA segment -> null living area / year built.
@@ -62,14 +68,55 @@ describe("Orion PropertyDataExport parser (Hays)", () => {
     expect(commercial?.livingAreaSqft).toBeNull();
     expect(commercial?.yearBuilt).toBeNull();
     expect(commercial?.marketValue).toBe(927395); // Curr differs from plain
+    expect(commercial?.propertyUseCode).toBe("F1"); // commercial state code
 
     // Empty ExemptionList -> null.
     expect(commercial?.exemptionCodes).toBeNull();
 
-    // SquareFootage wins over segment sum when present.
+    // Multiple land segments -> lowest Sequence (the primary) wins.
+    // 11924 has A1 @ seq 1 and D1 @ seq 2; A1 is expected.
     const withSqft = records.find((r) => r.propId === "11924");
     expect(withSqft?.livingAreaSqft).toBe(2647);
     expect(withSqft?.yearBuilt).toBe(1979);
+    expect(withSqft?.propertyUseCode).toBe("A1");
+
+    // Property with no land row -> null (honest neutral, no fabrication).
+    const noLand = records.find((r) => r.propId === "12350");
+    expect(noLand?.propertyUseCode).toBeNull();
+  });
+
+  it("leaves property_use_code null when no land file is supplied", async () => {
+    const { records } = await collect({
+      countyFips: "48209",
+      propertyFile: fx("hays_property_sample.txt"),
+      ownerFile: fx("hays_owner_sample.txt"),
+      segmentFile: fx("hays_segment_sample.txt"),
+      taxYear: 2025,
+    });
+    for (const r of records) expect(r.propertyUseCode).toBeNull();
+  });
+});
+
+describe("Orion Land file (record 3)", () => {
+  it("picks the lowest-Sequence StateCode per property", async () => {
+    const land = await readOrionLand(fx("hays_land_sample.txt"));
+    expect(land.get("11924")).toBe("A1"); // seq 1 over seq 2 (D1)
+    expect(land.get("12074")).toBe("F1");
+    expect(land.get("12300")).toBe("A1");
+    expect(land.has("12350")).toBe(false); // no row -> absent
+  });
+
+  it("classifies the record-3 Land header as \"land\"", () => {
+    const haysLandHeader = new HeaderIndex([
+      "RecordType",
+      "PropertyID",
+      "LandType",
+      "Description",
+      "StateCode",
+      "Acres",
+      "Sequence",
+    ]);
+    expect(classifyOrionHeader(haysLandHeader)).toBe("land");
   });
 });
 
@@ -79,6 +126,7 @@ describe("Orion PropertyDataExport parser (WCAD Socrata variant)", () => {
       countyFips: "48491",
       propertyFile: fx("wcad_property_sample.csv"),
       ownerFile: fx("wcad_owner_sample.csv"),
+      landFile: fx("wcad_land_sample.csv"),
       taxYear: 2026,
     });
     expect(counters.rowsParsed).toBe(4);
@@ -98,7 +146,12 @@ describe("Orion PropertyDataExport parser (WCAD Socrata variant)", () => {
       marketValue: 248632, // currmarketvalue preferred over marketvalue
       assessedValue: 248632,
       livingAreaSqft: 1184,
+      propertyUseCode: "A1", // lowercased-header land dataset
     });
+
+    // Property with no land row in the sample -> null.
+    const noLand = records.find((r) => r.propId === "63599");
+    expect(noLand?.propertyUseCode).toBeNull();
   });
 
   it("rejects a non-property file passed as the property file", async () => {

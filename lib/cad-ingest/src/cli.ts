@@ -9,6 +9,7 @@
  *     [--tax-year=2026]            # REQUIRED for Orion counties (48209/48491)
  *     [--vintage=<label>]          # default: derived from the file name
  *     [--owner-file=<path>]        # Orion owner file override
+ *     [--land-file=<path>]         # Orion land file override (state code)
  *     [--segment-file=<path>]      # Orion segment file override
  *     [--improvement-file=<path>]  # PACS improvement-detail override
  *     [--batch-size=1000] [--limit=N] [--dry-run]
@@ -73,6 +74,7 @@ interface ResolvedInputs {
   propertyFile: string;
   improvementFile?: string;
   ownerFile?: string;
+  landFile?: string;
   segmentFile?: string;
 }
 
@@ -105,6 +107,8 @@ async function discoverFiles(
       out.propertyFile = f;
     } else if (kind === "owner" && out.ownerFile === undefined) {
       out.ownerFile = f;
+    } else if (kind === "land" && out.landFile === undefined) {
+      out.landFile = f;
     } else if (kind === "segment" && out.segmentFile === undefined) {
       out.segmentFile = f;
     }
@@ -130,6 +134,7 @@ async function main(): Promise<void> {
       "tax-year": { type: "string" },
       vintage: { type: "string" },
       "owner-file": { type: "string" },
+      "land-file": { type: "string" },
       "segment-file": { type: "string" },
       "improvement-file": { type: "string" },
       "batch-size": { type: "string" },
@@ -193,9 +198,11 @@ async function main(): Promise<void> {
   }
   const improvementOverride = await resolveOverride(values["improvement-file"]);
   const ownerOverride = await resolveOverride(values["owner-file"]);
+  const landOverride = await resolveOverride(values["land-file"]);
   const segmentOverride = await resolveOverride(values["segment-file"]);
   if (improvementOverride) inputs.improvementFile = improvementOverride;
   if (ownerOverride) inputs.ownerFile = ownerOverride;
+  if (landOverride) inputs.landFile = landOverride;
   if (segmentOverride) inputs.segmentFile = segmentOverride;
 
   const taxYearArg =
@@ -217,6 +224,7 @@ async function main(): Promise<void> {
   log(`property file: ${inputs.propertyFile}`);
   if (inputs.improvementFile) log(`improvement detail: ${inputs.improvementFile}`);
   if (inputs.ownerFile) log(`owner file: ${inputs.ownerFile}`);
+  if (inputs.landFile) log(`land file: ${inputs.landFile}`);
   if (inputs.segmentFile) log(`segment file: ${inputs.segmentFile}`);
   log(`vintage=${vintage}${taxYearArg !== undefined ? ` tax-year=${taxYearArg}` : ""}`);
 
@@ -240,6 +248,7 @@ async function main(): Promise<void> {
         propertyFile: inputs.propertyFile,
         taxYear: taxYearArg as number,
         ownerFile: inputs.ownerFile,
+        landFile: inputs.landFile,
         segmentFile: inputs.segmentFile,
         limit,
       },
