@@ -52,6 +52,7 @@ import {
   bastropFloodAdapter,
 } from "./local/bastrop-tx";
 import { CAD_ADAPTERS } from "./local/cad";
+import { PERMIT_ADAPTERS } from "./local/permits";
 
 /**
  * QA-22 SCOPE B closeout (2026-05-23) — `fcc:broadband` is gated off
@@ -157,6 +158,13 @@ export const LOCAL_ADAPTERS: ReadonlyArray<Adapter> = [
   // path only) — the engagement generate-layers path never injects the
   // accessor, so these are inert there.
   ...CAD_ADAPTERS,
+  // feat/permits-brief-slot — the rehab-reality slot from the OWNED
+  // Austin/San Antonio issued-permit corpus (`permit_record` store,
+  // public-record acquisition 2026-06-21). Double-gated like cad:*:
+  // point inside a covered metro AND `ctx.permitLookup` injected
+  // (brief site-context path only) — inert everywhere else. Replaces
+  // the dormant `cotality:permits` on the brief path.
+  ...PERMIT_ADAPTERS,
 ];
 
 /**

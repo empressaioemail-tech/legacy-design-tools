@@ -12,9 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cad-ingest": "tsx src/cli.ts",
-    "txgio-ingest": "tsx src/txgio/cli.ts"
+    "txgio-ingest": "tsx src/txgio/cli.ts",
+    "permits-ingest": "tsx src/permits/cli.ts"
   },
   "dependencies": {
+    "@workspace/adapters": "workspace:*",
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "^8.20.0",

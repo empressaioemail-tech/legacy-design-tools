@@ -73,3 +73,4 @@ export * from "./dataroomDocumentAtoms";
 export * from "./cadProperty";
 export * from "./txgioParcel";
 export * from "./reportRun";
+export * from "./permitRecord";
