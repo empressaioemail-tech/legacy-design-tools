@@ -157,6 +157,10 @@ describe("hydrology/topography spine rehydration audit", () => {
       contentType: "image/tiff",
       bbox: { westLng: -98, southLat: 29, eastLng: -97, northLat: 30 },
       resolutionMeters: 10,
+      // Layer-0 coverage-honesty pair added to FetchUsgs3depDemResult:
+      // requested is echoed, actual stays null on the exportImage path.
+      resolutionMetersRequested: 10,
+      resolutionMetersActual: null,
       widthPx: 100,
       heightPx: 100,
       endpoint: "spine:/v1/hydrology/dem",

@@ -72,6 +72,49 @@ vi.mock("geotiff", () => ({
   }),
 }));
 
+// Mock the IFC worker client so these DB integration tests never spawn a
+// real Python process (deterministic + no ifcopenshell dependency in the
+// test env). `ifcWorkerMockState.mode` picks the behavior:
+//   - "skip-error": the worker returns a structured error (the real
+//     behavior when python/ifcopenshell is absent) -> IFC skipped
+//     best-effort, no `ifc` payload block.
+//   - "ok": the worker returns a well-formed IFC result -> `ifc` block
+//     lands. `capturedRequest` records the geometry the ingest handed the
+//     worker so a test can assert it matches the mesh.
+//   - "throw": the client throws -> ingest's try/catch swallows it.
+const ifcWorkerMockState: {
+  mode: "skip-error" | "ok" | "throw";
+  capturedRequest: unknown;
+} = { mode: "skip-error", capturedRequest: null };
+
+vi.mock("../lib/ifcWorkerClient", () => ({
+  runIfcWorker: vi.fn(async (req: unknown) => {
+    ifcWorkerMockState.capturedRequest = req;
+    if (ifcWorkerMockState.mode === "throw") {
+      throw new Error("ifc client threw");
+    }
+    if (ifcWorkerMockState.mode === "ok") {
+      return {
+        status: "ok",
+        library: "ifcopenshell",
+        libraryVersion: "0.7.0",
+        schemaVersion: "IFC4",
+        geometryPrimitive: "IfcTriangulatedFaceSet",
+        georefCrs: "EPSG:4326",
+        vertexCount: 100,
+        triangleCount: 162,
+        byteCount: 4096,
+        ifcText: "ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;",
+      };
+    }
+    return {
+      status: "error",
+      code: "spawn-failed",
+      message: "python3 not available in test env",
+    };
+  }),
+}));
+
 vi.mock("@workspace/db", async () => {
   const actual =
     await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
@@ -262,6 +305,10 @@ beforeEach(async () => {
   geotiffMockState.height = 10;
   geotiffMockState.values = Array.from({ length: 100 }, (_, i) => 100 + i / 10);
   geotiffMockState.rejectWith = undefined;
+  // Default: IFC worker unavailable (structured error) — the common
+  // dev/CI-without-ifcopenshell case. Tests that want IFC opt into "ok".
+  ifcWorkerMockState.mode = "skip-error";
+  ifcWorkerMockState.capturedRequest = null;
 });
 
 afterEach(async () => {
@@ -565,5 +612,137 @@ describe("site-topography ingest worker", () => {
     expect(typed.parcelOrigin).toBe("regrid-parcel");
     expect(summary.keyMetrics.length).toBeGreaterThan(0);
     expect(summary.prose).toMatch(/contour features/i);
+  });
+
+  it("[9] IFC best-effort — worker error does NOT fail the ingest; mesh + contours still land, no ifc block", async () => {
+    await seedEngagementWithRegridParcel();
+    ifcWorkerMockState.mode = "skip-error";
+    const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
+    const { shim } = makeInMemStorage();
+
+    const result = await ingestSiteTopography({
+      engagementId: ENGAGEMENT_ID,
+      history: getHistoryService(),
+      fetchImpl,
+      storage: shim,
+    });
+
+    // Ingest still succeeds — the IFC failure is best-effort.
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.contourCount).toBeGreaterThan(0);
+
+    const events = await ctx.schema!.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "site-topography"),
+          eq(atomEvents.entityId, ENGAGEMENT_ID),
+        ),
+      );
+    expect(events).toHaveLength(1);
+    const payload = events[0]!.payload as Record<string, unknown>;
+    // The mesh still landed (mesh is independent of the IFC step).
+    expect(payload.mesh).toBeTruthy();
+    // The IFC block is absent because the worker errored.
+    expect(payload.ifc).toBeUndefined();
+
+    // Read model mirrors: meshRef present, ifcRef null.
+    const row = await loadActiveSiteTopographyRow(ENGAGEMENT_ID);
+    const ps = row!.propertySet as Record<string, unknown>;
+    expect(ps.meshRef).toBeTruthy();
+    expect(ps.ifcRef).toBeNull();
+  });
+
+  it("[10] IFC ok — the ifc block lands, is fed the SAME geometry as the mesh, and reaches the read model", async () => {
+    await seedEngagementWithRegridParcel();
+    ifcWorkerMockState.mode = "ok";
+    const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
+    const { shim } = makeInMemStorage();
+
+    const result = await ingestSiteTopography({
+      engagementId: ENGAGEMENT_ID,
+      history: getHistoryService(),
+      fetchImpl,
+      storage: shim,
+    });
+    expect(result.status).toBe("ok");
+
+    const events = await ctx.schema!.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "site-topography"),
+          eq(atomEvents.entityId, ENGAGEMENT_ID),
+        ),
+      );
+    const payload = events[0]!.payload as Record<string, unknown>;
+    const mesh = payload.mesh as Record<string, unknown>;
+    const ifc = payload.ifc as Record<string, unknown>;
+    expect(mesh).toBeTruthy();
+    expect(ifc).toBeTruthy();
+    expect(ifc.ifcSchemaVersion).toBe("IFC4");
+    expect(ifc.geometryPrimitive).toBe("IfcTriangulatedFaceSet");
+    expect(ifc.georefCrs).toBe("EPSG:4326");
+    expect(ifc.gcsObjectPath).toMatch(/^\/objects\//);
+
+    // The geometry the ingest handed the IFC worker is the SAME compacted
+    // buffer the mesh reports: positions length = meshVertexCount * 3,
+    // indices length = meshTriangleCount * 3. This is the ingest-level
+    // guarantee that the IFC and the GLB share one triangulation.
+    const captured = ifcWorkerMockState.capturedRequest as {
+      positions: number[];
+      indices: number[];
+      crsConvention: string;
+      provenance: Record<string, unknown>;
+      confidence: Record<string, unknown>;
+    };
+    expect(captured.positions.length).toBe(
+      (mesh.vertexCount as number) * 3,
+    );
+    expect(captured.indices.length).toBe(
+      (mesh.triangleCount as number) * 3,
+    );
+    // The IFC worker got the same coverage-honest provenance/confidence the
+    // topo derivation computed (structural commitment 1).
+    expect(captured.provenance.sourceCitation).toMatch(/USGS 3DEP/);
+    expect(typeof captured.confidence.estimate).toBe("number");
+    expect(captured.confidence.provenance).toBe("asserted");
+
+    // Read model carries the ifc block + ifcRef.
+    const row = await loadActiveSiteTopographyRow(ENGAGEMENT_ID);
+    const ps = row!.propertySet as Record<string, unknown>;
+    expect(ps.ifcRef).toBe(ifc.gcsObjectPath);
+    const psIfc = ps.ifc as Record<string, unknown>;
+    expect(psIfc.ifcSchemaVersion).toBe("IFC4");
+  });
+
+  it("[11] IFC client throw — swallowed best-effort, ingest still ok", async () => {
+    await seedEngagementWithRegridParcel();
+    ifcWorkerMockState.mode = "throw";
+    const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
+    const { shim } = makeInMemStorage();
+
+    const result = await ingestSiteTopography({
+      engagementId: ENGAGEMENT_ID,
+      history: getHistoryService(),
+      fetchImpl,
+      storage: shim,
+    });
+    expect(result.status).toBe("ok");
+    const events = await ctx.schema!.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "site-topography"),
+          eq(atomEvents.entityId, ENGAGEMENT_ID),
+        ),
+      );
+    const payload = events[0]!.payload as Record<string, unknown>;
+    expect(payload.ifc).toBeUndefined();
+    expect(payload.mesh).toBeTruthy();
   });
 });

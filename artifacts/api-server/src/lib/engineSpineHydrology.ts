@@ -78,6 +78,14 @@ export async function routeFetchUsgs3depDem(
     contentType: "image/tiff",
     bbox: payload.bbox,
     resolutionMeters: opts.resolutionMeters,
+    // Coverage-honesty pair. The spine `/v1/hydrology/dem` response does
+    // not surface the source raster's native resolution (it forwards the
+    // same 3DEP exportImage bytes), so `actual` stays null exactly as the
+    // direct client path does: we know what we requested, not what the
+    // mosaic drew from. Echoing the request into `actual` here would
+    // fabricate a measured resolution (structural commitment #2).
+    resolutionMetersRequested: opts.resolutionMeters,
+    resolutionMetersActual: null,
     widthPx: payload.widthPx,
     heightPx: payload.heightPx,
     endpoint: "spine:/v1/hydrology/dem",

@@ -67,6 +67,10 @@ import {
 import { EngineSpineError } from "./engineSpineClient";
 import { routeFetchUsgs3depDem } from "./engineSpineHydrology";
 import type { EventAnchoringService } from "@hauska/atom-contract";
+import {
+  createWidthedConfidence,
+  type WidthedConfidence,
+} from "@hauska/atom-contract/read-contract";
 import { SITE_TOPOGRAPHY_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { ObjectStorageService } from "./objectStorage";
 import { logger as defaultLogger } from "./logger";
@@ -84,6 +88,12 @@ import {
   SITE_TOPOGRAPHY_EVENT_TYPES,
   type SiteTopographyEventType,
 } from "../atoms/site-topography.atom";
+import {
+  buildTerrainMeshGeometry,
+  deriveTerrainMeshGlb,
+  type TerrainMeshMeta,
+} from "./siteTopographyMesh";
+import { runIfcWorker } from "./ifcWorkerClient";
 
 /**
  * Default contour interval in meters. 5m is the operator-set Phase
@@ -465,8 +475,14 @@ export async function parseDemBytes(bytes: Uint8Array): Promise<ParsedDem> {
  * `L.GeoJSON` layer without a per-vertex coordinate transform on the
  * client.
  *
- * Pure function — no DB or HTTP calls. Unit-tested directly against a
- * synthetic elevation grid.
+ * Pure function, no DB or HTTP calls. Unit-tested directly against
+ * synthetic elevation grids in `__tests__/siteTopographyCoverage.test.ts`,
+ * which cover the fully-covered case (every threshold emitted, no drops,
+ * `touchesNodata` false), the nodata-hole case (spurious lowest isoline
+ * dropped, `touchesNodata` true, floor-adjacent contours flagged
+ * `onNodataBoundary`), and the terrain-at-global-minimum case (proving the
+ * lowest-isoline drop is gated on the presence of nodata, not on an
+ * elevation-equals-minimum coincidence).
  */
 export function deriveContoursGeoJson(
   dem: ParsedDem,
@@ -478,15 +494,46 @@ export function deriveContoursGeoJson(
     features: Array<{
       type: "Feature";
       geometry: GeoJsonGeometry;
-      properties: { elevationMeters: number };
+      properties: {
+        elevationMeters: number;
+        /**
+         * True when this contour is the lowest emitted isoline AND the DEM
+         * carried nodata cells, i.e. this line traces (partly) the
+         * data/nodata boundary rather than real terrain, so a consumer
+         * should render / weight it as low-confidence. Absent (undefined)
+         * on a fully-covered DEM.
+         */
+        onNodataBoundary?: true;
+      };
     }>;
   };
   thresholds: number[];
+  /**
+   * True when the DEM this collection was derived from contained any
+   * nodata cells. The contour geometry near the data/nodata boundary is
+   * an artifact of the NaN-to-floor substitution below, not real terrain;
+   * the ingest confidence computation discounts on this signal.
+   */
+  touchesNodata: boolean;
 } {
-  // Replace NaN with min-elevation so the marching-squares algorithm
-  // doesn't propagate NaN into intermediate sums. The contour lines at
-  // the nodata boundary read as the lowest-level isoline; this is the
-  // same convention `gdal_contour -inodata` uses by default.
+  const hasNodata = dem.nodataCount > 0;
+  // Marching Squares needs finite values on every cell, so we still have
+  // to replace NaN nodata cells with SOME finite number. We substitute
+  // `dem.minElevation` (the lowest real value) so the substituted cells
+  // sink to the floor rather than injecting a spurious mid-range plateau.
+  //
+  // The historical defect: with the floor substitution in place, the
+  // marching-squares run emits a lowest-level isoline that follows the
+  // data/nodata BOUNDARY (the step from real terrain down to the
+  // substituted floor) as if it were a real contour. On a parcel that
+  // clips the edge of 3DEP coverage this drew a hard, wrong contour ring
+  // around the nodata hole. We do NOT remove the substitution (the
+  // algorithm requires finite input); instead we make the boundary
+  // honest below by (a) dropping that spurious lowest isoline from the
+  // emitted features when nodata is present, and (b) flagging any
+  // remaining floor-level contour as `onNodataBoundary` so a consumer
+  // renders it low-confidence. The collection-level `touchesNodata` flag
+  // feeds the asserted-confidence discount in the ingest worker.
   const replaced = new Float64Array(dem.values.length);
   for (let i = 0; i < dem.values.length; i++) {
     const v = dem.values[i]!;
@@ -512,6 +559,7 @@ export function deriveContoursGeoJson(
     return {
       featureCollection: { type: "FeatureCollection", features: [] },
       thresholds: [],
+      touchesNodata: hasNodata,
     };
   }
 
@@ -532,28 +580,171 @@ export function deriveContoursGeoJson(
     return [lng, lat];
   }
 
-  const features = rawContours.map((c) => {
-    const remapped = (c.coordinates as unknown as number[][][][]).map(
-      (polygon) => polygon.map((ring) => ring.map(remapPair)),
-    );
-    return {
-      type: "Feature" as const,
-      geometry: {
-        type: "MultiPolygon",
-        coordinates: remapped,
-      } as GeoJsonGeometry,
-      properties: { elevationMeters: c.value },
-    };
-  });
+  // The floor threshold, the lowest emitted level. When nodata was
+  // substituted to `dem.minElevation`, the isoline at this level is the
+  // data/nodata boundary artifact rather than real terrain. `startElev`
+  // is the ceil-to-interval of `dem.minElevation`, so the artifact
+  // manifests at whichever emitted threshold sits at or just above the
+  // substituted floor; we treat the lowest emitted threshold as that
+  // level (the substitution puts every nodata cell at exactly the floor).
+  const floorThreshold = thresholds[0];
+
+  const features = rawContours
+    .filter((c) => {
+      // Drop the spurious lowest isoline when nodata was present: it
+      // traces the substitution boundary, not terrain. On a fully-covered
+      // DEM there is nothing spurious, so we keep every level.
+      if (hasNodata && c.value === floorThreshold) return false;
+      return true;
+    })
+    .map((c) => {
+      const remapped = (c.coordinates as unknown as number[][][][]).map(
+        (polygon) => polygon.map((ring) => ring.map(remapPair)),
+      );
+      // A contour sitting AT the floor on a partially-covered DEM is still
+      // adjacent to the nodata boundary; flag any that survive the filter
+      // (the next level up, when it hugs the boundary) as low-confidence.
+      const onNodataBoundary =
+        hasNodata && c.value <= floorThreshold + intervalMeters;
+      return {
+        type: "Feature" as const,
+        geometry: {
+          type: "MultiPolygon",
+          coordinates: remapped,
+        } as GeoJsonGeometry,
+        properties: onNodataBoundary
+          ? { elevationMeters: c.value, onNodataBoundary: true as const }
+          : { elevationMeters: c.value },
+      };
+    });
 
   return {
     featureCollection: { type: "FeatureCollection", features },
     thresholds,
+    touchesNodata: hasNodata,
   };
+}
+
+/**
+ * Coverage-honesty summary for a topo derivation.
+ *
+ * This is the Layer-0 coverage-honesty read model: the DEM path was
+ * previously blind to how much of the requested extent actually carried
+ * elevation data and whether the resolution was measured or merely
+ * requested. Every field here is a MEASURED or REQUESTED fact about the
+ * fetch, never an inferred one:
+ *
+ *   - `nodataCount` / `totalCells` / `coverageFraction` quantify how much
+ *     of the raster grid carried real elevation vs nodata.
+ *   - `resolutionMetersRequested` is what we asked 3DEP to resample to.
+ *   - `resolutionMetersActual` is the source raster's native resolution
+ *     when known, else `null`; the `/exportImage?f=image` path does not
+ *     expose it, so it stays null rather than echoing the request into it
+ *     (structural commitment #2: never an unearned number).
+ *   - `resolutionMeasured` is the boolean the confidence formula reads:
+ *     true only when `resolutionMetersActual` is known.
+ *   - `touchesNodata` marks that the contour geometry brushed the
+ *     data/nodata boundary (the confidence discount signal).
+ */
+export interface SiteTopographyCoverage {
+  /** Count of nodata / nan cells in the DEM grid. */
+  nodataCount: number;
+  /** Total cells in the DEM grid (widthPx * heightPx). */
+  totalCells: number;
+  /**
+   * Fraction of the grid that carried real elevation data, in [0, 1].
+   * `1 - nodataCount / totalCells`. 1.0 = fully covered; lower = more of
+   * the requested extent fell off 3DEP coverage.
+   */
+  coverageFraction: number;
+  /** Resolution (m/px) requested from 3DEP. */
+  resolutionMetersRequested: number;
+  /**
+   * Native source-raster resolution (m/px) when known, else `null`. Null
+   * on the exportImage raw-bytes path; see the usgs3dep client.
+   */
+  resolutionMetersActual: number | null;
+  /** True only when `resolutionMetersActual` is a known measured value. */
+  resolutionMeasured: boolean;
+  /** True when any contour brushed the data/nodata boundary. */
+  touchesNodata: boolean;
+}
+
+/**
+ * Compute the asserted-baseline confidence for a topo derivation from its
+ * coverage honesty.
+ *
+ * This is an ASSERTED baseline (`provenance: "asserted"`, `n: 0`,
+ * `intervalWidth: 1`), NEVER a calibrated number: there is no outcome
+ * signal backing a single DEM fetch, so per structural commitment #2 the
+ * confidence carries full interval width and asserted provenance until a
+ * calibration overlay earns the calibrated axis. We build it through the
+ * contract's sole `createWidthedConfidence` constructor so the topo path
+ * speaks the same widthed-confidence language as every other atom
+ * (mirrors `createEncumbranceQualityConfidence` in the atom-contract
+ * encumbrances module, which does the identical asserted seed).
+ *
+ * The `estimate` is derived purely from coverage honesty:
+ *
+ *   estimate = COVERAGE_FLOOR
+ *            + (1 - COVERAGE_FLOOR) * coverageFraction   // 0..(1-floor)
+ *            - RESOLUTION_UNMEASURED_PENALTY              // if requested-not-measured
+ *
+ * clamped to [0, 1]. Rationale: a fully-covered extent whose native
+ * resolution is confirmed earns the top asserted estimate; every nodata
+ * cell drags it down proportionally; and when the resolution is only
+ * requested (interpolated / unverified against the source cellsize) we
+ * subtract a fixed penalty so an interpolated surface never reads as high
+ * as a measured one. The floor keeps even a poorly-covered fetch from
+ * asserting zero, which would misrepresent "we have SOME data" as "none".
+ */
+const TOPO_COVERAGE_FLOOR = 0.25;
+const TOPO_RESOLUTION_UNMEASURED_PENALTY = 0.15;
+
+export function computeTopoAssertedConfidence(
+  coverage: SiteTopographyCoverage,
+): WidthedConfidence {
+  const coverageComponent =
+    TOPO_COVERAGE_FLOOR +
+    (1 - TOPO_COVERAGE_FLOOR) * clamp01(coverage.coverageFraction);
+  const resolutionPenalty = coverage.resolutionMeasured
+    ? 0
+    : TOPO_RESOLUTION_UNMEASURED_PENALTY;
+  const estimate = clamp01(coverageComponent - resolutionPenalty);
+  return createWidthedConfidence({
+    estimate,
+    // No observations back an asserted seed; the calibration overlay
+    // earns the calibrated axis over time.
+    n: 0,
+    // Full width: a single fetch with no outcome signal is maximally
+    // uncertain on the calibrated axis.
+    intervalWidth: 1,
+    provenance: "asserted",
+  });
+}
+
+/** Clamp a value into the [0, 1] unit interval; non-finite maps to 0. */
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
 }
 
 /** Site-topography event payload shape. Pinned to the atom registration. */
 export interface SiteTopographyEventPayload {
+  /**
+   * Payload schema version. STAYS at 1 across the Layer-0 coverage-honesty
+   * change: the new `coverage`, `confidence`, and `qualityGate` blocks and
+   * the `dem.resolutionMetersRequested` / `resolutionMetersActual` pair are
+   * all ADDITIVE and OPTIONAL. A reader written against the original
+   * schema-1 shape ignores the new keys and still parses; a reader that
+   * wants coverage honesty treats their absence as "unknown". Additive
+   * optional fields do not break the read contract, so a version bump
+   * would be noise; the algorithm-change signal rides on WORKER_VERSION
+   * (bumped to @1.1.0) instead. A bump to 2 is reserved for a change that
+   * removes or repurposes an existing field.
+   */
   schemaVersion: 1;
   /** Marker per ADR-001 — deterministic geospatial computation, not LLM. */
   computedOrigin: true;
@@ -577,6 +768,32 @@ export interface SiteTopographyEventPayload {
   dem: {
     source: "usgs-3dep";
     resolutionMeters: number;
+    /**
+     * REQUESTED resolution echoed from the fetch. Kept distinct from any
+     * measured resolution; see `coverage.resolutionMetersActual`.
+     */
+    resolutionMetersRequested: number;
+    /**
+     * Native source-raster resolution when known, else `null`. Null on the
+     * exportImage raw-bytes path (the coverage-honesty gap made explicit
+     * rather than silently conflated with the requested value).
+     */
+    resolutionMetersActual: number | null;
+    /**
+     * EPQS source-raster id, the one signal that distinguishes 1m lidar
+     * from 10m fallback, when known. Currently ALWAYS `null` on this DEM
+     * raster path: the site-topography ingest fetches a bbox GeoTIFF from
+     * the 3DEP ImageServer `/exportImage` operation, which returns no
+     * source-raster id (that is also why `resolutionMetersActual` is
+     * null). The `rasterId` lives on the EPQS POINT service, which the
+     * `usgsNedAdapter` reads but which is a separate lane not in this
+     * raster call chain. The field is threaded end-to-end (payload ->
+     * read model) so a future probe that DOES obtain a rasterId (an EPQS
+     * point query at the parcel centroid, or the 3DEP `f=json` metadata
+     * envelope) can fill it without another schema change; until that
+     * probe is wired it stays null rather than fabricated.
+     */
+    sourceRasterId: number | null;
     /** Object storage path the worker uploaded the GeoTIFF to. */
     gcsObjectPath: string;
     /** USGS request URL (for replay). */
@@ -599,9 +816,91 @@ export interface SiteTopographyEventPayload {
       features: ReadonlyArray<{
         type: "Feature";
         geometry: GeoJsonGeometry;
-        properties: { elevationMeters: number };
+        properties: { elevationMeters: number; onNodataBoundary?: true };
       }>;
     };
+  };
+  /**
+   * Layer-1 georeferenced terrain mesh. The DEM grid rendered as a gridded
+   * triangle mesh (GLB) in local ENU meters, uploaded to object storage and
+   * referenced by `gcsObjectPath`. Additive OPTIONAL field: readers written
+   * against the Layer-0 shape ignore it; the command center viewer that
+   * wants a 3D surface reads `mesh.gcsObjectPath`. Absent when mesh
+   * generation was skipped or failed (mesh failure never fails the ingest;
+   * the contour/coverage output still lands). Coverage-honest: the mesh
+   * carries the same `coverageFraction` / `confidence` the topo derivation
+   * computed, and leaves holes where the DEM had nodata rather than a floor.
+   */
+  mesh?: {
+    /** Object storage path the worker uploaded the terrain GLB to. */
+    gcsObjectPath: string;
+    format: "glb";
+    vertexCount: number;
+    triangleCount: number;
+    /** True when nodata cells left holes in the surface. */
+    hasHoles: boolean;
+    /** Georef origin + CRS convention so a consumer places the local frame. */
+    georefOrigin: TerrainMeshMeta["georefOrigin"];
+    crsConvention: TerrainMeshMeta["crsConvention"];
+    minElevationMeters: number;
+    maxElevationMeters: number;
+  };
+  /**
+   * Layer-2 georeferenced IFC. The SAME terrain triangulation as `mesh`
+   * (identical compacted positions + indices — the IFC worker consumes the
+   * exact geometry the GLB was built from, never a re-triangulation),
+   * authored as an IFC4 IfcTriangulatedFaceSet on an IfcGeographicElement /
+   * IfcSite. The real-world CRS is NAMED via IfcProjectedCRS (EPSG:4326);
+   * NO IfcMapConversion is authored (an active one with degree eastings
+   * would place the terrain off-planet), so the origin lat/lng travels as
+   * human-readable metadata in the IFC provenance Pset. Carries the same
+   * provenance + confidence Psets. Uploaded to object storage and
+   * referenced by `gcsObjectPath`. Additive OPTIONAL field: readers written
+   * against the Layer-0/1 shape ignore it. Absent when IFC authoring was
+   * skipped or failed (best-effort — an IFC failure NEVER fails the ingest;
+   * the mesh / contour / coverage output still lands, and there is no
+   * hand-authored fallback IFC).
+   */
+  ifc?: {
+    /** Object storage path the worker uploaded the .ifc to. */
+    gcsObjectPath: string;
+    /** IFC schema version authored (IFC4). */
+    ifcSchemaVersion: "IFC4";
+    /** Geometry primitive used for the terrain surface. */
+    geometryPrimitive: "IfcTriangulatedFaceSet";
+    /** The CRS declared (named) on the IfcProjectedCRS. No map conversion. */
+    georefCrs: string;
+    byteCount: number;
+    vertexCount: number;
+    triangleCount: number;
+    /** The asserted-baseline confidence carried into the IFC Psets. */
+    confidence: WidthedConfidence;
+  };
+  /**
+   * Layer-0 coverage-honesty summary: measured/requested facts about how
+   * much of the extent carried data and whether resolution is measured.
+   * Additive optional field (see `schemaVersion` note); consumers written
+   * before this field treat its absence as "coverage unknown".
+   */
+  coverage?: SiteTopographyCoverage;
+  /**
+   * Asserted-baseline widthed confidence for this derivation, derived
+   * from `coverage`. NEVER calibrated at ingest (`provenance: "asserted"`,
+   * `n: 0`, full interval width). Additive optional field.
+   */
+  confidence?: WidthedConfidence;
+  /**
+   * Quality-gate provenance stamped alongside the confidence, mirroring
+   * the atom-contract `QUALITY_GATE_FIELDS` shape ({ confidence,
+   * sourceCitation, evaluatedAt }). Every confidence-carrying output must
+   * name its source and when it was evaluated (structural commitment #1).
+   * Additive optional field.
+   */
+  qualityGate?: {
+    /** Human-readable source citation: dataset + endpoint. */
+    sourceCitation: string;
+    /** ISO-8601 time the confidence was evaluated (the DEM fetch time). */
+    evaluatedAt: string;
   };
   /** Hash of the inputs that produced this payload. */
   inputSignature: string;
@@ -611,7 +910,24 @@ export interface SiteTopographyEventPayload {
   previousAtomEventId?: string;
 }
 
-const WORKER_VERSION = "site-topography-ingest@1.0.0";
+// Bumped 1.0.0 -> 1.1.0 for the Layer-0 coverage-honesty change: the
+// payload gained the `coverage`, `confidence`, and `qualityGate` blocks,
+// `dem` gained the requested-vs-actual resolution pair, and the contour
+// derivation stopped emitting the spurious nodata-boundary isoline.
+// Bumped 1.1.0 -> 1.2.0 for the Layer-1 terrain mesh: the payload gained
+// the optional `mesh` block (a georeferenced gridded-triangle GLB in local
+// ENU meters, holes where nodata, same coverage/confidence as the topo
+// derivation).
+// Bumped 1.2.0 -> 1.3.0 for the Layer-2 IFC: the payload gained the
+// optional `ifc` block (an IFC4 IfcTriangulatedFaceSet authored from the
+// SAME compacted geometry the GLB uses; CRS NAMED via IfcProjectedCRS with
+// NO active IfcMapConversion and origin lat/lng in a Pset, with matching
+// provenance/confidence Psets). Best-effort: an IFC failure does not fail
+// the ingest. All added
+// payload fields are additive and optional, so `schemaVersion` stays at 1
+// (see the SiteTopographyEventPayload.schemaVersion note); WORKER_VERSION
+// carries the algorithm-change signal.
+const WORKER_VERSION = "site-topography-ingest@1.3.0";
 
 interface LatestEventSummary {
   id: string;
@@ -814,6 +1130,136 @@ export async function ingestSiteTopography(
     };
   }
 
+  // Layer-0 coverage honesty, computed here (before the mesh/IFC steps) so
+  // the Layer-2 IFC provenance/confidence Psets can carry the SAME numbers.
+  // `totalCells` is the parsed grid size; the parser proved at least one
+  // finite cell (it throws on all-nodata), so `totalCells` is always > 0
+  // and `coverageFraction` is well-defined.
+  const totalCells = dem.width * dem.height;
+  const coverage: SiteTopographyCoverage = {
+    nodataCount: dem.nodataCount,
+    totalCells,
+    coverageFraction: totalCells > 0 ? 1 - dem.nodataCount / totalCells : 0,
+    resolutionMetersRequested: demResult.resolutionMetersRequested,
+    resolutionMetersActual: demResult.resolutionMetersActual,
+    resolutionMeasured: demResult.resolutionMetersActual !== null,
+    touchesNodata: contoursResult.touchesNodata,
+  };
+  const confidence = computeTopoAssertedConfidence(coverage);
+  const sourceCitation = `USGS 3DEP (${demResult.endpoint})`;
+
+  // 5.5) Build the terrain geometry ONCE, then derive the Layer-1 GLB and
+  //      the Layer-2 IFC from that SAME compacted positions + indices. This
+  //      single-triangulation seam is what guarantees the GLB surface and
+  //      the IFC surface can never diverge: nothing re-triangulates the
+  //      grid. Best-effort: a mesh failure NEVER fails the ingest — the
+  //      contour + coverage + confidence output (the coverage-honesty
+  //      product) still lands, and the `mesh`/`ifc` payload fields simply
+  //      stay absent. The geometry build is a pure, synchronous pass over
+  //      the parsed grid; at parcel + catchment scale (a few hundred px
+  //      square) it is well within the request budget. If a future
+  //      higher-resolution or wider-catchment profile grows the grid, this
+  //      is the clean seam to move to a worker-spawn pattern.
+  let meshPayload: SiteTopographyEventPayload["mesh"] | undefined;
+  let meshGeometry:
+    | ReturnType<typeof buildTerrainMeshGeometry>
+    | undefined;
+  try {
+    meshGeometry = buildTerrainMeshGeometry(dem, catchmentBbox);
+    const { glb } = await deriveTerrainMeshGlb(dem, catchmentBbox);
+    const meshGcsObjectPath = await storage.uploadObjectEntityFromBuffer(
+      Buffer.from(glb),
+      "model/gltf-binary",
+    );
+    const meta = meshGeometry.meta;
+    meshPayload = {
+      gcsObjectPath: meshGcsObjectPath,
+      format: "glb",
+      vertexCount: meta.vertexCount,
+      triangleCount: meta.triangleCount,
+      hasHoles: meta.hasHoles,
+      georefOrigin: meta.georefOrigin,
+      crsConvention: meta.crsConvention,
+      minElevationMeters: meta.minElevationMeters,
+      maxElevationMeters: meta.maxElevationMeters,
+    };
+  } catch (err) {
+    // Log and continue — the topo output is not gated on the mesh.
+    log.warn(
+      { err, engagementId: args.engagementId },
+      "site-topography ingest: terrain mesh generation/upload failed (continuing without mesh)",
+    );
+  }
+
+  // 5.6) Author the Layer-2 IFC from the SAME geometry the GLB used, and
+  //      upload it. Best-effort and gated on a successful mesh build (we
+  //      reuse its compacted positions + indices so the IFC surface is the
+  //      identical triangulation). Spawns the ifcopenshell Python worker;
+  //      when Python / ifcopenshell is unavailable the worker client
+  //      returns a structured error and we skip IFC (no hand-authored
+  //      fallback — that would be a second, divergent implementation of the
+  //      correctness core). An IFC failure NEVER fails the ingest.
+  let ifcPayload: SiteTopographyEventPayload["ifc"] | undefined;
+  if (meshGeometry) {
+    try {
+      const ifcResult = await runIfcWorker({
+        positions: meshGeometry.positions,
+        indices: meshGeometry.indices,
+        georefOrigin: {
+          originLng: meshGeometry.meta.georefOrigin.originLng,
+          originLat: meshGeometry.meta.georefOrigin.originLat,
+          originHeightMeters: 0,
+        },
+        crsConvention: meshGeometry.meta.crsConvention,
+        provenance: {
+          sourceCitation,
+          coverageFraction: coverage.coverageFraction,
+          demResolutionMeters,
+          demResolutionMeasured: coverage.resolutionMeasured,
+          collectionProxyDate: demResult.fetchedAt,
+          hasHoles: meshGeometry.meta.hasHoles,
+        },
+        confidence: {
+          estimate: confidence.estimate,
+          provenance: confidence.provenance,
+          n: confidence.n,
+          intervalWidth: confidence.intervalWidth,
+        },
+      });
+      if (ifcResult.status === "ok") {
+        const ifcGcsObjectPath = await storage.uploadObjectEntityFromBuffer(
+          Buffer.from(ifcResult.ifcText, "utf8"),
+          "application/x-step",
+        );
+        ifcPayload = {
+          gcsObjectPath: ifcGcsObjectPath,
+          ifcSchemaVersion: ifcResult.schemaVersion,
+          geometryPrimitive: ifcResult.geometryPrimitive,
+          georefCrs: ifcResult.georefCrs,
+          byteCount: ifcResult.byteCount,
+          vertexCount: ifcResult.vertexCount,
+          triangleCount: ifcResult.triangleCount,
+          confidence,
+        };
+      } else {
+        log.warn(
+          {
+            engagementId: args.engagementId,
+            code: ifcResult.code,
+            message: ifcResult.message,
+          },
+          "site-topography ingest: IFC worker returned error (continuing without IFC)",
+        );
+      }
+    } catch (err) {
+      // Log and continue — the topo output is not gated on the IFC.
+      log.warn(
+        { err, engagementId: args.engagementId },
+        "site-topography ingest: IFC authoring/upload failed (continuing without IFC)",
+      );
+    }
+  }
+
   // 6) Upload DEM bytes to GCS.
   let demGcsObjectPath: string;
   try {
@@ -840,6 +1286,9 @@ export async function ingestSiteTopography(
       ? SITE_TOPOGRAPHY_EVENT_TYPES[0] // .ingested
       : SITE_TOPOGRAPHY_EVENT_TYPES[1]; // .refreshed
 
+  // `coverage`, `confidence`, and `sourceCitation` were computed above
+  // (before the mesh/IFC steps) so the IFC provenance/confidence Psets
+  // carry the identical numbers; reuse them here for the event payload.
   const payload: SiteTopographyEventPayload = {
     schemaVersion: 1,
     computedOrigin: true,
@@ -858,6 +1307,11 @@ export async function ingestSiteTopography(
     dem: {
       source: "usgs-3dep",
       resolutionMeters: demResolutionMeters,
+      resolutionMetersRequested: demResult.resolutionMetersRequested,
+      resolutionMetersActual: demResult.resolutionMetersActual,
+      // Null on the 3DEP raster path; see the field docstring. Threaded
+      // so a future rasterId probe fills it without a schema change.
+      sourceRasterId: null,
       gcsObjectPath: demGcsObjectPath,
       endpoint: demResult.endpoint,
       fetchedAt: demResult.fetchedAt,
@@ -872,6 +1326,18 @@ export async function ingestSiteTopography(
       thresholds: contoursResult.thresholds,
       featureCount: contoursResult.featureCollection.features.length,
       featureCollection: contoursResult.featureCollection,
+    },
+    ...(meshPayload ? { mesh: meshPayload } : {}),
+    ...(ifcPayload ? { ifc: ifcPayload } : {}),
+    coverage,
+    confidence,
+    qualityGate: {
+      // Source citation names the dataset + the exact endpoint the bytes
+      // came from, so the confidence is never a bare number; it is
+      // attributable (structural commitment #1). `evaluatedAt` is the DEM
+      // fetch time (the moment the coverage facts were measured).
+      sourceCitation,
+      evaluatedAt: demResult.fetchedAt,
     },
     inputSignature: signature,
     workerVersion: WORKER_VERSION,
