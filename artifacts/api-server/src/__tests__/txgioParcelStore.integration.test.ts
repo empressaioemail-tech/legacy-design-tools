@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import { withTestSchema } from "@workspace/db/testing";
-import { txgioParcel } from "@workspace/db/schema";
+import { txgioParcel, cadProperty } from "@workspace/db/schema";
 import { AdapterRunError } from "@workspace/adapters/types";
 import {
   bboxOfGeometry,
@@ -21,6 +21,7 @@ import {
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
 import {
+  __internal,
   makeTxgioParcelPointLookup,
   queryTxgioParcelsGeoJson,
   txgioSourceUrl,
@@ -216,6 +217,142 @@ describe.skipIf(!hasDb)("txgio_parcel store readers over real geometry", () => {
         database: db,
       });
       expect(res.featureCount).toBe(3);
+    });
+  });
+});
+
+/**
+ * CAD land-use join — proves the choropleth-coloring enrichment that
+ * lets Hays/Comal parcels color like the live county-GIS layers. The
+ * join is keyed (county_fips, normalizeCadPropId(prop_id)); the real
+ * San Marcos parcel Prop_ID 12310 (707 Uhland Rd) is the anchor, and
+ * its CAD row carries a real `property_use_code`. Comal seeds no CAD
+ * roll, so it must stay neutral without crashing.
+ */
+const HAYS_LANDUSE_SEED = [
+  ...rowsFor("48209", 1, HAYS_12310_GEOMETRY, {
+    propId: "12310",
+    geoId: "10-0017-2347-00000-3",
+    ownerName: "DELEON FELIX",
+    situsAddress: "707 UHLAND RD, SAN MARCOS, TX 78666",
+  }),
+  // A neighbor whose CAD row has a NULL use code (Hays Orion reality:
+  // the property export ships no state/use code) — must stay neutral.
+  ...rowsFor("48209", 3, SPANNING_GEOMETRY, { propId: "99001" }),
+];
+
+/** Two Hays CAD rows: 12310 has a real code, 99001's code is null. */
+const HAYS_CAD_ROWS = [
+  {
+    countyFips: "48209",
+    propId: "12310",
+    taxYear: 2025,
+    propertyUseCode: "PRIOR (must not win)",
+    sourceFile: "hays_2025.txt",
+    sourceVintage: "2025-orion-hays",
+  },
+  {
+    countyFips: "48209",
+    propId: "12310",
+    taxYear: 2026,
+    propertyUseCode: "A1",
+    sourceFile: "hays_2026.txt",
+    sourceVintage: "2026-orion-hays",
+  },
+  {
+    countyFips: "48209",
+    propId: "99001",
+    taxYear: 2026,
+    propertyUseCode: null,
+    sourceFile: "hays_2026.txt",
+    sourceVintage: "2026-orion-hays",
+  },
+];
+
+describe.skipIf(!hasDb)("txgio_parcel CAD land-use enrichment", () => {
+  it("merges landUseCode from the latest CAD row onto the joined parcel", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(HAYS_LANDUSE_SEED);
+      await db.insert(cadProperty).values(HAYS_CAD_ROWS);
+
+      const res = await queryTxgioParcelsGeoJson({
+        countyFips: "48209",
+        countyName: "Hays",
+        bbox: { westLng: -97.925, southLat: 29.894, eastLng: -97.911, northLat: 29.897 },
+        database: db,
+      });
+      const features = res.geojson.features as Array<{
+        properties: Record<string, unknown>;
+      }>;
+
+      const f12310 = features.find((f) => f.properties.apn === "12310")!;
+      expect(f12310.properties).toMatchObject({
+        landUseCode: "A1", // 2026 wins over the 2025 prior-year row
+        landUseSource: "cad-roll",
+        landUseVintage: "2026-orion-hays",
+      });
+
+      // 99001's only CAD row has a null code — stays honestly neutral.
+      const f99001 = features.find((f) => f.properties.apn === "99001")!;
+      expect(f99001.properties.landUseCode).toBeUndefined();
+      expect(f99001.properties.landUseSource).toBeUndefined();
+    });
+  });
+
+  it("leaves parcels neutral in a county with no CAD roll (Comal), no crash", async () => {
+    await withTestSchema(async ({ db }) => {
+      // Seed the SAME geometry under Comal's FIPS; seed NO cad_property.
+      await db.insert(txgioParcel).values([
+        ...rowsFor("48091", 1, HAYS_12310_GEOMETRY, { propId: "12310" }),
+      ]);
+
+      const res = await queryTxgioParcelsGeoJson({
+        countyFips: "48091",
+        countyName: "Comal",
+        bbox: { westLng: -97.925, southLat: 29.894, eastLng: -97.911, northLat: 29.897 },
+        database: db,
+      });
+      const feature = (res.geojson.features as Array<{
+        properties: Record<string, unknown>;
+      }>)[0];
+      expect(feature.properties.apn).toBe("12310");
+      expect(feature.properties.landUseCode).toBeUndefined();
+      expect(feature.properties.landUseSource).toBeUndefined();
+    });
+  });
+
+  it("batch-fetches CAD land-use for a tile in one map keyed by normalized prop id", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(cadProperty).values([
+        {
+          countyFips: "48209",
+          propId: "12310",
+          taxYear: 2026,
+          propertyUseCode: "A1",
+          sourceFile: "hays_2026.txt",
+          sourceVintage: "2026-orion-hays",
+        },
+        // Leading-zero id in the tile normalizes to "42" to match the
+        // CAD-stored key; proves the join normalizes both sides.
+        {
+          countyFips: "48209",
+          propId: "42",
+          taxYear: 2026,
+          propertyUseCode: "E",
+          sourceFile: "hays_2026.txt",
+          sourceVintage: "2026-orion-hays",
+        },
+      ]);
+
+      // Two tile rows: one plain numeric, one zero-padded upstream id.
+      const tileRows = [
+        { propId: "12310" } as never,
+        { propId: "00042" } as never,
+      ];
+      const map = await __internal.fetchCadLandUseForTile(db, "48209", tileRows);
+      expect(map.get("12310")?.landUseCode).toBe("A1");
+      expect(map.get("42")?.landUseCode).toBe("E");
+      expect(map.size).toBe(2);
     });
   });
 });

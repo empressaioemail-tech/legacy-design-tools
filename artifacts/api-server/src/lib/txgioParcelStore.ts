@@ -22,7 +22,25 @@
  *      sane cell list fall back to the bbox-column scan.
  *
  * No tile cache on this path — the local table IS the store; a cache
- * row would just duplicate it.
+ * row would just duplicate it. The CAD land-use enrichment (below) is
+ * therefore joined at every serve, not cached; there is no cached
+ * payload for it to be stale against.
+ *
+ * Land-use coloring: TxGIO parcel features carry NO land-use code (the
+ * StratMap parcel program ships geometry + owner/situs only), so the
+ * extension's choropheth renders neutral on the Hays/Comal layer while
+ * live county-GIS counties (which return USECD/PropUse) color. To close
+ * that gap, `queryTxgioParcelsGeoJson` batch-joins each returned tile's
+ * parcel ids to the `cad_property` roll (PR #245) on the SAME key the
+ * `cad:*` brief adapters use — `(county_fips, normalizeCadPropId(prop_id))`
+ * — and merges the CAD `property_use_code` onto the feature as
+ * `landUseCode`, matching the shape the live county providers emit
+ * (Bexar/Travis code-only, no description). One query per tile, not per
+ * feature. Land-use comes from a DIFFERENT source than geometry (the
+ * appraisal roll, not the parcel program), so an enriched feature also
+ * carries `landUseSource: "cad-roll"` + the CAD `sourceVintage` as
+ * provenance. A county with no CAD roll loaded (Comal today) gets zero
+ * join hits and stays honestly neutral — never a fabricated code.
  *
  * TxGIO land parcels are informational, not survey grade (the
  * program's own disclaimer) — every feature carries
@@ -33,7 +51,7 @@
 
 import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { db as defaultDb, txgioParcel } from "@workspace/db";
+import { db as defaultDb, txgioParcel, cadProperty } from "@workspace/db";
 import { AdapterRunError } from "@workspace/adapters/types";
 import type { ParcelGeometryPointLookup } from "@workspace/adapters/types";
 import {
@@ -148,11 +166,84 @@ export function makeTxgioParcelPointLookup(
   };
 }
 
+/**
+ * Land-use attributes joined out of the CAD roll for one tile's parcels,
+ * keyed by the CAD-normalized prop id (leading zeros stripped). Only the
+ * cheap attrs the extension colors on are carried.
+ */
+interface CadLandUse {
+  landUseCode: string;
+  landUseSource: "cad-roll";
+  landUseVintage: string;
+}
+
+/**
+ * Batch-fetch CAD land-use for the parcel ids in a served tile — ONE
+ * query for the whole tile, not one per feature. Joins on the same key
+ * the `cad:*` brief adapters use: `(county_fips, normalizeCadPropId(
+ * prop_id))`, backed by the `cad_property` primary key. Multiple
+ * `tax_year` rows can exist per parcel; the latest wins (matching
+ * `makeCadPropertyLookup`). Rows whose `property_use_code` is null (e.g.
+ * Hays today — the Orion property export does not carry a state/use
+ * code) are dropped so a parcel is enriched only when there is a real
+ * code to color on. A county with no CAD roll (Comal) yields an empty
+ * `ARRAY[]` predicate -> zero rows -> an empty map -> honest neutral.
+ */
+async function fetchCadLandUseForTile(
+  database: TxgioStoreDb,
+  countyFips: string,
+  rows: TxgioCandidateRow[],
+): Promise<Map<string, CadLandUse>> {
+  const out = new Map<string, CadLandUse>();
+  // Distinct CAD-normalized prop ids present in this tile.
+  const propIds = new Set<string>();
+  for (const row of rows) {
+    if (row.propId) propIds.add(normalizeCadPropId(row.propId));
+  }
+  if (propIds.size === 0) return out;
+
+  const cadRows = (await database
+    .select({
+      propId: cadProperty.propId,
+      taxYear: cadProperty.taxYear,
+      propertyUseCode: cadProperty.propertyUseCode,
+      sourceVintage: cadProperty.sourceVintage,
+    })
+    .from(cadProperty)
+    .where(
+      and(
+        eq(cadProperty.countyFips, countyFips),
+        inArray(cadProperty.propId, [...propIds]),
+      ),
+    )) as {
+    propId: string;
+    taxYear: number;
+    propertyUseCode: string | null;
+    sourceVintage: string;
+  }[];
+
+  // Latest tax-year row wins per parcel; keep only rows with a real code.
+  const latestYear = new Map<string, number>();
+  for (const cad of cadRows) {
+    if (!cad.propertyUseCode) continue;
+    const prev = latestYear.get(cad.propId);
+    if (prev !== undefined && prev >= cad.taxYear) continue;
+    latestYear.set(cad.propId, cad.taxYear);
+    out.set(cad.propId, {
+      landUseCode: cad.propertyUseCode,
+      landUseSource: "cad-roll",
+      landUseVintage: cad.sourceVintage,
+    });
+  }
+  return out;
+}
+
 function toFeature(
   row: TxgioCandidateRow,
   countyFips: string,
   countyName: string,
   retrievedAt: string,
+  landUse?: Map<string, CadLandUse>,
 ): Record<string, unknown> {
   const properties: Record<string, unknown> = {
     provider: "txgio",
@@ -166,6 +257,17 @@ function toFeature(
   if (row.propId) properties.apn = row.propId;
   if (row.situsAddress) properties.situsAddress = row.situsAddress;
   if (row.ownerName) properties.owner = row.ownerName;
+  // Land-use from the CAD roll (different source than the geometry).
+  // Keyed by the CAD-normalized prop id; only present when a real code
+  // was found, so Comal (no roll) and code-less Hays rows stay neutral.
+  if (row.propId && landUse) {
+    const hit = landUse.get(normalizeCadPropId(row.propId));
+    if (hit) {
+      properties.landUseCode = hit.landUseCode;
+      properties.landUseSource = hit.landUseSource;
+      properties.landUseVintage = hit.landUseVintage;
+    }
+  }
   return {
     type: "Feature",
     geometry: row.geometry,
@@ -286,8 +388,14 @@ export async function queryTxgioParcelsGeoJson(input: {
   }
 
   const retrievedAt = new Date().toISOString();
+  // One CAD land-use join for the whole tile (empty map when no roll).
+  const landUse = await fetchCadLandUseForTile(
+    database,
+    input.countyFips,
+    rows,
+  );
   const features = rows.map((row) =>
-    toFeature(row, input.countyFips, input.countyName, retrievedAt),
+    toFeature(row, input.countyFips, input.countyName, retrievedAt, landUse),
   );
 
   return {
@@ -299,4 +407,4 @@ export async function queryTxgioParcelsGeoJson(input: {
 }
 
 /** Exposed for tests. */
-export const __internal = { TXGIO_MAX_BBOX_CELLS };
+export const __internal = { TXGIO_MAX_BBOX_CELLS, fetchCadLandUseForTile };
