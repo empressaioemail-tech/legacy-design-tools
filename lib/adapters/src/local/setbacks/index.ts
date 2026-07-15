@@ -19,6 +19,7 @@
 import grandCountyUt from "./grand-county-ut.json" with { type: "json" };
 import lemhiCountyId from "./lemhi-county-id.json" with { type: "json" };
 import bastropTx from "./bastrop-tx.json" with { type: "json" };
+import sanMarcosTx from "./san-marcos-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 
@@ -33,6 +34,16 @@ export interface SetbackDistrict {
   max_lot_coverage_pct: number;
   max_impervious_pct: number;
   citation_url: string;
+  /**
+   * Optional per-value audit block read by the setback extraction acceptance
+   * gate (see `gate.ts` + docs/setback-extraction-acceptance-gate.md). The
+   * serving route ignores it — it does not reach the wire — so adding it to a
+   * table cannot change the FE contract. New (fan-out) tables MUST carry it;
+   * the four legacy hand-curated tables predate it and are treated as
+   * un-gated. Typed loosely here (Record) so the loader stays JSON-schema-free
+   * per the original design note; the gate imposes the strict shape.
+   */
+  provenance?: Record<string, unknown>;
 }
 
 export interface SetbackTable {
@@ -47,6 +58,12 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "grand-county-ut": grandCountyUt as SetbackTable,
   "lemhi-county-id": lemhiCountyId as SetbackTable,
   "bastrop-tx": bastropTx as SetbackTable,
+  // Registered with an empty districts[] — San Marcos is not yet in the code
+  // atom corpus, so it serves 200 with an explicit "pending onboarding" note
+  // (see the file's `note`) rather than 404 setback_table_not_found. No
+  // fabricated setback values ship; the acceptance gate blocks population
+  // until citation-backed extraction + human review lands.
+  "san-marcos-tx": sanMarcosTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
 };

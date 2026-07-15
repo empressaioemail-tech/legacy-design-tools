@@ -36,6 +36,28 @@ prose-only ordinance until the A05 code-atom pipeline ships.
 2. Append the import + record entry in `index.ts`.
 3. Adjust the test asserting completeness in `__tests__/`.
 
+## Acceptance gate (new / fan-out tables)
+
+New tables added by the multi-jurisdiction extraction fan-out MUST carry a
+per-value `provenance` block and pass the setback extraction acceptance gate
+before their `districts[]` is populated. The gate spec is
+`docs/setback-extraction-acceptance-gate.md`; the executable checker is
+`gate.ts` (exported as `@workspace/adapters/setbacks/gate`,
+`runSetbackGate`). It takes the extracted table plus the jurisdiction's source
+code-section atoms and returns pass / flag / block per rule per value:
+uncited or fabricated citations, missing districts, and missing verification
+state BLOCK; out-of-band values and asserted-quote mismatches FLAG for human
+review. The serving route ignores `provenance` — it never reaches the wire —
+so adding it cannot change the FE contract.
+
+The four legacy hand-curated tables (Grand County, Lemhi, Bastrop, and the two
+statewide fallbacks) predate the gate and carry no `provenance`; the gate
+treats them as un-gated legacy tables (reported, not silently passed).
+`san-marcos-tx.json` is registered with an empty `districts[]` because San
+Marcos is not yet in the code atom corpus — it serves 200 with a pending note
+rather than 404, and no setback values ship until citation-backed extraction
+plus human review land.
+
 ## Statewide fallback tables
 
 Two tables are statewide fallbacks rather than per-county entries:
