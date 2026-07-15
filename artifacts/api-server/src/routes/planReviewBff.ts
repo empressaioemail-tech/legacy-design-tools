@@ -64,6 +64,7 @@ import {
   loadReviewerBffEngagement,
   listReviewerEngagementSubmissions,
 } from "../lib/planReviewReviewerReads";
+import { UUID_RE } from "../lib/lSurfaceRoute";
 import {
   getSubmissionFindingsGenerationStatusWire,
   listSubmissionFindingsWire,
@@ -1125,6 +1126,16 @@ router.post(
       res.status(400).json({ error: "invalid_report_type" });
       return;
     }
+    // Guard the malformed-uuid engagement id BEFORE writing the `running` row.
+    // Without this, a non-uuid id upserts a `running` report_run row and THEN
+    // 500s on the `loadReviewerBffEngagement` uuid query below, leaving an
+    // orphan `running` row that the status GET reports forever (the observed
+    // "drainage running while every other type 500s" prod state). A malformed
+    // id is a clean 404 here too.
+    if (!UUID_RE.test(engagementId)) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
     const existing = await loadReportRun(engagementId, type);
     if (existing && existing.status === "running") {
       // Watchdog: a stuck previous run must never block retries forever. The
@@ -1413,6 +1424,19 @@ router.get(
     const type = normalizeReportType(typeRaw);
     if (!type) {
       res.status(400).json({ error: "invalid_report_type" });
+      return;
+    }
+    // A malformed (non-uuid) engagement id must be a clean 404, not a 500. The
+    // engagement lookup below (`loadReviewerBffEngagement`) runs a
+    // `WHERE id = $1` against a `uuid` column, and Postgres throws
+    // `invalid input syntax for type uuid` on a non-uuid value — surfacing as
+    // an unhandled 500 for every report type that falls past the early
+    // `running`-row return (a type WITH a running run-row returned before this
+    // point, which is why only the no-row types 500'd). Guarding here matches
+    // the null-engagement branch's honest `engagement_not_found` contract and
+    // the shared UUID_RE convention used across the sibling BFF routes.
+    if (!UUID_RE.test(engagementId)) {
+      res.status(404).json({ error: "engagement_not_found" });
       return;
     }
     // Durable run state (shared across instances). A `running` row drives the
