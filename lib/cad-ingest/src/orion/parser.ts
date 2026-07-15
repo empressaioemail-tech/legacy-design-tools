@@ -82,8 +82,12 @@ export interface OrionOwner {
 }
 
 function parseExemptionList(raw: string): string[] | null {
+  // WCAD's Socrata owner dataset space-separates multiple codes in one
+  // ExemptionList cell (e.g. "HS OA", "HS OV65 DV1"); Hays uses one
+  // code per cell. Split on whitespace too — exemption codes never
+  // contain internal spaces, so this is safe for both publishers.
   const codes = raw
-    .split(/[|,;]/)
+    .split(/[|,;\s]+/)
     .map((c) => c.trim().toUpperCase())
     .filter((c) => c.length > 0);
   return codes.length > 0 ? [...new Set(codes)] : null;
