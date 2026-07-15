@@ -172,6 +172,16 @@ describe.skipIf(!hasDb)("place dossier snapshots (integration)", () => {
           error: { code: "no-coverage" as const, message: "no roll row" },
         }),
       ),
+      // feat/permits-brief-slot — the free tier also carries
+      // permits:record; same deterministic no-coverage so the second
+      // dossier read stays snapshot-only.
+      {
+        adapterKey: "permits:record",
+        tier: "local",
+        layerKind: "permits-history",
+        status: "no-coverage" as const,
+        error: { code: "no-coverage" as const, message: "outside covered metros" },
+      },
     ]);
   });
 

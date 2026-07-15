@@ -980,6 +980,29 @@ CREATE TABLE @@SCHEMA@@.permit_counters (
 );
 
 
+-- Name: permit_record; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.permit_record (
+    metro text NOT NULL,
+    record_hash text NOT NULL,
+    permit_number text NOT NULL,
+    permit_type text,
+    work_class text,
+    permit_class text,
+    description text,
+    status text,
+    applied_date date,
+    issued_date date,
+    valuation numeric(14,2),
+    address_raw text,
+    address_normalized text,
+    tcad_id text,
+    source_file text NOT NULL,
+    acquired_date text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: place_layer_snapshots; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.place_layer_snapshots (
@@ -1909,6 +1932,12 @@ ALTER TABLE ONLY @@SCHEMA@@.permit_counters
     ADD CONSTRAINT permit_counters_tenant_id_year_pk PRIMARY KEY (tenant_id, year);
 
 
+-- Name: permit_record permit_record_metro_record_hash_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.permit_record
+    ADD CONSTRAINT permit_record_metro_record_hash_pk PRIMARY KEY (metro, record_hash);
+
+
 -- Name: place_layer_snapshots place_layer_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.place_layer_snapshots
@@ -2566,6 +2595,11 @@ CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING
 -- Name: parcel_briefings_engagement_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
+
+
+-- Name: permit_record_metro_address_issued_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX permit_record_metro_address_issued_idx ON @@SCHEMA@@.permit_record USING btree (metro, address_normalized, issued_date);
 
 
 -- Name: place_layer_snapshots_adapter_place_uidx; Type: INDEX; Schema: public; Owner: -

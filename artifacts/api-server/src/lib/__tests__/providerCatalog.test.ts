@@ -99,6 +99,13 @@ describe("providerCatalog metering", () => {
     expect(entry?.sourceKind).toBe("local-adapter");
   });
 
+  it("explicitly never meters permits keys (owned public-record corpus, local store)", () => {
+    expect(isMeteredAdapterKey("permits:record")).toBe(false);
+    const entry = providerCatalogEntryForKey("permits:record");
+    expect(entry?.metered).toBe(false);
+    expect(entry?.label).toBe("City issued-permit records (public record)");
+  });
+
   it("keeps regrid dormant semantics (unmetered)", () => {
     for (const key of REGRID_KEYS) {
       expect(isMeteredAdapterKey(key)).toBe(false);
@@ -136,6 +143,10 @@ describe("providerCatalog sourceKind", () => {
     for (const key of ["cad:property", "cad:tax", "cad:owner-occupancy"]) {
       expect(providerSourceKindForKey(key), key).toBe("local-adapter");
     }
+  });
+
+  it("labels permits keys local-adapter (per-jurisdiction issuance records)", () => {
+    expect(providerSourceKindForKey("permits:record")).toBe("local-adapter");
   });
 
   it("returns undefined for regrid and unknown prefixes so call sites keep their tier default", () => {

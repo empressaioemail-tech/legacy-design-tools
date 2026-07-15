@@ -173,6 +173,11 @@ describe("lib/db schema integration", () => {
         "parcel_briefings",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
+        // feat/permits-brief-slot — owned municipal issued-permit corpus
+        // (Austin + San Antonio public-record acquisition, Wave 3);
+        // loaded by the @workspace/cad-ingest permits-ingest CLI, read
+        // by the permits:record Property Brief adapter.
+        "permit_record",
         "place_layer_snapshots",
         // WS1 — per-piece discipline classification for plan-set decomposition.
         "plan_set_piece_classifications",

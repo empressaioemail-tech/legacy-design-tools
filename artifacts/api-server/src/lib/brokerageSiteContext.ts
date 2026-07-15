@@ -20,6 +20,7 @@ import {
 import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
 import { summarizeCadPayload } from "@workspace/adapters/local/cad";
+import { summarizePermitsPayload } from "@workspace/adapters/local/permits";
 import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import type { EngineHonesty } from "@workspace/engine-core";
 import {
@@ -41,6 +42,7 @@ import {
 } from "./brokerageTierGate";
 import { providerSourceKindForKey } from "./providerCatalog";
 import { makeCadPropertyLookup } from "./cadPropertyLookup";
+import { makePermitHistoryLookup } from "./permitHistoryLookup";
 import { makeTxgioParcelPointLookup } from "./txgioParcelStore";
 
 /** Wall-clock budget for one brief site-context fetch (all adapters). */
@@ -202,6 +204,7 @@ function layerSummary(
     summarizeFederalPayload(layerKind, payload) ??
     summarizeStatePayload(layerKind, payload) ??
     summarizeCadPayload(layerKind, payload) ??
+    summarizePermitsPayload(layerKind, payload) ??
     summarizeCotalityPayload(layerKind, payload)
   );
 }
@@ -454,6 +457,10 @@ export async function fetchBrokerageSiteContext(
           // Point->parcel geometry lookup for the TxGIO-store counties
           // (Hays/Comal — no live county GIS). Same injection pattern.
           parcelPointLookup: makeTxgioParcelPointLookup(),
+          // Issued-permit corpus accessor for the permits:record
+          // adapter (owned Austin/SA public-record corpus in
+          // permit_record). Same injection pattern.
+          permitLookup: makePermitHistoryLookup(),
         },
         cache,
       });

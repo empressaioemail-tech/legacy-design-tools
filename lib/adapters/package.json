@@ -31,6 +31,7 @@
     "./local/lemhi-county-id": "./src/local/lemhi-county-id.ts",
     "./local/bastrop-tx": "./src/local/bastrop-tx.ts",
     "./local/cad": "./src/local/cad.ts",
+    "./local/permits": "./src/local/permits.ts",
     "./local/summaries": "./src/local/summaries.ts",
     "./setbacks": "./src/local/setbacks/index.ts",
     "./setbacks/gate": "./src/local/setbacks/gate.ts",

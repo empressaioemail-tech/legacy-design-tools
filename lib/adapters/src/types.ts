@@ -145,6 +145,67 @@ export type CadPropertyLookup = (
   propId: string,
 ) => Promise<CadPropertyLookupRow | null>;
 
+/** Covered permit-corpus jurisdiction slug (`permit_record.metro`). */
+export type PermitMetroKey = "austin_tx" | "san_antonio_tx";
+
+/**
+ * One `permit_record` row as the `permits:record` adapter reads it —
+ * structural mirror of `@workspace/db`'s `PermitRecordRow`
+ * (feat/permits-brief-slot) narrowed to the fields the brief slot
+ * consumes. Defined here rather than imported so this package keeps
+ * its "no `@workspace/db` import" boundary.
+ *
+ * Dates are ISO `YYYY-MM-DD` strings. `valuation` is the applicant's
+ * declared figure in dollars (converted from the numeric column's
+ * decimal string by the accessor) — never an appraisal.
+ */
+export interface PermitRecordHit {
+  permitNumber: string;
+  permitType: string | null;
+  workClass: string | null;
+  permitClass: string | null;
+  status: string | null;
+  description: string | null;
+  appliedDate: string | null;
+  issuedDate: string | null;
+  valuation: number | null;
+  addressRaw: string | null;
+  /** CSV basename in the acquisition partition. */
+  sourceFile: string;
+  /** Public-record acquisition date, ISO. */
+  acquiredDate: string;
+}
+
+/**
+ * Result of one permit-history lookup: the most-recent-N rows (issued
+ * date descending, nulls last) plus honest aggregates over the FULL
+ * match set so the summary can say "N permits since YYYY" without
+ * pretending the returned page is the whole history.
+ */
+export interface PermitHistoryMatch {
+  rows: PermitRecordHit[];
+  totalMatched: number;
+  /** Min/max issued date over the full match set (ISO), null when unmatched/undated. */
+  earliestIssued: string | null;
+  latestIssued: string | null;
+}
+
+/**
+ * Injected accessor the `permits:record` adapter uses to read the
+ * `permit_record` store (owned Austin/San Antonio issued-permit
+ * corpus). Same injection pattern as {@link CadPropertyLookup}: this
+ * package is HTTP-fetch-shaped and must not import `@workspace/db`;
+ * the api-server injects a drizzle-backed implementation on the brief
+ * site-context path. `streetKey` must be produced by
+ * `permitStreetKey` (local/permits) — both sides of the address join
+ * share that one normalization.
+ */
+export type PermitHistoryLookup = (
+  metro: PermitMetroKey,
+  streetKey: string,
+  limit: number,
+) => Promise<PermitHistoryMatch>;
+
 /**
  * One point->parcel hit out of the self-hosted TxGIO parcel geometry
  * store (`txgio_parcel`, feat/txgio-parcel-geometry).
@@ -203,6 +264,14 @@ export interface AdapterContext {
    * ArcGIS-backed counties are unaffected.
    */
   parcelPointLookup?: ParcelGeometryPointLookup;
+  /**
+   * Issued-permit corpus accessor for the `permits:record` adapter
+   * (owned Austin/San Antonio public-record corpus in `permit_record`).
+   * Optional service injection — see {@link PermitHistoryLookup}.
+   * Absent on paths that cannot (or should not) reach the store; the
+   * adapter gates itself off when it is absent.
+   */
+  permitLookup?: PermitHistoryLookup;
   /**
    * Per-adapter network timeout (ms). Defaults to 15s in the runner —
    * adapters typically respond in <1s, so a hard cap here protects the

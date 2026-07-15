@@ -92,6 +92,20 @@ const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     sourceKind: "local-adapter",
   },
   {
+    // Owned municipal issued-permit corpus (feat/permits-brief-slot).
+    // Austin + San Antonio permit rows acquired via the uniform
+    // public-record process (Wave 3, 2026-06-21) and served from the
+    // local `permit_record` store — free public record, zero marginal
+    // cost per read, never metered. Per-jurisdiction issuance data is
+    // exactly what the AdapterSourceKind doc scopes OUT of
+    // `national-aggregator`, so like `cad:` these are `local-adapter`.
+    prefix: "permits:",
+    label: "City issued-permit records (public record)",
+    metered: false,
+    freeBaselineKeys: new Set(),
+    sourceKind: "local-adapter",
+  },
+  {
     // Dormant since the 2026-06-17 Regrid purge. Listed so the dormant
     // keys keep their historical semantics — unmetered, tier-default
     // sourceKind — instead of picking up accidental new behavior.
