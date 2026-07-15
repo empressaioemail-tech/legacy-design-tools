@@ -191,6 +191,12 @@ describe("lib/db schema integration", () => {
         // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
         "recorded_instruments",
         "render_outputs",
+        // feat/durable-report-run-state — cross-instance plan-review
+        // report-run STATE (replaces three instance-local Maps in
+        // planReviewBff.ts). Keyed (engagement_id, report_type). Sorts after
+        // `render_outputs` and before `response_tasks` (`ren` < `rep` < `res`)
+        // per `ORDER BY tablename`.
+        "report_run",
         // Cortex L1 (Lane C.4 / C.4.1) — response-task workflow rows.
         "response_tasks",
         // ADR-020 Phase 1 — restriction clauses extracted from instruments.

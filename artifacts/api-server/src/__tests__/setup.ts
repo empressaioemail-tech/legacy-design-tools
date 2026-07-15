@@ -162,6 +162,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // slate.
   "viewpoint_renders",
   "render_outputs",
+  // feat/durable-report-run-state — cross-instance plan-review report-run
+  // STATE. No FK to anything (keyed on engagement_id+report_type text, not a
+  // real FK — an engagement delete does not cascade to it), so the
+  // engagements truncate above does not clear it. Listed per the "if a route
+  // writes to it, it's in this list" invariant so the report-run route suite
+  // starts from a known-empty state between cases.
+  "report_run",
   // Architect inbox read-watermark. No FK to anything, so the
   // engagements truncate above does not clear it. Listed explicitly
   // per the "if a route writes to it, it's in this list" invariant,
