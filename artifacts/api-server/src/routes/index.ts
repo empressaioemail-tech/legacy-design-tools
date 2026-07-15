@@ -56,6 +56,7 @@ import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
 import planReviewBffRouter from "./planReviewBff";
+import { internalQaRunStateRouter } from "./operatorRunState";
 
 const router: IRouter = Router();
 
@@ -200,6 +201,12 @@ router.use(notificationsRouter);
 // every other router so ordering is indifferent.
 router.use(cannedFindingsRouter);
 router.use(qaRouter);
+// Command-center Run Monitor — the console's second run-state probe at
+// `/internal/qa/run-state`. Distinct path subtree from qaRouter's `/qa/*`, so
+// ordering is indifferent. Carries its own Bearer service-token gate (the
+// top-level `/api` router has no auth in front of it), so it is never
+// anonymous — see routes/operatorRunState.ts.
+router.use(internalQaRunStateRouter);
 // Cortex L1 (Lane C.4 / C.4.1) — response-task surface. Mounts
 // `/engagements/:engagementId/response-tasks` (create + list) and
 // `/response-tasks/:responseTaskId/*` (state + link-finding).
