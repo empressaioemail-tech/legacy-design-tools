@@ -1165,6 +1165,25 @@ CREATE TABLE @@SCHEMA@@.render_outputs (
 );
 
 
+-- Name: report_run; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.report_run (
+    engagement_id text NOT NULL,
+    report_type text NOT NULL,
+    status text NOT NULL,
+    generation_id text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    error text,
+    reason text,
+    degraded text,
+    degraded_reason text,
+    library text,
+    result jsonb,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: response_tasks; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.response_tasks (
@@ -1948,6 +1967,12 @@ ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
     ADD CONSTRAINT render_outputs_pkey PRIMARY KEY (id);
+
+
+-- Name: report_run report_run_engagement_id_report_type_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.report_run
+    ADD CONSTRAINT report_run_engagement_id_report_type_pk PRIMARY KEY (engagement_id, report_type);
 
 
 -- Name: response_tasks response_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -

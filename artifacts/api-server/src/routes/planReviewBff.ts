@@ -45,11 +45,17 @@ import {
 } from "../lib/siteTopographyMaterializer";
 import { ingestSiteDrainage } from "../lib/siteDrainageIngest";
 import {
-  isInFlightRunStale,
   reportRunWatchdogBudgetMs,
   runWithWatchdog,
-  type InFlightReportRun,
 } from "../lib/reportRunWatchdog";
+import {
+  clearReportRun,
+  isReportRunStale,
+  loadReportRun,
+  markReportRunError,
+  markReportRunOk,
+  markReportRunRunning,
+} from "../lib/reportRunState";
 import {
   loadActiveSiteDrainageRow,
   rematerializeSiteDrainageFromLatestEvent,
@@ -1092,36 +1098,21 @@ router.post(
 
 // â”€â”€â”€ POST /plan-review/engagements/:id/reports/:type/run â”€â”€â”€â”€â”€â”€â”€
 
-const inFlightReports = new Map<string, InFlightReportRun>();
-const reportResultCache = new Map<string, unknown>();
-
 /**
- * Last failed run per engagement+type (instance-local, best-effort).
- *
- * The topography/drainage ingests return typed failure results instead of
- * throwing. This route used to discard those results, answer 202, and let
- * the status GET report "not-run" forever — the UI then blamed geocoding
- * ("ensure the parcel is geocoded") for what was actually an upstream or
- * spine failure. Failures now (a) return a real 4xx/5xx from the run POST
- * and (b) land here so the status GET can answer `{ status: "error" }`
- * with the true reason instead of "not-run".
+ * Report-run STATE now lives in Postgres (`report_run` table), not in three
+ * instance-local Maps. On multi-instance Cloud Run a status GET landing on a
+ * different instance than the one that ran the job used to see `not-run`
+ * because `inFlightReports` / `lastReportRunFailure` / `reportResultCache`
+ * were per-process. The #249 watchdog bounded a forever-`running` state but
+ * did not fix cross-instance visibility. `../lib/reportRunState` is the
+ * durable equivalent:
+ *   - markReportRunRunning → the old inFlightReports.set
+ *   - markReportRunError   → the old lastReportRunFailure.set (recordReportRunFailure)
+ *   - clearReportRun       → the old inFlightReports.delete + lastReportRunFailure.delete
+ *   - markReportRunOk      → the old reportResultCache.set (subsurface / hazard-quota only)
+ *   - loadReportRun / isReportRunStale → the status-GET reads + the #249 stale check,
+ *     now reading started_at from the shared row instead of a per-process entry.
  */
-const lastReportRunFailure = new Map<
-  string,
-  { error: string; reason: string; at: string }
->();
-
-function recordReportRunFailure(
-  flightKey: string,
-  error: string,
-  reason: string,
-): void {
-  lastReportRunFailure.set(flightKey, {
-    error,
-    reason,
-    at: new Date().toISOString(),
-  });
-}
 
 router.post(
   "/engagements/:engagementId/reports/:type/run",
@@ -1134,47 +1125,61 @@ router.post(
       res.status(400).json({ error: "invalid_report_type" });
       return;
     }
-    const flightKey = `${engagementId}:${type}`;
-    const existing = inFlightReports.get(flightKey);
-    if (existing) {
-      // Watchdog: a stuck previous run must never block retries forever.
-      if (isInFlightRunStale(existing, Date.now())) {
-        inFlightReports.delete(flightKey);
-        recordReportRunFailure(
-          flightKey,
+    const existing = await loadReportRun(engagementId, type);
+    if (existing && existing.status === "running") {
+      // Watchdog: a stuck previous run must never block retries forever. The
+      // stale check now reads started_at from the shared row, so a run stuck
+      // on ANOTHER instance is expired here too (cross-instance, not just
+      // origin-instance).
+      if (isReportRunStale(existing, Date.now())) {
+        await markReportRunError(
+          engagementId,
+          type,
           "watchdog-stale",
           `previous run ${existing.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+          existing.generationId,
         );
       } else {
         res.status(409).json({
           error: "report_already_running",
           generationId: existing.generationId,
-          startedAt: new Date(existing.startedAt).toISOString(),
+          startedAt: existing.startedAt.toISOString(),
         });
         return;
       }
     }
     const generationId = `gen-${Date.now()}`;
-    inFlightReports.set(flightKey, { generationId, startedAt: Date.now() });
+    await markReportRunRunning(engagementId, type, generationId, Date.now());
 
     const log = reqLog(req);
     const engagement = await loadReviewerBffEngagement(engagementId);
     if (!engagement) {
-      inFlightReports.delete(flightKey);
+      await clearReportRun(engagementId, type);
       res.status(404).json({ error: "engagement_not_found" });
       return;
     }
     const jurisdictionTenant = reviewerJurisdictionTenant(engagement);
 
     const watchdogBudgetMs = reportRunWatchdogBudgetMs();
-    const watchdogTimeout = (
-      siblingKey: string | null,
-    ): void => {
+    const watchdogTimeout = async (
+      siblingType: string | null,
+    ): Promise<void> => {
       const reason = `run exceeded the ${watchdogBudgetMs}ms watchdog budget; a downstream await did not settle in time`;
-      inFlightReports.delete(flightKey);
-      recordReportRunFailure(flightKey, "watchdog-timeout", reason);
-      if (siblingKey) {
-        recordReportRunFailure(siblingKey, "watchdog-timeout", reason);
+      await markReportRunError(
+        engagementId,
+        type,
+        "watchdog-timeout",
+        reason,
+        generationId,
+      );
+      if (siblingType) {
+        await markReportRunError(
+          engagementId,
+          siblingType,
+          "watchdog-timeout",
+          reason,
+          generationId,
+        );
       }
       log.error(
         { engagementId, type, generationId, watchdogBudgetMs },
@@ -1203,18 +1208,23 @@ router.post(
           lateSettleLogger("topography"),
         );
         if (raced.timedOut) {
-          watchdogTimeout(null);
+          await watchdogTimeout(null);
           return;
         }
         const topoResult = raced.result;
         if (topoResult.status !== "ok") {
-          inFlightReports.delete(flightKey);
           const reason = topoResult.reason;
           const code =
             topoResult.status === "upstream-error"
               ? topoResult.code
               : topoResult.status;
-          recordReportRunFailure(flightKey, code, reason);
+          await markReportRunError(
+            engagementId,
+            type,
+            code,
+            reason,
+            generationId,
+          );
           log.warn(
             { engagementId, type, code, reason },
             "plan-review topography run failed",
@@ -1224,12 +1234,14 @@ router.post(
             .json({ error: code, reason });
           return;
         }
-        lastReportRunFailure.delete(flightKey);
+        // Success: the result materializes to the site_topography derived
+        // row. Clear the run-state row so the status GET falls through to it.
+        await clearReportRun(engagementId, type);
       } else if (
         type === "drainage" ||
         type === "hydrology"
       ) {
-        const siblingKey = `${engagementId}:${type === "drainage" ? "hydrology" : "drainage"}`;
+        const siblingType = type === "drainage" ? "hydrology" : "drainage";
         const raced = await runWithWatchdog(
           ingestSiteDrainage({
             engagementId,
@@ -1241,24 +1253,31 @@ router.post(
           lateSettleLogger("drainage"),
         );
         if (raced.timedOut) {
-          watchdogTimeout(siblingKey);
+          await watchdogTimeout(siblingType);
           return;
         }
         const drainageResult = raced.result;
         if (drainageResult.status !== "ok") {
-          inFlightReports.delete(flightKey);
           const reason = drainageResult.reason;
           const code =
             drainageResult.status === "upstream-error"
               ? drainageResult.code
               : drainageResult.status;
-          recordReportRunFailure(flightKey, code, reason);
-          // drainage + hydrology share one ingest; mirror the failure to
-          // the sibling key so either status GET answers honestly.
-          recordReportRunFailure(
-            `${engagementId}:${type === "drainage" ? "hydrology" : "drainage"}`,
+          await markReportRunError(
+            engagementId,
+            type,
             code,
             reason,
+            generationId,
+          );
+          // drainage + hydrology share one ingest; mirror the failure to
+          // the sibling type so either status GET answers honestly.
+          await markReportRunError(
+            engagementId,
+            siblingType,
+            code,
+            reason,
+            generationId,
           );
           log.warn(
             { engagementId, type, code, reason },
@@ -1269,10 +1288,11 @@ router.post(
             .json({ error: code, reason });
           return;
         }
-        lastReportRunFailure.delete(flightKey);
-        lastReportRunFailure.delete(
-          `${engagementId}:${type === "drainage" ? "hydrology" : "drainage"}`,
-        );
+        // Success: the result materializes to the site_drainage derived row
+        // (carrying the hydrology degraded fields). Clear both the run type
+        // and its sibling so either status GET falls through to that store.
+        await clearReportRun(engagementId, type);
+        await clearReportRun(engagementId, siblingType);
       } else if (type === "subsurface") {
         const [eng] = await db
           .select({
@@ -1283,10 +1303,14 @@ router.post(
           .where(eq(engagements.id, engagementId))
           .limit(1);
         if (!eng?.latitude || !eng?.longitude) {
-          inFlightReports.delete(flightKey);
+          await clearReportRun(engagementId, type);
           res.status(422).json({ error: "engagement_not_geocoded" });
           return;
         }
+        // subsurface has NO separate result store — its result lives inline
+        // in the run-state row (the old reportResultCache). Persist `ok` +
+        // result (or the unavailable reason) so a cross-instance status GET
+        // can answer without re-running the adapter.
         try {
           const result = await usdaSsurgoSoilsAdapter.run({
             parcel: {
@@ -1296,17 +1320,20 @@ router.post(
             jurisdiction: { stateKey: null, localKey: null },
             fetchImpl: fetch,
           });
-          reportResultCache.set(flightKey, { status: "ok", result });
+          await markReportRunOk(engagementId, type, generationId, {
+            status: "ok",
+            result,
+          });
         } catch (err) {
           if (err instanceof AdapterRunError && err.code === "network-error") {
             // Keep the true upstream failure text — "USDA endpoint
             // unreachable" alone hid which host/endpoint actually failed.
-            reportResultCache.set(flightKey, {
+            await markReportRunOk(engagementId, type, generationId, {
               status: "unavailable",
               reason: err.message || "USDA endpoint unreachable",
             });
           } else if (err instanceof AdapterRunError) {
-            reportResultCache.set(flightKey, {
+            await markReportRunOk(engagementId, type, generationId, {
               status: "unavailable",
               reason: `${err.code}: ${err.message}`,
             });
@@ -1314,29 +1341,38 @@ router.post(
             throw err;
           }
         }
+        res.status(202).json({ generationId });
+        return;
       } else if (type === "hazard") {
         const outcome = await runHazardAdaptersForEngagement({
           engagementId,
           log,
         });
         if (!outcome.ok) {
-          inFlightReports.delete(flightKey);
+          await clearReportRun(engagementId, type);
           res.status(outcome.status).json({ error: outcome.error });
           return;
         }
         if (outcome.quotaExhausted) {
-          reportResultCache.set(flightKey, {
+          // The hazard result materializes via loadHazardReportResult; only
+          // the quota-exhausted flag has no other home, so persist an `ok`
+          // row carrying it (the status GET merges it onto the loaded result).
+          await markReportRunOk(engagementId, type, generationId, {
             status: "ok",
             result: { quotaExhausted: true, persisted: outcome.persisted },
           });
+          res.status(202).json({ generationId });
+          return;
         }
+        // No quota flag — result has a home in loadHazardReportResult.
+        await clearReportRun(engagementId, type);
       } else if (type === "brief") {
         const outcome = await runBriefReportForEngagement({
           engagementId,
           log,
         });
         if (!outcome.ok) {
-          inFlightReports.delete(flightKey);
+          await clearReportRun(engagementId, type);
           res
             .status(outcome.status)
             .json({
@@ -1345,14 +1381,21 @@ router.post(
             });
           return;
         }
+        // Success: the brief result materializes via loadBriefReportResult.
+        await clearReportRun(engagementId, type);
       } else if (type === "encumbrances") {
-        const encResult = await loadEncumbrancesReportResult(engagementId);
-        reportResultCache.set(flightKey, encResult);
+        // The encumbrances result has a home in loadEncumbrancesReportResult
+        // (the status GET re-loads it fresh; the old reportResultCache write
+        // here was never read). Clear the run-state row.
+        await clearReportRun(engagementId, type);
+      } else {
+        // compliance / avm and any future type with no run-branch: clear the
+        // running marker (matches the old unconditional inFlightReports.delete).
+        await clearReportRun(engagementId, type);
       }
-      inFlightReports.delete(flightKey);
       res.status(202).json({ generationId });
     } catch (err) {
-      inFlightReports.delete(flightKey);
+      await clearReportRun(engagementId, type);
       log.error({ err, engagementId, type }, "plan-review report run failed");
       res.status(502).json({ error: "report_run_failed" });
     }
@@ -1372,33 +1415,45 @@ router.get(
       res.status(400).json({ error: "invalid_report_type" });
       return;
     }
-    const flightKey = `${engagementId}:${type}`;
-    const inFlight = inFlightReports.get(flightKey);
-    if (inFlight) {
+    // Durable run state (shared across instances). A `running` row drives the
+    // running/stale branches; an `error` row is the failure signal the
+    // topography/drainage fall-through reads; an `ok` row carries the inline
+    // subsurface/hazard-quota result.
+    const runState = await loadReportRun(engagementId, type);
+    if (runState && runState.status === "running") {
       // Watchdog backstop: if the run handler itself was starved (e.g.
       // CPU-throttled after a client disconnect) its in-process timer may
-      // never fire — the status GET independently expires stale runs so
-      // "running" can never be a forever state.
-      if (isInFlightRunStale(inFlight, Date.now())) {
-        inFlightReports.delete(flightKey);
-        recordReportRunFailure(
-          flightKey,
+      // never fire — the status GET independently expires stale runs, now
+      // reading started_at from the shared row so "running" can never be a
+      // forever state on ANY instance.
+      if (isReportRunStale(runState, Date.now())) {
+        await markReportRunError(
+          engagementId,
+          type,
           "watchdog-stale",
-          `run ${inFlight.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+          `run ${runState.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+          runState.generationId,
         );
         res.json({
           status: "error",
-          error: `watchdog-stale: run ${inFlight.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
+          error: `watchdog-stale: run ${runState.generationId} exceeded the ${reportRunWatchdogBudgetMs()}ms watchdog budget without reaching a terminal state`,
         });
         return;
       }
       res.json({
         status: "running",
-        generationId: inFlight.generationId,
-        startedAt: new Date(inFlight.startedAt).toISOString(),
+        generationId: runState.generationId,
+        startedAt: runState.startedAt.toISOString(),
       });
       return;
     }
+
+    // The persisted failure record (old lastReportRunFailure) — an `error`
+    // row for this (engagement, type).
+    const failure =
+      runState && runState.status === "error"
+        ? { error: runState.error ?? "error", reason: runState.reason ?? "" }
+        : null;
 
     const engagement = await loadReviewerBffEngagement(engagementId);
     if (!engagement) {
@@ -1415,7 +1470,6 @@ router.get(
           log: reqLog(req),
         });
         if (replayed.status === "no-event") {
-          const failure = lastReportRunFailure.get(flightKey);
           if (failure) {
             res.json({
               status: "error",
@@ -1452,7 +1506,6 @@ router.get(
           log: reqLog(req),
         });
         if (replayed.status === "no-event") {
-          const failure = lastReportRunFailure.get(flightKey);
           if (failure) {
             res.json({
               status: "error",
@@ -1484,14 +1537,23 @@ router.get(
     }
 
   if (type === "subsurface") {
-    const cached = reportResultCache.get(flightKey);
+    // subsurface result lives inline in the run-state row (old
+    // reportResultCache) — now a shared `ok` row, so a cross-instance status
+    // GET sees the same answer as the instance that ran the adapter.
+    const cached =
+      runState && runState.status === "ok"
+        ? (runState.result as {
+            status?: string;
+            reason?: string;
+            result?: unknown;
+          } | null)
+        : null;
     if (cached) {
-      const row = cached as { status?: string; reason?: string; result?: unknown };
-      if (row.status === "unavailable") {
-        res.json({ status: "unavailable", result: { reason: row.reason } });
+      if (cached.status === "unavailable") {
+        res.json({ status: "unavailable", result: { reason: cached.reason } });
         return;
       }
-      res.json({ status: "ok", result: row.result });
+      res.json({ status: "ok", result: cached.result });
       return;
     }
     res.json({ status: "not-run" });
@@ -1501,9 +1563,12 @@ router.get(
   if (type === "hazard") {
     const hazard = await loadHazardReportResult(engagementId);
     if (hazard.status === "ok") {
-      const cached = reportResultCache.get(flightKey) as
-        | { result?: { quotaExhausted?: boolean } }
-        | undefined;
+      const cached =
+        runState && runState.status === "ok"
+          ? (runState.result as {
+              result?: { quotaExhausted?: boolean };
+            } | null)
+          : null;
       if (cached?.result?.quotaExhausted) {
         res.json({
           ...hazard,
