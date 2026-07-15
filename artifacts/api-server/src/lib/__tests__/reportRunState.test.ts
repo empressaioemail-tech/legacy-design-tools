@@ -97,10 +97,14 @@ describe("durable report-run state — cross-instance", () => {
     await withTestSchema(async ({ db: instanceA, schemaName }) => {
       const { db: instanceB, pool: poolB } = secondInstanceDb(schemaName);
       try {
-        await markReportRunOk(ENGAGEMENT, "subsurface", "gen-3000", {
-          status: "ok",
-          result: { mapunit: "TeC2", pct: 55 },
-        });
+        await markReportRunOk(
+          ENGAGEMENT,
+          "subsurface",
+          "gen-3000",
+          { status: "ok", result: { mapunit: "TeC2", pct: 55 } },
+          {},
+          instanceA,
+        );
         const seen = await loadReportRun(ENGAGEMENT, "subsurface", instanceB);
         expect(seen?.status).toBe("ok");
         expect(seen?.result).toEqual({
