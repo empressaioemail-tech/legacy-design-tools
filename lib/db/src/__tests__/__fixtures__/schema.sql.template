@@ -1466,6 +1466,30 @@ CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
 );
 
 
+-- Name: txgio_address; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.txgio_address (
+    county_fips text NOT NULL,
+    full_addr text NOT NULL,
+    unit text DEFAULT ''::text NOT NULL,
+    object_id integer,
+    add_number text,
+    st_name text,
+    post_comm text,
+    post_code text,
+    state text,
+    county_name text,
+    source text,
+    date_acq text,
+    longitude double precision NOT NULL,
+    latitude double precision NOT NULL,
+    tile_key text NOT NULL,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: txgio_parcel; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.txgio_parcel (
@@ -2104,6 +2128,12 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_parcel_tile_cache
     ADD CONSTRAINT tx_parcel_tile_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: txgio_address txgio_address_county_fips_full_addr_unit_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.txgio_address
+    ADD CONSTRAINT txgio_address_county_fips_full_addr_unit_pk PRIMARY KEY (county_fips, full_addr, unit);
 
 
 -- Name: txgio_parcel txgio_parcel_county_fips_tile_key_feature_index_pk; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2785,6 +2815,11 @@ CREATE INDEX tx_parcel_tile_cache_expires_idx ON @@SCHEMA@@.tx_parcel_tile_cache
 -- Name: tx_parcel_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX tx_parcel_tile_cache_uniq ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (tile_key, county_fips);
+
+
+-- Name: txgio_address_tile_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX txgio_address_tile_idx ON @@SCHEMA@@.txgio_address USING btree (county_fips, tile_key);
 
 
 -- Name: txgio_parcel_prop_idx; Type: INDEX; Schema: public; Owner: -

@@ -59,3 +59,28 @@ export type {
   TxgioUpsertOptions,
   TxgioUpsertSummary,
 } from "./txgio/ingest";
+export {
+  ADDRESS_COUNTIES,
+  resolveAddressCounty,
+} from "./address/counties";
+export type { AddressCounty } from "./address/counties";
+export {
+  addressLayerUrl,
+  countAddressPoints,
+  fetchAddressFeatures,
+  ADDRESS_PAGE_SIZE,
+  ADDRESS_RATE_MS,
+} from "./address/service";
+export type { AddressServiceOptions, FetchJson } from "./address/service";
+export { normalizeAddressFeature } from "./address/parse";
+export type { TxgioAddressRecord, AddressFeature } from "./address/parse";
+export {
+  deleteCountyAddresses,
+  upsertAddresses,
+  ADDRESS_DEFAULT_BATCH_SIZE,
+} from "./address/ingest";
+export type {
+  AddressIngestDb,
+  AddressUpsertOptions,
+  AddressUpsertSummary,
+} from "./address/ingest";

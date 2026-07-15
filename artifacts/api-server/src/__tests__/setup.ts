@@ -229,6 +229,14 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // it, it's in this list" invariant so store-backed route suites
   // start from a known-empty state.
   "txgio_parcel",
+  // feat/txgio-address-points — self-hosted TxGIO/StratMap address-POINT
+  // store (point sibling of txgio_parcel). No FK to anything (loaded by
+  // the @workspace/cad-ingest address-ingest CLI, read by the geocode /
+  // situs->parcel resolver), so the engagements truncate does not clear
+  // it. Listed per the "if a route writes to it, it's in this list"
+  // invariant so store-backed route suites start from a known-empty
+  // state.
+  "txgio_address",
 ];
 
 /**
