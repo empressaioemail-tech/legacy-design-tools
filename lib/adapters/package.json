@@ -33,6 +33,7 @@
     "./local/cad": "./src/local/cad.ts",
     "./local/summaries": "./src/local/summaries.ts",
     "./setbacks": "./src/local/setbacks/index.ts",
+    "./setbacks/gate": "./src/local/setbacks/gate.ts",
     "./arcgis": "./src/arcgis.ts",
     "./txCountyApn": "./src/txCountyApn.ts"
   },

@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://empressa.io/schemas/local-setback-table.json",
+  "title": "Local setback table",
+  "description": "Per-jurisdiction setback table served by GET /api/local/setbacks/{jurisdictionKey}. The flat numeric fields are the served wire shape; the optional per-district `provenance` block is read only by the setback extraction acceptance gate and never reaches the wire.",
+  "type": "object",
+  "required": ["jurisdictionKey", "jurisdictionDisplayName", "districts"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "jurisdictionKey": { "type": "string" },
+    "jurisdictionDisplayName": { "type": "string" },
+    "note": { "type": ["string", "null"] },
+    "districts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/district" }
+    }
+  },
+  "$defs": {
+    "district": {
+      "type": "object",
+      "required": [
+        "district_name",
+        "front_ft",
+        "rear_ft",
+        "side_ft",
+        "side_corner_ft",
+        "max_height_ft",
+        "max_lot_coverage_pct",
+        "max_impervious_pct",
+        "citation_url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "district_name": { "type": "string" },
+        "front_ft": { "type": "number" },
+        "rear_ft": { "type": "number" },
+        "side_ft": { "type": "number" },
+        "side_corner_ft": { "type": "number" },
+        "max_height_ft": { "type": "number" },
+        "max_lot_coverage_pct": { "type": "number" },
+        "max_impervious_pct": { "type": "number" },
+        "citation_url": { "type": "string" },
+        "provenance": {
+          "type": "object",
+          "description": "Per-value audit block. Key = one of the seven numeric fields. Read by gate.ts, ignored by the serving route.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "atom_did",
+              "section_number",
+              "quote",
+              "confidence",
+              "verification_state"
+            ],
+            "properties": {
+              "atom_did": { "type": "string" },
+              "section_number": { "type": "string" },
+              "quote": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "verification_state": {
+                "type": "string",
+                "enum": ["asserted", "human-verified"]
+              },
+              "not_specified": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

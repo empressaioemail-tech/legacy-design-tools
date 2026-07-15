@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "san-marcos-tx",
+  "jurisdictionDisplayName": "City of San Marcos, TX",
+  "note": "Setback table pending corpus onboarding. San Marcos is NOT in the code-section atom corpus (0 atoms across the 34-jurisdiction snapshot as of 2026-05-26), so no citation-backed setback values can be extracted yet. Per the setback-extraction acceptance gate (docs/setback-extraction-acceptance-gate.md), values are not auto-shipped without a source atom + citation + human review. This registration wires the serving path (endpoint returns 200 with an explicit empty table rather than setback_table_not_found) and blocks on corpus onboarding: ingest the San Marcos Development Code as code-section atoms, extract per-district setbacks with per-value provenance, run the gate, human-review, then populate districts[].",
+  "districts": []
+}
