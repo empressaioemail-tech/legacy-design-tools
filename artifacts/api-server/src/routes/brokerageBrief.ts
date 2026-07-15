@@ -125,6 +125,7 @@ import { brokerageEncumbrancesRouter } from "./brokerageEncumbrances";
 import { brokerageWalletRouter } from "./brokerageWalletRoute";
 import { brokerageEntitlementRouter } from "./brokerageEntitlementRoute";
 import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
+import { brokerageOperatorRouter } from "./operatorRunState";
 import {
   RESEARCH_AREA_CONTEXT,
   formatResearchAreaContextForLlm,
@@ -294,6 +295,11 @@ brokerageV1.use("/wallet", brokerageWalletRouter);
 brokerageV1.use("/entitlement", brokerageEntitlementRouter);
 brokerageV1.use("/billing", brokerageBillingRouter);
 brokerageV1.use("/admin", brokerageAdminGraphRouter);
+// Command-center Run Monitor — operator run-state status. Mounts
+// `/operator/warming/status`; inherits the requireBrokerageAuthOrServiceToken
+// gate above (the console proxy attaches the service Bearer server-side), so it
+// is never anonymous.
+brokerageV1.use("/operator", brokerageOperatorRouter);
 
 async function resolveResearchChatRun(input: {
   runId?: string;
