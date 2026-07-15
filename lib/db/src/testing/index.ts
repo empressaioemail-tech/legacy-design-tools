@@ -132,6 +132,31 @@ export async function createTestSchema(): Promise<TestSchemaContext> {
 }
 
 /**
+ * Open a SECOND, independent connection pool + drizzle handle against an
+ * EXISTING test schema (typically one already opened by
+ * {@link createTestSchema} / {@link withTestSchema}). The caller owns the
+ * returned pool and must `pool.end()` it.
+ *
+ * This is the multi-instance stand-in for cross-process tests: two Cloud Run
+ * instances are two distinct clients against one shared database. A test that
+ * writes through the first handle and reads through this one proves a row is
+ * visible across connections, not just within the one that wrote it. The pool
+ * is scoped to the schema via `search_path` exactly like
+ * {@link createTestSchema}, so unqualified Drizzle table refs land there.
+ */
+export function openSecondHandle(schemaName: string): {
+  pool: pg.Pool;
+  db: TestDb;
+} {
+  const url = databaseUrl();
+  const url2 = new URL(url);
+  url2.searchParams.set("options", `-c search_path=${schemaName},public`);
+  const pool = new Pool({ connectionString: url2.toString(), max: 2 });
+  const db = drizzle(pool, { schema });
+  return { pool, db };
+}
+
+/**
  * Drop the schema opened by {@link createTestSchema} and close its pool.
  * Idempotent and safe to call from `afterAll`.
  */
