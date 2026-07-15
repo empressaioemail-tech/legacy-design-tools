@@ -5,7 +5,13 @@
  * Usage:
  *   pnpm --filter @workspace/cad-ingest cad-ingest -- \
  *     --county=48055 \
- *     --file=<local file | directory | zip | https URL> \
+ *     [--file=<local file | directory | zip | https URL>] \
+ *                                  # OMIT for open-fetch CADs (e.g. 48491
+ *                                  #   WCAD): the per-CAD bulk source is
+ *                                  #   resolved and fetched automatically.
+ *                                  #   REQUIRED for manual-download CADs
+ *                                  #   (e.g. 48209 Hays — WAF-gated ZIP)
+ *                                  #   and PACS counties.
  *     [--tax-year=2026]            # REQUIRED for Orion counties (48209/48491)
  *     [--vintage=<label>]          # default: derived from the file name
  *     [--owner-file=<path>]        # Orion owner file override
@@ -33,6 +39,7 @@ import { basename, join } from "node:path";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { resolveCounty } from "./counties";
+import { resolveCadBulkSource } from "./sources";
 import type { CadPropertyRecord, ParseCounters } from "./types";
 import { newCounters } from "./types";
 import { parsePacsExport } from "./pacs/parser";
@@ -143,9 +150,9 @@ async function main(): Promise<void> {
     },
   });
 
-  if (!values.county || !values.file) {
+  if (!values.county) {
     fail(
-      "usage: cad-ingest --county=<fips|name> --file=<path-or-url> " +
+      "usage: cad-ingest --county=<fips|name> [--file=<path-or-url>] " +
         "[--tax-year=NNNN] [--vintage=label] [--dry-run]",
     );
   }
@@ -156,6 +163,28 @@ async function main(): Promise<void> {
         "48021 Bastrop, 48055 Caldwell, 48209 Hays, 48491 Williamson",
     );
   }
+
+  // Resolve the input source. When --file is omitted, consult the
+  // per-CAD bulk-source registry (Rail B): open-fetch CADs pull their
+  // whole drop from the county alone; manual-download CADs stop with
+  // operator instructions rather than faking a fetch.
+  const bulkSource = resolveCadBulkSource(county.fips);
+  if (!values.file) {
+    if (!bulkSource) {
+      fail(
+        `--file is required for ${county.name} (${county.fips}): no ` +
+          "open-fetch bulk source is registered for it. Pass the local " +
+          "export drop with --file=<path>.",
+      );
+    }
+    if (bulkSource.mode === "manual-download") {
+      fail(
+        `${county.name} (${county.fips}) is a manual-download CAD — its ` +
+          `bulk roll is not an open HTTP fetch.\n  Source page: ${bulkSource.page}\n  ${bulkSource.instructions}`,
+      );
+    }
+    // open-fetch: fall through; datasets are fetched below.
+  }
   const dryRun = values["dry-run"] ?? false;
   const databaseUrl = process.env.DATABASE_URL;
   if (!dryRun && !databaseUrl) {
@@ -164,29 +193,56 @@ async function main(): Promise<void> {
 
   const startedAt = Date.now();
 
-  // 1. Resolve input: URL -> download; zip -> extract; dir -> discover.
-  let input = values.file;
   const workDir = await mkdtemp(join(tmpdir(), "cad-ingest-"));
-  if (isUrl(input)) {
-    input = await downloadToFile(input, workDir, log);
-  }
-  const sourceFile = basename(input);
 
   let inputs: ResolvedInputs;
-  const kind = await pathKind(input);
-  if (kind === "missing") fail(`input not found: ${input}`);
-  if (kind === "file" && /\.zip$/i.test(input)) {
-    const filter = county.format === "pacs" ? PACS_ENTRY_FILTER : ORION_ENTRY_FILTER;
-    const extracted = await extractCadDrop(input, workDir, filter, log);
-    inputs = await discoverFiles(county.format, extracted);
-  } else if (kind === "dir") {
-    const names = await readdir(input);
-    inputs = await discoverFiles(
-      county.format,
-      names.map((n) => join(input, n)),
-    );
+  let sourceFile: string;
+
+  if (!values.file) {
+    // Open-fetch path: pull every dataset in the per-CAD bulk source
+    // and slot each by its declared role. bulkSource is guaranteed
+    // open-fetch here (manual/missing already failed above).
+    const source = bulkSource as Extract<
+      NonNullable<typeof bulkSource>,
+      { mode: "open-fetch" }
+    >;
+    log(`open-fetch bulk source: ${source.datasets.length} dataset(s)`);
+    const partial: Partial<ResolvedInputs> = {};
+    for (const ds of source.datasets) {
+      const local = await downloadToFile(ds.url, workDir, log);
+      if (ds.kind === "property") partial.propertyFile = local;
+      else if (ds.kind === "owner") partial.ownerFile = local;
+      else if (ds.kind === "land") partial.landFile = local;
+      else if (ds.kind === "segment") partial.segmentFile = local;
+    }
+    if (partial.propertyFile === undefined) {
+      fail("open-fetch source declared no property dataset");
+    }
+    inputs = partial as ResolvedInputs;
+    sourceFile = basename(inputs.propertyFile);
   } else {
-    inputs = { propertyFile: input };
+    // 1. Resolve input: URL -> download; zip -> extract; dir -> discover.
+    let input = values.file;
+    if (isUrl(input)) {
+      input = await downloadToFile(input, workDir, log);
+    }
+    sourceFile = basename(input);
+
+    const kind = await pathKind(input);
+    if (kind === "missing") fail(`input not found: ${input}`);
+    if (kind === "file" && /\.zip$/i.test(input)) {
+      const filter = county.format === "pacs" ? PACS_ENTRY_FILTER : ORION_ENTRY_FILTER;
+      const extracted = await extractCadDrop(input, workDir, filter, log);
+      inputs = await discoverFiles(county.format, extracted);
+    } else if (kind === "dir") {
+      const names = await readdir(input);
+      inputs = await discoverFiles(
+        county.format,
+        names.map((n) => join(input, n)),
+      );
+    } else {
+      inputs = { propertyFile: input };
+    }
   }
   // Override files accept URLs exactly like --file does (they used to
   // be passed through verbatim and ENOENT on URLs).
@@ -217,7 +273,10 @@ async function main(): Promise<void> {
     );
   }
 
-  const vintage = values.vintage ?? deriveVintage(values.file);
+  // Open-fetch drops have no operator-supplied filename to derive a
+  // vintage from; fall back to the resolved property file's basename.
+  const vintage =
+    values.vintage ?? deriveVintage(values.file ?? sourceFile);
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
 
   log(`county=${county.fips} (${county.name} / ${county.cad}) format=${county.format}`);

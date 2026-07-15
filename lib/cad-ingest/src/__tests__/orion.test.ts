@@ -15,6 +15,7 @@ import {
   classifyOrionHeader,
   parseOrionExport,
   readOrionLand,
+  readOrionOwners,
 } from "../orion/parser";
 import { HeaderIndex } from "../csv";
 import { newCounters } from "../types";
@@ -152,6 +153,18 @@ describe("Orion PropertyDataExport parser (WCAD Socrata variant)", () => {
     // Property with no land row in the sample -> null.
     const noLand = records.find((r) => r.propId === "63599");
     expect(noLand?.propertyUseCode).toBeNull();
+  });
+
+  it("splits space-separated ExemptionList codes (live WCAD 'HS OA')", async () => {
+    // Live WCAD Socrata packs multiple exemption codes into one cell,
+    // space-separated ("HS OA", "HS OV65 DV1"); the fixture with a
+    // single code did not exercise this. Codes never contain internal
+    // spaces, so whitespace is a safe delimiter alongside |,;.
+    const owners = await readOrionOwners(fx("wcad_owner_multiexempt_sample.csv"));
+    expect(owners.get("70001")?.exemptionCodes).toEqual(["HS", "OA"]);
+    expect(owners.get("70002")?.exemptionCodes).toEqual(["HS", "OV65", "DV1"]);
+    // Empty cell -> null (no bogus empty-string code).
+    expect(owners.get("70003")?.exemptionCodes).toBeNull();
   });
 
   it("rejects a non-property file passed as the property file", async () => {

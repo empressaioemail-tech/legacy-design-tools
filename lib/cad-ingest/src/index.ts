@@ -8,6 +8,16 @@
 
 export * from "./types";
 export * from "./counties";
+export {
+  CAD_BULK_SOURCES,
+  resolveCadBulkSource,
+} from "./sources";
+export type {
+  CadBulkSource,
+  OpenFetchSource,
+  ManualDownloadSource,
+  BulkDataset,
+} from "./sources";
 export * from "./normalize";
 export { readCsvRows, HeaderIndex } from "./csv";
 export {
