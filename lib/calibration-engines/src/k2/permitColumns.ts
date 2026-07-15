@@ -38,11 +38,18 @@ export interface RawPermitFields {
   permitType: string;
 }
 
+/** `NULL` / `NUL` / `N/A` string sentinels that mean "no value". */
+function isSentinel(v: string): boolean {
+  const u = v.trim().toUpperCase();
+  return u === "" || u === "NULL" || u === "NUL" || u === "N/A" || u === "NONE";
+}
+
 function first(row: RawPermitRow, ...keys: string[]): string {
   for (const k of keys) {
     const v = row[k];
-    if (v !== undefined && v !== null && String(v).trim() !== "") {
-      return String(v).trim();
+    if (v !== undefined && v !== null) {
+      const s = String(v).trim();
+      if (!isSentinel(s)) return s;
     }
   }
   return "";
@@ -72,20 +79,27 @@ export function extractAustinPermitFields(row: RawPermitRow): RawPermitFields {
 /**
  * San Antonio permits-issued open-data CSVs (Bexar 48029).
  *
- * Parcel key is `PARCEL`; permit id is `PERMIT`; issued date is
- * `ISSUEDATE` (falling back to `PERMIT_DATE`); status is `STATUS`; work
- * type is `WORK_TYPE`. Title-case / spaced aliases cover the
- * current-vs-historical file header variants.
+ * Verified against the live 2026-06-21 open-data drops
+ * (permits_issued_2020_2024.csv, permits_issued_current.csv): the real
+ * headers are `PERMIT #` (permit id), `WORK TYPE`, `DATE ISSUED`,
+ * `DATE SUBMITTED` (applied), `PERMIT TYPE` (category, used as the
+ * description), and `PROJECT NAME`. These files carry NO parcel column
+ * and NO status column, and use the string sentinel `NULL` for empty
+ * cells (handled by `isSentinel`). The `PARCEL`/`ISSUEDATE`/`STATUS`/
+ * `WORK_TYPE` legacy aliases are kept for any older/underscored export
+ * variant. `PERMIT #` is not unique across trade lines of one project
+ * (a building + electrical + plumbing row can share it); the store
+ * dedups on (prop_id, permit_id) so those collapse to one row.
  */
 export function extractSanAntonioPermitFields(row: RawPermitRow): RawPermitFields {
   return {
-    permitId: first(row, "PERMIT", "Permit Number", "PERMIT_NUMBER"),
+    permitId: first(row, "PERMIT #", "PERMIT", "Permit Number", "PERMIT_NUMBER"),
     parcelKey: first(row, "PARCEL", "Parcel", "parcel"),
-    issuedDateRaw: first(row, "ISSUEDATE", "Issue Date", "issue_date", "PERMIT_DATE"),
-    appliedDateRaw: first(row, "APPLIEDDATE", "Applied Date", "applied_date", "SUBMITDATE"),
-    workClass: first(row, "WORK_TYPE", "Work Type", "work_type"),
+    issuedDateRaw: first(row, "DATE ISSUED", "ISSUEDATE", "Issue Date", "issue_date", "PERMIT_DATE"),
+    appliedDateRaw: first(row, "DATE SUBMITTED", "APPLIEDDATE", "Applied Date", "applied_date", "SUBMITDATE"),
+    workClass: first(row, "WORK TYPE", "WORK_TYPE", "Work Type", "work_type"),
     status: first(row, "STATUS", "Status"),
-    description: first(row, "DESCRIPTION", "Description", "PERMIT_TYPE", "Permit Type"),
-    permitType: first(row, "PERMIT_TYPE", "Permit Type", "permit_type", "PERMITTYPE"),
+    description: first(row, "PROJECT NAME", "DESCRIPTION", "Description"),
+    permitType: first(row, "PERMIT TYPE", "PERMIT_TYPE", "Permit Type", "permit_type", "PERMITTYPE"),
   };
 }

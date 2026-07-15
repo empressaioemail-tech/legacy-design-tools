@@ -27,6 +27,8 @@ export async function* readCsvStream(
   /** True when the previous char inside quotes was a quote (possible escape). */
   let pendingQuote = false;
   let sawAny = false;
+  /** Strip a leading UTF-8 BOM from the very first character. */
+  let atStart = true;
 
   function endField() {
     row.push(field);
@@ -47,7 +49,11 @@ export async function* readCsvStream(
 
   for await (const chunk of stream) {
     sawAny = true;
-    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    let text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (atStart) {
+      atStart = false;
+      if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    }
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       if (inQuotes) {

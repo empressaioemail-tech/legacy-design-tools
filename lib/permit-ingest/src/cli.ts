@@ -132,7 +132,22 @@ async function main(): Promise<void> {
     // Surface a non-zero gcloud exit as a fatal error.
     if (done) await done;
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
+    // Drizzle wraps the driver error; the useful text (the Postgres
+    // message + DETAIL) hangs off `.cause`. Surface both so a failing
+    // ingest is diagnosable without a debugger.
+    const parts: string[] = [];
+    if (err instanceof Error) {
+      parts.push(err.message);
+      const cause = (err as { cause?: unknown }).cause;
+      if (cause instanceof Error) {
+        parts.push(`cause: ${cause.message}`);
+        const detail = (cause as { detail?: unknown }).detail;
+        if (typeof detail === "string" && detail) parts.push(`detail: ${detail}`);
+      }
+    } else {
+      parts.push(String(err));
+    }
+    fail(parts.join(" | "));
   }
 
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
