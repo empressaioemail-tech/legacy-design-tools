@@ -23,8 +23,10 @@ import {
 import {
   __internal,
   makeTxgioParcelPointLookup,
+  ptadLandUseDescription,
   queryTxgioParcelsGeoJson,
   txgioSourceUrl,
+  type TxgioStoreDb,
 } from "../lib/txgioParcelStore";
 
 const hasDb =
@@ -288,6 +290,10 @@ describe.skipIf(!hasDb)("txgio_parcel CAD land-use enrichment", () => {
       const f12310 = features.find((f) => f.properties.apn === "12310")!;
       expect(f12310.properties).toMatchObject({
         landUseCode: "A1", // 2026 wins over the 2025 prior-year row
+        // Mapped description — this is what the paint expression's
+        // keyword matching actually colors by (PTAD codes never hit
+        // the exact-code branches).
+        landUseDescription: "Single-family residential",
         landUseSource: "cad-roll",
         landUseVintage: "2026-orion-hays",
       });
@@ -317,7 +323,39 @@ describe.skipIf(!hasDb)("txgio_parcel CAD land-use enrichment", () => {
       }>)[0];
       expect(feature.properties.apn).toBe("12310");
       expect(feature.properties.landUseCode).toBeUndefined();
+      expect(feature.properties.landUseDescription).toBeUndefined();
       expect(feature.properties.landUseSource).toBeUndefined();
+    });
+  });
+
+  it("issues exactly ONE extra statement per response for the join (no N+1)", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(HAYS_LANDUSE_SEED);
+      await db.insert(cadProperty).values(HAYS_CAD_ROWS);
+
+      // Count drizzle statement builds through the injected handle.
+      let builds = 0;
+      const database = {
+        select: (...args: unknown[]) => {
+          builds += 1;
+          return (db.select as (...a: unknown[]) => unknown)(...args);
+        },
+        selectDistinctOn: (...args: unknown[]) => {
+          builds += 1;
+          return (db.selectDistinctOn as (...a: unknown[]) => unknown)(...args);
+        },
+      } as unknown as TxgioStoreDb;
+
+      const res = await queryTxgioParcelsGeoJson({
+        countyFips: "48209",
+        countyName: "Hays",
+        bbox: { westLng: -97.925, southLat: 29.894, eastLng: -97.911, northLat: 29.897 },
+        database,
+      });
+      expect(res.featureCount).toBe(2);
+      // Parcel DISTINCT ON scan + one batched cad_property join —
+      // independent of how many features carry prop ids.
+      expect(builds).toBe(2);
     });
   });
 
@@ -354,5 +392,56 @@ describe.skipIf(!hasDb)("txgio_parcel CAD land-use enrichment", () => {
       expect(map.get("42")?.landUseCode).toBe("E");
       expect(map.size).toBe(2);
     });
+  });
+});
+
+describe("ptadLandUseDescription (mapping derived from the live cad_property code distribution)", () => {
+  it("maps every PTAD class observed in the store to a keyword the choropleth buckets on", () => {
+    // Class A — 321,512 A1 rows and friends.
+    expect(ptadLandUseDescription("A1")).toBe("Single-family residential");
+    expect(ptadLandUseDescription("A4")).toBe("Single-family residential");
+    // Class B, incl. Caldwell's BB..BF locals.
+    expect(ptadLandUseDescription("B2")).toBe("Multifamily residential");
+    expect(ptadLandUseDescription("BC")).toBe("Multifamily residential");
+    // Vacant.
+    expect(ptadLandUseDescription("C1")).toBe("Vacant lot or tract");
+    // Ag / open space; D2 is improvements ON ag land.
+    expect(ptadLandUseDescription("D1")).toBe(
+      "Agricultural / qualified open-space land",
+    );
+    expect(ptadLandUseDescription("D2")).toBe(
+      "Improvements on agricultural land",
+    );
+    // Rural: E1 is the farm/ranch house, the rest is land.
+    expect(ptadLandUseDescription("E1")).toBe(
+      "Rural single-family residential (farm/ranch improvement)",
+    );
+    expect(ptadLandUseDescription("E2")).toBe("Rural farm or ranch land");
+    expect(ptadLandUseDescription("E")).toBe("Rural farm or ranch land");
+    // Commercial vs industrial.
+    expect(ptadLandUseDescription("F1")).toBe("Commercial real property");
+    expect(ptadLandUseDescription("F2")).toBe("Industrial real property");
+    // Utilities, mobile homes, inventory.
+    expect(ptadLandUseDescription("J5")).toBe("Utility");
+    expect(ptadLandUseDescription("M1")).toBe("Mobile home (residential)");
+    expect(ptadLandUseDescription("O1")).toBe(
+      "Residential inventory (builder lots)",
+    );
+    expect(ptadLandUseDescription("S1")).toBe("Special inventory");
+    // Exempt family: EX, EX1..EX9, X, XV, XA/XG/XJ/XR/XU.
+    expect(ptadLandUseDescription("EX")).toBe("Exempt property");
+    expect(ptadLandUseDescription("EX9")).toBe("Exempt property");
+    expect(ptadLandUseDescription("XV")).toBe("Exempt property");
+    expect(ptadLandUseDescription("X")).toBe("Exempt property");
+  });
+
+  it("normalizes case/whitespace and refuses to guess unknown codes", () => {
+    expect(ptadLandUseDescription(" a1 ")).toBe("Single-family residential");
+    expect(ptadLandUseDescription("")).toBeNull();
+    expect(ptadLandUseDescription("   ")).toBeNull();
+    // Not PTAD codes — the raw code still serves on the feature, but a
+    // description (and therefore a color bucket) is never fabricated.
+    expect(ptadLandUseDescription("P-5")).toBeNull();
+    expect(ptadLandUseDescription("ZZZ")).toBeNull();
   });
 });

@@ -23,6 +23,14 @@
  *   Hays       48209  txgio_parcel (stratmap25, WGS84)
  *   Comal      48091  txgio_parcel (stratmap25, WGS84)
  *
+ * TxGIO carries no land-use attributes, so store-backed features are
+ * decorated at serve time with `landUseCode` / `landUseDescription`
+ * batch-joined from the local `cad_property` roll (one indexed query
+ * per response — see `txgioParcelStore.ts`), matching the normalized
+ * shape below. Counties whose roll has no use codes (Comal: no CAD
+ * rows; Hays: NULL codes until the Orion Land-file ingest lands) emit
+ * no land-use props and render neutral — honest, not fabricated.
+ *
  * County attributes are normalized to a compact feature-properties shape
  * (apn / situsAddress / owner / landUseCode / landUseDescription where the
  * county provides them) plus provenance (`provider: "county-gis"`,
