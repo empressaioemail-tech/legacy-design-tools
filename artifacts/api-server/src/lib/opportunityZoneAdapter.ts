@@ -28,8 +28,24 @@ export interface OzTractFeature {
   };
 }
 
+export interface OzTractCollectionMetadata {
+  version?: string;
+  designationRound?: string;
+  source?: string;
+  sourceUrl?: string;
+  retrievedAt?: string;
+  nationalDesignatedTractCount?: number;
+  bundledScope?: string;
+  bundledScopeReason?: string;
+  bundledTractCount?: number;
+  coordinatePrecisionDecimals?: number;
+  note?: string;
+  [key: string]: unknown;
+}
+
 interface OzTractCollection {
   type: "FeatureCollection";
+  metadata?: OzTractCollectionMetadata;
   features: OzTractFeature[];
 }
 
@@ -140,6 +156,106 @@ export function lookupOpportunityZone(input: {
     tractListVersion: round,
     matchMethod: "none",
   };
+}
+
+/** Provenance for the currently-loaded OZ tract layer (source, vintage, scope). */
+export function ozTractLayerProvenance(): {
+  source: string;
+  sourceUrl: string | null;
+  designationRound: string;
+  dataVintage: string | null;
+  tractListVersion: string;
+  nationalDesignatedTractCount: number | null;
+  bundledScope: string | null;
+  bundledTractCount: number;
+} {
+  const collection = loadOzTractFixture();
+  const meta = collection.metadata ?? {};
+  return {
+    source: meta.source ?? "CDFI Fund / HUD (OZ tracts)",
+    sourceUrl: meta.sourceUrl ?? null,
+    designationRound:
+      meta.designationRound ??
+      "2018 designation under the Tax Cuts and Jobs Act of 2017",
+    dataVintage: meta.retrievedAt ?? null,
+    tractListVersion: OZ_TRACT_LIST_VERSION,
+    nationalDesignatedTractCount: meta.nationalDesignatedTractCount ?? null,
+    bundledScope: meta.bundledScope ?? null,
+    bundledTractCount: meta.bundledTractCount ?? collection.features.length,
+  };
+}
+
+interface OzBboxEnvelope {
+  westLng: number;
+  southLat: number;
+  eastLng: number;
+  northLat: number;
+}
+
+function ringBbox(
+  ring: number[][],
+): { minLng: number; minLat: number; maxLng: number; maxLat: number } | null {
+  if (!ring.length) return null;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of ring as [number, number][]) {
+    if (lng < minLng) minLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lng > maxLng) maxLng = lng;
+    if (lat > maxLat) maxLat = lat;
+  }
+  return { minLng, minLat, maxLng, maxLat };
+}
+
+function geometryBbox(
+  geometry: OzTractFeature["geometry"],
+): { minLng: number; minLat: number; maxLng: number; maxLat: number } | null {
+  const rings: number[][][] =
+    geometry.type === "Polygon"
+      ? (geometry.coordinates as number[][][])
+      : (geometry.coordinates as number[][][][]).flatMap((poly) => poly);
+  let acc: {
+    minLng: number;
+    minLat: number;
+    maxLng: number;
+    maxLat: number;
+  } | null = null;
+  for (const ring of rings) {
+    const rb = ringBbox(ring);
+    if (!rb) continue;
+    acc = acc
+      ? {
+          minLng: Math.min(acc.minLng, rb.minLng),
+          minLat: Math.min(acc.minLat, rb.minLat),
+          maxLng: Math.max(acc.maxLng, rb.maxLng),
+          maxLat: Math.max(acc.maxLat, rb.maxLat),
+        }
+      : rb;
+  }
+  return acc;
+}
+
+/**
+ * Return the designated OZ tracts whose geometry bounding box overlaps the
+ * requested viewport bbox. Deterministic bbox-overlap test against authoritative
+ * federal geometry — no synthetic geometry, no external network call.
+ */
+export function ozTractsInBbox(bbox: OzBboxEnvelope): OzTractFeature[] {
+  const collection = loadOzTractFixture();
+  const hits: OzTractFeature[] = [];
+  for (const feature of collection.features) {
+    const gb = geometryBbox(feature.geometry);
+    if (!gb) continue;
+    const overlaps =
+      gb.minLng <= bbox.eastLng &&
+      gb.maxLng >= bbox.westLng &&
+      gb.minLat <= bbox.northLat &&
+      gb.maxLat >= bbox.southLat;
+    if (overlaps) hits.push(feature);
+  }
+  return hits;
 }
 
 export const opportunityZoneAdapter: Adapter = {

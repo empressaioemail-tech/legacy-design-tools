@@ -14,6 +14,10 @@ import {
 import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import type { ArcGisGeoJsonFeatureCollection } from "@workspace/adapters/arcgis";
 import type { GisLayerBbox } from "./brokerageGisLayers";
+import {
+  ozTractsInBbox,
+  ozTractLayerProvenance,
+} from "./opportunityZoneAdapter";
 
 export type CompositeLayerKey =
   | "buildable-envelope"
@@ -28,6 +32,26 @@ export const COMPOSITE_LAYER_KEYS: readonly CompositeLayerKey[] = [
   "motivated-seller",
 ];
 
+export type CompositeLayerProvenance = {
+  ozDesignation: {
+    source: string;
+    sourceUrl: string | null;
+    designationRound: string;
+    dataVintage: string | null;
+    tractListVersion: string;
+    nationalDesignatedTractCount: number | null;
+    bundledScope: string | null;
+    matchMethod: "bbox-overlap";
+  };
+  dealSignal: {
+    kind: "oz-designation-membership";
+    source: string;
+    excludes: string[];
+    note: string;
+  };
+  generatedAt: string;
+};
+
 export type CompositeLayerPayload = {
   layer: CompositeLayerKey;
   geojson: ArcGisGeoJsonFeatureCollection;
@@ -35,6 +59,7 @@ export type CompositeLayerPayload = {
   queryMode: "bbox";
   fixture?: boolean;
   notes?: string;
+  provenance?: CompositeLayerProvenance;
 };
 
 function defaultHonesty(adapter: string, degraded = false): EngineHonesty {
@@ -74,6 +99,105 @@ function insetRing(outer: number[][], inset = 0.15): number[][] {
     cx + (x! - cx) * (1 - inset),
     cy + (y! - cy) * (1 - inset),
   ]);
+}
+
+/**
+ * Real oz-deal-crossfilter derivation (STEP B).
+ *
+ * Resolves which CDFI/HUD-designated Opportunity Zone tracts overlap the
+ * requested viewport from the refreshed bundled OZ layer, and emits each with
+ * real tract geometry plus full provenance. The "deal signal" is the OZ
+ * designation itself — a public, investor-relevant tax-advantage signal
+ * (capital-gains deferral eligibility). No Cotality propensity is consumed
+ * (eval-clause); no synthetic dealScore/radarTier is invented.
+ *
+ * Membership is a deterministic bbox-overlap test against authoritative federal
+ * geometry, so the honesty is deterministic/earned, not an asserted number.
+ */
+export function deriveOzDealCrossfilter(bbox: GisLayerBbox): {
+  payload: CompositeLayerPayload;
+  honesty: EngineHonesty;
+} {
+  const prov = ozTractLayerProvenance();
+  const tracts = ozTractsInBbox({
+    westLng: bbox.westLng,
+    southLat: bbox.southLat,
+    eastLng: bbox.eastLng,
+    northLat: bbox.northLat,
+  });
+  const generatedAt = new Date().toISOString();
+
+  const provenance: CompositeLayerProvenance = {
+    ozDesignation: {
+      source: prov.source,
+      sourceUrl: prov.sourceUrl,
+      designationRound: prov.designationRound,
+      dataVintage: prov.dataVintage,
+      tractListVersion: prov.tractListVersion,
+      nationalDesignatedTractCount: prov.nationalDesignatedTractCount,
+      bundledScope: prov.bundledScope,
+      matchMethod: "bbox-overlap",
+    },
+    dealSignal: {
+      kind: "oz-designation-membership",
+      source: "CDFI/HUD OZ designation (public federal record)",
+      excludes: ["cotality-propensity", "tenant-private", "synthetic-deal-score"],
+      note:
+        "v1 deal signal is OZ designation membership only. No public-record per-tract deal score exists in the spine yet; none is fabricated.",
+    },
+    generatedAt,
+  };
+
+  const features = tracts.map((t) => {
+    const geoid = String(t.properties.geoid10 ?? "");
+    return {
+      type: "Feature" as const,
+      geometry: t.geometry,
+      properties: {
+        kind: "oz-deal-crossfilter",
+        geoid10: geoid,
+        inOpportunityZone: true,
+        ozDesignationRound: String(t.properties.round ?? prov.designationRound),
+        countyFips: t.properties.countyfp ?? null,
+        stateFips: t.properties.statefp ?? null,
+        dealSignal: "oz-designation-membership",
+        dealSignalSource: "CDFI/HUD OZ designation (public federal record)",
+        // Reasoning chain per commitment #1 — no bare/unearned number.
+        reasoning: `Tract ${geoid} is a CDFI/HUD-designated Opportunity Zone (${provenance.ozDesignation.designationRound}); OZ status is a public, investor-relevant capital-gains-deferral signal. Membership resolved by deterministic bbox overlap against authoritative federal geometry.`,
+        confidence: 1,
+        confidenceKind: "deterministic",
+        source: prov.source,
+        sourceUrl: prov.sourceUrl,
+        dataVintage: prov.dataVintage,
+        generatedAt,
+      },
+    };
+  });
+
+  const honesty: EngineHonesty = {
+    confidence: { value: 1, kind: "deterministic" },
+    dataVintage: prov.dataVintage,
+    coverage: { degraded: false },
+    source: {
+      adapter: "brokerage:composite-oz-deal-crossfilter",
+    },
+  };
+
+  return {
+    payload: {
+      layer: "oz-deal-crossfilter",
+      queryMode: "bbox",
+      fixture: false,
+      featureCount: features.length,
+      notes: `Designated OZ tracts overlapping the viewport (${features.length}), each carrying OZ-designation deal signal + provenance. Deal signal excludes Cotality propensity.`,
+      provenance,
+      geojson: {
+        type: "FeatureCollection",
+        features,
+      },
+    },
+    honesty,
+  };
 }
 
 export function buildCompositeLayerFixture(
@@ -137,28 +261,8 @@ export function buildCompositeLayerFixture(
   }
 
   if (layer === "oz-deal-crossfilter") {
-    return {
-      layer,
-      queryMode: "bbox",
-      fixture: true,
-      featureCount: 1,
-      geojson: {
-        type: "FeatureCollection",
-        features: [
-          {
-            type: "Feature",
-            geometry: { type: "Polygon", coordinates: [parcel] },
-            properties: {
-              kind: "oz-deal-crossfilter",
-              geoid10: "48453002400",
-              inOpportunityZone: true,
-              dealScore: 0.82,
-              radarTier: "A",
-            },
-          },
-        ],
-      },
-    };
+    // Real derivation — never a fixture. Delegates to the OZ layer.
+    return deriveOzDealCrossfilter(bbox).payload;
   }
 
   return {
@@ -191,6 +295,17 @@ export function queryCompositeLayer(input: {
   bbox: GisLayerBbox;
   fixture?: boolean;
 }): EngineEnvelope<CompositeLayerPayload> & { readContract: ReadContract } {
+  // oz-deal-crossfilter is a real derivation over the refreshed OZ layer:
+  // deterministic honesty, degraded:false, real provenance. It never presents
+  // as a fixture, so an incoming fixture flag does not downgrade it.
+  if (input.layer === "oz-deal-crossfilter") {
+    const { payload, honesty } = deriveOzDealCrossfilter(input.bbox);
+    return {
+      ...wrapEngineEnvelope(payload, honesty),
+      readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+    };
+  }
+
   const payload = buildCompositeLayerFixture(input.layer, input.bbox);
   const honesty = defaultHonesty(`brokerage:composite-${input.layer}`, true);
   return {
@@ -224,7 +339,8 @@ export function listCompositeLayerEndpoints(): Array<{
     {
       layer: "oz-deal-crossfilter",
       adapterKey: "brokerage:composite-oz-deal-crossfilter",
-      description: "Opportunity Zone tract crossed with fixture deal scores",
+      description:
+        "CDFI/HUD-designated Opportunity Zone tracts in view, carrying OZ-designation deal signal + provenance (public-record only; no Cotality propensity)",
     },
     {
       layer: "motivated-seller",
