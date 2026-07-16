@@ -1,6 +1,6 @@
 {
   "name": "@empressaio/cortex-tiles",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -12,6 +12,13 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.js",
       "default": "./dist/index.mjs"
+    },
+    "./site-analysis": {
+      "workspace": "./src/site-analysis/headless.ts",
+      "types": "./dist/site-analysis.d.ts",
+      "import": "./dist/site-analysis.mjs",
+      "require": "./dist/site-analysis.js",
+      "default": "./dist/site-analysis.mjs"
     }
   },
   "files": [

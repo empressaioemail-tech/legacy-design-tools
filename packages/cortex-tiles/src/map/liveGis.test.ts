@@ -81,6 +81,36 @@ describe('fetchGisLayer (bbox -> proxy POST -> honest states)', () => {
     }
   })
 
+  it('uses an INJECTED fetch (MV3 worker-proxy) and works with a brokerage baseUrl', async () => {
+    const envelope = { layer: 'parcels', featureCount: 1, geojson: fc([{ apn: '9' }]) }
+    const injected = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200 }))
+    const globalFetch = vi.fn().mockRejectedValue(new Error('global fetch must not be used'))
+    vi.stubGlobal('fetch', globalFetch)
+
+    // Brokerage-shaped baseUrl (origin/proxy root); fetchGisLayer appends
+    // /brokerage/v1/map-data/gis-layer.
+    const state = await fetchGisLayer('https://cortex.example/api', 'parcels', SAN_MARCOS_BBOX, {
+      fetch: injected,
+    })
+
+    expect(injected).toHaveBeenCalledTimes(1)
+    expect(globalFetch).not.toHaveBeenCalled()
+    expect(injected.mock.calls[0][0]).toBe(
+      'https://cortex.example/api/brokerage/v1/map-data/gis-layer',
+    )
+    expect(state.status).toBe('ok')
+  })
+
+  it('still accepts a bare AbortSignal as the 4th arg (back-compat)', async () => {
+    const injected = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ layer: 'parcels', geojson: fc([]) }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', injected)
+    const ac = new AbortController()
+    await fetchGisLayer('/api/spine/cortex/api', 'parcels', SAN_MARCOS_BBOX, ac.signal)
+    expect(injected.mock.calls[0][1]?.signal).toBe(ac.signal)
+  })
+
   it('maps 404 to an honest no-coverage state', async () => {
     vi.stubGlobal(
       'fetch',

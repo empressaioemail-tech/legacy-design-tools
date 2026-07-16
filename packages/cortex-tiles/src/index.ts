@@ -47,6 +47,8 @@ export {
   selectionToCard,
 } from './map/liveGis'
 export type {
+  GisFetchLike,
+  GisLayerOpts,
   LiveLayerKey,
   LiveLayerState,
   GisLayerResponse,
@@ -73,6 +75,7 @@ export {
   ReportHttpError,
 } from './site-analysis/siteReports'
 export type {
+  ReportFetchLike,
   SiteReportAuth,
   ReportParams,
   ReportState,
@@ -89,6 +92,27 @@ export type {
   SetbackTable,
   SetbackDistrict,
 } from './site-analysis/siteReports'
+// BROKERAGE, ADDRESS-keyed site-context (Change 1) — the Property Brief MV3
+// data plane. POST {baseUrl}/map-data keyed by lat/lng + address; pure
+// extractors over the bundled response. Peer of the engagement-keyed report
+// functions above. Also available React-free via the "./site-analysis" subpath.
+export {
+  fetchSiteContext,
+  getHydrologyLayer,
+  getHazardLayer,
+  getTopographyLayer,
+  getParcelContext,
+  SiteContextHttpError,
+} from './site-analysis/siteContext'
+export type {
+  FetchLike,
+  SiteContextFetchOpts,
+  SiteContext,
+  SiteContextMapData,
+  SiteContextLayerSlot,
+  SiteContextLayerKey,
+  SiteContextParams,
+} from './site-analysis/siteContext'
 
 // Property Intel
 export { PropertyBriefTile } from './property-intel/PropertyBriefTile'

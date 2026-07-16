@@ -99,20 +99,52 @@ export function layersForZoom(zoom: number): LiveLayerKey[] {
 }
 
 /**
+ * Injected fetch. When provided, fetchGisLayer routes the network call through
+ * it instead of global fetch — the MV3 worker-proxy seam (the background
+ * service worker holds the credential). Defaults to global fetch.
+ */
+export type GisFetchLike = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>
+
+export interface GisLayerOpts {
+  /** AbortSignal forwarded to the underlying fetch. */
+  signal?: AbortSignal
+  /** Injected fetch (MV3 worker-proxy); defaults to global fetch. */
+  fetch?: GisFetchLike
+}
+
+/**
  * POST one bbox gis-layer query through the cortex proxy.
  * Maps HTTP outcomes onto honest tile states:
  *   200 -> ok, 404 -> no-coverage, anything else -> named error (NEVER a silent
  *   fixture fallback).
+ *
+ * NOTE: `baseUrl` is caller-supplied and works for a brokerage base — the path
+ * appended here is `/brokerage/v1/map-data/gis-layer`, so pass the origin/proxy
+ * root (e.g. ".../api"), NOT a base already ending in "/brokerage/v1". A
+ * vanilla MV3 consumer can drive this headless (see the "./site-analysis"
+ * subpath export); pass `opts.fetch` to route through the worker.
+ *
+ * Back-compat: the 4th arg accepts either a bare AbortSignal (legacy) or a
+ * GisLayerOpts object `{ signal?, fetch? }`.
  */
 export async function fetchGisLayer(
   baseUrl: string,
   layer: LiveLayerKey,
   bbox: GisBBox,
-  signal?: AbortSignal,
+  signalOrOpts?: AbortSignal | GisLayerOpts,
 ): Promise<LiveLayerState> {
+  const opts: GisLayerOpts =
+    signalOrOpts && 'aborted' in (signalOrOpts as AbortSignal)
+      ? { signal: signalOrOpts as AbortSignal }
+      : ((signalOrOpts as GisLayerOpts) ?? {})
+  const signal = opts.signal
+  const doFetch: GisFetchLike = opts.fetch ?? ((input, init) => fetch(input, init))
   let res: Response
   try {
-    res = await fetch(`${baseUrl.replace(/\/$/, '')}/brokerage/v1/map-data/gis-layer`, {
+    res = await doFetch(`${baseUrl.replace(/\/$/, '')}/brokerage/v1/map-data/gis-layer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ layer, bbox }),
