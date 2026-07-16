@@ -1,0 +1,15 @@
+# IFC-authoring worker deps (parcel-mesh/IFC Layer 2).
+#
+# ifcopenshell authors the IFC4 file (IfcTriangulatedFaceSet + map
+# conversion + psets). The PyPI wheel `ifcopenshell` bundles the native
+# IfcOpenShell library, so no separate system build is required on the
+# platforms it publishes wheels for (manylinux x86_64 covers the
+# python:3.11-slim base). Pinned to the 0.7.x series (0.7.0.240xxxx build
+# tags) that ships those manylinux wheels; a bare `ifcopenshell` can
+# resolve to a source-only version with no wheel and fail the slim build.
+ifcopenshell>=0.7.0,<0.9
+
+# numpy: parity with the hydrology worker and available for any numeric
+# pre-pass. Kept <2 to match the sibling worker's pin and avoid an
+# ABI-mismatch surprise if ifcopenshell's wheel was built against numpy 1.x.
+numpy>=1.26.0,<2.0

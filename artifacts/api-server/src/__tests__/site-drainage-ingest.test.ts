@@ -138,9 +138,9 @@ describe("site-drainage ingest worker", () => {
     await ctx.schema!.db.insert(briefingSources).values({
       id: BRIEFING_SOURCE_ID,
       briefingId: BRIEFING_ID,
-      layerKind: "regrid-parcel",
-      sourceKind: "national-aggregator",
-      provider: "Regrid",
+      layerKind: "grand-county-ut-parcels",
+      sourceKind: "county-gis",
+      provider: "Grand County GIS",
       snapshotDate: new Date(),
       payload: {
         kind: "parcel",

@@ -151,10 +151,79 @@ export async function materializeSiteTopographyFromEvent(
             demFetchedAt: payload.dem.fetchedAt,
             demSource: payload.dem.source,
             demResolutionMeters: payload.dem.resolutionMeters,
+            // Layer-0 coverage honesty: carry the requested-vs-actual
+            // resolution pair (actual is null on the exportImage path) so
+            // the tile never conflates "asked for 10m" with "measured 10m".
+            demResolutionMetersRequested:
+              payload.dem.resolutionMetersRequested,
+            demResolutionMetersActual: payload.dem.resolutionMetersActual,
+            // The EPQS source-raster id (1m-lidar-vs-10m-fallback signal).
+            // Null on the 3DEP raster path today (see the payload field
+            // docstring); projected here so the read model carries it the
+            // moment a rasterId probe wires it into the event payload.
+            demSourceRasterId: payload.dem.sourceRasterId ?? null,
             demWidthPx: payload.dem.widthPx,
             demHeightPx: payload.dem.heightPx,
             minElevationMeters: payload.dem.minElevation,
             maxElevationMeters: payload.dem.maxElevation,
+            // Layer-0 fix (Defect 2): `nodataCount` was computed and written
+            // to the event payload but never reached this read model, so the
+            // tile could not tell a fully-covered fetch from a mostly-nodata
+            // one. Project it here, plus the derived coverage fraction so a
+            // consumer reads coverage without recomputing from the grid.
+            nodataCount: payload.dem.nodataCount,
+            coverageFraction:
+              payload.coverage?.coverageFraction ??
+              (payload.dem.widthPx * payload.dem.heightPx > 0
+                ? 1 -
+                  payload.dem.nodataCount /
+                    (payload.dem.widthPx * payload.dem.heightPx)
+                : null),
+            // Full coverage-honesty block (present on @1.1.0+ payloads).
+            coverage: payload.coverage ?? null,
+            // Layer-1 terrain mesh (present on @1.2.0+ payloads). `meshRef`
+            // is the object-storage path to the georeferenced GLB the
+            // command center viewer renders as a 3D surface (the same
+            // one-GLB-per-row read path the viewer already uses); the mesh
+            // metadata carries the georef origin + CRS convention so a
+            // consumer can place the local-ENU-meters frame in world space,
+            // plus vertex/triangle counts and the hole flag. Null on
+            // pre-@1.2.0 payloads (and when mesh generation was skipped).
+            meshRef: payload.mesh?.gcsObjectPath ?? null,
+            mesh: payload.mesh
+              ? {
+                  gcsObjectPath: payload.mesh.gcsObjectPath,
+                  format: payload.mesh.format,
+                  vertexCount: payload.mesh.vertexCount,
+                  triangleCount: payload.mesh.triangleCount,
+                  hasHoles: payload.mesh.hasHoles,
+                  georefOrigin: payload.mesh.georefOrigin,
+                  crsConvention: payload.mesh.crsConvention,
+                  minElevationMeters: payload.mesh.minElevationMeters,
+                  maxElevationMeters: payload.mesh.maxElevationMeters,
+                }
+              : null,
+            // Layer-2 IFC (present on @1.3.0+ payloads). `ifcRef` is the
+            // object-storage path to the georeferenced IFC4 file (authored
+            // from the SAME triangulation as the GLB). The block carries the
+            // schema version, geometry primitive, georef CRS, byte count,
+            // vertex/triangle counts, and the asserted confidence so the
+            // tile can surface an IFC deliverable with its provenance
+            // without fetching the file. Null on pre-@1.3.0 payloads (and
+            // when IFC authoring was skipped or failed — best-effort).
+            ifcRef: payload.ifc?.gcsObjectPath ?? null,
+            ifc: payload.ifc
+              ? {
+                  gcsObjectPath: payload.ifc.gcsObjectPath,
+                  ifcSchemaVersion: payload.ifc.ifcSchemaVersion,
+                  geometryPrimitive: payload.ifc.geometryPrimitive,
+                  georefCrs: payload.ifc.georefCrs,
+                  byteCount: payload.ifc.byteCount,
+                  vertexCount: payload.ifc.vertexCount,
+                  triangleCount: payload.ifc.triangleCount,
+                  confidence: payload.ifc.confidence,
+                }
+              : null,
             parcelOrigin: payload.parcel.origin,
             parcelBriefingSourceId: payload.parcel.briefingSourceId,
             parcelLayerKind: payload.parcel.layerKind,
@@ -165,6 +234,13 @@ export async function materializeSiteTopographyFromEvent(
             contourIntervalMeters: payload.contours.intervalMeters,
             contourThresholds: payload.contours.thresholds,
             contourFeatureCount: payload.contours.featureCount,
+            // Layer-0 fix (Defect 4): the asserted-baseline widthed
+            // confidence and its quality-gate provenance ride into the read
+            // model so every topo output the tile serves carries a source
+            // citation + confidence (structural commitment #1). `null` on
+            // pre-@1.1.0 payloads that predate the confidence field.
+            confidence: payload.confidence ?? null,
+            qualityGate: payload.qualityGate ?? null,
             workerVersion: payload.workerVersion,
           },
         })

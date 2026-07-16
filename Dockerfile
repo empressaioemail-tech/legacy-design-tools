@@ -107,6 +107,7 @@ RUN apt-get update \
       libgbm1 \
       libgcc-s1 \
       libglib2.0-0 \
+      libgomp1 \
       libgtk-3-0 \
       libnspr4 \
       libnss3 \
@@ -145,8 +146,12 @@ RUN apt-get update \
 COPY --from=build --chown=node:node /app /app
 
 # Python sidecar for site hydrology (artifacts/hydrology-worker/run.py).
+# Python sidecar for IFC authoring (artifacts/ifc-worker/run.py). ifcopenshell
+# dlopens libgomp at import, so libgomp1 is installed in the runtime apt set above.
 RUN pip3 install --break-system-packages --no-cache-dir \
       -r artifacts/hydrology-worker/requirements.txt \
+ && pip3 install --break-system-packages --no-cache-dir \
+      -r artifacts/ifc-worker/requirements.txt \
  && apt-get purge -y gcc g++ \
  && apt-get autoremove -y \
  && apt-get clean \
