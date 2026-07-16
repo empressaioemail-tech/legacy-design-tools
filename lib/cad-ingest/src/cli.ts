@@ -209,7 +209,8 @@ async function main(): Promise<void> {
     log(`open-fetch bulk source: ${source.datasets.length} dataset(s)`);
     const partial: Partial<ResolvedInputs> = {};
     for (const ds of source.datasets) {
-      const local = await downloadToFile(ds.url, workDir, log);
+      // Name by role so Socrata `/rows.csv` URLs do not overwrite each other.
+      const local = await downloadToFile(ds.url, workDir, log, `${ds.kind}.csv`);
       if (ds.kind === "property") partial.propertyFile = local;
       else if (ds.kind === "owner") partial.ownerFile = local;
       else if (ds.kind === "land") partial.landFile = local;

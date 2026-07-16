@@ -54,14 +54,20 @@ export function deriveVintage(fileArg: string): string {
 /**
  * Download `url` into `destDir`, following redirects. Returns the
  * local file path.
+ *
+ * `filename` overrides the basename derived from the URL. Required for
+ * Socrata-style endpoints where every dataset ends in `/rows.csv` —
+ * without an override the four WCAD open-fetch downloads collide on
+ * the same path and the last one wins.
  */
 export async function downloadToFile(
   url: string,
   destDir: string,
   log: (msg: string) => void = () => {},
+  filename?: string,
 ): Promise<string> {
   await mkdir(destDir, { recursive: true });
-  const dest = join(destDir, filenameFromUrl(url));
+  const dest = join(destDir, filename ?? filenameFromUrl(url));
   await mkdir(dirname(dest), { recursive: true });
 
   log(`downloading ${url}`);
