@@ -21,6 +21,22 @@ const travisOzBbox = {
   northLat: 30.234,
 };
 
+// Inside the bundled Central-TX coverage envelope but overlapping no OZ tract.
+const inScopeEmptyBbox = {
+  westLng: -98.572,
+  southLat: 29.44,
+  eastLng: -98.567,
+  northLat: 29.446,
+};
+
+// Miami, FL — outside the bundled Central-TX coverage envelope entirely.
+const outOfScopeBbox = {
+  westLng: -80.0,
+  southLat: 25.0,
+  eastLng: -79.99,
+  northLat: 25.01,
+};
+
 describe("listCompositeLayerEndpoints", () => {
   it("lists four composite map layers", () => {
     expect(listCompositeLayerEndpoints().map((l) => l.layer)).toEqual([
@@ -112,16 +128,28 @@ describe("deriveOzDealCrossfilter", () => {
     expect(honesty.coverage.degraded).toBe(false);
   });
 
-  it("returns an empty-but-honest derivation for a viewport with no OZ tracts", () => {
-    const { payload, honesty } = deriveOzDealCrossfilter({
-      westLng: -80.0,
-      southLat: 25.0,
-      eastLng: -79.99,
-      northLat: 25.01,
-    });
+  it("in-scope viewport with no OZ tract is a confident empty (degraded:false)", () => {
+    const { payload, honesty } = deriveOzDealCrossfilter(inScopeEmptyBbox);
     expect(payload.fixture).toBe(false);
     expect(payload.featureCount).toBe(0);
-    expect(payload.provenance?.ozDesignation.source).toContain("CDFI");
+    expect(payload.provenance?.ozDesignation.coverage).toBe("in-scope");
+    // Genuinely no OZ here, and we can say so: not degraded, deterministic.
     expect(honesty.coverage.degraded).toBe(false);
+    expect(honesty.confidence.kind).toBe("deterministic");
+  });
+
+  it("out-of-scope viewport is degraded (unknown), never a confident empty", () => {
+    const { payload, honesty } = deriveOzDealCrossfilter(outOfScopeBbox);
+    expect(payload.fixture).toBe(false);
+    expect(payload.featureCount).toBe(0);
+    expect(payload.provenance?.ozDesignation.coverage).toBe("out-of-scope");
+    // Absence here is unknown, not confirmed-none: must degrade honestly.
+    expect(honesty.coverage.degraded).toBe(true);
+    expect(honesty.coverage.reason).toMatch(/not hydrated|does not cover/i);
+    expect(honesty.confidence.kind).not.toBe("deterministic");
+    // Provenance still carries the national-count reconciliation note.
+    expect(payload.provenance?.ozDesignation.nationalCountNote).toMatch(
+      /8764/,
+    );
   });
 });

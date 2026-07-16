@@ -28,6 +28,13 @@ export interface OzTractFeature {
   };
 }
 
+export interface OzCoverageBbox {
+  westLng: number;
+  southLat: number;
+  eastLng: number;
+  northLat: number;
+}
+
 export interface OzTractCollectionMetadata {
   version?: string;
   designationRound?: string;
@@ -35,8 +42,11 @@ export interface OzTractCollectionMetadata {
   sourceUrl?: string;
   retrievedAt?: string;
   nationalDesignatedTractCount?: number;
+  nationalCountNote?: string;
   bundledScope?: string;
+  bundledScopeCountyFips?: string[];
   bundledScopeReason?: string;
+  bundledCoverageBbox?: OzCoverageBbox;
   bundledTractCount?: number;
   coordinatePrecisionDecimals?: number;
   note?: string;
@@ -166,8 +176,10 @@ export function ozTractLayerProvenance(): {
   dataVintage: string | null;
   tractListVersion: string;
   nationalDesignatedTractCount: number | null;
+  nationalCountNote: string | null;
   bundledScope: string | null;
   bundledTractCount: number;
+  coverageBbox: OzCoverageBbox | null;
 } {
   const collection = loadOzTractFixture();
   const meta = collection.metadata ?? {};
@@ -180,8 +192,10 @@ export function ozTractLayerProvenance(): {
     dataVintage: meta.retrievedAt ?? null,
     tractListVersion: OZ_TRACT_LIST_VERSION,
     nationalDesignatedTractCount: meta.nationalDesignatedTractCount ?? null,
+    nationalCountNote: meta.nationalCountNote ?? null,
     bundledScope: meta.bundledScope ?? null,
     bundledTractCount: meta.bundledTractCount ?? collection.features.length,
+    coverageBbox: ozLayerCoverageEnvelope(),
   };
 }
 
@@ -190,6 +204,71 @@ interface OzBboxEnvelope {
   southLat: number;
   eastLng: number;
   northLat: number;
+}
+
+let cachedCoverageEnvelope: OzCoverageBbox | null | undefined;
+
+/**
+ * The geographic coverage envelope of the currently-loaded OZ dataset.
+ *
+ * Prefers the explicit `metadata.bundledCoverageBbox` (bundled Central-TX file),
+ * otherwise derives the bbox union of every loaded tract geometry (e.g. the
+ * GCS-hydrated national set, which carries no bundledCoverageBbox). Returns null
+ * only if there is no usable geometry. Used to distinguish an in-scope empty
+ * viewport (confident "no OZ here") from an out-of-scope viewport (unknown —
+ * the layer simply does not cover that region in this environment).
+ */
+export function ozLayerCoverageEnvelope(): OzCoverageBbox | null {
+  if (cachedCoverageEnvelope !== undefined) return cachedCoverageEnvelope;
+  const collection = loadOzTractFixture();
+  const declared = collection.metadata?.bundledCoverageBbox;
+  if (
+    declared &&
+    Number.isFinite(declared.westLng) &&
+    Number.isFinite(declared.southLat) &&
+    Number.isFinite(declared.eastLng) &&
+    Number.isFinite(declared.northLat)
+  ) {
+    cachedCoverageEnvelope = declared;
+    return cachedCoverageEnvelope;
+  }
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  for (const feature of collection.features) {
+    const gb = geometryBbox(feature.geometry);
+    if (!gb) continue;
+    if (gb.minLng < minLng) minLng = gb.minLng;
+    if (gb.minLat < minLat) minLat = gb.minLat;
+    if (gb.maxLng > maxLng) maxLng = gb.maxLng;
+    if (gb.maxLat > maxLat) maxLat = gb.maxLat;
+  }
+  cachedCoverageEnvelope = Number.isFinite(minLng)
+    ? { westLng: minLng, southLat: minLat, eastLng: maxLng, northLat: maxLat }
+    : null;
+  return cachedCoverageEnvelope;
+}
+
+/**
+ * True when the requested viewport lies within (overlaps) the loaded OZ
+ * dataset's coverage envelope, i.e. the layer can speak to this region. A
+ * viewport that does not overlap the envelope is out-of-scope: absence of a
+ * tract there is "unknown", not "confidently none".
+ */
+export function bboxWithinOzCoverage(bbox: OzBboxEnvelope): boolean {
+  const env = ozLayerCoverageEnvelope();
+  if (!env) return false;
+  return (
+    env.westLng <= bbox.eastLng &&
+    env.eastLng >= bbox.westLng &&
+    env.southLat <= bbox.northLat &&
+    env.northLat >= bbox.southLat
+  );
+}
+
+export function __resetOzCoverageEnvelopeForTests(): void {
+  cachedCoverageEnvelope = undefined;
 }
 
 function ringBbox(
@@ -292,4 +371,5 @@ export const opportunityZoneAdapter: Adapter = {
 
 export function __resetOzTractCacheForTests(): void {
   cachedTracts = null;
+  cachedCoverageEnvelope = undefined;
 }
