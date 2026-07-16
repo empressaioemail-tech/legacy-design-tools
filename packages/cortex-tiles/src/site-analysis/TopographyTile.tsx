@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from 'react'
 import { useEngagement, useSpatial, TileStatusBanner } from '@empressaio/tile-shell'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
+import { fetchTopography } from './siteReports'
 
 function TopographyTileInner() {
   const client = useCortexClient()
@@ -17,26 +18,27 @@ function TopographyTileInner() {
     setError(null)
     setSummary(null)
     try {
-      await client.runReport(engagementId, 'topography')
-      const report = await client.getReport(engagementId, 'topography')
-      if (report.status === 'not-run') {
+      // Single source of truth: the pure fetchTopography function. Operator:
+      // "topography is a map function" — it returns map-ready contour GeoJSON.
+      const state = await fetchTopography(
+        client.config.baseUrl,
+        { engagementId },
+        undefined,
+        { getToken: client.config.getToken },
+      )
+      if (state.status === 'not-run' || state.status === 'unavailable') {
         setError('No topography yet — ensure the parcel is geocoded, then retry.')
         return
       }
-      if (report.status === 'error') {
-        setError(report.error ?? 'Topography run failed')
+      if (state.status === 'error') {
+        setError(state.message)
         return
       }
       setEngagementReportResult('topography', {
-        status: report.status === 'ok' ? 'ok' : 'error',
-        result: report.result,
-        error: report.error,
+        status: 'ok',
+        result: state.result,
       })
-      const geojson = (
-        report.result as {
-          contoursGeoJson?: { type: string; features: unknown[] }
-        }
-      )?.contoursGeoJson
+      const geojson = state.result?.contoursGeoJson
       if (geojson) {
         // SEAM: kind === map-renderer OverlaySpec.layerKey (MapTile.toMapOverlays).
         pushOverlay({

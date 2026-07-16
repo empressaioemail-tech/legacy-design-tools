@@ -3,13 +3,7 @@ import { useEngagement, useSpatial, TileStatusBanner } from '@empressaio/tile-sh
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 import { runButtonStyle } from './TopographyTile'
-
-type HydrologyReportResult = {
-  flowLinesGeoJson?: { type: string; features: unknown[] }
-  hydrologyLibrary?: string | null
-  hydrologyDegraded?: boolean
-  hydrologyDegradedReason?: string | null
-}
+import { fetchHydrology } from './siteReports'
 
 function HydrologyTileInner() {
   const client = useCortexClient()
@@ -26,26 +20,30 @@ function HydrologyTileInner() {
     setError(null)
     setDegradedReason(null)
     try {
-      await client.runReport(engagementId, 'hydrology')
-      const report = await client.getReport(engagementId, 'hydrology')
-      if (report.status === 'error') {
-        setError(report.error ?? 'Hydrology run failed')
+      // Single source of truth: the pure fetchHydrology function (React-free,
+      // vanilla-consumable) does the run+get+state mapping. The component only
+      // renders the honest state it returns.
+      const state = await fetchHydrology(
+        client.config.baseUrl,
+        { engagementId },
+        undefined,
+        { getToken: client.config.getToken },
+      )
+      if (state.status === 'error') {
+        setError(state.message)
+        return
+      }
+      if (state.status === 'not-run' || state.status === 'unavailable') {
+        setError('No hydrology result recorded yet — retry.')
         return
       }
       setEngagementReportResult('hydrology', {
-        status: report.status === 'ok' ? 'ok' : 'error',
-        result: report.result,
-        error: report.error,
+        status: 'ok',
+        result: state.result,
       })
-      const result = report.result as HydrologyReportResult | undefined
-      setLibrary(result?.hydrologyLibrary ?? null)
-      setDegradedReason(
-        result?.hydrologyDegraded
-          ? (result.hydrologyDegradedReason ??
-              'pysheds unavailable; native D8 fallback')
-          : null,
-      )
-      const flowLines = result?.flowLinesGeoJson
+      setLibrary(state.result?.hydrologyLibrary ?? null)
+      setDegradedReason(state.status === 'degraded' ? state.reason : null)
+      const flowLines = state.result?.flowLinesGeoJson
       if (flowLines) {
         pushOverlay({
           id: 'hydrology-flow',

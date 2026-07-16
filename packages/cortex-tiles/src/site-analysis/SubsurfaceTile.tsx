@@ -3,6 +3,7 @@ import { useEngagement, TileStatusBanner } from '@empressaio/tile-shell'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 import { runButtonStyle } from './TopographyTile'
+import { fetchSubsurface } from './siteReports'
 
 function SubsurfaceTileInner() {
   const client = useCortexClient()
@@ -16,24 +17,33 @@ function SubsurfaceTileInner() {
     setBusy(true)
     setError(null)
     try {
-      await client.runReport(engagementId, 'subsurface')
-      const report = await client.getReport(engagementId, 'subsurface')
-      if (report.status === 'unavailable') {
-        setError(
-          (report.result as { reason?: string })?.reason ??
-            'USDA endpoint unreachable',
-        )
+      // Single source of truth: the pure fetchSubsurface function.
+      const state = await fetchSubsurface(
+        client.config.baseUrl,
+        { engagementId },
+        undefined,
+        { getToken: client.config.getToken },
+      )
+      if (state.status === 'unavailable') {
+        setError(state.detail ?? 'USDA endpoint unreachable')
         setEngagementReportResult('subsurface', {
           status: 'error',
           error: 'unavailable',
-          result: report.result,
         })
         return
       }
-      setResult(report.result)
+      if (state.status === 'error') {
+        setError(state.message)
+        return
+      }
+      if (state.status === 'not-run') {
+        setError('No subsurface result recorded yet — retry.')
+        return
+      }
+      setResult(state.result)
       setEngagementReportResult('subsurface', {
-        status: report.status === 'ok' ? 'ok' : 'error',
-        result: report.result,
+        status: 'ok',
+        result: state.result,
       })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Subsurface run failed')

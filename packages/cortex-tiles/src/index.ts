@@ -58,6 +58,37 @@ export { TopographyTile } from './site-analysis/TopographyTile'
 export { DrainageTile } from './site-analysis/DrainageTile'
 export { HydrologyTile } from './site-analysis/HydrologyTile'
 export { SubsurfaceTile } from './site-analysis/SubsurfaceTile'
+// RAW-FUNCTION mode — pure, React-free, vanilla-consumable data functions for
+// the report-backed tiles (peers of the map's fetchGisLayer). Each takes a
+// baseUrl (spine proxy) + params + optional AbortSignal + optional auth and
+// returns a Promise of an honest discriminated state. The tile components above
+// call these internally, so there is one source of truth.
+export {
+  fetchHydrology,
+  fetchDrainage,
+  fetchTopography,
+  fetchSubsurface,
+  fetchHazardProfile,
+  fetchSetbacks,
+  ReportHttpError,
+} from './site-analysis/siteReports'
+export type {
+  SiteReportAuth,
+  ReportParams,
+  ReportState,
+  ReportStatusWire,
+  ReportResultWire,
+  GeoJsonFC,
+  HydrologyData,
+  DrainageData,
+  TopographyData,
+  SubsurfaceData,
+  HazardData,
+  HazardLayer,
+  SetbacksState,
+  SetbackTable,
+  SetbackDistrict,
+} from './site-analysis/siteReports'
 
 // Property Intel
 export { PropertyBriefTile } from './property-intel/PropertyBriefTile'
