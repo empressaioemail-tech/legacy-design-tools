@@ -341,7 +341,10 @@ describe("site-topography ingest worker", () => {
     expect(result.reusedExisting).toBe(false);
     expect(result.contourCount).toBeGreaterThan(0);
     expect(result.demGcsObjectPath).toMatch(/^\/objects\/test-dem-/);
-    expect(blobs.size).toBe(1);
+    // Two blobs upload on the happy path: the DEM GeoTIFF + the terrain mesh
+    // GLB. IFC is skipped in this test (ifcWorkerMockState.mode = "skip-error"),
+    // so there is no third blob.
+    expect(blobs.size).toBe(2);
 
     // atom_events row landed.
     const events = await ctx.schema!.db
