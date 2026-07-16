@@ -17,6 +17,7 @@ import type { GisLayerBbox } from "./brokerageGisLayers";
 import {
   ozTractsInBbox,
   ozTractLayerProvenance,
+  bboxWithinOzCoverage,
 } from "./opportunityZoneAdapter";
 
 export type CompositeLayerKey =
@@ -40,8 +41,15 @@ export type CompositeLayerProvenance = {
     dataVintage: string | null;
     tractListVersion: string;
     nationalDesignatedTractCount: number | null;
+    nationalCountNote: string | null;
     bundledScope: string | null;
     matchMethod: "bbox-overlap";
+    /**
+     * Whether the requested viewport is within the loaded OZ layer's coverage
+     * envelope. When "out-of-scope", an empty result means "unknown here", not
+     * "confidently no OZ" — the honesty is degraded accordingly.
+     */
+    coverage: "in-scope" | "out-of-scope";
   };
   dealSignal: {
     kind: "oz-designation-membership";
@@ -119,12 +127,14 @@ export function deriveOzDealCrossfilter(bbox: GisLayerBbox): {
   honesty: EngineHonesty;
 } {
   const prov = ozTractLayerProvenance();
-  const tracts = ozTractsInBbox({
+  const queryBbox = {
     westLng: bbox.westLng,
     southLat: bbox.southLat,
     eastLng: bbox.eastLng,
     northLat: bbox.northLat,
-  });
+  };
+  const inScope = bboxWithinOzCoverage(queryBbox);
+  const tracts = inScope ? ozTractsInBbox(queryBbox) : [];
   const generatedAt = new Date().toISOString();
 
   const provenance: CompositeLayerProvenance = {
@@ -135,8 +145,10 @@ export function deriveOzDealCrossfilter(bbox: GisLayerBbox): {
       dataVintage: prov.dataVintage,
       tractListVersion: prov.tractListVersion,
       nationalDesignatedTractCount: prov.nationalDesignatedTractCount,
+      nationalCountNote: prov.nationalCountNote,
       bundledScope: prov.bundledScope,
       matchMethod: "bbox-overlap",
+      coverage: inScope ? "in-scope" : "out-of-scope",
     },
     dealSignal: {
       kind: "oz-designation-membership",
@@ -174,14 +186,32 @@ export function deriveOzDealCrossfilter(bbox: GisLayerBbox): {
     };
   });
 
-  const honesty: EngineHonesty = {
-    confidence: { value: 1, kind: "deterministic" },
-    dataVintage: prov.dataVintage,
-    coverage: { degraded: false },
-    source: {
-      adapter: "brokerage:composite-oz-deal-crossfilter",
-    },
-  };
+  // Coverage honesty (55 §7 rule #5): an empty result only means "no OZ here"
+  // when the viewport is within the loaded layer's coverage envelope. Outside
+  // it — e.g. a non-Central-TX bbox against the bundled fixture, or any env
+  // where the national set is not yet GCS-hydrated — absence is UNKNOWN, so we
+  // degrade rather than assert a confident empty.
+  const outOfScopeReason = prov.bundledScope
+    ? `OZ layer not hydrated for this region; loaded scope is ${prov.bundledScope}. The national set hydrates from GCS in prod (BROKERAGE_FEDERAL_DATA_GCS_PREFIX). Absence of OZ tracts here is unknown, not confirmed-none.`
+    : "OZ layer does not cover this region in the current environment; absence is unknown, not confirmed-none.";
+
+  const honesty: EngineHonesty = inScope
+    ? {
+        confidence: { value: 1, kind: "deterministic" },
+        dataVintage: prov.dataVintage,
+        coverage: { degraded: false },
+        source: { adapter: "brokerage:composite-oz-deal-crossfilter" },
+      }
+    : {
+        confidence: { value: 0.2, kind: "asserted" },
+        dataVintage: prov.dataVintage,
+        coverage: { degraded: true, reason: outOfScopeReason },
+        source: { adapter: "brokerage:composite-oz-deal-crossfilter" },
+      };
+
+  const notes = inScope
+    ? `Designated OZ tracts overlapping the viewport (${features.length}), each carrying OZ-designation deal signal + provenance. Deal signal excludes Cotality propensity.`
+    : `Viewport is outside the loaded OZ coverage envelope. ${outOfScopeReason}`;
 
   return {
     payload: {
@@ -189,7 +219,7 @@ export function deriveOzDealCrossfilter(bbox: GisLayerBbox): {
       queryMode: "bbox",
       fixture: false,
       featureCount: features.length,
-      notes: `Designated OZ tracts overlapping the viewport (${features.length}), each carrying OZ-designation deal signal + provenance. Deal signal excludes Cotality propensity.`,
+      notes,
       provenance,
       geojson: {
         type: "FeatureCollection",
