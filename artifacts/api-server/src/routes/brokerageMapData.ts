@@ -53,6 +53,13 @@ import {
   federalGisLayerFixtureGeoJson,
   isFederalGisProxyLayer,
 } from "../lib/brokerageGisFederalLayers";
+import {
+  RENT_AREA_LAYER_KEY,
+  isRentAreaLayer,
+  listRentAreaLayerEndpoints,
+  queryRentAreaLayerGeoJson,
+  rentAreaLayerFixtureResult,
+} from "../lib/brokerageGisRentAreaLayers";
 import { isBrokerageServiceCaller } from "../middlewares/brokerageServiceAuth";
 
 function mapDataMaxInstallOverride(
@@ -170,6 +177,7 @@ const GIS_LAYER_KEYS = [
   "mud-pid",
   "edwards-aquifer",
   "texas-rrc",
+  RENT_AREA_LAYER_KEY,
 ] as const;
 
 const GIS_LAYER_BODY = z
@@ -186,10 +194,11 @@ const GIS_LAYER_BODY = z
   .strict()
   .superRefine((body, ctx) => {
     if (body.bbox) return;
-    if (isFederalGisProxyLayer(body.layer)) {
+    if (isFederalGisProxyLayer(body.layer) || isRentAreaLayer(body.layer)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "bbox is required for federal GIS layer viewport queries",
+        message:
+          "bbox is required for federal / rent-area GIS layer viewport queries",
         path: ["bbox"],
       });
       return;
@@ -241,14 +250,25 @@ brokerageMapDataRouter.get("/gis-layers", async (req: Request, res: Response) =>
   }
 
   res.json({
-    layers: listGisLayerEndpoints().map((layer) => ({
-      layer: layer.layer,
-      serviceUrl: layer.serviceUrl,
-      provider: layer.provider,
-      adapterKey: layer.adapterKey,
-      ...(layer.degraded ? { degraded: true } : {}),
-      ...(layer.degradedReason ? { degradedReason: layer.degradedReason } : {}),
-    })),
+    layers: [
+      ...listGisLayerEndpoints().map((layer) => ({
+        layer: layer.layer,
+        serviceUrl: layer.serviceUrl,
+        provider: layer.provider,
+        adapterKey: layer.adapterKey,
+        ...(layer.degraded ? { degraded: true } : {}),
+        ...(layer.degradedReason
+          ? { degradedReason: layer.degradedReason }
+          : {}),
+      })),
+      ...listRentAreaLayerEndpoints().map((layer) => ({
+        layer: layer.layer,
+        serviceUrl: layer.serviceUrl,
+        provider: layer.provider,
+        adapterKey: layer.adapterKey,
+        description: layer.description,
+      })),
+    ],
     packageTier,
   });
 });
@@ -348,6 +368,34 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
         return;
       }
 
+      if (isRentAreaLayer(parsed.data.layer)) {
+        const bbox = parsed.data.bbox
+          ? normalizeGisLayerBbox(parsed.data.bbox)
+          : {
+              westLng: -97.85,
+              southLat: 30.2,
+              eastLng: -97.6,
+              northLat: 30.4,
+            };
+        const result = rentAreaLayerFixtureResult(bbox);
+        res.json({
+          layer: result.layer,
+          provider: result.provider,
+          adapterKey: result.adapterKey,
+          serviceUrl: result.serviceUrl,
+          featureCount: result.featureCount,
+          queryMode: result.queryMode,
+          truncated: result.truncated ?? false,
+          geojson: result.geojson,
+          provenance: result.provenance,
+          disclosure: result.disclosure,
+          operatorDataPullRequired: result.operatorDataPullRequired,
+          packageTier,
+          fixture: true,
+        });
+        return;
+      }
+
       const fixture = loadGisLayerFixture(parsed.data.layer as GisProxyLayerKey);
       if (!fixture) {
         res.status(503).json({
@@ -363,6 +411,30 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
         packageTier,
         fixture: true,
         fixtureMeta: fixture.manifest,
+      });
+      return;
+    }
+
+    if (isRentAreaLayer(parsed.data.layer)) {
+      const bbox = parsed.data.bbox
+        ? normalizeGisLayerBbox(parsed.data.bbox)
+        : undefined;
+      const result = await queryRentAreaLayerGeoJson({ bbox });
+      res.json({
+        layer: result.layer,
+        provider: result.provider,
+        adapterKey: result.adapterKey,
+        serviceUrl: result.serviceUrl,
+        featureCount: result.featureCount,
+        queryMode: result.queryMode,
+        truncated: result.truncated ?? false,
+        geojson: result.geojson,
+        // Mandatory honesty: disclosure + provenance on the payload,
+        // mirrored per-feature inside geojson.features[].properties.
+        provenance: result.provenance,
+        disclosure: result.disclosure,
+        operatorDataPullRequired: result.operatorDataPullRequired,
+        packageTier,
       });
       return;
     }

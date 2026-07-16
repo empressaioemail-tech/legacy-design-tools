@@ -17,6 +17,7 @@
     "./federal/usda-ssurgo": "./src/federal/usda-ssurgo.ts",
     "./federal/usgs-groundwater": "./src/federal/usgs-groundwater.ts",
     "./federal/texas-rrc": "./src/federal/texas-rrc.ts",
+    "./federal/census-acs-rent": "./src/federal/census-acs-rent.ts",
     "./federal/summaries": "./src/federal/summaries.ts",
     "./national/regrid": "./src/national/regrid.ts",
     "./national/cotality": "./src/national/cotality.ts",
