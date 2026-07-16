@@ -1,27 +1,12 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useEngagement, TileStatusBanner } from '@empressaio/tile-shell'
-import { CortexApiError } from '@empressaio/cortex-client'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
-
-type SetbackDistrict = {
-  district_name?: string | null
-  front_ft?: number | null
-  rear_ft?: number | null
-  side_ft?: number | null
-  side_corner_ft?: number | null
-  max_height_ft?: number | null
-  max_lot_coverage_pct?: number | null
-  max_impervious_pct?: number | null
-  citation_url?: string | null
-}
-
-type LocalSetbackTable = {
-  jurisdictionKey?: string
-  jurisdictionDisplayName?: string
-  note?: string | null
-  districts?: SetbackDistrict[]
-}
+import {
+  fetchSetbacks,
+  type SetbackDistrict,
+  type SetbackTable as LocalSetbackTable,
+} from '../site-analysis/siteReports'
 
 const mutedText: CSSProperties = {
   fontSize: 'var(--h-text-sm)',
@@ -48,26 +33,28 @@ function LocalSetbacksTileInner() {
     setNotFound(false)
     if (!jurisdiction) return
     setLoading(true)
-    client
-      .fetch<LocalSetbackTable>(
-        '/local/setbacks/' + encodeURIComponent(jurisdiction),
-      )
-      .then((res) => {
-        if (!cancelled) setTable(res)
+    const ac = new AbortController()
+    // Single source of truth: the pure fetchSetbacks function (React-free,
+    // AbortSignal-aware). The component only renders the honest state.
+    fetchSetbacks(client.config.baseUrl, jurisdiction, ac.signal, {
+      getToken: client.config.getToken,
+    })
+      .then((state) => {
+        if (cancelled) return
+        if (state.status === 'not-found') setNotFound(true)
+        else if (state.status === 'error') setError(state.message)
+        else setTable(state.table)
       })
       .catch((err: unknown) => {
-        if (cancelled) return
-        if (err instanceof CortexApiError && err.status === 404) {
-          setNotFound(true)
-        } else {
-          setError(err instanceof Error ? err.message : 'Failed to load setbacks')
-        }
+        if (cancelled || (err as Error)?.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Failed to load setbacks')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
     return () => {
       cancelled = true
+      ac.abort()
     }
   }, [jurisdiction, client])
 

@@ -5,8 +5,13 @@
 // backend was fixed (drainage/hydrology runs return library:pysheds, live).
 // The banner must be driven by the RUN RESULT (hydrologyDegraded/-Reason),
 // never asserted statically.
+//
+// 0.1.6: the tile now calls the pure fetchHydrology(baseUrl, ...) function
+// internally (single source of truth). The test drives it through a stubbed
+// global fetch (run POST -> ok, get GET -> report envelope) with a real
+// CortexClient config, proving the same banner behavior over the new path.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HydrologyTile } from './HydrologyTile'
 import { EngagementProvider, SpatialProvider, useSpatial } from '@empressaio/tile-shell'
@@ -30,12 +35,37 @@ const FLOW_LINES = {
   ],
 }
 
+// A CortexClient with only the config the pure function reads (baseUrl +
+// getToken). No runReport/getReport methods are used anymore — the tile calls
+// the pure fetchHydrology(baseUrl, ...) function, which uses global fetch.
+const client = {
+  config: { baseUrl: '/api/spine/cortex/api', getToken: () => '' },
+} as unknown as CortexClient
+
+/**
+ * Stub global fetch so the run POST resolves ok and the report GET returns the
+ * given ReportResult envelope. Returns the fetch mock for URL assertions.
+ */
+function stubReportFetch(envelope: unknown) {
+  const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+    if (typeof url === 'string' && url.endsWith('/reports/hydrology/run')) {
+      expect(init?.method).toBe('POST')
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(envelope), { status: 200 }),
+    )
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
 function OverlayProbe() {
   const { overlays } = useSpatial()
   return <div data-testid="overlay-probe">{overlays.map((o) => o.id).join(',')}</div>
 }
 
-function renderTile(client: CortexClient) {
+function renderTile() {
   return render(
     <CortexProvider client={client}>
       <EngagementProvider initialParcel={{ engagementId: 'eng-hydro' }}>
@@ -48,20 +78,16 @@ function renderTile(client: CortexClient) {
   )
 }
 
-describe('HydrologyTile banner reflects the live run result', () => {
-  let client: CortexClient
-  let getReportSpy: ReturnType<typeof vi.fn>
-
+describe('HydrologyTile banner reflects the live run result (via pure fetchHydrology)', () => {
   beforeEach(() => {
-    getReportSpy = vi.fn()
-    client = {
-      runReport: vi.fn().mockResolvedValue({}),
-      getReport: getReportSpy,
-    } as unknown as CortexClient
+    vi.restoreAllMocks()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('shows NO degraded banner (and pushes flow lines) when the run is healthy', async () => {
-    getReportSpy.mockResolvedValue({
+    stubReportFetch({
       status: 'ok',
       result: {
         flowLinesGeoJson: FLOW_LINES,
@@ -71,7 +97,7 @@ describe('HydrologyTile banner reflects the live run result', () => {
       },
     })
 
-    renderTile(client)
+    renderTile()
 
     // Before the run: live banner (null render), no static degraded claim.
     expect(screen.queryByTestId('tile-status-banner')).toBeNull()
@@ -87,7 +113,7 @@ describe('HydrologyTile banner reflects the live run result', () => {
   })
 
   it('shows the run-reported reason when the run IS degraded', async () => {
-    getReportSpy.mockResolvedValue({
+    stubReportFetch({
       status: 'ok',
       result: {
         flowLinesGeoJson: FLOW_LINES,
@@ -97,7 +123,7 @@ describe('HydrologyTile banner reflects the live run result', () => {
       },
     })
 
-    renderTile(client)
+    renderTile()
     fireEvent.click(screen.getByTestId('hydrology-run'))
 
     const banner = await screen.findByTestId('tile-status-banner')
@@ -106,12 +132,12 @@ describe('HydrologyTile banner reflects the live run result', () => {
   })
 
   it('surfaces a run error honestly instead of a stale banner', async () => {
-    getReportSpy.mockResolvedValue({
+    stubReportFetch({
       status: 'error',
       error: 'DEM fetch failed upstream',
     })
 
-    renderTile(client)
+    renderTile()
     fireEvent.click(screen.getByTestId('hydrology-run'))
 
     await waitFor(() => expect(screen.getByText('DEM fetch failed upstream')).toBeTruthy())

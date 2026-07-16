@@ -2,19 +2,14 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { useEngagement, TileStatusBanner } from '@empressaio/tile-shell'
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
+import {
+  fetchHazardProfile,
+  ReportHttpError,
+  type HazardData,
+  type HazardLayer,
+} from '../site-analysis/siteReports'
 
-type HazardLayer = {
-  layerKind?: string
-  provider?: string | null
-  snapshotDate?: string | null
-  sourceKind?: string | null
-  payload?: unknown
-}
-
-type HazardResult = {
-  layers?: HazardLayer[]
-  quotaExhausted?: boolean
-}
+type HazardResult = HazardData
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
@@ -97,24 +92,31 @@ function HazardProfileTileInner() {
     setError(null)
     setQuotaBanner(null)
     try {
-      await client.runReport(engagementId, 'hazard')
-      const report = await client.getReport<HazardResult>(engagementId, 'hazard')
-      if (report.status === 'error') {
-        setError(report.error ?? 'Hazard profile failed')
+      // Single source of truth: the pure fetchHazardProfile function.
+      const state = await fetchHazardProfile(
+        client.config.baseUrl,
+        { engagementId },
+        undefined,
+        { getToken: client.config.getToken },
+      )
+      if (state.status === 'error') {
+        setError(state.message)
         return
       }
-      if (report.status === 'not-run') {
+      if (state.status === 'not-run' || state.status === 'unavailable') {
         setError('No hazard layers returned — check geocode and retry.')
         return
       }
-      const payload = report.result ?? null
-      if (payload?.quotaExhausted) {
+      if (state.status === 'degraded' && state.result?.quotaExhausted) {
         setQuotaBanner('Hazard data quota exhausted — demo keys expire ~2026-07-06.')
       }
-      setResult(payload)
+      setResult(state.result ?? null)
     } catch (err: unknown) {
+      // ReportHttpError carries the upstream status so a 429 maps to the
+      // honest quota banner instead of a bare error.
+      const status = err instanceof ReportHttpError ? err.status : null
       const msg = err instanceof Error ? err.message : 'Hazard run failed'
-      if (msg.includes('429') || msg.includes('quota')) {
+      if (status === 429 || msg.includes('429') || msg.includes('quota')) {
         setQuotaBanner('Hazard data quota exhausted — demo keys expire ~2026-07-06.')
       } else {
         setError(msg)

@@ -3,6 +3,7 @@ import { useEngagement, useSpatial, TileStatusBanner } from '@empressaio/tile-sh
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 import { runButtonStyle } from './TopographyTile'
+import { fetchDrainage } from './siteReports'
 
 function DrainageTileInner() {
   const client = useCortexClient()
@@ -20,34 +21,35 @@ function DrainageTileInner() {
     setSummary(null)
     setDegradedReason(null)
     try {
-      await client.runReport(engagementId, 'drainage')
-      const report = await client.getReport(engagementId, 'drainage')
-      if (report.status === 'not-run') {
+      // Single source of truth: the pure fetchDrainage function.
+      const state = await fetchDrainage(
+        client.config.baseUrl,
+        { engagementId },
+        undefined,
+        { getToken: client.config.getToken },
+      )
+      if (state.status === 'not-run') {
         // The run POST surfaces real failures as 4xx/5xx (caught below),
         // so a lingering not-run here means no drainage result exists yet
         // for this engagement — never blame geocoding for it.
         setError('No drainage result recorded yet — retry, and run Topography first if it has not run.')
         return
       }
-      if (report.status === 'error') {
-        setError(report.error ?? 'Drainage run failed')
+      if (state.status === 'unavailable') {
+        setError('No drainage result recorded yet — retry, and run Topography first if it has not run.')
+        return
+      }
+      if (state.status === 'error') {
+        setError(state.message)
         return
       }
       setEngagementReportResult('drainage', {
-        status: report.status === 'ok' ? 'ok' : 'error',
-        result: report.result,
+        status: 'ok',
+        result: state.result,
       })
-      const result = report.result as {
-        flowLinesGeoJson?: { type: string; features: unknown[] }
-        drainageZonesGeoJson?: { type: string; features: unknown[] }
-        hydrologyDegraded?: boolean
-        hydrologyDegradedReason?: string | null
-      }
-      if (result?.hydrologyDegraded) {
-        setDegradedReason(
-          result.hydrologyDegradedReason ??
-            'pysheds unavailable; native D8 fallback',
-        )
+      const result = state.result
+      if (state.status === 'degraded') {
+        setDegradedReason(state.reason)
       }
       const pushed: string[] = []
       // SEAM: kind === map-renderer OverlaySpec.layerKey (MapTile.toMapOverlays).
