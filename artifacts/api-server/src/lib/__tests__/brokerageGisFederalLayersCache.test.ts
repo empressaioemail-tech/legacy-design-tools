@@ -28,11 +28,24 @@ function fakeTileKey(
   return `${layer}:g${gridDeg}:${snap(bbox.westLng)},${snap(bbox.southLat)},${snap(bbox.eastLng)},${snap(bbox.northLat)}`;
 }
 
+// The real 30d spatial-tile default, reproduced so federalLayerCacheTtlMs
+// (which calls the mocked getTileCacheTtlMs for static layers) resolves the
+// same horizon it does in production.
+const REAL_TILE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 vi.mock("../brokerageGisCache", () => ({
   tileKey: vi.fn(fakeTileKey),
-  getSpatialTile: vi.fn(async (key: string) => store.get(key) ?? null),
+  getTileCacheTtlMs: vi.fn(() => REAL_TILE_TTL_MS),
+  getSpatialTile: vi.fn(
+    async (key: string, _opts?: { ttlMs?: number }) => store.get(key) ?? null,
+  ),
   putSpatialTile: vi.fn(
-    async (key: string, payload: unknown, featureCount: number) => {
+    async (
+      key: string,
+      payload: unknown,
+      featureCount: number,
+      _opts?: { ttlMs?: number },
+    ) => {
       store.set(key, { payload, featureCount, cachedAt: new Date() });
     },
   ),
@@ -169,5 +182,64 @@ describe("queryFederalGisLayerGeoJson read-through cache", () => {
     expect(b.featureCount).toBe(1);
     // Cache never serves -> both requests fetch upstream, and neither throws.
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("writes the volatile groundwater layer at the short (24h) TTL, not the 30d default", async () => {
+    stubNwisFetch();
+    const cacheMod = await import("../brokerageGisCache");
+    const { queryFederalGisLayerGeoJson } = await import(
+      "../brokerageGisFederalLayers"
+    );
+
+    await queryFederalGisLayerGeoJson({ layer: "groundwater", bbox: GW_BBOX });
+
+    const putMock = vi.mocked(cacheMod.putSpatialTile);
+    expect(putMock).toHaveBeenCalledTimes(1);
+    const opts = putMock.mock.calls[0][3] as { ttlMs?: number } | undefined;
+    expect(opts?.ttlMs).toBe(24 * 60 * 60 * 1000);
+    // Freshness-honesty guard: a volatile layer must NOT inherit the 30d
+    // spatial-tile default.
+    expect(opts?.ttlMs).toBeLessThan(30 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe("federalLayerCacheTtlMs — per-layer freshness classification", () => {
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const THIRTY_DAYS = 30 * ONE_DAY;
+
+  it("caches volatile layers (texas-rrc, groundwater) short", async () => {
+    const { federalLayerCacheTtlMs } = await import(
+      "../brokerageGisFederalLayers"
+    );
+    expect(federalLayerCacheTtlMs("groundwater")).toBe(ONE_DAY);
+    expect(federalLayerCacheTtlMs("texas-rrc")).toBe(ONE_DAY);
+  });
+
+  it("caches near-static layers (ssurgo, edwards, mud-pid) at the 30d default", async () => {
+    const { federalLayerCacheTtlMs } = await import(
+      "../brokerageGisFederalLayers"
+    );
+    expect(federalLayerCacheTtlMs("ssurgo-soils")).toBe(THIRTY_DAYS);
+    expect(federalLayerCacheTtlMs("edwards-aquifer")).toBe(THIRTY_DAYS);
+    expect(federalLayerCacheTtlMs("mud-pid")).toBe(THIRTY_DAYS);
+  });
+
+  it("honors the FEDERAL_GIS_VOLATILE_CACHE_TTL_MS env override and falls back on garbage", async () => {
+    const { getFederalVolatileCacheTtlMs, DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS } =
+      await import("../brokerageGisFederalLayers");
+    expect(getFederalVolatileCacheTtlMs("3600000")).toBe(3600000);
+    expect(getFederalVolatileCacheTtlMs("0")).toBe(0); // 0 disables the cache
+    expect(getFederalVolatileCacheTtlMs(undefined)).toBe(
+      DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS,
+    );
+    expect(getFederalVolatileCacheTtlMs("")).toBe(
+      DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS,
+    );
+    expect(getFederalVolatileCacheTtlMs("abc")).toBe(
+      DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS,
+    );
+    expect(getFederalVolatileCacheTtlMs("-5")).toBe(
+      DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS,
+    );
   });
 });

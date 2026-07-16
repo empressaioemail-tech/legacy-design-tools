@@ -10,6 +10,7 @@ vi.mock("../brokerageGisCache", () => ({
   tileKey: vi.fn(
     (layer: string) => `${layer}:test-key`,
   ),
+  getTileCacheTtlMs: vi.fn(() => 30 * 24 * 60 * 60 * 1000),
   getSpatialTile: vi.fn(async () => null),
   putSpatialTile: vi.fn(async () => {}),
 }));

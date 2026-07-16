@@ -30,7 +30,12 @@ import {
 } from "@workspace/adapters/state/texas";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { loadTxSpecialDistrictRegistry } from "./mudPidRegistry";
-import { getSpatialTile, putSpatialTile, tileKey } from "./brokerageGisCache";
+import {
+  getSpatialTile,
+  putSpatialTile,
+  tileKey,
+  getTileCacheTtlMs,
+} from "./brokerageGisCache";
 import type { GisLayerBbox, GisLayerEndpoint } from "./brokerageGisLayers";
 
 export type FederalGisProxyLayerKey =
@@ -335,6 +340,56 @@ function tagEdwardsZone(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Per-layer cache freshness (spine freshness-honesty, 55 §7 rule #4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The default spatial-tile TTL (30d) is correct for near-static layers but
+ * would serve stale regulatory data for the volatile ones. Classify each
+ * layer:
+ *   - ssurgo-soils   : NRCS survey data, ~24-month refresh   -> 30d default
+ *   - edwards-aquifer: aquifer zone boundaries, near-static  -> 30d default
+ *   - mud-pid        : special-district registry, near-static-> 30d default
+ *   - texas-rrc      : O&G wells + pipelines, continuous      -> short TTL
+ *   - groundwater    : USGS NWIS well levels, time-varying    -> short TTL
+ *
+ * "Short" defaults to 24h and is env-overridable via
+ * `FEDERAL_GIS_VOLATILE_CACHE_TTL_MS`, matching the env-override pattern the
+ * other TTL resolvers use (empty/garbage/negative fall back to the default).
+ */
+const VOLATILE_FEDERAL_LAYERS: ReadonlySet<FederalGisProxyLayerKey> = new Set([
+  "texas-rrc",
+  "groundwater",
+]);
+
+/** Short TTL for volatile federal layers. 24h; env-overridable. */
+export const DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+export function getFederalVolatileCacheTtlMs(
+  envValue: string | undefined = process.env.FEDERAL_GIS_VOLATILE_CACHE_TTL_MS,
+): number {
+  if (envValue === undefined || envValue === "") {
+    return DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS;
+  }
+  const parsed = Number(envValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_FEDERAL_VOLATILE_CACHE_TTL_MS;
+  }
+  return Math.floor(parsed);
+}
+
+/**
+ * Resolve the write TTL for a federal layer. Volatile layers get the short
+ * (env-overridable) TTL; static layers get the standard spatial-tile TTL.
+ * Both honor a `0` value as "disabled" via the underlying put helper.
+ */
+export function federalLayerCacheTtlMs(layer: FederalGisProxyLayerKey): number {
+  return VOLATILE_FEDERAL_LAYERS.has(layer)
+    ? getFederalVolatileCacheTtlMs()
+    : getTileCacheTtlMs();
+}
+
 /**
  * Read-through cache for the free federal / state GIS proxy layers.
  *
@@ -347,6 +402,10 @@ function tagEdwardsZone(
  * rows never collide with `parcels:` rows: the key is
  * `tileKey(adapterKey, snappedBbox)` where `adapterKey` is the layer's
  * distinct upstream id (e.g. `usda:ssurgo-soils`).
+ *
+ * Write TTL is per-layer for freshness-honesty (55 §7 rule #4): volatile
+ * layers (texas-rrc, groundwater) cache short; near-static layers keep the
+ * 30d default. See `federalLayerCacheTtlMs`.
  *
  * Failure isolation is inherited from the cache helpers: a get error
  * returns null (miss -> live fetch), a put error is a no-op, neither ever
@@ -369,8 +428,14 @@ export async function queryFederalGisLayerGeoJson(input: {
   // collides with the parcels spatial-tile rows.
   const key = tileKey(meta.adapterKey ?? `federal:${input.layer}`, bbox);
 
+  // Per-layer freshness: volatile layers cache short, static ones 30d. The
+  // same ttlMs gates both read and write, so a `0` (disabled) TTL for a
+  // layer skips the cache on both sides rather than reading a row the write
+  // side would never have populated at that horizon.
+  const ttlMs = federalLayerCacheTtlMs(input.layer);
+
   if (!input.forceRefresh) {
-    const hit = await getSpatialTile(key);
+    const hit = await getSpatialTile(key, { ttlMs });
     if (hit?.payload && typeof hit.payload === "object") {
       const cached = hit.payload as {
         geojson?: ArcGisGeoJsonFeatureCollection;
@@ -398,8 +463,9 @@ export async function queryFederalGisLayerGeoJson(input: {
     meta,
   });
 
-  // Store just the cacheable payload (geojson + counts). A put failure is a
-  // no-op inside the helper, so it never fails the request.
+  // Store just the cacheable payload (geojson + counts) at the per-layer
+  // TTL. A put failure is a no-op inside the helper, so it never fails the
+  // request.
   await putSpatialTile(
     key,
     {
@@ -408,6 +474,7 @@ export async function queryFederalGisLayerGeoJson(input: {
       truncated: result.truncated,
     },
     result.featureCount,
+    { ttlMs },
   );
 
   return result;
