@@ -1,4 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
+
+// The federal layer module now imports ./brokerageGisCache for its
+// read-through cache, and that module loads @workspace/db (which throws
+// without DATABASE_URL). Mock the cache to a no-op miss so these
+// upstream-parsing tests run without a DB and exercise the live-fetch path
+// (cache always misses -> always fetches). Same pattern as
+// brokerageGisLayers.test.ts.
+vi.mock("../brokerageGisCache", () => ({
+  tileKey: vi.fn(
+    (layer: string) => `${layer}:test-key`,
+  ),
+  getSpatialTile: vi.fn(async () => null),
+  putSpatialTile: vi.fn(async () => {}),
+}));
+
 import { foundationRiskScoreFromShrinkSwell } from "@workspace/adapters/federal/usda-ssurgo";
 import {
   enrichSsurgoGeoJson,

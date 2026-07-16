@@ -1,29 +1,42 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// In-memory stand-in for the persistent spatial-tile cache, so a cache-hit
-// can be asserted without a live DB. tileKey stays real (the real key
-// derivation is what namespaces federal rows), only the get/put persistence
-// is swapped for a Map. Mirrors the mock discipline in
-// brokerageGisLayers.test.ts, which mocks the same module.
+// Fully mock the cache module so the real one (which imports @workspace/db
+// and throws without DATABASE_URL) never loads under vitest. This mirrors
+// brokerageGisLayers.test.ts, which mocks the same module for the same
+// reason. The in-memory Map stands in for cotality_spatial_tile_cache so a
+// cache-hit can be asserted without a live DB, and a self-contained tileKey
+// reproduces the real per-(layer,bbox) key namespacing.
 const store = new Map<
   string,
   { payload: unknown; featureCount: number; cachedAt: Date }
 >();
 
-vi.mock("../brokerageGisCache", async () => {
-  const actual = await vi.importActual<
-    typeof import("../brokerageGisCache")
-  >("../brokerageGisCache");
-  return {
-    ...actual,
-    getSpatialTile: vi.fn(async (key: string) => store.get(key) ?? null),
-    putSpatialTile: vi.fn(
-      async (key: string, payload: unknown, featureCount: number) => {
-        store.set(key, { payload, featureCount, cachedAt: new Date() });
-      },
-    ),
-  };
-});
+// Stand-in matching brokerageGisCache.tileKey's contract: a stable,
+// layer-namespaced, snapped-bbox key. Grid + precision mirror the real
+// helper so the namespacing assertion is meaningful.
+function fakeTileKey(
+  layer: string,
+  bbox: {
+    westLng: number;
+    southLat: number;
+    eastLng: number;
+    northLat: number;
+  },
+  gridDeg = 0.02,
+): string {
+  const snap = (v: number) => (Math.floor(v / gridDeg) * gridDeg).toFixed(5);
+  return `${layer}:g${gridDeg}:${snap(bbox.westLng)},${snap(bbox.southLat)},${snap(bbox.eastLng)},${snap(bbox.northLat)}`;
+}
+
+vi.mock("../brokerageGisCache", () => ({
+  tileKey: vi.fn(fakeTileKey),
+  getSpatialTile: vi.fn(async (key: string) => store.get(key) ?? null),
+  putSpatialTile: vi.fn(
+    async (key: string, payload: unknown, featureCount: number) => {
+      store.set(key, { payload, featureCount, cachedAt: new Date() });
+    },
+  ),
+}));
 
 const GW_BBOX = {
   westLng: -97.4,
@@ -109,22 +122,17 @@ describe("queryFederalGisLayerGeoJson read-through cache", () => {
 
   it("namespaces the cache per layer — a groundwater entry is never served for a different layer key", async () => {
     stubNwisFetch();
-    const { queryFederalGisLayerGeoJson } = await import(
-      "../brokerageGisFederalLayers"
-    );
-    const { tileKey } = await import("../brokerageGisCache");
-    const {
-      listFederalGisLayerEndpoints,
-    } = await import("../brokerageGisFederalLayers");
+    const { queryFederalGisLayerGeoJson, listFederalGisLayerEndpoints } =
+      await import("../brokerageGisFederalLayers");
 
     await queryFederalGisLayerGeoJson({ layer: "groundwater", bbox: GW_BBOX });
 
     const meta = listFederalGisLayerEndpoints();
-    const gwKey = tileKey(
+    const gwKey = fakeTileKey(
       meta.find((l) => l.layer === "groundwater")!.adapterKey!,
       GW_BBOX,
     );
-    const soilKey = tileKey(
+    const soilKey = fakeTileKey(
       meta.find((l) => l.layer === "ssurgo-soils")!.adapterKey!,
       GW_BBOX,
     );
