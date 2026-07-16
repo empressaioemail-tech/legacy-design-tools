@@ -25,6 +25,35 @@ export { DataroomTile } from './dataroom/DataroomTile'
 
 // Site Analysis
 export { MapTile } from './map/MapTile'
+// LIVE map tile — the promoted, live-GIS map (parcels + FEMA via the cortex
+// proxy, honest states, parcel-click card, report overlay stack). The
+// fixture-only MapTile above is retained for consumers that want it; this is the
+// real map every app should consume. MV3 worker seam threaded via workerUrl /
+// workerClass (mapWorker.ts) for Chrome-extension consumers.
+export { LiveMapTile } from './map/LiveMapTile'
+export type { LiveMapTileProps } from './map/LiveMapTile'
+export type { MapWorkerSeam, MapWorkerClass } from './map/mapWorker'
+// Pure live-GIS logic + types (viewport fetch policy, gis-layer client, overlay
+// composition, parcel-card mapping) — consumable standalone/testable.
+export {
+  MIN_PARCEL_ZOOM,
+  MIN_FEMA_ZOOM,
+  LIVE_PARCELS_KEY,
+  LIVE_FEMA_KEY,
+  layersForZoom,
+  fetchGisLayer,
+  parcelFillColor,
+  toLiveOverlays,
+  selectionToCard,
+} from './map/liveGis'
+export type {
+  LiveLayerKey,
+  LiveLayerState,
+  GisLayerResponse,
+  FeatureCollectionLike,
+  GeoJsonFeature,
+  ParcelCardData,
+} from './map/liveGis'
 export { TopographyTile } from './site-analysis/TopographyTile'
 export { DrainageTile } from './site-analysis/DrainageTile'
 export { HydrologyTile } from './site-analysis/HydrologyTile'
