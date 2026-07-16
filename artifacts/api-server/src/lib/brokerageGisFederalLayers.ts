@@ -30,6 +30,7 @@ import {
 } from "@workspace/adapters/state/texas";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { loadTxSpecialDistrictRegistry } from "./mudPidRegistry";
+import { getSpatialTile, putSpatialTile, tileKey } from "./brokerageGisCache";
 import type { GisLayerBbox, GisLayerEndpoint } from "./brokerageGisLayers";
 
 export type FederalGisProxyLayerKey =
@@ -334,15 +335,95 @@ function tagEdwardsZone(
   });
 }
 
+/**
+ * Read-through cache for the free federal / state GIS proxy layers.
+ *
+ * These five layers (USDA SSURGO, USGS NWIS groundwater, TCEQ MUD/PID,
+ * TCEQ Edwards Aquifer, Texas RRC) hit their upstreams LIVE on every
+ * viewport request with zero caching — the same quota/latency problem the
+ * Cotality bbox mesh had. This wraps the live fetch in the SAME persistent
+ * spatial-tile cache (`cotality_spatial_tile_cache`, migration 0043) the
+ * parcels path already uses, with a per-layer key namespace so federal
+ * rows never collide with `parcels:` rows: the key is
+ * `tileKey(adapterKey, snappedBbox)` where `adapterKey` is the layer's
+ * distinct upstream id (e.g. `usda:ssurgo-soils`).
+ *
+ * Failure isolation is inherited from the cache helpers: a get error
+ * returns null (miss -> live fetch), a put error is a no-op, neither ever
+ * throws. `forceRefresh` and a `0` TTL both bypass the cache. These layers
+ * are all FREE public sources, so no eval-clause / R1 gating applies.
+ */
 export async function queryFederalGisLayerGeoJson(input: {
   layer: FederalGisProxyLayerKey;
   bbox?: GisLayerBbox;
+  forceRefresh?: boolean;
 }): Promise<FederalGisLayerResult> {
   const bbox = requireBbox(input.bbox);
   const meta = listFederalGisLayerEndpoints().find((l) => l.layer === input.layer);
   if (!meta) {
     throw new AdapterRunError("no-coverage", `GIS layer unavailable: ${input.layer}`);
   }
+
+  // Distinct key namespace per federal layer, keyed on the adapterKey so a
+  // ssurgo tile can never be served for a groundwater request and neither
+  // collides with the parcels spatial-tile rows.
+  const key = tileKey(meta.adapterKey ?? `federal:${input.layer}`, bbox);
+
+  if (!input.forceRefresh) {
+    const hit = await getSpatialTile(key);
+    if (hit?.payload && typeof hit.payload === "object") {
+      const cached = hit.payload as {
+        geojson?: ArcGisGeoJsonFeatureCollection;
+        featureCount?: number;
+        truncated?: boolean;
+      };
+      if (cached.geojson?.type === "FeatureCollection") {
+        return {
+          ...meta,
+          geojson: cached.geojson,
+          featureCount:
+            hit.featureCount ??
+            cached.featureCount ??
+            cached.geojson.features.length,
+          queryMode: "bbox",
+          truncated: cached.truncated,
+        };
+      }
+    }
+  }
+
+  const result = await fetchFederalGisLayerGeoJson({
+    layer: input.layer,
+    bbox,
+    meta,
+  });
+
+  // Store just the cacheable payload (geojson + counts). A put failure is a
+  // no-op inside the helper, so it never fails the request.
+  await putSpatialTile(
+    key,
+    {
+      geojson: result.geojson,
+      featureCount: result.featureCount,
+      truncated: result.truncated,
+    },
+    result.featureCount,
+  );
+
+  return result;
+}
+
+/**
+ * Live upstream fetch for a single federal layer. The read-through cache in
+ * `queryFederalGisLayerGeoJson` calls this only on a miss (or forceRefresh).
+ * bbox is already validated by the caller.
+ */
+async function fetchFederalGisLayerGeoJson(input: {
+  layer: FederalGisProxyLayerKey;
+  bbox: GisLayerBbox;
+  meta: GisLayerEndpoint;
+}): Promise<FederalGisLayerResult> {
+  const { bbox, meta } = input;
 
   if (input.layer === "ssurgo-soils") {
     // Primary: SDA WFS polygons (sdmdataaccess — the host that actually
