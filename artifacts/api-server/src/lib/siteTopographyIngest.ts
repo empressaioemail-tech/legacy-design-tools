@@ -2,7 +2,7 @@
  * Site-topography DEM ingest worker — Phase 2D.x PR3.
  *
  * Resolves a parcel boundary from the engagement's active
- * `briefing_sources` (Regrid-emitted GeoJSON post-PR #104), expands
+ * `briefing_sources` (county-GIS / UGRC GeoJSON), expands
  * to a parcel-plus-catchment bbox, fetches a clipped DEM raster from
  * USGS 3DEP via the PR #98 client, derives contour-line GeoJSON via
  * `d3-contour` over the parsed GeoTIFF elevation grid, uploads the
@@ -136,7 +136,6 @@ const MAX_CONTOUR_GEOJSON_BYTES = 1_048_576;
 
 /** Layer kinds the parcel resolver inspects, in priority order. */
 const PARCEL_LAYER_KINDS_BY_PRIORITY: ReadonlyArray<string> = [
-  "regrid-parcel", // National Regrid baseline (PR #104) — preferred
   "grand-county-ut-parcels", // County-GIS for partner cities (Bastrop is partner-only on the parcels side; Grand County gated off baseline)
   "ugrc-parcels", // State-tier UGRC fallback for Utah
 ];
@@ -157,7 +156,7 @@ interface PayloadBbox {
 
 interface ResolvedParcelInput {
   /** Provenance flag — which source the parcel boundary came from. */
-  origin: "regrid-parcel" | "county-gis-parcel" | "engagement-geocode-fallback";
+  origin: "county-gis-parcel" | "engagement-geocode-fallback";
   /** Slug of the briefing_sources row, when applicable. */
   briefingSourceId: string | null;
   layerKind: string | null;
@@ -167,7 +166,7 @@ interface ResolvedParcelInput {
    * Parcel-only bbox in WGS84 (before catchment buffer). Always populated
    * from `geometry` when available; falls back to the engagement
    * geocode + a small buffer when no parcel geometry exists for the
-   * engagement (rare post-Regrid; mostly the out-of-trial-coverage path).
+   * engagement (mostly the out-of-coverage path).
    */
   parcelBbox: BboxWgs84;
 }
@@ -303,7 +302,7 @@ export function bufferBbox(bbox: BboxWgs84, meters: number): BboxWgs84 {
 /**
  * Resolve the most-relevant parcel boundary for an engagement. Reads
  * the active (non-superseded) briefing_sources rows in priority order
- * — Regrid first, then per-county-GIS, then UGRC fallback — and
+ * — per-county-GIS first, then UGRC fallback — and
  * returns the first usable geometry. If none are present, falls back
  * to a small bbox around the engagement geocode. Returns null only
  * when even the geocode is unavailable.
@@ -350,8 +349,7 @@ export async function resolveParcelInput(
     const bbox = geometryToBboxWgs84(geometry);
     if (!bbox) continue;
     return {
-      origin:
-        row.layerKind === "regrid-parcel" ? "regrid-parcel" : "county-gis-parcel",
+      origin: "county-gis-parcel",
       briefingSourceId: row.id,
       layerKind: row.layerKind,
       geometry,
@@ -360,7 +358,7 @@ export async function resolveParcelInput(
   }
 
   // Final fallback — engagement geocode + small buffer. Useful for the
-  // out-of-Regrid-coverage cases (trial token + unzoned tracts) so the
+  // out-of-coverage cases (trial token + unzoned tracts) so the
   // worker still produces a topo overlay anchored at the address.
   const eng = await db
     .select({
@@ -1000,7 +998,7 @@ export async function ingestSiteTopography(
     return {
       status: "no-parcel-coverage",
       reason:
-        "No active regrid-parcel / county-gis-parcel / ugrc-parcels briefing-source and no engagement geocode — cannot derive a topo extent.",
+        "No active county-gis-parcel / ugrc-parcels briefing-source and no engagement geocode — cannot derive a topo extent.",
     };
   }
   const catchmentBbox = bufferBbox(parcel.parcelBbox, catchmentBufferMeters);

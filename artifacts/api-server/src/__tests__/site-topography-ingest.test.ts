@@ -12,7 +12,7 @@
  * 6 dispatch-specified test cases + 2 helpful extras (atom payload
  * provenance + atom contextSummary surfaces metrics post-ingest):
  *
- *  1. Happy path — parcel-from-Regrid → atom event + read row
+ *  1. Happy path — parcel-from-county-GIS → atom event + read row
  *     populated with DEM ref + contour GeoJSON.
  *  2. Bbox-fallback path — no parcel briefing → uses engagement
  *     geocode + 200m buffer → still produces atom + row.
@@ -173,7 +173,7 @@ const MOAB_PARCEL_GEOMETRY = {
   ],
 };
 
-function makeRegridParcelPayload() {
+function makeGrandCountyParcelPayload() {
   return {
     kind: "parcel",
     parcel: {
@@ -230,7 +230,7 @@ function makeMinimalTiffResponse(): Response {
   });
 }
 
-async function seedEngagementWithRegridParcel(): Promise<void> {
+async function seedEngagementWithGrandCountyParcel(): Promise<void> {
   if (!ctx.schema) throw new Error("test: schema not set");
   const db = ctx.schema.db;
   await db.insert(engagements).values({
@@ -250,11 +250,11 @@ async function seedEngagementWithRegridParcel(): Promise<void> {
   await db.insert(briefingSources).values({
     id: BRIEFING_SOURCE_ID,
     briefingId: BRIEFING_ID,
-    layerKind: "regrid-parcel",
-    sourceKind: "national-aggregator",
-    provider: "Regrid",
+    layerKind: "grand-county-ut-parcels",
+    sourceKind: "county-gis",
+    provider: "Grand County GIS",
     snapshotDate: new Date("2026-04-15T00:00:00.000Z"),
-    payload: makeRegridParcelPayload(),
+    payload: makeGrandCountyParcelPayload(),
   });
 }
 
@@ -322,8 +322,8 @@ afterEach(async () => {
 });
 
 describe("site-topography ingest worker", () => {
-  it("[1] happy path — parcel-from-Regrid → atom event + materializable_elements row", async () => {
-    await seedEngagementWithRegridParcel();
+  it("[1] happy path — parcel-from-county-GIS → atom event + materializable_elements row", async () => {
+    await seedEngagementWithGrandCountyParcel();
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim, blobs } = makeInMemStorage();
 
@@ -337,7 +337,7 @@ describe("site-topography ingest worker", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("unreachable");
     expect(result.eventType).toBe("site-topography.ingested");
-    expect(result.parcelOrigin).toBe("regrid-parcel");
+    expect(result.parcelOrigin).toBe("county-gis-parcel");
     expect(result.reusedExisting).toBe(false);
     expect(result.contourCount).toBeGreaterThan(0);
     expect(result.demGcsObjectPath).toMatch(/^\/objects\/test-dem-/);
@@ -417,7 +417,7 @@ describe("site-topography ingest worker", () => {
   });
 
   it("[4] 3DEP upstream error — HTTP 503 → upstream-error status, no atom event, no row", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     const fetchImpl = vi.fn(
       async () =>
         new Response("backend DB down", {
@@ -456,7 +456,7 @@ describe("site-topography ingest worker", () => {
   });
 
   it("[5] re-run idempotency — second run with same inputs reuses the existing event + row", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
 
@@ -504,7 +504,7 @@ describe("site-topography ingest worker", () => {
   });
 
   it("[6] replay-from-events — deleted row re-materializes from latest event", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
 
@@ -538,7 +538,7 @@ describe("site-topography ingest worker", () => {
   });
 
   it("[7] atom payload shape — provenance fields land per SiteTopographyEventPayload", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
 
@@ -577,12 +577,12 @@ describe("site-topography ingest worker", () => {
     const catchment = payload.catchment as Record<string, unknown>;
     expect(catchment.bufferMeters).toBe(300);
     const parcel = payload.parcel as Record<string, unknown>;
-    expect(parcel.origin).toBe("regrid-parcel");
+    expect(parcel.origin).toBe("county-gis-parcel");
     expect(parcel.briefingSourceId).toBe(BRIEFING_SOURCE_ID);
   });
 
   it("[8] atom contextSummary — found:true with key metrics post-ingest", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
 
@@ -609,13 +609,13 @@ describe("site-topography ingest worker", () => {
     expect(typed.demSource).toBe("usgs-3dep");
     expect(typed.contourCount).toBeGreaterThan(0);
     expect(typed.contourIntervalMeters).toBe(5);
-    expect(typed.parcelOrigin).toBe("regrid-parcel");
+    expect(typed.parcelOrigin).toBe("county-gis-parcel");
     expect(summary.keyMetrics.length).toBeGreaterThan(0);
     expect(summary.prose).toMatch(/contour features/i);
   });
 
   it("[9] IFC best-effort — worker error does NOT fail the ingest; mesh + contours still land, no ifc block", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     ifcWorkerMockState.mode = "skip-error";
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
@@ -656,7 +656,7 @@ describe("site-topography ingest worker", () => {
   });
 
   it("[10] IFC ok — the ifc block lands, is fed the SAME geometry as the mesh, and reaches the read model", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     ifcWorkerMockState.mode = "ok";
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
@@ -720,7 +720,7 @@ describe("site-topography ingest worker", () => {
   });
 
   it("[11] IFC client throw — swallowed best-effort, ingest still ok", async () => {
-    await seedEngagementWithRegridParcel();
+    await seedEngagementWithGrandCountyParcel();
     ifcWorkerMockState.mode = "throw";
     const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
     const { shim } = makeInMemStorage();
