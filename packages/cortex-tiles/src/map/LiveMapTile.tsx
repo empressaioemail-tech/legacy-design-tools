@@ -49,6 +49,7 @@ import {
   fetchGisLayer,
   toLiveOverlays,
   selectionToCard,
+  createLiveGisGuard,
   type GisLayerResponse,
   type LiveLayerKey,
   type LiveLayerState,
@@ -181,6 +182,15 @@ function LiveMapTileInner({ onRunBrief, onSiteAnalysis, workerUrl, workerClass }
     () => new Set<string>(),
   )
   const abortRef = useRef<AbortController | null>(null)
+  // Per-layer failure latch (THE STORM GUARD). One instance per tile session:
+  // once a layer's bbox query fails hard, its query is skipped on every
+  // subsequent viewport emit, so no backend failure can exhaust the browser
+  // connection pool. A good response self-heals the latch. See liveGis.ts.
+  const guardRef = useRef(createLiveGisGuard())
+  // Coalesce: never hold more than one in-flight fetch per layer. A viewport
+  // emit that lands while a layer is still fetching supersedes it via the shared
+  // AbortController (below); this ref just tracks liveness for the cap.
+  const inFlightRef = useRef<Set<LiveLayerKey>>(new Set())
 
   const { apn, jurisdiction, lat, lng } = activeParcel
   const center = useMemo(
@@ -201,23 +211,48 @@ function LiveMapTileInner({ onRunBrief, onSiteAnalysis, workerUrl, workerClass }
       const wanted = layersForZoom(vp.zoom)
       const baseUrl = cortex.config.baseUrl
 
+      const guard = guardRef.current
+      const inFlight = inFlightRef.current
+
       const run = (layer: LiveLayerKey, set: React.Dispatch<React.SetStateAction<LayerSlot>>) => {
         if (!wanted.includes(layer)) {
           set({ fetch: { status: 'zoom-gated' }, data: null })
           return
         }
+        // STORM GUARD: this layer has already failed hard this session. Do NOT
+        // re-issue its bbox query — a repeated 400/502 must never produce more
+        // than the few requests it took to trip the latch. Render honest-empty.
+        if (guard.isSuppressed(layer)) {
+          set((s) => ({ ...s, fetch: guard.suppressedState(layer) }))
+          return
+        }
+        // Concurrency cap: at most one in-flight fetch per layer. The prior
+        // controller was already aborted above (abortRef), so a still-listed
+        // layer means this emit supersedes it — allow it; the aborted promise
+        // resolves to a no-op. This guards against a layer ever holding more
+        // than one live socket at a time.
+        inFlight.add(layer)
         set((s) => ({ ...s, fetch: { status: 'loading' } }))
         fetchGisLayer(baseUrl, layer, vp.bbox, ctrl.signal)
           .then((state) => {
             if (ctrl.signal.aborted) return
+            inFlight.delete(layer)
+            // Fold the outcome into the latch: a hard error arms it (no more
+            // requests for this layer); an ok/no-coverage clears any prior latch.
+            guard.record(layer, state)
             set({ fetch: state, data: state.status === 'ok' ? state.response : null })
           })
           .catch((err) => {
             if (ctrl.signal.aborted || (err as Error)?.name === 'AbortError') return
-            set({
-              fetch: { status: 'error', message: `${layer}: ${(err as Error)?.message}` },
-              data: null,
-            })
+            inFlight.delete(layer)
+            // A thrown fetch (network error surfacing as a reject) is also a hard
+            // failure: latch it so viewport churn can't storm the pool.
+            const errState: LiveLayerState = {
+              status: 'error',
+              message: `${layer}: ${(err as Error)?.message}`,
+            }
+            guard.record(layer, errState)
+            set({ fetch: errState, data: null })
           })
       }
 
@@ -319,6 +354,14 @@ function LiveMapTileInner({ onRunBrief, onSiteAnalysis, workerUrl, workerClass }
   }
   if (fema.fetch.status === 'error') {
     chips.push({ key: 'fema-err', sev: 'error', text: `FEMA failed — ${fema.fetch.message}` })
+  }
+  // Storm guard tripped: the layer is latched off after repeated failure. Say so
+  // honestly (the map draws nothing for it, and no further requests are issued).
+  if (parcels.fetch.status === 'suppressed') {
+    chips.push({ key: 'parcels-sup', sev: 'warn', text: 'Parcels layer paused after repeated errors' })
+  }
+  if (fema.fetch.status === 'suppressed') {
+    chips.push({ key: 'fema-sup', sev: 'warn', text: 'FEMA layer paused after repeated errors' })
   }
   const attribution =
     parcels.fetch.status === 'ok' && parcels.fetch.response.provider

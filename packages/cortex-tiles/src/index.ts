@@ -45,6 +45,9 @@ export {
   parcelFillColor,
   toLiveOverlays,
   selectionToCard,
+  normalizeBbox,
+  createLiveGisGuard,
+  shouldSuppressAfter,
 } from './map/liveGis'
 export type {
   GisFetchLike,
@@ -55,6 +58,9 @@ export type {
   FeatureCollectionLike,
   GeoJsonFeature,
   ParcelCardData,
+  LiveGisGuard,
+  GisBBox,
+  ViewportState,
 } from './map/liveGis'
 export { TopographyTile } from './site-analysis/TopographyTile'
 export { DrainageTile } from './site-analysis/DrainageTile'

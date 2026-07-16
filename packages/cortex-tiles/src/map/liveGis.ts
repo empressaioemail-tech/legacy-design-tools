@@ -89,6 +89,14 @@ export type LiveLayerState =
   | { status: 'ok'; response: GisLayerResponse }
   | { status: 'no-coverage'; detail?: string }
   | { status: 'error'; message: string }
+  /**
+   * The per-layer failure latch tripped: this layer returned a client/server
+   * error (400/403/5xx) or a network error, so the loop has STOPPED re-issuing
+   * its bbox query for the session. Renders as an honest empty overlay (no
+   * throw, no retry loop). This is the storm guard — the reason a broken
+   * endpoint can never exhaust the browser connection pool.
+   */
+  | { status: 'suppressed'; message: string }
 
 /** Which live layers to fetch at this zoom. */
 export function layersForZoom(zoom: number): LiveLayerKey[] {
@@ -113,6 +121,27 @@ export interface GisLayerOpts {
   signal?: AbortSignal
   /** Injected fetch (MV3 worker-proxy); defaults to global fetch. */
   fetch?: GisFetchLike
+}
+
+/**
+ * Pick EXACTLY {west,south,east,north} off whatever the renderer's viewport
+ * emit hands us. The server's GIS_BBOX_BODY is `.strict()` — it rejects on ANY
+ * extra key (e.g. a `zoom` carried alongside the bounds, which is the shape the
+ * pre-library home-grown client sent and the shape that produced the observed
+ * "Unrecognized key" 400s). Sending a strict-clean bbox is what makes the body
+ * pass the exact-match POST allowlist regardless of what the viewport object
+ * carries. Non-finite coordinates are dropped to `null` so a malformed viewport
+ * degrades to an honest error rather than a rejected request.
+ */
+export function normalizeBbox(bbox: GisBBox): GisBBox {
+  const n = (v: unknown): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : NaN
+  return {
+    west: n(bbox?.west),
+    south: n(bbox?.south),
+    east: n(bbox?.east),
+    north: n(bbox?.north),
+  }
 }
 
 /**
@@ -142,12 +171,17 @@ export async function fetchGisLayer(
       : ((signalOrOpts as GisLayerOpts) ?? {})
   const signal = opts.signal
   const doFetch: GisFetchLike = opts.fetch ?? ((input, init) => fetch(input, init))
+  // STRICT-CLEAN body: exactly { layer, bbox: {west,south,east,north} }. The
+  // server body is `.strict()`; any stray key (a `zoom` alongside the bounds,
+  // renderer internals) is a 400. Pin the shape here so no viewport carrier can
+  // trip the exact-match allowlist.
+  const cleanBbox = normalizeBbox(bbox)
   let res: Response
   try {
     res = await doFetch(`${baseUrl.replace(/\/$/, '')}/brokerage/v1/map-data/gis-layer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ layer, bbox }),
+      body: JSON.stringify({ layer, bbox: cleanBbox }),
       signal,
     })
   } catch (err) {
@@ -177,6 +211,69 @@ export async function fetchGisLayer(
     return { status: 'error', message: `${layer}: ${detail}` }
   }
   return { status: 'ok', response: rec as unknown as GisLayerResponse }
+}
+
+// ---------------------------------------------------------------------------
+// Storm guard: per-layer failure latch
+// ---------------------------------------------------------------------------
+//
+// THE PRIMARY FIX. The viewport loop re-issues each layer's bbox query on every
+// (debounced) viewport emit. With no memory of prior failures, a persistently
+// failing endpoint (a 400 shape mismatch, a 502 upstream outage like FEMA NFHL,
+// a network error) gets re-fired on every pan/zoom — thousands of requests —
+// until the browser connection pool is exhausted (ERR_INSUFFICIENT_RESOURCES)
+// and the map goes black.
+//
+// This mirrors the resilience intent of the pre-library home-grown client's
+// `bboxSupported` runtime feature-detection latch: once a layer's bbox query
+// has failed hard, STOP issuing it for the session. The guard is per-layer, so
+// a failing FEMA layer never suppresses working parcels and vice-versa. A
+// successful response CLEARS the latch (transient blips self-heal on the next
+// good response); a hard failure re-arms it.
+
+/** Which HTTP outcomes trip the latch. 404 (no-coverage) does NOT — it is an
+ *  honest "no data here", cheap, and legitimately varies by viewport. */
+export function shouldSuppressAfter(state: LiveLayerState): boolean {
+  return state.status === 'error'
+}
+
+export interface LiveGisGuard {
+  /** True if this layer is latched off and its bbox query must be skipped. */
+  isSuppressed(layer: LiveLayerKey): boolean
+  /** The suppressed state to render for a latched layer (honest empty). */
+  suppressedState(layer: LiveLayerKey): Extract<LiveLayerState, { status: 'suppressed' }>
+  /** Fold a fetch outcome into the latch: arms on hard failure, clears on ok. */
+  record(layer: LiveLayerKey, state: LiveLayerState): void
+  /** Reset all latches (e.g. an explicit user "retry"). */
+  reset(): void
+}
+
+/**
+ * Create a session-scoped per-layer failure guard. Hold one instance per tile
+ * (a ref) so it persists across viewport emits within a session but resets on
+ * remount.
+ */
+export function createLiveGisGuard(): LiveGisGuard {
+  const suppressed = new Map<LiveLayerKey, string>()
+  return {
+    isSuppressed: (layer) => suppressed.has(layer),
+    suppressedState: (layer) => ({
+      status: 'suppressed',
+      message: suppressed.get(layer) ?? `${layer}: layer temporarily disabled after repeated failure`,
+    }),
+    record: (layer, state) => {
+      if (state.status === 'ok' || state.status === 'no-coverage') {
+        // A good (or honestly-empty) response self-heals a prior latch.
+        suppressed.delete(layer)
+        return
+      }
+      if (shouldSuppressAfter(state)) {
+        const message = state.status === 'error' ? state.message : `${layer}: suppressed`
+        suppressed.set(layer, message)
+      }
+    },
+    reset: () => suppressed.clear(),
+  }
 }
 
 /** Neutral parcel fill when no landUseCode is present in the viewport. */

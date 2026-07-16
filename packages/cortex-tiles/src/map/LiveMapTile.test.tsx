@@ -189,6 +189,96 @@ describe('live GIS path (the promotion)', () => {
     expect(latestMapProps().useFixture).toBe(false)
   })
 
+  it('STORM GUARD: after a layer 400s/502s, repeated viewport ticks do NOT re-issue that layer (bounded call count)', async () => {
+    // parcels persistently 400 (the failing endpoint); fema stays healthy so we
+    // prove the latch is PER-LAYER (fema keeps working, parcels is suppressed).
+    let parcelsCalls = 0
+    let femaCalls = 0
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const { layer } = JSON.parse(String(init?.body ?? '{}'))
+      if (layer === 'parcels') {
+        parcelsCalls += 1
+        return new Response(
+          JSON.stringify({ error: 'invalid_request', message: 'bad bbox' }),
+          { status: 400 },
+        )
+      }
+      femaCalls += 1
+      return new Response(JSON.stringify(FEMA_ENVELOPE), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTile()
+
+    // Simulate a user panning the map many times over the broken endpoint. Each
+    // tick uses a slightly different bbox so nothing is deduped by identity.
+    const TICKS = 25
+    for (let i = 0; i < TICKS; i += 1) {
+      const shift = i * 0.001
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        latestMapProps().onViewportChange({
+          bbox: {
+            west: -97.934 + shift,
+            south: 29.865 + shift,
+            east: -97.92 + shift,
+            north: 29.876 + shift,
+          },
+          zoom: 15.2,
+        })
+        // let the fetch promises resolve so the latch records before next tick
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    }
+    await waitFor(() => expect(screen.getByText(/Parcels layer paused/)).toBeTruthy())
+
+    // The WHOLE POINT: parcels fired only the handful of times it took to trip
+    // the latch — NOT once per tick. A repeated 400 must never storm the pool.
+    expect(parcelsCalls).toBeLessThanOrEqual(2)
+    expect(parcelsCalls).toBeGreaterThanOrEqual(1)
+    // fema is healthy and per-layer independent: it keeps fetching every tick.
+    expect(femaCalls).toBeGreaterThan(parcelsCalls)
+    // And the map degrades to an honest-empty overlay for parcels (no throw).
+    const overlayKeys = (latestMapProps().overlays as Array<{ layerKey: string }>).map(
+      (o) => o.layerKey,
+    )
+    expect(overlayKeys).not.toContain(LIVE_PARCELS_KEY)
+  })
+
+  it('STORM GUARD covers a 502 (upstream FEMA outage degrades gracefully, does not storm)', async () => {
+    let femaCalls = 0
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const { layer } = JSON.parse(String(init?.body ?? '{}'))
+      if (layer === 'fema') {
+        femaCalls += 1
+        return new Response(
+          JSON.stringify({ error: 'upstream-error', message: 'NFHL 500 (FEMA service outage)' }),
+          { status: 502 },
+        )
+      }
+      return new Response(JSON.stringify(PARCELS_ENVELOPE), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTile()
+
+    for (let i = 0; i < 15; i += 1) {
+      const shift = i * 0.001
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        latestMapProps().onViewportChange({
+          bbox: { west: -97.934 + shift, south: 29.865, east: -97.92, north: 29.876 },
+          zoom: 15.2,
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    }
+    await waitFor(() => expect(screen.getByText(/FEMA layer paused/)).toBeTruthy())
+    // The FEMA 502 (upstream outage) tripped the latch after a couple of tries;
+    // it does not re-fire on every pan. Guard makes an upstream outage graceful.
+    expect(femaCalls).toBeLessThanOrEqual(2)
+  })
+
   it('gates parcels at wide zooms with a zoom-in hint instead of fetching', async () => {
     const fetchMock = mockFetchByLayer({
       fema: () => new Response(JSON.stringify(FEMA_ENVELOPE), { status: 200 }),

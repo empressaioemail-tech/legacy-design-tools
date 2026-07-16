@@ -17,6 +17,9 @@ import {
   parcelFillColor,
   toLiveOverlays,
   selectionToCard,
+  normalizeBbox,
+  createLiveGisGuard,
+  shouldSuppressAfter,
   type FeatureCollectionLike,
   type LiveLayerState,
 } from './liveGis'
@@ -147,6 +150,82 @@ describe('fetchGisLayer (bbox -> proxy POST -> honest states)', () => {
     const state = await fetchGisLayer('/api/spine/cortex/api', 'fema', SAN_MARCOS_BBOX)
     expect(state).toEqual({ status: 'error', message: 'fema: Failed to fetch' })
   })
+
+  it('sends a STRICT-CLEAN body: exactly {layer, bbox:{west,south,east,north}} — strips any extra viewport key (the 400 fix)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ layer: 'parcels', geojson: fc([]) }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    // A viewport carrier that (like the renderer / old client) drags along extra
+    // keys the server's .strict() body rejects: zoom, and stray corner aliases.
+    const dirtyBbox = {
+      west: -97.934,
+      south: 29.865,
+      east: -97.92,
+      north: 29.876,
+      zoom: 15.2,
+      westLng: -97.934,
+    } as unknown as typeof SAN_MARCOS_BBOX
+    await fetchGisLayer('/api/spine/cortex/api', 'parcels', dirtyBbox)
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    // Exactly two top-level keys, and bbox has exactly the four cardinal keys.
+    expect(Object.keys(body).sort()).toEqual(['bbox', 'layer'])
+    expect(Object.keys(body.bbox).sort()).toEqual(['east', 'north', 'south', 'west'])
+    expect(body.bbox).toEqual({ west: -97.934, south: 29.865, east: -97.92, north: 29.876 })
+    expect(body.bbox).not.toHaveProperty('zoom')
+    expect(body.bbox).not.toHaveProperty('westLng')
+  })
+})
+
+describe('normalizeBbox (strict-clean picker)', () => {
+  it('picks exactly the four cardinal keys and drops everything else', () => {
+    const out = normalizeBbox({
+      west: -1,
+      south: -2,
+      east: 3,
+      north: 4,
+      // extras a viewport object may carry
+      zoom: 15,
+      pitch: 0,
+    } as unknown as Parameters<typeof normalizeBbox>[0])
+    expect(out).toEqual({ west: -1, south: -2, east: 3, north: 4 })
+    expect(Object.keys(out).sort()).toEqual(['east', 'north', 'south', 'west'])
+  })
+})
+
+describe('createLiveGisGuard (per-layer failure latch — the storm guard)', () => {
+  it('suppresses a layer after a hard error and self-heals on a later ok', () => {
+    const guard = createLiveGisGuard()
+    expect(guard.isSuppressed('fema')).toBe(false)
+
+    guard.record('fema', { status: 'error', message: 'fema: HTTP 502' })
+    expect(guard.isSuppressed('fema')).toBe(true)
+    expect(guard.suppressedState('fema')).toEqual({ status: 'suppressed', message: 'fema: HTTP 502' })
+    // a different layer is unaffected
+    expect(guard.isSuppressed('parcels')).toBe(false)
+
+    // an ok response clears the latch
+    guard.record('fema', { status: 'ok', response: { layer: 'fema' } })
+    expect(guard.isSuppressed('fema')).toBe(false)
+  })
+
+  it('does NOT suppress on 404 no-coverage (honest empty, legitimately varies by viewport)', () => {
+    const guard = createLiveGisGuard()
+    guard.record('parcels', { status: 'no-coverage' })
+    expect(guard.isSuppressed('parcels')).toBe(false)
+    expect(shouldSuppressAfter({ status: 'no-coverage' })).toBe(false)
+    expect(shouldSuppressAfter({ status: 'error', message: 'x' })).toBe(true)
+  })
+
+  it('reset() clears all latches', () => {
+    const guard = createLiveGisGuard()
+    guard.record('fema', { status: 'error', message: 'e' })
+    guard.record('parcels', { status: 'error', message: 'e' })
+    guard.reset()
+    expect(guard.isSuppressed('fema')).toBe(false)
+    expect(guard.isSuppressed('parcels')).toBe(false)
+  })
 })
 
 describe('parcelFillColor (color by landUseCode where present, neutral otherwise)', () => {
@@ -180,9 +259,12 @@ describe('toLiveOverlays (overlay composition)', () => {
     expect(specs[1].interactive).toBe(true)
   })
 
-  it('renders nothing for error / no-coverage / zoom-gated states (honest empty, not fixtures)', () => {
+  it('renders nothing for error / no-coverage / zoom-gated / suppressed states (honest empty, not fixtures)', () => {
     expect(toLiveOverlays({ status: 'error', message: 'x' }, { status: 'no-coverage' })).toEqual([])
     expect(toLiveOverlays({ status: 'zoom-gated' }, { status: 'idle' })).toEqual([])
+    expect(
+      toLiveOverlays({ status: 'suppressed', message: 'p' }, { status: 'suppressed', message: 'f' }),
+    ).toEqual([])
   })
 })
 
