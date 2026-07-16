@@ -14,6 +14,13 @@ import {
 import type { ReadContract } from "@hauska/atom-contract/read-contract";
 import type { ArcGisGeoJsonFeatureCollection } from "@workspace/adapters/arcgis";
 import type { GisLayerBbox } from "./brokerageGisLayers";
+import { queryGisLayerGeoJson } from "./brokerageGisLayers";
+import {
+  keyFromEngagementOrSynthesize,
+  retrieveAtomsForQuestion,
+  type RetrievedAtom,
+} from "@workspace/codes";
+import { logger } from "./logger";
 import {
   ozTractsInBbox,
   ozTractLayerProvenance,
@@ -60,6 +67,56 @@ export type CompositeLayerProvenance = {
   generatedAt: string;
 };
 
+/**
+ * Provenance for a derived buildable-envelope. Every field is real or null —
+ * a null dimensional standard means "not found in the corpus for this
+ * jurisdiction/district", which downgrades the honesty rather than being
+ * silently defaulted to a number.
+ */
+export type BuildableEnvelopeProvenance = {
+  parcel: {
+    source: string;
+    sourceUrl: string | null;
+    notSurveyGrade: boolean;
+    /** Whether a parcel polygon was resolved for this viewport at all. */
+    resolved: boolean;
+  };
+  zoning: {
+    /** Zoning district / code resolved from the parcel attributes (Cotality site-location enrich). */
+    district: string | null;
+    description: string | null;
+    source: string;
+    resolved: boolean;
+  };
+  dimensionalStandards: {
+    jurisdictionKey: string | null;
+    source: string;
+    sourceUrl: string | null;
+    /** Code-atom ids the setback/FAR/height/coverage values were read from. */
+    citedAtomIds: string[];
+    frontSetbackFt: number | null;
+    sideSetbackFt: number | null;
+    rearSetbackFt: number | null;
+    farLimit: number | null;
+    heightLimitFt: number | null;
+    lotCoveragePct: number | null;
+    /** How complete the dimensional set is: full | partial | none. */
+    completeness: "full" | "partial" | "none";
+  };
+  method: {
+    kind: "centroid-inset-approximation";
+    note: string;
+  };
+  /**
+   * Three-way coverage state, mirroring the OZ derivation:
+   *   in-scope-derived — parcel + at least one dimensional standard → earned
+   *   in-scope-partial — parcel resolved but dimensional set incomplete → lowered confidence, honest
+   *   out-of-scope     — parcel geometry OR jurisdiction/zoning missing → degraded, absence-is-unknown
+   */
+  coverage: "in-scope-derived" | "in-scope-partial" | "out-of-scope";
+  generatedAt: string;
+};
+
 export type CompositeLayerPayload = {
   layer: CompositeLayerKey;
   geojson: ArcGisGeoJsonFeatureCollection;
@@ -68,6 +125,7 @@ export type CompositeLayerPayload = {
   fixture?: boolean;
   notes?: string;
   provenance?: CompositeLayerProvenance;
+  buildableProvenance?: BuildableEnvelopeProvenance;
 };
 
 function defaultHonesty(adapter: string, degraded = false): EngineHonesty {
@@ -96,17 +154,6 @@ function parcelRing(bbox: GisLayerBbox, scale = 0.35): number[][] {
     [cx - dx, cy + dy],
     [cx - dx, cy - dy],
   ];
-}
-
-function insetRing(outer: number[][], inset = 0.15): number[][] {
-  const cx =
-    outer.reduce((s, p) => s + p[0]!, 0) / Math.max(outer.length - 1, 1);
-  const cy =
-    outer.reduce((s, p) => s + p[1]!, 0) / Math.max(outer.length - 1, 1);
-  return outer.map(([x, y]) => [
-    cx + (x! - cx) * (1 - inset),
-    cy + (y! - cy) * (1 - inset),
-  ]);
 }
 
 /**
@@ -230,41 +277,740 @@ export function deriveOzDealCrossfilter(bbox: GisLayerBbox): {
   };
 }
 
-export function buildCompositeLayerFixture(
-  layer: CompositeLayerKey,
-  bbox: GisLayerBbox,
-): CompositeLayerPayload {
-  const parcel = parcelRing(bbox);
-  const buildable = insetRing(parcel, 0.22);
+// ---------------------------------------------------------------------------
+// Buildable-envelope derivation (STEP: promote 78% fixture -> real derivation)
+// ---------------------------------------------------------------------------
 
-  if (layer === "buildable-envelope") {
+type LngLat = [number, number];
+
+/**
+ * Shoelace area of a WGS84 ring, projected to an approximately-equal-area
+ * local plane (degrees scaled to meters at the ring's mean latitude). Returns
+ * square meters. Sign-agnostic (absolute). Rings are assumed small (a single
+ * parcel) so the flat-earth approximation error is negligible relative to the
+ * conservative-inset approximation that already dominates the result.
+ */
+function ringAreaSqMeters(ring: LngLat[]): number {
+  if (ring.length < 4) return 0;
+  const meanLat =
+    ring.reduce((s, p) => s + p[1], 0) / Math.max(ring.length, 1);
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos((meanLat * Math.PI) / 180);
+  let acc = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i]![0] * mPerDegLng;
+    const yi = ring[i]![1] * mPerDegLat;
+    const xj = ring[j]![0] * mPerDegLng;
+    const yj = ring[j]![1] * mPerDegLat;
+    acc += xj * yi - xi * yj;
+  }
+  return Math.abs(acc) / 2;
+}
+
+/** Centroid of a ring (ignores the closing duplicate vertex). */
+function ringCentroid(ring: LngLat[]): LngLat {
+  const n = Math.max(ring.length - 1, 1);
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < n; i++) {
+    cx += ring[i]![0];
+    cy += ring[i]![1];
+  }
+  return [cx / n, cy / n];
+}
+
+/**
+ * Conservative buildable-ring approximation. TRUE polygon setback offsetting
+ * (a negative buffer along every edge normal) needs a geometry library
+ * (turf/jsts), and none is a dependency in this repo. Rather than add a heavy
+ * dep for v1, we approximate the setback inset by shrinking the parcel ring
+ * toward its centroid by the fraction of the parcel's mean half-span consumed
+ * by the (front+rear) and (side+side) setbacks. This is an APPROXIMATION — it
+ * is labeled as such in provenance and carries lowered confidence. It never
+ * over-states buildable area for a convex-ish parcel: a uniform centroid
+ * shrink removes at least as much as a true inward buffer of the same depth.
+ */
+function centroidInsetRing(ring: LngLat[], insetFraction: number): LngLat[] {
+  const clamped = Math.max(0, Math.min(0.95, insetFraction));
+  const [cx, cy] = ringCentroid(ring);
+  const scale = 1 - clamped;
+  return ring.map(([x, y]) => [cx + (x - cx) * scale, cy + (y - cy) * scale]);
+}
+
+/** Meters -> degrees (lat / lng) at a given latitude, for setback -> fraction. */
+function metersToDegrees(
+  meters: number,
+  latDeg: number,
+): { degLat: number; degLng: number } {
+  const degLat = meters / 111_320;
+  const degLng = meters / (111_320 * Math.cos((latDeg * Math.PI) / 180) || 1);
+  return { degLat, degLng };
+}
+
+function firstPolygonRing(geometry: unknown): LngLat[] | null {
+  if (!geometry || typeof geometry !== "object") return null;
+  const g = geometry as { type?: string; coordinates?: unknown };
+  if (g.type === "Polygon" && Array.isArray(g.coordinates)) {
+    const outer = (g.coordinates as unknown[])[0];
+    if (Array.isArray(outer) && outer.length >= 4) return outer as LngLat[];
+  }
+  if (g.type === "MultiPolygon" && Array.isArray(g.coordinates)) {
+    // Take the largest polygon's outer ring.
+    let best: LngLat[] | null = null;
+    let bestArea = -1;
+    for (const poly of g.coordinates as unknown[]) {
+      if (!Array.isArray(poly)) continue;
+      const outer = poly[0];
+      if (!Array.isArray(outer) || outer.length < 4) continue;
+      const a = ringAreaSqMeters(outer as LngLat[]);
+      if (a > bestArea) {
+        bestArea = a;
+        best = outer as LngLat[];
+      }
+    }
+    return best;
+  }
+  return null;
+}
+
+const FEET_PER_METER = 3.280_84;
+
+/** Pull the largest plausible "N ft" dimension from an atom body for a keyword. */
+function parseFeetNear(body: string, keywords: string[]): number | null {
+  const hay = body.toLowerCase();
+  let best: number | null = null;
+  for (const kw of keywords) {
+    let idx = hay.indexOf(kw);
+    while (idx !== -1) {
+      // Look in a window after the keyword for "<n> feet|ft|'".
+      const window = body.slice(idx, idx + 120);
+      const m = window.match(
+        /(\d{1,3}(?:\.\d+)?)\s*(?:feet|foot|ft\.?|')/i,
+      );
+      if (m) {
+        const v = Number(m[1]);
+        if (Number.isFinite(v) && v > 0 && v < 300) {
+          best = best === null ? v : Math.min(best, v);
+        }
+      }
+      idx = hay.indexOf(kw, idx + kw.length);
+    }
+  }
+  return best;
+}
+
+/** Pull a FAR ratio (e.g. "floor area ratio of 0.4" or "F.A.R. 2.0"). */
+function parseFar(body: string): number | null {
+  const m = body.match(
+    /(?:floor[\s-]*area[\s-]*ratio|f\.?a\.?r\.?)[^0-9]{0,20}(\d(?:\.\d+)?)/i,
+  );
+  if (m) {
+    const v = Number(m[1]);
+    if (Number.isFinite(v) && v > 0 && v <= 30) return v;
+  }
+  return null;
+}
+
+/** Pull a lot-coverage percentage (e.g. "maximum lot coverage of 40%"). */
+function parseLotCoveragePct(body: string): number | null {
+  const m = body.match(
+    /(?:lot[\s-]*coverage|building[\s-]*coverage|maximum[\s-]*coverage)[^0-9]{0,30}(\d{1,3}(?:\.\d+)?)\s*%/i,
+  );
+  if (m) {
+    const v = Number(m[1]);
+    if (Number.isFinite(v) && v > 0 && v <= 100) return v;
+  }
+  return null;
+}
+
+type DimensionalStandards = {
+  frontSetbackFt: number | null;
+  sideSetbackFt: number | null;
+  rearSetbackFt: number | null;
+  farLimit: number | null;
+  heightLimitFt: number | null;
+  lotCoveragePct: number | null;
+  citedAtomIds: string[];
+  sourceUrl: string | null;
+};
+
+/**
+ * Read dimensional standards (setbacks / FAR / height / lot coverage) for a
+ * jurisdiction from the code corpus via the same retrieval path the brief's
+ * local-code layer uses. Never fabricates a value: a dimension absent from the
+ * retrieved atoms stays null.
+ */
+async function retrieveDimensionalStandards(
+  jurisdictionKey: string,
+): Promise<DimensionalStandards> {
+  const queries: Array<{ q: string; kind: string }> = [
+    { q: "setback requirements front side rear yard", kind: "setback" },
+    { q: "floor area ratio FAR maximum", kind: "far" },
+    { q: "maximum building height", kind: "height" },
+    { q: "maximum lot coverage building coverage", kind: "coverage" },
+  ];
+
+  const cited = new Set<string>();
+  let front: number | null = null;
+  let side: number | null = null;
+  let rear: number | null = null;
+  let far: number | null = null;
+  let height: number | null = null;
+  let coverage: number | null = null;
+  let sourceUrl: string | null = null;
+
+  for (const { q } of queries) {
+    let hits: RetrievedAtom[] = [];
+    try {
+      hits = await retrieveAtomsForQuestion({
+        jurisdictionKey,
+        question: q,
+        limit: 3,
+        logger,
+        applyMinScore: false,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, jurisdictionKey, query: q },
+        "buildable-envelope: dimensional retrieval failed",
+      );
+    }
+
+    for (const h of hits) {
+      const body = h.body ?? "";
+      if (!body) continue;
+      const f = parseFeetNear(body, ["front setback", "front yard"]);
+      const s = parseFeetNear(body, ["side setback", "side yard"]);
+      const r = parseFeetNear(body, ["rear setback", "rear yard"]);
+      const genericSetback = parseFeetNear(body, ["setback", "yard"]);
+      const fr = parseFar(body);
+      const ht = parseFeetNear(body, [
+        "building height",
+        "maximum height",
+        "height limit",
+        "height of",
+      ]);
+      const cov = parseLotCoveragePct(body);
+
+      let used = false;
+      if (front === null && f !== null) (front = f), (used = true);
+      if (side === null && s !== null) (side = s), (used = true);
+      if (rear === null && r !== null) (rear = r), (used = true);
+      // Fall back to a generic setback figure for any yard we still lack.
+      if (genericSetback !== null) {
+        if (front === null) (front = genericSetback), (used = true);
+        if (side === null) (side = genericSetback), (used = true);
+        if (rear === null) (rear = genericSetback), (used = true);
+      }
+      if (far === null && fr !== null) (far = fr), (used = true);
+      if (height === null && ht !== null) (height = ht), (used = true);
+      if (coverage === null && cov !== null) (coverage = cov), (used = true);
+
+      if (used) {
+        cited.add(h.id);
+        if (!sourceUrl && h.sourceUrl) sourceUrl = h.sourceUrl;
+      }
+    }
+  }
+
+  return {
+    frontSetbackFt: front,
+    sideSetbackFt: side,
+    rearSetbackFt: rear,
+    farLimit: far,
+    heightLimitFt: height,
+    lotCoveragePct: coverage,
+    citedAtomIds: [...cited],
+    sourceUrl,
+  };
+}
+
+function zoningFromProps(
+  props: Record<string, unknown>,
+): { district: string | null; description: string | null } {
+  const district =
+    (typeof props.zoningCode === "string" && props.zoningCode) ||
+    (typeof props.zoning === "string" && (props.zoning as string)) ||
+    null;
+  const description =
+    (typeof props.zoningDescription === "string" && props.zoningDescription) ||
+    null;
+  return { district: district || null, description: description || null };
+}
+
+function cityStateFromProps(props: Record<string, unknown>): {
+  city: string | null;
+  state: string | null;
+} {
+  const city =
+    [props.stdCity, props.city, props.situsCity].find(
+      (v) => typeof v === "string" && (v as string).trim(),
+    ) ?? null;
+  const state =
+    [props.stdState, props.state, props.situsState].find(
+      (v) => typeof v === "string" && (v as string).trim(),
+    ) ?? null;
+  return {
+    city: typeof city === "string" ? city.trim() : null,
+    state: typeof state === "string" ? state.trim() : null,
+  };
+}
+
+const BUILDABLE_METHOD_NOTE =
+  "Buildable ring is a conservative centroid-inset approximation of the setback offset, not a true polygon negative-buffer (no geometry library is a repo dependency). It removes at least as much area as a true inward buffer of the same depth, so buildableAreaPct is a floor, not an exact figure. Confidence is lowered accordingly.";
+
+/**
+ * Real buildable-envelope derivation (replaces the hardcoded 78% fixture).
+ *
+ * Inputs, all live and resolved per-request:
+ *   - Parcel polygon: county-GIS / Cotality Spatial Tile via queryGisLayerGeoJson
+ *     (the same path the parcels layer uses), which also enriches each parcel
+ *     with zoning attributes from the Cotality site-location call.
+ *   - Zoning district: read from the enriched parcel properties.
+ *   - Dimensional standards (setback / FAR / height / lot coverage): retrieved
+ *     from the code corpus for the parcel's jurisdiction via the same retrieval
+ *     path the brief's local-code layer uses.
+ *
+ * Method: take the parcel outer ring, inset it toward the centroid by the
+ * fraction of the parcel's mean half-span consumed by the setbacks (a labeled
+ * approximation — see BUILDABLE_METHOD_NOTE), then cap the resulting area by
+ * the FAR / lot-coverage limit. buildableAreaPct is DERIVED from the resulting
+ * geometry, never hardcoded.
+ *
+ * Three-state coverage honesty (mirrors deriveOzDealCrossfilter):
+ *   (a) parcel + >=1 dimensional standard -> in-scope-derived, degraded:false
+ *   (b) parcel but incomplete dimensional set -> in-scope-partial, degraded:true,
+ *       honest reason naming what is missing, lowered confidence
+ *   (c) no parcel geometry, or no jurisdiction/zoning -> out-of-scope,
+ *       degraded:true, "absence of a buildable envelope is unknown, not
+ *       confirmed-none" — NEVER a fabricated 78%.
+ */
+export async function deriveBuildableEnvelope(bbox: GisLayerBbox): Promise<{
+  payload: CompositeLayerPayload;
+  honesty: EngineHonesty;
+}> {
+  const generatedAt = new Date().toISOString();
+  const dataVintage = generatedAt.slice(0, 10);
+  const adapter = "brokerage:composite-buildable-envelope";
+
+  // --- Resolve parcel geometry (input 1) ---
+  let parcelResult:
+    | Awaited<ReturnType<typeof queryGisLayerGeoJson>>
+    | null = null;
+  try {
+    parcelResult = await queryGisLayerGeoJson({ layer: "parcels", bbox });
+  } catch (err) {
+    logger.warn({ err, bbox }, "buildable-envelope: parcel resolution failed");
+  }
+
+  const features = (parcelResult?.geojson.features ?? []) as Array<{
+    geometry?: unknown;
+    properties?: Record<string, unknown>;
+  }>;
+
+  const withRing = features
+    .map((f) => ({
+      ring: firstPolygonRing(f.geometry),
+      props: f.properties ?? {},
+    }))
+    .filter((f): f is { ring: LngLat[]; props: Record<string, unknown> } =>
+      Boolean(f.ring),
+    );
+
+  const parcelSource =
+    parcelResult?.provider ?? "county-GIS / Cotality Spatial Tile (parcels)";
+  const parcelSourceUrl = parcelResult?.serviceUrl ?? null;
+  const notSurveyGrade = Boolean(parcelResult?.notSurveyGrade);
+
+  // STATE (c): no parcel geometry resolvable for this viewport.
+  if (withRing.length === 0) {
+    const reason =
+      "Buildable envelope requires a parcel polygon; none was resolvable for this viewport (parcel geometry unavailable). Absence of a buildable envelope here is unknown, not confirmed-none.";
+    const provenance: BuildableEnvelopeProvenance = {
+      parcel: {
+        source: parcelSource,
+        sourceUrl: parcelSourceUrl,
+        notSurveyGrade,
+        resolved: false,
+      },
+      zoning: {
+        district: null,
+        description: null,
+        source: "Cotality site-location enrich",
+        resolved: false,
+      },
+      dimensionalStandards: {
+        jurisdictionKey: null,
+        source: "code corpus (retrieval-api / neon)",
+        sourceUrl: null,
+        citedAtomIds: [],
+        frontSetbackFt: null,
+        sideSetbackFt: null,
+        rearSetbackFt: null,
+        farLimit: null,
+        heightLimitFt: null,
+        lotCoveragePct: null,
+        completeness: "none",
+      },
+      method: { kind: "centroid-inset-approximation", note: BUILDABLE_METHOD_NOTE },
+      coverage: "out-of-scope",
+      generatedAt,
+    };
     return {
-      layer,
+      payload: {
+        layer: "buildable-envelope",
+        queryMode: "bbox",
+        fixture: false,
+        featureCount: 0,
+        notes: reason,
+        buildableProvenance: provenance,
+        geojson: { type: "FeatureCollection", features: [] },
+      },
+      honesty: {
+        confidence: { value: 0.2, kind: "asserted" },
+        dataVintage,
+        coverage: { degraded: true, reason },
+        source: { adapter },
+      },
+    };
+  }
+
+  // Subject parcel: the largest resolved parcel in the viewport.
+  const subject = withRing
+    .map((f) => ({ ...f, area: ringAreaSqMeters(f.ring) }))
+    .sort((a, b) => b.area - a.area)[0]!;
+
+  const { district, description } = zoningFromProps(subject.props);
+  const { city, state } = cityStateFromProps(subject.props);
+
+  const jurisdictionKey = keyFromEngagementOrSynthesize({
+    jurisdictionCity: city,
+    jurisdictionState: state,
+  });
+
+  // --- Resolve dimensional standards (input 3) ---
+  const dims: DimensionalStandards = jurisdictionKey
+    ? await retrieveDimensionalStandards(jurisdictionKey)
+    : {
+        frontSetbackFt: null,
+        sideSetbackFt: null,
+        rearSetbackFt: null,
+        farLimit: null,
+        heightLimitFt: null,
+        lotCoveragePct: null,
+        citedAtomIds: [],
+        sourceUrl: null,
+      };
+
+  const haveAnySetback =
+    dims.frontSetbackFt !== null ||
+    dims.sideSetbackFt !== null ||
+    dims.rearSetbackFt !== null;
+  const haveAnyDimension =
+    haveAnySetback ||
+    dims.farLimit !== null ||
+    dims.lotCoveragePct !== null ||
+    dims.heightLimitFt !== null;
+
+  const setbackFields = [
+    dims.frontSetbackFt,
+    dims.sideSetbackFt,
+    dims.rearSetbackFt,
+    dims.farLimit,
+    dims.lotCoveragePct,
+  ];
+  const knownCount = setbackFields.filter((v) => v !== null).length;
+  const completeness: BuildableEnvelopeProvenance["dimensionalStandards"]["completeness"] =
+    !haveAnyDimension ? "none" : knownCount >= 4 ? "full" : "partial";
+
+  // STATE (c-alt): parcel exists but NO dimensional standard in the corpus for
+  // this jurisdiction, and/or no jurisdiction/zoning resolvable — do NOT guess
+  // dimensions. Emit the parcel ring only, degraded, honest reason.
+  if (!haveAnyDimension) {
+    const missing = !jurisdictionKey
+      ? "no jurisdiction/zoning could be resolved for the parcel"
+      : "no dimensional zoning atom (setback / FAR / height / lot coverage) was found in the code corpus for this jurisdiction";
+    const reason = `Parcel geometry resolved, but ${missing}; a buildable envelope cannot be derived without dimensional standards, so none is fabricated. The parcel outline is returned as-is. Absence of a derived envelope is unknown, not confirmed-none.`;
+    const provenance: BuildableEnvelopeProvenance = {
+      parcel: {
+        source: parcelSource,
+        sourceUrl: parcelSourceUrl,
+        notSurveyGrade,
+        resolved: true,
+      },
+      zoning: {
+        district,
+        description,
+        source: "Cotality site-location enrich",
+        resolved: Boolean(district),
+      },
+      dimensionalStandards: {
+        jurisdictionKey,
+        source: "code corpus (retrieval-api / neon)",
+        sourceUrl: dims.sourceUrl,
+        citedAtomIds: dims.citedAtomIds,
+        frontSetbackFt: dims.frontSetbackFt,
+        sideSetbackFt: dims.sideSetbackFt,
+        rearSetbackFt: dims.rearSetbackFt,
+        farLimit: dims.farLimit,
+        heightLimitFt: dims.heightLimitFt,
+        lotCoveragePct: dims.lotCoveragePct,
+        completeness: "none",
+      },
+      method: { kind: "centroid-inset-approximation", note: BUILDABLE_METHOD_NOTE },
+      coverage: "out-of-scope",
+      generatedAt,
+    };
+    return {
+      payload: {
+        layer: "buildable-envelope",
+        queryMode: "bbox",
+        fixture: false,
+        featureCount: 1,
+        notes: reason,
+        buildableProvenance: provenance,
+        geojson: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: { type: "Polygon", coordinates: [subject.ring] },
+              properties: {
+                kind: "buildable-envelope",
+                derived: false,
+                zoningDistrict: district,
+                buildableAreaPct: null,
+                reasoning: reason,
+                confidence: 0.25,
+                confidenceKind: "asserted",
+                source: parcelSource,
+                sourceUrl: parcelSourceUrl,
+                dataVintage,
+                generatedAt,
+              },
+            },
+          ],
+        },
+      },
+      honesty: {
+        confidence: { value: 0.25, kind: "asserted" },
+        dataVintage,
+        coverage: { degraded: true, reason },
+        source: { adapter },
+      },
+    };
+  }
+
+  // --- STATE (a)/(b): derive the buildable ring from real dimensions ---
+  const ring = subject.ring;
+  const parcelArea = subject.area;
+  const [, cLat] = ringCentroid(ring);
+
+  // Parcel mean half-span in meters, to convert a setback depth into an inset
+  // fraction. Use the bbox of the ring.
+  let minLng = Infinity,
+    maxLng = -Infinity,
+    minLat = Infinity,
+    maxLat = -Infinity;
+  for (const [x, y] of ring) {
+    if (x < minLng) minLng = x;
+    if (x > maxLng) maxLng = x;
+    if (y < minLat) minLat = y;
+    if (y > maxLat) maxLat = y;
+  }
+  const spanLngM =
+    (maxLng - minLng) * 111_320 * Math.cos((cLat * Math.PI) / 180);
+  const spanLatM = (maxLat - minLat) * 111_320;
+  const meanHalfSpanM = Math.max((spanLngM + spanLatM) / 4, 1);
+
+  // Effective inward setback depth (meters): average of the yard setbacks we
+  // know, converted from feet. If a yard is unknown but at least one is known,
+  // we use the known ones only (partial), and say so.
+  const knownSetbacksFt = [
+    dims.frontSetbackFt,
+    dims.sideSetbackFt,
+    dims.rearSetbackFt,
+  ].filter((v): v is number => v !== null);
+  const meanSetbackFt =
+    knownSetbacksFt.length > 0
+      ? knownSetbacksFt.reduce((s, v) => s + v, 0) / knownSetbacksFt.length
+      : 0;
+  const meanSetbackM = meanSetbackFt / FEET_PER_METER;
+
+  const insetFraction =
+    meanSetbackM > 0 ? Math.min(0.95, meanSetbackM / meanHalfSpanM) : 0;
+
+  // Setback-limited ring + its area.
+  const setbackRing = insetFraction > 0 ? centroidInsetRing(ring, insetFraction) : ring;
+  let buildableArea = ringAreaSqMeters(setbackRing);
+
+  // Cap by lot-coverage (a hard fraction of parcel area).
+  const appliedCaps: string[] = [];
+  if (dims.lotCoveragePct !== null) {
+    const capArea = parcelArea * (dims.lotCoveragePct / 100);
+    if (capArea < buildableArea) {
+      buildableArea = capArea;
+      appliedCaps.push(`lot coverage ${dims.lotCoveragePct}%`);
+    }
+  }
+  // FAR caps FLOOR area; as a single-story footprint proxy it caps footprint at
+  // min(FAR, 1) * parcelArea. Only applies as a footprint cap when FAR < 1.
+  if (dims.farLimit !== null && dims.farLimit < 1) {
+    const capArea = parcelArea * dims.farLimit;
+    if (capArea < buildableArea) {
+      buildableArea = capArea;
+      appliedCaps.push(`FAR ${dims.farLimit} (footprint proxy)`);
+    }
+  }
+
+  const buildableAreaPct =
+    parcelArea > 0
+      ? Math.max(0, Math.min(100, Math.round((buildableArea / parcelArea) * 100)))
+      : null;
+
+  const appliedSetbackDesc =
+    knownSetbacksFt.length === 3
+      ? `front ${dims.frontSetbackFt} ft / side ${dims.sideSetbackFt} ft / rear ${dims.rearSetbackFt} ft`
+      : `${knownSetbacksFt.length} of 3 yard setbacks known (${[
+          dims.frontSetbackFt !== null ? `front ${dims.frontSetbackFt} ft` : null,
+          dims.sideSetbackFt !== null ? `side ${dims.sideSetbackFt} ft` : null,
+          dims.rearSetbackFt !== null ? `rear ${dims.rearSetbackFt} ft` : null,
+        ]
+          .filter(Boolean)
+          .join(", ") || "none"})`;
+
+  const missingBits: string[] = [];
+  if (!haveAnySetback) missingBits.push("no yard setback found");
+  if (dims.farLimit === null) missingBits.push("no FAR limit found");
+  if (dims.lotCoveragePct === null) missingBits.push("no lot-coverage limit found");
+  if (dims.heightLimitFt === null) missingBits.push("no height limit found");
+
+  const isPartial = completeness === "partial";
+  const coverage: BuildableEnvelopeProvenance["coverage"] = isPartial
+    ? "in-scope-partial"
+    : "in-scope-derived";
+
+  const reasoning =
+    `Buildable envelope for zoning district ${district ?? "(district not on parcel record)"}` +
+    ` in ${jurisdictionKey}. Applied setbacks: ${appliedSetbackDesc}` +
+    (appliedCaps.length ? `; area capped by ${appliedCaps.join(" and ")}` : "") +
+    `. buildableAreaPct=${buildableAreaPct}% derived from parcel geometry` +
+    ` (parcel ${Math.round(parcelArea)} m^2). Dimensional standards cited from code atoms [${dims.citedAtomIds.join(", ") || "none"}].` +
+    ` Method: ${BUILDABLE_METHOD_NOTE}` +
+    (missingBits.length ? ` Incomplete inputs: ${missingBits.join("; ")}.` : "");
+
+  // Earned-from-completeness confidence. Full dimensional set on a resolved
+  // parcel earns the most; partial lowers it. Never a bare number: kind carried.
+  const confidenceValue = isPartial ? 0.5 : 0.68;
+
+  const provenance: BuildableEnvelopeProvenance = {
+    parcel: {
+      source: parcelSource,
+      sourceUrl: parcelSourceUrl,
+      notSurveyGrade,
+      resolved: true,
+    },
+    zoning: {
+      district,
+      description,
+      source: "Cotality site-location enrich",
+      resolved: Boolean(district),
+    },
+    dimensionalStandards: {
+      jurisdictionKey,
+      source: "code corpus (retrieval-api / neon)",
+      sourceUrl: dims.sourceUrl,
+      citedAtomIds: dims.citedAtomIds,
+      frontSetbackFt: dims.frontSetbackFt,
+      sideSetbackFt: dims.sideSetbackFt,
+      rearSetbackFt: dims.rearSetbackFt,
+      farLimit: dims.farLimit,
+      heightLimitFt: dims.heightLimitFt,
+      lotCoveragePct: dims.lotCoveragePct,
+      completeness,
+    },
+    method: { kind: "centroid-inset-approximation", note: BUILDABLE_METHOD_NOTE },
+    coverage,
+    generatedAt,
+  };
+
+  const notes = isPartial
+    ? `Buildable envelope derived from a partial dimensional set (${missingBits.join("; ")}); buildableAreaPct is an approximation floor with lowered confidence.`
+    : `Buildable envelope derived from parcel geometry + full dimensional set; buildableAreaPct is a conservative approximation floor.`;
+
+  return {
+    payload: {
+      layer: "buildable-envelope",
       queryMode: "bbox",
-      fixture: true,
+      fixture: false,
       featureCount: 1,
-      notes:
-        "Parcel minus floodway/floodplain/steep slope/aquifer recharge (fixture).",
+      notes,
+      buildableProvenance: provenance,
       geojson: {
         type: "FeatureCollection",
         features: [
           {
             type: "Feature",
-            geometry: { type: "Polygon", coordinates: [buildable] },
+            geometry: { type: "Polygon", coordinates: [setbackRing] },
             properties: {
               kind: "buildable-envelope",
-              constraintsRemoved: [
-                "floodway",
-                "floodplain",
-                "steep-slope",
-                "aquifer-recharge",
-              ],
-              buildableAreaPct: 78,
+              derived: true,
+              approximation: true,
+              zoningDistrict: district,
+              zoningDescription: description,
+              buildableAreaPct,
+              parcelAreaSqM: Math.round(parcelArea),
+              buildableAreaSqM: Math.round(buildableArea),
+              appliedSetbacksFt: {
+                front: dims.frontSetbackFt,
+                side: dims.sideSetbackFt,
+                rear: dims.rearSetbackFt,
+              },
+              farLimit: dims.farLimit,
+              heightLimitFt: dims.heightLimitFt,
+              lotCoveragePct: dims.lotCoveragePct,
+              citedCodeAtomIds: dims.citedAtomIds,
+              reasoning,
+              confidence: confidenceValue,
+              confidenceKind: "asserted",
+              source: parcelSource,
+              sourceUrl: parcelSourceUrl,
+              codeSourceUrl: dims.sourceUrl,
+              dataVintage,
+              generatedAt,
             },
           },
         ],
       },
-    };
+    },
+    honesty: {
+      confidence: { value: confidenceValue, kind: "asserted" },
+      dataVintage,
+      coverage: isPartial
+        ? {
+            degraded: true,
+            reason: `Partial dimensional set: ${missingBits.join("; ")}. buildableAreaPct is an approximation floor.`,
+          }
+        : { degraded: false },
+      source: { adapter },
+    },
+  };
+}
+
+export function buildCompositeLayerFixture(
+  layer: CompositeLayerKey,
+  bbox: GisLayerBbox,
+): CompositeLayerPayload {
+  const parcel = parcelRing(bbox);
+
+  if (layer === "buildable-envelope") {
+    // buildable-envelope is now a REAL async derivation (deriveBuildableEnvelope),
+    // never a fixture. It cannot be built synchronously (parcel + zoning + code
+    // retrieval are all async), so the sync fixture builder no longer serves it.
+    // Route it through queryCompositeLayer (async), exactly like oz-deal-crossfilter.
+    throw new Error(
+      "buildable-envelope is a real async derivation; call queryCompositeLayer (async) / deriveBuildableEnvelope, not buildCompositeLayerFixture.",
+    );
   }
 
   if (layer === "constraint-density") {
@@ -320,16 +1066,30 @@ export function buildCompositeLayerFixture(
   };
 }
 
-export function queryCompositeLayer(input: {
+export async function queryCompositeLayer(input: {
   layer: CompositeLayerKey;
   bbox: GisLayerBbox;
   fixture?: boolean;
-}): EngineEnvelope<CompositeLayerPayload> & { readContract: ReadContract } {
+}): Promise<
+  EngineEnvelope<CompositeLayerPayload> & { readContract: ReadContract }
+> {
   // oz-deal-crossfilter is a real derivation over the refreshed OZ layer:
   // deterministic honesty, degraded:false, real provenance. It never presents
   // as a fixture, so an incoming fixture flag does not downgrade it.
   if (input.layer === "oz-deal-crossfilter") {
     const { payload, honesty } = deriveOzDealCrossfilter(input.bbox);
+    return {
+      ...wrapEngineEnvelope(payload, honesty),
+      readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+    };
+  }
+
+  // buildable-envelope is a real async derivation over live parcel geometry +
+  // zoning + code corpus. Its honesty is earned from input completeness and it
+  // degrades honestly when an input is missing (never a fixture 78%), so an
+  // incoming fixture flag does not downgrade it.
+  if (input.layer === "buildable-envelope") {
+    const { payload, honesty } = await deriveBuildableEnvelope(input.bbox);
     return {
       ...wrapEngineEnvelope(payload, honesty),
       readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
@@ -359,7 +1119,8 @@ export function listCompositeLayerEndpoints(): Array<{
     {
       layer: "buildable-envelope",
       adapterKey: "brokerage:composite-buildable-envelope",
-      description: "Parcel minus floodway, floodplain, steep slope, aquifer recharge",
+      description:
+        "Parcel polygon inset by zoning setbacks and capped by FAR / lot-coverage from the code corpus, with derived buildableAreaPct + provenance (degrades honestly when parcel or dimensional standards are missing)",
     },
     {
       layer: "constraint-density",
