@@ -25,14 +25,36 @@
 //   { status: 'ok'|'running'|'not-run'|'error'|'unavailable'|'degraded',
 //     result?, error?, degradedReason?, generationId? }
 
-// ─── Auth seam ─────────────────────────────────────────────────────
+// ─── Auth + fetch-injection seam ───────────────────────────────────
 // Optional token accessor. Mirrors CortexClient.doFetch's auth rule: send a
 // Bearer header ONLY when a non-empty token is produced; otherwise fall through
 // to the same-origin session cookie (credentials: 'include'). A vanilla caller
 // with no auth simply omits this — the function is still callable.
+//
+// FETCH INJECTION: `fetch` lets an MV3 page route the network call through the
+// background service worker (which holds the credential) instead of a direct
+// page fetch. When omitted, global fetch is used. This is the same seam
+// fetchSiteContext / fetchGisLayer expose, threaded here so ALL pure functions
+// in the headless entry share it and an MV3 worker-proxy bridge can drive them.
+export type ReportFetchLike = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>
+
 export interface SiteReportAuth {
   /** Returns a bearer token, or an empty string / undefined for cookie-session. */
   getToken?: () => string | Promise<string>
+  /**
+   * Injected fetch. When provided it is used instead of global fetch — an MV3
+   * page passes a fetch that proxies through the background service worker.
+   * Defaults to global fetch.
+   */
+  fetch?: ReportFetchLike
+}
+
+/** Resolve the effective fetch: injected when present, else global fetch. */
+function reportFetch(auth?: SiteReportAuth): ReportFetchLike {
+  return auth?.fetch ?? ((input, init) => fetch(input, init))
 }
 
 /** Raw report result envelope, mirrored from cortex-client ReportResult<T>. */
@@ -136,6 +158,7 @@ async function runAndGetReport<T>(
   auth?: SiteReportAuth,
 ): Promise<ReportResultWire<T>> {
   const base = trimBase(baseUrl)
+  const doFetch = reportFetch(auth)
   const headers = {
     'Content-Type': 'application/json',
     ...(await authHeaders(auth)),
@@ -143,7 +166,7 @@ async function runAndGetReport<T>(
   const eid = encodeURIComponent(params.engagementId)
 
   // Run (POST). A run failure surfaces as a non-ok HTTP status here.
-  const runRes = await fetch(
+  const runRes = await doFetch(
     `${base}/plan-review/engagements/${eid}/reports/${type}/run`,
     { method: 'POST', body: '{}', credentials: 'include', headers, signal },
   )
@@ -153,7 +176,7 @@ async function runAndGetReport<T>(
   }
 
   // Get (GET) the persisted result envelope.
-  const getRes = await fetch(
+  const getRes = await doFetch(
     `${base}/plan-review/engagements/${eid}/reports/${type}`,
     { method: 'GET', credentials: 'include', headers, signal },
   )
@@ -358,11 +381,12 @@ export async function fetchSetbacks(
   auth?: SiteReportAuth,
 ): Promise<SetbacksState> {
   const base = trimBase(baseUrl)
+  const doFetch = reportFetch(auth)
   const headers = {
     'Content-Type': 'application/json',
     ...(await authHeaders(auth)),
   }
-  const res = await fetch(
+  const res = await doFetch(
     `${base}/local/setbacks/${encodeURIComponent(jurisdiction)}`,
     { method: 'GET', credentials: 'include', headers, signal },
   )

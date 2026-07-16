@@ -239,3 +239,40 @@ describe('AbortSignal is honored (peer of fetchGisLayer abort support)', () => {
     }
   })
 })
+
+describe('fetch-injection seam (MV3 worker-proxy) — uses injected fetch', () => {
+  it('routes report calls through auth.fetch instead of global fetch', async () => {
+    // Injected fetch answers run+get; global fetch must never be touched.
+    const injected = vi.fn((url: string) =>
+      Promise.resolve(
+        url.includes('/run')
+          ? new Response('{}', { status: 200 })
+          : new Response(JSON.stringify({ status: 'ok', result: { contoursGeoJson: { type: 'FeatureCollection', features: [] } } }), { status: 200 }),
+      ),
+    )
+    const globalFetch = vi.fn(() => Promise.reject(new Error('global fetch must not be used')))
+    vi.stubGlobal('fetch', globalFetch)
+
+    const state = await fetchTopography(BASE, { engagementId: EID }, undefined, {
+      fetch: injected,
+    })
+
+    expect(injected).toHaveBeenCalledTimes(2) // run + get
+    expect(globalFetch).not.toHaveBeenCalled()
+    expect(state.status).toBe('ok')
+  })
+
+  it('fetchSetbacks also honors the injected fetch', async () => {
+    const injected = vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify({ jurisdictionKey: 'bastrop', districts: [] }), { status: 200 })),
+    )
+    const globalFetch = vi.fn(() => Promise.reject(new Error('global fetch must not be used')))
+    vi.stubGlobal('fetch', globalFetch)
+
+    const state = await fetchSetbacks(BASE, 'bastrop', undefined, { fetch: injected })
+
+    expect(injected).toHaveBeenCalledTimes(1)
+    expect(globalFetch).not.toHaveBeenCalled()
+    expect(state.status).toBe('ok')
+  })
+})
