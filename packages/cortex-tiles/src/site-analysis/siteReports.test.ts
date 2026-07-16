@@ -58,7 +58,7 @@ describe('fetchHydrology (pure, no React) — run+get -> honest state', () => {
     expect(m).toHaveBeenCalledTimes(2)
     const [runUrl, runInit] = m.mock.calls[0]
     expect(runUrl).toBe(`${BASE}/plan-review/engagements/${EID}/reports/hydrology/run`)
-    expect(runInit.method).toBe('POST')
+    expect(runInit?.method).toBe('POST')
     const [getUrl] = m.mock.calls[1]
     expect(getUrl).toBe(`${BASE}/plan-review/engagements/${EID}/reports/hydrology`)
 
@@ -129,7 +129,7 @@ describe('fetchTopography (pure, no React) — map-data contour function', () =>
       result: { contoursGeoJson: { type: 'FeatureCollection', features: [{}, {}, {}] } },
     })
     const state = await fetchTopography(BASE, { engagementId: EID })
-    expect(m.mock.calls[1][0]).toBe(
+    expect(m.mock.calls[1]?.[0]).toBe(
       `${BASE}/plan-review/engagements/${EID}/reports/topography`,
     )
     expect(state.status).toBe('ok')
@@ -187,7 +187,7 @@ describe('fetchSetbacks (pure, no React) — single GET, no run', () => {
       jurisdictionDisplayName: 'Bastrop, TX',
       districts: [{ district_name: 'R-1', front_ft: 25, rear_ft: 10 }],
     }
-    const m = vi.fn(() =>
+    const m = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(new Response(JSON.stringify(table), { status: 200 })),
     )
     vi.stubGlobal('fetch', m)
@@ -195,7 +195,7 @@ describe('fetchSetbacks (pure, no React) — single GET, no run', () => {
     const state = await fetchSetbacks(BASE, 'bastrop')
 
     expect(m).toHaveBeenCalledTimes(1)
-    expect(m.mock.calls[0][0]).toBe(`${BASE}/local/setbacks/bastrop`)
+    expect(m.mock.calls[0]?.[0]).toBe(`${BASE}/local/setbacks/bastrop`)
     expect(state.status).toBe('ok')
     if (state.status === 'ok') {
       expect(state.table.districts?.[0].district_name).toBe('R-1')
@@ -235,7 +235,7 @@ describe('AbortSignal is honored (peer of fetchGisLayer abort support)', () => {
     await fetchTopography(BASE, { engagementId: EID }, ac.signal)
     // Every fetch call carries the same signal.
     for (const call of m.mock.calls) {
-      expect(call[1].signal).toBe(ac.signal)
+      expect(call[1]?.signal).toBe(ac.signal)
     }
   })
 })
