@@ -3,19 +3,54 @@ import { useEngagement, useSpatial, TileStatusBanner } from '@empressaio/tile-sh
 import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 
-function TopographyTileInner() {
+type TopographyReportResult = {
+  contoursGeoJson?: { type: string; features: unknown[] }
+}
+
+export type TopographyMode = 'full' | 'card' | 'raw'
+
+/**
+ * The raw-mode payload handed to a `children` render-prop when `mode="raw"`.
+ * Mirrors PropertyBriefTile's headless escape hatch: the tile owns data + state,
+ * the consumer renders in its own look-and-feel. `run` is exposed because
+ * topography contours are computed on demand (engine run) and pushed into the
+ * shared spatial overlay stack.
+ *
+ * NOTE (operator): topography is also a candidate to become a standalone "map
+ * function" like the map/liveGis.ts exports (fetchGisLayer / toLiveOverlays).
+ * This raw mode replicates PropertyBriefTile's render-prop contract for
+ * cross-tile consistency; a pure map-function extraction is a separate,
+ * additive move and does not conflict with this.
+ */
+export type TopographyRaw = {
+  result: TopographyReportResult | null
+  summary: string | null
+  busy: boolean
+  error: string | null
+  run: () => Promise<void>
+}
+
+function TopographyTileInner({
+  mode = 'full',
+  children,
+}: {
+  mode?: TopographyMode
+  children?: (raw: TopographyRaw) => React.ReactNode
+}) {
   const client = useCortexClient()
   const { engagementId, setEngagementReportResult } = useEngagement()
   const { pushOverlay } = useSpatial()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
+  const [result, setResult] = useState<TopographyReportResult | null>(null)
 
   async function handleRun() {
     if (!engagementId) return
     setBusy(true)
     setError(null)
     setSummary(null)
+    setResult(null)
     try {
       await client.runReport(engagementId, 'topography')
       const report = await client.getReport(engagementId, 'topography')
@@ -32,11 +67,9 @@ function TopographyTileInner() {
         result: report.result,
         error: report.error,
       })
-      const geojson = (
-        report.result as {
-          contoursGeoJson?: { type: string; features: unknown[] }
-        }
-      )?.contoursGeoJson
+      const runResult = report.result as TopographyReportResult
+      setResult(runResult ?? null)
+      const geojson = runResult?.contoursGeoJson
       if (geojson) {
         // SEAM: kind === map-renderer OverlaySpec.layerKey (MapTile.toMapOverlays).
         pushOverlay({
@@ -56,6 +89,16 @@ function TopographyTileInner() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // raw mode: headless escape hatch — the tile owns data + state, consumer
+  // renders. Matches PropertyBriefTile's mode="raw" render-prop contract.
+  if (mode === 'raw') {
+    return (
+      <>
+        {children ? children({ result, summary, busy, error, run: handleRun }) : null}
+      </>
+    )
   }
 
   return (
@@ -91,10 +134,16 @@ function TopographyTileInner() {
   )
 }
 
-export function TopographyTile() {
+export function TopographyTile({
+  mode = 'full',
+  children,
+}: {
+  mode?: TopographyMode
+  children?: (raw: TopographyRaw) => React.ReactNode
+} = {}) {
   return (
     <TileErrorBoundary label="Topography">
-      <TopographyTileInner />
+      <TopographyTileInner mode={mode} children={children} />
     </TileErrorBoundary>
   )
 }

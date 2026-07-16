@@ -4,7 +4,38 @@ import { useCortexClient } from '../CortexProvider'
 import { TileErrorBoundary } from '../TileErrorBoundary'
 import { runButtonStyle } from './TopographyTile'
 
-function DrainageTileInner() {
+type DrainageReportResult = {
+  flowLinesGeoJson?: { type: string; features: unknown[] }
+  drainageZonesGeoJson?: { type: string; features: unknown[] }
+  hydrologyDegraded?: boolean
+  hydrologyDegradedReason?: string | null
+}
+
+export type DrainageMode = 'full' | 'card' | 'raw'
+
+/**
+ * The raw-mode payload handed to a `children` render-prop when `mode="raw"`.
+ * Mirrors PropertyBriefTile's headless escape hatch: the tile owns data + state,
+ * the consumer renders in its own look-and-feel. `run` is exposed because
+ * drainage is computed on demand (engine run) and pushes flow-line + drainage-
+ * zone overlays into the shared spatial context.
+ */
+export type DrainageRaw = {
+  result: DrainageReportResult | null
+  summary: string | null
+  degradedReason: string | null
+  busy: boolean
+  error: string | null
+  run: () => Promise<void>
+}
+
+function DrainageTileInner({
+  mode = 'full',
+  children,
+}: {
+  mode?: DrainageMode
+  children?: (raw: DrainageRaw) => React.ReactNode
+}) {
   const client = useCortexClient()
   const { engagementId, setEngagementReportResult } = useEngagement()
   const { pushOverlay } = useSpatial()
@@ -12,6 +43,7 @@ function DrainageTileInner() {
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
   const [degradedReason, setDegradedReason] = useState<string | null>(null)
+  const [result, setResult] = useState<DrainageReportResult | null>(null)
 
   async function handleRun() {
     if (!engagementId) return
@@ -19,6 +51,7 @@ function DrainageTileInner() {
     setError(null)
     setSummary(null)
     setDegradedReason(null)
+    setResult(null)
     try {
       await client.runReport(engagementId, 'drainage')
       const report = await client.getReport(engagementId, 'drainage')
@@ -37,12 +70,8 @@ function DrainageTileInner() {
         status: report.status === 'ok' ? 'ok' : 'error',
         result: report.result,
       })
-      const result = report.result as {
-        flowLinesGeoJson?: { type: string; features: unknown[] }
-        drainageZonesGeoJson?: { type: string; features: unknown[] }
-        hydrologyDegraded?: boolean
-        hydrologyDegradedReason?: string | null
-      }
+      const result = report.result as DrainageReportResult
+      setResult(result ?? null)
       if (result?.hydrologyDegraded) {
         setDegradedReason(
           result.hydrologyDegradedReason ??
@@ -88,6 +117,18 @@ function DrainageTileInner() {
     }
   }
 
+  // raw mode: headless escape hatch — the tile owns data + state, consumer
+  // renders. Matches PropertyBriefTile's mode="raw" render-prop contract.
+  if (mode === 'raw') {
+    return (
+      <>
+        {children
+          ? children({ result, summary, degradedReason, busy, error, run: handleRun })
+          : null}
+      </>
+    )
+  }
+
   return (
     <div
       style={{
@@ -129,10 +170,16 @@ function DrainageTileInner() {
   )
 }
 
-export function DrainageTile() {
+export function DrainageTile({
+  mode = 'full',
+  children,
+}: {
+  mode?: DrainageMode
+  children?: (raw: DrainageRaw) => React.ReactNode
+} = {}) {
   return (
     <TileErrorBoundary label="Drainage">
-      <DrainageTileInner />
+      <DrainageTileInner mode={mode} children={children} />
     </TileErrorBoundary>
   )
 }

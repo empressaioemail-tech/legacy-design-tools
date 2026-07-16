@@ -11,7 +11,32 @@ type HydrologyReportResult = {
   hydrologyDegradedReason?: string | null
 }
 
-function HydrologyTileInner() {
+export type HydrologyMode = 'full' | 'card' | 'raw'
+
+/**
+ * The raw-mode payload handed to a `children` render-prop when `mode="raw"`.
+ * Mirrors PropertyBriefTile's headless escape hatch: the tile owns data + state,
+ * the consumer renders in its own look-and-feel. `run` is exposed because
+ * hydrology is computed on demand (engine pysheds/D8 run) and pushes flow-line
+ * overlays into the shared spatial context — the consumer triggers the run and
+ * reads the result + degraded state, rendering however it wants.
+ */
+export type HydrologyRaw = {
+  result: HydrologyReportResult | null
+  library: string | null
+  degradedReason: string | null
+  busy: boolean
+  error: string | null
+  run: () => Promise<void>
+}
+
+function HydrologyTileInner({
+  mode = 'full',
+  children,
+}: {
+  mode?: HydrologyMode
+  children?: (raw: HydrologyRaw) => React.ReactNode
+}) {
   const client = useCortexClient()
   const { engagementId, setEngagementReportResult } = useEngagement()
   const { pushOverlay } = useSpatial()
@@ -19,6 +44,7 @@ function HydrologyTileInner() {
   const [error, setError] = useState<string | null>(null)
   const [degradedReason, setDegradedReason] = useState<string | null>(null)
   const [library, setLibrary] = useState<string | null>(null)
+  const [result, setResult] = useState<HydrologyReportResult | null>(null)
 
   async function handleRun() {
     if (!engagementId) return
@@ -37,15 +63,16 @@ function HydrologyTileInner() {
         result: report.result,
         error: report.error,
       })
-      const result = report.result as HydrologyReportResult | undefined
-      setLibrary(result?.hydrologyLibrary ?? null)
+      const runResult = report.result as HydrologyReportResult | undefined
+      setResult(runResult ?? null)
+      setLibrary(runResult?.hydrologyLibrary ?? null)
       setDegradedReason(
-        result?.hydrologyDegraded
-          ? (result.hydrologyDegradedReason ??
+        runResult?.hydrologyDegraded
+          ? (runResult.hydrologyDegradedReason ??
               'pysheds unavailable; native D8 fallback')
           : null,
       )
-      const flowLines = result?.flowLinesGeoJson
+      const flowLines = runResult?.flowLinesGeoJson
       if (flowLines) {
         pushOverlay({
           id: 'hydrology-flow',
@@ -59,6 +86,18 @@ function HydrologyTileInner() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // raw mode: headless escape hatch — the tile owns data + state, consumer
+  // renders. Matches PropertyBriefTile's mode="raw" render-prop contract.
+  if (mode === 'raw') {
+    return (
+      <>
+        {children
+          ? children({ result, library, degradedReason, busy, error, run: handleRun })
+          : null}
+      </>
+    )
   }
 
   return (
@@ -102,10 +141,16 @@ function HydrologyTileInner() {
   )
 }
 
-export function HydrologyTile() {
+export function HydrologyTile({
+  mode = 'full',
+  children,
+}: {
+  mode?: HydrologyMode
+  children?: (raw: HydrologyRaw) => React.ReactNode
+} = {}) {
   return (
     <TileErrorBoundary label="Hydrology">
-      <HydrologyTileInner />
+      <HydrologyTileInner mode={mode} children={children} />
     </TileErrorBoundary>
   )
 }

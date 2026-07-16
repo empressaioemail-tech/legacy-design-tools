@@ -32,7 +32,32 @@ function num(v: number | null | undefined): string {
   return typeof v === 'number' && Number.isFinite(v) ? String(v) : '—'
 }
 
-function LocalSetbacksTileInner() {
+export type LocalSetbacksMode = 'full' | 'card' | 'inline' | 'raw'
+
+/**
+ * The raw-mode payload handed to a `children` render-prop when `mode="raw"`.
+ * Mirrors PropertyBriefTile's headless escape hatch: the tile owns the fetch +
+ * state (auto-loaded off the active parcel's jurisdiction), the consumer renders
+ * in its own look-and-feel. No `run` — the setback table auto-loads on
+ * jurisdiction change, exactly like PropertyBriefTile auto-loads on the
+ * engagement.
+ */
+export type LocalSetbacksRaw = {
+  table: LocalSetbackTable | null
+  districts: SetbackDistrict[]
+  jurisdiction: string | null
+  loading: boolean
+  error: string | null
+  notFound: boolean
+}
+
+function LocalSetbacksTileInner({
+  mode = 'full',
+  children,
+}: {
+  mode?: LocalSetbacksMode
+  children?: (raw: LocalSetbacksRaw) => React.ReactNode
+}) {
   const client = useCortexClient()
   const { activeParcel } = useEngagement()
   const jurisdiction = activeParcel.jurisdiction
@@ -72,6 +97,18 @@ function LocalSetbacksTileInner() {
   }, [jurisdiction, client])
 
   const districts = Array.isArray(table?.districts) ? table.districts : []
+
+  // raw mode: headless escape hatch — the tile owns fetch + state, consumer
+  // renders. Matches PropertyBriefTile's mode="raw" render-prop contract.
+  if (mode === 'raw') {
+    return (
+      <>
+        {children
+          ? children({ table, districts, jurisdiction, loading, error, notFound })
+          : null}
+      </>
+    )
+  }
 
   return (
     <div
@@ -205,10 +242,16 @@ const cellStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
-export function LocalSetbacksTile() {
+export function LocalSetbacksTile({
+  mode = 'full',
+  children,
+}: {
+  mode?: LocalSetbacksMode
+  children?: (raw: LocalSetbacksRaw) => React.ReactNode
+} = {}) {
   return (
     <TileErrorBoundary label="Local Setbacks">
-      <LocalSetbacksTileInner />
+      <LocalSetbacksTileInner mode={mode} children={children} />
     </TileErrorBoundary>
   )
 }

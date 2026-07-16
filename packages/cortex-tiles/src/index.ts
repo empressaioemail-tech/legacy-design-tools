@@ -55,15 +55,22 @@ export type {
   ParcelCardData,
 } from './map/liveGis'
 export { TopographyTile } from './site-analysis/TopographyTile'
+export type { TopographyMode, TopographyRaw } from './site-analysis/TopographyTile'
 export { DrainageTile } from './site-analysis/DrainageTile'
+export type { DrainageMode, DrainageRaw } from './site-analysis/DrainageTile'
 export { HydrologyTile } from './site-analysis/HydrologyTile'
+export type { HydrologyMode, HydrologyRaw } from './site-analysis/HydrologyTile'
 export { SubsurfaceTile } from './site-analysis/SubsurfaceTile'
+export type { SubsurfaceMode, SubsurfaceRaw } from './site-analysis/SubsurfaceTile'
 
 // Property Intel
 export { PropertyBriefTile } from './property-intel/PropertyBriefTile'
+export type { PropertyBriefMode } from './property-intel/PropertyBriefTile'
 export { HazardProfileTile } from './property-intel/HazardProfileTile'
+export type { HazardProfileMode, HazardProfileRaw } from './property-intel/HazardProfileTile'
 export { EncumbranceTile } from './property-intel/EncumbranceTile'
 export { LocalSetbacksTile } from './property-intel/LocalSetbacksTile'
+export type { LocalSetbacksMode, LocalSetbacksRaw } from './property-intel/LocalSetbacksTile'
 export { ReportTileShell } from './property-intel/ReportTileShell'
 
 // Design Accelerator

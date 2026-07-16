@@ -61,7 +61,31 @@ const CONF_COLOR: Record<string, string> = {
   deterministic: 'var(--h-confidence-deterministic)',
 }
 
-function HazardProfileTileInner() {
+export type HazardProfileMode = 'full' | 'card' | 'inline' | 'raw'
+
+/**
+ * The raw-mode payload handed to a `children` render-prop when `mode="raw"`.
+ * Mirrors PropertyBriefTile's headless escape hatch: the tile owns data + state,
+ * the consumer renders in its own look-and-feel. `run` is exposed because the
+ * hazard profile is fetched imperatively (a Cotality-quota-metered call), so a
+ * raw consumer needs to trigger it, not just read an auto-loaded result.
+ */
+export type HazardProfileRaw = {
+  result: HazardResult | null
+  floodZone: string | null
+  busy: boolean
+  error: string | null
+  quotaBanner: string | null
+  run: () => Promise<void>
+}
+
+function HazardProfileTileInner({
+  mode = 'full',
+  children,
+}: {
+  mode?: HazardProfileMode
+  children?: (raw: HazardProfileRaw) => React.ReactNode
+}) {
   const client = useCortexClient()
   const { engagementId } = useEngagement()
   const [busy, setBusy] = useState(false)
@@ -127,6 +151,18 @@ function HazardProfileTileInner() {
   const layers = result?.layers ?? []
   const floodLayer = layers.find((l) => floodZoneFrom(l.payload) != null)
   const floodZone = floodLayer ? floodZoneFrom(floodLayer.payload) : null
+
+  // raw mode: headless escape hatch — the tile owns data + state, consumer
+  // renders. Matches PropertyBriefTile's mode="raw" render-prop contract.
+  if (mode === 'raw') {
+    return (
+      <>
+        {children
+          ? children({ result, floodZone, busy, error, quotaBanner, run: handleRun })
+          : null}
+      </>
+    )
+  }
 
   return (
     <div
@@ -281,10 +317,16 @@ const rawPre: CSSProperties = {
   fontSize: 11,
 }
 
-export function HazardProfileTile() {
+export function HazardProfileTile({
+  mode = 'full',
+  children,
+}: {
+  mode?: HazardProfileMode
+  children?: (raw: HazardProfileRaw) => React.ReactNode
+} = {}) {
   return (
     <TileErrorBoundary label="Hazard Profile">
-      <HazardProfileTileInner />
+      <HazardProfileTileInner mode={mode} children={children} />
     </TileErrorBoundary>
   )
 }
