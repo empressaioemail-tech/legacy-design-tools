@@ -13,6 +13,7 @@ import {
   LIVE_PARCELS_KEY,
   LIVE_FEMA_KEY,
   layersForZoom,
+  coarseAffordanceForZoom,
   fetchGisLayer,
   parcelFillColor,
   toLiveOverlays,
@@ -42,15 +43,75 @@ afterEach(() => {
 })
 
 describe('layersForZoom (viewport fetch policy)', () => {
-  it('fetches nothing at very wide zooms', () => {
-    expect(layersForZoom(MIN_FEMA_ZOOM - 1)).toEqual([])
+  it('still allows coarse context layers at wide zooms (never a blank map)', () => {
+    // Below the parcel floor the map is NOT empty: the coarse context layers
+    // that are cheaply fetchable wide-out (edwards aquifer to 10, fema to 11,
+    // districts) keep something real on screen. This is the zoom-out fix.
+    const wide = layersForZoom(MIN_FEMA_ZOOM - 1) // zoom 10
+    expect(wide).toContain('edwards-aquifer')
+    expect(wide).not.toContain('parcels')
   })
-  it('fetches fema but gates parcels between the thresholds', () => {
-    expect(layersForZoom(MIN_PARCEL_ZOOM - 1)).toEqual(['fema'])
+  it('gates parcels below the parcel floor but keeps fema + federal context', () => {
+    const mid = layersForZoom(MIN_PARCEL_ZOOM - 1) // zoom 13
+    expect(mid).toContain('fema')
+    expect(mid).toContain('ssurgo-soils')
+    expect(mid).not.toContain('parcels')
   })
-  it('fetches both at parcel zoom', () => {
-    expect(layersForZoom(MIN_PARCEL_ZOOM)).toEqual(['fema', 'parcels'])
-    expect(layersForZoom(15.2)).toEqual(['fema', 'parcels'])
+  it('fetches parcels + the full layer set at parcel zoom', () => {
+    const full = layersForZoom(MIN_PARCEL_ZOOM)
+    expect(full).toContain('parcels')
+    expect(full).toContain('fema')
+    expect(full).toContain('groundwater')
+    expect(full).toContain('texas-rrc')
+    expect(layersForZoom(15.2)).toContain('parcels')
+  })
+})
+
+describe('coarseAffordanceForZoom (LOD honest-empty)', () => {
+  it('reports coarse + an honest note below the parcel floor', () => {
+    const a = coarseAffordanceForZoom(MIN_PARCEL_ZOOM - 1)
+    expect(a.coarse).toBe(true)
+    expect(a.note).toMatch(/zoom in/i)
+    expect(a.availableLayers).not.toContain('parcels')
+  })
+  it('is non-coarse (full detail) at/above the parcel floor', () => {
+    const a = coarseAffordanceForZoom(MIN_PARCEL_ZOOM)
+    expect(a.coarse).toBe(false)
+    expect(a.note).toBe('')
+    expect(a.availableLayers).toContain('parcels')
+  })
+})
+
+describe('federal layer overlays (real layers, distinct paints)', () => {
+  it('composes a distinct overlay per federal layer from a state map', () => {
+    const soils: LiveLayerState = {
+      status: 'ok',
+      response: {
+        layer: 'ssurgo-soils',
+        provider: 'USDA',
+        geojson: fc([{ foundationRiskBand: 'high' }]),
+      },
+    }
+    const gw: LiveLayerState = {
+      status: 'ok',
+      response: {
+        layer: 'groundwater',
+        provider: 'USGS',
+        geojson: {
+          type: 'FeatureCollection',
+          features: [
+            { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} },
+          ],
+        },
+      },
+    }
+    const specs = toLiveOverlays({ 'ssurgo-soils': soils, groundwater: gw })
+    const keys = specs.map((s) => s.layerKey)
+    expect(keys).toContain('live-ssurgo')
+    expect(keys).toContain('live-groundwater')
+    // groundwater is a point layer — carries circle paint, not fill.
+    const gwSpec = specs.find((s) => s.layerKey === 'live-groundwater')
+    expect(gwSpec?.paint?.['circle-color']).toBeDefined()
   })
 })
 

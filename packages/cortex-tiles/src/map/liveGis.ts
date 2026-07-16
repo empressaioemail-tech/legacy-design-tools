@@ -48,17 +48,74 @@ export interface ViewportState {
  */
 export type LiveOverlaySpec = OverlaySpec & { interactive?: boolean }
 
-export type LiveLayerKey = 'parcels' | 'fema'
+/**
+ * The live GIS layers the loader owns. `parcels` + `fema` were the original
+ * two; the five federal/state layers are the REAL, bbox-fetchable layers the
+ * server's /map-data/gis-layer POST allowlist already accepts (see
+ * artifacts/api-server .../brokerageGisFederalLayers.ts + the GIS_LAYER_KEYS
+ * allowlist). No backend change is needed to fetch any of these — the proxy
+ * exact-match allowlist already lists all seven. NONE of these is a
+ * fixture/synthetic composite (no buildable-envelope / constraint-density /
+ * motivated-seller / oz-crossfilter): every key here returns real ArcGIS/USGS
+ * GeoJSON from a public source.
+ */
+export type LiveLayerKey =
+  | 'parcels'
+  | 'fema'
+  | 'ssurgo-soils'
+  | 'groundwater'
+  | 'mud-pid'
+  | 'edwards-aquifer'
+  | 'texas-rrc'
 
-/** Overlay layerKeys the live loader owns on the map. */
+/** Every live layer key, in draw order (coarser/context below, parcels on top). */
+export const LIVE_LAYER_KEYS: LiveLayerKey[] = [
+  'edwards-aquifer',
+  'ssurgo-soils',
+  'mud-pid',
+  'texas-rrc',
+  'groundwater',
+  'fema',
+  'parcels',
+]
+
+/** Overlay layerKeys the live loader owns on the map (renderer source/layer ids). */
 export const LIVE_PARCELS_KEY = 'live-parcels'
 export const LIVE_FEMA_KEY = 'live-fema'
+export const LIVE_SSURGO_KEY = 'live-ssurgo'
+export const LIVE_GROUNDWATER_KEY = 'live-groundwater'
+export const LIVE_MUDPID_KEY = 'live-mud-pid'
+export const LIVE_EDWARDS_KEY = 'live-edwards'
+export const LIVE_RRC_KEY = 'live-rrc'
+
+/** Map a LiveLayerKey to the renderer overlay layerKey it draws under. */
+export const OVERLAY_KEY_FOR_LAYER: Record<LiveLayerKey, string> = {
+  parcels: LIVE_PARCELS_KEY,
+  fema: LIVE_FEMA_KEY,
+  'ssurgo-soils': LIVE_SSURGO_KEY,
+  groundwater: LIVE_GROUNDWATER_KEY,
+  'mud-pid': LIVE_MUDPID_KEY,
+  'edwards-aquifer': LIVE_EDWARDS_KEY,
+  'texas-rrc': LIVE_RRC_KEY,
+}
 
 /** Parcels are bbox-capped (~200 features upstream); below this zoom we show
- *  a "zoom in" hint instead of hammering the API with huge viewports. */
+ *  a coarse "zoom in for parcel detail" state instead of hammering the API with
+ *  huge viewports. See layersForZoom + coarseAffordanceForZoom. */
 export const MIN_PARCEL_ZOOM = 14
-/** FEMA flood polygons are coarser; fetchable a bit wider out. */
+/** FEMA flood polygons are coarser; fetchable a bit wider out. This is also the
+ *  floor at which the map keeps rendering an HONEST coarse (FEMA-only) state
+ *  when zoomed out past parcel detail — never a blank map. */
 export const MIN_FEMA_ZOOM = 11
+/** SSURGO soils / Edwards aquifer / MUD-PID are area polygons that read well a
+ *  little wider out than parcels but not at metro scale. */
+export const MIN_SOILS_ZOOM = 12
+export const MIN_MUDPID_ZOOM = 11
+export const MIN_EDWARDS_ZOOM = 10
+/** RRC wells/pipelines + NWIS groundwater points are dense; keep them near-in so
+ *  the point clouds stay legible and the bbox stays cheap. */
+export const MIN_RRC_ZOOM = 12
+export const MIN_GROUNDWATER_ZOOM = 12
 
 export interface GeoJsonFeature {
   type: 'Feature'
@@ -98,12 +155,71 @@ export type LiveLayerState =
    */
   | { status: 'suppressed'; message: string }
 
-/** Which live layers to fetch at this zoom. */
+/**
+ * Which live layers a given zoom is ALLOWED to request. This is the per-layer
+ * min-zoom gate (keeps a metro-wide viewport from firing a 10k-feature bbox).
+ *
+ * NOTE: this returns the layers the loader MAY fetch; the consumer intersects it
+ * with the user's visibility set (the toggle UI) so a layer is fetched only when
+ * it is both zoom-eligible AND toggled on. FEMA at MIN_FEMA_ZOOM is the coarsest
+ * always-available context layer — see coarseAffordanceForZoom for what keeps
+ * the map honest below MIN_PARCEL_ZOOM.
+ */
 export function layersForZoom(zoom: number): LiveLayerKey[] {
   const layers: LiveLayerKey[] = []
+  if (zoom >= MIN_EDWARDS_ZOOM) layers.push('edwards-aquifer')
+  if (zoom >= MIN_MUDPID_ZOOM) layers.push('mud-pid')
   if (zoom >= MIN_FEMA_ZOOM) layers.push('fema')
+  if (zoom >= MIN_SOILS_ZOOM) layers.push('ssurgo-soils')
+  if (zoom >= MIN_RRC_ZOOM) layers.push('texas-rrc')
+  if (zoom >= MIN_GROUNDWATER_ZOOM) layers.push('groundwater')
   if (zoom >= MIN_PARCEL_ZOOM) layers.push('parcels')
   return layers
+}
+
+// ---------------------------------------------------------------------------
+// LOD honest-empty: never a blank map when zoomed out
+// ---------------------------------------------------------------------------
+//
+// THE ZOOM-OUT FIX. The old rule returned [] below zoom 11, so a zoomed-out
+// viewport fetched nothing and the map read as "no data here" (an empty tan/black
+// canvas). That is dishonest — data DOES exist, it is just too dense to fetch at
+// that scale. The cheap correct fix (no backend change, no server-side simplify):
+//
+//   * KEEP fetching the coarse context layers that are already fetchable wide-out
+//     (FEMA to zoom 11, Edwards aquifer to zoom 10) so something real still draws.
+//   * Below MIN_PARCEL_ZOOM, surface an HONEST affordance describing what is
+//     coarse and how to see detail ("Zoom in for parcel detail"), rather than
+//     rendering nothing. The consumer renders this as a small map chrome note.
+//
+// So at ANY zoom the user sees either real coarse geometry, or an honest note —
+// never a bare empty map that reads as an absence of data.
+
+export interface CoarseAffordance {
+  /** True when the current zoom is below the parcel-detail floor. */
+  coarse: boolean
+  /** Honest one-line note for the map chrome. Empty when not coarse. */
+  note: string
+  /** The context layers still fetchable at this zoom (for the honest indicator). */
+  availableLayers: LiveLayerKey[]
+}
+
+/**
+ * Describe the honest coarse state for a zoom. Below MIN_PARCEL_ZOOM the map
+ * cannot show parcel geometry cheaply, so it reports which coarser layers ARE
+ * still live (FEMA / aquifer / districts) and prompts a zoom-in for detail. At
+ * or above MIN_PARCEL_ZOOM this is the non-coarse (full-detail) state.
+ */
+export function coarseAffordanceForZoom(zoom: number): CoarseAffordance {
+  const availableLayers = layersForZoom(zoom)
+  if (zoom >= MIN_PARCEL_ZOOM) {
+    return { coarse: false, note: '', availableLayers }
+  }
+  const context = availableLayers.filter((l) => l !== 'parcels')
+  const note = context.length
+    ? 'Zoom in for parcel detail — showing coarse layers only'
+    : 'Zoom in to load map data for this area'
+  return { coarse: true, note, availableLayers }
 }
 
 /**
@@ -292,18 +408,23 @@ const LAND_USE_PALETTE = [
 ]
 
 /**
- * Data-driven parcel fill color: categorical by landUseCode where present in
- * the fetched collection, neutral otherwise.
+ * Data-driven parcel fill color, categorical over a parcel property. Shared by
+ * the land-use choropleth (`landUseCode`, the default) and the color-by-zoning
+ * variant (`zoningCode`). Parcels carry BOTH from enrichParcelsWithZoning, so
+ * zoning is a paint variant, not a separate fetch.
  */
-export function parcelFillColor(fc: FeatureCollectionLike | undefined): unknown {
+function parcelCategoricalFill(
+  fc: FeatureCollectionLike | undefined,
+  property: string,
+): unknown {
   const codes: string[] = []
   for (const f of fc?.features ?? []) {
-    const code = f.properties?.landUseCode
+    const code = f.properties?.[property]
     if (typeof code === 'string' && code && !codes.includes(code)) codes.push(code)
     if (codes.length >= 24) break
   }
   if (!codes.length) return NEUTRAL_PARCEL_FILL
-  const expr: unknown[] = ['match', ['to-string', ['get', 'landUseCode']]]
+  const expr: unknown[] = ['match', ['to-string', ['get', property]]]
   codes.forEach((code, i) => {
     expr.push(code, LAND_USE_PALETTE[i % LAND_USE_PALETTE.length])
   })
@@ -312,46 +433,188 @@ export function parcelFillColor(fc: FeatureCollectionLike | undefined): unknown 
 }
 
 /**
- * Compose the live OverlaySpec[] for the renderer. FEMA first so its fill
- * draws BELOW the parcel lines (reconcileOverlays adds layers in array
- * order); parcels are the interactive click/hover surface.
+ * Data-driven parcel fill color: categorical by landUseCode where present in
+ * the fetched collection, neutral otherwise.
  */
-export function toLiveOverlays(
-  parcels: LiveLayerState,
-  fema: LiveLayerState,
-): LiveOverlaySpec[] {
-  const specs: LiveOverlaySpec[] = []
-  if (fema.status === 'ok' && fema.response.geojson) {
-    specs.push({
-      layerKey: LIVE_FEMA_KEY,
-      provider: fema.response.provider,
-      geojson: fema.response.geojson,
-      paint: {
+export function parcelFillColor(fc: FeatureCollectionLike | undefined): unknown {
+  return parcelCategoricalFill(fc, 'landUseCode')
+}
+
+/**
+ * Color-by-ZONING parcel fill variant: categorical by parcel `zoningCode`
+ * (carried on parcels by enrichParcelsWithZoning), neutral where absent. This
+ * is the parallel of parcelFillColor for the "color by zoning" toggle — same
+ * shape, different property, so the consumer can swap the parcel fill paint
+ * without a second fetch.
+ */
+export function parcelZoningFillColor(
+  fc: FeatureCollectionLike | undefined,
+): unknown {
+  return parcelCategoricalFill(fc, 'zoningCode')
+}
+
+/**
+ * Per-layer paint for the FIVE federal/state layers + FEMA. Colors are dark,
+ * saturated strokes readable on the warm-light "paper map" basemap the Brief
+ * uses (a pale-stroke palette washes out on tan). Each layer gets a distinct
+ * hue so a multi-layer view stays legible:
+ *   fema            — blue flood bands
+ *   ssurgo-soils    — foundation-risk choropleth (green→amber→red by risk band)
+ *   groundwater     — teal wells (points)
+ *   mud-pid         — magenta districts (polygons)
+ *   edwards-aquifer — purple recharge/contributing (polygons)
+ *   texas-rrc       — brown/orange wells (points) + pipelines (lines)
+ * reconcileOverlays auto-detects the geometry family per overlay and creates the
+ * matching -fill / -line / -circle sublayer, reading these paint keys.
+ */
+function paintForLayer(key: LiveLayerKey, fc: FeatureCollectionLike): Record<string, unknown> {
+  switch (key) {
+    case 'fema':
+      return {
         'fill-color': [
           'match',
           ['get', 'FLD_ZONE'],
-          'X', 'rgba(96,165,250,0.18)',
-          'rgba(59,130,246,0.6)',
+          'X', 'rgba(37,99,235,0.14)',
+          'rgba(29,78,216,0.5)',
         ],
+        'fill-opacity': 0.32,
+        'line-color': '#1d4ed8',
+        'line-width': 1.1,
+      }
+    case 'ssurgo-soils':
+      // foundationRiskScore (1 low → 4 high) is enriched onto every feature
+      // server-side. Choropleth green → amber → red so soil foundation risk
+      // reads at a glance.
+      return {
+        'fill-color': [
+          'match',
+          ['to-string', ['get', 'foundationRiskBand']],
+          'high', 'rgba(153,27,27,0.42)',
+          'moderate', 'rgba(180,83,9,0.36)',
+          'low', 'rgba(21,128,61,0.30)',
+          'rgba(120,113,108,0.30)',
+        ],
+        'fill-opacity': 0.5,
+        'line-color': '#7c2d12',
+        'line-width': 0.7,
+      }
+    case 'groundwater':
+      // NWIS monitoring wells — points.
+      return {
+        'circle-color': '#0f766e',
+        'circle-radius': 5,
+        'circle-opacity': 0.85,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1,
+      }
+    case 'mud-pid':
+      // MUD/PID/PUD special districts — polygons.
+      return {
+        'fill-color': 'rgba(162,28,175,0.20)',
         'fill-opacity': 0.4,
-        'line-color': 'rgba(59,130,246,0.55)',
-        'line-width': 0.8,
-      },
-    })
-  }
-  if (parcels.status === 'ok' && parcels.response.geojson) {
-    specs.push({
-      layerKey: LIVE_PARCELS_KEY,
-      provider: parcels.response.provider,
-      geojson: parcels.response.geojson,
-      interactive: true,
-      paint: {
-        'fill-color': parcelFillColor(parcels.response.geojson),
+        'line-color': '#86198f',
+        'line-width': 1.2,
+      }
+    case 'edwards-aquifer':
+      // Recharge vs contributing tagged by edwardsZone — two-tone purple.
+      return {
+        'fill-color': [
+          'match',
+          ['to-string', ['get', 'edwardsZone']],
+          'recharge', 'rgba(109,40,217,0.30)',
+          'contributing', 'rgba(147,51,234,0.18)',
+          'rgba(126,34,206,0.22)',
+        ],
+        'fill-opacity': 0.45,
+        'line-color': '#6d28d9',
+        'line-width': 1,
+      }
+    case 'texas-rrc':
+      // Wells (points) + pipelines (lines), tagged rrcAsset. The renderer draws
+      // both a -circle and a -line sublayer from the mixed FeatureCollection.
+      return {
+        'circle-color': '#9a3412',
+        'circle-radius': 4,
+        'circle-opacity': 0.85,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 0.8,
+        'line-color': '#c2410c',
+        'line-width': 1.4,
+      }
+    case 'parcels':
+    default:
+      return {
+        'fill-color': parcelFillColor(fc),
         'fill-opacity': 0.14,
         'line-color': '#7dd3fc',
         'line-width': 1.1,
-      },
-    })
+      }
+  }
+}
+
+/**
+ * Compose ONE live OverlaySpec from a resolved layer state, or null when the
+ * layer is not drawable (not ok, or no geojson). Parcels are the interactive
+ * click/hover surface; everything else is passive context.
+ */
+export function overlayForLayer(
+  key: LiveLayerKey,
+  state: LiveLayerState,
+): LiveOverlaySpec | null {
+  if (state.status !== 'ok' || !state.response.geojson) return null
+  const spec: LiveOverlaySpec = {
+    layerKey: OVERLAY_KEY_FOR_LAYER[key],
+    provider: state.response.provider,
+    geojson: state.response.geojson,
+    paint: paintForLayer(key, state.response.geojson),
+  }
+  if (key === 'parcels') spec.interactive = true
+  return spec
+}
+
+/**
+ * Compose the live OverlaySpec[] for the renderer from a per-layer state map.
+ * Draw order follows LIVE_LAYER_KEYS (context polygons below, points/parcels on
+ * top) so reconcileOverlays stacks them legibly (it adds layers in array order).
+ *
+ * Back-compat: also accepts the legacy positional call
+ * `toLiveOverlays(parcels, fema)` — the shape the pre-extension Brief and the
+ * library's own tests use. A second positional arg (or any non-Map first arg) is
+ * treated as the parcels+fema pair.
+ */
+export function toLiveOverlays(
+  statesOrParcels: Partial<Record<LiveLayerKey, LiveLayerState>> | LiveLayerState,
+  fema?: LiveLayerState,
+): LiveOverlaySpec[] {
+  // Legacy positional form: (parcels, fema).
+  if (fema !== undefined || isLiveLayerState(statesOrParcels)) {
+    const parcels = statesOrParcels as LiveLayerState
+    const states: Partial<Record<LiveLayerKey, LiveLayerState>> = {
+      parcels,
+      ...(fema ? { fema } : {}),
+    }
+    return composeOverlays(states)
+  }
+  return composeOverlays(statesOrParcels as Partial<Record<LiveLayerKey, LiveLayerState>>)
+}
+
+function isLiveLayerState(v: unknown): v is LiveLayerState {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    typeof (v as { status?: unknown }).status === 'string'
+  )
+}
+
+function composeOverlays(
+  states: Partial<Record<LiveLayerKey, LiveLayerState>>,
+): LiveOverlaySpec[] {
+  const specs: LiveOverlaySpec[] = []
+  for (const key of LIVE_LAYER_KEYS) {
+    const state = states[key]
+    if (!state) continue
+    const spec = overlayForLayer(key, state)
+    if (spec) specs.push(spec)
   }
   return specs
 }

@@ -43,19 +43,43 @@ export type {
 export {
   fetchGisLayer,
   layersForZoom,
+  coarseAffordanceForZoom,
   parcelFillColor,
+  parcelZoningFillColor,
   toLiveOverlays,
+  overlayForLayer,
   selectionToCard,
+  // Storm-guard + bbox helpers. Re-exported here (they were omitted from the
+  // 0.1.8 subpath, forcing the Brief to vendor byte-faithful copies); a consumer
+  // can now import them directly from /site-analysis instead of vendoring.
+  createLiveGisGuard,
+  normalizeBbox,
+  shouldSuppressAfter,
+  // Layer keys / zoom floors / overlay-key map (drive the toggle UI + LOD).
+  LIVE_LAYER_KEYS,
+  OVERLAY_KEY_FOR_LAYER,
   MIN_PARCEL_ZOOM,
   MIN_FEMA_ZOOM,
+  MIN_SOILS_ZOOM,
+  MIN_MUDPID_ZOOM,
+  MIN_EDWARDS_ZOOM,
+  MIN_RRC_ZOOM,
+  MIN_GROUNDWATER_ZOOM,
   LIVE_PARCELS_KEY,
   LIVE_FEMA_KEY,
+  LIVE_SSURGO_KEY,
+  LIVE_GROUNDWATER_KEY,
+  LIVE_MUDPID_KEY,
+  LIVE_EDWARDS_KEY,
+  LIVE_RRC_KEY,
 } from '../map/liveGis'
 export type {
   GisFetchLike,
   GisLayerOpts,
   LiveLayerKey,
   LiveLayerState,
+  LiveGisGuard,
+  CoarseAffordance,
   GisLayerResponse,
   FeatureCollectionLike,
   GeoJsonFeature,
