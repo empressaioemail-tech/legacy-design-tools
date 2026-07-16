@@ -1,6 +1,6 @@
 {
   "name": "@empressaio/cortex-tiles",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -39,6 +39,6 @@
     "@hauska/map-renderer": "^0.1.2",
     "maplibre-gl": "^5.24.0"
   },
-  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19", "vitest": "^3", "happy-dom": "^16", "@testing-library/react": "^16", "react": "^19", "react-dom": "^19" },
+  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19", "vitest": "^3", "happy-dom": "^16", "@testing-library/react": "^16", "react": "^19", "react-dom": "^19", "zod": "catalog:" },
   "scripts": { "build": "tsup", "dev": "tsup --watch", "test": "vitest run", "test:watch": "vitest" }
 }
