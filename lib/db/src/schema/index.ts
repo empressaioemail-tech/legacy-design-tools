@@ -75,3 +75,4 @@ export * from "./txgioParcel";
 export * from "./txgioAddress";
 export * from "./reportRun";
 export * from "./permitRecord";
+export * from "./terrainGenerationJobs";
