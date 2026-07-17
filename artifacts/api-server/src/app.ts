@@ -11,6 +11,7 @@ import { mountSpaStatic } from "./middlewares/spaStatic";
 import { stripeWebhookHandler } from "./routes/brokerageBilling";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
 import { startFindingRunsSweep } from "./lib/findingRunsSweep";
+import { startTerrainJobsSweep } from "./lib/terrainGenerationJobsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
@@ -27,6 +28,13 @@ startBriefingGenerationJobsSweep(logger);
 // Rescue stale pending finding_runs after worker crashes / deploy
 // restarts; also one-time expire on boot for operator keystone engagement.
 startFindingRunsSweep(logger);
+
+// Rescue orphaned terrain_generation_jobs (queued/generating rows left by a
+// worker crash / deploy restart) and reap old terminal rows. The async
+// parcel-terrain authoring runs off the request path (terrainJobWorker); this
+// sweep is its orphan-recovery + retention path. See
+// `lib/terrainGenerationJobsSweep.ts`.
+startTerrainJobsSweep(logger);
 
 // Sweep expired federal-adapter cache rows (Task #203). Reads filter
 // `expires_at > now()` so expired rows never serve, but the table

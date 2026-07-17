@@ -1453,6 +1453,23 @@ CREATE TABLE @@SCHEMA@@.submissions (
 );
 
 
+-- Name: terrain_generation_jobs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.terrain_generation_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    place_key text,
+    request_payload jsonb,
+    status text NOT NULL,
+    error_code text,
+    error_message text,
+    materializable_element_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone
+);
+
+
 -- Name: tx_parcel_tile_cache; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
@@ -2122,6 +2139,12 @@ ALTER TABLE ONLY @@SCHEMA@@.submission_communications
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_pkey PRIMARY KEY (id);
+
+
+-- Name: terrain_generation_jobs terrain_generation_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.terrain_generation_jobs
+    ADD CONSTRAINT terrain_generation_jobs_pkey PRIMARY KEY (id);
 
 
 -- Name: tx_parcel_tile_cache tx_parcel_tile_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2807,6 +2830,26 @@ CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (e
 CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
 
 
+-- Name: terrain_generation_jobs_active_per_engagement_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX terrain_generation_jobs_active_per_engagement_uniq ON @@SCHEMA@@.terrain_generation_jobs USING btree (engagement_id) WHERE (status = ANY (ARRAY['queued'::text, 'generating'::text]));
+
+
+-- Name: terrain_generation_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX terrain_generation_jobs_engagement_created_idx ON @@SCHEMA@@.terrain_generation_jobs USING btree (engagement_id, created_at);
+
+
+-- Name: terrain_generation_jobs_place_key_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX terrain_generation_jobs_place_key_idx ON @@SCHEMA@@.terrain_generation_jobs USING btree (place_key);
+
+
+-- Name: terrain_generation_jobs_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX terrain_generation_jobs_status_idx ON @@SCHEMA@@.terrain_generation_jobs USING btree (status);
+
+
 -- Name: tx_parcel_tile_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX tx_parcel_tile_cache_expires_idx ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (expires_at);
@@ -3219,6 +3262,18 @@ ALTER TABLE ONLY @@SCHEMA@@.submission_communications
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: terrain_generation_jobs terrain_generation_jobs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.terrain_generation_jobs
+    ADD CONSTRAINT terrain_generation_jobs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: terrain_generation_jobs terrain_generation_jobs_materializable_element_id_materializabl; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.terrain_generation_jobs
+    ADD CONSTRAINT terrain_generation_jobs_materializable_element_id_materializabl FOREIGN KEY (materializable_element_id) REFERENCES @@SCHEMA@@.materializable_elements(id) ON DELETE SET NULL;
 
 
 -- Name: user_auth_credentials user_auth_credentials_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

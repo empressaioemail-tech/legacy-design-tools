@@ -88,12 +88,10 @@ import {
   SITE_TOPOGRAPHY_EVENT_TYPES,
   type SiteTopographyEventType,
 } from "../atoms/site-topography.atom";
-import {
-  buildTerrainMeshGeometry,
-  deriveTerrainMeshGlb,
-  type TerrainMeshMeta,
-} from "./siteTopographyMesh";
+import { type TerrainMeshMeta } from "./siteTopographyMesh";
 import { runIfcWorker } from "./ifcWorkerClient";
+import { buildTerrainMeshInWorker } from "./terrainMeshWorker/workerClient";
+import type { TerrainMeshWorkerResult } from "./terrainMeshWorker/types";
 
 /**
  * Default contour interval in meters. 5m is the operator-set Phase
@@ -1146,30 +1144,33 @@ export async function ingestSiteTopography(
   const confidence = computeTopoAssertedConfidence(coverage);
   const sourceCitation = `USGS 3DEP (${demResult.endpoint})`;
 
-  // 5.5) Build the terrain geometry ONCE, then derive the Layer-1 GLB and
-  //      the Layer-2 IFC from that SAME compacted positions + indices. This
-  //      single-triangulation seam is what guarantees the GLB surface and
-  //      the IFC surface can never diverge: nothing re-triangulates the
-  //      grid. Best-effort: a mesh failure NEVER fails the ingest — the
+  // 5.5) Build the terrain geometry ONCE (on a worker thread), then derive
+  //      the Layer-1 GLB and the Layer-2 IFC from that SAME compacted
+  //      positions + indices. This single-triangulation seam is what
+  //      guarantees the GLB surface and the IFC surface can never diverge:
+  //      nothing re-triangulates the grid. The triangulation + GLB encode is
+  //      the CPU-heavy nested per-pixel loop that used to run inline on the
+  //      request path and peg a core on the shared 2-CPU container, starving
+  //      the co-scheduled 29s brief request (Cloud Run 503s). It now runs off
+  //      the event loop in a one-shot worker_threads worker
+  //      (`terrainMeshWorker`), which returns both the GLB bytes and the
+  //      compacted positions/indices so the IFC author consumes the identical
+  //      geometry. Best-effort: a mesh failure NEVER fails the ingest — the
   //      contour + coverage + confidence output (the coverage-honesty
   //      product) still lands, and the `mesh`/`ifc` payload fields simply
-  //      stay absent. The geometry build is a pure, synchronous pass over
-  //      the parsed grid; at parcel + catchment scale (a few hundred px
-  //      square) it is well within the request budget. If a future
-  //      higher-resolution or wider-catchment profile grows the grid, this
-  //      is the clean seam to move to a worker-spawn pattern.
+  //      stay absent.
   let meshPayload: SiteTopographyEventPayload["mesh"] | undefined;
-  let meshGeometry:
-    | ReturnType<typeof buildTerrainMeshGeometry>
-    | undefined;
+  let meshResult: TerrainMeshWorkerResult | undefined;
   try {
-    meshGeometry = buildTerrainMeshGeometry(dem, catchmentBbox);
-    const { glb } = await deriveTerrainMeshGlb(dem, catchmentBbox);
+    meshResult = await buildTerrainMeshInWorker({
+      dem: { width: dem.width, height: dem.height, values: dem.values },
+      bbox: catchmentBbox,
+    });
     const meshGcsObjectPath = await storage.uploadObjectEntityFromBuffer(
-      Buffer.from(glb),
+      Buffer.from(meshResult.glb),
       "model/gltf-binary",
     );
-    const meta = meshGeometry.meta;
+    const meta = meshResult.meta;
     meshPayload = {
       gcsObjectPath: meshGcsObjectPath,
       format: "glb",
@@ -1198,24 +1199,24 @@ export async function ingestSiteTopography(
   //      fallback — that would be a second, divergent implementation of the
   //      correctness core). An IFC failure NEVER fails the ingest.
   let ifcPayload: SiteTopographyEventPayload["ifc"] | undefined;
-  if (meshGeometry) {
+  if (meshResult) {
     try {
       const ifcResult = await runIfcWorker({
-        positions: meshGeometry.positions,
-        indices: meshGeometry.indices,
+        positions: meshResult.positions,
+        indices: meshResult.indices,
         georefOrigin: {
-          originLng: meshGeometry.meta.georefOrigin.originLng,
-          originLat: meshGeometry.meta.georefOrigin.originLat,
+          originLng: meshResult.meta.georefOrigin.originLng,
+          originLat: meshResult.meta.georefOrigin.originLat,
           originHeightMeters: 0,
         },
-        crsConvention: meshGeometry.meta.crsConvention,
+        crsConvention: meshResult.meta.crsConvention,
         provenance: {
           sourceCitation,
           coverageFraction: coverage.coverageFraction,
           demResolutionMeters,
           demResolutionMeasured: coverage.resolutionMeasured,
           collectionProxyDate: demResult.fetchedAt,
-          hasHoles: meshGeometry.meta.hasHoles,
+          hasHoles: meshResult.meta.hasHoles,
         },
         confidence: {
           estimate: confidence.estimate,

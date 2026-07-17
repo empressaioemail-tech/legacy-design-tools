@@ -31,14 +31,16 @@ import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAu
 import { verifyGateContext } from "../middlewares/gateContextVerification";
 import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { getHistoryService } from "../atoms/registry";
-import {
-  ingestSiteTopography,
-  type SiteTopographyIngestResult,
-} from "../lib/siteTopographyIngest";
+import type { SiteTopographyIngestResult } from "../lib/siteTopographyIngest";
 import {
   loadActiveSiteTopographyRow,
   rematerializeFromLatestEvent,
 } from "../lib/siteTopographyMaterializer";
+import {
+  enqueueTerrainJob,
+  loadActiveTerrainJob,
+  loadLatestTerrainJob,
+} from "../lib/terrainJobWorker";
 
 const router: IRouter = Router();
 
@@ -139,26 +141,28 @@ router.post(
       res.status(tenantScope.status).json(tenantScope.body);
       return;
     }
-    let result: SiteTopographyIngestResult;
+    // ASYNC: enqueue the terrain job and return 202 immediately. The heavy
+    // DEM -> mesh -> IFC authoring runs OFF the request path (terrainJobWorker),
+    // with the mesh built on a worker thread — the fix for the CPU contention
+    // that starved co-scheduled brief requests into Cloud Run 503s. The client
+    // polls GET …/site-topography for the terminal state.
+    let enqueued: Awaited<ReturnType<typeof enqueueTerrainJob>>;
     try {
-      result = await ingestSiteTopography({
+      enqueued = await enqueueTerrainJob({
         engagementId,
-        history: getHistoryService(),
-        jurisdictionTenant: tenantScope.jurisdictionTenant,
-        contourIntervalMeters: parsed.data.contourIntervalMeters,
-        catchmentBufferMeters: parsed.data.catchmentBufferMeters,
-        demResolutionMeters: parsed.data.demResolutionMeters,
-        forceRefresh: parsed.data.forceRefresh,
+        params: {
+          jurisdictionTenant: tenantScope.jurisdictionTenant,
+          contourIntervalMeters: parsed.data.contourIntervalMeters,
+          catchmentBufferMeters: parsed.data.catchmentBufferMeters,
+          demResolutionMeters: parsed.data.demResolutionMeters,
+          forceRefresh: parsed.data.forceRefresh,
+        },
         log,
       });
     } catch (err) {
-      // Unexpected throw out of the worker — the worker is supposed to
-      // catch every recoverable failure mode and return a typed
-      // upstream-error result. Reaching here is a bug; surface it as
-      // a clean 500 so the FE doesn't have to branch on HTML.
       log.error(
         { err, engagementId },
-        "site-topography refresh: unhandled worker error",
+        "site-topography refresh: enqueue failed",
       );
       res.status(500).json({
         error: "internal_worker_error",
@@ -166,8 +170,11 @@ router.post(
       });
       return;
     }
-    const { status, body } = ingestResultToHttp(result);
-    res.status(status).json(body);
+    res.status(202).json({
+      status: enqueued.alreadyInFlight ? "in-progress" : "accepted",
+      jobId: enqueued.jobId,
+      jobStatus: enqueued.alreadyInFlight ? "generating" : "queued",
+    });
   },
 );
 
@@ -190,51 +197,81 @@ router.get(
       return;
     }
 
+    // ASYNC status read. Report the terrain job lifecycle:
+    //   ready (materialized row present) | pending (job queued/generating) |
+    //   no-coverage | failed | not-found. The row is the source of truth for
+    //   ready, so a completed run reads as ready even if its job row was reaped.
     // 1) Fast path — active row already materialized.
     let row = await loadActiveSiteTopographyRow(engagementId);
 
-    // 2) Replay path — no row, but maybe an event exists.
+    // 2) Replay path — no row, but maybe an event exists. A replay error is
+    //    treated as transient (fall through to job status), never masking an
+    //    in-flight job.
     if (!row) {
       const replayed = await rematerializeFromLatestEvent({
         history: getHistoryService(),
         engagementId,
         log,
-      });
-      if (replayed.status === "no-event") {
-        res.status(404).json({
-          status: "not-found",
-          reason: replayed.reason,
-        });
-        return;
-      }
-      if (replayed.status === "error") {
-        res.status(500).json({
-          status: "error",
-          reason: replayed.reason,
-        });
-        return;
-      }
-      // Re-read the row now that the materializer has written it.
-      row = await loadActiveSiteTopographyRow(engagementId);
-      if (!row) {
-        res.status(500).json({
-          status: "error",
-          reason:
-            "Replay-from-events succeeded but the materializable_elements row is still missing — investigate.",
-        });
-        return;
+      }).catch(() => ({ status: "no-event" as const, reason: "replay failed" }));
+      if (replayed.status === "ok") {
+        row = await loadActiveSiteTopographyRow(engagementId);
       }
     }
 
-    res.status(200).json({
-      status: "ok",
-      materializableElementId: row.id,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      // The full read model. SiteMap (Phase 2D.x PR4) reads
-      // `contoursGeoJson` directly off this; other consumers can
-      // peek at `demRef` / provenance metadata.
-      propertySet: row.propertySet,
+    if (row) {
+      res.status(200).json({
+        // `status: "ok"` preserved for backward compatibility; `jobStatus` is
+        // the async signal.
+        status: "ok",
+        jobStatus: "ready",
+        materializableElementId: row.id,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        // The full read model. SiteMap reads `contoursGeoJson` directly off
+        // this; other consumers peek at `demRef` / provenance metadata.
+        propertySet: row.propertySet,
+      });
+      return;
+    }
+
+    const activeJob = await loadActiveTerrainJob(engagementId);
+    if (activeJob) {
+      res.status(200).json({
+        status: "pending",
+        jobStatus: "pending",
+        jobId: activeJob.id,
+      });
+      return;
+    }
+
+    const latestJob = await loadLatestTerrainJob(engagementId);
+    if (latestJob && latestJob.status === "no-coverage") {
+      res.status(200).json({
+        status: "no-coverage",
+        jobStatus: "no-coverage",
+        jobId: latestJob.id,
+        reason:
+          latestJob.errorMessage ??
+          "No parcel coverage here yet, so a terrain model can't be built.",
+      });
+      return;
+    }
+    if (latestJob && latestJob.status === "failed") {
+      res.status(200).json({
+        status: "failed",
+        jobStatus: "failed",
+        jobId: latestJob.id,
+        code: latestJob.errorCode ?? "internal_worker_error",
+        reason: latestJob.errorMessage ?? "Terrain authoring failed.",
+      });
+      return;
+    }
+
+    res.status(404).json({
+      status: "not-found",
+      jobStatus: "none",
+      reason:
+        "No terrain model for this engagement yet; POST …/site-topography/refresh to start one.",
     });
   },
 );
