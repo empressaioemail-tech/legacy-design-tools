@@ -18,6 +18,7 @@ import {
   computeEngagementCoverage,
   coverageFieldsFromResolved,
 } from "./engagementCoverage";
+import { SERVICE_PLACE_OWNER_USER_ID } from "./anonymousOwnerCookie";
 
 export const MCP_PLACE_ENGAGEMENT_PREFIX = "mcp-place:";
 
@@ -231,6 +232,13 @@ export async function ensureMcpPlaceEngagement(
       geocodedAt: new Date(),
       geocodeSource: "mcp-place",
       status: "active",
+      // MCP/place callers have no authenticated user, but migration 0038 made
+      // engagements.owner_user_id NOT NULL (with no DB-level default — 0038/0039
+      // only backfill + SET NOT NULL). Omitting it throws Postgres 23502 and
+      // 503s the place/terrain routes. Supply a documented service principal so
+      // the ownership invariant holds; owner_user_id is plain text with no users
+      // FK, and isolation for these rows is via tenant_id / cortexJurisdictionKey.
+      ownerUserId: SERVICE_PLACE_OWNER_USER_ID,
       ...(tenantKey ? { cortexJurisdictionKey: tenantKey } : {}),
       ...coverageFieldsFromResolved(coverage),
     })

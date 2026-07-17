@@ -69,3 +69,15 @@ export function readAnonymousOwnerFromCookies(
 
 /** Stable system owner for pre-auth backfilled engagements — never anonymous. */
 export const LEGACY_INTERNAL_OWNER_USER_ID = "legacy-internal-owner";
+
+/**
+ * Stable service principal for MCP/place-scoped engagements that have no
+ * authenticated user (external MCP callers supply only an address/placeKey).
+ * Distinct from {@link LEGACY_INTERNAL_OWNER_USER_ID} (pre-auth demo backfill)
+ * and from anonymous ephemeral owners, so place engagements never pool into
+ * either set. `owner_user_id` is a plain text column with no FK to users
+ * (migration 0038), so a documented sentinel string is a valid owner; tenant
+ * isolation for these rows is via `tenant_id` / `cortexJurisdictionKey`, not
+ * the owner id. Satisfies the 0038 NOT NULL ownership invariant.
+ */
+export const SERVICE_PLACE_OWNER_USER_ID = "service:mcp-place";
