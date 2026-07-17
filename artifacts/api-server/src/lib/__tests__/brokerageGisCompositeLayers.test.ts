@@ -3,12 +3,15 @@ import {
   buildCompositeLayerFixture,
   deriveBuildableEnvelope,
   deriveConstraintDensity,
+  deriveMotivatedSellerHeat,
   deriveOzDealCrossfilter,
   listCompositeLayerEndpoints,
   queryCompositeLayer,
+  MOTIVATED_SELLER_SIGNAL_MODEL,
 } from "../brokerageGisCompositeLayers";
 import * as gisLayers from "../brokerageGisLayers";
 import * as federalLayers from "../brokerageGisFederalLayers";
+import type { MotivatedSellerSignalDb } from "../brokerageMotivatedSellerSignals";
 
 const bbox = {
   westLng: -97.32,
@@ -65,13 +68,14 @@ describe("buildCompositeLayerFixture", () => {
     ).toThrow(/real async derivation/i);
   });
 
-  it("builds motivated-seller heat properties", () => {
-    const payload = buildCompositeLayerFixture("motivated-seller", bbox);
-    const props = (
-      payload.geojson.features[0] as { properties: Record<string, unknown> }
-    ).properties;
-    expect(props.motivatedSellerHeat).toBeGreaterThan(0);
-    expect(props.propensity).toBeGreaterThan(0);
+  it("no longer serves motivated-seller synchronously (it is a real async derivation); the 0.74/propensity fixture is dead", () => {
+    expect(() =>
+      buildCompositeLayerFixture("motivated-seller", bbox),
+    ).toThrow(/real async derivation/i);
+    // The retired propensity fixture must never resurrect.
+    expect(() =>
+      buildCompositeLayerFixture("motivated-seller", bbox),
+    ).toThrow(/propensity/i);
   });
 });
 
@@ -525,5 +529,290 @@ describe("deriveOzDealCrossfilter", () => {
     expect(payload.provenance?.ozDesignation.nationalCountNote).toMatch(
       /8764/,
     );
+  });
+});
+
+// A parcel FeatureCollection carrying (countyFips, apn) so the CAD-roll join has
+// an identity to match. Situs is on the feature so the reader can fall back to it.
+function fakeParcelsResult(
+  parcels: Array<{ countyFips: string; apn: string; situsAddress?: string }>,
+) {
+  return {
+    layer: "parcels" as const,
+    serviceUrl: "https://example.test/parcels",
+    provider: "Test County GIS (parcels)",
+    adapterKey: "test:parcels",
+    geojson: {
+      type: "FeatureCollection" as const,
+      features: parcels.map((p, i) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Polygon" as const,
+          coordinates: [
+            [
+              [-97.75 + i * 0.001, 30.25],
+              [-97.749 + i * 0.001, 30.25],
+              [-97.749 + i * 0.001, 30.251],
+              [-97.75 + i * 0.001, 30.251],
+              [-97.75 + i * 0.001, 30.25],
+            ],
+          ],
+        },
+        properties: {
+          provider: "county-gis",
+          countyFips: p.countyFips,
+          apn: p.apn,
+          ...(p.situsAddress ? { situsAddress: p.situsAddress } : {}),
+        },
+      })),
+    },
+    featureCount: parcels.length,
+    queryMode: "bbox" as const,
+    notSurveyGrade: true,
+  };
+}
+
+/**
+ * A fake injectable CAD-roll db. `rows` are matched against the terminal await
+ * of `select(...).from(cadProperty).where(...).orderBy(...)`. The reader awaits
+ * the orderBy() result, so the chain object must be thenable.
+ */
+function fakeSignalDb(
+  rows: Array<{
+    propId: string;
+    taxYear: number;
+    ownerMailingAddress: string | null;
+    situsAddress: string | null;
+    situsCity: string | null;
+    exemptionCodes: string[] | null;
+    sourceVintage: string;
+  }>,
+): MotivatedSellerSignalDb {
+  const chain = {
+    from() {
+      return this;
+    },
+    where() {
+      return this;
+    },
+    orderBy() {
+      return Promise.resolve(rows);
+    },
+  };
+  return { select: () => chain as never } as unknown as MotivatedSellerSignalDb;
+}
+
+describe("MOTIVATED_SELLER_SIGNAL_MODEL (transparent documented weighted-sum)", () => {
+  it("is a documented weighted-sum with a named weight + rationale per signal, and excludes any vendor propensity", () => {
+    const keys = MOTIVATED_SELLER_SIGNAL_MODEL.map((s) => s.key);
+    expect(keys).toContain("absentee-owner");
+    expect(keys).toContain("tax-delinquency");
+    expect(keys).toContain("pre-foreclosure-nos");
+    expect(keys).toContain("lis-pendens-tax-lien");
+    expect(keys).toContain("probate-estate");
+    for (const s of MOTIVATED_SELLER_SIGNAL_MODEL) {
+      // Every weight is a named documented constant with a rationale (R3).
+      expect(typeof s.weight).toBe("number");
+      expect(s.weight).toBeGreaterThan(0);
+      expect(s.weightRationale.length).toBeGreaterThan(20);
+    }
+    // Only absentee-owner is live today; the rest carry a data-pull.
+    const live = MOTIVATED_SELLER_SIGNAL_MODEL.filter((s) => s.liveToday);
+    expect(live.map((s) => s.key)).toEqual(["absentee-owner"]);
+    for (const s of MOTIVATED_SELLER_SIGNAL_MODEL.filter((s) => !s.liveToday)) {
+      expect(s.dataPull).toBeTruthy();
+    }
+  });
+});
+
+describe("deriveMotivatedSellerHeat (transparent public-record weighted-sum + honesty)", () => {
+  it("STATE c-no-parcels: no parcels -> out-of-scope, degraded, never a fabricated 0.74", async () => {
+    const spy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockRejectedValue(new Error("no-coverage"));
+    const { payload, honesty } = await deriveMotivatedSellerHeat(bbox);
+    spy.mockRestore();
+
+    expect(payload.fixture).toBe(false);
+    expect(payload.featureCount).toBe(0);
+    expect(payload.motivatedSellerProvenance?.coverage).toBe("out-of-scope");
+    expect(honesty.coverage.degraded).toBe(true);
+    expect(honesty.confidence.kind).toBe("asserted");
+    // The retired 0.74 propensity fixture must never appear anywhere.
+    expect(JSON.stringify(payload)).not.toMatch(/0\.74/);
+    expect(JSON.stringify(payload)).not.toMatch(/"propensity"/);
+    // verification-state is explicit (calibration does not exist yet).
+    expect(payload.motivatedSellerProvenance?.verificationState).toBe(
+      "asserted-unverified",
+    );
+  });
+
+  it("STATE c: parcels but no CAD match -> out-of-scope (absentee not-evaluated), never 0.74", async () => {
+    const parcelSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeParcelsResult([
+          { countyFips: "48453", apn: "10001", situsAddress: "1 MAIN ST" },
+        ]) as never,
+      );
+    // Empty CAD roll -> no absentee row matches.
+    const { payload, honesty } = await deriveMotivatedSellerHeat(bbox, {
+      signalDb: fakeSignalDb([]),
+    });
+    parcelSpy.mockRestore();
+
+    expect(payload.featureCount).toBe(0);
+    expect(payload.motivatedSellerProvenance?.coverage).toBe("out-of-scope");
+    expect(payload.motivatedSellerProvenance?.signalsEvaluated).toBe(0);
+    expect(honesty.coverage.degraded).toBe(true);
+    // Not one signal treated as "absent = not motivated".
+    expect(String(honesty.coverage.reason)).toMatch(/unknown, not confirmed-none/i);
+  });
+
+  it("STATE b (partial): absentee fires (mailing != situs) -> in-scope-partial, 1 of 5 signals, low asserted confidence", async () => {
+    const parcelSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeParcelsResult([
+          { countyFips: "48453", apn: "10001", situsAddress: "1 MAIN ST" },
+        ]) as never,
+      );
+    const { payload, honesty } = await deriveMotivatedSellerHeat(bbox, {
+      signalDb: fakeSignalDb([
+        {
+          propId: "10001",
+          taxYear: 2026,
+          ownerMailingAddress: "PO BOX 500, DALLAS, TX 75201",
+          situsAddress: "1 MAIN ST",
+          situsCity: "AUSTIN",
+          exemptionCodes: null,
+          sourceVintage: "2026-preliminary",
+        },
+      ]),
+    });
+    parcelSpy.mockRestore();
+
+    expect(payload.featureCount).toBe(1);
+    expect(payload.motivatedSellerProvenance?.coverage).toBe("in-scope-partial");
+    expect(payload.motivatedSellerProvenance?.signalsEvaluated).toBe(1);
+    expect(payload.motivatedSellerProvenance?.signalsTotal).toBe(5);
+    // The four un-ingested signals are flagged as operator/fleet data-pulls.
+    expect(payload.motivatedSellerProvenance?.pendingIngest.length).toBe(4);
+
+    const props = (
+      payload.geojson.features[0] as { properties: Record<string, unknown> }
+    ).properties;
+    // Absentee fired at value 1 -> heat normalized against evaluated weights = 1.
+    expect(props.motivatedSellerHeat).toBe(1);
+    expect(props.partial).toBe(true);
+    expect(props.signalsEvaluated).toBe(1);
+    // Reasoning chain per commitment #1: value + weight + contribution + excludes.
+    expect(String(props.reasoning)).toMatch(/weighted-sum/i);
+    expect(String(props.reasoning)).toMatch(/absentee/i);
+    expect(String(props.reasoning)).toMatch(/no proprietary/i);
+    // Confidence is asserted-unverified, and low (1 of 5).
+    expect(props.confidenceKind).toBe("asserted");
+    expect(props.verificationState).toBe("asserted-unverified");
+    expect(props.confidence as number).toBeLessThan(0.4);
+    // Per-signal citation carries source + weight + contribution.
+    const cited = props.contributingSignals as Array<Record<string, unknown>>;
+    expect(cited[0]?.key).toBe("absentee-owner");
+    expect(cited[0]?.source).toBeTruthy();
+    expect(cited[0]?.weight).toBeTruthy();
+    // Absentee evidence carries the actual mailing vs situs (the public record).
+    const evidence = props.absenteeEvidence as Record<string, unknown>;
+    expect(evidence.absentee).toBe(true);
+    expect(String(evidence.ownerMailingAddress)).toMatch(/PO BOX/);
+    // The four not-evaluated signals are recorded as unknown, never zero.
+    const notEval = props.signalsNotEvaluated as Array<Record<string, unknown>>;
+    expect(notEval.length).toBe(4);
+    honesty; // honesty asserted below
+    expect(honesty.confidence.kind).toBe("asserted");
+    expect(honesty.coverage.degraded).toBe(true);
+  });
+
+  it("owner-occupied (mailing == situs) -> absentee value 0, heat 0, still honestly derived not fabricated", async () => {
+    const parcelSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeParcelsResult([
+          { countyFips: "48453", apn: "20002", situsAddress: "5 OAK AVE" },
+        ]) as never,
+      );
+    const { payload } = await deriveMotivatedSellerHeat(bbox, {
+      signalDb: fakeSignalDb([
+        {
+          propId: "20002",
+          taxYear: 2026,
+          ownerMailingAddress: "5 OAK AVE",
+          situsAddress: "5 OAK AVE",
+          situsCity: "AUSTIN",
+          exemptionCodes: null,
+          sourceVintage: "2026-preliminary",
+        },
+      ]),
+    });
+    parcelSpy.mockRestore();
+
+    // Absentee is evaluated (we CAN decide) and value 0 -> heat 0, but derived.
+    const props = (
+      payload.geojson.features[0] as { properties: Record<string, unknown> }
+    ).properties;
+    expect(props.motivatedSellerHeat).toBe(0);
+    expect(props.signalsEvaluated).toBe(1);
+    expect((props.contributingSignals as unknown[]).length).toBe(1);
+  });
+
+  it("homestead-exempt parcel is owner-occupied by law -> never flagged absentee", async () => {
+    const parcelSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeParcelsResult([
+          { countyFips: "48453", apn: "30003", situsAddress: "9 ELM ST" },
+        ]) as never,
+      );
+    const { payload } = await deriveMotivatedSellerHeat(bbox, {
+      signalDb: fakeSignalDb([
+        {
+          propId: "30003",
+          taxYear: 2026,
+          // Mailing differs textually (PO box) but HS exemption = owner-occupied.
+          ownerMailingAddress: "PO BOX 12, AUSTIN, TX 78701",
+          situsAddress: "9 ELM ST",
+          situsCity: "AUSTIN",
+          exemptionCodes: ["HS"],
+          sourceVintage: "2026-preliminary",
+        },
+      ]),
+    });
+    parcelSpy.mockRestore();
+
+    const props = (
+      payload.geojson.features[0] as { properties: Record<string, unknown> }
+    ).properties;
+    expect(props.motivatedSellerHeat).toBe(0);
+    const evidence = props.absenteeEvidence as Record<string, unknown>;
+    expect(evidence.absentee).toBe(false);
+    expect(evidence.homesteadExempt).toBe(true);
+  });
+
+  it("queryCompositeLayer routes motivated-seller through the real derivation; fixture flag does not resurrect 0.74", async () => {
+    const spy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockRejectedValue(new Error("no-coverage"));
+    const envelope = await queryCompositeLayer({
+      layer: "motivated-seller",
+      bbox,
+      // an explicit fixture flag must NOT resurrect the retired propensity fixture
+      fixture: true,
+    });
+    spy.mockRestore();
+
+    expect(envelope.payload.layer).toBe("motivated-seller");
+    expect(envelope.payload.fixture).toBe(false);
+    expect(envelope.confidence.kind).toBe("asserted");
+    expect(envelope.source.adapter).toContain("brokerage:composite");
+    expect(JSON.stringify(envelope.payload)).not.toMatch(/0\.74/);
+    expect(JSON.stringify(envelope.payload)).not.toMatch(/"propensity"/);
   });
 });
