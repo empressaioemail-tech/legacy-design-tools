@@ -30,6 +30,12 @@ import {
   ozTractLayerProvenance,
   bboxWithinOzCoverage,
 } from "./opportunityZoneAdapter";
+import {
+  fetchAbsenteeSignalsForTile,
+  type AbsenteeSignal,
+  type MotivatedSellerSignalDb,
+  type ParcelIdentity,
+} from "./brokerageMotivatedSellerSignals";
 
 export type CompositeLayerKey =
   | "buildable-envelope"
@@ -174,6 +180,74 @@ export type ConstraintDensityProvenance = {
   generatedAt: string;
 };
 
+/**
+ * Provenance for a derived motivated-seller heat score. motivated-seller is a
+ * TRANSPARENT documented WEIGHTED-SUM over TX public-record signals acquired via
+ * the uniform public-record process (ruling R3). It is NOT a bought propensity
+ * model and NOT a black box: every signal carries a named documented weight, and
+ * the score is fully reconstructable from `contributingSignals`.
+ *
+ * A signal that is unavailable for a parcel (no store ingested, or no match) is
+ * recorded `evaluated:false` and EXCLUDED from the weighted-sum denominator, the
+ * same partial-honesty as constraint-density — an unavailable signal is NEVER
+ * treated as "signal absent = not motivated".
+ */
+export type MotivatedSellerSignalProvenance = {
+  key:
+    | "tax-delinquency"
+    | "absentee-owner"
+    | "pre-foreclosure-nos"
+    | "lis-pendens-tax-lien"
+    | "probate-estate";
+  label: string;
+  /** Documented weight this signal contributes to the weighted-sum. */
+  weight: number;
+  /** One-line rationale for the weight (R3: every weight is documented). */
+  weightRationale: string;
+  source: string;
+  sourceUrl: string | null;
+  /** Whether this signal's DATA is ingested/reachable for the parcel at all. */
+  evaluated: boolean;
+  /**
+   * The signal's normalized value in [0,1] when evaluated; null when
+   * not-evaluated. This is the signal's own contribution factor, not the
+   * weighted term.
+   */
+  value: number | null;
+  dataVintage: string | null;
+  /** Reason the signal was not evaluated (data not ingested / no match), when applicable. */
+  note: string | null;
+};
+
+export type MotivatedSellerProvenance = {
+  method: {
+    kind: "transparent-weighted-sum";
+    note: string;
+    excludes: string[];
+  };
+  /** Every signal in the model, with weight + evaluated/not-evaluated state. */
+  signals: MotivatedSellerSignalProvenance[];
+  /** Signals whose data is NOT yet ingested — each an operator/fleet data-pull. */
+  pendingIngest: Array<{ key: string; dataPull: string }>;
+  signalsEvaluated: number;
+  signalsTotal: number;
+  /**
+   * Three-way coverage state, mirroring the OZ + buildable + constraint
+   * derivations:
+   *   in-scope-derived — all modeled signals evaluated -> earned
+   *   in-scope-partial — some (>=1) but not all evaluated -> lowered confidence
+   *   out-of-scope     — zero signals evaluated -> degraded, absence-is-unknown
+   */
+  coverage: "in-scope-derived" | "in-scope-partial" | "out-of-scope";
+  /**
+   * Confidence is ASSERTED with a verification state — calibration (arrow two)
+   * does not exist yet, so this is honestly asserted with provenance, never a
+   * bare number and never presented as calibrated/earned.
+   */
+  verificationState: "asserted-unverified";
+  generatedAt: string;
+};
+
 export type CompositeLayerPayload = {
   layer: CompositeLayerKey;
   geojson: ArcGisGeoJsonFeatureCollection;
@@ -184,6 +258,7 @@ export type CompositeLayerPayload = {
   provenance?: CompositeLayerProvenance;
   buildableProvenance?: BuildableEnvelopeProvenance;
   constraintProvenance?: ConstraintDensityProvenance;
+  motivatedSellerProvenance?: MotivatedSellerProvenance;
 };
 
 function defaultHonesty(adapter: string, degraded = false): EngineHonesty {
@@ -198,20 +273,6 @@ function defaultHonesty(adapter: string, degraded = false): EngineHonesty {
       : { degraded: false },
     source: { adapter },
   };
-}
-
-function parcelRing(bbox: GisLayerBbox, scale = 0.35): number[][] {
-  const cx = (bbox.westLng + bbox.eastLng) / 2;
-  const cy = (bbox.southLat + bbox.northLat) / 2;
-  const dx = (bbox.eastLng - bbox.westLng) * scale;
-  const dy = (bbox.northLat - bbox.southLat) * scale;
-  return [
-    [cx - dx, cy - dy],
-    [cx + dx, cy - dy],
-    [cx + dx, cy + dy],
-    [cx - dx, cy + dy],
-    [cx - dx, cy - dy],
-  ];
 }
 
 /**
@@ -1571,11 +1632,580 @@ export async function deriveConstraintDensity(bbox: GisLayerBbox): Promise<{
   };
 }
 
+// ---------------------------------------------------------------------------
+// Motivated-seller heat derivation (promote the hardcoded 0.74 fixture to a
+// real, TRANSPARENT, PUBLIC-RECORD documented weighted-sum — ruling R3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The motivated-seller signal model: a TRANSPARENT documented weighted-sum over
+ * TX public records, acquired via the uniform public-record process (ruling R3,
+ * `_inbox/2026-07-16_map_data_sourcing_rulings.md`). This table IS the model —
+ * every signal's weight is a named documented constant with a rationale, and a
+ * parcel's score is fully reconstructable from which signals fired at what value.
+ *
+ * NO proprietary propensity model. Cotality "Propensity to List" and any
+ * bought/vendor propensity score are excluded by design — the public
+ * weighted-sum REPLACES the black box, more defensibly.
+ *
+ * Weights are RELATIVE importance (they need not sum to 1; the derivation
+ * normalizes by the sum of the weights of the signals actually EVALUATED, so a
+ * partial model is reported as partial rather than diluted). Ordering follows
+ * R3's build-by-access-difficulty list; the weights reflect distress signal
+ * strength as understood in the real-estate acquisition literature (a filed
+ * pre-foreclosure notice is a far stronger motivation signal than mere absentee
+ * ownership).
+ */
+export const MOTIVATED_SELLER_SIGNAL_MODEL: ReadonlyArray<{
+  key: MotivatedSellerSignalProvenance["key"];
+  label: string;
+  weight: number;
+  weightRationale: string;
+  source: string;
+  sourceUrl: string | null;
+  /** Whether the signal's DATA is ingested anywhere in the spine today. */
+  liveToday: boolean;
+  /** Operator/fleet data-pull needed to light the signal up, when not live. */
+  dataPull: string | null;
+}> = [
+  {
+    key: "pre-foreclosure-nos",
+    label: "Pre-foreclosure Notice of (Substitute) Trustee's Sale",
+    weight: 0.35,
+    weightRationale:
+      "Highest-value motivation signal: a filed Notice of (Substitute) Trustee's Sale means an active foreclosure timeline (TX 21-day posting, Property Code §51.002), the strongest public indicator that an owner must transact.",
+    source: "County clerk trustee-sale postings (public record)",
+    sourceUrl: null,
+    liveToday: false,
+    dataPull:
+      "Ingest county-clerk Notice of (Substitute) Trustee's Sale postings (21-day pre-sale filings) into a pre_foreclosure_notice store keyed (county_fips, prop_id/legal). No such store exists in the spine yet.",
+  },
+  {
+    key: "tax-delinquency",
+    label: "Property-tax delinquency",
+    weight: 0.3,
+    weightRationale:
+      "Strong, easiest-access distress signal: a parcel on the published delinquent tax roll (TX Property Tax Code Ch.33) carries carrying-cost pressure and penalty/interest accrual that motivates a sale.",
+    source: "County tax-assessor delinquent roll (public record, Tax Code Ch.33)",
+    sourceUrl: null,
+    liveToday: false,
+    dataPull:
+      "Ingest each county's published delinquent tax roll (some counties post CSV) into a tax_delinquency store keyed (county_fips, prop_id). No such store exists in the spine yet.",
+  },
+  {
+    key: "lis-pendens-tax-lien",
+    label: "Lis pendens / recorded tax lien",
+    weight: 0.2,
+    weightRationale:
+      "A recorded lis pendens or tax lien signals litigation/encumbrance pressure on the owner; recorded and public, but a weaker and noisier motivation signal than an active foreclosure timeline.",
+    source: "County clerk recorded documents (lis pendens / lien filings)",
+    sourceUrl: null,
+    liveToday: false,
+    dataPull:
+      "Ingest county-clerk recorded lis-pendens and tax-lien filings into a recorded_encumbrance store keyed (county_fips, prop_id/legal). No such store exists in the spine yet.",
+  },
+  {
+    key: "absentee-owner",
+    label: "Absentee owner (mailing address != situs)",
+    weight: 0.15,
+    weightRationale:
+      "Baseline propensity signal: an owner whose mailing address differs from the property situs does not occupy it, correlating with a higher willingness to sell (investor/inherited/out-of-area). Weaker than a distress event, so weighted lowest — but it is the one signal genuinely live from the cad_property roll today.",
+    source: "County appraisal-district roll (cad_property: owner mailing vs situs)",
+    sourceUrl: null,
+    liveToday: true,
+    dataPull: null,
+  },
+  {
+    key: "probate-estate",
+    label: "Probate / estate ownership",
+    weight: 0.2,
+    weightRationale:
+      "Estate/probate ownership is a well-known motivated-seller source (heirs liquidating), public and name-keyed — but the hardest to match to a parcel, so it lands late and is treated as not-evaluated until a matched store exists.",
+    source: "County probate court records (public, name-keyed)",
+    sourceUrl: null,
+    liveToday: false,
+    dataPull:
+      "Ingest county probate/estate filings and name-match them to owner_name on the CAD roll into a probate_estate store keyed (county_fips, prop_id). Name matching is lossy; no such store exists in the spine yet.",
+  },
+] as const;
+
+const MOTIVATED_SELLER_METHOD_NOTE =
+  "Motivated-seller heat is a TRANSPARENT documented weighted-sum over TX public-record signals (pre-foreclosure NOS, tax delinquency, lis-pendens/liens, absentee ownership, probate), each with a named documented weight. The score for a parcel is sum(weight_i * value_i) over the signals EVALUATED for that parcel, normalized by the sum of those signals' weights — so a score built from a subset of signals is reported as partial and is fully reconstructable from contributingSignals. NO proprietary/vendor propensity model is consumed; absence of a signal's data is recorded as not-evaluated and excluded from the denominator, never treated as 'not motivated'.";
+
+const MOTIVATED_SELLER_EXCLUDES = [
+  "cotality-propensity-to-list",
+  "any-vendor-bought-propensity-score",
+  "tenant-private",
+  "synthetic-heat-score",
+];
+
+/** A parcel with a resolvable (countyFips, propId) identity + situs + geometry. */
+type MotivatedSellerParcel = {
+  countyFips: string;
+  propId: string;
+  situsAddress: string | null;
+  geometry: unknown;
+};
+
+function parcelIdentityFromFeatureProps(
+  props: Record<string, unknown>,
+): { countyFips: string; propId: string; situsAddress: string | null } | null {
+  const countyFips =
+    typeof props.countyFips === "string" && props.countyFips.trim()
+      ? props.countyFips.trim()
+      : null;
+  const propIdRaw =
+    (typeof props.apn === "string" && props.apn.trim()) ||
+    (typeof props.propId === "string" && (props.propId as string).trim()) ||
+    (typeof props.PROP_ID === "string" && (props.PROP_ID as string).trim()) ||
+    null;
+  if (!countyFips || !propIdRaw) return null;
+  const situsAddress =
+    (typeof props.situsAddress === "string" && props.situsAddress.trim()) ||
+    null;
+  return { countyFips, propId: propIdRaw, situsAddress: situsAddress || null };
+}
+
+/**
+ * Real motivated-seller heat derivation (replaces the hardcoded
+ * motivatedSellerHeat:0.74 / propensity:0.81 fixture).
+ *
+ * INPUTS, all live and resolved per-request:
+ *   - Parcels in the viewport, from the SAME live parcels path the buildable
+ *     envelope uses (county-GIS / TxGIO store), each carrying (countyFips, apn).
+ *   - Absentee ownership, batch-joined from the cad_property roll (owner mailing
+ *     vs situs), the ONE R3 signal genuinely live today.
+ *
+ * Every other R3 signal (pre-foreclosure NOS, tax delinquency, lis-pendens/lien,
+ * probate) is in the model with its documented weight and is recorded as
+ * not-evaluated (data not ingested) — the score lights each up automatically as
+ * its store lands. NONE is fabricated.
+ *
+ * Three-state coverage honesty (mirrors the other three derivations):
+ *   (a) all modeled signals evaluated -> in-scope-derived, degraded:false
+ *   (b) some (>=1) but not all evaluated -> in-scope-partial, degraded:true,
+ *       reason naming the not-evaluated signals, lowered confidence
+ *   (c) zero signals evaluable for any parcel (no parcels, or no CAD match and
+ *       no other signal live) -> out-of-scope, degraded:true,
+ *       "absence of a motivated-seller signal is unknown, not confirmed-none" —
+ *       NEVER a fabricated 0.74.
+ *
+ * Confidence is ASSERTED with an explicit verification state
+ * ("asserted-unverified"): calibration (arrow two) does not exist yet, so the
+ * number is honestly asserted with provenance, never presented as calibrated.
+ */
+export async function deriveMotivatedSellerHeat(
+  bbox: GisLayerBbox,
+  deps?: { signalDb?: MotivatedSellerSignalDb },
+): Promise<{ payload: CompositeLayerPayload; honesty: EngineHonesty }> {
+  const generatedAt = new Date().toISOString();
+  const dataVintage = generatedAt.slice(0, 10);
+  const adapter = "brokerage:composite-motivated-seller";
+
+  const liveSignals = MOTIVATED_SELLER_SIGNAL_MODEL.filter((s) => s.liveToday);
+  const notLiveSignals = MOTIVATED_SELLER_SIGNAL_MODEL.filter(
+    (s) => !s.liveToday,
+  );
+  const pendingIngest = notLiveSignals.map((s) => ({
+    key: s.key,
+    dataPull: s.dataPull ?? "Data source not yet ingested.",
+  }));
+
+  // --- Resolve parcels in the viewport (same path as buildable-envelope) ---
+  let parcelResult:
+    | Awaited<ReturnType<typeof queryGisLayerGeoJson>>
+    | null = null;
+  try {
+    parcelResult = await queryGisLayerGeoJson({ layer: "parcels", bbox });
+  } catch (err) {
+    logger.warn(
+      { err, bbox },
+      "motivated-seller: parcel resolution failed",
+    );
+  }
+
+  const rawFeatures = (parcelResult?.geojson.features ?? []) as Array<{
+    geometry?: unknown;
+    properties?: Record<string, unknown>;
+  }>;
+
+  const parcels: MotivatedSellerParcel[] = [];
+  for (const f of rawFeatures) {
+    const identity = parcelIdentityFromFeatureProps(f.properties ?? {});
+    if (!identity || !f.geometry) continue;
+    parcels.push({
+      countyFips: identity.countyFips,
+      propId: identity.propId,
+      situsAddress: identity.situsAddress,
+      geometry: f.geometry,
+    });
+  }
+
+  const parcelSource =
+    parcelResult?.provider ?? "county-GIS / TxGIO store (parcels)";
+  const parcelSourceUrl = parcelResult?.serviceUrl ?? null;
+
+  // Base signal provenance (model with weights), independent of any parcel.
+  const buildSignalProvenance = (
+    evaluatedKeys: Set<string>,
+  ): MotivatedSellerSignalProvenance[] =>
+    MOTIVATED_SELLER_SIGNAL_MODEL.map((s) => ({
+      key: s.key,
+      label: s.label,
+      weight: s.weight,
+      weightRationale: s.weightRationale,
+      source: s.source,
+      sourceUrl: s.sourceUrl,
+      evaluated: evaluatedKeys.has(s.key),
+      value: null,
+      dataVintage: evaluatedKeys.has(s.key) ? dataVintage : null,
+      note: s.liveToday
+        ? evaluatedKeys.has(s.key)
+          ? null
+          : "Signal is live but not evaluable for any parcel in this viewport (no CAD match)."
+        : `Not-evaluated (data not ingested). ${s.dataPull ?? ""}`.trim(),
+    }));
+
+  // STATE (c-no-parcels): no parcels resolvable -> nothing to score.
+  if (parcels.length === 0) {
+    const reason =
+      "Motivated-seller heat requires parcels; none was resolvable for this viewport (parcel geometry unavailable). Absence of a motivated-seller signal here is unknown, not confirmed-none.";
+    const provenance: MotivatedSellerProvenance = {
+      method: {
+        kind: "transparent-weighted-sum",
+        note: MOTIVATED_SELLER_METHOD_NOTE,
+        excludes: MOTIVATED_SELLER_EXCLUDES,
+      },
+      signals: buildSignalProvenance(new Set()),
+      pendingIngest,
+      signalsEvaluated: 0,
+      signalsTotal: MOTIVATED_SELLER_SIGNAL_MODEL.length,
+      coverage: "out-of-scope",
+      verificationState: "asserted-unverified",
+      generatedAt,
+    };
+    return {
+      payload: {
+        layer: "motivated-seller",
+        queryMode: "bbox",
+        fixture: false,
+        featureCount: 0,
+        notes: reason,
+        motivatedSellerProvenance: provenance,
+        geojson: { type: "FeatureCollection", features: [] },
+      },
+      honesty: {
+        confidence: { value: 0.2, kind: "asserted" },
+        dataVintage,
+        coverage: { degraded: true, reason },
+        source: { adapter },
+      },
+    };
+  }
+
+  // --- Evaluate the LIVE signals ---
+  // absentee-owner is the only live signal today; batch-join the CAD roll.
+  const wantAbsentee = liveSignals.some((s) => s.key === "absentee-owner");
+  let absenteeMap = new Map<string, AbsenteeSignal>();
+  if (wantAbsentee) {
+    const identities: ParcelIdentity[] = parcels.map((p) => ({
+      countyFips: p.countyFips,
+      propId: p.propId,
+      featureSitusAddress: p.situsAddress,
+    }));
+    try {
+      absenteeMap = await fetchAbsenteeSignalsForTile(
+        identities,
+        deps?.signalDb,
+      );
+    } catch (err) {
+      logger.warn(
+        { err },
+        "motivated-seller: absentee CAD-roll join failed; absentee not-evaluated for viewport",
+      );
+      absenteeMap = new Map();
+    }
+  }
+
+  // Which signals were evaluated for AT LEAST ONE parcel — drives coverage.
+  const evaluatedSignalKeys = new Set<string>();
+
+  const features: unknown[] = [];
+  let scoredParcelCount = 0;
+
+  for (const parcel of parcels) {
+    const key = `${parcel.countyFips}:${(function () {
+      // Normalize here matches the map key produced in the signal reader.
+      const id = parcel.propId.trim();
+      return /^\d+$/.test(id) ? id.replace(/^0+(?=\d)/, "") : id;
+    })()}`;
+
+    // Per-parcel evaluated signals + their [0,1] value.
+    const perParcelSignals: MotivatedSellerSignalProvenance[] =
+      MOTIVATED_SELLER_SIGNAL_MODEL.map((s) => {
+        // Only absentee-owner is wired live today.
+        if (s.key === "absentee-owner") {
+          const sig = absenteeMap.get(key);
+          if (!sig || !sig.available || sig.absentee === null) {
+            return {
+              key: s.key,
+              label: s.label,
+              weight: s.weight,
+              weightRationale: s.weightRationale,
+              source: s.source,
+              sourceUrl: s.sourceUrl,
+              evaluated: false,
+              value: null,
+              dataVintage: null,
+              note:
+                sig?.note ??
+                "No cad_property row matched this parcel; absentee not-evaluated (unknown), not 'not absentee'.",
+            };
+          }
+          const value = sig.absentee ? 1 : 0;
+          return {
+            key: s.key,
+            label: s.label,
+            weight: s.weight,
+            weightRationale: s.weightRationale,
+            source: s.source,
+            sourceUrl: s.sourceUrl,
+            evaluated: true,
+            value,
+            dataVintage: sig.sourceVintage ?? dataVintage,
+            note: sig.note,
+          };
+        }
+        // Every other signal: data not ingested -> not-evaluated for this parcel.
+        return {
+          key: s.key,
+          label: s.label,
+          weight: s.weight,
+          weightRationale: s.weightRationale,
+          source: s.source,
+          sourceUrl: s.sourceUrl,
+          evaluated: false,
+          value: null,
+          dataVintage: null,
+          note: `Not-evaluated (data not ingested). ${s.dataPull ?? ""}`.trim(),
+        };
+      });
+
+    const evaluated = perParcelSignals.filter(
+      (s) => s.evaluated && s.value !== null,
+    );
+    // A parcel with no evaluable signal is not scored (excluded), never 0.74.
+    if (evaluated.length === 0) continue;
+
+    for (const s of evaluated) evaluatedSignalKeys.add(s.key);
+
+    const weightSum = evaluated.reduce((acc, s) => acc + s.weight, 0);
+    const weightedTerm = evaluated.reduce(
+      (acc, s) => acc + s.weight * (s.value as number),
+      0,
+    );
+    const heat = weightSum > 0 ? Math.min(1, weightedTerm / weightSum) : 0;
+
+    const signalsTotal = MOTIVATED_SELLER_SIGNAL_MODEL.length;
+    const partial = evaluated.length < signalsTotal;
+    const notEvaluatedForParcel = perParcelSignals
+      .filter((s) => !s.evaluated)
+      .map((s) => s.label);
+
+    // Confidence is ASSERTED with a verification state, and scaled by how much
+    // of the model actually fired — a 1-of-5 score is honestly low-confidence.
+    const coverageFraction = evaluated.length / signalsTotal;
+    const confidenceValue = Number((0.2 + 0.5 * coverageFraction).toFixed(2));
+
+    const firedDesc = evaluated
+      .map(
+        (s) =>
+          `${s.label} value=${(s.value as number).toFixed(2)} weight=${s.weight} contribution=${(
+            s.weight * (s.value as number)
+          ).toFixed(3)}`,
+      )
+      .join("; ");
+
+    const reasoning =
+      `Motivated-seller heat ${heat.toFixed(2)} = weighted-sum over ${evaluated.length} of ${signalsTotal} public-record signals, normalized by evaluated weights (${weightSum.toFixed(
+        2,
+      )}). Fired: ${firedDesc}.` +
+      (notEvaluatedForParcel.length
+        ? ` Not-evaluated (unknown, NOT 'not motivated'; excluded from the denominator): ${notEvaluatedForParcel.join(
+            ", ",
+          )}.`
+        : " All modeled signals evaluated.") +
+      ` Transparent documented weighted-sum; no proprietary/vendor propensity model. Confidence is asserted-unverified (calibration not yet available).`;
+
+    // Absentee-specific evidence for the citation, when it fired.
+    const absenteeSig = absenteeMap.get(key);
+
+    features.push({
+      type: "Feature",
+      geometry: parcel.geometry,
+      properties: {
+        kind: "motivated-seller",
+        derived: true,
+        countyFips: parcel.countyFips,
+        apn: parcel.propId,
+        motivatedSellerHeat: Number(heat.toFixed(3)),
+        signalsEvaluated: evaluated.length,
+        signalsTotal,
+        partial,
+        weightedTermSum: Number(weightedTerm.toFixed(4)),
+        evaluatedWeightSum: Number(weightSum.toFixed(4)),
+        // Full reasoning chain per commitment #1: each signal's value + weight
+        // + contribution, source + sourceUrl, vintage, verification state.
+        contributingSignals: evaluated.map((s) => ({
+          key: s.key,
+          label: s.label,
+          value: s.value,
+          weight: s.weight,
+          weightRationale: s.weightRationale,
+          contribution: Number((s.weight * (s.value as number)).toFixed(4)),
+          source: s.source,
+          sourceUrl: s.sourceUrl,
+          dataVintage: s.dataVintage,
+        })),
+        signalsNotEvaluated: perParcelSignals
+          .filter((s) => !s.evaluated)
+          .map((s) => ({ key: s.key, label: s.label, note: s.note })),
+        absenteeEvidence: absenteeSig
+          ? {
+              absentee: absenteeSig.absentee,
+              ownerMailingAddress: absenteeSig.ownerMailingAddress,
+              situsAddress: absenteeSig.situsAddress,
+              homesteadExempt: absenteeSig.homesteadExempt,
+              sourceVintage: absenteeSig.sourceVintage,
+            }
+          : null,
+        reasoning,
+        confidence: confidenceValue,
+        confidenceKind: "asserted",
+        verificationState: "asserted-unverified",
+        source: parcelSource,
+        sourceUrl: parcelSourceUrl,
+        dataVintage,
+        generatedAt,
+      },
+    });
+    scoredParcelCount += 1;
+  }
+
+  const signalsTotal = MOTIVATED_SELLER_SIGNAL_MODEL.length;
+  const signalsEvaluated = evaluatedSignalKeys.size;
+
+  const coverage: MotivatedSellerProvenance["coverage"] =
+    signalsEvaluated === 0
+      ? "out-of-scope"
+      : signalsEvaluated === signalsTotal
+        ? "in-scope-derived"
+        : "in-scope-partial";
+
+  const notEvaluatedLabels = MOTIVATED_SELLER_SIGNAL_MODEL.filter(
+    (s) => !evaluatedSignalKeys.has(s.key),
+  ).map((s) => s.label);
+
+  // STATE (c): parcels existed but not one evaluable signal fired anywhere
+  // (e.g. no CAD roll ingested for the county) -> never a fabricated heat.
+  if (signalsEvaluated === 0 || scoredParcelCount === 0) {
+    const reason = `Parcels resolved, but no public-record motivated-seller signal was evaluable for any parcel in this viewport (the only live signal, absentee ownership, requires a matched cad_property row and none matched; every other signal's data is not yet ingested). No heat is fabricated. Absence of a motivated-seller signal here is unknown, not confirmed-none. Pending data-pulls: ${pendingIngest
+      .map((p) => p.key)
+      .join(", ")}.`;
+    const provenance: MotivatedSellerProvenance = {
+      method: {
+        kind: "transparent-weighted-sum",
+        note: MOTIVATED_SELLER_METHOD_NOTE,
+        excludes: MOTIVATED_SELLER_EXCLUDES,
+      },
+      signals: buildSignalProvenance(new Set()),
+      pendingIngest,
+      signalsEvaluated: 0,
+      signalsTotal,
+      coverage: "out-of-scope",
+      verificationState: "asserted-unverified",
+      generatedAt,
+    };
+    return {
+      payload: {
+        layer: "motivated-seller",
+        queryMode: "bbox",
+        fixture: false,
+        featureCount: 0,
+        notes: reason,
+        motivatedSellerProvenance: provenance,
+        geojson: { type: "FeatureCollection", features: [] },
+      },
+      honesty: {
+        confidence: { value: 0.2, kind: "asserted" },
+        dataVintage,
+        coverage: { degraded: true, reason },
+        source: { adapter },
+      },
+    };
+  }
+
+  const isPartial = coverage === "in-scope-partial";
+  const provenance: MotivatedSellerProvenance = {
+    method: {
+      kind: "transparent-weighted-sum",
+      note: MOTIVATED_SELLER_METHOD_NOTE,
+      excludes: MOTIVATED_SELLER_EXCLUDES,
+    },
+    signals: buildSignalProvenance(evaluatedSignalKeys),
+    pendingIngest,
+    signalsEvaluated,
+    signalsTotal,
+    coverage,
+    verificationState: "asserted-unverified",
+    generatedAt,
+  };
+
+  const notes = isPartial
+    ? `Motivated-seller heat derived from a PARTIAL model: ${signalsEvaluated} of ${signalsTotal} public-record signals evaluated (not evaluated, pending ingest: ${notEvaluatedLabels.join(
+        ", ",
+      )}). ${scoredParcelCount} parcel(s) scored; each score is normalized against evaluated signals only and carries asserted-unverified confidence. An unevaluated signal is unknown, not 'not motivated'.`
+    : `Motivated-seller heat derived from the full signal model (${signalsEvaluated} of ${signalsTotal} signals evaluated). ${scoredParcelCount} parcel(s) scored.`;
+
+  // Honesty confidence: asserted (calibration/arrow-two does not exist yet),
+  // scaled by how much of the model fired. Never presented as deterministic.
+  const honestyConfidence = Number(
+    (0.2 + 0.5 * (signalsEvaluated / signalsTotal)).toFixed(2),
+  );
+
+  return {
+    payload: {
+      layer: "motivated-seller",
+      queryMode: "bbox",
+      fixture: false,
+      featureCount: features.length,
+      notes,
+      motivatedSellerProvenance: provenance,
+      geojson: {
+        type: "FeatureCollection",
+        features: features as ArcGisGeoJsonFeatureCollection["features"],
+      },
+    },
+    honesty: {
+      confidence: { value: honestyConfidence, kind: "asserted" },
+      dataVintage,
+      coverage: isPartial
+        ? {
+            degraded: true,
+            reason: `Partial motivated-seller model: ${signalsEvaluated} of ${signalsTotal} signals evaluated. Not evaluated (unknown, pending ingest): ${notEvaluatedLabels.join(
+              ", ",
+            )}. Confidence asserted-unverified.`,
+          }
+        : { degraded: false },
+      source: { adapter },
+    },
+  };
+}
+
 export function buildCompositeLayerFixture(
   layer: CompositeLayerKey,
   bbox: GisLayerBbox,
 ): CompositeLayerPayload {
-  const parcel = parcelRing(bbox);
 
   if (layer === "buildable-envelope") {
     // buildable-envelope is now a REAL async derivation (deriveBuildableEnvelope),
@@ -1603,29 +2233,16 @@ export function buildCompositeLayerFixture(
     return deriveOzDealCrossfilter(bbox).payload;
   }
 
-  return {
-    layer: "motivated-seller",
-    queryMode: "bbox",
-    fixture: true,
-    featureCount: 1,
-    geojson: {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          geometry: { type: "Polygon", coordinates: [parcel] },
-          properties: {
-            kind: "motivated-seller",
-            motivatedSellerHeat: 0.74,
-            propensity: 0.81,
-            absenteeOwner: 1,
-            equityPosition: 0.62,
-            taxDelinquency: 0.55,
-          },
-        },
-      ],
-    },
-  };
+  // motivated-seller is now a REAL async derivation (deriveMotivatedSellerHeat):
+  // a transparent public-record weighted-sum, never the old
+  // motivatedSellerHeat:0.74 / propensity:0.81 fixture. It cannot be built
+  // synchronously (parcels + CAD-roll join are async), and the black-box
+  // propensity number is forbidden by ruling R3, so the sync fixture builder no
+  // longer serves it. Route through queryCompositeLayer (async), exactly like
+  // buildable-envelope, constraint-density, and oz-deal-crossfilter.
+  throw new Error(
+    "motivated-seller is a real async derivation; call queryCompositeLayer (async) / deriveMotivatedSellerHeat, not buildCompositeLayerFixture. The 0.74 propensity fixture is retired (ruling R3: no proprietary propensity model).",
+  );
 }
 
 export async function queryCompositeLayer(input: {
@@ -1665,6 +2282,20 @@ export async function queryCompositeLayer(input: {
   // fabricated density, so an incoming fixture flag does not downgrade it.
   if (input.layer === "constraint-density") {
     const { payload, honesty } = await deriveConstraintDensity(input.bbox);
+    return {
+      ...wrapEngineEnvelope(payload, honesty),
+      readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+    };
+  }
+
+  // motivated-seller is a real async derivation: a TRANSPARENT public-record
+  // weighted-sum (absentee ownership live from the cad_property roll; the other
+  // R3 signals modeled and recorded not-evaluated-pending-ingest). Its honesty
+  // is asserted-with-verification-state and degrades honestly (partial /
+  // out-of-scope) rather than ever emitting the retired 0.74 propensity fixture,
+  // so an incoming fixture flag does not downgrade it.
+  if (input.layer === "motivated-seller") {
+    const { payload, honesty } = await deriveMotivatedSellerHeat(input.bbox);
     return {
       ...wrapEngineEnvelope(payload, honesty),
       readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
@@ -1713,7 +2344,7 @@ export function listCompositeLayerEndpoints(): Array<{
       layer: "motivated-seller",
       adapterKey: "brokerage:composite-motivated-seller",
       description:
-        "Propensity × absentee × equity × tax-delinquency motivated-seller heat",
+        "Transparent documented weighted-sum of TX public-record distress signals (pre-foreclosure NOS, tax delinquency, lis-pendens/lien, absentee ownership, probate) into per-parcel motivated-seller heat, with per-signal weight + reasoning + evaluated/not-evaluated honesty (absentee live from the cad_property roll; other signals modeled and pending ingest; NO proprietary propensity model; degrades to partial or out-of-scope, never a fabricated heat)",
     },
   ];
 }
