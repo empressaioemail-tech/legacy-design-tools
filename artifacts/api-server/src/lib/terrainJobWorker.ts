@@ -133,10 +133,65 @@ export async function loadTerrainJobById(
 
 const defaultLaunch = (jobId: string): void => {
   // Fire-and-forget. The refresh route has already returned 202; the worker
-  // runs the authoring off the request path and settles the row. Errors are
-  // caught inside runTerrainJob and stamped on the row, so nothing escapes.
-  void runTerrainJob(jobId);
+  // runs the authoring off the request path and settles the row.
+  //
+  // runTerrainJob catches its own recoverable failures and stamps the row, but
+  // we STILL attach a `.catch()` here: a throw before the worker's own try
+  // (e.g. from the `getHistoryService()` default-arg evaluation) or a
+  // synchronous throw would otherwise reject with no handler. There is no
+  // process-level `unhandledRejection` handler, so such a rejection would
+  // vanish silently — the exact prod signature where "terrain job: enqueued"
+  // logs but nothing after it ever does. The `.catch()` guarantees the launch
+  // failure is at least logged (and, best-effort, stamped failed) instead of
+  // swallowed.
+  void runTerrainJob(jobId).catch((err) => {
+    defaultLogger.error(
+      { err, jobId },
+      "terrain job: worker launch rejected (should be unreachable — runTerrainJob catches internally)",
+    );
+    // Best-effort: drive the row to a terminal `failed` so the poller does not
+    // hang. Swallow any error from this stamp — we are already in the failure
+    // path and must not re-throw into an unhandled rejection.
+    void markTerrainJobLaunchFailed(jobId, err);
+  });
 };
+
+/**
+ * Best-effort terminal-stamp used only by the launch `.catch()` above, for the
+ * pathological case where `runTerrainJob` rejected before it could stamp the
+ * row itself. Never throws.
+ */
+async function markTerrainJobLaunchFailed(
+  jobId: string,
+  err: unknown,
+): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  try {
+    await db
+      .update(terrainGenerationJobs)
+      .set({
+        status: "failed",
+        errorCode: "internal_worker_error",
+        errorMessage: truncate(`worker launch rejected: ${message}`),
+        updatedAt: new Date(),
+        completedAt: new Date(),
+      })
+      // Only touch a still-active row: guard against clobbering a `ready` /
+      // `failed` / `no-coverage` terminal that another runner (or a rescue
+      // sweep) may already have settled.
+      .where(
+        and(
+          eq(terrainGenerationJobs.id, jobId),
+          inArray(terrainGenerationJobs.status, [...ACTIVE_STATUSES]),
+        ),
+      );
+  } catch (updateErr) {
+    defaultLogger.error(
+      { err: updateErr, jobId },
+      "terrain job: failed to stamp launch-failure status",
+    );
+  }
+}
 
 /**
  * Enqueue a terrain generation job and launch its worker off the request path.
@@ -209,13 +264,29 @@ export async function runTerrainJob(
   deps?: { history?: EventAnchoringService; log?: typeof defaultLogger },
 ): Promise<void> {
   const log = deps?.log ?? defaultLogger;
-  const history = deps?.history ?? getHistoryService();
 
+  // ENTRY LOG — the FIRST thing the worker does, before ANY throwable setup
+  // (history-service construction, the job-row load, the claim UPDATE). Its
+  // absence in prod is the difference between "the void-fire never scheduled /
+  // the worker never started" and "the worker started but the ingest is
+  // silent/hung": with this line, seeing "terrain job: worker started" and
+  // then nothing means the ingest stalled; NOT seeing it means the launch
+  // itself never ran. Emitting it first is the diagnosability the async path
+  // was missing.
+  log.info({ jobId }, "terrain job: worker started");
+
+  // Resolve the history service inside the try so a throw here is caught and
+  // stamped on the row rather than escaping as an unhandled rejection.
+  let history: EventAnchoringService;
   let job: TerrainGenerationJob | null;
   try {
+    history = deps?.history ?? getHistoryService();
     job = await loadTerrainJobById(jobId);
   } catch (err) {
     log.error({ err, jobId }, "terrain job: failed to load job row");
+    // Best-effort terminal stamp so the poller does not hang on a row we could
+    // not even load-and-run. Guarded so this failure path cannot itself throw.
+    await markTerrainJobLaunchFailed(jobId, err);
     return;
   }
   if (!job) {
@@ -248,6 +319,14 @@ export async function runTerrainJob(
     log.info({ jobId }, "terrain job: lost the claim race; another runner has it");
     return;
   }
+
+  // Claim succeeded: queued -> generating. Log the transition so a stuck run is
+  // attributable to the ingest step (worker started + claimed, then silent)
+  // rather than to the claim itself.
+  log.info(
+    { jobId, engagementId: job.engagementId },
+    "terrain job: generating (claimed queued -> generating)",
+  );
 
   const params = (job.requestPayload ?? {}) as TerrainJobParams;
 
