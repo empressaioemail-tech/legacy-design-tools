@@ -92,8 +92,28 @@ export type IfcWorkerResult =
 function resolveWorkerPath(): string {
   const override = process.env.IFC_WORKER_PATH?.trim();
   if (override) return override;
+  // No env override (the deploy is expected to set IFC_WORKER_PATH). Compute a
+  // fallback that is correct in BOTH layouts, because the relative distance to
+  // artifacts/ifc-worker/run.py differs between them:
+  //   - source (vitest/ts-node): this file is at
+  //     artifacts/api-server/src/lib/ifcWorkerClient.ts (3 hops up to artifacts)
+  //   - bundled image: import.meta.url is
+  //     /app/artifacts/api-server/dist/index.mjs (2 hops up to artifacts)
+  // A single fixed "../../.." was correct only from source and resolved to the
+  // nonexistent /app/ifc-worker/run.py in the image. Instead, anchor on the
+  // nearest ancestor named "artifacts" and join ifc-worker/run.py off it, so
+  // both the src/lib and dist/ homes land on artifacts/ifc-worker/run.py.
   const here = dirname(fileURLToPath(import.meta.url));
-  // src/lib -> src -> api-server -> artifacts -> artifacts/ifc-worker/run.py
+  // Match the nearest ancestor path segment named "artifacts" (bounded by path
+  // separators) and keep everything up to and including it, so the absolute
+  // prefix and leading separator are preserved (rejoining split segments would
+  // drop the POSIX leading slash). Then append ifc-worker/run.py.
+  const artifactsRoot = here.match(/^(.*[\\/]artifacts)(?:[\\/]|$)/);
+  if (artifactsRoot) {
+    return join(artifactsRoot[1], "ifc-worker", "run.py");
+  }
+  // Last-resort fallback if the module isn't under an "artifacts" ancestor:
+  // walk up from src/lib as the original code did (correct from source).
   return join(here, "..", "..", "..", "ifc-worker", "run.py");
 }
 

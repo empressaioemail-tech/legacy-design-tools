@@ -84,6 +84,7 @@ ENV NODE_ENV=production \
     HYDROLOGY_PYTHON=python3 \
     HYDROLOGY_PYSHEDS_INSTALLED=1 \
     IFC_PYTHON=/opt/ifc-venv/bin/python3 \
+    IFC_WORKER_PATH=/app/artifacts/ifc-worker/run.py \
     HAUSKA_IFC_WORKER_INSTALLED=1
 
 WORKDIR /app
