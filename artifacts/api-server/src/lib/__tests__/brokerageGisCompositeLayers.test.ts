@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildCompositeLayerFixture,
   deriveBuildableEnvelope,
+  deriveConstraintDensity,
   deriveOzDealCrossfilter,
   listCompositeLayerEndpoints,
   queryCompositeLayer,
 } from "../brokerageGisCompositeLayers";
 import * as gisLayers from "../brokerageGisLayers";
+import * as federalLayers from "../brokerageGisFederalLayers";
 
 const bbox = {
   westLng: -97.32,
@@ -55,6 +57,12 @@ describe("buildCompositeLayerFixture", () => {
     expect(() => buildCompositeLayerFixture("buildable-envelope", bbox)).toThrow(
       /real async derivation/i,
     );
+  });
+
+  it("no longer serves constraint-density synchronously (it is a real async derivation)", () => {
+    expect(() =>
+      buildCompositeLayerFixture("constraint-density", bbox),
+    ).toThrow(/real async derivation/i);
   });
 
   it("builds motivated-seller heat properties", () => {
@@ -213,16 +221,28 @@ describe("deriveBuildableEnvelope (three-state coverage honesty)", () => {
 });
 
 describe("queryCompositeLayer", () => {
-  it("wraps payload in EngineEnvelope with honesty fields", async () => {
+  it("wraps constraint-density payload in EngineEnvelope with honesty fields", async () => {
+    // All constraint layers unreachable -> real derivation degrades honestly.
+    const femaSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockRejectedValue(new Error("upstream-error"));
+    const fedSpy = vi
+      .spyOn(federalLayers, "queryFederalGisLayerGeoJson")
+      .mockRejectedValue(new Error("upstream-error"));
     const envelope = await queryCompositeLayer({
       layer: "constraint-density",
       bbox,
       fixture: true,
     });
+    femaSpy.mockRestore();
+    fedSpy.mockRestore();
     expect(envelope.payload.layer).toBe("constraint-density");
+    // An explicit fixture flag must NOT resurrect the old constraintCount:4 fixture.
+    expect(envelope.payload.fixture).toBe(false);
     expect(envelope.confidence.kind).toBe("asserted");
     expect(envelope.source.adapter).toContain("brokerage:composite");
     expect(envelope.coverage.degraded).toBe(true);
+    expect(envelope.payload.constraintProvenance?.coverage).toBe("out-of-scope");
     expect(envelope.payload.geojson.type).toBe("FeatureCollection");
   });
 
@@ -260,6 +280,201 @@ describe("queryCompositeLayer", () => {
       "cotality-propensity",
     );
     expect(envelope.payload.featureCount).toBeGreaterThan(0);
+  });
+});
+
+// A constraint polygon covering the whole test bbox, so it overlaps every cell.
+function fullBboxFeature(
+  props: Record<string, unknown>,
+): { type: "Feature"; geometry: unknown; properties: Record<string, unknown> } {
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [bbox.westLng, bbox.southLat],
+          [bbox.eastLng, bbox.southLat],
+          [bbox.eastLng, bbox.northLat],
+          [bbox.westLng, bbox.northLat],
+          [bbox.westLng, bbox.southLat],
+        ],
+      ],
+    },
+    properties: props,
+  };
+}
+
+function fakeFemaResult(features: unknown[]) {
+  return {
+    layer: "fema" as const,
+    serviceUrl: "https://example.test/fema",
+    provider: "FEMA NFHL",
+    adapterKey: "fema:nfhl-flood-zone",
+    geojson: { type: "FeatureCollection" as const, features },
+    featureCount: features.length,
+    queryMode: "bbox" as const,
+  };
+}
+
+function fakeFederalResult(
+  layer: string,
+  features: unknown[],
+) {
+  return {
+    layer,
+    serviceUrl: "https://example.test/federal",
+    provider: "Test federal",
+    adapterKey: `test:${layer}`,
+    geojson: { type: "FeatureCollection" as const, features },
+    featureCount: features.length,
+    queryMode: "bbox" as const,
+  };
+}
+
+describe("deriveConstraintDensity (severity-weighted layer stack + honesty)", () => {
+  it("STATE c: zero constraint layers reachable -> out-of-scope, degraded, never a fabricated density", async () => {
+    const femaSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockRejectedValue(new Error("upstream-error"));
+    const fedSpy = vi
+      .spyOn(federalLayers, "queryFederalGisLayerGeoJson")
+      .mockRejectedValue(new Error("upstream-error"));
+    const { payload, honesty } = await deriveConstraintDensity(bbox);
+    femaSpy.mockRestore();
+    fedSpy.mockRestore();
+
+    expect(payload.fixture).toBe(false);
+    expect(payload.featureCount).toBe(0);
+    expect(payload.constraintProvenance?.coverage).toBe("out-of-scope");
+    expect(payload.constraintProvenance?.layersEvaluated).toBe(0);
+    expect(honesty.coverage.degraded).toBe(true);
+    expect(honesty.confidence.kind).not.toBe("deterministic");
+    // No fabricated density / no old constraintCount:4 fixture.
+    expect(JSON.stringify(payload)).not.toMatch(/"constraintDensity":/);
+    // Every layer recorded as not-evaluated (unknown), never zero-constraint.
+    for (const l of payload.constraintProvenance?.contributingLayers ?? []) {
+      expect(l.evaluated).toBe(false);
+    }
+  });
+
+  it("STATE a: all layers evaluated -> in-scope-derived, degraded:false, density derived from the stack", async () => {
+    // FEMA returns an AE (SFHA, severity 3) polygon; the three federal layers
+    // return constraint polygons too -> full stack.
+    const femaSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeFemaResult([fullBboxFeature({ FLD_ZONE: "AE" })]) as never,
+      );
+    const fedSpy = vi
+      .spyOn(federalLayers, "queryFederalGisLayerGeoJson")
+      .mockImplementation((async (input: { layer: string }) => {
+        if (input.layer === "ssurgo-soils")
+          return fakeFederalResult("ssurgo-soils", [
+            fullBboxFeature({ shrinkswell: "High", foundationRiskScore: 4 }),
+          ]) as never;
+        if (input.layer === "edwards-aquifer")
+          return fakeFederalResult("edwards-aquifer", [
+            fullBboxFeature({ edwardsZone: "recharge" }),
+          ]) as never;
+        return fakeFederalResult("mud-pid", [
+          fullBboxFeature({ districtType: "MUD" }),
+        ]) as never;
+      }) as never);
+
+    const { payload, honesty } = await deriveConstraintDensity(bbox);
+    femaSpy.mockRestore();
+    fedSpy.mockRestore();
+
+    expect(payload.fixture).toBe(false);
+    expect(payload.constraintProvenance?.coverage).toBe("in-scope-derived");
+    expect(payload.constraintProvenance?.layersEvaluated).toBe(4);
+    expect(honesty.coverage.degraded).toBe(false);
+    expect(payload.featureCount).toBeGreaterThan(0);
+
+    const props = (
+      payload.geojson.features[0] as { properties: Record<string, unknown> }
+    ).properties;
+    // A real derived 0..1 density, never a synthetic fixture number.
+    expect(typeof props.constraintDensity).toBe("number");
+    expect(props.constraintDensity as number).toBeGreaterThan(0);
+    expect(props.constraintDensity as number).toBeLessThanOrEqual(1);
+    expect(props.partial).toBe(false);
+    // Reasoning cites the contributing layers per commitment #1.
+    expect(String(props.reasoning)).toMatch(/FEMA NFHL flood/);
+    expect(String(props.reasoning)).toMatch(/severity/i);
+    expect(props.confidenceKind).toBe("asserted");
+    expect(props.generatedAt).toBeTruthy();
+  });
+
+  it("STATE b (partial stack): 2 of 4 layers evaluated -> in-scope-partial, lowered confidence, unevaluated layers recorded as unknown NOT zero", async () => {
+    // FEMA + SSURGO reachable; Edwards + MUD/PID unreachable.
+    const femaSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeFemaResult([fullBboxFeature({ FLD_ZONE: "AE" })]) as never,
+      );
+    const fedSpy = vi
+      .spyOn(federalLayers, "queryFederalGisLayerGeoJson")
+      .mockImplementation((async (input: { layer: string }) => {
+        if (input.layer === "ssurgo-soils")
+          return fakeFederalResult("ssurgo-soils", [
+            fullBboxFeature({ shrinkswell: "High", foundationRiskScore: 4 }),
+          ]) as never;
+        throw new Error("upstream-error");
+      }) as never);
+
+    const { payload, honesty } = await deriveConstraintDensity(bbox);
+    femaSpy.mockRestore();
+    fedSpy.mockRestore();
+
+    expect(payload.constraintProvenance?.coverage).toBe("in-scope-partial");
+    expect(payload.constraintProvenance?.layersEvaluated).toBe(2);
+    expect(honesty.coverage.degraded).toBe(true);
+    expect(honesty.coverage.reason).toMatch(/partial/i);
+
+    const layers = payload.constraintProvenance?.contributingLayers ?? [];
+    const edwards = layers.find((l) => l.key === "edwards-aquifer");
+    const mud = layers.find((l) => l.key === "mud-pid");
+    // Unreachable layers are recorded as not-evaluated (unknown), never zero.
+    expect(edwards?.evaluated).toBe(false);
+    expect(mud?.evaluated).toBe(false);
+    expect(edwards?.note).toMatch(/unknown, not confirmed-none/i);
+
+    const props = (
+      payload.geojson.features[0] as { properties: Record<string, unknown> }
+    ).properties;
+    expect(props.partial).toBe(true);
+    expect(props.layersNotEvaluated).toContain("edwards-aquifer");
+    expect(props.layersNotEvaluated).toContain("mud-pid");
+    // Reasoning tells the reader the stack is partial.
+    expect(String(props.reasoning)).toMatch(/not evaluated|PARTIAL/i);
+    // Lowered confidence relative to a full stack.
+    expect(props.confidence as number).toBeLessThan(0.68);
+  });
+
+  it("FEMA zone X (minimal hazard) contributes zero constraint, not a false positive", async () => {
+    // Only FEMA reachable, and it returns zone X -> no constraint feature there.
+    const femaSpy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockResolvedValue(
+        fakeFemaResult([fullBboxFeature({ FLD_ZONE: "X" })]) as never,
+      );
+    const fedSpy = vi
+      .spyOn(federalLayers, "queryFederalGisLayerGeoJson")
+      .mockRejectedValue(new Error("upstream-error"));
+    const { payload } = await deriveConstraintDensity(bbox);
+    femaSpy.mockRestore();
+    fedSpy.mockRestore();
+
+    // FEMA evaluated (reachable) but zone X yields no constraint feature.
+    const fema = (payload.constraintProvenance?.contributingLayers ?? []).find(
+      (l) => l.key === "fema-flood",
+    );
+    expect(fema?.evaluated).toBe(true);
+    expect(fema?.featureCount).toBe(0);
+    // No constrained cells (X isn't a constraint, other layers unreachable).
+    expect(payload.featureCount).toBe(0);
   });
 });
 

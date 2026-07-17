@@ -16,6 +16,10 @@ import type { ArcGisGeoJsonFeatureCollection } from "@workspace/adapters/arcgis"
 import type { GisLayerBbox } from "./brokerageGisLayers";
 import { queryGisLayerGeoJson } from "./brokerageGisLayers";
 import {
+  queryFederalGisLayerGeoJson,
+  scoreSsurgoFeatureRisk,
+} from "./brokerageGisFederalLayers";
+import {
   keyFromEngagementOrSynthesize,
   retrieveAtomsForQuestion,
   type RetrievedAtom,
@@ -117,6 +121,59 @@ export type BuildableEnvelopeProvenance = {
   generatedAt: string;
 };
 
+/**
+ * Provenance for a derived constraint-density surface. constraint-density is a
+ * COMPOSITION over already-live constraint layers (FEMA flood, SSURGO soils,
+ * Edwards aquifer, MUD/PID), never a new source and never a synthetic number.
+ *
+ * Each contributing layer is recorded with its own provenance and its
+ * evaluation state. A layer that was unreachable for the viewport is recorded
+ * as `evaluated:false` so the density is honestly PARTIAL — an unevaluated
+ * layer is NEVER silently treated as zero-constraint.
+ */
+export type ConstraintLayerProvenance = {
+  key: "fema-flood" | "ssurgo-soils" | "edwards-aquifer" | "mud-pid";
+  label: string;
+  source: string;
+  sourceUrl: string | null;
+  /** Severity weight this layer contributes when a cell overlaps it. */
+  severityWeight: number;
+  /** Whether the layer was reachable and returned an answer for this viewport. */
+  evaluated: boolean;
+  /**
+   * Feature count returned by the layer for the viewport. 0 with evaluated:true
+   * means "confidently no constraint of this kind here"; evaluated:false means
+   * "unknown — absence is not confirmed-none".
+   */
+  featureCount: number;
+  /** Reason the layer was not evaluated (upstream/no-coverage), when applicable. */
+  note: string | null;
+};
+
+export type ConstraintDensityProvenance = {
+  method: {
+    kind: "severity-weighted-layer-stack";
+    note: string;
+    /** Grid the viewport was tessellated into (cells = gridSize x gridSize). */
+    gridSize: number;
+  };
+  contributingLayers: ConstraintLayerProvenance[];
+  /** Layers excluded by design (not queryable server-side as constraints), with why. */
+  excludedLayers: Array<{ key: string; reason: string }>;
+  /** How many of the constraint layers were actually evaluated (reachable). */
+  layersEvaluated: number;
+  layersTotal: number;
+  /**
+   * Three-way coverage state, mirroring the OZ + buildable derivations:
+   *   in-scope-derived — all constraint layers evaluated → earned
+   *   in-scope-partial — some (>=1) but not all evaluated → lowered confidence, honest
+   *   out-of-scope     — zero constraint layers reachable → degraded, absence-is-unknown
+   */
+  coverage: "in-scope-derived" | "in-scope-partial" | "out-of-scope";
+  dataVintage: string;
+  generatedAt: string;
+};
+
 export type CompositeLayerPayload = {
   layer: CompositeLayerKey;
   geojson: ArcGisGeoJsonFeatureCollection;
@@ -126,6 +183,7 @@ export type CompositeLayerPayload = {
   notes?: string;
   provenance?: CompositeLayerProvenance;
   buildableProvenance?: BuildableEnvelopeProvenance;
+  constraintProvenance?: ConstraintDensityProvenance;
 };
 
 function defaultHonesty(adapter: string, degraded = false): EngineHonesty {
@@ -997,6 +1055,522 @@ export async function deriveBuildableEnvelope(bbox: GisLayerBbox): Promise<{
   };
 }
 
+// ---------------------------------------------------------------------------
+// Constraint-density derivation (promote the hardcoded 4-overlay fixture to a
+// real severity-weighted STACK over already-live constraint layers)
+// ---------------------------------------------------------------------------
+
+type Bounds = {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+};
+
+/** Axis-aligned bounds of an arbitrary GeoJSON geometry's coordinates. */
+function geometryBounds(geometry: unknown): Bounds | null {
+  if (!geometry || typeof geometry !== "object") return null;
+  const g = geometry as { coordinates?: unknown };
+  let minLng = Infinity,
+    minLat = Infinity,
+    maxLng = -Infinity,
+    maxLat = -Infinity;
+  const walk = (node: unknown): void => {
+    if (!Array.isArray(node)) return;
+    // A coordinate pair is [number, number, ...].
+    if (typeof node[0] === "number" && typeof node[1] === "number") {
+      const x = node[0];
+      const y = node[1];
+      if (x < minLng) minLng = x;
+      if (x > maxLng) maxLng = x;
+      if (y < minLat) minLat = y;
+      if (y > maxLat) maxLat = y;
+      return;
+    }
+    for (const child of node) walk(child);
+  };
+  walk(g.coordinates);
+  if (!Number.isFinite(minLng) || !Number.isFinite(minLat)) return null;
+  return { minLng, minLat, maxLng, maxLat };
+}
+
+/** Do two axis-aligned lng/lat boxes overlap (edge-touching counts)? */
+function boundsOverlap(a: Bounds, b: Bounds): boolean {
+  return (
+    a.minLng <= b.maxLng &&
+    a.maxLng >= b.minLng &&
+    a.minLat <= b.maxLat &&
+    a.maxLat >= b.minLat
+  );
+}
+
+/**
+ * Severity weight for a FEMA NFHL flood feature, read from the flood-zone code
+ * across the field-name variants the NFHL service emits. Higher = more
+ * development-constraining. Zone X (minimal/outside SFHA) contributes 0.
+ */
+function femaFloodSeverity(props: Record<string, unknown>): number {
+  const raw =
+    [props.FLD_ZONE, props.fld_zone, props.floodZone, props.FLOODZONE, props.ZONE]
+      .find((v) => typeof v === "string" && (v as string).trim()) ?? "";
+  const zone = String(raw).trim().toUpperCase();
+  const subty =
+    String(
+      [props.ZONE_SUBTY, props.zone_subty].find(
+        (v) => typeof v === "string" && (v as string).trim(),
+      ) ?? "",
+    ).toUpperCase();
+
+  // Coastal high-hazard (velocity) zones are the hardest constraint.
+  if (zone === "V" || zone === "VE" || zone.startsWith("V")) return 4;
+  // Special Flood Hazard Area (1% annual chance): AE/A/AO/AH/AR/A99.
+  if (zone.startsWith("A")) return 3;
+  // 0.2% annual chance (shaded X) is a real but lower constraint.
+  if (subty.includes("0.2 PCT") || subty.includes("0.2%")) return 2;
+  // Explicit "no SFHA" / minimal-hazard X is not a constraint.
+  if (zone === "X" || zone === "AREA NOT INCLUDED" || zone === "") return 0;
+  // Unknown non-empty zone code: treat as a low constraint rather than zero.
+  return 1;
+}
+
+/** Severity for an Edwards aquifer feature (recharge zone > contributing). */
+function edwardsSeverity(props: Record<string, unknown>): number {
+  const zone = String(props.edwardsZone ?? "").toLowerCase();
+  if (zone === "recharge") return 4;
+  if (zone === "contributing") return 2;
+  return 2;
+}
+
+type EvaluatedConstraintLayer = {
+  key: ConstraintLayerProvenance["key"];
+  label: string;
+  source: string;
+  sourceUrl: string | null;
+  severityWeight: number;
+  evaluated: boolean;
+  featureCount: number;
+  note: string | null;
+  /** Per-feature bounds + that feature's own severity, for cell overlap tests. */
+  features: Array<{ bounds: Bounds; severity: number }>;
+};
+
+/**
+ * Query one constraint layer for the viewport, catching upstream/no-coverage
+ * failures so one unreachable layer degrades the stack HONESTLY (evaluated:false)
+ * instead of throwing and instead of being counted as zero-constraint.
+ */
+async function evaluateConstraintLayer(
+  key: ConstraintLayerProvenance["key"],
+  bbox: GisLayerBbox,
+): Promise<EvaluatedConstraintLayer> {
+  const defs: Record<
+    ConstraintLayerProvenance["key"],
+    { label: string; source: string; sourceUrl: string; severityWeight: number }
+  > = {
+    "fema-flood": {
+      label: "FEMA NFHL flood hazard",
+      source: "FEMA NFHL",
+      sourceUrl:
+        "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
+      severityWeight: 4,
+    },
+    "ssurgo-soils": {
+      label: "USDA SSURGO soils (shrink-swell / drainage / HSG)",
+      source: "USDA SDA WFS (SSURGO map units)",
+      sourceUrl: "https://sdmdataaccess.sc.egov.usda.gov",
+      severityWeight: 4,
+    },
+    "edwards-aquifer": {
+      label: "TCEQ Edwards Aquifer (recharge / contributing)",
+      source: "TCEQ Edwards Aquifer",
+      sourceUrl:
+        "https://gisweb.tceq.texas.gov/arcgis/rest/services",
+      severityWeight: 4,
+    },
+    "mud-pid": {
+      label: "MUD / PID / PUD special districts",
+      source: "TCEQ water districts + TX Comptroller SPDPID",
+      sourceUrl:
+        "https://gisweb.tceq.texas.gov/arcgis/rest/services/Public/WaterDistricts/MapServer/0",
+      severityWeight: 2,
+    },
+  };
+  const def = defs[key];
+
+  try {
+    const result =
+      key === "fema-flood"
+        ? await queryGisLayerGeoJson({ layer: "fema", bbox })
+        : await queryFederalGisLayerGeoJson({
+            layer:
+              key === "ssurgo-soils"
+                ? "ssurgo-soils"
+                : key === "edwards-aquifer"
+                  ? "edwards-aquifer"
+                  : "mud-pid",
+            bbox,
+          });
+
+    const rawFeatures = (result.geojson.features ?? []) as Array<{
+      geometry?: unknown;
+      properties?: Record<string, unknown>;
+    }>;
+
+    const features: Array<{ bounds: Bounds; severity: number }> = [];
+    for (const f of rawFeatures) {
+      const bounds = geometryBounds(f.geometry);
+      if (!bounds) continue;
+      const props = f.properties ?? {};
+      let severity = def.severityWeight;
+      if (key === "fema-flood") severity = femaFloodSeverity(props);
+      else if (key === "ssurgo-soils")
+        // Reuse the shared SSURGO foundation-risk scorer (1..4).
+        severity = scoreSsurgoFeatureRisk(props);
+      else if (key === "edwards-aquifer") severity = edwardsSeverity(props);
+      if (severity <= 0) continue;
+      features.push({ bounds, severity });
+    }
+
+    return {
+      key,
+      label: def.label,
+      source: def.source,
+      sourceUrl: def.sourceUrl,
+      severityWeight: def.severityWeight,
+      evaluated: true,
+      featureCount: features.length,
+      note: null,
+      features,
+    };
+  } catch (err) {
+    // no-coverage is a REAL answer (confidently empty for this kind); anything
+    // else (upstream/network) means the layer is unreachable -> not evaluated.
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code?: unknown }).code)
+        : "";
+    if (code === "no-coverage") {
+      return {
+        key,
+        label: def.label,
+        source: def.source,
+        sourceUrl: def.sourceUrl,
+        severityWeight: def.severityWeight,
+        evaluated: true,
+        featureCount: 0,
+        note: "No features of this constraint kind in the viewport (confidently empty).",
+        features: [],
+      };
+    }
+    logger.warn(
+      { err, layer: key, bbox },
+      "constraint-density: constraint layer unreachable",
+    );
+    return {
+      key,
+      label: def.label,
+      source: def.source,
+      sourceUrl: def.sourceUrl,
+      severityWeight: def.severityWeight,
+      evaluated: false,
+      featureCount: 0,
+      note: `Layer unreachable for this viewport (${
+        err instanceof Error ? err.message : String(err)
+      }); absence of this constraint is unknown, not confirmed-none.`,
+      features: [],
+    };
+  }
+}
+
+const CONSTRAINT_GRID_SIZE = 6;
+const CONSTRAINT_METHOD_NOTE =
+  "Constraint density is a severity-weighted STACK over already-live constraint layers (FEMA flood, SSURGO soils, Edwards aquifer, MUD/PID), tessellated into a grid. Each cell's density is the sum of the severities of the constraint features overlapping it, normalized by the maximum possible severity of the layers actually EVALUATED for the viewport. A layer that was unreachable is recorded as not-evaluated and excluded from both the numerator and the denominator, so a partial stack is reported as partial, never as low-constraint.";
+
+const CONSTRAINT_EXCLUDED_LAYERS: ConstraintDensityProvenance["excludedLayers"] =
+  [
+    {
+      key: "hydrology-drainage (pysheds)",
+      reason:
+        "Drainage/flow-accumulation zones are a report-tile atom overlay materialized from site-drainage.computed events (siteDrainageMaterializer), not a bbox-queryable server-side GIS layer, so they cannot be stacked here without fabrication. The SSURGO drainage-class dimension partially covers the soils-drainage constraint. Excluded honestly rather than faked.",
+    },
+    {
+      key: "usgs-groundwater-wells",
+      reason:
+        "USGS NWIS groundwater sites are a point well inventory, not a development-constraint polygon; counting well points as constraint density would misrepresent the signal.",
+    },
+    {
+      key: "texas-rrc",
+      reason:
+        "RRC wells/pipelines are an oil-and-gas asset inventory, relevant as a hazard overlay but not a land-use constraint density input in v1.",
+    },
+  ];
+
+/**
+ * Real constraint-density derivation (replaces the hardcoded 4-overlay,
+ * constraintCount:4 fixture).
+ *
+ * METHOD: constraint-density is a COMPOSITION over already-live constraint
+ * layers, not a new source. For the requested viewport we query each constraint
+ * layer the spine already serves (FEMA flood, SSURGO soils, Edwards aquifer,
+ * MUD/PID), tessellate the viewport into a grid, and for each cell sum the
+ * severities of the constraint features overlapping it. The per-cell density is
+ * normalized by the maximum severity of the layers actually EVALUATED, so a
+ * partial stack reads as partial.
+ *
+ * Three-state coverage honesty (mirrors deriveOzDealCrossfilter / buildable):
+ *   (a) all constraint layers evaluated -> in-scope-derived, degraded:false
+ *   (b) some but not all evaluated       -> in-scope-partial, degraded:true,
+ *       reason naming which layers were not evaluated, lowered confidence
+ *   (c) zero constraint layers reachable -> out-of-scope, degraded:true,
+ *       "absence of constraints is unknown, not confirmed-none" — NEVER a
+ *       fabricated density.
+ *
+ * An unreachable layer is recorded as not-evaluated in provenance and excluded
+ * from BOTH numerator and denominator; it is NEVER silently treated as
+ * zero-constraint. A cell that had only N of M layers evaluated says so and
+ * carries lowered confidence.
+ */
+export async function deriveConstraintDensity(bbox: GisLayerBbox): Promise<{
+  payload: CompositeLayerPayload;
+  honesty: EngineHonesty;
+}> {
+  const generatedAt = new Date().toISOString();
+  const dataVintage = generatedAt.slice(0, 10);
+  const adapter = "brokerage:composite-constraint-density";
+
+  const layerKeys: ConstraintLayerProvenance["key"][] = [
+    "fema-flood",
+    "ssurgo-soils",
+    "edwards-aquifer",
+    "mud-pid",
+  ];
+
+  const evaluated = await Promise.all(
+    layerKeys.map((k) => evaluateConstraintLayer(k, bbox)),
+  );
+
+  const reachable = evaluated.filter((l) => l.evaluated);
+  const notEvaluated = evaluated.filter((l) => !l.evaluated);
+  const layersTotal = evaluated.length;
+  const layersEvaluated = reachable.length;
+
+  const contributingLayers: ConstraintLayerProvenance[] = evaluated.map((l) => ({
+    key: l.key,
+    label: l.label,
+    source: l.source,
+    sourceUrl: l.sourceUrl,
+    severityWeight: l.severityWeight,
+    evaluated: l.evaluated,
+    featureCount: l.featureCount,
+    note: l.note,
+  }));
+
+  const coverage: ConstraintDensityProvenance["coverage"] =
+    layersEvaluated === 0
+      ? "out-of-scope"
+      : layersEvaluated === layersTotal
+        ? "in-scope-derived"
+        : "in-scope-partial";
+
+  const notEvaluatedLabels = notEvaluated.map((l) => l.label);
+
+  // STATE (c): no constraint layer reachable at all — never fabricate a density.
+  if (layersEvaluated === 0) {
+    const reason = `No constraint layer (FEMA flood, SSURGO soils, Edwards aquifer, MUD/PID) was reachable for this viewport. Constraint density cannot be composed without at least one live layer, so none is fabricated. Absence of constraints here is unknown, not confirmed-none.`;
+    const provenance: ConstraintDensityProvenance = {
+      method: {
+        kind: "severity-weighted-layer-stack",
+        note: CONSTRAINT_METHOD_NOTE,
+        gridSize: CONSTRAINT_GRID_SIZE,
+      },
+      contributingLayers,
+      excludedLayers: CONSTRAINT_EXCLUDED_LAYERS,
+      layersEvaluated,
+      layersTotal,
+      coverage: "out-of-scope",
+      dataVintage,
+      generatedAt,
+    };
+    return {
+      payload: {
+        layer: "constraint-density",
+        queryMode: "bbox",
+        fixture: false,
+        featureCount: 0,
+        notes: reason,
+        constraintProvenance: provenance,
+        geojson: { type: "FeatureCollection", features: [] },
+      },
+      honesty: {
+        confidence: { value: 0.2, kind: "asserted" },
+        dataVintage,
+        coverage: { degraded: true, reason },
+        source: { adapter },
+      },
+    };
+  }
+
+  // Denominator: max severity per cell if every EVALUATED layer's worst feature
+  // overlapped it. This normalizes the density against what we actually looked
+  // at, so a 2-of-4 stack is not diluted by the 2 layers we could not reach.
+  const maxSeverityPerLayer = reachable.map((l) =>
+    l.features.reduce((m, f) => Math.max(m, f.severity), l.severityWeight),
+  );
+  const denom = maxSeverityPerLayer.reduce((s, v) => s + v, 0) || 1;
+
+  // Tessellate the viewport into a grid and score each cell.
+  const n = CONSTRAINT_GRID_SIZE;
+  const cellW = (bbox.eastLng - bbox.westLng) / n;
+  const cellH = (bbox.northLat - bbox.southLat) / n;
+  const features: unknown[] = [];
+
+  const isPartial = coverage === "in-scope-partial";
+  const cellConfidence = isPartial ? 0.5 : 0.68;
+
+  for (let iy = 0; iy < n; iy++) {
+    for (let ix = 0; ix < n; ix++) {
+      const west = bbox.westLng + ix * cellW;
+      const east = west + cellW;
+      const south = bbox.southLat + iy * cellH;
+      const north = south + cellH;
+      const cellBounds: Bounds = {
+        minLng: west,
+        minLat: south,
+        maxLng: east,
+        maxLat: north,
+      };
+
+      // Sum the severities of the constraint features overlapping this cell,
+      // taking the WORST (max) severity per layer so a layer contributes once.
+      const contributions: Array<{
+        layer: ConstraintLayerProvenance["key"];
+        label: string;
+        severity: number;
+      }> = [];
+      let weightedSum = 0;
+      for (const l of reachable) {
+        let cellSeverity = 0;
+        for (const f of l.features) {
+          if (boundsOverlap(cellBounds, f.bounds)) {
+            cellSeverity = Math.max(cellSeverity, f.severity);
+          }
+        }
+        if (cellSeverity > 0) {
+          weightedSum += cellSeverity;
+          contributions.push({
+            layer: l.key,
+            label: l.label,
+            severity: cellSeverity,
+          });
+        }
+      }
+
+      // A completely-unconstrained cell (within the evaluated layers) is not a
+      // "constraint" feature; skip it so the surface is the constraint hot-spots.
+      if (contributions.length === 0) continue;
+
+      const densityValue = Math.min(1, weightedSum / denom);
+      const cx = (west + east) / 2;
+      const cy = (south + north) / 2;
+      const contributingKeys = contributions.map((c) => c.layer);
+      const notEvaluatedKeys = notEvaluated.map((l) => l.key);
+
+      const reasoning =
+        `Cell (${ix},${iy}) constraint density ${densityValue.toFixed(2)} composed from ${contributions.length} of ${layersEvaluated} evaluated constraint layers: ${contributions
+          .map((c) => `${c.label} (severity ${c.severity})`)
+          .join(", ")}.` +
+        (notEvaluatedKeys.length
+          ? ` Not evaluated (unknown, not zero): ${notEvaluatedLabels.join(", ")}. Density normalized only against evaluated layers; treat as PARTIAL.`
+          : ` All constraint layers evaluated.`) +
+        ` Severity-weighted stack over already-live layers; no synthetic value.`;
+
+      features.push({
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [west, south],
+              [east, south],
+              [east, north],
+              [west, north],
+              [west, south],
+            ],
+          ],
+        },
+        properties: {
+          kind: "constraint-density",
+          derived: true,
+          cellCenter: [cx, cy],
+          constraintDensity: Number(densityValue.toFixed(3)),
+          constraintCount: contributions.length,
+          weightedSeveritySum: weightedSum,
+          severityDenominator: denom,
+          contributingLayers: contributingKeys,
+          contributingLayerDetail: contributions,
+          layersNotEvaluated: notEvaluatedKeys,
+          partial: isPartial,
+          reasoning,
+          confidence: cellConfidence,
+          confidenceKind: "asserted",
+          source: reachable.map((l) => l.source).join("; "),
+          dataVintage,
+          generatedAt,
+        },
+      });
+    }
+  }
+
+  const provenance: ConstraintDensityProvenance = {
+    method: {
+      kind: "severity-weighted-layer-stack",
+      note: CONSTRAINT_METHOD_NOTE,
+      gridSize: CONSTRAINT_GRID_SIZE,
+    },
+    contributingLayers,
+    excludedLayers: CONSTRAINT_EXCLUDED_LAYERS,
+    layersEvaluated,
+    layersTotal,
+    coverage,
+    dataVintage,
+    generatedAt,
+  };
+
+  const notes = isPartial
+    ? `Constraint density composed from a PARTIAL stack: ${layersEvaluated} of ${layersTotal} constraint layers evaluated (not evaluated: ${notEvaluatedLabels.join(
+        ", ",
+      )}). Density is normalized against evaluated layers only and carries lowered confidence; an unevaluated layer is unknown, not zero-constraint.`
+    : `Constraint density composed from the full constraint stack (${layersEvaluated} of ${layersTotal} layers evaluated). ${features.length} constrained cells returned.`;
+
+  return {
+    payload: {
+      layer: "constraint-density",
+      queryMode: "bbox",
+      fixture: false,
+      featureCount: features.length,
+      notes,
+      constraintProvenance: provenance,
+      geojson: {
+        type: "FeatureCollection",
+        features,
+      },
+    },
+    honesty: {
+      confidence: { value: cellConfidence, kind: "asserted" },
+      dataVintage,
+      coverage: isPartial
+        ? {
+            degraded: true,
+            reason: `Partial constraint stack: ${layersEvaluated} of ${layersTotal} layers evaluated. Not evaluated (unknown, not zero-constraint): ${notEvaluatedLabels.join(
+              ", ",
+            )}.`,
+          }
+        : { degraded: false },
+      source: { adapter },
+    },
+  };
+}
+
 export function buildCompositeLayerFixture(
   layer: CompositeLayerKey,
   bbox: GisLayerBbox,
@@ -1014,26 +1588,14 @@ export function buildCompositeLayerFixture(
   }
 
   if (layer === "constraint-density") {
-    return {
-      layer,
-      queryMode: "bbox",
-      fixture: true,
-      featureCount: 1,
-      geojson: {
-        type: "FeatureCollection",
-        features: [
-          {
-            type: "Feature",
-            geometry: { type: "Polygon", coordinates: [parcel] },
-            properties: {
-              kind: "constraint-density",
-              constraintCount: 4,
-              overlays: ["floodplain", "steep-slope", "aquifer", "wetland"],
-            },
-          },
-        ],
-      },
-    };
+    // constraint-density is now a REAL async derivation (deriveConstraintDensity)
+    // that STACKS the already-live constraint layers. It cannot be built
+    // synchronously (FEMA/SSURGO/Edwards/MUD-PID queries are all async), so the
+    // sync fixture builder no longer serves it. Route through queryCompositeLayer
+    // (async), exactly like buildable-envelope and oz-deal-crossfilter.
+    throw new Error(
+      "constraint-density is a real async derivation; call queryCompositeLayer (async) / deriveConstraintDensity, not buildCompositeLayerFixture.",
+    );
   }
 
   if (layer === "oz-deal-crossfilter") {
@@ -1096,6 +1658,19 @@ export async function queryCompositeLayer(input: {
     };
   }
 
+  // constraint-density is a real async derivation: a severity-weighted STACK
+  // over the already-live constraint layers (FEMA flood / SSURGO / Edwards /
+  // MUD-PID). Its honesty is earned from how many layers were evaluated and it
+  // degrades honestly (partial or out-of-scope) rather than ever emitting a
+  // fabricated density, so an incoming fixture flag does not downgrade it.
+  if (input.layer === "constraint-density") {
+    const { payload, honesty } = await deriveConstraintDensity(input.bbox);
+    return {
+      ...wrapEngineEnvelope(payload, honesty),
+      readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+    };
+  }
+
   const payload = buildCompositeLayerFixture(input.layer, input.bbox);
   const honesty = defaultHonesty(`brokerage:composite-${input.layer}`, true);
   return {
@@ -1125,7 +1700,8 @@ export function listCompositeLayerEndpoints(): Array<{
     {
       layer: "constraint-density",
       adapterKey: "brokerage:composite-constraint-density",
-      description: "Overlay constraint count per parcel polygon",
+      description:
+        "Severity-weighted stack of already-live constraint layers (FEMA flood, SSURGO soils, Edwards aquifer, MUD/PID) into a per-cell density surface, with per-layer provenance + evaluated/not-evaluated honesty (degrades to partial or out-of-scope; never a fabricated density)",
     },
     {
       layer: "oz-deal-crossfilter",
