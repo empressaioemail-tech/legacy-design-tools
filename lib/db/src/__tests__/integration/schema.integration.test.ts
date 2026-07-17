@@ -237,6 +237,11 @@ describe("lib/db schema integration", () => {
         // append-only letter log). Cascades off `submissions`.
         "submission_communications",
         "submissions",
+        // async-terrain-job (0057) — async parcel-terrain authoring jobs.
+        // Moves the heavy DEM->mesh->IFC authoring off the synchronous
+        // refresh request path (viewpoint_renders-style: queued row +
+        // fire-and-forget worker + status polling + orphan sweep).
+        "terrain_generation_jobs",
         // Central TX county-GIS parcels provider (0051) — read-through
         // tile cache keyed (tile_key, county_fips); neutral of (and
         // parallel to) the dormant Cotality spatial-tile cache tables.
