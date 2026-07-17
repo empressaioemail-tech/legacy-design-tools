@@ -6,7 +6,6 @@ import {
   requestUploadUrlBodySizeMax,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { ObjectPermission } from "../lib/objectAcl";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -125,30 +124,55 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
  * GET /storage/objects/*
  *
  * Serve object entities from PRIVATE_OBJECT_DIR.
- * These are served from a separate path from /public-objects and can optionally
- * be protected with authentication or ACL checks based on the use case.
+ *
+ * SECURITY — RESIDUAL ANONYMOUS-READ EXPOSURE (flagged, partially hardened).
+ *
+ * This route is mounted with NO gate/auth middleware (see routes/index.ts) and
+ * this api-server has no session/passport auth (`req.isAuthenticated()` never
+ * exists — the old "uncomment for replit-auth" ACL example was dead code and
+ * has been removed). Its only real callers are browser-initiated `<img>` /
+ * `<a>` / `<iframe>` GETs that cannot attach a header credential:
+ *   - Plan Review avatars  — `<img src="/api/storage/objects/uploads/avatar-…">`
+ *   - Encumbrance PDF view — `pdfServeUrl()` → `/api/storage/objects/uploads/…`
+ *     (artifacts/api-server/src/lib/encumbranceWire.ts)
+ * Gating it behind the brokerage key (`X-Hauska-Key` / Bearer) would break both,
+ * with no session-cookie fallback available — so it is NOT gated here.
+ *
+ * Hardening applied without breaking those flows: the route now serves ONLY a
+ * flat `uploads/<entity>` entity path (single path segment under `uploads/`,
+ * no nested prefixes, no traversal). This blocks namespace-escape / traversal
+ * but does NOT close the core hole: any caller who knows or guesses an
+ * `/objects/uploads/<uuid>` still reads the object anonymously, and terrain
+ * mesh/IFC objects are written under the SAME `uploads/<uuid>` namespace.
+ *
+ * The terrain use case no longer depends on this route: the authorized,
+ * engagement-scoped path is
+ *   GET /api/brokerage/v1/place/:placeKey/site-topography/{mesh,ifc}
+ * (brokeragePlaceHydrology.ts), which derives the object path from the caller's
+ * authorized engagement and inherits the brokerage gate.
+ *
+ * FOLLOW-UP (app-auth owner): close this fully by moving avatars + encumbrance
+ * PDF serving to a per-object short-lived signed URL (signObjectEntityGetUrl)
+ * or a session-authenticated app route, then remove this anonymous route.
  */
 router.get("/storage/objects/*path", async (req: Request, res: Response) => {
   try {
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
+
+    // Hardening: only a flat `uploads/<entity>` path is servable here. Reject
+    // anything with traversal, empty segments, or a non-`uploads/` prefix so
+    // the ungated surface can't be walked into other object namespaces. The
+    // legit browser callers (avatars, encumbrance PDFs) all live at
+    // `uploads/<uuid|avatar-…>`.
+    const uploadsMatch = /^uploads\/([^/]+)$/.exec(wildcardPath);
+    if (!uploadsMatch || wildcardPath.includes("..")) {
+      res.status(404).json({ error: "Object not found" });
+      return;
+    }
+
     const objectPath = `/objects/${wildcardPath}`;
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
-
-    // --- Protected route example (uncomment when using replit-auth) ---
-    // if (!req.isAuthenticated()) {
-    //   res.status(401).json({ error: "Unauthorized" });
-    //   return;
-    // }
-    // const canAccess = await objectStorageService.canAccessObjectEntity({
-    //   userId: req.user.id,
-    //   objectFile,
-    //   requestedPermission: ObjectPermission.READ,
-    // });
-    // if (!canAccess) {
-    //   res.status(403).json({ error: "Forbidden" });
-    //   return;
-    // }
 
     const response = await objectStorageService.downloadObject(objectFile);
 
