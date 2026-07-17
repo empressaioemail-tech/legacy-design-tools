@@ -135,3 +135,12 @@ export { ProductSpecReferenceTile } from './design-accelerator/ProductSpecRefere
 
 // Deliverable
 export { LetterTile } from './deliverable/LetterTile'
+
+// Model Viewer — self-contained three.js GLB/BIM viewer (promoted from the
+// plan-review BimModelViewport, previously private in @workspace/portal-ui).
+// Takes a glbUrl OR raw GLB bytes; NO plan-review data-model coupling; no
+// CortexProvider dependency, so it mounts as a bare React island.
+export { ModelViewerTile } from './model-viewer/ModelViewerTile'
+export type { ModelViewerTileProps } from './model-viewer/ModelViewerTile'
+export { GlbViewer } from './model-viewer/GlbViewer'
+export type { GlbViewerProps } from './model-viewer/GlbViewer'

@@ -9,5 +9,5 @@ export default defineConfig({
   },
   format: ['cjs', 'esm'],
   dts: true,
-  external: ['react', 'react-dom', '@empressaio/cortex-client', '@empressaio/tile-shell', '@empressaio/design-tokens', '@empressaio/document-viewer', '@hauska/map-renderer', 'maplibre-gl'],
+  external: ['react', 'react-dom', '@empressaio/cortex-client', '@empressaio/tile-shell', '@empressaio/design-tokens', '@empressaio/document-viewer', '@hauska/map-renderer', 'maplibre-gl', 'three', 'three/examples/jsm/controls/OrbitControls.js', 'three/examples/jsm/loaders/GLTFLoader.js', 'lucide-react'],
 })
