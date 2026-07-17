@@ -288,4 +288,21 @@ describe("runIfcWorker marshalling", () => {
     delete process.env.IFC_PYTHON;
     delete process.env.IFC_WORKER_PATH;
   });
+
+  it("falls back to artifacts/ifc-worker/run.py anchored on the artifacts dir when IFC_WORKER_PATH is unset", async () => {
+    // Regression guard for the deployed image: with no env override the client
+    // must resolve run.py under the nearest `artifacts` ancestor, so both the
+    // source layout (artifacts/api-server/src/lib) and the bundled layout
+    // (artifacts/api-server/dist) land on artifacts/ifc-worker/run.py — never
+    // the old, image-wrong /app/ifc-worker/run.py. This test file lives under
+    // artifacts/, so the resolved path must end in artifacts/ifc-worker/run.py.
+    delete process.env.IFC_WORKER_PATH;
+    const promise = runIfcWorker(baseRequest());
+    currentChild.stdout.emit("data", Buffer.from(OK_STDOUT, "utf8"));
+    currentChild.emit("close", 0);
+    await promise;
+    const [, argv] = spawnMock.mock.calls[0]!;
+    const workerPath = argv[0]!.replace(/\\/g, "/");
+    expect(workerPath.endsWith("artifacts/ifc-worker/run.py")).toBe(true);
+  });
 });
