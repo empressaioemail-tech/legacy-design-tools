@@ -4,12 +4,22 @@
 # conversion + psets). The PyPI wheel `ifcopenshell` bundles the native
 # IfcOpenShell library, so no separate system build is required on the
 # platforms it publishes wheels for (manylinux x86_64 covers the
-# python:3.11-slim base). Pinned to the 0.7.x series (0.7.0.240xxxx build
-# tags) that ships those manylinux wheels; a bare `ifcopenshell` can
-# resolve to a source-only version with no wheel and fail the slim build.
-ifcopenshell>=0.7.0,<0.9
+# python:3.11-slim / debian-bookworm base). PyPI now only publishes the
+# 0.8.x series (0.7.x was yanked), so `>=0.7.0,<0.9` resolves to 0.8.x.
+ifcopenshell>=0.8.0,<0.9
 
-# numpy: parity with the hydrology worker and available for any numeric
-# pre-pass. Kept <2 to match the sibling worker's pin and avoid an
-# ABI-mismatch surprise if ifcopenshell's wheel was built against numpy 1.x.
-numpy>=1.26.0,<2.0
+# numpy: ifcopenshell 0.8.x's native extension is built against the NumPy 2
+# C-ABI. Forcing numpy<2 here (the earlier pin) makes `import ifcopenshell`
+# raise the NumPy-2-vs-1 ABI error at import in the deployed image — the
+# worker's import guard then exits 0 BEFORE reading stdin, so the api-server
+# parent's payload write EPIPEs and IFC is silently skipped. That is exactly
+# the "died early -> EPIPE" bug this file fixes.
+#
+# CRITICAL: this worker must NOT share a Python interpreter with the
+# hydrology worker. pysheds still calls np.in1d (removed in NumPy 2), so the
+# hydrology worker HARD-requires numpy<2. The two numpy requirements are
+# mutually exclusive, so the api-server image installs THIS worker into its
+# own dedicated venv (see the root Dockerfile; IFC_PYTHON points at it) and
+# leaves hydrology on the system interpreter's numpy<2. Do not "reconcile"
+# these pins by co-installing them.
+numpy>=2.0,<3.0
