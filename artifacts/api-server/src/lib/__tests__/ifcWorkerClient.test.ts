@@ -32,23 +32,45 @@ import {
 // A fake child process the mocked spawn returns. Tests drive it by emitting
 // stdout data + a close code (or an error). `stdinChunks` captures what the
 // client wrote so we can assert the JSON contract.
+// A writable-stdin fake. Extends EventEmitter so the client can attach the
+// 'error' listener the real fix relies on, and models `writable`/`destroyed`
+// so the write-guard branch is exercised. `emitError` simulates the kernel
+// resetting the pipe mid-write (the EPIPE crash the fix catches).
+class FakeStdin extends EventEmitter {
+  chunks: string[] = [];
+  writable = true;
+  destroyed = false;
+  ended = false;
+  write = (chunk: string) => {
+    this.chunks.push(chunk);
+    return true;
+  };
+  end = () => {
+    this.ended = true;
+  };
+  /** Simulate a downstream pipe reset: emit an EPIPE 'error' on stdin. */
+  emitEpipe(): void {
+    const err = Object.assign(new Error("write EPIPE"), {
+      errno: -32,
+      code: "EPIPE",
+      syscall: "write",
+    });
+    this.writable = false;
+    this.emit("error", err);
+  }
+}
+
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
   stderr = new EventEmitter();
-  stdinChunks: string[] = [];
   killed: string | null = null;
-  stdin = {
-    write: (chunk: string) => {
-      this.stdinChunks.push(chunk);
-    },
-    end: () => {},
-  };
+  stdin = new FakeStdin();
   kill = (signal: string) => {
     this.killed = signal;
     return true;
   };
   fullStdin(): string {
-    return this.stdinChunks.join("");
+    return this.stdin.chunks.join("");
   }
 }
 
@@ -190,6 +212,42 @@ describe("runIfcWorker marshalling", () => {
     if (result.status !== "error") throw new Error("expected error");
     expect(result.code).toBe("spawn-failed");
     expect(result.message).toContain("ENOENT");
+  });
+
+  it("an EPIPE 'error' on stdin resolves to stdin-write-failed instead of crashing the process", async () => {
+    // Regression: the async terrain worker crashed the whole container with an
+    // unhandled 'error' event on the child's stdin Socket (write EPIPE) when
+    // the Python child died mid-write. With no listener Node re-emits that as
+    // an uncaughtException -> exit(1). The client now attaches an 'error'
+    // handler on child.stdin so the EPIPE becomes a structured best-effort
+    // error the ingest can absorb (job stamped, process survives).
+    const promise = runIfcWorker(baseRequest());
+    // The client wrote the payload synchronously; now the peer resets the pipe.
+    currentChild.stdin.emitEpipe();
+    const result = await promise;
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.code).toBe("stdin-write-failed");
+    expect(result.message).toContain("EPIPE");
+    // The (likely already-dead) child is torn down rather than left around.
+    expect(currentChild.killed).toBe("SIGTERM");
+  });
+
+  it("a stdin that is no longer writable is not written to and settles via close", async () => {
+    // If the child died before the write guard runs, stdin.writable is false;
+    // the client must NOT call write() (which would throw/EPIPE) and instead
+    // let the 'close' handler settle the result.
+    currentChild.stdin.writable = false;
+    const promise = runIfcWorker(baseRequest());
+    expect(currentChild.fullStdin()).toBe(""); // no write attempted
+    expect(currentChild.stdin.ended).toBe(false);
+    // The child then closes non-zero (it died); result is a structured error.
+    currentChild.stderr.emit("data", Buffer.from("python died\n", "utf8"));
+    currentChild.emit("close", 1);
+    const result = await promise;
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.code).toBe("worker-exit");
   });
 
   it("unparseable stdout resolves to parse-failed", async () => {

@@ -195,7 +195,70 @@ export async function runIfcWorker(
         });
       }
     });
-    child.stdin.write(payload);
-    child.stdin.end();
+
+    // Handle 'error' on the stdin pipe. This is the crash the async terrain
+    // worker was hitting: the payload below (positions + indices for the full
+    // terrain mesh, serialized as JSON number arrays) is large enough to be
+    // written to the pipe in multiple chunks. If the Python child exits early
+    // — missing interpreter at the resolved path, an ifcopenshell import crash,
+    // or an OOM kill on the shared 2-CPU container — the kernel resets the
+    // stdin pipe and the in-flight write completes with EPIPE. A writable
+    // stream with NO 'error' listener re-emits that as an UNHANDLED 'error'
+    // event on the Socket, which Node turns into an uncaughtException and the
+    // process exits(1) — taking down the whole container (and every
+    // co-scheduled brief/map request) instead of failing just this job. The
+    // '.catch()' the terrain job worker attaches to the fire-and-forget launch
+    // cannot intercept this: it is a raw stream 'error' event, not a promise
+    // rejection. Catching it here converts the EPIPE into the client's
+    // structured best-effort result: the ingest logs it and continues WITHOUT
+    // the IFC layer, and the terrain job is stamped 'ready'/'failed' with a
+    // real reason on the normal path — never swept 8 minutes later after a
+    // process death.
+    child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // The child likely already died; make sure it is not left around.
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // Already exited — ignore.
+      }
+      resolve({
+        status: "error",
+        code: "stdin-write-failed",
+        message: `write to ifc worker stdin failed (${err.code ?? "unknown"}): ${err.message}`,
+      });
+    });
+
+    // Guard the write itself: if the child already died before we get here,
+    // its stdin is no longer writable and a bare `.write()` would throw
+    // synchronously (or emit EPIPE) rather than returning a normal false. Skip
+    // the write in that case and let the 'error'/'close' handlers settle the
+    // result. `.write()`/`.end()` are additionally wrapped so a synchronous
+    // throw (e.g. "write after end") is caught instead of escaping this
+    // Promise executor as an unhandled exception.
+    try {
+      if (child.stdin.writable && !child.stdin.destroyed) {
+        child.stdin.write(payload);
+        child.stdin.end();
+      }
+    } catch (err) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // Already exited — ignore.
+        }
+        resolve({
+          status: "error",
+          code: "stdin-write-failed",
+          message:
+            err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   });
 }
