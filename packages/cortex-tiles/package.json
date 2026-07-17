@@ -1,6 +1,6 @@
 {
   "name": "@empressaio/cortex-tiles",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -19,6 +19,13 @@
       "import": "./dist/site-analysis.mjs",
       "require": "./dist/site-analysis.js",
       "default": "./dist/site-analysis.mjs"
+    },
+    "./model-viewer": {
+      "workspace": "./src/model-viewer/index.ts",
+      "types": "./dist/model-viewer.d.ts",
+      "import": "./dist/model-viewer.mjs",
+      "require": "./dist/model-viewer.js",
+      "default": "./dist/model-viewer.mjs"
     }
   },
   "files": [
@@ -37,8 +44,10 @@
     "@empressaio/design-tokens": "workspace:*",
     "@empressaio/document-viewer": "workspace:*",
     "@hauska/map-renderer": "^0.1.2",
-    "maplibre-gl": "^5.24.0"
+    "maplibre-gl": "^5.24.0",
+    "three": "catalog:",
+    "lucide-react": "catalog:"
   },
-  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19", "vitest": "^3", "happy-dom": "^16", "@testing-library/react": "^16", "react": "^19", "react-dom": "^19", "zod": "catalog:" },
+  "devDependencies": { "tsup": "^8", "typescript": "~5.9.2", "@types/react": "^19", "@types/react-dom": "^19", "@types/three": "catalog:", "vitest": "^3", "happy-dom": "^16", "@testing-library/react": "^16", "react": "^19", "react-dom": "^19", "zod": "catalog:" },
   "scripts": { "build": "tsup", "dev": "tsup --watch", "test": "vitest run", "test:watch": "vitest" }
 }

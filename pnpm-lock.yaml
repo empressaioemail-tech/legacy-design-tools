@@ -2118,9 +2118,15 @@ importers:
       '@hauska/map-renderer':
         specifier: ^0.1.2
         version: 0.1.2(@types/pg@8.18.0)(pg@8.20.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 0.545.0(react@19.1.0)
       maplibre-gl:
         specifier: ^5.24.0
         version: 5.24.0
+      three:
+        specifier: 'catalog:'
+        version: 0.128.0
     devDependencies:
       '@testing-library/react':
         specifier: ^16
@@ -2131,6 +2137,9 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.2.3(@types/react@19.2.14)
+      '@types/three':
+        specifier: 'catalog:'
+        version: 0.128.0
       happy-dom:
         specifier: ^16
         version: 16.8.1
