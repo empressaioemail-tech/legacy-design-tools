@@ -43,6 +43,17 @@ import {
 } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
 import { ctx } from "./test-context";
+import {
+  __setTerrainMeshWorkerFactoryForTests,
+} from "../lib/terrainMeshWorker/workerClient";
+import {
+  buildTerrainMeshGeometry,
+  deriveTerrainMeshGlb,
+} from "../lib/siteTopographyMesh";
+import type {
+  TerrainMeshWorkerInput,
+  TerrainMeshWorkerMessage,
+} from "../lib/terrainMeshWorker/types";
 
 // Hoisted mock helpers — the `geotiff` mock has to land before any
 // import of `siteTopographyIngest.ts` resolves the real module.
@@ -289,9 +300,61 @@ async function seedEngagementWithoutAnything(): Promise<void> {
 
 beforeAll(async () => {
   ctx.schema = await createTestSchema();
+  // Run the terrain-mesh build IN-PROCESS (not on a real worker thread) so
+  // these DB integration tests stay deterministic and fast — same geometry the
+  // production worker thread produces, just without spawning a thread. A fake
+  // "worker" that computes the result synchronously and posts one message keeps
+  // the async terrain fix's mesh contract identical to the pre-async inline
+  // path the assertions were written against.
+  __setTerrainMeshWorkerFactoryForTests((input: TerrainMeshWorkerInput) => {
+    const listeners: Record<string, Array<(arg: never) => void>> = {
+      message: [],
+      error: [],
+      exit: [],
+    };
+    void (async () => {
+      let msg: TerrainMeshWorkerMessage;
+      try {
+        const dem = {
+          width: input.dem.width,
+          height: input.dem.height,
+          values: input.dem.values,
+        };
+        const geometry = buildTerrainMeshGeometry(dem, input.bbox, {
+          verticalExaggeration: input.verticalExaggeration,
+        });
+        const { glb } = await deriveTerrainMeshGlb(dem, input.bbox, {
+          verticalExaggeration: input.verticalExaggeration,
+        });
+        msg = {
+          ok: true,
+          result: {
+            glb,
+            positions: geometry.positions,
+            indices: geometry.indices,
+            meta: geometry.meta,
+          },
+        };
+      } catch (err) {
+        msg = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+      for (const cb of listeners.message)
+        (cb as (m: TerrainMeshWorkerMessage) => void)(msg);
+    })();
+    return {
+      on(event: string, cb: (arg: never) => void) {
+        (listeners[event] ??= []).push(cb);
+        return this;
+      },
+      terminate() {
+        return Promise.resolve(0);
+      },
+    };
+  });
 });
 
 afterAll(async () => {
+  __setTerrainMeshWorkerFactoryForTests(null);
   if (ctx.schema) {
     await dropTestSchema(ctx.schema);
     ctx.schema = null;

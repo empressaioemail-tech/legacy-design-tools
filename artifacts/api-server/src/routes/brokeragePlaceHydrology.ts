@@ -26,14 +26,14 @@ import { resolveRequestJurisdictionTenant } from "../lib/gateFrontSeam";
 import { getHistoryService } from "../atoms/registry";
 import { ensureMcpPlaceEngagement } from "../lib/mcpPlaceEngagement";
 import {
-  ingestSiteTopography,
-  type SiteTopographyIngestResult,
-} from "../lib/siteTopographyIngest";
-import {
   loadActiveSiteTopographyRow,
   rematerializeFromLatestEvent,
 } from "../lib/siteTopographyMaterializer";
-import { ingestResultToHttp } from "./siteTopography";
+import {
+  enqueueTerrainJob,
+  loadActiveTerrainJob,
+  loadLatestTerrainJob,
+} from "../lib/terrainJobWorker";
 import {
   ingestSiteDrainage,
   type SiteDrainageIngestResult,
@@ -147,19 +147,32 @@ async function handleTopoRefresh(
   }
 
   const log = reqLog(req);
-  let result: SiteTopographyIngestResult;
+
+  // ASYNC: enqueue the terrain job and return 202 immediately. The heavy
+  // DEM -> mesh -> IFC authoring runs OFF the request path in a fire-and-forget
+  // worker (terrainJobWorker), which builds the mesh on a worker thread. This
+  // is the fix for the 503s: the synchronous authoring on the shared 2-CPU
+  // container pegged both cores and starved the co-scheduled 29s brief request.
+  // The client polls GET :placeKey/site-topography for the terminal state.
+  let enqueued: Awaited<ReturnType<typeof enqueueTerrainJob>>;
   try {
-    result = await ingestSiteTopography({
+    enqueued = await enqueueTerrainJob({
       engagementId: ensured.engagementId,
-      history: getHistoryService(),
-      contourIntervalMeters: parsed.data.contourIntervalMeters,
-      catchmentBufferMeters: parsed.data.catchmentBufferMeters,
-      demResolutionMeters: parsed.data.demResolutionMeters,
-      forceRefresh: parsed.data.forceRefresh,
+      placeKey: ensured.placeKey,
+      params: {
+        jurisdictionTenant: resolveRequestJurisdictionTenant(req),
+        contourIntervalMeters: parsed.data.contourIntervalMeters,
+        catchmentBufferMeters: parsed.data.catchmentBufferMeters,
+        demResolutionMeters: parsed.data.demResolutionMeters,
+        forceRefresh: parsed.data.forceRefresh,
+      },
       log,
     });
   } catch (err) {
-    log.error({ err, engagementId: ensured.engagementId }, "place site-topography refresh failed");
+    log.error(
+      { err, engagementId: ensured.engagementId },
+      "place site-topography refresh: enqueue failed",
+    );
     res.status(500).json({
       error: "internal_worker_error",
       detail: err instanceof Error ? err.message : String(err),
@@ -167,13 +180,22 @@ async function handleTopoRefresh(
     return;
   }
 
-  const { status, body } = ingestResultToHttp(result);
-  res.status(status).json(
-    withPlaceEnvelope(body, {
-      placeKey: ensured.placeKey,
-      engagementId: ensured.engagementId,
-      created: ensured.created,
-    }),
+  // 202 Accepted — authoring is in progress (or already in flight). The read
+  // route reports pending -> ready/failed. Envelope stays place-shaped so the
+  // Brief keeps reading `placeKey` off the response.
+  res.status(202).json(
+    withPlaceEnvelope(
+      {
+        status: enqueued.alreadyInFlight ? "in-progress" : "accepted",
+        jobId: enqueued.jobId,
+        jobStatus: enqueued.alreadyInFlight ? "generating" : "queued",
+      },
+      {
+        placeKey: ensured.placeKey,
+        engagementId: ensured.engagementId,
+        created: ensured.created,
+      },
+    ),
   );
 }
 
@@ -198,39 +220,125 @@ async function handleTopoRead(
   }
 
   const log = reqLog(req);
+
+  // ASYNC status read. The Brief polls this after a 202 from the refresh route.
+  // Report the terrain job's lifecycle:
+  //   pending      an authoring job is queued/generating (poll again)
+  //   ready        the materialized site-topography row is present (return it)
+  //   no-coverage  the parcel has no derivable extent (terminal, honest)
+  //   failed       authoring failed (terminal, honest)
+  //   not-found    nothing has ever been requested for this place
+  //
+  // A ready result is reported the moment the materialized row exists — that is
+  // the source of truth, so a `ready` render also covers the (backward-compat)
+  // case of a row produced before this async path existed. We check the row
+  // FIRST so a completed run always reads as ready even if its job row was
+  // reaped by the sweep.
   let row = await loadActiveSiteTopographyRow(ensured.engagementId);
   if (!row) {
+    // Replay-from-events recovers a row whose read model was dropped. Treat a
+    // replay error as transient rather than terminal (don't mask an in-flight
+    // job); a `no-event` just means no successful run has landed yet.
     const replayed = await rematerializeFromLatestEvent({
       history: getHistoryService(),
       engagementId: ensured.engagementId,
       log,
-    });
-    if (replayed.status === "no-event") {
-      res.status(404).json({ status: "not-found", reason: replayed.reason });
-      return;
+    }).catch(() => ({ status: "no-event" as const, reason: "replay failed" }));
+    if (replayed.status === "ok") {
+      row = await loadActiveSiteTopographyRow(ensured.engagementId);
     }
-    if (replayed.status === "error") {
-      res.status(500).json({ status: "error", reason: replayed.reason });
-      return;
-    }
-    row = await loadActiveSiteTopographyRow(ensured.engagementId);
   }
-  if (!row) {
-    res.status(500).json({
-      status: "error",
-      reason: "Row missing after replay.",
-    });
+
+  if (row) {
+    res.status(200).json(
+      withPlaceEnvelope(
+        {
+          // `status: "ok"` preserved for backward compatibility with the
+          // pre-async read contract; `jobStatus: "ready"` is the async signal.
+          status: "ok",
+          jobStatus: "ready",
+          materializableElementId: row.id,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          propertySet: row.propertySet,
+        },
+        {
+          placeKey: ensured.placeKey,
+          engagementId: ensured.engagementId,
+          created: ensured.created,
+        },
+      ),
+    );
     return;
   }
 
-  res.status(200).json(
+  // No materialized row yet — report the job lifecycle so the poller knows
+  // whether to keep polling (pending) or stop (failed / no-coverage / none).
+  const activeJob = await loadActiveTerrainJob(ensured.engagementId);
+  if (activeJob) {
+    res.status(200).json(
+      withPlaceEnvelope(
+        { status: "pending", jobStatus: "pending", jobId: activeJob.id },
+        {
+          placeKey: ensured.placeKey,
+          engagementId: ensured.engagementId,
+          created: ensured.created,
+        },
+      ),
+    );
+    return;
+  }
+
+  const latestJob = await loadLatestTerrainJob(ensured.engagementId);
+  if (latestJob && latestJob.status === "no-coverage") {
+    res.status(200).json(
+      withPlaceEnvelope(
+        {
+          status: "no-coverage",
+          jobStatus: "no-coverage",
+          jobId: latestJob.id,
+          reason:
+            latestJob.errorMessage ??
+            "No parcel coverage here yet, so a terrain model can't be built.",
+        },
+        {
+          placeKey: ensured.placeKey,
+          engagementId: ensured.engagementId,
+          created: ensured.created,
+        },
+      ),
+    );
+    return;
+  }
+  if (latestJob && latestJob.status === "failed") {
+    res.status(200).json(
+      withPlaceEnvelope(
+        {
+          status: "failed",
+          jobStatus: "failed",
+          jobId: latestJob.id,
+          code: latestJob.errorCode ?? "internal_worker_error",
+          reason: latestJob.errorMessage ?? "Terrain authoring failed.",
+        },
+        {
+          placeKey: ensured.placeKey,
+          engagementId: ensured.engagementId,
+          created: ensured.created,
+        },
+      ),
+    );
+    return;
+  }
+
+  // Nothing requested (or the row-and-job both absent). 404 preserves the
+  // pre-async "no topo yet" contract.
+  res.status(404).json(
     withPlaceEnvelope(
       {
-        status: "ok",
-        materializableElementId: row.id,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        propertySet: row.propertySet,
+        status: "not-found",
+        jobStatus: "none",
+        reason:
+          "No terrain model for this place yet; POST …/site-topography/refresh to start one.",
       },
       {
         placeKey: ensured.placeKey,
