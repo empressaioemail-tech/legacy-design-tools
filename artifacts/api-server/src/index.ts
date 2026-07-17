@@ -13,6 +13,39 @@ import { validateClassificationEnvAtBoot } from "@workspace/submission-classifie
 import { reconcileOrphanedAutopilotRuns } from "./lib/qa/autopilot";
 import { ensureBrokerageFederalDataFromGcs } from "./lib/brokerageFederalDataBootstrap";
 
+// Process-level diagnosability safety net. Before this, an unhandled
+// rejection vanished silently and an uncaught exception (e.g. an unhandled
+// 'error' event on a raw socket / a child-process stdin pipe that EPIPEs
+// mid-write — the async terrain worker's exact prod crash) exited the
+// container with only Node's default one-line stack on stderr, no structured
+// log, taking down every co-scheduled brief/map request with it.
+//
+// unhandledRejection: LOG with full context and continue. A stray rejection
+// should never silently disappear, but it also should not kill the process.
+//
+// uncaughtException: LOG the full stack through pino FIRST (the diagnosability
+// that was missing), then let the process exit. We deliberately do NOT swallow
+// it — an uncaughtException means the process may be in an indeterminate state,
+// and Cloud Run restarts the container cleanly; the value here is the
+// structured log identifying WHICH socket/stream/pipe crashed, not preventing
+// the exit. `process.exit(1)` is explicit so the intent is unambiguous and so
+// we exit before pino's async transport can lose the line.
+process.on("unhandledRejection", (reason) => {
+  logger.error(
+    { err: reason },
+    "unhandledRejection — logged and swallowed (should be investigated; not crashing the process)",
+  );
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error(
+    { err },
+    "uncaughtException — logged before exit (process state may be indeterminate; exiting for a clean container restart)",
+  );
+  // Give pino's transport a tick to flush, then exit. Cloud Run restarts.
+  process.exit(1);
+});
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
