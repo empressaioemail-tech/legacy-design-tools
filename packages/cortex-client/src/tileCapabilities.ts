@@ -191,6 +191,17 @@ export const TILE_CAPABILITIES: TileCapability[] = [
     mcpTools: ['get_topography'],
   },
   {
+    id: 'parcel-terrain-model',
+    label: 'Parcel Terrain Model',
+    category: 'Site Analysis',
+    engine: 'spatial',
+    status: 'live',
+    requires: { engagementId: true },
+    produces: { spatialOverlays: true },
+    modes: ['full', 'card', 'raw'],
+    mcpTools: ['generate_parcel_terrain_model'],
+  },
+  {
     id: 'drainage',
     label: 'Drainage',
     category: 'Site Analysis',
