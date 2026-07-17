@@ -28,19 +28,32 @@ import type { Logger } from "pino";
 export const TERRAIN_JOB_ORPHANED_TIMEOUT_CODE = "orphaned-timeout";
 
 /**
- * Default rescue threshold: 15 min. The terrain authoring (DEM fetch + mesh on
- * a worker thread + IFC spawn) finishes in seconds to low-minutes at
- * parcel/catchment scale; a row still queued/generating after 15 min means the
- * worker that owned it died. Distinct from any per-run self-timeout so the sweep
- * only catches genuinely orphaned rows.
+ * Default rescue threshold: 8 min. The terrain authoring has a bounded worst
+ * case — the DEM fetch self-times out at 120s, the mesh worker_thread at 60s,
+ * plus the IFC spawn and the GCS uploads — so a legitimate run finishes well
+ * inside ~5 min. A row still queued/generating past 8 min means the worker that
+ * owned it died (crash / deploy restart) OR the ingest wedged with no live
+ * settler; either way the poller would otherwise wait forever, so we fail it to
+ * an honest terminal state. Kept comfortably above the legitimate worst case so
+ * the sweep never kills a slow-but-live run, and env-tunable via
+ * `TERRAIN_JOBS_RESCUE_THRESHOLD_MS` for incident response. (Lowered from 15 min
+ * — a stuck run should surface as `failed` to the poller in single-digit
+ * minutes, not a quarter hour.)
  */
-export const DEFAULT_TERRAIN_JOB_RESCUE_THRESHOLD_MS = 15 * 60 * 1000;
+export const DEFAULT_TERRAIN_JOB_RESCUE_THRESHOLD_MS = 8 * 60 * 1000;
 
 /** Default terminal-row retention: 30 days. */
 export const DEFAULT_TERRAIN_JOB_TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Default sweep interval after boot. */
-const DEFAULT_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+/**
+ * Default sweep interval after boot: 2 min. The tick is cheap (two
+ * cluster-locked bounded UPDATE/DELETEs) and a shorter cadence means a row that
+ * crosses the rescue threshold is failed within ~2 min of doing so rather than
+ * lingering up to a full sweep period. Env-tunable via
+ * `TERRAIN_JOBS_SWEEP_INTERVAL_MS`. (Lowered from 10 min so the orphan-rescue
+ * latency tracks the tighter rescue threshold.)
+ */
+const DEFAULT_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 /** Boot delay before first tick. */
 const DEFAULT_BOOT_DELAY_MS = 60 * 1000;
@@ -65,14 +78,30 @@ export interface SweepTerrainJobsResult {
   reaped: number;
 }
 
+/**
+ * Resolve the rescue threshold, preferring an explicit option, then the
+ * `TERRAIN_JOBS_RESCUE_THRESHOLD_MS` env override, then the default. Env-tunable
+ * so ops can tighten the orphan-rescue window (e.g. when a stuck-generating
+ * incident is in progress) without a redeploy — the same knob-shape the sweep
+ * interval and boot delay already use.
+ */
+function resolveRescueThresholdMs(explicit?: number): number {
+  if (explicit !== undefined) return explicit;
+  const raw = process.env["TERRAIN_JOBS_RESCUE_THRESHOLD_MS"];
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_TERRAIN_JOB_RESCUE_THRESHOLD_MS;
+}
+
 export async function sweepTerrainGenerationJobs(
   opts: SweepTerrainJobsOptions = {},
 ): Promise<SweepTerrainJobsResult> {
   const db = opts.db ?? prodDb;
   const now = opts.now ?? new Date();
   const rescueCutoff = new Date(
-    now.getTime() -
-      (opts.rescueThresholdMs ?? DEFAULT_TERRAIN_JOB_RESCUE_THRESHOLD_MS),
+    now.getTime() - resolveRescueThresholdMs(opts.rescueThresholdMs),
   );
   const reapCutoff = new Date(
     now.getTime() -
