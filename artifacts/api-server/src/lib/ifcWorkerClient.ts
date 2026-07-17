@@ -146,9 +146,22 @@ export async function runIfcWorker(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    // Diagnostic state for the EPIPE-on-write path. When the child dies before
+    // reading its stdin (the failure mode this whole file exists to survive),
+    // the parent's write EPIPEs. We must NOT resolve on that raw stream error
+    // immediately: the child's REAL failure reason — an ifcopenshell import
+    // crash on stderr, or the worker's own structured `missing-deps` JSON on
+    // stdout — is still arriving. Record the EPIPE, give the child a short
+    // grace window to flush stderr and emit 'close', then resolve carrying the
+    // captured diagnostics so "continuing without IFC" names the Python cause,
+    // not a bare EPIPE. (Root-causing a future regression needs the child's
+    // stderr, which the old immediate-resolve threw away.)
+    let stdinEpipe: NodeJS.ErrnoException | null = null;
+    let epipeGraceTimer: ReturnType<typeof setTimeout> | null = null;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      if (epipeGraceTimer) clearTimeout(epipeGraceTimer);
       child.kill("SIGTERM");
       resolve({
         status: "error",
@@ -156,6 +169,42 @@ export async function runIfcWorker(
         message: `ifc worker exceeded ${timeoutMs}ms`,
       });
     }, timeoutMs);
+
+    /**
+     * Build the structured stdin-write-failure result, folding in whatever the
+     * child managed to emit before/while dying. `stderr` is the actual Python
+     * traceback (e.g. an ifcopenshell import error); a non-null `exitCode` is
+     * the child's exit status. Both are appended when present so the single
+     * log line the ingest prints for "continuing without IFC" is diagnosable.
+     */
+    const stdinFailureResult = (
+      err: NodeJS.ErrnoException,
+      exitCode: number | null,
+    ): IfcWorkerResult => {
+      const parts = [
+        `write to ifc worker stdin failed (${err.code ?? "unknown"}): ${err.message}`,
+      ];
+      if (exitCode !== null) {
+        parts.push(`child exit code: ${exitCode}`);
+      }
+      const trimmedErr = stderr.trim();
+      if (trimmedErr) {
+        parts.push(`child stderr: ${trimmedErr}`);
+      }
+      // The worker's import guard prints a structured `missing-deps` JSON to
+      // stdout then exits 0 before reading stdin; surface it too, since it is
+      // the single most likely real cause (ifcopenshell not importable in the
+      // deployed image) and it lands on stdout, not stderr.
+      const trimmedOut = stdout.trim();
+      if (trimmedOut) {
+        parts.push(`child stdout: ${trimmedOut}`);
+      }
+      return {
+        status: "error",
+        code: "stdin-write-failed",
+        message: parts.join(" | "),
+      };
+    };
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
     });
@@ -176,11 +225,20 @@ export async function runIfcWorker(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (epipeGraceTimer) clearTimeout(epipeGraceTimer);
+      // If the write EPIPE'd, the child died early: resolve as
+      // stdin-write-failed but now WITH the child's stderr + exit code that
+      // arrived on 'close'. This is the diagnosable path — the real Python
+      // error (or the worker's missing-deps stdout) rides along.
+      if (stdinEpipe) {
+        resolve(stdinFailureResult(stdinEpipe, code));
+        return;
+      }
       if (code !== 0) {
         resolve({
           status: "error",
           code: "worker-exit",
-          message: stderr || `python exited ${code}`,
+          message: stderr.trim() || `python exited ${code}`,
         });
         return;
       }
@@ -216,19 +274,26 @@ export async function runIfcWorker(
     // process death.
     child.stdin.on("error", (err: NodeJS.ErrnoException) => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      // The child likely already died; make sure it is not left around.
+      // Do NOT resolve immediately. Record the EPIPE and let the child's
+      // 'close' fire so its stderr/exit code (the actual reason it died —
+      // most likely an ifcopenshell import crash in the deployed image) is
+      // captured into the message. Kick SIGTERM to hurry a dead-but-not-yet-
+      // reaped child. A short grace timer guarantees we still settle even if
+      // 'close' never arrives (e.g. a wedged child, or a unit test that emits
+      // only the stdin error).
+      if (stdinEpipe) return; // already recorded; ignore repeat errors
+      stdinEpipe = err;
       try {
         child.kill("SIGTERM");
       } catch {
         // Already exited — ignore.
       }
-      resolve({
-        status: "error",
-        code: "stdin-write-failed",
-        message: `write to ifc worker stdin failed (${err.code ?? "unknown"}): ${err.message}`,
-      });
+      epipeGraceTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(stdinFailureResult(err, null));
+      }, 250);
     });
 
     // Guard the write itself: if the child already died before we get here,
@@ -247,17 +312,18 @@ export async function runIfcWorker(
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        if (epipeGraceTimer) clearTimeout(epipeGraceTimer);
         try {
           child.kill("SIGTERM");
         } catch {
           // Already exited — ignore.
         }
-        resolve({
-          status: "error",
-          code: "stdin-write-failed",
-          message:
-            err instanceof Error ? err.message : String(err),
-        });
+        // Fold in any stderr/stdout already captured so a synchronous write
+        // throw ("write after end", a child that died before this line) is
+        // just as diagnosable as the async EPIPE path.
+        const wrapped: NodeJS.ErrnoException =
+          err instanceof Error ? err : new Error(String(err));
+        resolve(stdinFailureResult(wrapped, null));
       }
     }
   });
