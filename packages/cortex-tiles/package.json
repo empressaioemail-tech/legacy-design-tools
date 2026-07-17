@@ -19,6 +19,13 @@
       "import": "./dist/site-analysis.mjs",
       "require": "./dist/site-analysis.js",
       "default": "./dist/site-analysis.mjs"
+    },
+    "./model-viewer": {
+      "workspace": "./src/model-viewer/index.ts",
+      "types": "./dist/model-viewer.d.ts",
+      "import": "./dist/model-viewer.mjs",
+      "require": "./dist/model-viewer.js",
+      "default": "./dist/model-viewer.mjs"
     }
   },
   "files": [
