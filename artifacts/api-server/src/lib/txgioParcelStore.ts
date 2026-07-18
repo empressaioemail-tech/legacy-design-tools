@@ -70,6 +70,7 @@ import {
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
 import { normalizeCadPropId } from "./cadPropertyLookup";
+import { parcelNodeId } from "./parcelNodeId";
 
 export const TXGIO_PARCEL_DISCLAIMER =
   "TxGIO/StratMap land parcels are informational and not survey grade. Verify boundaries with a licensed surveyor.";
@@ -337,6 +338,14 @@ function toFeature(
     notSurveyGrade: true,
   };
   if (row.propId) properties.apn = row.propId;
+  // Canonical parcel node identity — the ONE id the browse tile layer and
+  // the live-detail layer both key on (feature-state highlight +
+  // click-to-resolve). Computed from countyFips + the RAW prop id via the
+  // shared helper so a parcel baked from this store and the same parcel
+  // fetched live carry the SAME parcel_node_id. Omitted (never faked) when
+  // there is no prop id to identify the parcel by.
+  const nodeId = parcelNodeId(countyFips, row.propId);
+  if (nodeId) properties.parcel_node_id = nodeId;
   if (row.situsAddress) properties.situsAddress = row.situsAddress;
   if (row.ownerName) properties.owner = row.ownerName;
   // Land-use from the CAD roll (different source than the geometry).

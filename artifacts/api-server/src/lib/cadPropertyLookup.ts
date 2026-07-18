@@ -22,6 +22,13 @@ import { and, desc, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db as defaultDb, cadProperty } from "@workspace/db";
 import type { CadPropertyLookup } from "@workspace/adapters";
+import { normalizeCadPropId } from "./parcelNodeId";
+
+// Re-exported so existing `./cadPropertyLookup` import sites keep working;
+// the single implementation now lives in the dependency-free
+// `parcelNodeId` module (see its header) so the db-free
+// `brokerageTxParcels.ts` live path can share it.
+export { normalizeCadPropId };
 
 /**
  * Narrow db surface, mirroring @workspace/cad-ingest's `CadIngestDb`
@@ -32,13 +39,6 @@ export type CadLookupDb = Pick<
   NodePgDatabase<Record<string, unknown>>,
   "select"
 >;
-
-/** Same normalization as @workspace/cad-ingest `stripLeadingZeros`. */
-export function normalizeCadPropId(propId: string): string {
-  const t = propId.trim();
-  if (!/^\d+$/.test(t)) return t;
-  return t.replace(/^0+(?=\d)/, "");
-}
 
 /**
  * Build the accessor. `database` is injectable for tests (the

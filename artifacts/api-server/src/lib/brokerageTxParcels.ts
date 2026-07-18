@@ -63,6 +63,7 @@ import {
   TXGIO_PARCEL_DISCLAIMER,
 } from "./txgioParcelStore";
 import type { GisLayerBbox } from "./brokerageGisLayers";
+import { parcelNodeId } from "./parcelNodeId";
 
 /**
  * Feature cap per request — matches the Cotality parcels path
@@ -122,6 +123,20 @@ export interface TxParcelCounty {
   attributesDegraded?: boolean;
   /** County-specific attribute normalization ("arcgis" only). */
   normalizeProps: (props: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * Extract the RAW appraisal-district prop id from this county's feature
+   * properties — the field that keys `cad_property` / `txgio_parcel`
+   * (leading zeros unstripped; normalized centrally by `parcelNodeId`).
+   *
+   * This is DELIBERATELY the primary prop-id field only, NOT the
+   * geo_id / QuickRefID / OLDPROPID fallbacks `apn` may carry: those are
+   * different identifier spaces and would not line up with the same
+   * parcel served from the self-hosted store. Returns null when the
+   * county's prop id is absent, so the feature gets no fabricated node
+   * id. "arcgis" counties only ("txgio-store" counties are stamped in
+   * `txgioParcelStore.ts` from the store's own `prop_id` column).
+   */
+  rawPropId?: (props: Record<string, unknown>) => string | null;
 }
 
 function str(v: unknown): string | null {
@@ -182,6 +197,8 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
             p.situs_street_suffix,
           ),
       }),
+    // Node id keys on PROP_ID only (geo_id is a different id space).
+    rawPropId: (p) => str(p.PROP_ID),
   },
   {
     name: "Williamson",
@@ -201,6 +218,8 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
         landUseCode: str(p.USECD),
         landUseDescription: str(p.USEDSCRP),
       }),
+    // Node id keys on PropertyNumber only (QuickRefID is a different id).
+    rawPropId: (p) => str(p.PropertyNumber),
   },
   {
     name: "Bexar",
@@ -219,6 +238,7 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
         owner: str(p.Owner),
         landUseCode: str(p.PropUse),
       }),
+    rawPropId: (p) => str(p.PropID),
   },
   {
     name: "Bastrop",
@@ -242,6 +262,9 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
         ),
         owner: str(p.file_as_name),
       }),
+    // prop_id_text is the same Bastrop prop id as text — a valid fallback,
+    // not a different id space (unlike geo_id/QuickRefID above).
+    rawPropId: (p) => str(p.prop_id) ?? str(p.prop_id_text),
   },
   {
     name: "Hays",
@@ -285,6 +308,8 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
       withoutNulls({
         apn: str(p.Prop_ID) ?? str(p.OLDPROPID),
       }),
+    // Node id keys on the current Prop_ID only (OLDPROPID is superseded).
+    rawPropId: (p) => str(p.Prop_ID),
   },
 ];
 
@@ -372,11 +397,20 @@ export function normalizeTxCountyFeatures(
   for (const raw of features) {
     const feature = raw as GeoJsonFeature;
     if (!feature || typeof feature !== "object" || !feature.geometry) continue;
+    const rawProps = feature.properties ?? {};
+    // Canonical parcel node identity — the ONE id the browse tile layer
+    // and this live-detail layer both key on. Derived from countyFips +
+    // the county's RAW appraisal prop id via the shared helper, so the
+    // same parcel served live here and baked from the txgio store carries
+    // an IDENTICAL parcel_node_id. Omitted (never faked) when the county
+    // exposes no prop id.
+    const nodeId = parcelNodeId(county.fips, county.rawPropId?.(rawProps));
     out.push({
       type: "Feature",
       geometry: feature.geometry,
       properties: {
-        ...county.normalizeProps(feature.properties ?? {}),
+        ...county.normalizeProps(rawProps),
+        ...(nodeId ? { parcel_node_id: nodeId } : {}),
         provider: "county-gis",
         countyFips: county.fips,
         countyName: county.name,
