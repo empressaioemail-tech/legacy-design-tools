@@ -653,3 +653,138 @@ export function selectionToCard(sel: ParcelSelection): ParcelCardData {
     lng: typeof sel.lng === 'number' ? sel.lng : null,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Buildable envelope — a DERIVED report overlay (NOT a live bbox layer)
+// ---------------------------------------------------------------------------
+//
+// The buildable envelope is the parcel polygon inset by its front/side/rear
+// setbacks (see api-server .../buildableEnvelope + the
+// GET /place/:placeKey/buildable-envelope route). It is DERIVED, not a
+// bbox-fetchable layer, so it is deliberately NOT a LiveLayerKey — it does not
+// go through fetchGisLayer / the /map-data/gis-layer proxy allowlist. The Brief
+// fetches the derivation once (per place) and draws it as a report overlay.
+//
+// HONESTY styling (commitment #1): a WRONG envelope drawn confidently is worse
+// than none. So the paint is confidence-aware — a high-confidence envelope
+// reads as a solid green buildable area; an APPROXIMATE one reads as an amber,
+// dashed, more-transparent shape that visually signals "estimate, verify". The
+// empty (no-buildable-area) case draws nothing (the disclosure carries it).
+
+/** Renderer overlay layerKey the buildable envelope draws under. */
+export const BUILDABLE_ENVELOPE_KEY = 'buildable-envelope'
+
+/** The buildable-envelope feature properties the derivation route emits. */
+export interface BuildableEnvelopeFeatureProps {
+  kind?: string
+  approximate?: boolean
+  notSurveyGrade?: boolean
+  disclosure?: string
+  citationUrl?: string
+  buildableAreaSqFt?: number
+  buildableAreaPct?: number
+  maxLotCoveragePct?: number | null
+  maxHeightFt?: number | null
+  maxFootprintSqFt?: number | null
+  setbacks?: { front_ft: number; side_ft: number; rear_ft: number; district: string }
+  edgeSignal?: string
+  edgeNote?: string
+  districtNote?: string
+  emptyReason?: string
+}
+
+/** The `payload` shape of the buildable-envelope derivation response. */
+export interface BuildableEnvelopePayload {
+  geojson?: FeatureCollectionLike
+  approximate?: boolean
+  empty?: boolean
+  citationUrl?: string
+  district?: string
+}
+
+/**
+ * Paint for the buildable envelope, confidence-aware. High-confidence: solid
+ * green buildable area. Approximate: amber, dashed border, lower opacity — a
+ * visual "estimate, verify" signal so a user never mistakes it for a survey.
+ */
+export function buildableEnvelopePaint(approximate: boolean): Record<string, unknown> {
+  if (approximate) {
+    return {
+      'fill-color': 'rgba(180,83,9,0.16)', // amber
+      'fill-opacity': 0.35,
+      'line-color': '#b45309',
+      'line-width': 1.6,
+      'line-dasharray': [2, 2],
+    }
+  }
+  return {
+    'fill-color': 'rgba(21,128,61,0.22)', // green
+    'fill-opacity': 0.45,
+    'line-color': '#15803d',
+    'line-width': 1.8,
+  }
+}
+
+/**
+ * Compose the buildable-envelope OverlaySpec from the derivation response
+ * payload, or null when there is no drawable geometry (empty envelope, or the
+ * derivation returned no polygon feature). The overlay is passive (not the
+ * interactive parcel surface); the Brief renders the disclosure + citation in
+ * chrome, and the feature properties carry them for a click handler.
+ */
+export function buildableEnvelopeOverlay(
+  payload: BuildableEnvelopePayload | null | undefined,
+): LiveOverlaySpec | null {
+  if (!payload || !payload.geojson) return null
+  const features = payload.geojson.features ?? []
+  const drawable = features.filter(
+    (f) => f && f.geometry != null && typeof f.geometry === 'object',
+  )
+  if (!drawable.length) return null
+  const approximate = payload.approximate === true
+  return {
+    layerKey: BUILDABLE_ENVELOPE_KEY,
+    provider: 'hauska:buildable-envelope',
+    geojson: { type: 'FeatureCollection', features: drawable },
+    paint: buildableEnvelopePaint(approximate),
+  }
+}
+
+/** What the buildable-envelope info card renders (disclosure + sizing + cite). */
+export interface BuildableEnvelopeCard {
+  approximate: boolean
+  empty: boolean
+  disclosure: string | null
+  citationUrl: string | null
+  district: string | null
+  buildableAreaSqFt: number | null
+  buildableAreaPct: number | null
+  maxFootprintSqFt: number | null
+  maxHeightFt: number | null
+  edgeSignal: string | null
+}
+
+/** Extract the buildable-envelope card fields from the derivation payload. */
+export function buildableEnvelopeCard(
+  payload: BuildableEnvelopePayload | null | undefined,
+): BuildableEnvelopeCard | null {
+  if (!payload) return null
+  const feat = payload.geojson?.features?.[0]
+  const props = (feat?.properties ?? {}) as BuildableEnvelopeFeatureProps
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null
+  const str = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() ? v : null
+  return {
+    approximate: payload.approximate === true || props.approximate === true,
+    empty: payload.empty === true,
+    disclosure: str(props.disclosure),
+    citationUrl: str(props.citationUrl) ?? str(payload.citationUrl),
+    district: str(payload.district) ?? str(props.setbacks?.district),
+    buildableAreaSqFt: num(props.buildableAreaSqFt),
+    buildableAreaPct: num(props.buildableAreaPct),
+    maxFootprintSqFt: num(props.maxFootprintSqFt),
+    maxHeightFt: num(props.maxHeightFt),
+    edgeSignal: str(props.edgeSignal),
+  }
+}
