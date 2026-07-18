@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * TxGIO/StratMap land-parcel ingest CLI — self-hosted parcel geometry
- * for counties without a live queryable county GIS (v1: Hays 48209,
- * Comal 48091).
+ * for the Central-Texas map store. As of Wave D2 (2026-07-18) this
+ * covers all ten Central-TX counties (Hays, Comal, Travis, Williamson,
+ * Bexar, Bastrop, Caldwell, Guadalupe, Bell, McLennan); run --list to
+ * see the full set.
  *
  * Usage:
  *   pnpm --filter @workspace/cad-ingest txgio-ingest -- \
@@ -11,6 +13,7 @@
  *     [--vintage=<label>]      # default: shapefile basename, e.g.
  *                              #   stratmap25-landparcels_48209_hays_202503
  *     [--batch-size=250] [--limit=N] [--dry-run]
+ *   pnpm --filter @workspace/cad-ingest txgio-ingest -- --list
  *
  * DATABASE_URL must point at the target Postgres unless --dry-run.
  *
@@ -32,7 +35,7 @@ import { basename, extname, join } from "node:path";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import shapefile from "shapefile";
-import { resolveTxgioCounty } from "./counties";
+import { resolveTxgioCounty, TXGIO_COUNTIES } from "./counties";
 import type { TxgioParcelRecord } from "./parse";
 import {
   assertWgs84Prj,
@@ -130,20 +133,34 @@ async function main(): Promise<void> {
       "batch-size": { type: "string" },
       limit: { type: "string" },
       "dry-run": { type: "boolean", default: false },
+      list: { type: "boolean", default: false },
     },
   });
+
+  // --list: print the recognized counties and exit (no network, no DB).
+  if (values.list) {
+    log("recognized TxGIO counties (unified into txgio_parcel):");
+    for (const c of Object.values(TXGIO_COUNTIES)) {
+      log(`  ${c.fips}  ${c.name.padEnd(11)} ${c.downloadUrl}`);
+    }
+    log(`total: ${Object.keys(TXGIO_COUNTIES).length}`);
+    return;
+  }
 
   if (!values.county) {
     fail(
       "usage: txgio-ingest --county=<fips|name> [--file=<path-or-url>] " +
-        "[--vintage=label] [--limit=N] [--dry-run]",
+        "[--vintage=label] [--limit=N] [--dry-run] | txgio-ingest --list",
     );
   }
   const county = resolveTxgioCounty(values.county);
   if (!county) {
+    const supported = Object.values(TXGIO_COUNTIES)
+      .map((c) => `${c.fips} ${c.name}`)
+      .join(", ");
     fail(
-      `unknown county "${values.county}" — supported: 48209 Hays, 48091 Comal ` +
-        "(counties WITH a live county GIS are served live, not bulk-loaded)",
+      `unknown county "${values.county}" — supported: ${supported} ` +
+        "(run --list for the full set)",
     );
   }
   const dryRun = values["dry-run"] ?? false;
