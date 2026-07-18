@@ -132,6 +132,7 @@ import {
   isAreaResearchChatEligible,
 } from "../lib/brokerageResearchAreaContext";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
+import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildableEnvelope";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
 import { brokerageBillingPublicRouter } from "./brokerageBillingPublic";
@@ -287,6 +288,7 @@ brokerageV1.use(requireBrokerageAuthOrServiceToken);
 brokerageV1.use("/profile", brokerageProfileRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
+brokerageV1.use("/place", brokeragePlaceBuildableEnvelopeRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);

@@ -1,0 +1,100 @@
+/**
+ * District-mapping tests (Problem B): zoningCode -> district, with the honest
+ * most-conservative fallback for absent/unmatched codes.
+ */
+
+import { describe, it, expect } from "vitest";
+import type { SetbackTable } from "@workspace/adapters";
+import { mapDistrict, districtCode, normalizeCode } from "./districtMapping";
+
+const TABLE: SetbackTable = {
+  jurisdictionKey: "test-tx",
+  jurisdictionDisplayName: "Test, TX",
+  districts: [
+    {
+      district_name: "R-HD Residential High Density",
+      front_ft: 20,
+      rear_ft: 15,
+      side_ft: 5,
+      side_corner_ft: 12,
+      max_height_ft: 45,
+      max_lot_coverage_pct: 50,
+      max_impervious_pct: 65,
+      citation_url: "https://example/hd",
+    },
+    {
+      district_name: "R-MD Residential Medium Density",
+      front_ft: 25,
+      rear_ft: 20,
+      side_ft: 7.5,
+      side_corner_ft: 15,
+      max_height_ft: 35,
+      max_lot_coverage_pct: 40,
+      max_impervious_pct: 55,
+      citation_url: "https://example/md",
+    },
+    {
+      district_name: "R-LD Residential Low Density",
+      front_ft: 30,
+      rear_ft: 25,
+      side_ft: 10,
+      side_corner_ft: 20,
+      max_height_ft: 35,
+      max_lot_coverage_pct: 35,
+      max_impervious_pct: 50,
+      citation_url: "https://example/ld",
+    },
+  ],
+};
+
+describe("normalizeCode / districtCode", () => {
+  it("strips punctuation and uppercases", () => {
+    expect(normalizeCode("r-md")).toBe("RMD");
+    expect(districtCode(TABLE.districts[1]!)).toBe("RMD");
+  });
+});
+
+describe("mapDistrict — exact match", () => {
+  it("maps a zoningCode to its district", () => {
+    const r = mapDistrict(TABLE, "R-MD")!;
+    expect(r.kind).toBe("matched");
+    expect(r.district.district_name).toContain("R-MD");
+    expect(r.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("is punctuation/case insensitive", () => {
+    const r = mapDistrict(TABLE, "rmd")!;
+    expect(r.district.district_name).toContain("R-MD");
+    expect(r.kind).toBe("matched");
+  });
+});
+
+describe("mapDistrict — unmatched/absent -> conservative fallback", () => {
+  it("uses the most-conservative district for an unknown code", () => {
+    const r = mapDistrict(TABLE, "C-2")!;
+    expect(r.kind).toBe("fallback-conservative");
+    // R-LD has the largest combined setback (30+25+2*10=65) -> most conservative.
+    expect(r.district.district_name).toContain("R-LD");
+    expect(r.confidence).toBeLessThan(0.5);
+    expect(r.note).toMatch(/verify/i);
+  });
+
+  it("uses the conservative fallback when no zoning is present", () => {
+    const r = mapDistrict(TABLE, null)!;
+    expect(r.kind).toBe("fallback-conservative");
+    expect(r.district.district_name).toContain("R-LD");
+    expect(r.note).toMatch(/no zoning/i);
+  });
+});
+
+describe("mapDistrict — single-district table", () => {
+  it("uses the only district", () => {
+    const single: SetbackTable = {
+      ...TABLE,
+      districts: [TABLE.districts[0]!],
+    };
+    const r = mapDistrict(single, null)!;
+    expect(r.kind).toBe("single");
+    expect(r.confidence).toBeGreaterThan(0.5);
+  });
+});

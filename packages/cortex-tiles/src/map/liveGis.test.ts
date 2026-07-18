@@ -21,8 +21,13 @@ import {
   normalizeBbox,
   createLiveGisGuard,
   shouldSuppressAfter,
+  buildableEnvelopeOverlay,
+  buildableEnvelopePaint,
+  buildableEnvelopeCard,
+  BUILDABLE_ENVELOPE_KEY,
   type FeatureCollectionLike,
   type LiveLayerState,
+  type BuildableEnvelopePayload,
 } from './liveGis'
 
 const SAN_MARCOS_BBOX = { west: -97.934, south: 29.865, east: -97.92, north: 29.876 }
@@ -366,5 +371,77 @@ describe('selectionToCard (click payload)', () => {
         .landUseDescription,
     ).toBe('Commercial')
     expect(selectionToCard({ properties: { landUseCode: 'COM' } }).landUseDescription).toBe('COM')
+  })
+})
+
+describe('buildableEnvelope report overlay (derived, confidence-aware paint)', () => {
+  function envPayload(
+    approximate: boolean,
+    withGeometry = true,
+  ): BuildableEnvelopePayload {
+    return {
+      approximate,
+      empty: !withGeometry,
+      citationUrl: 'https://library.municode.com/tx/bastrop',
+      district: 'R-MD Residential Medium Density',
+      geojson: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: withGeometry
+              ? { type: 'Polygon', coordinates: [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]] }
+              : (null as unknown as FeatureCollectionLike['features'][number]['geometry']),
+            properties: {
+              approximate,
+              notSurveyGrade: true,
+              disclosure: approximate ? 'Approximate — verify with survey.' : 'Not survey grade.',
+              citationUrl: 'https://library.municode.com/tx/bastrop',
+              buildableAreaSqFt: 13175,
+              buildableAreaPct: 65.9,
+              maxFootprintSqFt: 8000,
+              maxHeightFt: 35,
+              edgeSignal: approximate ? 'shape' : 'road',
+              setbacks: { front_ft: 25, side_ft: 7.5, rear_ft: 20, district: 'R-MD' },
+            },
+          },
+        ],
+      },
+    }
+  }
+
+  it('draws a green solid overlay when high-confidence', () => {
+    const spec = buildableEnvelopeOverlay(envPayload(false))!
+    expect(spec.layerKey).toBe(BUILDABLE_ENVELOPE_KEY)
+    expect(spec.paint!['line-color']).toBe('#15803d')
+    expect(spec.paint!['line-dasharray']).toBeUndefined()
+  })
+
+  it('draws an amber dashed overlay when approximate', () => {
+    const spec = buildableEnvelopeOverlay(envPayload(true))!
+    expect(spec.paint!['line-color']).toBe('#b45309')
+    expect(spec.paint!['line-dasharray']).toEqual([2, 2])
+  })
+
+  it('returns null for an empty (no-buildable-area) envelope', () => {
+    expect(buildableEnvelopeOverlay(envPayload(false, false))).toBeNull()
+    expect(buildableEnvelopeOverlay(null)).toBeNull()
+    expect(buildableEnvelopeOverlay({ geojson: undefined })).toBeNull()
+  })
+
+  it('paint is dashed+amber for approximate, solid+green otherwise', () => {
+    expect(buildableEnvelopePaint(true)['line-dasharray']).toEqual([2, 2])
+    expect(buildableEnvelopePaint(false)['line-dasharray']).toBeUndefined()
+  })
+
+  it('extracts a card with disclosure + citation + sizing', () => {
+    const card = buildableEnvelopeCard(envPayload(true))!
+    expect(card.approximate).toBe(true)
+    expect(card.disclosure).toMatch(/verify/i)
+    expect(card.citationUrl).toMatch(/municode/i)
+    expect(card.buildableAreaSqFt).toBe(13175)
+    expect(card.maxFootprintSqFt).toBe(8000)
+    expect(card.maxHeightFt).toBe(35)
+    expect(card.edgeSignal).toBe('shape')
   })
 })
