@@ -155,7 +155,7 @@ beforeAll(() => {
   resetBrokerageApiKeysForTests();
 });
 
-function post(body: unknown) {
+function post(body: Record<string, unknown>) {
   return request(getApp())
     .post("/api/brokerage/v1/place/buildable-envelope")
     .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
