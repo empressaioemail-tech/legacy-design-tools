@@ -30,6 +30,7 @@ import {
 } from "@workspace/cad-ingest/txgio-geo";
 import {
   resolveParcelBySitus,
+  resolveParcelBySitusDisambiguated,
   resolveRooftopByAddress,
 } from "../lib/txgioAddressResolve";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
@@ -67,15 +68,64 @@ const DUP_A: GeoJsonGeometry = {
   ],
 };
 
+// --- F4e disambiguation fixtures ---
+// Two DISTINCT, non-overlapping polygons that will SHARE one situs string:
+// a point inside AMBIG_LEFT disambiguates to the left parcel and lies
+// OUTSIDE AMBIG_RIGHT (item 1: point-in-polygon among situs candidates).
+const AMBIG_LEFT: GeoJsonGeometry = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [-97.900, 30.100],
+      [-97.899, 30.100],
+      [-97.899, 30.101],
+      [-97.900, 30.101],
+      [-97.900, 30.100],
+    ],
+  ],
+};
+const AMBIG_RIGHT: GeoJsonGeometry = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [-97.800, 30.100],
+      [-97.799, 30.100],
+      [-97.799, 30.101],
+      [-97.800, 30.101],
+      [-97.800, 30.100],
+    ],
+  ],
+};
+/** Inside AMBIG_LEFT, outside AMBIG_RIGHT. */
+const POINT_IN_LEFT = { latitude: 30.1005, longitude: -97.8995 };
+/** Inside neither AMBIG_LEFT nor AMBIG_RIGHT (a centroid that fell away). */
+const POINT_IN_NEITHER = { latitude: 30.2, longitude: -97.5 };
+
+// A Comal (48091) parcel with a UNIQUE situs, for the multi-county query
+// test. Its polygon sits in Comal's routing area.
+const COMAL_GEOMETRY: GeoJsonGeometry = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [-98.200, 29.800],
+      [-98.199, 29.800],
+      [-98.199, 29.801],
+      [-98.200, 29.801],
+      [-98.200, 29.800],
+    ],
+  ],
+};
+
 function parcelRows(
   featureIndex: number,
   geometry: GeoJsonGeometry,
   attrs: Partial<typeof txgioParcel.$inferInsert>,
+  countyFips = "48209",
 ): (typeof txgioParcel.$inferInsert)[] {
   const bbox = bboxOfGeometry(geometry)!;
   const cells = cellKeysForBbox(bbox)!;
   return cells.map((tileKey) => ({
-    countyFips: "48209",
+    countyFips,
     tileKey,
     featureIndex,
     geometry: geometry as unknown as Record<string, unknown>,
@@ -83,8 +133,8 @@ function parcelRows(
     southLat: bbox.southLat,
     eastLng: bbox.eastLng,
     northLat: bbox.northLat,
-    sourceFile: "stratmap25-landparcels_48209_lp.zip",
-    sourceVintage: "stratmap25-landparcels_48209_hays_202503",
+    sourceFile: `stratmap25-landparcels_${countyFips}_lp.zip`,
+    sourceVintage: `stratmap25-landparcels_${countyFips}_202503`,
     ...attrs,
   }));
 }
@@ -122,6 +172,28 @@ const PARCEL_SEED = [
     propId: "108394",
     situsAddress: "144 THOMAS PLACE , KYLE, TX 78640",
   }),
+  // F4e item 1: two DISTINCT parcels sharing a situs, DIFFERENT polygons.
+  // A point inside AMBIG_LEFT disambiguates to prop 500001; a point in
+  // neither declines.
+  ...parcelRows(10, AMBIG_LEFT, {
+    propId: "500001",
+    situsAddress: "42 AMBIG WAY, KYLE, TX 78640",
+  }),
+  ...parcelRows(11, AMBIG_RIGHT, {
+    propId: "500002",
+    situsAddress: "42 AMBIG WAY, KYLE, TX 78640",
+  }),
+  // F4e item 2: a Comal (48091) parcel with a situs UNIQUE across both
+  // counties — proves a unique hit in ANY candidate county wins.
+  ...parcelRows(
+    20,
+    COMAL_GEOMETRY,
+    {
+      propId: "600001",
+      situsAddress: "77 COMAL ONLY RD, NEW BRAUNFELS, TX 78130",
+    },
+    "48091",
+  ),
 ];
 
 const ADDRESS_SEED: (typeof txgioAddress.$inferInsert)[] = [
@@ -284,3 +356,114 @@ describe.skipIf(!hasDb)("F4d queryTxgioParcelByPropId (geometry by prop id)", ()
     });
   });
 });
+
+describe.skipIf(!hasDb)(
+  "F4e resolveParcelBySitusDisambiguated (multi-county + point disambiguation)",
+  () => {
+    it("resolves a UNIQUE situs with NO point (situs-before-geocode; a geocode miss must not lose it)", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }, { fips: "48091" }],
+          address: "6026 Marsh Ln, Buda, TX 78610",
+          point: null, // geocode MISSED — a unique situs still resolves
+          database: db,
+        });
+        expect(out.hit?.parcelNodeId).toBe("48209:193340");
+        expect(out.resolvedBy).toBe("unique-situs");
+      });
+    });
+
+    it("finds a UNIQUE situs in ANOTHER candidate county (item 2 — multi-county query)", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        // Search both counties; the situs only exists in Comal (48091). A
+        // unique hit in ANY candidate county is authoritative.
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }, { fips: "48091" }],
+          address: "77 Comal Only Rd, New Braunfels, TX 78130",
+          point: null,
+          database: db,
+        });
+        expect(out.hit?.parcelNodeId).toBe("48091:600001");
+        expect(out.resolvedBy).toBe("unique-situs");
+      });
+    });
+
+    it("DISAMBIGUATES an ambiguous situs by the containing point (item 1)", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        // Two parcels share "42 AMBIG WAY"; the point lies inside the LEFT
+        // parcel only -> that's the authoritative answer (right situs AND
+        // right geometry).
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }, { fips: "48091" }],
+          address: "42 Ambig Way, Kyle, TX 78640",
+          point: POINT_IN_LEFT,
+          database: db,
+        });
+        expect(out.hit?.parcelNodeId).toBe("48209:500001");
+        expect(out.resolvedBy).toBe("point-disambiguated");
+      });
+    });
+
+    it("DECLINES an ambiguous situs when NO candidate contains the point (never a wrong-situs neighbor)", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }],
+          address: "42 Ambig Way, Kyle, TX 78640",
+          point: POINT_IN_NEITHER,
+          database: db,
+        });
+        expect(out.hit).toBeNull();
+        expect(out.reason).toBe("ambiguous-no-containing-candidate");
+        expect(out.ambiguousCandidateCount).toBe(2);
+      });
+    });
+
+    it("DECLINES an ambiguous situs when there is NO point to disambiguate with", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }],
+          address: "42 Ambig Way, Kyle, TX 78640",
+          point: null,
+          database: db,
+        });
+        expect(out.hit).toBeNull();
+        expect(out.reason).toBe("ambiguous-no-point");
+      });
+    });
+
+    it("returns no-situs-match (fall-through) for a genuinely absent address", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }, { fips: "48091" }],
+          address: "99999 Nonexistent Rd, Buda, TX 78610",
+          point: { latitude: 30.0, longitude: -97.9 },
+          database: db,
+        });
+        expect(out.hit).toBeNull();
+        expect(out.reason).toBe("no-situs-match");
+      });
+    });
+
+    it("never returns the EMPTY-situs parcel (unmatchable by a house-numbered query)", async () => {
+      await withTestSchema(async ({ db }) => {
+        await db.insert(txgioParcel).values(PARCEL_SEED);
+        // Prop 999001 has situs ", ," — a house-numbered query must never
+        // resolve to it, and it must never be a disambiguation candidate.
+        const out = await resolveParcelBySitusDisambiguated({
+          counties: [{ fips: "48209" }],
+          address: "6026 Marsh Ln, Buda, TX 78610",
+          point: null,
+          database: db,
+        });
+        expect(out.hit?.rawPropId).not.toBe("999001");
+        expect(out.hit?.parcelNodeId).toBe("48209:193340");
+      });
+    });
+  },
+);

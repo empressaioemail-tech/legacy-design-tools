@@ -34,8 +34,12 @@ vi.mock("@workspace/db", async () => {
 // Geocode -> a fixed Bastrop point (bastrop-tx has a real setback table).
 const BASTROP_LNG = -97.31;
 const BASTROP_LAT = 30.11;
-// Per-test override of the geocoded point/city (F4d situs tests need a
-// Hays point so the county resolves to the txgio-store-backed county).
+// Per-test override of the geocoded point/city. F4e runs a best-effort
+// geocode in the SITUS-FIRST pre-pass (via `geocodeAddress`) AND, on the
+// no-situs fall-through, `resolvePlace` re-derives from the same geocode.
+// Both mocks read this single override so a test controls the point/city
+// once. `null` on `geocodeMiss` simulates a geocode MISS (the pre-pass
+// then runs point-less; a unique situs still resolves — F4e item 3).
 // Reset in beforeEach.
 let geocodeOverride: {
   lat: number;
@@ -44,6 +48,34 @@ let geocodeOverride: {
   state: string;
   matchRung?: "street" | "locality" | "zip";
 } | null = null;
+let geocodeMiss = false;
+
+// The SITUS-FIRST pre-pass geocode (best-effort, non-fatal). Returns the
+// `Geocode` shape (`latitude`/`longitude`/`jurisdictionCity`/...), or null
+// on a simulated miss.
+vi.mock("@workspace/site-context/server", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/site-context/server")>(
+      "@workspace/site-context/server",
+    );
+  return {
+    ...actual,
+    geocodeAddress: vi.fn(async (address: string) => {
+      if (geocodeMiss) return null;
+      const o = geocodeOverride;
+      const noSetback = /nowhere/i.test(address);
+      return {
+        latitude: o?.lat ?? BASTROP_LAT,
+        longitude: o?.lng ?? BASTROP_LNG,
+        jurisdictionCity: o?.city ?? (noSetback ? "Nowhere" : "Bastrop"),
+        jurisdictionState: o?.state ?? (noSetback ? "XX" : "TX"),
+        matchRung: o?.matchRung,
+        source: "nominatim" as const,
+      };
+    }),
+  };
+});
+
 vi.mock("../lib/placeResolve", async () => {
   const actual =
     await vi.importActual<typeof import("../lib/placeResolve")>(
@@ -54,6 +86,13 @@ vi.mock("../lib/placeResolve", async () => {
     resolvePlace: vi.fn(async (input: unknown) => {
       const i = input as { address?: string };
       const o = geocodeOverride;
+      if (geocodeMiss && i.address) {
+        return {
+          errorClass: "geocode_miss" as const,
+          error: "geocode_miss",
+          message: "Could not geocode the provided address",
+        };
+      }
       // Route "Nowhere, XX" to a no-setback jurisdiction.
       const noSetback =
         typeof i.address === "string" && /nowhere/i.test(i.address);
@@ -154,12 +193,26 @@ vi.mock("../lib/brokerageGisLayers", async () => {
   };
 });
 
-// The F4d authoritative resolver + store direct-fetch. Off by default
-// (null returns -> fall through to the point path, preserving the
-// existing tests); a test sets these to exercise the situs short-circuit.
-let situsHit:
-  | { parcelNodeId: string; rawPropId: string; matchSource: "situs" }
-  | null = null;
+// The F4e authoritative disambiguating resolver + store direct-fetch. Off
+// by default (`no-situs-match` -> fall through to the point path,
+// preserving the existing tests); a test sets `situsOutcome` to exercise
+// the situs hit / ambiguous-decline paths. `situsOutcome` mirrors the real
+// `SitusResolveOutcome` shape.
+type SitusOutcome =
+  | {
+      hit: { parcelNodeId: string; rawPropId: string; matchSource: "situs" };
+      resolvedBy: "unique-situs" | "point-disambiguated";
+    }
+  | {
+      hit: null;
+      reason:
+        | "no-situs-match"
+        | "ambiguous-no-point"
+        | "ambiguous-no-containing-candidate"
+        | "ambiguous-multiple-containing-candidates";
+      ambiguousCandidateCount?: number;
+    };
+let situsOutcome: SitusOutcome = { hit: null, reason: "no-situs-match" };
 let rooftopHit:
   | { latitude: number; longitude: number; matchSource: "txgio-address" }
   | null = null;
@@ -171,7 +224,7 @@ vi.mock("../lib/txgioAddressResolve", async () => {
     );
   return {
     ...actual,
-    resolveParcelBySitus: vi.fn(async () => situsHit),
+    resolveParcelBySitusDisambiguated: vi.fn(async () => situsOutcome),
     resolveRooftopByAddress: vi.fn(async () => rooftopHit),
   };
 });
@@ -234,13 +287,14 @@ function post(body: Record<string, unknown>) {
 
 import { beforeEach } from "vitest";
 beforeEach(() => {
-  // Reset F4d controls so each test starts from the point-path baseline.
+  // Reset F4d/F4e controls so each test starts from the point-path baseline.
   pinQueryThrow = null;
   lastPinQueryPoint = null;
-  situsHit = null;
+  situsOutcome = { hit: null, reason: "no-situs-match" };
   rooftopHit = null;
   byPropIdResult = null;
   geocodeOverride = null;
+  geocodeMiss = false;
 });
 
 describe("POST /place/buildable-envelope", () => {
@@ -382,7 +436,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
     // Geocode returns a Hays point (Buda) so the county resolves to the
-    // txgio-store-backed Hays; the situs resolver returns a direct hit,
+    // txgio-store-backed Hays; the situs resolver returns a UNIQUE hit,
     // and the store returns that parcel's geometry by prop id.
     geocodeOverride = {
       lat: 30.04667,
@@ -391,10 +445,13 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       state: "TX",
       matchRung: "street",
     };
-    situsHit = {
-      parcelNodeId: "48209:193340",
-      rawPropId: "193340",
-      matchSource: "situs",
+    situsOutcome = {
+      hit: {
+        parcelNodeId: "48209:193340",
+        rawPropId: "193340",
+        matchSource: "situs",
+      },
+      resolvedBy: "unique-situs",
     };
     byPropIdResult = {
       geojson: rectParcel("R-MD", "48209:193340"),
@@ -422,7 +479,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     // fail honestly instead, and NEVER consult the pin query.
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
-    situsHit = null;
+    situsOutcome = { hit: null, reason: "no-situs-match" };
     rooftopHit = null; // no authoritative upgrade
     geocodeOverride = {
       lat: BASTROP_LAT,
@@ -445,7 +502,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     // (bastrop-tx) — the F4d changes are additive and don't regress it.
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
-    situsHit = null; // point path
+    situsOutcome = { hit: null, reason: "no-situs-match" }; // point path
     geocodeOverride = null; // Bastrop (has setbacks)
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);

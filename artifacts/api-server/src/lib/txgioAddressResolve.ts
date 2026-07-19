@@ -56,9 +56,13 @@
  * county) and consistent with what we store.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db as defaultDb, txgioParcel, txgioAddress } from "@workspace/db";
+import {
+  pointInGeometry,
+  type GeoJsonGeometry,
+} from "@workspace/cad-ingest/txgio-geo";
 import { parcelNodeId } from "./parcelNodeId";
 import {
   normalizeStreetLine,
@@ -90,6 +94,49 @@ export interface RooftopHit {
   latitude: number;
   longitude: number;
   matchSource: "txgio-address";
+}
+
+/**
+ * Outcome of the F4e disambiguating, multi-county situs resolve. Exactly
+ * one of `hit` / `declined` is meaningful:
+ *
+ *   - `hit` set  : an AUTHORITATIVE parcel — either a situs that was
+ *     unique across all candidate counties, or an ambiguous situs the
+ *     geocoded point disambiguated to a single containing candidate.
+ *     `resolvedBy` records which.
+ *   - `hit` null : no authoritative parcel. `reason` distinguishes an
+ *     honest situs MISS (fall through to the geocode/rooftop path) from
+ *     an ambiguous situs that the point could NOT disambiguate
+ *     (`ambiguous-*` — the caller must DECLINE, never blind-point-guess a
+ *     wrong-situs neighbor; commitment #1).
+ *
+ * Empty-situs parcels (`, ,`) never appear here: the normalizer rejects a
+ * house-numberless query key, and the stored empty situs normalizes to a
+ * key no house-numbered query can equal.
+ */
+export interface SitusResolveOutcome {
+  hit: AddressResolveHit | null;
+  /** Why `hit` is null (only when it is). */
+  reason?:
+    | "no-situs-match"
+    | "ambiguous-no-point"
+    | "ambiguous-no-containing-candidate"
+    | "ambiguous-multiple-containing-candidates";
+  /** How a non-null `hit` was reached — provenance for logging. */
+  resolvedBy?: "unique-situs" | "point-disambiguated";
+  /** Distinct candidate prop-id count for an ambiguous decline (logging). */
+  ambiguousCandidateCount?: number;
+}
+
+/** One store county to search + point-disambiguate against. */
+export interface SitusCandidateCounty {
+  fips: string;
+}
+
+interface SitusCandidate {
+  countyFips: string;
+  propId: string;
+  geometry: unknown;
 }
 
 /**
@@ -151,6 +198,181 @@ export async function resolveParcelBySitus(input: {
   const nodeId = parcelNodeId(input.countyFips.trim(), propId);
   if (!nodeId) return null;
   return { parcelNodeId: nodeId, rawPropId: propId, matchSource: "situs" };
+}
+
+/**
+ * F4e authoritative situs resolve — the class that finishes F4d. It fixes
+ * three residual wrong-parcel / false-decline modes the single-county,
+ * unique-only `resolveParcelBySitus` above left open:
+ *
+ *   1. SHARED-SITUS AMBIGUITY. When several parcels share a situs string
+ *      (Hays ~14%, Comal ~5% of situs-bearing parcels), the old resolver
+ *      returned null and the route blind-pin-queried the geocode point —
+ *      which happily returns a real, adjacent, DIFFERENTLY-ADDRESSED
+ *      parcel (e.g. a query for "145 Texas Agate Dr" pinned the neighbor
+ *      whose situs is "AMYTHEST DR"). Here we DISAMBIGUATE instead: among
+ *      the ambiguous-situs candidates, pick the one whose POLYGON CONTAINS
+ *      the geocoded point. Exactly one containing candidate -> that's the
+ *      authoritative answer (right situs AND right geometry). None or
+ *      several containing -> DECLINE (`hit: null`, `reason: ambiguous-*`);
+ *      we NEVER return a wrong-situs neighbor. The point is used only to
+ *      choose AMONG situs-correct candidates, never to grab a parcel whose
+ *      situs does not match the query.
+ *
+ *   2. MULTI-COUNTY. County routing bboxes overlap at county lines and
+ *      nearest-centroid can pick the WRONG store county (a Hays address
+ *      near the Comal line routed to Comal, found nothing, declined). We
+ *      search situs across ALL candidate counties in one indexed query; a
+ *      UNIQUE hit in ANY of them is authoritative and wins over centroid
+ *      distance. (Bounded to the 2 store counties today.)
+ *
+ *   3. SITUS-BEFORE-GEOCODE. A unique situs (or a point-disambiguated
+ *      ambiguous situs) is HIGHER authority than any geocode. This
+ *      resolver takes an OPTIONAL point: a unique hit needs no point at
+ *      all, so it resolves even when the geocode entirely MISSED — the
+ *      caller runs this BEFORE the geocode-quality / geocode-miss gate.
+ *
+ * INDEX: the situs comparison uses the SAME `normalizedColumnExpr(
+ * "situs_address")` the unique resolver uses, now with an `IN (counties)`
+ * predicate on `county_fips`. The functional index (migration 0058) is on
+ * `(county_fips, <normalized expr>)`, so Postgres still uses it — an
+ * equality on the normalized expression combined with a small `IN` list on
+ * the leading `county_fips` column is an index/bitmap scan, not a seq scan.
+ *
+ * Point-in-polygon runs in JS over the SMALL ambiguous candidate set
+ * (a handful of parcels), reusing the shared `pointInGeometry` ray-cast
+ * (`@workspace/cad-ingest/txgio-geo`) — the same helper the store's pin
+ * lookup uses. No PostGIS.
+ */
+export async function resolveParcelBySitusDisambiguated(input: {
+  counties: SitusCandidateCounty[];
+  address: string;
+  /** Geocoded point, when available — used ONLY to disambiguate an
+   *  ambiguous situs among situs-correct candidates. Omit when the geocode
+   *  missed; a unique situs still resolves. */
+  point?: { latitude: number; longitude: number } | null;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusResolveOutcome> {
+  const key = normalizeStreetLine(input.address);
+  if (!key) return { hit: null, reason: "no-situs-match" };
+  const database = input.database ?? defaultDb;
+
+  const fipsList = [
+    ...new Set(
+      input.counties.map((c) => c.fips.trim()).filter((f) => f.length > 0),
+    ),
+  ];
+  if (fipsList.length === 0) return { hit: null, reason: "no-situs-match" };
+
+  // ONE indexed query across all candidate counties. Pull geometry too so
+  // an ambiguous match can be point-disambiguated without a second round
+  // trip; the ambiguous set is a handful of rows, so the geometry payload
+  // is small.
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      geometry: txgioParcel.geometry,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        inArray(txgioParcel.countyFips, fipsList),
+        eq(normalizedColumnExpr("situs_address"), key),
+      ),
+    )) as {
+    countyFips: string | null;
+    propId: string | null;
+    geometry: unknown;
+  }[];
+
+  // Distinct (county, propId) candidates — rows are duplicated one-per-
+  // tile-cell in the store, so dedupe. Empty/absent prop ids can't identify
+  // a parcel and are skipped (never a fabricated node id).
+  const byKey = new Map<string, SitusCandidate>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    if (!fips || !propId) continue;
+    const k = `${fips}:${propId}`;
+    if (!byKey.has(k)) {
+      byKey.set(k, { countyFips: fips, propId, geometry: r.geometry });
+    }
+  }
+  const candidates = [...byKey.values()];
+
+  if (candidates.length === 0) return { hit: null, reason: "no-situs-match" };
+
+  // UNIQUE across every candidate county -> authoritative, no point needed
+  // (wins over any geocode; item 2 + item 3).
+  if (candidates.length === 1) {
+    const only = candidates[0]!;
+    const nodeId = parcelNodeId(only.countyFips, only.propId);
+    if (!nodeId) return { hit: null, reason: "no-situs-match" };
+    return {
+      hit: {
+        parcelNodeId: nodeId,
+        rawPropId: only.propId,
+        matchSource: "situs",
+      },
+      resolvedBy: "unique-situs",
+    };
+  }
+
+  // AMBIGUOUS (>1 distinct parcel share the situs; item 1). Disambiguate by
+  // the geocoded point: keep only situs-correct candidates whose polygon
+  // CONTAINS the point.
+  if (
+    !input.point ||
+    !Number.isFinite(input.point.latitude) ||
+    !Number.isFinite(input.point.longitude)
+  ) {
+    // No point to disambiguate with -> DECLINE (never guess between the
+    // situs-correct candidates, and never fall to a wrong-situs neighbor).
+    return {
+      hit: null,
+      reason: "ambiguous-no-point",
+      ambiguousCandidateCount: candidates.length,
+    };
+  }
+
+  const { latitude, longitude } = input.point;
+  const containing = candidates.filter((c) =>
+    pointInGeometry(longitude, latitude, c.geometry as GeoJsonGeometry),
+  );
+
+  if (containing.length === 1) {
+    const pick = containing[0]!;
+    const nodeId = parcelNodeId(pick.countyFips, pick.propId);
+    if (!nodeId) {
+      return {
+        hit: null,
+        reason: "ambiguous-no-containing-candidate",
+        ambiguousCandidateCount: candidates.length,
+      };
+    }
+    return {
+      hit: {
+        parcelNodeId: nodeId,
+        rawPropId: pick.propId,
+        matchSource: "situs",
+      },
+      resolvedBy: "point-disambiguated",
+    };
+  }
+
+  // None or several situs-correct candidates contain the point (e.g. stacked
+  // overlapping parcels, or a centroid geocode that falls in no candidate) ->
+  // DECLINE honestly. This is CORRECT (commitment #1): an honest decline
+  // beats returning a wrong parcel.
+  return {
+    hit: null,
+    reason:
+      containing.length === 0
+        ? "ambiguous-no-containing-candidate"
+        : "ambiguous-multiple-containing-candidates",
+    ambiguousCandidateCount: candidates.length,
+  };
 }
 
 /**
