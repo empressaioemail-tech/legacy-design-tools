@@ -1,4 +1,4 @@
-import type { Geocode } from "../types";
+import type { Geocode, GeocodeMatchRung } from "../types";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const USER_AGENT =
@@ -69,29 +69,54 @@ function normalizeWhitespace(s: string): string {
  * least-specific; the first hit wins, so a precise street match is still
  * preferred whenever OSM has one.
  */
-export function buildQueryLadder(rawAddress: string): string[] {
+/** One rung of the geocode ladder: the query plus how precise a hit on
+ *  it would be (see {@link GeocodeMatchRung}). */
+export interface GeocodeLadderRung {
+  q: string;
+  rung: GeocodeMatchRung;
+}
+
+/**
+ * Labelled ladder — each rung carries its {@link GeocodeMatchRung} so a
+ * hit can report whether it was a rooftop-grade street match or a coarser
+ * locality/ZIP centroid. The full street address is the only "street"
+ * rung; a trailing "City ST ZIP" line is "locality"; the bare ZIP is
+ * "zip". Callers that only want the strings use {@link buildQueryLadder}.
+ */
+export function buildQueryLadderLabelled(
+  rawAddress: string,
+): GeocodeLadderRung[] {
   const lines = rawAddress
     .split(/\r?\n/)
     .map((l) => normalizeWhitespace(l))
     .filter(Boolean);
   const full = normalizeWhitespace(rawAddress);
-  const ladder: string[] = [];
-  const push = (q: string) => {
-    if (q && !ladder.includes(q)) ladder.push(q);
+  const ladder: GeocodeLadderRung[] = [];
+  const push = (q: string, rung: GeocodeMatchRung) => {
+    if (q && !ladder.some((r) => r.q === q)) ladder.push({ q, rung });
   };
 
-  if (full) push(full);
+  // The full address is a rooftop-grade "street" query ONLY when it
+  // carries a house number; a bare "City ST ZIP" typed as the whole
+  // address is a locality centroid, not a rooftop.
+  if (full) push(full, /^\s*\d/.test(full) ? "street" : "locality");
   // The last line of a conventional US address is "City ST ZIP".
-  if (lines.length > 1) push(lines[lines.length - 1]!);
+  if (lines.length > 1) push(lines[lines.length - 1]!, "locality");
   // Coarsest fallback: the bare 5-digit ZIP.
   const zip = full.match(/\b(\d{5})(?:-\d{4})?\b/);
-  if (zip) push(`${zip[1]}, USA`);
+  if (zip) push(`${zip[1]}, USA`, "zip");
 
   return ladder;
 }
 
+/** Query-string-only ladder (back-compat). */
+export function buildQueryLadder(rawAddress: string): string[] {
+  return buildQueryLadderLabelled(rawAddress).map((r) => r.q);
+}
+
 async function queryNominatim(
   q: string,
+  rung: GeocodeMatchRung,
   signal?: AbortSignal,
 ): Promise<Geocode | null> {
   return enqueue(async () => {
@@ -133,6 +158,7 @@ async function queryNominatim(
       jurisdictionFips: null, // Nominatim does not provide FIPS
       source: "nominatim",
       geocodedAt: new Date().toISOString(),
+      matchRung: rung,
       raw: hit,
     };
   });
@@ -151,15 +177,15 @@ export async function geocodeAddress(
   address: string,
   opts: GeocodeOptions = {},
 ): Promise<Geocode | null> {
-  const ladder = buildQueryLadder(address);
+  const ladder = buildQueryLadderLabelled(address);
   if (ladder.length === 0) return null;
 
   let lastErr: unknown = null;
   let sawCleanMiss = false;
-  for (const q of ladder) {
+  for (const { q, rung } of ladder) {
     if (opts.signal?.aborted) break;
     try {
-      const hit = await queryNominatim(q, opts.signal);
+      const hit = await queryNominatim(q, rung, opts.signal);
       if (hit) return hit;
       sawCleanMiss = true; // Nominatim was reachable; it just had no match.
     } catch (err) {

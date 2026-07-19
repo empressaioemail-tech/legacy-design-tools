@@ -439,5 +439,69 @@ export async function queryTxgioParcelsGeoJson(input: {
   };
 }
 
+/**
+ * Fetch a single parcel's GeoJSON by its RAW appraisal prop id, as the
+ * authoritative situs->parcel resolver (F4d) needs: once an address is
+ * matched to a prop id via `txgio_parcel.situs_address`, this returns
+ * that parcel's polygon + normalized feature (same shape/enrichment as
+ * the pin/bbox reads) so the buildable-envelope route can derive the
+ * envelope WITHOUT a geocode or point-in-polygon step.
+ *
+ * Rows are duplicated one-per-tile-cell in the store, so a prop id maps
+ * to several identical-geometry rows; the first is taken (all carry the
+ * same geometry + attrs). Returns null when the prop id is not present
+ * in the county — the caller falls through to the coord/geocode path.
+ * Land-use is joined the same single-query way as the tile reads.
+ */
+export async function queryTxgioParcelByPropId(input: {
+  countyFips: string;
+  countyName: string;
+  propId: string;
+  database?: TxgioStoreDb;
+}): Promise<TxgioParcelsResult | null> {
+  const database = input.database ?? defaultDb;
+  const propId = input.propId.trim();
+  if (!propId) return null;
+
+  const candidates = (await database
+    .select(candidateColumns)
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, input.countyFips.trim()),
+        eq(txgioParcel.propId, propId),
+      ),
+    )
+    .limit(TXGIO_PARCEL_FEATURE_CAP)) as TxgioCandidateRow[];
+
+  if (candidates.length === 0) return null;
+
+  // All rows for one prop id are per-cell duplicates of the same parcel;
+  // dedupe on featureIndex and keep the first.
+  const seen = new Set<number>();
+  const rows: TxgioCandidateRow[] = [];
+  for (const row of candidates) {
+    if (seen.has(row.featureIndex)) continue;
+    seen.add(row.featureIndex);
+    rows.push(row);
+  }
+
+  const retrievedAt = new Date().toISOString();
+  const landUse = await fetchCadLandUseForTile(
+    database,
+    input.countyFips,
+    rows,
+  );
+  const features = rows.map((row) =>
+    toFeature(row, input.countyFips, input.countyName, retrievedAt, landUse),
+  );
+
+  return {
+    geojson: { type: "FeatureCollection", features },
+    featureCount: features.length,
+    queryMode: "pin",
+  };
+}
+
 /** Exposed for tests. */
 export const __internal = { TXGIO_MAX_BBOX_CELLS, fetchCadLandUseForTile };

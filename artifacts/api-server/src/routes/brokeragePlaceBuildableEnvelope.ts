@@ -46,9 +46,21 @@ import {
   legacyHonestyToReadContract,
   readContractForWire,
 } from "@workspace/engine-core";
+import { AdapterRunError } from "@workspace/adapters/types";
 import { logger } from "../lib/logger";
 import { resolvePlace, parseCoordPlaceKey } from "../lib/placeResolve";
+import { placeKeyFromCoords } from "../lib/placeLayerUtils";
 import { queryGisLayerGeoJson } from "../lib/brokerageGisLayers";
+import {
+  resolveParcelBySitus,
+  resolveRooftopByAddress,
+} from "../lib/txgioAddressResolve";
+import {
+  resolveTxParcelCounty,
+  txCountyProviderLabel,
+  txParcelProviderMode,
+} from "../lib/brokerageTxParcels";
+import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
 import { labelEdges, type RoadPolyline } from "../lib/buildableEnvelope/edgeLabeling";
 import { mapDistrict } from "../lib/buildableEnvelope/districtMapping";
@@ -136,6 +148,21 @@ interface EnvelopeContext {
   city: string | null;
   state: string | null;
   address: string | null;
+  /**
+   * How the resolved (lat,lng) was obtained. This is the TRUE authority
+   * of the point, so a fuzzy ZIP/city centroid is never mistaken for a
+   * rooftop:
+   *   - "coordinates"  : caller passed explicit lat/lng (honored verbatim).
+   *   - "authoritative": county rooftop point from `txgio_address`.
+   *   - "geocode-high" : Nominatim returned a hit for the full address.
+   *   - "geocode-low"  : Nominatim only matched a coarser rung
+   *                       (city/ZIP centroid) — the point is NOT rooftop.
+   */
+  pointConfidence:
+    | "coordinates"
+    | "authoritative"
+    | "geocode-high"
+    | "geocode-low";
 }
 
 function withPlace<T extends Record<string, unknown>>(
@@ -145,7 +172,19 @@ function withPlace<T extends Record<string, unknown>>(
   return { ...body, placeKey: ctx.placeKey };
 }
 
-/** Resolve the derivation inputs (placeKey/address/coords) to a point + city/state. */
+/**
+ * Resolve the derivation inputs (placeKey/address/coords) to a point +
+ * city/state, honoring the F4d authority order:
+ *   (i)   explicit caller lat/lng   -> honored verbatim (no re-geocode
+ *         of the point; the address, if present, only enriches city/state).
+ *   (ii)  authoritative county rooftop from `txgio_address`             -> upgrade the point.
+ *   (iii) fuzzy geocode              -> LAST resort, tagged with its true
+ *         rung so a locality/ZIP centroid is never mistaken for rooftop.
+ *
+ * The situs->parcel-directly path (the strongest authority) is applied
+ * downstream in `handleBuildableEnvelope`, where the county + provider
+ * label are in hand.
+ */
 async function resolveContext(
   input:
     | { placeKey: string }
@@ -155,11 +194,15 @@ async function resolveContext(
     | { address: string }
     | { lat: number; lng: number; address?: string };
   let addressHint: string | null = null;
+  // Set when the caller passed explicit coordinates — those are honored
+  // verbatim as the point, bypassing the geocode-derived point entirely.
+  let explicitCoords: { lat: number; lng: number } | null = null;
 
   if ("placeKey" in input) {
     const coord = parseCoordPlaceKey(input.placeKey);
     if (coord) {
       resolveInput = { lat: coord.lat, lng: coord.lng };
+      explicitCoords = { lat: coord.lat, lng: coord.lng };
     } else {
       // A non-coordinate placeKey needs an address to re-geocode; we don't carry
       // a placeKey->address store here, so require the POST/address form.
@@ -174,12 +217,17 @@ async function resolveContext(
         },
       };
     }
+  } else if (input.lat != null && input.lng != null) {
+    // Explicit coordinates take precedence over any address: the caller
+    // gave us the point, so we HONOR it and never re-geocode the address
+    // to a (possibly wrong) point. The address, when present, is passed
+    // only so `resolvePlace` can enrich city/state for jurisdiction.
+    resolveInput = { lat: input.lat, lng: input.lng, address: input.address };
+    explicitCoords = { lat: input.lat, lng: input.lng };
+    addressHint = input.address ?? null;
   } else if (input.address) {
     resolveInput = { address: input.address };
     addressHint = input.address;
-  } else if (input.lat != null && input.lng != null) {
-    resolveInput = { lat: input.lat, lng: input.lng, address: input.address };
-    addressHint = input.address ?? null;
   } else {
     return {
       error: {
@@ -198,14 +246,101 @@ async function resolveContext(
       },
     };
   }
+
+  let lat = resolved.geocode.lat;
+  let lng = resolved.geocode.lng;
+  let placeKey = resolved.placeKey;
+  let pointConfidence: EnvelopeContext["pointConfidence"];
+
+  if (explicitCoords) {
+    // Caller-supplied point wins outright.
+    lat = explicitCoords.lat;
+    lng = explicitCoords.lng;
+    pointConfidence = "coordinates";
+  } else {
+    // Address-only resolution. Try to UPGRADE the fuzzy geocode point to
+    // the county's authoritative rooftop before we trust it. The county
+    // is chosen from the (approximate) geocode point — county routing
+    // bboxes are generous enough that even a ZIP centroid lands in the
+    // right county — then the rooftop is matched by address WITHIN it.
+    pointConfidence =
+      resolved.geocode.matchRung && resolved.geocode.matchRung !== "street"
+        ? "geocode-low"
+        : "geocode-high";
+
+    if (addressHint && txParcelProviderMode() === "county-gis") {
+      const county = resolveTxParcelCounty({ latitude: lat, longitude: lng });
+      if (county) {
+        try {
+          const rooftop = await resolveRooftopByAddress({
+            countyFips: county.fips,
+            address: addressHint,
+          });
+          if (rooftop) {
+            lat = rooftop.latitude;
+            lng = rooftop.longitude;
+            placeKey = placeKeyFromCoords(lat, lng);
+            pointConfidence = "authoritative";
+          }
+        } catch (err) {
+          // Authoritative lookup is best-effort; a store hiccup must not
+          // sink the request — fall through to the geocode point.
+          logger.warn(
+            { err, address: addressHint, county: county.fips },
+            "buildable-envelope: authoritative rooftop lookup failed",
+          );
+        }
+      }
+    }
+  }
+
   return {
-    placeKey: resolved.placeKey,
-    lat: resolved.geocode.lat,
-    lng: resolved.geocode.lng,
+    placeKey,
+    lat,
+    lng,
     city: resolved.geocode.city,
     state: resolved.geocode.state,
     address: addressHint,
+    pointConfidence,
   };
+}
+
+/**
+ * AUTHORITATIVE situs->parcel short-circuit (F4d, highest authority).
+ * When the address matches exactly ONE parcel by
+ * `txgio_parcel.situs_address` within the resolved county, fetch that
+ * parcel's polygon DIRECTLY by prop id — skipping geocode AND
+ * point-in-polygon. Returns the same `{ geojson, provider }` shape the
+ * pin-query path returns, or null to fall through to the point path
+ * (no address, no county, no unambiguous situs match, or the county has
+ * no self-hosted store — the live-county-GIS counties are pin-queried).
+ */
+async function resolveParcelBySitusDirect(
+  ctx: EnvelopeContext,
+): Promise<{ geojson: unknown; provider: string | null } | null> {
+  if (!ctx.address) return null;
+  if (txParcelProviderMode() !== "county-gis") return null;
+  const county = resolveTxParcelCounty({ latitude: ctx.lat, longitude: ctx.lng });
+  // Situs is stored in `txgio_parcel`, so the direct fetch-by-prop-id only
+  // applies to the self-hosted store-backed counties (Hays/Comal). Live
+  // county-GIS counties resolve by pin as before.
+  if (!county || county.source !== "txgio-store") return null;
+
+  const hit = await resolveParcelBySitus({
+    countyFips: county.fips,
+    address: ctx.address,
+  });
+  if (!hit) return null;
+
+  // Fetch geometry by the RAW prop id (the store's `prop_id` column),
+  // recovered from the same situs row that produced the match.
+  const result = await queryTxgioParcelByPropId({
+    countyFips: county.fips,
+    countyName: county.name,
+    propId: hit.rawPropId,
+  });
+  if (!result) return null;
+  return { geojson: result.geojson, provider: txCountyProviderLabel(county) };
 }
 
 /**
@@ -229,8 +364,7 @@ async function handleBuildableEnvelope(
   }
   const ctx: EnvelopeContext = resolvedCtx;
 
-  // 1) Fetch the REAL parcel polygon at the place point FIRST (county GIS
-  //    pin-query, same path the live map uses; carries zoningCode after
+  // 1) Fetch the REAL parcel polygon FIRST (carries zoningCode after
   //    enrichment AND the canonical `parcel_node_id`). This runs BEFORE the
   //    setback-table check so `parcel_node_id` is available on every honest
   //    non-ok status where the parcel resolved — including `no-setbacks`.
@@ -239,14 +373,58 @@ async function handleBuildableEnvelope(
   //    snap + glow the subject parcel even when there is no envelope to draw.
   //    `parcel_node_id` is therefore gated on parcel resolution, NOT on
   //    setback/envelope derivation.
-  let parcelGeo: Awaited<ReturnType<typeof queryGisLayerGeoJson>>;
+  //
+  //    RESOLUTION AUTHORITY (F4d):
+  //      (a) AUTHORITATIVE situs->parcel: when the address matches exactly
+  //          one parcel by `txgio_parcel.situs_address`, fetch THAT parcel's
+  //          polygon directly by prop id — no geocode, no point-in-polygon.
+  //      (b) point pin-query at ctx.(lat,lng): the point is already the best
+  //          available (explicit coords > authoritative rooftop > geocode),
+  //          so this is the same live map path, now fed a trustworthy point.
+  //    A geocode centroid (low confidence) that resolved NEITHER (a) nor a
+  //    containing parcel is reported as an honest no-parcel, never a
+  //    fabricated wrong-parcel and never a provider-outage 502.
+  let parcelGeo: Awaited<ReturnType<typeof queryGisLayerGeoJson>> | {
+    geojson: unknown;
+    provider: string | null;
+  };
   try {
-    parcelGeo = await queryGisLayerGeoJson({
-      layer: "parcels",
-      latitude: ctx.lat,
-      longitude: ctx.lng,
-    });
+    parcelGeo =
+      (await resolveParcelBySitusDirect(ctx)) ??
+      (await queryGisLayerGeoJson({
+        layer: "parcels",
+        latitude: ctx.lat,
+        longitude: ctx.lng,
+      }));
   } catch (err) {
+    // ERROR CLASSIFICATION (F4d). The store/provider readers throw a
+    // named `AdapterRunError`: `no-coverage` means the query SUCCEEDED but
+    // no parcel matched (an honest "no parcel here" — 404), whereas
+    // network/upstream/parse/timeout/unknown are genuine provider failures
+    // (502). Previously ALL throws collapsed to a 502 "provider
+    // unavailable", so a geocode miss / point outside every polygon
+    // masqueraded as an outage and the honest 404 branch was dead code for
+    // the store-backed counties. Classify by code.
+    const isEmptyResult =
+      err instanceof AdapterRunError && err.code === "no-coverage";
+    if (isEmptyResult) {
+      log.info(
+        { placeKey: ctx.placeKey, pointConfidence: ctx.pointConfidence },
+        "buildable-envelope: no parcel at resolved location",
+      );
+      res.status(404).json(
+        withPlace(
+          {
+            status: "no-parcel",
+            reason:
+              "No parcel found for this address, so a buildable envelope can't be derived.",
+            parcel_node_id: null,
+          },
+          ctx,
+        ),
+      );
+      return;
+    }
     log.warn({ err, placeKey: ctx.placeKey }, "buildable-envelope: parcel fetch failed");
     res.status(502).json(
       withPlace(
@@ -264,6 +442,10 @@ async function handleBuildableEnvelope(
 
   const parcel = firstParcelRing(parcelGeo.geojson);
   if (!parcel) {
+    // The query succeeded but returned no usable polygon at this point.
+    // This is the honest "no parcel here" case (404), NOT a provider
+    // outage — the live county-GIS provider returns an empty collection
+    // rather than throwing for a point outside every parcel.
     res.status(404).json(
       withPlace(
         {

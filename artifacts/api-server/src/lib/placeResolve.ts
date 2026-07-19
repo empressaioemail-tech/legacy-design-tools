@@ -28,6 +28,13 @@ export type PlaceResolveSuccess = {
     city: string | null;
     state: string | null;
     confidence: "high" | "coordinates" | "low";
+    /**
+     * Which geocode ladder rung produced the point (F4d). Only "street"
+     * is rooftop-grade; "locality"/"zip" are centroids and must NOT be
+     * treated as a precise point. Absent when the point came from
+     * explicit caller coordinates (see `confidence: "coordinates"`).
+     */
+    matchRung?: "street" | "locality" | "zip";
   };
 };
 
@@ -56,6 +63,7 @@ export async function resolvePlace(
   let city: string | null = null;
   let state: string | null = null;
   let confidence: PlaceResolveSuccess["geocode"]["confidence"] = "high";
+  let matchRung: PlaceResolveSuccess["geocode"]["matchRung"];
   const address = "address" in input ? input.address : undefined;
 
   if ("lat" in input && input.lat != null && input.lng != null) {
@@ -91,6 +99,10 @@ export async function resolvePlace(
     lng = roundPlaceCoord(geo.longitude);
     city = geo.jurisdictionCity ?? null;
     state = geo.jurisdictionState ?? null;
+    matchRung = geo.matchRung;
+    // A coarse (non-street) rung is a locality/ZIP centroid, not a
+    // rooftop — reflect that honestly instead of the "high" default.
+    if (geo.matchRung && geo.matchRung !== "street") confidence = "low";
   } else {
     return {
       errorClass: "validation_error",
@@ -130,6 +142,6 @@ export async function resolvePlace(
     jurisdiction_key,
     ll_uuid,
     workspaceDid,
-    geocode: { lat, lng, city, state, confidence },
+    geocode: { lat, lng, city, state, confidence, matchRung },
   };
 }
