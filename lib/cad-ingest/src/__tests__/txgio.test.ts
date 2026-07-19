@@ -245,11 +245,17 @@ describe("WGS84 .prj guard", () => {
 });
 
 describe("TxGIO county registry + zip entry filter", () => {
-  it("resolves by fips and name, and refuses live-GIS counties", () => {
+  it("resolves by fips and name across all ten Central-TX counties", () => {
     expect(resolveTxgioCounty("48209")?.name).toBe("Hays");
     expect(resolveTxgioCounty("comal")?.fips).toBe("48091");
-    // Travis has a live county GIS — deliberately NOT bulk-loaded.
-    expect(resolveTxgioCounty("48453")).toBeUndefined();
+    // Wave D2: the metro-5 + gap counties are now bulk-loaded here so
+    // the PMTiles bake has one uniform source. Travis (formerly
+    // live-GIS-only) now resolves.
+    expect(resolveTxgioCounty("48453")?.name).toBe("Travis");
+    expect(resolveTxgioCounty("mclennan")?.fips).toBe("48309");
+    expect(resolveTxgioCounty("48187")?.name).toBe("Guadalupe");
+    // An out-of-scope county still resolves to undefined.
+    expect(resolveTxgioCounty("48999")).toBeUndefined();
   });
 
   it("builds the collection resource URL", () => {
