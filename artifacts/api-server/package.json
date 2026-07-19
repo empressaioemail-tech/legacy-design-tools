@@ -8,6 +8,7 @@
     "dev:local": "cross-env NODE_ENV=development pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "parcels-pmtiles-bake": "tsx src/parcelsPmtilesBakeCli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
@@ -48,6 +49,7 @@
     "geotiff": "^2.1.4-beta.0",
     "google-auth-library": "^10.6.2",
     "pdf-lib": "^1.17.1",
+    "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10",
     "puppeteer": "^24.42.0",
@@ -63,6 +65,7 @@
     "@types/express": "^5.0.6",
     "@types/fluent-ffmpeg": "^2.1.27",
     "@types/node": "catalog:",
+    "@types/pg": "^8.18.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/supertest": "^7.2.0",
@@ -78,6 +81,7 @@
     "react-dom": "catalog:",
     "supertest": "^7.2.2",
     "thread-stream": "3.1.0",
+    "tsx": "catalog:",
     "vitest": "catalog:",
     "zustand": "^5.0.12"
   }
