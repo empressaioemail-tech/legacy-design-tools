@@ -78,12 +78,25 @@ function decodePlaceKeyParam(raw: string | string[] | undefined): string {
 }
 
 /** Pull the first Polygon outer ring out of a parcel FeatureCollection, plus
- *  the parcel's zoningCode/situsAddress properties. Null when no polygon. */
+ *  the parcel's zoningCode/situsAddress properties. Null when no polygon.
+ *
+ *  `parcelNodeId` is the canonical tile-matching parcel identity
+ *  (`{county_fips}:{normalizeCadPropId(prop_id)}`). It is NOT re-derived here:
+ *  both parcel emit paths — the live county-GIS provider
+ *  (`brokerageTxParcels.ts`) and the self-hosted TxGIO store
+ *  (`txgioParcelStore.ts`) — already stamp `parcel_node_id` onto each feature's
+ *  properties via the shared `parcelNodeId()` helper (the same helper the
+ *  PMTiles bake uses), so reading it straight off the feature guarantees the
+ *  value byte-matches the tile `promoteId`. Null when the parcel source did not
+ *  stamp one (e.g. the dormant Cotality fallback, or a county parcel with no
+ *  appraisal prop id) — a mismatching id would glow the wrong parcel or
+ *  nothing, so null is the honest answer. */
 function firstParcelRing(geojson: unknown): {
   ring: Ring;
   zoningCode: string | null;
   situsAddress: string | null;
   apn: string | null;
+  parcelNodeId: string | null;
 } | null {
   const fc = geojson as { features?: unknown[] } | null;
   if (!fc || !Array.isArray(fc.features)) return null;
@@ -110,6 +123,7 @@ function firstParcelRing(geojson: unknown): {
       zoningCode: str(props.zoningCode),
       situsAddress: str(props.situsAddress),
       apn: str(props.apn),
+      parcelNodeId: str(props.parcel_node_id),
     };
   }
   return null;
@@ -215,8 +229,63 @@ async function handleBuildableEnvelope(
   }
   const ctx: EnvelopeContext = resolvedCtx;
 
-  // 1) Resolve the jurisdiction's setback table. No table => honest 404 (no
-  //    codified setbacks here — the geometry can't be derived confidently).
+  // 1) Fetch the REAL parcel polygon at the place point FIRST (county GIS
+  //    pin-query, same path the live map uses; carries zoningCode after
+  //    enrichment AND the canonical `parcel_node_id`). This runs BEFORE the
+  //    setback-table check so `parcel_node_id` is available on every honest
+  //    non-ok status where the parcel resolved — including `no-setbacks`.
+  //    That is the point: a jurisdiction with no codified setback table (e.g.
+  //    Dripping Springs) still has a real parcel, and the map must be able to
+  //    snap + glow the subject parcel even when there is no envelope to draw.
+  //    `parcel_node_id` is therefore gated on parcel resolution, NOT on
+  //    setback/envelope derivation.
+  let parcelGeo: Awaited<ReturnType<typeof queryGisLayerGeoJson>>;
+  try {
+    parcelGeo = await queryGisLayerGeoJson({
+      layer: "parcels",
+      latitude: ctx.lat,
+      longitude: ctx.lng,
+    });
+  } catch (err) {
+    log.warn({ err, placeKey: ctx.placeKey }, "buildable-envelope: parcel fetch failed");
+    res.status(502).json(
+      withPlace(
+        {
+          status: "parcel-unavailable",
+          reason:
+            "Parcel geometry provider is unavailable; can't derive the envelope right now.",
+          parcel_node_id: null,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  const parcel = firstParcelRing(parcelGeo.geojson);
+  if (!parcel) {
+    res.status(404).json(
+      withPlace(
+        {
+          status: "no-parcel",
+          reason:
+            "No parcel polygon found at this location, so a buildable envelope can't be derived.",
+          parcel_node_id: null,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  // The tile-matching subject-parcel id, populated whenever the containing
+  // parcel resolved (independent of setbacks). Threaded through every honest
+  // response below so the map can snap + glow regardless of envelope outcome.
+  const parcelNodeIdValue: string | null = parcel.parcelNodeId;
+
+  // 2) Resolve the jurisdiction's setback table. No table => honest 404 (no
+  //    codified setbacks here — the geometry can't be derived confidently) —
+  //    but the parcel DID resolve, so still emit `parcel_node_id` for the snap.
   const jurisdictionKey = keyFromEngagementOrSynthesize({
     jurisdictionCity: ctx.city,
     jurisdictionState: ctx.state,
@@ -233,6 +302,7 @@ async function handleBuildableEnvelope(
           reason:
             "No codified setback table for this jurisdiction yet, so a buildable envelope can't be derived.",
           jurisdictionKey: jurisdictionKey ?? null,
+          parcel_node_id: parcelNodeIdValue,
         },
         ctx,
       ),
@@ -250,45 +320,7 @@ async function handleBuildableEnvelope(
             table.note ??
             "Setback table for this jurisdiction is pending onboarding.",
           jurisdictionKey,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  // 2) Fetch the REAL parcel polygon at the place point (county GIS pin-query,
-  //    same path the live map uses; carries zoningCode after enrichment).
-  let parcelGeo: Awaited<ReturnType<typeof queryGisLayerGeoJson>>;
-  try {
-    parcelGeo = await queryGisLayerGeoJson({
-      layer: "parcels",
-      latitude: ctx.lat,
-      longitude: ctx.lng,
-    });
-  } catch (err) {
-    log.warn({ err, placeKey: ctx.placeKey }, "buildable-envelope: parcel fetch failed");
-    res.status(502).json(
-      withPlace(
-        {
-          status: "parcel-unavailable",
-          reason:
-            "Parcel geometry provider is unavailable; can't derive the envelope right now.",
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  const parcel = firstParcelRing(parcelGeo.geojson);
-  if (!parcel) {
-    res.status(404).json(
-      withPlace(
-        {
-          status: "no-parcel",
-          reason:
-            "No parcel polygon found at this location, so a buildable envelope can't be derived.",
+          parcel_node_id: parcelNodeIdValue,
         },
         ctx,
       ),
@@ -303,7 +335,11 @@ async function handleBuildableEnvelope(
   if (!district) {
     res.status(404).json(
       withPlace(
-        { status: "no-district", reason: "Setback table has no districts." },
+        {
+          status: "no-district",
+          reason: "Setback table has no districts.",
+          parcel_node_id: parcelNodeIdValue,
+        },
         ctx,
       ),
     );
@@ -329,6 +365,7 @@ async function handleBuildableEnvelope(
         {
           status: "ungeometric-parcel",
           reason: "Parcel geometry is not a usable polygon for envelope derivation.",
+          parcel_node_id: parcelNodeIdValue,
         },
         ctx,
       ),
@@ -369,6 +406,10 @@ async function handleBuildableEnvelope(
       {
         status: derived.empty ? "no-buildable-area" : "ok",
         layer: "buildable-envelope",
+        // Top-level mirror of payload.parcel.parcel_node_id, so the map-snap
+        // consumer reads ONE uniform field (`parcel_node_id`) across every
+        // status (ok, no-buildable-area, no-setbacks, pending, no-parcel, ...).
+        parcel_node_id: parcelNodeIdValue,
         ...wrapEngineEnvelope(
           {
             geojson: derived.geojson,
@@ -380,6 +421,11 @@ async function handleBuildableEnvelope(
               apn: parcel.apn,
               situsAddress: parcel.situsAddress,
               zoningCode: parcel.zoningCode,
+              // Canonical tile-matching id for canvas-free map snap + glow.
+              // Read straight off the resolved feature (already stamped by the
+              // parcel provider via the shared parcelNodeId() helper), so it
+              // byte-matches the PMTiles promoteId. Null when unresolvable.
+              parcel_node_id: parcelNodeIdValue,
               provider: parcelGeo.provider ?? null,
               notSurveyGrade: true,
             },

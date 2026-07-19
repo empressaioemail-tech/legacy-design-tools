@@ -63,7 +63,12 @@ vi.mock("../lib/placeResolve", async () => {
 });
 
 // A 100ft x 200ft rectangular parcel centered on the Bastrop point, zoned R-MD.
-function rectParcel(zoningCode: string | null) {
+// `parcelNodeId` mirrors what the real parcel providers (county-GIS /
+// txgio-store) stamp onto each feature's properties via the shared
+// `parcelNodeId()` helper. When null (default), the feature carries NO
+// `parcel_node_id` property, exactly as the dormant Cotality fallback path
+// leaves it — so the route must surface a null id, never fabricate one.
+function rectParcel(zoningCode: string | null, parcelNodeId: string | null = null) {
   const mPerDegLat = (Math.PI / 180) * 6_378_137;
   const mPerDegLng = mPerDegLat * Math.cos((BASTROP_LAT * Math.PI) / 180);
   const halfW = feetToMeters(100) / 2 / mPerDegLng;
@@ -89,6 +94,7 @@ function rectParcel(zoningCode: string | null) {
           apn: "R123456",
           situsAddress: "1209 Main St",
           zoningCode,
+          ...(parcelNodeId ? { parcel_node_id: parcelNodeId } : {}),
         },
       },
     ],
@@ -96,6 +102,9 @@ function rectParcel(zoningCode: string | null) {
 }
 
 let parcelZoning: string | null = "R-MD";
+// Set per-test to simulate the provider having (or not having) stamped a
+// tile-matching `parcel_node_id` on the resolved feature.
+let parcelNodeIdStamped: string | null = null;
 vi.mock("../lib/brokerageGisLayers", async () => {
   const actual =
     await vi.importActual<typeof import("../lib/brokerageGisLayers")>(
@@ -108,7 +117,7 @@ vi.mock("../lib/brokerageGisLayers", async () => {
       provider: "Test County GIS",
       adapterKey: "test:parcels",
       serviceUrl: "https://example/parcels",
-      geojson: rectParcel(parcelZoning),
+      geojson: rectParcel(parcelZoning, parcelNodeIdStamped),
       featureCount: 1,
       queryMode: "pin" as const,
       notSurveyGrade: true,
@@ -165,6 +174,7 @@ function post(body: Record<string, unknown>) {
 describe("POST /place/buildable-envelope", () => {
   it("returns an envelope with confidence + citation for a matched parcel", async () => {
     parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
@@ -187,6 +197,7 @@ describe("POST /place/buildable-envelope", () => {
 
   it("marks approximate when zoning is absent (conservative fallback)", async () => {
     parcelZoning = null;
+    parcelNodeIdStamped = null;
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
     expect(res.body.payload.approximate).toBe(true);
@@ -196,8 +207,48 @@ describe("POST /place/buildable-envelope", () => {
 
   it("404s honestly when the jurisdiction has no setback table", async () => {
     parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
     const res = await post({ address: "1 Main St, Nowhere, XX" });
     expect(res.status).toBe(404);
     expect(res.body.status).toBe("no-setbacks");
+  });
+});
+
+describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map snap)", () => {
+  it("emits the tile-matching parcel_node_id on the ok path (top-level + payload.parcel)", async () => {
+    parcelZoning = "R-MD";
+    // The Hays 576 Sage Thrasher known case: Hays fips 48209, prop_id 123767
+    // -> the parcel provider stamps parcel_node_id "48209:123767", which must
+    // byte-match the PMTiles promoteId. The route reads it straight off the
+    // resolved feature (no re-derivation).
+    parcelNodeIdStamped = "48209:123767";
+    const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    // FE contract: uniform top-level field across all statuses.
+    expect(res.body.parcel_node_id).toBe("48209:123767");
+    // And inside the parcel identity block on the ok payload.
+    expect(res.body.payload.parcel.parcel_node_id).toBe("48209:123767");
+  });
+
+  it("emits null (never fabricates) when the parcel source stamped no node id", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null; // e.g. dormant Cotality fallback / no prop id
+    const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(200);
+    expect(res.body.parcel_node_id).toBeNull();
+    expect(res.body.payload.parcel.parcel_node_id).toBeNull();
+  });
+
+  it("emits parcel_node_id on the no-setbacks path so the map still snaps + glows", async () => {
+    // Dripping Springs shape: the parcel EXISTS but the jurisdiction has no
+    // codified setback table -> status no-setbacks, yet the subject parcel must
+    // still glow. parcel_node_id is gated on parcel resolution, NOT on setbacks.
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48209:123767";
+    const res = await post({ address: "1 Main St, Nowhere, XX" });
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-setbacks");
+    expect(res.body.parcel_node_id).toBe("48209:123767");
   });
 });
