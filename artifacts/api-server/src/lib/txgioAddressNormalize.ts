@@ -15,7 +15,7 @@
  */
 
 /** USPS street-type synonyms -> canonical abbreviation (uppercase). */
-const STREET_TYPE_ABBR: Record<string, string> = {
+export const STREET_TYPE_ABBR: Record<string, string> = {
   ALLEY: "ALY",
   ALY: "ALY",
   AVENUE: "AVE",
@@ -76,7 +76,7 @@ const STREET_TYPE_ABBR: Record<string, string> = {
 };
 
 /** Directional synonyms -> canonical abbreviation. */
-const DIRECTIONAL_ABBR: Record<string, string> = {
+export const DIRECTIONAL_ABBR: Record<string, string> = {
   NORTH: "N",
   N: "N",
   SOUTH: "S",
@@ -159,4 +159,73 @@ export function normalizeStreetLine(raw: string): string | null {
   }
   if (out.length < 2) return null; // need at least number + one street token
   return out.join(" ");
+}
+
+/**
+ * The ordered set of (spelledOut -> abbrev) canonicalizations the JS
+ * normalizer applies, derived from the SAME two token maps so the SQL
+ * side (below) and the JS side (above) can never drift. Only pairs where
+ * the source spelling differs from its abbreviation are emitted (a token
+ * that already equals its abbreviation is a no-op). Directionals are
+ * listed before street types to mirror the JS lookup order
+ * (`DIRECTIONAL_ABBR[t] ?? STREET_TYPE_ABBR[t]`); since the two key sets
+ * are disjoint and no abbreviation is itself a spelled-out key, the order
+ * only documents intent — there is no cascading between rules.
+ */
+export function streetCanonicalizationPairs(): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const map of [DIRECTIONAL_ABBR, STREET_TYPE_ABBR]) {
+    for (const [word, abbr] of Object.entries(map)) {
+      if (word === abbr) continue; // no-op (already canonical)
+      if (seen.has(word)) continue; // first map wins, mirroring JS
+      seen.add(word);
+      pairs.push([word, abbr]);
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Build a SQL expression that normalizes a STORED situs/full_addr column
+ * to the SAME canonical street line `normalizeStreetLine()` produces for
+ * the query — SYMMETRICALLY, including street-type + directional
+ * canonicalization (so a stored spelled-out "144 THOMAS PLACE" matches a
+ * query of "144 Thomas Place" AND "144 Thomas Pl"). Generated from
+ * {@link streetCanonicalizationPairs} so it cannot diverge from the JS
+ * normalizer.
+ *
+ * Shape (mirrors `normalizeStreetLine`, column side):
+ *   1. `split_part(col, ',', 1)`  — drop city/state/zip after first comma.
+ *   2. uppercase, strip periods, collapse whitespace, trim.
+ *   3. for each (spelledOut -> abbrev): replace whole-word occurrences
+ *      (`\m..\M` word boundaries, global) with the abbreviation.
+ *
+ * Every function used (`split_part`, `upper`, `trim`, `regexp_replace`)
+ * is IMMUTABLE, so this expression is valid as a functional-index key —
+ * the resolver queries and the migration's indexes build the expression
+ * from THIS function, guaranteeing they match byte-for-byte.
+ *
+ * `col` is the raw column SQL text, e.g. `"situs_address"` or
+ * `"full_addr"` (already the correct identifier for the target table).
+ */
+export function buildNormalizedStreetSql(col: string): string {
+  // Base: comma-split, upper, strip periods, collapse whitespace, trim.
+  // Note the ordering — strip periods BEFORE collapsing whitespace, same
+  // as the JS `.replace(/[.]/g,"").replace(/\s+/g," ")` order.
+  let expr =
+    `trim(regexp_replace(` +
+    `regexp_replace(upper(split_part(${col}, ',', 1)), '[.]', '', 'g'), ` +
+    `'\\s+', ' ', 'g'))`;
+  // Wrap the base in a leading+trailing space so a token at the very
+  // start or end still sits between word boundaries uniformly; the outer
+  // trim() at the end removes them. (Postgres \m/\M already handle edges,
+  // but this keeps the expression robust and readable.)
+  for (const [word, abbr] of streetCanonicalizationPairs()) {
+    // \m WORD \M = whole-word match on WORD (Postgres regex word bounds).
+    expr = `regexp_replace(${expr}, '\\m${word}\\M', '${abbr}', 'g')`;
+  }
+  // Final trim + whitespace collapse in case a replacement changed length
+  // (it never introduces spaces, but keep the contract identical).
+  return `trim(${expr})`;
 }

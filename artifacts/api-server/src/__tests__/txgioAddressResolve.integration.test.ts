@@ -113,6 +113,15 @@ const PARCEL_SEED = [
     propId: "700002",
     situsAddress: "10 SHARED ST, KYLE, TX 78640",
   }),
+  // A SPELLED-OUT street type ("PLACE", not "PL") — ~13k Hays+Comal
+  // situs rows store the type spelled out (real: "144 THOMAS PLACE ,
+  // KYLE, TX 78640"). The SQL-side normalization must canonicalize it to
+  // "144 THOMAS PL" so a typed "144 Thomas Place" OR "144 Thomas Pl"
+  // matches (FIX 1 — symmetric normalization).
+  ...parcelRows(5, DUP_A, {
+    propId: "108394",
+    situsAddress: "144 THOMAS PLACE , KYLE, TX 78640",
+  }),
 ];
 
 const ADDRESS_SEED: (typeof txgioAddress.$inferInsert)[] = [
@@ -159,6 +168,27 @@ describe.skipIf(!hasDb)("F4d resolveParcelBySitus (situs -> parcel node)", () =>
         database: db,
       });
       expect(hit?.parcelNodeId).toBe("48209:193340");
+    });
+  });
+
+  it("matches a SPELLED-OUT stored situs type against both spelled and abbreviated queries (FIX 1)", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(txgioParcel).values(PARCEL_SEED);
+      // Stored as "144 THOMAS PLACE"; a query spelling it out must match.
+      const spelled = await resolveParcelBySitus({
+        countyFips: "48209",
+        address: "144 Thomas Place, Kyle, TX 78640",
+        database: db,
+      });
+      expect(spelled?.parcelNodeId).toBe("48209:108394");
+      // And the abbreviated query must match the SAME parcel — symmetric
+      // normalization folds both sides to "144 THOMAS PL".
+      const abbrev = await resolveParcelBySitus({
+        countyFips: "48209",
+        address: "144 Thomas Pl, Kyle, TX 78640",
+        database: db,
+      });
+      expect(abbrev?.parcelNodeId).toBe("48209:108394");
     });
   });
 
