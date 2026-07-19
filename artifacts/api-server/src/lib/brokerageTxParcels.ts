@@ -364,6 +364,37 @@ export function resolveTxParcelCounty(input: {
   return best;
 }
 
+/**
+ * All store-backed (self-hosted `txgio_parcel`) counties whose routing
+ * bbox contains the point — the candidate set for the F4e multi-county
+ * situs resolve. Unlike {@link resolveTxParcelCounty} this returns EVERY
+ * containing store county (not just the nearest centroid), so a situs
+ * that is unique in ANY of them can win over centroid distance and a
+ * point near a county line is never mis-routed to the wrong store
+ * (item 2). Live-ArcGIS counties are excluded: situs lives only in the
+ * store, so they have no situs path (and stay on the pin-query path).
+ */
+export function storeCountiesContainingPoint(
+  latitude: number,
+  longitude: number,
+): TxParcelCounty[] {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+  return TX_PARCEL_COUNTIES.filter(
+    (c) =>
+      c.source === "txgio-store" && bboxContains(c.bbox, latitude, longitude),
+  );
+}
+
+/**
+ * Every store-backed county — the fallback candidate set for the situs
+ * resolve when there is NO geocoded point to route by (a geocode MISS).
+ * A unique situs still resolves without a point, and the set is bounded
+ * (2 counties today), so a full-store situs query is cheap and correct.
+ */
+export function allStoreCounties(): TxParcelCounty[] {
+  return TX_PARCEL_COUNTIES.filter((c) => c.source === "txgio-store");
+}
+
 export function txCountyProviderLabel(county: TxParcelCounty): string {
   return county.source === "txgio-store"
     ? `${county.name} County parcels (TxGIO/StratMap)`

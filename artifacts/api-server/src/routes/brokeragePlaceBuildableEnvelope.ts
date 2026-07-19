@@ -47,18 +47,23 @@ import {
   readContractForWire,
 } from "@workspace/engine-core";
 import { AdapterRunError } from "@workspace/adapters/types";
+import { geocodeAddress } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
 import { resolvePlace, parseCoordPlaceKey } from "../lib/placeResolve";
-import { placeKeyFromCoords } from "../lib/placeLayerUtils";
+import { placeKeyFromCoords, roundPlaceCoord } from "../lib/placeLayerUtils";
 import { queryGisLayerGeoJson } from "../lib/brokerageGisLayers";
 import {
-  resolveParcelBySitus,
   resolveRooftopByAddress,
+  resolveParcelBySitusDisambiguated,
+  type SitusResolveOutcome,
 } from "../lib/txgioAddressResolve";
 import {
   resolveTxParcelCounty,
+  storeCountiesContainingPoint,
+  allStoreCounties,
   txCountyProviderLabel,
   txParcelProviderMode,
+  type TxParcelCounty,
 } from "../lib/brokerageTxParcels";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
@@ -163,6 +168,14 @@ interface EnvelopeContext {
     | "authoritative"
     | "geocode-high"
     | "geocode-low";
+  /**
+   * False ONLY on the F4e situs-hit path when the geocode MISSED, so
+   * `(lat,lng)` is a `(0,0)` sentinel, not a real location. Edge labeling
+   * and the OSM road fetch must then skip the point signal (degrade to lot
+   * shape) rather than treat null-island as the reference point. Absent /
+   * true on every other path (a real point is always present).
+   */
+  hasPoint?: boolean;
 }
 
 function withPlace<T extends Record<string, unknown>>(
@@ -189,6 +202,17 @@ async function resolveContext(
   input:
     | { placeKey: string }
     | { address?: string; lat?: number; lng?: number },
+  /**
+   * A geocode already fetched by the situs pre-pass, reused here so the
+   * no-situs-match fall-through path does NOT geocode a second time. Only
+   * consulted for the address-only branch (explicit coords never geocode).
+   * `null` means the pre-pass geocoded and MISSED — honored as a genuine
+   * geocode miss (422) exactly as `resolvePlace` would have.
+   */
+  pregeocoded?: {
+    provided: boolean;
+    geocode: Awaited<ReturnType<typeof geocodeAddress>> | null;
+  },
 ): Promise<EnvelopeContext | { error: { status: number; body: Record<string, unknown> } }> {
   let resolveInput:
     | { address: string }
@@ -237,7 +261,50 @@ async function resolveContext(
     };
   }
 
-  const resolved = await resolvePlace(resolveInput);
+  // Reuse the situs pre-pass geocode for the address-only branch so we do
+  // not geocode twice. When the pre-pass geocoded and MISSED
+  // (`provided && geocode === null`), honor it as a real geocode miss (422)
+  // just as `resolvePlace` would. Explicit coords never geocode, so they
+  // always go through `resolvePlace` (which only enriches city/state).
+  const canReusePregeocode =
+    pregeocoded?.provided === true && !explicitCoords && addressHint !== null;
+
+  let resolved: Awaited<ReturnType<typeof resolvePlace>>;
+  if (canReusePregeocode) {
+    const geo = pregeocoded!.geocode;
+    if (!geo) {
+      return {
+        error: {
+          status: 422,
+          body: {
+            errorClass: "geocode_miss",
+            error: "geocode_miss",
+            message: "Could not geocode the provided address",
+          },
+        },
+      };
+    }
+    resolved = {
+      placeKey: placeKeyFromCoords(
+        roundPlaceCoord(geo.latitude),
+        roundPlaceCoord(geo.longitude),
+      ),
+      jurisdiction_key: null,
+      ll_uuid: null,
+      workspaceDid: null,
+      geocode: {
+        lat: roundPlaceCoord(geo.latitude),
+        lng: roundPlaceCoord(geo.longitude),
+        city: geo.jurisdictionCity ?? null,
+        state: geo.jurisdictionState ?? null,
+        confidence:
+          geo.matchRung && geo.matchRung !== "street" ? "low" : "high",
+        matchRung: geo.matchRung,
+      },
+    };
+  } else {
+    resolved = await resolvePlace(resolveInput);
+  }
   if ("errorClass" in resolved) {
     return {
       error: {
@@ -306,41 +373,216 @@ async function resolveContext(
 }
 
 /**
- * AUTHORITATIVE situs->parcel short-circuit (F4d, highest authority).
- * When the address matches exactly ONE parcel by
- * `txgio_parcel.situs_address` within the resolved county, fetch that
- * parcel's polygon DIRECTLY by prop id — skipping geocode AND
- * point-in-polygon. Returns the same `{ geojson, provider }` shape the
- * pin-query path returns, or null to fall through to the point path
- * (no address, no county, no unambiguous situs match, or the county has
- * no self-hosted store — the live-county-GIS counties are pin-queried).
+ * The store county that owns a resolved prop id (for the provider label +
+ * the geometry fetch-by-prop-id). The disambiguating resolver stamps the
+ * county into the parcel node id (`{fips}:{propId}`), so recover the fips
+ * from there and map it back to its `TxParcelCounty`.
  */
-async function resolveParcelBySitusDirect(
-  ctx: EnvelopeContext,
-): Promise<{ geojson: unknown; provider: string | null } | null> {
-  if (!ctx.address) return null;
+function storeCountyByFips(fips: string): TxParcelCounty | null {
+  return allStoreCounties().find((c) => c.fips === fips) ?? null;
+}
+
+/**
+ * AUTHORITATIVE situs->parcel resolution (F4e; supersedes the F4d
+ * single-county unique-only `resolveParcelBySitusDirect`). Runs the
+ * disambiguating, multi-county situs resolve and, on an authoritative hit,
+ * fetches that parcel's polygon DIRECTLY by prop id — skipping the geocode
+ * pin-query entirely.
+ *
+ * Returns:
+ *   - `{ parcelGeo, provider }` on an authoritative hit (unique situs, or an
+ *     ambiguous situs the point disambiguated to a single containing parcel).
+ *   - `{ decline: true }` when the situs was AMBIGUOUS and the point could
+ *     NOT disambiguate it — the caller must DECLINE HONESTLY, never
+ *     blind-point-guess a wrong-situs neighbor (commitment #1, item 1).
+ *   - `null` when there was NO situs match at all — the caller falls through
+ *     to the existing rooftop/geocode/pin path unchanged.
+ *
+ * The candidate county set is EVERY store county whose routing bbox
+ * contains the point (item 2), or — when there is no point (geocode miss) —
+ * ALL store counties (item 3); a unique situs needs no point. This inverts
+ * F4d's "situs downstream of geocode-derived county routing": situs
+ * authority is evaluated FIRST, over all candidate counties, and only the
+ * point is used to break a genuine situs ambiguity.
+ */
+async function resolveParcelBySitusAuthoritative(input: {
+  address: string;
+  point: { latitude: number; longitude: number } | null;
+  log: typeof logger;
+  placeKey: string;
+}): Promise<
+  | { parcelGeo: { geojson: unknown; provider: string | null }; nodeCountyFips: string }
+  | { decline: SitusResolveOutcome }
+  | null
+> {
   if (txParcelProviderMode() !== "county-gis") return null;
-  const county = resolveTxParcelCounty({ latitude: ctx.lat, longitude: ctx.lng });
-  // Situs is stored in `txgio_parcel`, so the direct fetch-by-prop-id only
-  // applies to the self-hosted store-backed counties (Hays/Comal). Live
-  // county-GIS counties resolve by pin as before.
-  if (!county || county.source !== "txgio-store") return null;
 
-  const hit = await resolveParcelBySitus({
-    countyFips: county.fips,
-    address: ctx.address,
+  // Candidate store counties: those whose routing bbox contains the point
+  // (item 2 — all containing, not nearest-centroid); ALL store counties when
+  // there is no point to route by (item 3 — a unique situs still resolves).
+  const counties =
+    input.point &&
+    Number.isFinite(input.point.latitude) &&
+    Number.isFinite(input.point.longitude)
+      ? storeCountiesContainingPoint(input.point.latitude, input.point.longitude)
+      : allStoreCounties();
+  if (counties.length === 0) return null;
+
+  const outcome = await resolveParcelBySitusDisambiguated({
+    counties: counties.map((c) => ({ fips: c.fips })),
+    address: input.address,
+    point: input.point,
   });
-  if (!hit) return null;
 
-  // Fetch geometry by the RAW prop id (the store's `prop_id` column),
-  // recovered from the same situs row that produced the match.
+  if (!outcome.hit) {
+    if (outcome.reason === "no-situs-match") return null; // fall through
+    // Ambiguous situs the point couldn't disambiguate -> honest decline.
+    input.log.info(
+      {
+        placeKey: input.placeKey,
+        address: input.address,
+        reason: outcome.reason,
+        ambiguousCandidateCount: outcome.ambiguousCandidateCount,
+      },
+      "buildable-envelope: ambiguous situs not disambiguated by point; declining rather than guessing a neighbor",
+    );
+    return { decline: outcome };
+  }
+
+  // Authoritative hit — recover the owning store county from the node id
+  // (`{fips}:{propId}`) to fetch geometry + label the provider.
+  const nodeCountyFips = outcome.hit.parcelNodeId.split(":")[0] ?? "";
+  const county = storeCountyByFips(nodeCountyFips);
+  if (!county) return null;
+
   const result = await queryTxgioParcelByPropId({
     countyFips: county.fips,
     countyName: county.name,
-    propId: hit.rawPropId,
+    propId: outcome.hit.rawPropId,
   });
   if (!result) return null;
-  return { geojson: result.geojson, provider: txCountyProviderLabel(county) };
+  input.log.info(
+    {
+      placeKey: input.placeKey,
+      address: input.address,
+      parcelNodeId: outcome.hit.parcelNodeId,
+      resolvedBy: outcome.resolvedBy,
+      candidateCounties: counties.map((c) => c.fips),
+    },
+    "buildable-envelope: resolved parcel authoritatively by situs",
+  );
+  return {
+    parcelGeo: { geojson: result.geojson, provider: txCountyProviderLabel(county) },
+    nodeCountyFips: county.fips,
+  };
+}
+
+/**
+ * Pull the free-text address and any explicit point out of the raw route
+ * input, WITHOUT geocoding. The address feeds the situs pre-pass; the
+ * explicit point (caller lat/lng, or a coord-encoded placeKey) is honored
+ * verbatim as the disambiguation point when present.
+ */
+function extractSitusInputs(
+  input: { placeKey: string } | { address?: string; lat?: number; lng?: number },
+): { address: string | null; explicitPoint: { latitude: number; longitude: number } | null } {
+  if ("placeKey" in input) {
+    const coord = parseCoordPlaceKey(input.placeKey);
+    return {
+      address: null,
+      explicitPoint: coord ? { latitude: coord.lat, longitude: coord.lng } : null,
+    };
+  }
+  const address = input.address?.trim() ? input.address.trim() : null;
+  const explicitPoint =
+    input.lat != null && input.lng != null && Number.isFinite(input.lat) && Number.isFinite(input.lng)
+      ? { latitude: input.lat, longitude: input.lng }
+      : null;
+  return { address, explicitPoint };
+}
+
+/**
+ * SITUS-FIRST pre-pass (F4e item 3 — the authority inversion). Run the
+ * authoritative, multi-county, disambiguating situs resolve BEFORE any
+ * geocode-quality or geocode-miss gate, so the STRONGEST signal (situs) is
+ * no longer downstream of the WEAKEST (geocode-derived county routing).
+ *
+ * Point source for disambiguation, in authority order:
+ *   - explicit caller point (honored verbatim), else
+ *   - a BEST-EFFORT geocode purely to obtain a disambiguation point +
+ *     city/state. A geocode MISS is NON-FATAL here: `point` stays null and a
+ *     UNIQUE situs still resolves (that is the whole point — a clean unique
+ *     situs must not be lost to a geocode miss). The geocode is NOT re-run
+ *     downstream; its result is threaded back so the no-situs path reuses it.
+ *
+ * Returns the situs outcome plus the (best-effort) geocode so the caller can
+ * (a) derive directly on a hit, (b) 404 honestly on an ambiguous decline, or
+ * (c) fall through to the existing rooftop/geocode/pin path on no-match.
+ */
+async function situsFirstPreResolve(input: {
+  address: string | null;
+  explicitPoint: { latitude: number; longitude: number } | null;
+  log: typeof logger;
+  placeKey: string;
+}): Promise<{
+  situs:
+    | { parcelGeo: { geojson: unknown; provider: string | null }; nodeCountyFips: string }
+    | { decline: SitusResolveOutcome }
+    | null;
+  geocode: Awaited<ReturnType<typeof geocodeAddress>> | null;
+}> {
+  const { address, explicitPoint } = input;
+  if (!address) return { situs: null, geocode: null };
+
+  let point = explicitPoint;
+  let geocode: Awaited<ReturnType<typeof geocodeAddress>> | null = null;
+  if (!point) {
+    // Best-effort geocode ONLY for a disambiguation point + city/state. A
+    // miss (or a service hiccup) must NOT abort — a unique situs resolves
+    // with no point at all.
+    try {
+      geocode = await geocodeAddress(address);
+      if (geocode && Number.isFinite(geocode.latitude) && Number.isFinite(geocode.longitude)) {
+        point = { latitude: geocode.latitude, longitude: geocode.longitude };
+      }
+    } catch (err) {
+      input.log.warn(
+        { err, address, placeKey: input.placeKey },
+        "buildable-envelope: best-effort geocode for situs disambiguation failed; proceeding point-less",
+      );
+    }
+  }
+
+  const situs = await resolveParcelBySitusAuthoritative({
+    address,
+    point,
+    log: input.log,
+    placeKey: input.placeKey,
+  });
+  return { situs, geocode };
+}
+
+/**
+ * Best-effort city/state from a stored situs string
+ * ("300 BLANCO RIVER RD, WIMBERLEY, TX 78676" -> { city: "WIMBERLEY",
+ * state: "TX" }). Used to synthesize the setback jurisdiction key when a
+ * situs hit resolved WITHOUT a geocode (miss) so there is no geocode
+ * city/state. Returns nulls when the shape is not the expected
+ * "street, city, ST zip". Never fabricates.
+ */
+function cityStateFromSitus(situs: string | null): {
+  city: string | null;
+  state: string | null;
+} {
+  if (!situs) return { city: null, state: null };
+  const parts = situs.split(",").map((p) => p.trim()).filter(Boolean);
+  // Expect [street, city, "ST zip"] (or [street, city, "ST", zip]).
+  if (parts.length < 3) return { city: null, state: null };
+  const city = parts[1] || null;
+  const stateZip = parts.slice(2).join(" ").trim();
+  const stateMatch = /\b([A-Za-z]{2})\b/.exec(stateZip);
+  const state = stateMatch ? stateMatch[1]!.toUpperCase() : null;
+  return { city, state };
 }
 
 /**
@@ -357,49 +599,130 @@ async function handleBuildableEnvelope(
   skipRoad: boolean,
 ): Promise<void> {
   const log = reqLog(req);
-  const resolvedCtx = await resolveContext(input);
-  if ("error" in resolvedCtx) {
-    res.status(resolvedCtx.error.status).json(resolvedCtx.error.body);
-    return;
-  }
-  const ctx: EnvelopeContext = resolvedCtx;
 
-  // 1) Fetch the REAL parcel polygon FIRST (carries zoningCode after
-  //    enrichment AND the canonical `parcel_node_id`). This runs BEFORE the
-  //    setback-table check so `parcel_node_id` is available on every honest
-  //    non-ok status where the parcel resolved — including `no-setbacks`.
-  //    That is the point: a jurisdiction with no codified setback table (e.g.
-  //    Dripping Springs) still has a real parcel, and the map must be able to
-  //    snap + glow the subject parcel even when there is no envelope to draw.
-  //    `parcel_node_id` is therefore gated on parcel resolution, NOT on
-  //    setback/envelope derivation.
-  //
-  //    RESOLUTION AUTHORITY (F4d):
-  //      (a) AUTHORITATIVE situs->parcel: when the address matches exactly
-  //          one parcel by `txgio_parcel.situs_address`, fetch THAT parcel's
-  //          polygon directly by prop id — no geocode, no point-in-polygon.
-  //      (b) point pin-query at ctx.(lat,lng): the point is already the best
-  //          available (explicit coords > authoritative rooftop > geocode),
-  //          so this is the same live map path, now fed a trustworthy point.
-  //    A geocode centroid (low confidence) that resolved NEITHER (a) nor a
-  //    containing parcel is reported as an honest no-parcel, never a
-  //    fabricated wrong-parcel and never a provider-outage 502.
+  // === F4e: SITUS-FIRST (authority inversion). ===
+  // Run the authoritative, multi-county, disambiguating situs resolve BEFORE
+  // resolveContext's geocode-quality/geocode-miss gate, so a clean unique
+  // situs (or a point-disambiguated ambiguous situs) resolves even when the
+  // geocode is a coarse centroid or MISSES entirely. Three outcomes:
+  //   - HIT       : derive from that parcel directly, skipping the gate.
+  //   - DECLINE   : ambiguous situs the point couldn't disambiguate -> honest
+  //                 404 no-parcel (NEVER a blind-pin wrong-situs neighbor).
+  //   - NO-MATCH  : fall through to the existing rooftop/geocode/pin path,
+  //                 reusing the pre-pass geocode so we do not geocode twice.
+  const { address: situsAddress, explicitPoint } = extractSitusInputs(input);
+  const { situs, geocode: pregeocode } = await situsFirstPreResolve({
+    address: situsAddress,
+    explicitPoint,
+    log,
+    placeKey: "placeKey" in input ? input.placeKey : "",
+  });
+
   let parcelGeo: Awaited<ReturnType<typeof queryGisLayerGeoJson>> | {
     geojson: unknown;
     provider: string | null;
   };
+  let ctx: EnvelopeContext;
+
+  if (situs && "decline" in situs) {
+    // Ambiguous situs, point did not disambiguate -> honest decline. Build a
+    // minimal ctx (best-effort placeKey from the geocode point, if any) so
+    // the response still carries placeKey.
+    const pt =
+      explicitPoint ??
+      (pregeocode &&
+      Number.isFinite(pregeocode.latitude) &&
+      Number.isFinite(pregeocode.longitude)
+        ? { latitude: pregeocode.latitude, longitude: pregeocode.longitude }
+        : null);
+    const declineCtx: EnvelopeContext = {
+      placeKey: pt
+        ? placeKeyFromCoords(roundPlaceCoord(pt.latitude), roundPlaceCoord(pt.longitude))
+        : ("placeKey" in input ? input.placeKey : ""),
+      lat: pt?.latitude ?? 0,
+      lng: pt?.longitude ?? 0,
+      city: pregeocode?.jurisdictionCity ?? null,
+      state: pregeocode?.jurisdictionState ?? null,
+      address: situsAddress,
+      pointConfidence: explicitPoint ? "coordinates" : "geocode-low",
+    };
+    res.status(404).json(
+      withPlace(
+        {
+          status: "no-parcel",
+          reason:
+            "This address matches multiple parcels sharing one situs and could not be pinned to a single one confidently, so a buildable envelope can't be derived.",
+          parcel_node_id: null,
+        },
+        declineCtx,
+      ),
+    );
+    return;
+  }
+
+  if (situs && "parcelGeo" in situs) {
+    // AUTHORITATIVE situs hit. Build ctx WITHOUT the geocode gate. City/state
+    // for the setback jurisdiction come from the geocode when it succeeded,
+    // else from the resolved parcel's own situs string (a unique situs can
+    // resolve with no geocode at all).
+    const parcel0 = firstParcelRing(situs.parcelGeo.geojson);
+    const fromSitus = cityStateFromSitus(parcel0?.situsAddress ?? null);
+    const pt =
+      explicitPoint ??
+      (pregeocode &&
+      Number.isFinite(pregeocode.latitude) &&
+      Number.isFinite(pregeocode.longitude)
+        ? { latitude: pregeocode.latitude, longitude: pregeocode.longitude }
+        : null);
+    ctx = {
+      placeKey: pt
+        ? placeKeyFromCoords(roundPlaceCoord(pt.latitude), roundPlaceCoord(pt.longitude))
+        : ("placeKey" in input ? input.placeKey : ""),
+      // The point (when present) still drives edge-labeling / road lookup
+      // downstream; on a geocode miss it is absent and labeling degrades to
+      // lot-shape (still honest).
+      lat: pt?.latitude ?? 0,
+      lng: pt?.longitude ?? 0,
+      city: pregeocode?.jurisdictionCity ?? fromSitus.city,
+      state: pregeocode?.jurisdictionState ?? fromSitus.state,
+      address: situsAddress,
+      pointConfidence: explicitPoint ? "coordinates" : "authoritative",
+      // No real point when the geocode missed AND no explicit coords — edge
+      // labeling must not treat the (0,0) sentinel as a reference point.
+      hasPoint: pt !== null,
+    };
+    parcelGeo = situs.parcelGeo;
+    // Skip the geocode gate and the pin-query — the parcel is already in hand.
+    await deriveAndRespond({ req, res, ctx, parcelGeo, skipRoad, log });
+    return;
+  }
+
+  // === NO situs match: existing rooftop/geocode/pin path, unchanged. ===
+  // Reuse the pre-pass geocode (fetched for the address-only branch) so we
+  // don't geocode twice; explicit-coord / placeKey inputs never geocoded in
+  // the pre-pass, so pass provided=false for those.
+  const resolvedCtx = await resolveContext(input, {
+    provided: situsAddress !== null && explicitPoint === null,
+    geocode: pregeocode,
+  });
+  if ("error" in resolvedCtx) {
+    res.status(resolvedCtx.error.status).json(resolvedCtx.error.body);
+    return;
+  }
+  ctx = resolvedCtx;
+
+  // 1) Fetch the REAL parcel polygon (carries zoningCode after enrichment AND
+  //    the canonical `parcel_node_id`), BEFORE the setback check so the id is
+  //    present on every honest status. The authoritative situs path already
+  //    ran above (and either resolved, declined, or fell through as no-match),
+  //    so here we only have the point pin-query (b) and the geocode-centroid
+  //    honest-decline (b'):
+  //      (b') geocode CENTROID (ZIP/city rung), no situs, no rooftop upgrade
+  //           -> honest no-parcel (pin-querying a centroid is what grabbed a
+  //           WRONG parcel before; commitment #1).
+  //      (b)  point pin-query at the (rooftop-grade or explicit) point.
   try {
-    // (a) authoritative situs->parcel first.
-    const situsDirect = await resolveParcelBySitusDirect(ctx);
-    if (situsDirect) {
-      parcelGeo = situsDirect;
-    } else if (ctx.pointConfidence === "geocode-low") {
-      // (b') The point is a fuzzy geocode CENTROID (ZIP/city rung), NOT a
-      //      rooftop, and neither the authoritative situs match nor the
-      //      authoritative rooftop upgrade resolved this address. Pin-
-      //      querying a centroid is exactly what silently resolved the
-      //      WRONG parcel before (commitment #1: a confidently-wrong
-      //      answer is worse than none). Fail honestly instead.
+    if (ctx.pointConfidence === "geocode-low") {
       log.info(
         { placeKey: ctx.placeKey, address: ctx.address },
         "buildable-envelope: declining to resolve a parcel from a geocode centroid",
@@ -416,14 +739,13 @@ async function handleBuildableEnvelope(
         ),
       );
       return;
-    } else {
-      // (b) point pin-query at the (rooftop-grade or explicit) point.
-      parcelGeo = await queryGisLayerGeoJson({
-        layer: "parcels",
-        latitude: ctx.lat,
-        longitude: ctx.lng,
-      });
     }
+    // (b) point pin-query at the (rooftop-grade or explicit) point.
+    parcelGeo = await queryGisLayerGeoJson({
+      layer: "parcels",
+      latitude: ctx.lat,
+      longitude: ctx.lng,
+    });
   } catch (err) {
     // ERROR CLASSIFICATION (F4d). The store/provider readers throw a
     // named `AdapterRunError`: `no-coverage` means the query SUCCEEDED but
@@ -468,6 +790,26 @@ async function handleBuildableEnvelope(
     return;
   }
 
+  await deriveAndRespond({ req, res, ctx, parcelGeo, skipRoad, log });
+}
+
+/**
+ * Shared derivation tail: given a resolved parcel `parcelGeo` (from EITHER
+ * the authoritative situs path or the point pin-query) plus the context,
+ * resolve setbacks, map district, label edges, derive the envelope, and send
+ * the honesty-wrapped response (or an honest non-ok status). Extracted so the
+ * F4e situs-hit path (which skips the geocode gate and pin-query) and the
+ * legacy pin-query path share ONE derivation + honesty implementation.
+ */
+async function deriveAndRespond(args: {
+  req: Request;
+  res: Response;
+  ctx: EnvelopeContext;
+  parcelGeo: { geojson: unknown; provider: string | null };
+  skipRoad: boolean;
+  log: typeof logger;
+}): Promise<void> {
+  const { res, ctx, parcelGeo, skipRoad } = args;
   const parcel = firstParcelRing(parcelGeo.geojson);
   if (!parcel) {
     // The query succeeded but returned no usable polygon at this point.
@@ -496,9 +838,13 @@ async function handleBuildableEnvelope(
   // 2) Resolve the jurisdiction's setback table. No table => honest 404 (no
   //    codified setbacks here — the geometry can't be derived confidently) —
   //    but the parcel DID resolve, so still emit `parcel_node_id` for the snap.
+  //    City/state come from the geocode when available, else from the parcel's
+  //    own situs (F4e: a situs-resolved parcel with a missed geocode still
+  //    synthesizes a jurisdiction key from its situs city/state).
+  const situsCityState = cityStateFromSitus(parcel.situsAddress);
   const jurisdictionKey = keyFromEngagementOrSynthesize({
-    jurisdictionCity: ctx.city,
-    jurisdictionState: ctx.state,
+    jurisdictionCity: ctx.city ?? situsCityState.city,
+    jurisdictionState: ctx.state ?? situsCityState.state,
     address: ctx.address ?? undefined,
   });
   const table: SetbackTable | null = jurisdictionKey
@@ -559,15 +905,20 @@ async function handleBuildableEnvelope(
   // 4) Edge labeling (Problem A — the crux). Best signal wins: nearest OSM road
   //    (high), else the geocoded point (medium), else lot shape (low). The road
   //    fetch is best-effort; failure degrades to the point signal.
+  //    When there is NO real point (F4e situs hit + geocode miss), skip BOTH
+  //    the road fetch and the point refPoint — a `(0,0)` sentinel would label
+  //    edges against null island. Labeling then degrades honestly to lot
+  //    shape.
+  const hasPoint = ctx.hasPoint !== false;
   let road: RoadPolyline | null = null;
-  if (!skipRoad) {
+  if (!skipRoad && hasPoint) {
     const roads = await fetchNearestRoads({ lat: ctx.lat, lng: ctx.lng });
     road = roads[0] ?? null;
   }
   const labeling = labelEdges({
     ring: parcel.ring,
     road,
-    refPoint: { lng: ctx.lng, lat: ctx.lat },
+    refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
   });
   if (!labeling) {
     res.status(422).json(
