@@ -16,6 +16,38 @@ export const RESEARCH_AREA_VISIBLE_PARCEL = z.object({
   attrs: z.record(z.unknown()).optional(),
 });
 
+/**
+ * Researched subject parcel's zoning constraints (setbacks + buildable envelope).
+ * Fully optional so content-bundle / intel-panel callers that send no subject
+ * never break. Numbers are approximate, not survey-grade (honesty contract).
+ */
+export const RESEARCH_AREA_SUBJECT = z.object({
+  parcelNodeId: z.string().nullish(),
+  address: z.string().nullish(),
+  setbacks: z
+    .object({
+      front_ft: z.number().nullish(),
+      side_ft: z.number().nullish(),
+      rear_ft: z.number().nullish(),
+      district: z.string().nullish(),
+    })
+    .nullish(),
+  envelope: z
+    .object({
+      buildableAreaSqFt: z.number().nullish(),
+      buildableAreaPct: z.number().nullish(),
+      maxHeightFt: z.number().nullish(),
+      maxLotCoveragePct: z.number().nullish(),
+      maxFootprintSqFt: z.number().nullish(),
+      notSurveyGrade: z.boolean().nullish(),
+      approximate: z.boolean().nullish(),
+      edgeSignal: z.string().nullish(), // "road" | "point" | "shape"
+      disclosure: z.string().nullish(),
+      citationUrl: z.string().nullish(),
+    })
+    .nullish(),
+});
+
 export const RESEARCH_AREA_CONTEXT = z
   .object({
     /** `area` = map-level question; `property` = default single-listing focus. */
@@ -33,6 +65,8 @@ export const RESEARCH_AREA_CONTEXT = z
       .optional(),
     activeFilters: z.record(z.unknown()).optional(),
     visibleParcels: z.array(RESEARCH_AREA_VISIBLE_PARCEL).max(100).optional(),
+    /** Researched subject parcel constraints (setbacks + buildable envelope). */
+    subject: RESEARCH_AREA_SUBJECT.nullish(),
   })
   .optional();
 
@@ -95,5 +129,83 @@ export function formatResearchAreaContextForLlm(
     }
   }
 
+  const subjectBlock = formatSubjectConstraintsForLlm(areaContext.subject);
+  if (subjectBlock) {
+    lines.push("");
+    lines.push(subjectBlock);
+  }
+
   return lines.join("\n");
+}
+
+/**
+ * Renders the researched subject parcel's setbacks + buildable envelope for the
+ * LLM prompt, present-fields-only, always carrying the not-survey-grade hedge.
+ * Returns "" when no subject (or no usable subject fields) are supplied.
+ */
+export function formatSubjectConstraintsForLlm(
+  subject: z.infer<typeof RESEARCH_AREA_SUBJECT> | null | undefined,
+): string {
+  if (!subject) return "";
+
+  const sb = subject.setbacks ?? undefined;
+  const env = subject.envelope ?? undefined;
+
+  const detail: string[] = [];
+
+  const district = sb?.district;
+  if (district) detail.push(`- Zoning district: ${district}`);
+
+  const setbackParts: string[] = [];
+  if (sb?.front_ft != null) setbackParts.push(`front ${sb.front_ft} ft`);
+  if (sb?.side_ft != null) setbackParts.push(`side ${sb.side_ft} ft`);
+  if (sb?.rear_ft != null) setbackParts.push(`rear ${sb.rear_ft} ft`);
+  if (setbackParts.length) detail.push(`- Setbacks: ${setbackParts.join(", ")}`);
+
+  const envParts: string[] = [];
+  if (env?.buildableAreaSqFt != null) {
+    const pct =
+      env.buildableAreaPct != null ? ` (${env.buildableAreaPct}% of lot)` : "";
+    envParts.push(`buildable area ${env.buildableAreaSqFt} sqft${pct}`);
+  } else if (env?.buildableAreaPct != null) {
+    envParts.push(`buildable area ${env.buildableAreaPct}% of lot`);
+  }
+  if (env?.maxFootprintSqFt != null) {
+    envParts.push(`max footprint ${env.maxFootprintSqFt} sqft`);
+  }
+  if (env?.maxHeightFt != null) envParts.push(`max height ${env.maxHeightFt} ft`);
+  if (env?.maxLotCoveragePct != null) {
+    envParts.push(`max lot coverage ${env.maxLotCoveragePct}%`);
+  }
+  if (envParts.length) detail.push(`- Envelope: ${envParts.join("; ")}`);
+
+  const edgeSignal = env?.edgeSignal;
+  const lowerConfidence =
+    env?.approximate === true ||
+    edgeSignal === "shape" ||
+    edgeSignal === "point";
+  if (edgeSignal) {
+    const hedge = lowerConfidence
+      ? ` — front edge inferred from parcel ${edgeSignal}, lower confidence`
+      : "";
+    detail.push(`- Front-edge inference: ${edgeSignal}${hedge}`);
+  } else if (lowerConfidence) {
+    detail.push("- Note: envelope is approximate (lower confidence)");
+  }
+
+  if (env?.disclosure) detail.push(`- ${env.disclosure}`);
+  if (env?.citationUrl) detail.push(`- Source: ${env.citationUrl}`);
+
+  // Nothing usable to render (no PII in this shape by contract).
+  if (!detail.length) return "";
+
+  const header =
+    "SUBJECT PARCEL CONSTRAINTS (approximate, not survey-grade — verify with city):";
+  const instruction =
+    "When the user asks about setbacks / ADU / additions and SUBJECT PARCEL " +
+    "CONSTRAINTS are present, answer from them and cite the source; state they " +
+    "are approximate and to verify with the city. If absent, say the setbacks " +
+    "aren't resolved for this parcel yet — do not fabricate.";
+
+  return [header, ...detail, instruction].join("\n");
 }
