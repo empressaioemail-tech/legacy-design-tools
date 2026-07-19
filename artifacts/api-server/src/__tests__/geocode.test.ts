@@ -86,6 +86,8 @@ describe("geocodeAddress", () => {
     expect(geo!.latitude).toBe(38.5);
     expect(geo!.longitude).toBe(-109.5);
     expect(geo!.jurisdictionCity).toBe("Moab");
+    // The house-number street rung is rooftop-grade (F4d).
+    expect(geo!.matchRung).toBe("street");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -98,7 +100,23 @@ describe("geocodeAddress", () => {
     const geo = await geocodeAddress("1144 N Kayenta Dr\nMoab UT 84532");
     expect(geo).not.toBeNull();
     expect(geo!.latitude).toBe(38.57);
+    // The centroid rung is NOT rooftop — it must be tagged as such so a
+    // consumer never treats it like a precise point (the F4d bug).
+    expect(geo!.matchRung).toBe("locality");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 15_000);
+
+  it("tags a bare-ZIP-rung hit as 'zip' (coarsest, never rooftop)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(fakeResponse([])) // street miss
+      .mockResolvedValueOnce(fakeResponse([])) // city miss
+      .mockResolvedValueOnce(
+        fakeResponse(nominatimHit("38.6", "-109.6", "Moab", "Utah")),
+      ); // zip centroid hit
+    const geo = await geocodeAddress("1144 N Kayenta Dr\nMoab UT 84532");
+    expect(geo).not.toBeNull();
+    expect(geo!.matchRung).toBe("zip");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   }, 15_000);
 
   it("returns null when every rung is a clean miss", async () => {
