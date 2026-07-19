@@ -66,6 +66,7 @@ import {
 import { parcelNodeId } from "./parcelNodeId";
 import {
   normalizeStreetLine,
+  normalizeStreetLineCandidates,
   buildNormalizedStreetSql,
 } from "./txgioAddressNormalize";
 
@@ -174,8 +175,8 @@ export async function resolveParcelBySitus(input: {
   address: string;
   database?: TxgioAddressResolveDb;
 }): Promise<AddressResolveHit | null> {
-  const key = normalizeStreetLine(input.address);
-  if (!key) return null;
+  const keys = normalizeStreetLineCandidates(input.address);
+  if (keys.length === 0) return null;
   const database = input.database ?? defaultDb;
 
   const rows = (await database
@@ -184,7 +185,7 @@ export async function resolveParcelBySitus(input: {
     .where(
       and(
         eq(txgioParcel.countyFips, input.countyFips.trim()),
-        eq(normalizedColumnExpr("situs_address"), key),
+        inArray(normalizedColumnExpr("situs_address"), keys),
       ),
     )) as { propId: string | null }[];
 
@@ -253,8 +254,8 @@ export async function resolveParcelBySitusDisambiguated(input: {
   point?: { latitude: number; longitude: number } | null;
   database?: TxgioAddressResolveDb;
 }): Promise<SitusResolveOutcome> {
-  const key = normalizeStreetLine(input.address);
-  if (!key) return { hit: null, reason: "no-situs-match" };
+  const keys = normalizeStreetLineCandidates(input.address);
+  if (keys.length === 0) return { hit: null, reason: "no-situs-match" };
   const database = input.database ?? defaultDb;
 
   const fipsList = [
@@ -278,7 +279,7 @@ export async function resolveParcelBySitusDisambiguated(input: {
     .where(
       and(
         inArray(txgioParcel.countyFips, fipsList),
-        eq(normalizedColumnExpr("situs_address"), key),
+        inArray(normalizedColumnExpr("situs_address"), keys),
       ),
     )) as {
     countyFips: string | null;
@@ -390,8 +391,8 @@ export async function resolveRooftopByAddress(input: {
   address: string;
   database?: TxgioAddressResolveDb;
 }): Promise<RooftopHit | null> {
-  const key = normalizeStreetLine(input.address);
-  if (!key) return null;
+  const keys = normalizeStreetLineCandidates(input.address);
+  if (keys.length === 0) return null;
   const database = input.database ?? defaultDb;
 
   const rows = (await database
@@ -403,7 +404,7 @@ export async function resolveRooftopByAddress(input: {
     .where(
       and(
         eq(txgioAddress.countyFips, input.countyFips.trim()),
-        eq(normalizedColumnExpr("full_addr"), key),
+        inArray(normalizedColumnExpr("full_addr"), keys),
       ),
     )) as { latitude: number; longitude: number }[];
 

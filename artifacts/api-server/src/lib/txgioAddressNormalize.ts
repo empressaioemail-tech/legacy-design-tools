@@ -116,17 +116,18 @@ const UNIT_DESIGNATORS = new Set([
 ]);
 
 /**
- * Normalize an address to a canonical `"{number} {street}"` token stream
- * for equality comparison against a stored situs/full_addr. Drops any
- * trailing city/state/zip (so a typed "6026 Marsh Ln, Buda, TX 78610"
- * still compares against the store's "6026 MARSH LN"), a trailing unit,
- * and canonicalizes street-type + directional words to their USPS
- * abbreviation.
+ * Fold the FIRST comma-delimited segment of a typed address into the
+ * canonical token stream a stored situs/full_addr street line reduces to:
+ * uppercase, punctuation-stripped, whitespace-collapsed, unit-truncated,
+ * and street-type/directional canonicalized to USPS abbreviations. Returns
+ * an empty array when there is no leading house number (unmatchable).
  *
- * Returns null when there is nothing usable (no leading house number).
+ * Shared by {@link normalizeStreetLine} and
+ * {@link normalizeStreetLineCandidates} so both derive their key(s) from
+ * the identical base tokenization.
  */
-export function normalizeStreetLine(raw: string): string | null {
-  if (!raw) return null;
+function baseStreetTokens(raw: string): string[] {
+  if (!raw) return [];
   // Take the FIRST comma-delimited segment — the street line. A typed
   // full address ("6026 Marsh Ln, Buda, TX 78610") and a bare street
   // line both reduce to the same street tokens this way, and a stored
@@ -138,15 +139,15 @@ export function normalizeStreetLine(raw: string): string | null {
     .replace(/[.]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!cleaned) return null;
+  if (!cleaned) return [];
 
   const tokens = cleaned.split(" ").filter(Boolean);
-  if (tokens.length === 0) return null;
+  if (tokens.length === 0) return [];
 
   // Must start with a house number (the situs/full_addr store both do).
   // Addresses with no leading number (e.g. a bare street or the empty
-  // ", ," situs) are not matchable this way -> null.
-  if (!/^\d/.test(tokens[0]!)) return null;
+  // ", ," situs) are not matchable this way -> [].
+  if (!/^\d/.test(tokens[0]!)) return [];
 
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -157,8 +158,131 @@ export function normalizeStreetLine(raw: string): string | null {
     const canonical = DIRECTIONAL_ABBR[t] ?? STREET_TYPE_ABBR[t] ?? t;
     out.push(canonical);
   }
-  if (out.length < 2) return null; // need at least number + one street token
-  return out.join(" ");
+  return out;
+}
+
+/** A 5-digit or ZIP+4 zip token. */
+const ZIP_RE = /^\d{5}(-\d{4})?$/;
+/** A bare 2-letter US state token (already uppercased). Kept broad — any
+ *  two-letter alpha token that sits directly before a trailing zip is a
+ *  state in this position (the store is TX-only, but the anchor is the
+ *  <state><zip> shape, not the literal "TX"). */
+const STATE_RE = /^[A-Z]{2}$/;
+
+/**
+ * Normalize an address to a canonical `"{number} {street}"` token stream
+ * for equality comparison against a stored situs/full_addr. Drops the
+ * city/state/zip AFTER the first comma (so a typed
+ * "6026 Marsh Ln, Buda, TX 78610" still compares against the store's
+ * "6026 MARSH LN"), a trailing unit, and canonicalizes street-type +
+ * directional words to their USPS abbreviation.
+ *
+ * This is the PRIMARY key. For a comma-LESS full address (the shape the FE
+ * usually sends) it still contains the trailing locality; use
+ * {@link normalizeStreetLineCandidates} to also get the city/state/zip-
+ * stripped street-line candidates for the situs/rooftop lookups.
+ *
+ * Returns null when there is nothing usable (no leading house number, or
+ * fewer than number + one street token).
+ */
+export function normalizeStreetLine(raw: string): string | null {
+  const tokens = baseStreetTokens(raw);
+  if (tokens.length < 2) return null; // need at least number + one street token
+  return tokens.join(" ");
+}
+
+/**
+ * QUERY-SIDE key derivation for the F4d/F4e situs + rooftop lookups. Given
+ * a typed address, return the set of candidate normalized street-line keys
+ * to match against the stored (comma-bearing) situs/full_addr — most
+ * authoritative (fewest assumptions) first.
+ *
+ * WHY A SET. The stored situs is ALWAYS comma-delimited, so its street
+ * line falls out of `split_part(col, ',', 1)` cleanly. A typed query is
+ * frequently comma-LESS ("576 Sage Thrasher Cir Dripping Springs TX
+ * 78620") — the common FE shape — and then the first-comma split yields
+ * the WHOLE string, so `normalizeStreetLine` keeps the city/state/zip and
+ * never equals the stored "576 SAGE THRASHER CIR". We fix that here,
+ * QUERY-side only (the stored-side / index expression in
+ * {@link buildNormalizedStreetSql} is UNCHANGED — no reindex).
+ *
+ * THE RULE (only fires when a trailing <STATE> <ZIP> anchor is present,
+ * i.e. the input was comma-less):
+ *   1. Base tokens = {@link baseStreetTokens} (the primary key's tokens).
+ *   2. If the tokens end with `<2-letter state> <zip>` or a bare `<zip>`,
+ *      strip that anchor, then emit the street-line candidates that drop
+ *      0, 1, 2, and 3 further trailing tokens — the city is 0..3 words in
+ *      the real store (0 = "<street> <state> <zip>" with no city; 233k of
+ *      234k city-bearing parcels are 1-2 words, a handful are 3 like
+ *      "FAIR OAKS RANCH"). Each candidate keeps >= number + one street
+ *      token.
+ *
+ * WHY DROP-N RATHER THAN CUT-AT-SUFFIX. The store's street lines do NOT
+ * reliably end in a recognizable street-type suffix (highways/FM/RR/US/IH
+ * "13341 W US 290", "1531 LOOP 165", "TBD"), and some CITY names DO end in
+ * a street-type word ("GARDEN RIDGE" -> RIDGE is in the abbr map). So
+ * neither "keep through the last street-type suffix" nor "cut at the first
+ * suffix" is safe (last breaks Garden Ridge; first breaks "LOOP 165",
+ * "CIRCLE OAK DR", "CATTLE TRAIL DR"). The <state><zip> tail is the only
+ * reliable anchor; from it we enumerate the 1..3-word city drop and let
+ * the DB's EXACT normalized match + UNIQUE-prop-id rule pick the real
+ * street line. An over- or under-stripped candidate matches nothing (or,
+ * at worst, adds a distinct prop id that makes the resolver DECLINE as
+ * ambiguous — never returns a wrong parcel; commitment #1).
+ *
+ * The returned list is de-duplicated and preserves order (primary first).
+ * When there is no <state><zip> anchor (a comma-delimited address, or a
+ * bare street line like "6026 Marsh Ln"), the ONLY candidate is the
+ * primary key — behavior identical to `normalizeStreetLine`.
+ */
+export function normalizeStreetLineCandidates(raw: string): string[] {
+  const tokens = baseStreetTokens(raw);
+  if (tokens.length < 2) return [];
+
+  const candidates: string[] = [];
+  const push = (toks: string[]) => {
+    if (toks.length < 2) return; // need number + >= one street token
+    const key = toks.join(" ");
+    if (!candidates.includes(key)) candidates.push(key);
+  };
+
+  // Primary key: the full first-segment street line (unchanged behavior,
+  // and the correct/only key for comma-delimited input).
+  push(tokens);
+
+  // Comma-less tail: strip a trailing <state> <zip> (or a bare <zip>). Only
+  // when such an anchor is actually present do we treat trailing tokens as
+  // a locality to strip — this keeps bare street lines ("6026 MARSH LN")
+  // and comma-delimited inputs (already just the street line) untouched.
+  let end = tokens.length;
+  const last = tokens[end - 1]!;
+  const secondLast = end >= 2 ? tokens[end - 2]! : undefined;
+  let strippedAnchor = false;
+  if (ZIP_RE.test(last)) {
+    end -= 1; // drop zip
+    strippedAnchor = true;
+    if (secondLast && STATE_RE.test(secondLast)) {
+      end -= 1; // drop state before the zip
+    }
+  } else if (STATE_RE.test(last) && secondLast && ZIP_RE.test(secondLast)) {
+    // Rare "<zip> <state>" ordering — drop both.
+    end -= 2;
+    strippedAnchor = true;
+  }
+
+  if (strippedAnchor) {
+    const withoutAnchor = tokens.slice(0, end);
+    // Drop 0, 1, 2, and 3 trailing city tokens (city is 0..3 words: 0 when
+    // the address is "<street> <state> <zip>" with no city, up to 3 like
+    // "FAIR OAKS RANCH"). Each is an EXACT-match candidate; only the real
+    // street line will hit a stored situs, so extra candidates are harmless.
+    for (let drop = 0; drop <= 3; drop++) {
+      if (withoutAnchor.length - drop < 2) break;
+      push(withoutAnchor.slice(0, withoutAnchor.length - drop));
+    }
+  }
+
+  return candidates;
 }
 
 /**
