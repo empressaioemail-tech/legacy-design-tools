@@ -303,11 +303,10 @@ async function exportCounty(
       feature_index: number;
       prop_id: string | null;
       situs_address: string | null;
-      owner_name: string | null;
       geometry: unknown;
     }>(
       `SELECT DISTINCT ON (feature_index)
-              feature_index, prop_id, situs_address, owner_name, geometry
+              feature_index, prop_id, situs_address, geometry
          FROM ${county.table}
         WHERE county_fips = $1
           AND feature_index > $2
@@ -328,8 +327,14 @@ async function exportCounty(
         properties.parcel_node_id = nodeId;
         nodeIds += 1;
       }
+      // situsAddress is the parcel's own public street address (on the
+      // listing, the county site, the map click UX). It is kept.
+      //
+      // owner_name is NOT stamped: the CAD owner NAME is the private pairing
+      // and this PMTiles archive is a public, bulk-downloadable, cache-forever
+      // artifact. Publishing owner names on ~2.5M features would leak the names
+      // of millions of Texans. The column is not even SELECTed above.
       if (row.situs_address) properties.situsAddress = row.situs_address;
-      if (row.owner_name) properties.owner = row.owner_name;
       if (row.prop_id) {
         // The cad_property key is CAD-normalized (leading zeros stripped),
         // the same key the cad:* brief adapters join on. The store's raw
