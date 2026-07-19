@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
+import { AdapterRunError } from "@workspace/adapters/types";
 import { ctx } from "./test-context";
 import { feetToMeters } from "../lib/buildableEnvelope/geometry";
 
@@ -33,6 +34,16 @@ vi.mock("@workspace/db", async () => {
 // Geocode -> a fixed Bastrop point (bastrop-tx has a real setback table).
 const BASTROP_LNG = -97.31;
 const BASTROP_LAT = 30.11;
+// Per-test override of the geocoded point/city (F4d situs tests need a
+// Hays point so the county resolves to the txgio-store-backed county).
+// Reset in beforeEach.
+let geocodeOverride: {
+  lat: number;
+  lng: number;
+  city: string;
+  state: string;
+  matchRung?: "street" | "locality" | "zip";
+} | null = null;
 vi.mock("../lib/placeResolve", async () => {
   const actual =
     await vi.importActual<typeof import("../lib/placeResolve")>(
@@ -42,20 +53,24 @@ vi.mock("../lib/placeResolve", async () => {
     ...actual,
     resolvePlace: vi.fn(async (input: unknown) => {
       const i = input as { address?: string };
+      const o = geocodeOverride;
       // Route "Nowhere, XX" to a no-setback jurisdiction.
       const noSetback =
         typeof i.address === "string" && /nowhere/i.test(i.address);
+      const lat = o?.lat ?? BASTROP_LAT;
+      const lng = o?.lng ?? BASTROP_LNG;
       return {
-        placeKey: `coord:${BASTROP_LAT}:${BASTROP_LNG}`,
+        placeKey: `coord:${lat}:${lng}`,
         jurisdiction_key: null,
         ll_uuid: null,
         workspaceDid: null,
         geocode: {
-          lat: BASTROP_LAT,
-          lng: BASTROP_LNG,
-          city: noSetback ? "Nowhere" : "Bastrop",
-          state: noSetback ? "XX" : "TX",
+          lat,
+          lng,
+          city: o?.city ?? (noSetback ? "Nowhere" : "Bastrop"),
+          state: o?.state ?? (noSetback ? "XX" : "TX"),
           confidence: "high" as const,
+          matchRung: o?.matchRung,
         },
       };
     }),
@@ -105,6 +120,11 @@ let parcelZoning: string | null = "R-MD";
 // Set per-test to simulate the provider having (or not having) stamped a
 // tile-matching `parcel_node_id` on the resolved feature.
 let parcelNodeIdStamped: string | null = null;
+// Per-test control over the pin-query path: set to an AdapterRunError to
+// simulate a provider failure vs. an empty-coverage (no parcel) throw,
+// or record the point it was called with.
+let pinQueryThrow: unknown = null;
+let lastPinQueryPoint: { latitude?: number; longitude?: number } | null = null;
 vi.mock("../lib/brokerageGisLayers", async () => {
   const actual =
     await vi.importActual<typeof import("../lib/brokerageGisLayers")>(
@@ -112,16 +132,57 @@ vi.mock("../lib/brokerageGisLayers", async () => {
     );
   return {
     ...actual,
-    queryGisLayerGeoJson: vi.fn(async () => ({
-      layer: "parcels",
-      provider: "Test County GIS",
-      adapterKey: "test:parcels",
-      serviceUrl: "https://example/parcels",
-      geojson: rectParcel(parcelZoning, parcelNodeIdStamped),
-      featureCount: 1,
-      queryMode: "pin" as const,
-      notSurveyGrade: true,
-    })),
+    queryGisLayerGeoJson: vi.fn(
+      async (input: { latitude?: number; longitude?: number }) => {
+        lastPinQueryPoint = {
+          latitude: input.latitude,
+          longitude: input.longitude,
+        };
+        if (pinQueryThrow) throw pinQueryThrow;
+        return {
+          layer: "parcels",
+          provider: "Test County GIS",
+          adapterKey: "test:parcels",
+          serviceUrl: "https://example/parcels",
+          geojson: rectParcel(parcelZoning, parcelNodeIdStamped),
+          featureCount: 1,
+          queryMode: "pin" as const,
+          notSurveyGrade: true,
+        };
+      },
+    ),
+  };
+});
+
+// The F4d authoritative resolver + store direct-fetch. Off by default
+// (null returns -> fall through to the point path, preserving the
+// existing tests); a test sets these to exercise the situs short-circuit.
+let situsHit:
+  | { parcelNodeId: string; rawPropId: string; matchSource: "situs" }
+  | null = null;
+let rooftopHit:
+  | { latitude: number; longitude: number; matchSource: "txgio-address" }
+  | null = null;
+let byPropIdResult: unknown = null;
+vi.mock("../lib/txgioAddressResolve", async () => {
+  const actual =
+    await vi.importActual<typeof import("../lib/txgioAddressResolve")>(
+      "../lib/txgioAddressResolve",
+    );
+  return {
+    ...actual,
+    resolveParcelBySitus: vi.fn(async () => situsHit),
+    resolveRooftopByAddress: vi.fn(async () => rooftopHit),
+  };
+});
+vi.mock("../lib/txgioParcelStore", async () => {
+  const actual =
+    await vi.importActual<typeof import("../lib/txgioParcelStore")>(
+      "../lib/txgioParcelStore",
+    );
+  return {
+    ...actual,
+    queryTxgioParcelByPropId: vi.fn(async () => byPropIdResult),
   };
 });
 
@@ -170,6 +231,17 @@ function post(body: Record<string, unknown>) {
     .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
     .send(body);
 }
+
+import { beforeEach } from "vitest";
+beforeEach(() => {
+  // Reset F4d controls so each test starts from the point-path baseline.
+  pinQueryThrow = null;
+  lastPinQueryPoint = null;
+  situsHit = null;
+  rooftopHit = null;
+  byPropIdResult = null;
+  geocodeOverride = null;
+});
 
 describe("POST /place/buildable-envelope", () => {
   it("returns an envelope with confidence + citation for a matched parcel", async () => {
@@ -250,5 +322,133 @@ describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map sna
     expect(res.status).toBe(404);
     expect(res.body.status).toBe("no-setbacks");
     expect(res.body.parcel_node_id).toBe("48209:123767");
+  });
+});
+
+describe("POST /place/buildable-envelope — F4d authoritative resolution", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  it("HONORS explicit lat/lng and does NOT re-geocode the point (even with an address)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    // Pass a point that is NOT the Bastrop point the geocode mock would
+    // return; the pin query must be called with the CALLER'S coords.
+    const res = await postWith({
+      address: "1209 Main St, Bastrop, TX 78602",
+      lat: 30.04667,
+      lng: -97.81298,
+    });
+    expect(res.status).toBe(200);
+    expect(lastPinQueryPoint).toEqual({
+      latitude: 30.04667,
+      longitude: -97.81298,
+    });
+  });
+
+  it("classifies an empty-coverage throw as an honest 404 no-parcel (NOT a 502)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    // The store/provider readers throw AdapterRunError("no-coverage") when
+    // the query succeeded but no parcel matched — this is the geocode-miss
+    // / point-outside-every-polygon case that used to masquerade as a 502.
+    pinQueryThrow = new AdapterRunError(
+      "no-coverage",
+      "no ingested parcel polygons for this query",
+    );
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-parcel");
+    expect(res.body.parcel_node_id).toBeNull();
+  });
+
+  it("still returns a real 502 for a GENUINE provider failure (network/upstream)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    pinQueryThrow = new AdapterRunError(
+      "upstream-error",
+      "county ArcGIS service returned HTTP 500",
+    );
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(502);
+    expect(res.body.status).toBe("parcel-unavailable");
+  });
+
+  it("uses the authoritative situs short-circuit for a Hays store-backed county", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    // Geocode returns a Hays point (Buda) so the county resolves to the
+    // txgio-store-backed Hays; the situs resolver returns a direct hit,
+    // and the store returns that parcel's geometry by prop id.
+    geocodeOverride = {
+      lat: 30.04667,
+      lng: -97.81298,
+      city: "Buda",
+      state: "TX",
+      matchRung: "street",
+    };
+    situsHit = {
+      parcelNodeId: "48209:193340",
+      rawPropId: "193340",
+      matchSource: "situs",
+    };
+    byPropIdResult = {
+      geojson: rectParcel("R-MD", "48209:193340"),
+      featureCount: 1,
+      queryMode: "pin" as const,
+    };
+    const res = await postWith({ address: "6026 Marsh Ln, Buda, TX 78610" });
+    // Buda (Hays) has no codified setback table, so the envelope itself
+    // is an honest no-setbacks 404 — but the AUTHORITATIVE situs
+    // short-circuit still resolved the SUBJECT PARCEL, so parcel_node_id
+    // is populated (the map can snap + glow). That the id is present is
+    // the proof the situs path resolved the right parcel.
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-setbacks");
+    expect(res.body.parcel_node_id).toBe("48209:193340");
+    // The point pin-query must NOT have been consulted — the situs path
+    // short-circuited it.
+    expect(lastPinQueryPoint).toBeNull();
+  });
+
+  it("declines to resolve from a geocode CENTROID (locality/zip rung) — honest 404, no pin-query", async () => {
+    // The address only geocoded to a ZIP/city centroid (matchRung !=
+    // "street") and neither authoritative path (situs/rooftop) matched.
+    // Pin-querying a centroid is what resolved the WRONG parcel before —
+    // fail honestly instead, and NEVER consult the pin query.
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    situsHit = null;
+    rooftopHit = null; // no authoritative upgrade
+    geocodeOverride = {
+      lat: BASTROP_LAT,
+      lng: BASTROP_LNG,
+      city: "Bastrop",
+      state: "TX",
+      matchRung: "zip", // centroid, not rooftop
+    };
+    const res = await postWith({ address: "9999 Rural Rd, Bastrop, TX 78602" });
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-parcel");
+    expect(res.body.parcel_node_id).toBeNull();
+    // The centroid must NOT have been pin-queried.
+    expect(lastPinQueryPoint).toBeNull();
+  });
+
+  it("still returns a full 200 envelope through the point path (no regression)", async () => {
+    // The default point path (no situs short-circuit) still flows all the
+    // way to a 200 envelope for a jurisdiction WITH a setback table
+    // (bastrop-tx) — the F4d changes are additive and don't regress it.
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    situsHit = null; // point path
+    geocodeOverride = null; // Bastrop (has setbacks)
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
   });
 });

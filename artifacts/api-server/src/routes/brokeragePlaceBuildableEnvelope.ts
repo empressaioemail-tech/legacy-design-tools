@@ -389,13 +389,41 @@ async function handleBuildableEnvelope(
     provider: string | null;
   };
   try {
-    parcelGeo =
-      (await resolveParcelBySitusDirect(ctx)) ??
-      (await queryGisLayerGeoJson({
+    // (a) authoritative situs->parcel first.
+    const situsDirect = await resolveParcelBySitusDirect(ctx);
+    if (situsDirect) {
+      parcelGeo = situsDirect;
+    } else if (ctx.pointConfidence === "geocode-low") {
+      // (b') The point is a fuzzy geocode CENTROID (ZIP/city rung), NOT a
+      //      rooftop, and neither the authoritative situs match nor the
+      //      authoritative rooftop upgrade resolved this address. Pin-
+      //      querying a centroid is exactly what silently resolved the
+      //      WRONG parcel before (commitment #1: a confidently-wrong
+      //      answer is worse than none). Fail honestly instead.
+      log.info(
+        { placeKey: ctx.placeKey, address: ctx.address },
+        "buildable-envelope: declining to resolve a parcel from a geocode centroid",
+      );
+      res.status(404).json(
+        withPlace(
+          {
+            status: "no-parcel",
+            reason:
+              "Could not pin this address to a rooftop; only an approximate area was found, so a buildable envelope can't be derived confidently.",
+            parcel_node_id: null,
+          },
+          ctx,
+        ),
+      );
+      return;
+    } else {
+      // (b) point pin-query at the (rooftop-grade or explicit) point.
+      parcelGeo = await queryGisLayerGeoJson({
         layer: "parcels",
         latitude: ctx.lat,
         longitude: ctx.lng,
-      }));
+      });
+    }
   } catch (err) {
     // ERROR CLASSIFICATION (F4d). The store/provider readers throw a
     // named `AdapterRunError`: `no-coverage` means the query SUCCEEDED but
@@ -650,10 +678,14 @@ brokeragePlaceBuildableEnvelopeRouter.post("/buildable-envelope", (req, res) => 
     });
     return;
   }
+  // Pass ALL of address+lat+lng through — DO NOT drop lat/lng when an
+  // address is also present (the F4d bug: caller-supplied coordinates
+  // were ignored and the address re-geocoded to a possibly-wrong point).
+  // `resolveContext` honors explicit coordinates over the geocode.
   void handleBuildableEnvelope(
     req,
     res,
-    address ? { address } : { lat, lng, address },
+    { address, lat, lng },
     skipRoad === true,
   );
 });
