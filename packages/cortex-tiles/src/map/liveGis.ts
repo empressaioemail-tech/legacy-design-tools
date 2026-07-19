@@ -15,9 +15,17 @@
 //   { layer, provider, adapterKey, serviceUrl, featureCount, queryMode,
 //     truncated, geojson: FeatureCollection, packageTier,
 //     notSurveyGrade?, disclaimer? }
-// Parcel feature properties: apn, situsAddress, owner, landUseCode?,
-// landUseDescription?, countyFips, countyName, provider, retrievedAt,
-// notSurveyGrade. FEMA feature properties: FLD_ZONE, SFHA_TF, ...
+// Parcel feature properties: parcel_node_id, apn, situsAddress, owner,
+// landUseCode?, landUseDescription?, countyFips, countyName, provider,
+// retrievedAt, notSurveyGrade. FEMA feature properties: FLD_ZONE, SFHA_TF, ...
+//
+// parcel_node_id is the CANONICAL parcel id — `{county_fips}:{normalizeCadPropId
+// (prop_id)}` — stamped by the backend map-data route (brokerageTxParcels.ts /
+// txgioParcelStore.ts). It is carried through this library UNTOUCHED: the geojson
+// FeatureCollection threads straight into the OverlaySpec (overlayForLayer does
+// not rebuild feature props), and selectionToCard surfaces it on the card as
+// `parcelNodeId` so the frontend can key MapLibre feature-state highlight on the
+// canonical id (with `apn` kept as the back-compat fallback).
 
 import type { OverlaySpec, ParcelSelection } from '@hauska/map-renderer'
 
@@ -621,6 +629,13 @@ function composeOverlays(
 
 /** What the parcel info card renders, extracted from a map click selection. */
 export interface ParcelCardData {
+  /**
+   * Canonical parcel id `{county_fips}:{normalizeCadPropId(prop_id)}` when the
+   * backend stamped it on the feature; null otherwise. This is the id the
+   * frontend keys MapLibre feature-state highlight on. `apn` stays as the
+   * back-compat fallback for features that predate the canonical id.
+   */
+  parcelNodeId: string | null
   apn: string | null
   situsAddress: string | null
   owner: string | null
@@ -641,6 +656,10 @@ export function selectionToCard(sel: ParcelSelection): ParcelCardData {
   const countyName = str(p.countyName)
   const countyFips = str(p.countyFips)
   return {
+    // Prefer the canonical parcel_node_id the backend stamps; snake_case is the
+    // wire key on the feature props. Kept alongside apn (never replacing it) so a
+    // feature without the canonical id still resolves on apn.
+    parcelNodeId: str(p.parcel_node_id),
     apn: str(p.apn),
     situsAddress: str(p.situsAddress) ?? (sel.address ?? null),
     owner: str(p.owner),
