@@ -341,6 +341,7 @@ describe('selectionToCard (click payload)', () => {
       lat: 29.87019,
       lng: -97.92754,
       properties: {
+        parcel_node_id: '48209:R12311',
         apn: '12311',
         situsAddress: '600 CAPE RD, SAN MARCOS, TX 78666',
         owner: 'TEXAS PARKS & WILDLIFE DEPT',
@@ -352,6 +353,7 @@ describe('selectionToCard (click payload)', () => {
       },
     })
     expect(card).toEqual({
+      parcelNodeId: '48209:R12311',
       apn: '12311',
       situsAddress: '600 CAPE RD, SAN MARCOS, TX 78666',
       owner: 'TEXAS PARKS & WILDLIFE DEPT',
@@ -363,6 +365,26 @@ describe('selectionToCard (click payload)', () => {
       lat: 29.87019,
       lng: -97.92754,
     })
+  })
+
+  it('carries the canonical parcel_node_id onto the card when present', () => {
+    // The seam this change closes: the backend stamps parcel_node_id on the
+    // feature; the selection must surface it so the frontend feature-state
+    // highlight can key on the canonical id instead of the apn fallback.
+    const card = selectionToCard({
+      layerKey: LIVE_PARCELS_KEY,
+      properties: { parcel_node_id: '48453:R000123', apn: '000123' },
+    })
+    expect(card.parcelNodeId).toBe('48453:R000123')
+    expect(card.apn).toBe('000123')
+  })
+
+  it('falls back cleanly when parcel_node_id is absent (apn still resolves, no crash)', () => {
+    // Back-compat: a feature that predates the canonical id has no
+    // parcel_node_id; the card must still resolve on apn with parcelNodeId null.
+    const card = selectionToCard({ properties: { apn: '000123' } })
+    expect(card.parcelNodeId).toBeNull()
+    expect(card.apn).toBe('000123')
   })
 
   it('prefers landUseDescription and falls back to landUseCode', () => {
