@@ -295,6 +295,71 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
     normalizeProps: (p) => p,
   },
   {
+    name: "Bell",
+    fips: "48027",
+    source: "txgio-store",
+    // No live queryable Bell county GIS — served from the self-hosted TxGIO
+    // store (promoted from txgio_parcel_staging). serviceUrl is provenance.
+    // No cad_property (land-use) or txgio_address rows for this county yet, so
+    // features resolve by geometry and render neutral (no land-use color, no
+    // rooftop/situs authority) — geocode-point resolution only, honest per
+    // the store's not-survey-grade posture.
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48027_lp.zip",
+    // Routing bbox from the promoted staging geometry
+    // (west/south/east/north min/max: [-97.9219, 30.7371, -97.0633, 31.4063]),
+    // padded. Centroid is the parcel-MASS centroid (mean of per-parcel bbox
+    // centers), not the bbox midpoint, so the nearest-centroid tiebreak in
+    // resolveTxParcelCounty places Bell's mass correctly against Williamson's
+    // overlapping bbox to the south (verified: ~98% of sampled Bell parcels
+    // resolve to Bell).
+    bbox: { westLng: -97.94, southLat: 30.72, eastLng: -97.05, northLat: 31.42 },
+    centroid: { latitude: 31.0744, longitude: -97.5432 },
+    normalizeProps: (p) => p,
+  },
+  {
+    name: "McLennan",
+    fips: "48309",
+    source: "txgio-store",
+    // No live queryable McLennan county GIS — served from the TxGIO store
+    // (promoted from staging). No land-use/address rows yet: geometry-only,
+    // neutral render, geocode-point resolution. serviceUrl is provenance.
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48309_lp.zip",
+    // Routing bbox from the promoted staging geometry
+    // ([-97.6054, 31.2454, -96.7968, 31.8632]), padded. Parcel-MASS centroid
+    // (verified: ~99% of sampled McLennan parcels resolve to McLennan).
+    bbox: { westLng: -97.62, southLat: 31.23, eastLng: -96.78, northLat: 31.88 },
+    centroid: { latitude: 31.544, longitude: -97.1794 },
+    normalizeProps: (p) => p,
+  },
+  {
+    name: "Guadalupe",
+    fips: "48187",
+    source: "txgio-store",
+    // No live queryable Guadalupe county GIS — served from the TxGIO store
+    // (promoted from staging). No land-use/address rows yet: geometry-only,
+    // neutral render, geocode-point resolution. serviceUrl is provenance.
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48187_lp.zip",
+    // Routing bbox from the promoted staging geometry
+    // ([-98.3120, 29.3653, -97.6310, 29.8580]), padded. Parcel-MASS centroid
+    // (mean of per-parcel bbox centers). NOTE: Guadalupe's routing bbox
+    // overlaps Comal (48091), Bexar (48029), and Caldwell (48055) at their
+    // shared borders. The mass centroid lifts correct resolution to ~95% of
+    // sampled Guadalupe parcels, but the nearest-centroid heuristic cannot
+    // fully separate the New-Braunfels-area interleave: a small number of
+    // border points (notably some genuine Comal parcels near New Braunfels)
+    // still resolve here and will read as no-coverage against the Guadalupe
+    // store. This is the known limit of bbox+centroid pre-routing for
+    // interleaved store counties; true separation needs point-in-polygon
+    // pre-resolution (out of scope for this router change). See the F4g PR
+    // description and the promote runbook.
+    bbox: { westLng: -98.33, southLat: 29.35, eastLng: -97.62, northLat: 29.87 },
+    centroid: { latitude: 29.6026, longitude: -98.075 },
+    normalizeProps: (p) => p,
+  },
+  {
     name: "Caldwell",
     fips: "48055",
     serviceUrl:
