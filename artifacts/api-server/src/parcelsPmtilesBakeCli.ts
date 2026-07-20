@@ -34,14 +34,23 @@
  * renderer (promoteId defaults to the `parcel_node_id` property) keys on
  * it regardless of how tippecanoe resolves the tile id.
  *
- * LAND-USE. Five of the ten counties have a CAD appraisal roll loaded
- * (`cad_property`): Travis, Williamson, Bastrop, Caldwell, Hays. For those,
+ * LAND-USE. Six of the ten counties have a CAD appraisal roll loaded
+ * (`cad_property`): Travis, Williamson, Bastrop, Caldwell, Hays, and Bexar.
+ * (Bexar was omitted from this list historically; loadLandUse pulls ALL
+ * cad_property rows and is NOT county-gated, so any county with a loaded
+ * roll joins — Bexar's ~623k coded rows join at ~88% today.) For those,
  * each parcel is joined (latest tax year, coded rows only) to its
  * `property_use_code` and stamped `landUseCode` + a keyword-bucketable
- * `landUseDescription` (via the shared `ptadLandUseDescription`). The other
- * five bake geometry-only with uniform paint — still clickable, honestly
- * neutral (no fabricated code). The join uses the SAME key the cad:* brief
- * adapters use: `(county_fips, normalizeCadPropId(prop_id))`.
+ * `landUseDescription` (via the shared `ptadLandUseDescription`). The
+ * remaining counties bake geometry-only with uniform paint — still
+ * clickable, honestly neutral (no fabricated code). The join uses the SAME
+ * key the cad:* brief adapters use: `(county_fips, cad-normalized prop_id)`,
+ * via `normalizeForJoin` (see ./lib/joinNormalize). Williamson's TxGIO
+ * prop_ids are in the appraisal "R-account" form ("R000009") while its
+ * cad_property rows are bare numeric ("9"); `normalizeForJoin` strips the
+ * leading "R" before the leading-zero normalize so Williamson now joins
+ * (recovering a large chunk of its parcels — some TxGIO prop_ids have no
+ * matching cad row, so this is a partial, not total, join).
  *
  * RE-RUNNABLE + CONTENT-HASHED. Emits a GeoJSONSeq (newline-delimited)
  * export, runs tippecanoe to a temp PMTiles, then renames it to a
@@ -86,6 +95,7 @@ import { parseArgs } from "node:util";
 import pg from "pg";
 
 import { parcelNodeId } from "./lib/parcelNodeId";
+import { normalizeForJoin } from "./lib/joinNormalize";
 // The land-use description mapping lives in a dependency-free module (NOT
 // imported from txgioParcelStore, which drags in @workspace/db and would
 // throw on a missing DATABASE_URL at import time — this offline bake
@@ -362,13 +372,6 @@ async function exportCounty(
     if (r.rows.length < pageLimit) break;
   }
   return { features, landUse: landUseHits, nodeIds };
-}
-
-/** Mirror of normalizeCadPropId for the join fallback (leading zeros). */
-function normalizeForJoin(propId: string): string {
-  const t = propId.trim();
-  if (!/^\d+$/.test(t)) return t;
-  return t.replace(/^0+(?=\d)/, "");
 }
 
 // ---------------------------------------------------------------------------
