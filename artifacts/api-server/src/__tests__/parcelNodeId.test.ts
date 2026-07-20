@@ -99,19 +99,26 @@ describe("live county-ArcGIS emit path stamps parcel_node_id", () => {
     expect("parcel_node_id" in feature.properties).toBe(false);
   });
 
-  it("keys on PROP_ID only, ignoring the geo_id fallback (different id space)", () => {
-    const travis = TX_PARCEL_COUNTIES.find(
-      (c) => c.fips === "48453",
+  it("keys on the primary prop id only, ignoring the different-id-space apn fallback", () => {
+    // Caldwell (still live-ArcGIS after the F4h Travis/Williamson store flip)
+    // carries the same invariant the flipped Travis geo_id case used to prove:
+    // apn falls back to OLDPROPID (a SUPERSEDED / different id space), but the
+    // node id keys on the current Prop_ID ONLY — OLDPROPID is not the
+    // CAD/txgio join key, so parcel_node_id must be omitted when only the
+    // fallback id is present. (Caldwell: apn = Prop_ID ?? OLDPROPID;
+    // rawPropId = Prop_ID only.)
+    const caldwell = TX_PARCEL_COUNTIES.find(
+      (c) => c.fips === "48055",
     ) as TxParcelCounty;
     const [feature] = normalizeTxCountyFeatures(
-      travis,
+      caldwell,
       [
         {
           type: "Feature",
-          geometry: { type: "Point", coordinates: [-97.78, 30.33] },
-          // No PROP_ID, only geo_id: apn falls back to geo_id, but the
-          // node id must NOT — geo_id is not the CAD/txgio join key.
-          properties: { geo_id: "0203140101" },
+          geometry: { type: "Point", coordinates: [-97.62, 29.84] },
+          // No Prop_ID, only OLDPROPID: apn falls back to OLDPROPID, but the
+          // node id must NOT — OLDPROPID is a superseded, different id space.
+          properties: { OLDPROPID: "0203140101" },
         },
       ],
       "2026-07-18T00:00:00.000Z",
