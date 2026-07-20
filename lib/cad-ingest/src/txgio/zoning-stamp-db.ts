@@ -12,19 +12,35 @@
  * overwrites in place. A parcel whose centroid falls in no zoning polygon
  * is left NULL (never guessed).
  *
+ * Write path: the PIP loop only COLLECTS the matched `(feature_index, code)`
+ * pairs in memory; after the loop they are flushed in batches, each batch a
+ * single set-based UPDATE that joins a parameterized `VALUES` list against
+ * `txgio_parcel`. A county with ~40k matches is one round-trip per ~5k
+ * matches instead of one per match, dropping a stamp run from ~40 min to a
+ * few minutes. The join still touches EVERY per-cell row of each matched
+ * feature (the `WHERE t.feature_index = v.feature_index` has no tile_key
+ * bound), so `rowsUpdated` still counts total ROWS (>= parcelsMatched),
+ * identical to the old one-UPDATE-per-parcel semantics.
+ *
  * db-handle-injected (own pool from the CLI; a fake in tests), same pattern
  * as `ingest.ts`.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { txgioParcel } from "@workspace/db/schema";
 import type { GeoJsonGeometry } from "./geo";
 import { stampParcelZoning, type ZoningPolygon } from "./zoning-stamp";
 
+/**
+ * Injected db handle. Reads use `selectDistinctOn`; the batched write uses
+ * raw `execute(sql...)` (drizzle's typed `.update()` builder can't express a
+ * `VALUES`-join set-update cleanly), so `execute` is part of the surface the
+ * CLI's real pool and the test fake both satisfy.
+ */
 export type ZoningStampDb = Pick<
   NodePgDatabase<Record<string, unknown>>,
-  "selectDistinctOn" | "update"
+  "selectDistinctOn" | "execute"
 >;
 
 export interface ZoningStampSummary {
@@ -43,6 +59,61 @@ export interface ZoningStampSummary {
 interface DistinctParcelRow {
   featureIndex: number;
   geometry: unknown;
+}
+
+/** One matched parcel's stamp, collected during PIP, flushed in batches. */
+interface StampPair {
+  featureIndex: number;
+  code: string;
+}
+
+/**
+ * Max `(feature_index, code)` pairs per batched UPDATE. Each pair binds 2
+ * params (int + text) and the whole statement binds 1 shared county param,
+ * so a batch of 5000 binds 10001 params — well under pg's ~65535 bound-
+ * parameter ceiling. Exported for the test that proves the chunk split.
+ */
+export const ZONING_STAMP_BATCH_SIZE = 5000;
+
+/** Split a flat array into fixed-size chunks (last chunk may be short). */
+export function chunkPairs<T>(items: T[], size: number): T[][] {
+  if (size <= 0) throw new Error("chunk size must be > 0");
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+/**
+ * Flush one batch of matched pairs as a single set-based UPDATE joining a
+ * parameterized `VALUES` list. Returns the number of ROWS updated (sums all
+ * per-cell duplicate rows of every feature in the batch). All values are
+ * bound params (never interpolated), so the code strings are injection-safe.
+ */
+async function flushBatch(
+  db: ZoningStampDb,
+  countyFips: string,
+  batch: StampPair[],
+): Promise<number> {
+  if (batch.length === 0) return 0;
+  // (feature_index, code) tuples as bound params. Casts pin the pg types so
+  // the VALUES list has an unambiguous column type from the first row.
+  const values = sql.join(
+    batch.map(
+      (p) => sql`(${p.featureIndex}::integer, ${p.code}::text)`,
+    ),
+    sql`, `,
+  );
+  const stmt = sql`
+    UPDATE ${txgioParcel} AS t
+    SET zoning_district = v.code
+    FROM (VALUES ${values}) AS v(feature_index, code)
+    WHERE t.county_fips = ${countyFips}
+      AND t.feature_index = v.feature_index
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+  return res?.rowCount ?? 0;
 }
 
 /**
@@ -81,6 +152,8 @@ export async function stampCountyZoning(opts: {
     rowsUpdated: 0,
   };
 
+  // PIP loop: collect matched pairs in memory, no per-parcel round-trip.
+  const matches: StampPair[] = [];
   for (const p of parcels) {
     if (limit !== undefined && summary.parcelsRead >= limit) break;
     summary.parcelsRead += 1;
@@ -91,21 +164,18 @@ export async function stampCountyZoning(opts: {
       summary.parcelsMatched += 1;
       summary.codeHistogram[hit.code] =
         (summary.codeHistogram[hit.code] ?? 0) + 1;
-      if (!dryRun) {
-        const res = (await db
-          .update(txgioParcel)
-          .set({ zoningDistrict: hit.code })
-          .where(
-            and(
-              eq(txgioParcel.countyFips, countyFips),
-              eq(txgioParcel.featureIndex, p.featureIndex),
-            ),
-          )) as unknown as { rowCount?: number };
-        summary.rowsUpdated += res?.rowCount ?? 0;
-      }
+      matches.push({ featureIndex: p.featureIndex, code: hit.code });
     }
     if (summary.parcelsRead % progressEvery === 0) {
       opts.onProgress?.(summary.parcelsRead, summary.parcelsMatched);
+    }
+  }
+
+  // Batched write. dryRun writes nothing; matching semantics above already
+  // ran identically either way.
+  if (!dryRun && matches.length > 0) {
+    for (const batch of chunkPairs(matches, ZONING_STAMP_BATCH_SIZE)) {
+      summary.rowsUpdated += await flushBatch(db, countyFips, batch);
     }
   }
 
