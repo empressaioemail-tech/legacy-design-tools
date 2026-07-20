@@ -1,0 +1,168 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "hutto-tx",
+  "jurisdictionDisplayName": "City of Hutto, TX",
+  "note": "Codified from the City of Hutto Unified Development Code (UDC), Chapter 4 (Site design standards), Section 10.403.4.2 (Primary and accessory structures default bulk standards) and Section 10.403.3 (Lot dimensions and area) — UDC Updated through March 2024, the current in-force edition hosted as a city PDF at huttotx.gov (NOT on Municode; the batch's 'Municode UDC' label was incorrect — Municode has no Hutto client and Hutto's Code of Ordinances is on eCode360 while the UDC/zoning lives in this standalone city PDF). Each district cites the UDC Section 10.403.4.2 bulk-standards table. MODELING NOTES: (1) Front yard (min), Side yard (min), Rear yard (min), and Building height (max) come from the Section 10.403.4.2 table; the table states building height in FEET so max_height_ft is ordinance-sourced. (2) The UDC states NO per-district maximum building lot-coverage or impervious-cover cap in the bulk-standards table, so max_lot_coverage_pct and max_impervious_pct are not_specified and carry 100 as non-binding stand-ins. (3) The Section 10.403.4.2 table has NO separate corner/street-side yard column, so side_corner_ft is not_specified and mirrors the base side yard. (4) The UDC splits SF-1 into three sub-variants (SF-1, SF-1 zero lot line, SF-1 village) that all normalize to the same leading code 'SF1'; because a parcel's GIS zoningCode carries only 'SF-1' and cannot distinguish sub-variants, only the base SF-1 (conventional) is codified to avoid an unresolvable district-mapping collision. (5) SF-2 side is stated '5 ft.; 0 ft. for common walls'; the conventional 5 ft is codified. (6) B-1/B-2/LI/I side and rear are stated '0 ft. for common walls or 10 ft.; from [residential distances]'; the base 10 ft (non-common-wall) side and the stated 25 ft rear are codified with residential-adjacency exceptions flagged. (7) MH (Manufactured Housing) height is stated '1 story' (not feet) so max_height_ft is not_specified for MH; MH is retained because its setbacks are stated. (8) Hutto has a separate Form Based Code / Old Town (Chapter 10) transect-zone set that is form-based (height in stories, build-to lines) and is EXCLUDED from this conventional-setback table.",
+  "districts": [
+    {
+      "district_name": "SF-R Single-Family Residential Rural",
+      "front_ft": 50,
+      "rear_ft": 50,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): SF-R 50 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): SF-R 50 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): SF-R 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 20 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): SF-R 45 ft. / 3 stories.", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SF-1 Single-Family Residential",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): SF-1 25 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): SF-1 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): SF-1 5 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): SF-1 35 ft. / 2.5 stories.", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SF-2 Single-Family Residential 2",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): SF-2 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): SF-2 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): SF-2 5 ft.; 0 ft. for common walls (5 ft codified).", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): SF-2 35 ft. / 3 stories.", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "MF Multifamily",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): MF 25 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): MF 25 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): MF 15 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 15 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): MF 35 feet; 45 feet along Freeways, Arterials, and Major Non-Residential Collectors (35 ft base codified).", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "MH Manufactured Housing",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): MH 25 ft. (MH site).", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): MH 25 ft. (MH site).", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): MH 25 ft. (MH site).", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 25 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): MH 1 story (stated in stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "B-1 Neighborhood Business",
+      "front_ft": 5,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): B-1 5 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): B-1 25 ft.; from residential SF-R:20 ft., SF-1:20 ft., SF-2:10 ft. (25 ft base codified).", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): B-1 0 ft. for common walls or 10 ft.; from residential SF-R:20 ft., SF-1:20 ft., SF-2:10 ft. (10 ft non-common-wall base codified).", "confidence": 0.75, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 10 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): B-1 35 feet.", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "B-2 General Business",
+      "front_ft": 10,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): B-2 10 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): B-2 25 ft.; from residential SF-R:30 ft., SF-1:30 ft., SF-2:20 ft. (25 ft base codified).", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): B-2 0 ft. for common walls or 10 ft.; from residential SF-R:30 ft., SF-1:30 ft., SF-2:20 ft. (10 ft non-common-wall base codified).", "confidence": 0.75, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 10 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): B-2 45 feet.", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "LI/I Light Industrial / Industrial",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.huttotx.gov/DocumentCenter/View/3779/UDC-Updated-through-March-2024",
+      "provenance": {
+        "front_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Front yard (min): LI/I 25 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Rear yard (min): LI/I 25 ft.; adjacent to residential: 2ft for every 1ft of building height or 50ft, whichever is greater (25 ft base codified).", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Side yard (min): LI/I 0 ft. for common walls or 10 ft.; adjacent to residential: 2ft for every 1ft of building height or 50ft, whichever is greater (10 ft non-common-wall base codified).", "confidence": 0.75, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Section 10.403.4.2 has no separate corner/street-side yard column; mirrors base side yard of 10 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "Building height (max): LI/I 60 feet.", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "hutto_tx/udc/10.403.4.2", "section_number": "10.403.4.2", "quote": "The Hutto UDC bulk-standards table states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    }
+  ]
+}

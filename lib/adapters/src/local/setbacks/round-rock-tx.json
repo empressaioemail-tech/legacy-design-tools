@@ -1,0 +1,208 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "round-rock-tx",
+  "jurisdictionDisplayName": "City of Round Rock, TX",
+  "note": "Codified from the City of Round Rock Code of Ordinances (2018), Part III - Zoning and Development Code, Chapter 2 (Zoning Districts and Use Regulations), Sec. 2-26 Residential lot and building dimensional standards chart — Supplement 25, codified through Resolution No. R-2025-158 enacted June 26, 2025 (Municode ProductID 14610, job Id 492357). Source is Municode; all rows cite Sec. 2-26. MODELING NOTES: (1) The Round Rock Sec. 2-26 chart states 'Maximum height of principal building' in STORIES ('2.5 stories', '4 stories'), NOT feet, so max_height_ft is not_specified for every district (converting stories to feet would be fabrication) and carries 100 as a non-binding stand-in. (2) 'Minimum setback from street (ROW)' is codified as front_ft (Round Rock measures the front setback from the right-of-way). (3) The Sec. 2-26 chart has NO separate corner/street-side setback column, so side_corner_ft is not_specified and mirrors the base side setback. (4) 'Maximum lot coverage for buildings' (a building-coverage %) is codified as max_lot_coverage_pct; the chart states no separate impervious-cover cap, so max_impervious_pct is not_specified and carries 100. (5) The chart splits several districts into sub-type sub-columns (SF-2 Conventional/Zero Lot Line/Village; SF-3 Estate/Standard/Small Lot; TH Single-lot/Common-lot). Because a parcel's GIS zoningCode carries only the base code (e.g. 'SF-2') and cannot distinguish sub-types, exactly ONE base sub-variant per code is codified here (SF-2 = Conventional, SF-3 = Standard Lot, TH = Single-lot) to avoid an unresolvable leading-code collision in district mapping. (6) TF base side setback is stated '0 ft./5 ft.' (attached party-wall / detached side); the applicable non-zero minimum (5) is codified as side_ft and flagged. TH(Single) side is '5 ft./20 ft.' (interior / adjacent-to-street or -SF); the base interior 5 is codified and flagged. (7) AG (Agriculture) and SF-D (front setback stated 'Contextual', not a number) are EXCLUDED.",
+  "districts": [
+    {
+      "district_name": "SF-R Single-Family Residential Rural",
+      "front_ft": 50,
+      "rear_ft": 50,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 10,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... SF-R 50 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... SF-R 50 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... SF-R 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 20 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... SF-R 10%", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SF-1 Single-Family Residential 1",
+      "front_ft": 30,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... SF-1 30 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... SF-1 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... SF-1 5 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... SF-1 40%", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SF-2 Single-Family Residential 2 (Conventional)",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... SF-2 Conventional 20 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... SF-2 Conventional 20 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... SF-2 Conventional 5 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... SF-2 Conventional 40%", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SF-3 Single-Family Residential 3 (Standard Lot)",
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... SF-3 Standard Lot 15 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... SF-3 Standard Lot 10 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... SF-3 Standard Lot 5 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... SF-3 Standard Lot 50%", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "MH Manufactured Housing",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... MH 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... MH 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... MH 5 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... MH 40%", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "TF Two-Family",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... TF 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... TF 20 ft.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... TF 0 ft./5 ft. (attached party-wall / detached side; non-zero minimum codified).", "confidence": 0.7, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 5 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... TF 50%", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "TH Townhouse (Single-lot)",
+      "front_ft": 15,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... TH Single-lot 15 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... TH Single-lot 20 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... TH Single-lot 5 ft./20 ft. (interior / adjacent-to-street; base interior codified).", "confidence": 0.7, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "TH side is '5 ft./20 ft.'; the 20 ft. adjacent-to-street value applies at a street side.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... TH Single-lot 50%", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SR Suburban Residential",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... SR 25 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... SR 25 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... SR 25 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 25 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 4 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... SR 40%", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "MF-1 Multifamily Residential 1",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... MF-1 20 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... MF-1 20 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... MF-1 10 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 10 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 2.5 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... MF-1 40%", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "MF-2 Multifamily Residential 2",
+      "front_ft": 15,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/round_rock/codes/code_of_ordinances?nodeId=PTIIIZODECO_CH2ZODIUSRE_ARTIIREDI_S2-26RELOBUDIST",
+      "provenance": {
+        "front_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum setback from street (ROW) ... MF-2 15 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum rear setback ... MF-2 25 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Minimum side setback ... MF-2 25 ft.", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 has no separate corner/street-side setback column; mirrors base side setback of 25 ft.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum height of principal building: 4 stories (Round Rock states stories, not feet; not specified in feet).", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Maximum lot coverage for buildings ... MF-2 40%", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "round_rock_tx/pt3/2-26", "section_number": "2-26", "quote": "Sec. 2-26 states no separate impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    }
+  ]
+}

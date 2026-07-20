@@ -1,0 +1,348 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "leander-tx",
+  "jurisdictionDisplayName": "City of Leander, TX",
+  "note": "Codified from the City of Leander Code of Ordinances, Chapter 14 (Zoning), Exhibit A Zoning Ordinance, Article VI (Site Standards) Section 6 (Setbacks) — Supplement 4 Update 1, codified through Ordinance No. 25-078-00 enacted December 18, 2025 (Municode ProductID 12187, job Id 487773). Source is Municode; the setback values cite Article VI Sec. 6, the single-family building/structure setback table. MODELING NOTES: (1) The Leander setback table columns are Front, Side, Street Side, Rear. 'Street Side' is codified as side_corner_ft (the corner/street-facing side). (2) The Leander zoning ordinance (a form-based/SmartCode-style code) states NO simple per-district maximum building height in feet and NO per-district lot-coverage or impervious-cover cap in the dimensional/setback or lot-size-summary sections; max_height_ft, max_lot_coverage_pct, and max_impervious_pct are therefore all not_specified and carry 100 as non-binding stand-ins (the envelope draw uses setbacks, not these fields). (3) SFC/SFL side is stated \"5' or 0' & 10'\" (attached / zero-lot-line option); the conventional 5 ft interior side is codified and flagged. SFT side is stated \"0 or 10'\" (attached / detached option); the attached 0 is codified as the base with the alternative flagged. (4) Districts with a note-marked garage/ROW exception (front value carries '*', min 18' to ROW for the garage) retain the table's stated front building setback. (5) Nonresidential/multifamily districts (NR/MF/LO/LC/GC/HC/HI) use a Max-Front + Min-Front + Min-Side + Street-Side + Min-Rear format; the Min values are codified where present, Max-Front is not a setback minimum and is excluded. LO and LC share a table row; codified identically.",
+  "districts": [
+    {
+      "district_name": "SFR Single-Family Residential",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "Standard Setback SFR 25' 7' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "Standard Setback SFR 25' 7' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "Standard Setback SFR 25' 7' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "Standard Setback SFR 25' 7' 15' 15' (Street Side column = 15').", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SFE Single-Family Estate",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15' (Street Side = 15').", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SFS Single-Family Suburban",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15' (Street Side = 15').", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SFU Single-Family Urban",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15' (Street Side = 15').", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SFU/MH Single-Family Urban Manufactured Housing",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15' (Street Side = 15').", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "TF Two-Family",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15'", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFE, SFS, SFU, SFU/MH, TF 20' 5' 15' 15' (Street Side = 15').", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SFC Single-Family Compact",
+      "front_ft": 15,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15' (conventional 5 ft interior side codified; zero-lot-line 0'&10' option flagged).", "confidence": 0.7, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15' (Street Side = 15').", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "SFL Single-Family Limited",
+      "front_ft": 15,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15' (conventional 5 ft interior side codified; zero-lot-line 0'&10' option flagged).", "confidence": 0.7, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "SFC, SFL 15'* 5' or 0' & 10' 15' 15' (Street Side = 15').", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "CH Cottage Home",
+      "front_ft": 15,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "CH***** 15' 5' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "CH***** 15' 5' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "CH***** 15' 5' 15' 15'", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "CH***** 15' 5' 15' 15' (Street Side = 15').", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "TH Townhome",
+      "front_ft": 10,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "TH 10'* 5' 10' 10'", "confidence": 0.85, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "TH 10'* 5' 10' 10'", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "TH 10'* 5' 10' 10'", "confidence": 0.85, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "TH 10'* 5' 10' 10' (Street Side = 10').", "confidence": 0.85, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "NR Neighborhood Retail",
+      "front_ft": 15,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "NR Min Front 15' * (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "NR Min Rear 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "NR Min Side 5'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "NR Min Street Side 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "MF Multifamily",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "MF Min Front 25' (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "MF Min Rear 20'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "MF Min Side 10'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "MF Min Street Side 25'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "LO Limited Office",
+      "front_ft": 30,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 30,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Front 30' (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Rear 10'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Side 10'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Street Side 30'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "LC Limited Commercial",
+      "front_ft": 30,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 30,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Front 30' (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Rear 10'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Side 10'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "LO, LC Min Street Side 30'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "GC General Commercial",
+      "front_ft": 35,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 35,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Front 35' (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Rear 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Side 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Street Side 35'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "HC Heavy Commercial",
+      "front_ft": 35,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 35,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Front 35' (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Rear 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Side 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Street Side 35'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    },
+    {
+      "district_name": "HI Heavy Industrial",
+      "front_ft": 35,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 35,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/leander/codes/code_of_ordinances?nodeId=CH14ZO_EXHIBIT_AZOOR_ARTVISIST_S6SE",
+      "provenance": {
+        "front_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Front 35' (columns: Max Front, Min Front, Min Side, Min Street Side, Max Street Side, Min Rear).", "confidence": 0.8, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Rear 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Side 15'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "GC, HC, HI Min Street Side 35'.", "confidence": 0.8, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district maximum building height in feet; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_lot_coverage_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "leander_tx/ch14/art6.6", "section_number": "6", "quote": "The Leander zoning ordinance states no per-district impervious-cover cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+      }
+    }
+  ]
+}

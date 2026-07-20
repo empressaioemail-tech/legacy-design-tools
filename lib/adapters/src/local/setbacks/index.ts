@@ -23,6 +23,11 @@ import sanMarcosTx from "./san-marcos-tx.json" with { type: "json" };
 import drippingSpringsTx from "./dripping-springs-tx.json" with { type: "json" };
 import kyleTx from "./kyle-tx.json" with { type: "json" };
 import budaTx from "./buda-tx.json" with { type: "json" };
+import georgetownTx from "./georgetown-tx.json" with { type: "json" };
+import roundRockTx from "./round-rock-tx.json" with { type: "json" };
+import leanderTx from "./leander-tx.json" with { type: "json" };
+import huttoTx from "./hutto-tx.json" with { type: "json" };
+import newBraunfelsTx from "./new-braunfels-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 
@@ -75,6 +80,19 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "dripping-springs-tx": drippingSpringsTx as SetbackTable,
   "kyle-tx": kyleTx as SetbackTable,
   "buda-tx": budaTx as SetbackTable,
+  // F4l batch (Municode + city-PDF, citation-backed from live ordinances,
+  // carry per-value provenance). Georgetown from UDC Ch. 6 §6.02 / Ch. 7 Table
+  // 7.02.020 (Supp. 15, Ord. 2025-54; UDC rewrite pending ~mid-2026 — re-verify
+  // when it lands); Round Rock from Pt. III Ch. 2 §2-26 (Supp. 25); Leander
+  // from Ch. 14 Exhibit A Art. VI §6 (Supp. 4 U1); Hutto from UDC §10.403.4.2
+  // (city PDF, Mar 2024 — NOT on Municode); New Braunfels from Ch. 144 §144-3.4
+  // (Supp. 36 U3). Synthesized keys `georgetown_tx`/`round_rock_tx`/
+  // `leander_tx`/`hutto_tx`/`new_braunfels_tx`, normalized to hyphen form here.
+  "georgetown-tx": georgetownTx as SetbackTable,
+  "round-rock-tx": roundRockTx as SetbackTable,
+  "leander-tx": leanderTx as SetbackTable,
+  "hutto-tx": huttoTx as SetbackTable,
+  "new-braunfels-tx": newBraunfelsTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
 };
