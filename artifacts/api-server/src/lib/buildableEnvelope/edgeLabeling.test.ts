@@ -6,7 +6,13 @@
 
 import { describe, it, expect } from "vitest";
 import { feetToMeters, projectRing, type Ring } from "./geometry";
-import { labelEdges, insetFeetForLabeling } from "./edgeLabeling";
+import {
+  labelEdges,
+  insetFeetForLabeling,
+  normalizeStreetName,
+  streetNameFromSitus,
+  type RoadCandidate,
+} from "./edgeLabeling";
 
 /** 100ft (E-W) x 200ft (N-S) rect centered at (lng0, lat0). */
 function rectRing(lng0: number, lat0: number, wFt = 100, hFt = 200): Ring {
@@ -104,6 +110,152 @@ describe("labelEdges — shape fallback (LOW confidence, flagged)", () => {
       // shorter than the 200ft edges
       feetToMeters(150),
     );
+  });
+});
+
+describe("normalizeStreetName + streetNameFromSitus", () => {
+  it("canonicalizes suffix + directional so situs matches OSM full name", () => {
+    expect(normalizeStreetName("NOLAN DR")).toBe("nolan drive");
+    expect(normalizeStreetName("Nolan Drive")).toBe("nolan drive");
+    // Both sides normalize equal -> a valid match.
+    expect(normalizeStreetName("120 NOLAN DR")).toBe("nolan drive");
+    expect(normalizeStreetName("W Oak St")).toBe("west oak street");
+    expect(normalizeStreetName("Live Oak Blvd")).toBe("live oak boulevard");
+  });
+
+  it("extracts the street from a full situs (first comma part)", () => {
+    expect(streetNameFromSitus("120 NOLAN DR, KYLE, TX 78640")).toBe(
+      "nolan drive",
+    );
+    expect(streetNameFromSitus("501 W OAK ST, KYLE, TX")).toBe(
+      "west oak street",
+    );
+  });
+
+  it("returns empty for null/blank/unparseable situs", () => {
+    expect(streetNameFromSitus(null)).toBe("");
+    expect(streetNameFromSitus("")).toBe("");
+    expect(streetNameFromSitus("   ")).toBe("");
+  });
+});
+
+describe("labelEdges — situs-named road preference (cul-de-sac defense)", () => {
+  const mPerDegLat = (Math.PI / 180) * 6_378_137;
+  // South edge is 100ft below LAT0 (rect is 200ft tall, centered).
+  const southEdgeLat = LAT0 - feetToMeters(100) / mPerDegLat;
+  const northEdgeLat = LAT0 + feetToMeters(100) / mPerDegLat;
+
+  function roadAtLat(lat: number): [number, number][] {
+    return [
+      [LNG0 - 0.002, lat],
+      [LNG0 + 0.002, lat],
+    ];
+  }
+
+  it("prefers the SITUS-named cul-de-sac (south) over a longer through-street (north)", () => {
+    const ring = rectRing(LNG0, LAT0);
+    // A LONGER through street just north of the lot (would win by length/nearest
+    // if only roads[0] were passed), and a SHORTER situs-named cul-de-sac just
+    // south. Both within the trust gate.
+    const throughStreet: RoadCandidate = {
+      name: "Center Street",
+      polyline: roadAtLat(northEdgeLat + feetToMeters(15) / mPerDegLat),
+    };
+    const culDeSac: RoadCandidate = {
+      name: "Nolan Drive",
+      polyline: roadAtLat(southEdgeLat - feetToMeters(15) / mPerDegLat),
+    };
+    // Order deliberately puts the through-street first (the old roads[0] bug).
+    const result = labelEdges({
+      ring,
+      roads: [throughStreet, culDeSac],
+      situsAddress: "120 NOLAN DR, KYLE, TX 78640",
+    })!;
+    expect(result.signal).toBe("road");
+    expect(result.note).toContain("situs-named");
+    // Front edge must be the SOUTH edge (matching Nolan Drive), not the north.
+    const proj = projectRing(ring)!;
+    const front = result.edges.find((e) => e.label === "front")!;
+    const a = proj.points[front.index]!;
+    const b = proj.points[(front.index + 1) % proj.points.length]!;
+    expect((a.y + b.y) / 2).toBeLessThan(0); // southern edge
+  });
+
+  it("falls back to NEAREST across all candidates when situs name has no match", () => {
+    const ring = rectRing(LNG0, LAT0);
+    // Neither road matches the situs name; the closer one (south) should win —
+    // and it's NOT the longest, proving all candidates are considered.
+    const farNorth: RoadCandidate = {
+      name: "Center Street",
+      polyline: roadAtLat(northEdgeLat + feetToMeters(30) / mPerDegLat),
+    };
+    const nearSouth: RoadCandidate = {
+      name: "Some Other Way",
+      polyline: roadAtLat(southEdgeLat - feetToMeters(8) / mPerDegLat),
+    };
+    const result = labelEdges({
+      ring,
+      roads: [farNorth, nearSouth],
+      situsAddress: "120 NOLAN DR, KYLE, TX 78640", // no matching road
+    })!;
+    expect(result.signal).toBe("road");
+    expect(result.note).not.toContain("situs-named");
+    const proj = projectRing(ring)!;
+    const front = result.edges.find((e) => e.label === "front")!;
+    const a = proj.points[front.index]!;
+    const b = proj.points[(front.index + 1) % proj.points.length]!;
+    expect((a.y + b.y) / 2).toBeLessThan(0); // nearer (south) edge
+  });
+
+  it("all-roads pass: the shorter SIDE-street frontage beats the longer nearby way", () => {
+    const ring = rectRing(LNG0, LAT0);
+    // Old bug: only roads[0] (longest) was passed, so a lot fronting a short
+    // side street matched the wrong (longer) road. Here the longest way is far
+    // north (fails/loses), the true frontage is a short south way, no situs.
+    const longFar: RoadCandidate = {
+      name: null,
+      polyline: [
+        [LNG0 - 0.01, northEdgeLat + feetToMeters(120) / mPerDegLat],
+        [LNG0 + 0.01, northEdgeLat + feetToMeters(120) / mPerDegLat],
+      ],
+    };
+    const shortNear: RoadCandidate = {
+      name: null,
+      polyline: roadAtLat(southEdgeLat - feetToMeters(12) / mPerDegLat),
+    };
+    const result = labelEdges({ ring, roads: [longFar, shortNear] })!;
+    expect(result.signal).toBe("road");
+    const proj = projectRing(ring)!;
+    const front = result.edges.find((e) => e.label === "front")!;
+    const a = proj.points[front.index]!;
+    const b = proj.points[(front.index + 1) % proj.points.length]!;
+    expect((a.y + b.y) / 2).toBeLessThan(0); // south (the real frontage)
+  });
+
+  it("still degrades to point when NO road candidate passes the trust gate", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const farAway: RoadCandidate = {
+      name: "Nolan Drive",
+      polyline: roadAtLat(LAT0 - feetToMeters(500) / mPerDegLat),
+    };
+    const result = labelEdges({
+      ring,
+      roads: [farAway],
+      situsAddress: "120 NOLAN DR, KYLE, TX",
+      refPoint: { lng: LNG0, lat: northEdgeLat + feetToMeters(20) / mPerDegLat },
+    })!;
+    // Road too far -> honest degradation to the point signal (fallback intact).
+    expect(result.signal).toBe("point");
+  });
+
+  it("back-compat: a single `road` polyline still labels as before", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const result = labelEdges({
+      ring,
+      road: roadAtLat(southEdgeLat - feetToMeters(15) / mPerDegLat),
+    })!;
+    expect(result.signal).toBe("road");
+    expect(result.note).not.toContain("situs-named");
   });
 });
 
