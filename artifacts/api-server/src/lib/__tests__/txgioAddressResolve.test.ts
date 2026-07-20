@@ -95,16 +95,47 @@ describe("normalizeStreetLineCandidates (F4f comma-less query key)", () => {
     expect(cands[0]).toBe("576 SAGE THRASHER CIR DRIPPING SPRINGS TX 78620");
   });
 
-  it("keeps the comma-delimited form working (single primary candidate)", () => {
-    // A comma-delimited address already isolates the street line via the
-    // first-comma split, so there is exactly ONE candidate and it equals
-    // the stored street line — identical to the pre-F4f behavior.
+  it("keeps the comma-delimited form working (stored street line is the FIRST candidate)", () => {
+    // A comma-delimited address isolates the street line via the first-comma
+    // split, so the stored street line is the PRIMARY (first) candidate. F6b
+    // additionally runs the comma-flattened anchor-strip, which appends a few
+    // harmless over-/under-stripped candidates (e.g. "...CIR DRIPPING
+    // SPRINGS") that match nothing in the store. The invariant that matters:
+    // the correct street line resolves and comes FIRST.
+    const dripping = normalizeStreetLineCandidates(
+      "576 Sage Thrasher Cir, Dripping Springs, TX 78620",
+    );
+    expect(dripping[0]).toBe("576 SAGE THRASHER CIR");
+    expect(dripping).toContain("576 SAGE THRASHER CIR");
+    const marsh = normalizeStreetLineCandidates("6026 Marsh Ln, Buda, TX 78610");
+    expect(marsh[0]).toBe("6026 MARSH LN");
+    expect(marsh).toContain("6026 MARSH LN");
+  });
+
+  it("F6b: a comma AFTER the street type (no street-comma) still yields the stored street line", () => {
+    // THE F6b BUG. The FE sent "576 Sage Thrasher Cir Dripping Springs, TX
+    // 78620" — the FIRST comma lands after the city, so the first-comma split
+    // discards the <state> <zip> anchor and F4f's drop-N never fired. Flatten
+    // all commas to spaces so the anchor survives -> the stored street line is
+    // generated and the Hays situs (unique prop 190180) resolves.
     expect(
-      normalizeStreetLineCandidates("576 Sage Thrasher Cir, Dripping Springs, TX 78620"),
-    ).toEqual(["576 SAGE THRASHER CIR"]);
+      normalizeStreetLineCandidates("576 Sage Thrasher Cir Dripping Springs, TX 78620"),
+    ).toContain("576 SAGE THRASHER CIR");
+  });
+
+  it("F6b: an INTERIOR comma inside a multi-word city still yields the stored street line", () => {
+    // The other malformed FE shape: "576 Sage Thrasher Cir Dripping, Springs,
+    // TX 78620" — a comma splits the two-word city "Dripping, Springs". The
+    // first-comma split truncated to "...CIR DRIPPING" (anchor gone). The
+    // comma-flatten path recovers the anchor and generates the street line.
     expect(
-      normalizeStreetLineCandidates("6026 Marsh Ln, Buda, TX 78610"),
-    ).toEqual(["6026 MARSH LN"]);
+      normalizeStreetLineCandidates("576 Sage Thrasher Cir Dripping, Springs, TX 78620"),
+    ).toContain("576 SAGE THRASHER CIR");
+    // And it must NOT mis-resolve: the over-stripped "576 SAGE THRASHER" is
+    // harmless (matches nothing), the correct line is present.
+    expect(
+      normalizeStreetLineCandidates("576 Sage Thrasher Cir Dripping, Springs, TX 78620"),
+    ).toContain("576 SAGE THRASHER CIR");
   });
 
   it("comma-less 6026 Marsh Ln reduces to the stored street line", () => {
@@ -136,6 +167,15 @@ describe("normalizeStreetLineCandidates (F4f comma-less query key)", () => {
     expect(cands).toContain("8135 BRACKEN CREEK RD");
     // Never emit the mis-cut "...CREEK RDG" (RIDGE from the city folded in).
     expect(cands).not.toContain("8135 BRACKEN CREEK RDG");
+
+    // F6b: the same safety holds when a comma lands after the street type
+    // (the flat-comma path must not mis-cut "GARDEN RIDGE" into "...CREEK RDG"
+    // either — RDG only appears with GARDEN still glued on, matching nothing).
+    const commaCands = normalizeStreetLineCandidates(
+      "8135 Bracken Creek Rd Garden Ridge, TX 78266",
+    );
+    expect(commaCands).toContain("8135 BRACKEN CREEK RD");
+    expect(commaCands).not.toContain("8135 BRACKEN CREEK RDG");
   });
 
   it("comma-less highway address enumerates the real street line (stays declinable)", () => {
