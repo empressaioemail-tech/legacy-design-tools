@@ -20,6 +20,10 @@ import {
   normalizeTxgioFeature,
   TXGIO_ENTRY_FILTER,
 } from "../txgio/parse";
+import {
+  normalizeStatLandUse,
+  normalizeStratMapLandUse,
+} from "../txgio/landuse";
 import { resolveTxgioCounty, txgioDownloadUrl } from "../txgio/counties";
 import { deriveVintage } from "../download";
 import { newCounters } from "../types";
@@ -229,6 +233,154 @@ describe("normalizeTxgioFeature", () => {
     expect(rec!.propId).toBeNull();
     expect(rec!.situsAddress).toBeNull();
     expect(rec!.ownerName).toBeNull();
+  });
+});
+
+describe("StratMap STAT_LAND_ -> property_use_code", () => {
+  it("takes the first non-blank comma segment (repeated-code parcel)", () => {
+    // The overwhelmingly common Bexar form: same PTAD code per segment.
+    expect(normalizeStatLandUse("A1,A1")).toBe("A1");
+    expect(normalizeStatLandUse("F1,F1")).toBe("F1");
+    expect(normalizeStatLandUse("A1")).toBe("A1");
+  });
+
+  it("takes the first-listed code on a genuine mixed-use parcel", () => {
+    // ~1,793 of 709,541 Bexar rows carry two different codes; the
+    // choropleth needs one, so the parcel's first-listed real code wins.
+    expect(normalizeStatLandUse("A1,F1")).toBe("A1");
+    expect(normalizeStatLandUse("B1,B2")).toBe("B1");
+  });
+
+  it("uppercases and trims, and skips a leading empty segment", () => {
+    expect(normalizeStatLandUse(" a1 ")).toBe("A1");
+    expect(normalizeStatLandUse(",A1")).toBe("A1");
+    expect(normalizeStatLandUse("A,A1,")).toBe("A");
+  });
+
+  it("returns null for a blank field — never a fabricated code", () => {
+    expect(normalizeStatLandUse("")).toBeNull();
+    expect(normalizeStatLandUse("   ")).toBeNull();
+    expect(normalizeStatLandUse(",")).toBeNull();
+    expect(normalizeStatLandUse(null)).toBeNull();
+    expect(normalizeStatLandUse(undefined)).toBeNull();
+  });
+});
+
+describe("normalizeStratMapLandUse -> cad_property row", () => {
+  // A real Bexar DBF attribute row shape (situs/value fields as the DBF
+  // carries them, verified against the 48029 header 2026-07-20).
+  const BEXAR_ROW = {
+    Prop_ID: "105294",
+    STAT_LAND_: "A1,A1",
+    LOC_LAND_U: "RES",
+    OWNER_NAME: "DOE JANE",
+    SITUS_ADDR: "504  LAMAR , SAN ANTONIO, TX 78202",
+    SITUS_CITY: "SAN ANTONIO",
+    SITUS_ZIP: "78202",
+    LEGAL_DESC: "NCB 1234 BLK 5 LOT 6",
+    LAND_VALUE: "2.68880000000e+05",
+    IMP_VALUE: "1.50000000000e+05",
+    MKT_VALUE: "4.18880000000e+05",
+    TAX_YEAR: "2025",
+    FIPS: "48029",
+  };
+
+  it("maps STAT_LAND_ to a clean property_use_code and lands values as whole dollars", () => {
+    const counters = newCounters();
+    const rec = normalizeStratMapLandUse("48029", 0, BEXAR_ROW, counters);
+    expect(rec).not.toBeNull();
+    expect(rec!.countyFips).toBe("48029");
+    expect(rec!.propId).toBe("105294");
+    expect(rec!.taxYear).toBe(2025);
+    expect(rec!.propertyUseCode).toBe("A1"); // A1,A1 collapsed
+    expect(rec!.ownerName).toBe("DOE JANE");
+    // situs whitespace collapsed (matches the parse.ts str() normalizer).
+    expect(rec!.situsAddress).toBe("504 LAMAR , SAN ANTONIO, TX 78202");
+    expect(rec!.situsCity).toBe("SAN ANTONIO");
+    expect(rec!.landValue).toBe(268880);
+    expect(rec!.improvementValue).toBe(150000);
+    expect(rec!.marketValue).toBe(418880);
+    // Fields StratMap does not carry stay null.
+    expect(rec!.exemptionCodes).toBeNull();
+    expect(rec!.yearBuilt).toBeNull();
+    expect(rec!.landAcres).toBeNull();
+    expect(counters.rowsSkipped).toBe(0);
+  });
+
+  it("strips leading zeros on all-numeric prop_id (matches normalizeCadPropId join key)", () => {
+    const counters = newCounters();
+    const rec = normalizeStratMapLandUse(
+      "48029",
+      0,
+      { ...BEXAR_ROW, Prop_ID: "0000105294" },
+      counters,
+    );
+    expect(rec!.propId).toBe("105294");
+  });
+
+  it("leaves property_use_code null when STAT_LAND_ is blank (commitment #1)", () => {
+    const counters = newCounters();
+    const rec = normalizeStratMapLandUse(
+      "48029",
+      0,
+      { ...BEXAR_ROW, STAT_LAND_: "" },
+      counters,
+    );
+    expect(rec).not.toBeNull(); // row still lands (owner/situs/value)
+    expect(rec!.propertyUseCode).toBeNull();
+  });
+
+  it("drops zero/absent values to null rather than storing $0", () => {
+    const counters = newCounters();
+    const rec = normalizeStratMapLandUse(
+      "48029",
+      0,
+      { ...BEXAR_ROW, LAND_VALUE: "0.00000000000e+00", MKT_VALUE: undefined },
+      counters,
+    );
+    expect(rec!.landValue).toBeNull();
+    expect(rec!.marketValue).toBeNull();
+    expect(rec!.improvementValue).toBe(150000);
+  });
+
+  it("uses the fallback tax year only when the DBF row's TAX_YEAR is blank", () => {
+    const counters = newCounters();
+    const withRow = normalizeStratMapLandUse(
+      "48029",
+      0,
+      { ...BEXAR_ROW, TAX_YEAR: "2024" },
+      counters,
+      2025,
+    );
+    expect(withRow!.taxYear).toBe(2024); // in-row wins
+    const blank = normalizeStratMapLandUse(
+      "48029",
+      1,
+      { ...BEXAR_ROW, TAX_YEAR: "" },
+      counters,
+      2025,
+    );
+    expect(blank!.taxYear).toBe(2025); // fallback used
+  });
+
+  it("skips a row with no Prop_ID or no resolvable tax year, with a counted sample", () => {
+    const counters = newCounters();
+    const noProp = normalizeStratMapLandUse(
+      "48029",
+      3,
+      { ...BEXAR_ROW, Prop_ID: "   " },
+      counters,
+    );
+    expect(noProp).toBeNull();
+    const noYear = normalizeStratMapLandUse(
+      "48029",
+      4,
+      { ...BEXAR_ROW, TAX_YEAR: "" },
+      counters, // no fallback provided
+    );
+    expect(noYear).toBeNull();
+    expect(counters.rowsSkipped).toBe(2);
+    expect(counters.skipSamples[0]).toContain("feature 3");
   });
 });
 
