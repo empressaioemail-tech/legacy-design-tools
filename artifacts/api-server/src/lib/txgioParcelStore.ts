@@ -175,6 +175,83 @@ export function makeTxgioParcelPointLookup(
   };
 }
 
+/** Result of a store point-in-polygon probe against ONE county. */
+export interface CountyStorePipHit {
+  /** RAW appraisal prop id of the containing parcel (leading zeros intact). */
+  propId: string;
+  /**
+   * Bbox area (deg^2) of the containing parcel's own bounding box — the
+   * tightest-containment tiebreak for the (rare) case where two candidate
+   * counties both report a containing parcel (should not happen for real,
+   * non-overlapping parcels; the smaller box wins).
+   */
+  bboxAreaDeg2: number;
+}
+
+/**
+ * POINT-IN-POLYGON probe against ONE store county (F4j). Answers the
+ * question county ROUTING must ask on a straddle: does THIS county's store
+ * hold a parcel whose polygon actually CONTAINS the point? Reuses the
+ * IDENTICAL bounded, index-using query shape as `makeTxgioParcelPointLookup`
+ * — a single grid-cell (`tile_key`) equality plus the four bbox-column
+ * range pre-filters (all covered by the `txgio_parcel` `(county_fips,
+ * tile_key)` / bbox indexes), then the shared `pointInGeometry` ray cast in
+ * JS over the SMALL candidate set (a handful of bbox-overlapping parcels in
+ * one 0.02-degree cell). No full-county scan, no PostGIS.
+ *
+ * Returns the containing parcel's prop id + its bbox area on a hit, null
+ * when no ingested parcel in the county contains the point. A parcel
+ * without a usable prop id still counts as containment (it proves the point
+ * is inside THIS county's parcel fabric) but yields the fabric bbox with no
+ * prop id preference — the county routing only needs the containment fact.
+ */
+export async function countyStoreContainsPoint(input: {
+  countyFips: string;
+  latitude: number;
+  longitude: number;
+  database?: TxgioStoreDb;
+}): Promise<CountyStorePipHit | null> {
+  const { latitude, longitude } = input;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  const database = input.database ?? defaultDb;
+  const cell = cellKeyForPoint(longitude, latitude);
+  const rows = (await database
+    .select(candidateColumns)
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, input.countyFips.trim()),
+        eq(txgioParcel.tileKey, cell),
+        // Cheap bbox-column pre-filter before the ray cast (indexed).
+        lte(txgioParcel.westLng, longitude),
+        gte(txgioParcel.eastLng, longitude),
+        lte(txgioParcel.southLat, latitude),
+        gte(txgioParcel.northLat, latitude),
+      ),
+    )) as TxgioCandidateRow[];
+
+  let best: CountyStorePipHit | null = null;
+  for (const row of rows) {
+    if (
+      !pointInGeometry(longitude, latitude, row.geometry as GeoJsonGeometry)
+    ) {
+      continue;
+    }
+    const propId = row.propId?.trim();
+    if (!propId) continue;
+    const area =
+      Math.max(0, row.eastLng - row.westLng) *
+      Math.max(0, row.northLat - row.southLat);
+    // Prefer the tightest containing parcel within the county (smallest
+    // bbox) — the point can sit inside a large enclosing parcel AND a small
+    // real lot; the small lot is the answer.
+    if (best === null || area < best.bboxAreaDeg2) {
+      best = { propId, bboxAreaDeg2: area };
+    }
+  }
+  return best;
+}
+
 /**
  * PTAD state-classification code -> human land-use description for the
  * map choropleth. Extracted to the dependency-free `./ptadLandUse` module

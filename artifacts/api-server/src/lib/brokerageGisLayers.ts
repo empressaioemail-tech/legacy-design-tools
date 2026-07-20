@@ -36,6 +36,7 @@ import {
 import {
   queryTxCountyParcelsGeoJson,
   resolveTxParcelCounty,
+  resolvePointCountyByPip,
   txCountyAdapterKey,
   txCountyDisclaimer,
   txCountyProviderLabel,
@@ -638,11 +639,28 @@ export async function queryGisLayerGeoJson(input: {
     // counties — or with TX_PARCEL_PROVIDER=off — the Cotality branch
     // runs exactly as before.
     if (txParcelProviderMode() === "county-gis") {
-      const county = resolveTxParcelCounty({
-        bbox,
-        latitude: input.latitude,
-        longitude: input.longitude,
-      });
+      // County routing. For a POINT pin-query (no bbox) use point-in-polygon
+      // pre-resolution (F4j): the county whose parcel-fabric actually
+      // CONTAINS the point wins, so a straddle address (e.g. New Braunfels /
+      // Comal, at ~29.72,-98.10) routes to the county that owns the parcel
+      // rather than the nearest-centroid neighbor that has no parcel there.
+      // On no containment it falls back to nearest-centroid, so live-ArcGIS
+      // counties and the Cotality fall-through are unchanged. For a BBOX
+      // VIEWPORT (tile fetch) keep the cheap synchronous nearest-centroid
+      // router — a viewport wants the dominant county, not a per-point PIP,
+      // and it has no single point to test.
+      const county = bbox
+        ? resolveTxParcelCounty({
+            bbox,
+            latitude: input.latitude,
+            longitude: input.longitude,
+          })
+        : (
+            await resolvePointCountyByPip({
+              latitude: input.latitude!,
+              longitude: input.longitude!,
+            })
+          ).county;
       if (county) {
         const countyResult = await queryTxCountyParcelsGeoJson({
           county,
