@@ -6,22 +6,30 @@
  * fallback for requests outside the supported counties (or when
  * `TX_PARCEL_PROVIDER=off`).
  *
- * Supported counties (endpoints live-probed 2026-07-13; all serve
+ * Live-ArcGIS counties (endpoints live-probed 2026-07-13; all serve
  * `f=geojson` with `outSR=4326`):
  *
- *   Travis     48453  TCAD_public MapServer/0        (native SR 2277)
- *   Williamson 48491  county_wcad_parcels MapServer/0 (native SR 3857)
  *   Bexar      48029  Parcels MapServer/0             (native SR 2278)
  *   Bastrop    48021  Bastrop_County_Parcels FS/0     (native SR 2277)
  *   Caldwell   48055  Caldwell_CAD_Parcel_Map FS/1    (attribute-thin)
  *
- * Store-backed counties (feat/txgio-parcel-geometry) — no live county
- * GIS exists, so bbox/pin requests are served from the self-hosted
- * `txgio_parcel` store (TxGIO/StratMap Land Parcels, loaded by the
- * txgio-ingest CLI; `source: "txgio-store"`, provider `"txgio"`):
+ * Store-backed counties (feat/txgio-parcel-geometry) — served from the
+ * self-hosted `txgio_parcel` store (TxGIO/StratMap Land Parcels, loaded by
+ * the txgio-ingest CLI; `source: "txgio-store"`, provider `"txgio"`).
+ * Hays/Comal/Bell/McLennan/Guadalupe have no live queryable county GIS;
+ * Travis and Williamson were FLIPPED off their live TCAD/WCAD ArcGIS
+ * services (F4h) once their geometry, rooftop, and CAD land-use were all
+ * present in prod, for identity consistency with the baked tiles + the
+ * authoritative situs/rooftop resolution path (and to drop the live
+ * round-trip):
  *
  *   Hays       48209  txgio_parcel (stratmap25, WGS84)
  *   Comal      48091  txgio_parcel (stratmap25, WGS84)
+ *   Bell       48027  txgio_parcel (promoted from staging)
+ *   McLennan   48309  txgio_parcel (promoted from staging)
+ *   Guadalupe  48187  txgio_parcel (promoted from staging)
+ *   Travis     48453  txgio_parcel (situs ~10% -> rides rooftop path)
+ *   Williamson 48491  txgio_parcel (situs ~94% -> full situs + rooftop)
  *
  * TxGIO carries no land-use attributes, so store-backed features are
  * decorated at serve time with `landUseCode` / `landUseDescription`
@@ -170,56 +178,77 @@ function withoutNulls(
 }
 
 /**
- * Supported counties, live-probed 2026-07-13. Order is the spec table
- * order; bbox overlaps at county lines are resolved by nearest centroid
- * (see `resolveTxParcelCounty`).
+ * Supported counties. Live-ArcGIS entries were probed 2026-07-13; the
+ * store-backed entries carry their bbox from the ingested/promoted
+ * `txgio_parcel` geometry. Bbox overlaps at county lines are resolved by
+ * nearest centroid (see `resolveTxParcelCounty`).
  */
 export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
   {
     name: "Travis",
     fips: "48453",
+    source: "txgio-store",
+    // FLIPPED from the live TCAD ArcGIS service to the self-hosted TxGIO
+    // store (F4h). Travis geometry is promoted to prod `txgio_parcel`
+    // (894,657 rows / 828,773 distinct parcels), rooftop points to
+    // `txgio_address` (433,031 rows), and land-use joins from `cad_property`
+    // (453k coded), so store-backed resolution gives full identity
+    // consistency with the baked tiles and drops the live TCAD round-trip.
+    // Travis rides the ROOFTOP path, not situs: TCAD situs is mostly blank
+    // (the appraisal roll stores ", TX 78xxx" with no street for ~90% of
+    // parcels), so only ~10% of Travis is situs-matchable and the address
+    // path resolves via the `txgio_address` rooftop coordinate. serviceUrl
+    // is the TxGIO program resource (provenance only).
     serviceUrl:
-      "https://gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdictions/TCAD_public/MapServer/0",
-    bbox: { westLng: -98.2, southLat: 30.0, eastLng: -97.35, northLat: 30.65 },
-    centroid: { latitude: 30.334, longitude: -97.78 },
-    // Probed fields: PROP_ID, situs_address, situs_num/situs_street(+prefx/
-    // suffix), legal_desc, tcad_acres. Owner (py_owner_name is the display
-    // field) is NOT returned by outFields=* on this public layer — omitted.
-    normalizeProps: (p) =>
-      withoutNulls({
-        apn: str(p.PROP_ID) ?? str(p.geo_id),
-        situsAddress:
-          str(p.situs_address) ??
-          joinSitus(
-            p.situs_num,
-            p.situs_street_prefx,
-            p.situs_street,
-            p.situs_street_suffix,
-          ),
-      }),
-    // Node id keys on PROP_ID only (geo_id is a different id space).
-    rawPropId: (p) => str(p.PROP_ID),
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48453_lp.zip",
+    // Routing bbox from the prod txgio_parcel geometry
+    // (min/max over all Travis rows: [-98.1856, 30.0224, -97.3695, 30.6416]),
+    // padded. Centroid is the parcel-MASS centroid (mean of per-parcel bbox
+    // centers over the 828,773 distinct parcels), NOT the bbox midpoint — the
+    // nearest-centroid tiebreak in resolveTxParcelCounty needs the mass point
+    // so Travis places correctly against Williamson's (north) and Hays'
+    // (southwest) overlapping bboxes. Travis parcel mass is dense in east
+    // Austin, so the mass centroid sits east of the county area-center; this
+    // maximizes correct routing (~85% of sampled Travis parcels resolve to
+    // Travis vs. ~64% on the old arcgis geometric-centroid entry). The
+    // residual west/north edge (SW Austin near the Hays line, north Austin
+    // near the Williamson line) resolves to the neighbor store under
+    // nearest-centroid; that never returns a WRONG parcel (the neighbor store
+    // filters by its own county_fips and has no Travis rows -> honest
+    // no-coverage), and the multi-county situs pre-pass (which searches ALL
+    // containing store counties) recovers any situs-bearing border address
+    // regardless of centroid distance.
+    bbox: { westLng: -98.19, southLat: 30.01, eastLng: -97.36, northLat: 30.65 },
+    centroid: { latitude: 30.3595, longitude: -97.6719 },
+    normalizeProps: (p) => p,
   },
   {
     name: "Williamson",
     fips: "48491",
+    source: "txgio-store",
+    // FLIPPED from the live WCAD ArcGIS service to the self-hosted TxGIO
+    // store (F4h). Williamson geometry is promoted to prod `txgio_parcel`
+    // (304,298 rows / 282,983 distinct parcels), rooftop points to
+    // `txgio_address` (345,111 rows), and land-use joins from `cad_property`
+    // (287k coded). Unlike Travis, WCAD situs IS populated
+    // ("14501 TEMPLEMORE CV, AUSTIN, TX 78717") — ~94% situs-matchable — so
+    // Williamson gets FULL situs + rooftop authority: the situs pre-pass
+    // resolves an address DIRECTLY to its parcel node id (no geocode), and
+    // rooftop covers the rest. serviceUrl is the TxGIO program resource.
     serviceUrl:
-      "https://gis.wilco.org/arcgis/rest/services/public/county_wcad_parcels/MapServer/0",
-    bbox: { westLng: -98.07, southLat: 30.38, eastLng: -97.0, northLat: 30.93 },
-    centroid: { latitude: 30.648, longitude: -97.6 },
-    // Probed fields: PropertyNumber, QuickRefID, OWNERNME1/FullName,
-    // SITEADDRESS, USECD/USEDSCRP, RESYRBLT, LNDVALUE/CNTASSDVAL, Acres.
-    normalizeProps: (p) =>
-      withoutNulls({
-        apn: str(p.PropertyNumber) ?? str(p.QuickRefID),
-        situsAddress:
-          str(p.SITEADDRESS) ?? str(p.SitusAddress) ?? str(p.PropertyAddress),
-        owner: str(p.OWNERNME1) ?? str(p.FullName),
-        landUseCode: str(p.USECD),
-        landUseDescription: str(p.USEDSCRP),
-      }),
-    // Node id keys on PropertyNumber only (QuickRefID is a different id).
-    rawPropId: (p) => str(p.PropertyNumber),
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48491_lp.zip",
+    // Routing bbox from the prod txgio_parcel geometry
+    // (min/max over all Williamson rows: [-98.0500, 30.4028, -97.1549,
+    // 30.9045]), padded. Parcel-MASS centroid over the 282,983 distinct
+    // parcels. Routing accuracy ~94% of sampled Williamson parcels resolve to
+    // Williamson (vs. ~76% on the old arcgis geometric-centroid entry); the
+    // residual south edge (near the Travis line) that nearest-centroid hands
+    // to Travis is fully recovered for address resolution by the multi-county
+    // situs pre-pass, since WCAD situs is unique and situs wins over centroid
+    // distance.
+    bbox: { westLng: -98.06, southLat: 30.39, eastLng: -97.14, northLat: 30.91 },
+    centroid: { latitude: 30.5926, longitude: -97.7093 },
+    normalizeProps: (p) => p,
   },
   {
     name: "Bexar",
