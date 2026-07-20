@@ -1520,6 +1520,7 @@ CREATE TABLE @@SCHEMA@@.txgio_parcel (
     situs_city text,
     situs_state text,
     situs_zip text,
+    zoning_district text,
     geometry jsonb NOT NULL,
     west_lng double precision NOT NULL,
     south_lat double precision NOT NULL,
@@ -1527,8 +1528,7 @@ CREATE TABLE @@SCHEMA@@.txgio_parcel (
     north_lat double precision NOT NULL,
     source_file text NOT NULL,
     source_vintage text NOT NULL,
-    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
-    zoning_district text
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
