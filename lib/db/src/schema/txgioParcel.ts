@@ -68,6 +68,17 @@ export const txgioParcel = pgTable(
     situsCity: text("situs_city"),
     situsState: text("situs_state"),
     situsZip: text("situs_zip"),
+    /**
+     * Real zoning-district code stamped at ingest by a point-in-polygon of
+     * the parcel centroid against the jurisdiction's public zoning GIS layer
+     * (e.g. Georgetown's ArcGIS `ZONE` field, "RS"/"AG"/"IN"). Read by
+     * `toFeature()` into `feature.properties.zoningCode` so the
+     * buildable-envelope district mapping matches the true setback district
+     * instead of degrading to the most-conservative fallback. NULL until the
+     * per-city zoning stamp runs (and after a geometry re-run, until it is
+     * re-stamped) — the honest fallback, never a stale wrong district.
+     */
+    zoningDistrict: text("zoning_district"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
     /** Feature bbox, WGS84. */

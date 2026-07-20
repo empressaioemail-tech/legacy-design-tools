@@ -110,6 +110,7 @@ interface TxgioCandidateRow {
   situsAddress: string | null;
   situsCity: string | null;
   situsZip: string | null;
+  zoningDistrict: string | null;
   geometry: unknown;
   westLng: number;
   southLat: number;
@@ -126,6 +127,7 @@ const candidateColumns = {
   situsAddress: txgioParcel.situsAddress,
   situsCity: txgioParcel.situsCity,
   situsZip: txgioParcel.situsZip,
+  zoningDistrict: txgioParcel.zoningDistrict,
   geometry: txgioParcel.geometry,
   westLng: txgioParcel.westLng,
   southLat: txgioParcel.southLat,
@@ -360,6 +362,15 @@ function toFeature(
   if (nodeId) properties.parcel_node_id = nodeId;
   if (row.situsAddress) properties.situsAddress = row.situsAddress;
   if (row.ownerName) properties.owner = row.ownerName;
+  // Real zoning-district code, when the per-city zoning stamp populated it
+  // (point-in-polygon of the parcel centroid against the jurisdiction's
+  // public zoning GIS layer). This is the ONE field the buildable-envelope
+  // route reads (`firstParcelRing` -> `mapDistrict`); without it every
+  // store-backed parcel arrives zoningCode-null and the district mapping
+  // degrades to the most-conservative fallback (Georgetown MF-2 on SF lots).
+  // Omitted (never faked) when the parcel was not stamped — the honest
+  // fallback path, never a stale wrong district.
+  if (row.zoningDistrict) properties.zoningCode = row.zoningDistrict;
   // Land-use from the CAD roll (different source than the geometry).
   // Keyed by the CAD-normalized prop id; only present when a real code
   // was found, so Comal (no roll) and code-less Hays rows stay neutral.
