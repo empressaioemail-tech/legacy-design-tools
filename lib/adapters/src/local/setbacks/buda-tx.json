@@ -1,0 +1,168 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "buda-tx",
+  "jurisdictionDisplayName": "City of Buda, TX",
+  "note": "Codified from the City of Buda Unified Development Code (UDC), Section 2.07 'Zoning Dimensional Regulations' — the two consolidated dimensional tables (Residential Dimensional Regulations and Nonresidential Dimensional Regulations). Source is eCode360 (General Code). Side yard is stated as Interior/Corner; side_ft = interior, side_corner_ft = corner. Buda states BOTH Maximum Building Coverage (%) and Maximum Impervious Cover (%) explicitly, so both fields are ordinance-sourced (unlike Dripping Springs and Kyle, whose codes specify only one coverage figure). The UDC notes that impervious cover and building coverage 'may be altered elsewhere in this UDC depending on a property's particular' overlay/PUD; per-parcel overrides are not modeled here.",
+  "districts": [
+    {
+      "district_name": "R-1 Estate Residential",
+      "front_ft": 30,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 25,
+      "max_impervious_pct": 30,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Estate Residential (R-1) District | 30", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... R-1 | 25", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-1 | 15/20", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-1 | 15/20", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... R-1 | 35", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... R-1 | 25", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... R-1 | 30", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "R-2 Suburban Residential",
+      "front_ft": 20,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 50,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Suburban Residential (R-2) District | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... R-2 | 25", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-2 | 10/15", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-2 | 10/15", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... R-2 | 35", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... R-2 | 40", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... R-2 | 50", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "R-3 One & Two Family Residential",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 7.5,
+      "side_corner_ft": 10,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... One & Two Family Residential (R-3) District | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... R-3 | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-3 | 7.5/10", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-3 | 7.5/10", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... R-3 | 30", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... R-3 | 50", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... R-3 | 60", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "R-4 Transitional Residential",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Transitional Residential (R-4) District | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... R-4 | 10", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-4 | 5/10", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-4 | 5/10", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... R-4 | 30", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... R-4 | 50", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... R-4 | 60", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "R-5 Urban Residential",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 65,
+      "max_impervious_pct": 75,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Urban Residential (R-5) District | 25", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... R-5 | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-5 | 15/20", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-5 | 15/20", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... R-5 | 40", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... R-5 | 65", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... R-5 | 75", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "R-MH Manufactured Housing",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 45,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Manufactured Housing (R-MH) District | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... R-MH | 10", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-MH | 5/10", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... R-MH | 5/10", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... R-MH | 30", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... R-MH | 40", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... R-MH | 45", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "AG Agricultural",
+      "front_ft": 35,
+      "rear_ft": 30,
+      "side_ft": 20,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 25,
+      "max_impervious_pct": 30,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Agricultural (AG) District | 35", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... AG | 30", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... AG | 20/25", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... AG | 20/25", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... AG | 35", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... AG | 25", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-res-table", "section_number": "2.07", "quote": "Maximum Impervious Cover (%) ... AG | 30", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "B-1 Neighborhood Business",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 0,
+      "side_corner_ft": 15,
+      "max_height_ft": 25,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 75,
+      "citation_url": "https://ecode360.com/40956702",
+      "provenance": {
+        "front_ft": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Minimum Front Yard Setback (ft) ... Neighborhood Business (B-1) District | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Minimum Rear Yard Setback (ft) ... B-1 | 20", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... B-1 | 0/15", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Minimum Side Yard Setback (Interior/Corner) (ft) ... B-1 | 0/15", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Maximum Height (ft) ... B-1 | 25", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Maximum Building Coverage (%) ... B-1 | 50", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_impervious_pct": { "atom_did": "buda_tx/udc/2.07-nonres-table", "section_number": "2.07", "quote": "Maximum Impervious Coverage (%) ... B-1 | 75", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    }
+  ]
+}

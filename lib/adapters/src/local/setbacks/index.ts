@@ -20,6 +20,9 @@ import grandCountyUt from "./grand-county-ut.json" with { type: "json" };
 import lemhiCountyId from "./lemhi-county-id.json" with { type: "json" };
 import bastropTx from "./bastrop-tx.json" with { type: "json" };
 import sanMarcosTx from "./san-marcos-tx.json" with { type: "json" };
+import drippingSpringsTx from "./dripping-springs-tx.json" with { type: "json" };
+import kyleTx from "./kyle-tx.json" with { type: "json" };
+import budaTx from "./buda-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 
@@ -64,6 +67,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // fabricated setback values ship; the acceptance gate blocks population
   // until citation-backed extraction + human review lands.
   "san-marcos-tx": sanMarcosTx as SetbackTable,
+  // Hays County batch (F4k) — citation-backed from live ordinances, carry
+  // per-value provenance. Dripping Springs from Municode Ch. 30 Exhibit A
+  // Section 3; Kyle from eCode360 Ch. 53 §53-33 Charts 1 & 2; Buda from
+  // eCode360 UDC §2.07 dimensional tables. Synthesized keys are
+  // `dripping_springs_tx`/`kyle_tx`/`buda_tx`, normalized to hyphen form here.
+  "dripping-springs-tx": drippingSpringsTx as SetbackTable,
+  "kyle-tx": kyleTx as SetbackTable,
+  "buda-tx": budaTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
 };

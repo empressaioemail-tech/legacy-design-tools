@@ -1,0 +1,128 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "dripping-springs-tx",
+  "jurisdictionDisplayName": "City of Dripping Springs, TX",
+  "note": "Codified from the City of Dripping Springs Code of Ordinances, Chapter 30 (Zoning and Development Code), Exhibit A, Section 3 (Zoning Districts) — Supplement 10, current 2026. Source is Municode; each district cites its own Section 3.x deep-link. MODELING NOTES: (1) The Dripping Springs code states only 'impervious coverage'/'impervious cover' per district and does NOT state a separate building lot-coverage cap, so max_impervious_pct is ordinance-sourced and max_lot_coverage_pct is flagged not_specified in provenance, carrying the impervious value as a conservative stand-in (the envelope draw uses setbacks, not this field). (2) SF-1 side yard is stated as 'Total of 40 feet combining both side yards with a minimum of 15 feet on either side' — the per-side minimum (15) is codified as side_ft; SF-1 states no distinct corner rule so side_corner_ft mirrors side_ft. (3) Distinct corner side yards are stated only for SF-3 (7.5) and SF-4 (15); other residential districts state no separate corner value so side_corner_ft mirrors side_ft. (4) For commercial districts (O/LR/GR/CS/I), side_ft is the base 'Minimum side yard' and side_corner_ft is the '__ feet adjacent to a public street or residential lot' figure. (5) Heights are 'two and one-half stories, or 40 feet' — the 40 ft cap is codified.",
+  "districts": [
+    {
+      "district_name": "SF-1 Single-Family Residential Low Density",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 30,
+      "max_impervious_pct": 30,
+      "citation_url": "https://library.municode.com/tx/dripping_springs/codes/code_of_ordinances?nodeId=COOR_CH30ZO_EXHIBIT_AZOOR_S3ZODI_3.3SIMIREDIOWDE",
+      "provenance": {
+        "front_ft": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "Minimum front yard: 25 feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "Minimum rear yard: 25 feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "Minimum side yard: Total of 40 feet combining both side yards with a minimum of 15 feet on either side.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "No distinct corner side yard stated for SF-1; mirrors the per-side minimum of 15 feet.", "confidence": 0.7, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "Maximum two and one-half stories, or 40 feet for the main building or house, whichever", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "Dripping Springs states impervious coverage only, not a separate building lot-coverage cap; stand-in equals impervious value.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "dripping_springs_tx/ch30/3.3", "section_number": "3.3", "quote": "Impervious coverage: 30 percent.", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "SF-2 Single-Family Residential Moderate Density",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 40,
+      "citation_url": "https://library.municode.com/tx/dripping_springs/codes/code_of_ordinances?nodeId=COOR_CH30ZO_EXHIBIT_AZOOR_S3ZODI_3.4SIMIREDIODDE",
+      "provenance": {
+        "front_ft": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "Minimum front yard : Minimum 25 feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "Minimum rear yard: Minimum 25 feet from the main building.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "Minimum side yard: Minimum 15 feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "No distinct corner side yard stated for SF-2; mirrors the side yard minimum of 15 feet.", "confidence": 0.7, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "Maximum two and one-half stories, or 40 feet whichever is less, for the main building", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "Dripping Springs states impervious cover only, not a separate building lot-coverage cap; stand-in equals impervious value.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "dripping_springs_tx/ch30/3.4", "section_number": "3.4", "quote": "Impervious cover: 40 percent.", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "SF-3 Single-Family Residential Town Center",
+      "front_ft": 10,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 7.5,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 65,
+      "max_impervious_pct": 65,
+      "citation_url": "https://library.municode.com/tx/dripping_springs/codes/code_of_ordinances?nodeId=COOR_CH30ZO_EXHIBIT_AZOOR_S3ZODI_3.5SIMIREOWCE",
+      "provenance": {
+        "front_ft": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Minimum front yard setback: Ten feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Minimum rear yard setback: Ten feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Minimum side yard setback: Five feet; corner lots, seven and one-half feet from the street right-of-way.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Minimum side yard setback: Five feet; corner lots, seven and one-half feet from the street right-of-way.", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Main building(s) height: Maximum two and one-half stories, or 40 feet for the main", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Dripping Springs states impervious coverage only, not a separate building lot-coverage cap; stand-in equals impervious value.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "dripping_springs_tx/ch30/3.5", "section_number": "3.5", "quote": "Maximum total impervious coverage : 65 percent.", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "SF-4 Two-Family Residential Duplex",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 50,
+      "citation_url": "https://library.municode.com/tx/dripping_springs/codes/code_of_ordinances?nodeId=COOR_CH30ZO_EXHIBIT_AZOOR_S3ZODI_3.6TMIREUP",
+      "provenance": {
+        "front_ft": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Minimum front yard: Minimum 20 feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Minimum rear yard: Minimum 20 feet for the main building.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Minimum side yard: Minimum ten feet; 15 feet from a street right-of-way for a corner", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Minimum side yard: Minimum ten feet; 15 feet from a street right-of-way for a corner lot.", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Maximum two and one-half stories, or 40 feet, whichever is less, for the main building", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Dripping Springs states impervious cover only, not a separate building lot-coverage cap; stand-in equals impervious value.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "dripping_springs_tx/ch30/3.6", "section_number": "3.6", "quote": "Impervious cover : 50 percent.", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "SF-5 Single-Family Attached Residential (Garden Home)",
+      "front_ft": 15,
+      "rear_ft": 20,
+      "side_ft": 0,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 80,
+      "max_impervious_pct": 80,
+      "citation_url": "https://library.municode.com/tx/dripping_springs/codes/code_of_ordinances?nodeId=COOR_CH30ZO_EXHIBIT_AZOOR_S3ZODI_3.7SIMIATREDIGAHO",
+      "provenance": {
+        "front_ft": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "Minimum front yard: 15 feet.", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "Minimum rear yard: 20 feet for the main building.", "confidence": 0.95, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "Single-family attached dwellings are not required to have a side yard, with the exception of a minimum 15-foot side yard adjacent to a street.", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "a minimum 15-foot side yard adjacent to a street", "confidence": 0.9, "verification_state": "human-verified" },
+        "max_height_ft": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "Maximum two and one-half stories, or 40 feet for the main building or house, whichever", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "Dripping Springs states impervious coverage only, not a separate building lot-coverage cap; stand-in equals impervious value.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "dripping_springs_tx/ch30/3.7", "section_number": "3.7", "quote": "Impervious coverage : 80 percent.", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    },
+    {
+      "district_name": "MF Multiple-Family Residential",
+      "front_ft": 30,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 60,
+      "citation_url": "https://library.municode.com/tx/dripping_springs/codes/code_of_ordinances?nodeId=COOR_CH30ZO_EXHIBIT_AZOOR_S3ZODI_3.8MUMIREDIMF",
+      "provenance": {
+        "front_ft": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "Minimum front yard: 30 feet; all areas adjacent to a street shall be deemed front yards.", "confidence": 0.95, "verification_state": "human-verified" },
+        "rear_ft": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "Minimum rear yard: 25 feet; 45 feet when the building is in excess of one-story and", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_ft": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "Minimum side yard: 15 feet; 45 feet when building is in excess of one-story in height", "confidence": 0.9, "verification_state": "human-verified" },
+        "side_corner_ft": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "No distinct corner side yard stated for MF; mirrors the side yard minimum of 15 feet.", "confidence": 0.7, "verification_state": "asserted", "not_specified": true },
+        "max_height_ft": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "Maximum two stories, or 40 feet, whichever is less, for the main building(s).", "confidence": 0.95, "verification_state": "human-verified" },
+        "max_lot_coverage_pct": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "Dripping Springs states impervious cover only, not a separate building lot-coverage cap; stand-in equals impervious value.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
+        "max_impervious_pct": { "atom_did": "dripping_springs_tx/ch30/3.8", "section_number": "3.8", "quote": "Impervious cover : 60 percent total, including main buildings and accessory buildings.", "confidence": 0.95, "verification_state": "human-verified" }
+      }
+    }
+  ]
+}
