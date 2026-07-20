@@ -100,6 +100,8 @@ const SEED = [
     situsCity: "SAN MARCOS",
     situsState: "TX",
     situsZip: "78666",
+    // F11: a real zoning district stamped at ingest -> surfaced as zoningCode.
+    zoningDistrict: "RS",
   }),
   // Same cell, overlapping the lookup point, but WITHOUT a prop id —
   // the point lookup must skip it (it cannot join the CAD roll).
@@ -157,10 +159,17 @@ describe.skipIf(!hasDb)("txgio_parcel store readers over real geometry", () => {
         notSurveyGrade: true,
         situsAddress: "707 UHLAND RD, SAN MARCOS, TX 78666",
         owner: "DELEON FELIX",
+        // F11: stamped zoning district surfaced as zoningCode (the field the
+        // buildable-envelope route maps to the setback district).
+        zoningCode: "RS",
       });
       expect(typeof f12310.properties.retrievedAt).toBe("string");
       // No fabricated CLIP on this path.
       expect(f12310.properties.clip).toBeUndefined();
+      // A parcel with no stamped zoning district carries no zoningCode (never
+      // faked) — the honest conservative-fallback path.
+      const f99001 = features.find((f) => f.properties.apn === "99001")!;
+      expect(f99001.properties.zoningCode).toBeUndefined();
     });
   });
 
