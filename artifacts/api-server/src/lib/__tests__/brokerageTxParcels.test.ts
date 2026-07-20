@@ -114,12 +114,16 @@ describe("txParcelProviderMode", () => {
 });
 
 describe("resolveTxParcelCounty", () => {
-  it("resolves downtown Austin bbox to Travis", () => {
-    expect(resolveTxParcelCounty({ bbox: BBOXES.austin })?.fips).toBe("48453");
+  it("resolves downtown Austin bbox to Travis (now store-backed, F4h)", () => {
+    const c = resolveTxParcelCounty({ bbox: BBOXES.austin });
+    expect(c?.fips).toBe("48453");
+    expect(c?.source).toBe("txgio-store");
   });
 
-  it("resolves Round Rock to Williamson despite Travis bbox overlap (nearest centroid)", () => {
-    expect(resolveTxParcelCounty({ bbox: BBOXES.roundRock })?.fips).toBe("48491");
+  it("resolves Round Rock to Williamson (store-backed) despite Travis bbox overlap (nearest centroid)", () => {
+    const c = resolveTxParcelCounty({ bbox: BBOXES.roundRock });
+    expect(c?.fips).toBe("48491");
+    expect(c?.source).toBe("txgio-store");
   });
 
   it("resolves a San Antonio pin to Bexar", () => {
@@ -144,6 +148,111 @@ describe("resolveTxParcelCounty", () => {
 
   it("returns null with neither bbox nor pin", () => {
     expect(resolveTxParcelCounty({})).toBeNull();
+  });
+});
+
+describe("F4h: Travis/Williamson flipped to the TxGIO store", () => {
+  function county(fips: string): TxParcelCounty {
+    const c = TX_PARCEL_COUNTIES.find((x) => x.fips === fips);
+    if (!c) throw new Error(`no county ${fips}`);
+    return c;
+  }
+
+  it("Travis (48453) is a store entry pointing at the StratMap resource, no arcgis fields", () => {
+    const t = county("48453");
+    expect(t.source).toBe("txgio-store");
+    expect(t.serviceUrl).toContain(
+      "data.geographic.texas.gov",
+    );
+    expect(t.serviceUrl).toContain("stratmap25-landparcels_48453_lp.zip");
+    // Store entries carry no live-ArcGIS field-mapping (identity normalizer,
+    // no rawPropId — the store stamps parcel_node_id from its own prop_id).
+    expect(t.rawPropId).toBeUndefined();
+    const passthrough = { anything: 1 };
+    expect(t.normalizeProps(passthrough)).toBe(passthrough);
+    // Store label + adapter key + disclaimer.
+    expect(txCountyProviderLabel(t)).toBe(
+      "Travis County parcels (TxGIO/StratMap)",
+    );
+    expect(txCountyAdapterKey(t)).toBe("txgio:parcels:48453");
+    expect(txCountyDisclaimer(t)).toBe(TXGIO_PARCEL_DISCLAIMER);
+  });
+
+  it("Williamson (48491) is a store entry pointing at the StratMap resource, no arcgis fields", () => {
+    const w = county("48491");
+    expect(w.source).toBe("txgio-store");
+    expect(w.serviceUrl).toContain("stratmap25-landparcels_48491_lp.zip");
+    expect(w.rawPropId).toBeUndefined();
+    expect(txCountyProviderLabel(w)).toBe(
+      "Williamson County parcels (TxGIO/StratMap)",
+    );
+    expect(txCountyAdapterKey(w)).toBe("txgio:parcels:48491");
+  });
+
+  it("downtown Austin resolves to Travis via the store", () => {
+    // ~30.27, -97.74 (downtown), interior Travis.
+    const c = resolveTxParcelCounty({ latitude: 30.27, longitude: -97.74 });
+    expect(c?.fips).toBe("48453");
+    expect(c?.source).toBe("txgio-store");
+  });
+
+  it("Georgetown resolves to Williamson via the store", () => {
+    // ~30.63, -97.68 (Georgetown), interior Williamson near the mass centroid.
+    const c = resolveTxParcelCounty({ latitude: 30.63, longitude: -97.68 });
+    expect(c?.fips).toBe("48491");
+    expect(c?.source).toBe("txgio-store");
+  });
+
+  it("interior in-county bboxes route correctly (both directions across the shared border)", () => {
+    // A Travis bbox just SOUTH of the Travis/Williamson line -> Travis.
+    expect(
+      resolveTxParcelCounty({
+        bbox: { westLng: -97.72, southLat: 30.30, eastLng: -97.70, northLat: 30.32 },
+      })?.fips,
+    ).toBe("48453");
+    // A Williamson bbox just NORTH of the line (Round Rock) -> Williamson.
+    expect(resolveTxParcelCounty({ bbox: BBOXES.roundRock })?.fips).toBe("48491");
+  });
+
+  it("KNOWN EDGE (documented sliver): SW-Travis near the Hays line routes to the Hays store under nearest-centroid", () => {
+    // Real Travis parcel center (11412 ESPERANZA DR, 78739): 30.17047,
+    // -97.87057. Travis' parcel mass centroid sits far east (dense east
+    // Austin), so this SW-Austin point is closer to Hays' centroid and
+    // nearest-centroid pre-routing hands the bbox tile-fetch to the Hays
+    // store. That NEVER returns a wrong parcel: the Hays store filters by
+    // county_fips=48209 and has no Travis rows, so the query is an honest
+    // no-coverage. For ADDRESS resolution the multi-county situs pre-pass
+    // (storeCountiesContainingPoint) still includes Travis, so a
+    // situs-bearing border address resolves regardless of centroid distance;
+    // Travis' mostly-blank situs rides the rooftop path instead. This is the
+    // known bbox+centroid limit at a straddle (~7.5% of sampled Travis
+    // parcels, all along the SW/W edge). If a later change adds point-in-
+    // polygon pre-resolution, flip this expectation to "48453".
+    expect(
+      resolveTxParcelCounty({ latitude: 30.17047, longitude: -97.87057 })?.fips,
+    ).toBe("48209");
+    // The same point IS contained by Travis' routing bbox, so the situs
+    // multi-county candidate set (all store counties containing the point)
+    // includes Travis — the recovery path for a situs-bearing address.
+    const t = TX_PARCEL_COUNTIES.find((c) => c.fips === "48453")!;
+    const inTravisBbox =
+      -97.87057 >= t.bbox.westLng &&
+      -97.87057 <= t.bbox.eastLng &&
+      30.17047 >= t.bbox.southLat &&
+      30.17047 <= t.bbox.northLat;
+    expect(inTravisBbox).toBe(true);
+  });
+
+  it("REGRESSION: Bexar/Bastrop/Caldwell stay live-ArcGIS; Hays/Comal unchanged", () => {
+    expect(resolveTxParcelCounty({ bbox: BBOXES.sanAntonio })?.source).toBeUndefined();
+    expect(resolveTxParcelCounty({ bbox: BBOXES.bastrop })?.source).toBeUndefined();
+    expect(
+      resolveTxParcelCounty({ latitude: 29.885, longitude: -97.673 })?.source,
+    ).toBeUndefined();
+    // Hays / Comal cores still resolve to their store entries.
+    expect(
+      resolveTxParcelCounty({ latitude: 29.88, longitude: -97.94 })?.fips,
+    ).toBe("48209");
   });
 });
 
@@ -185,57 +294,34 @@ describe("gap counties routed to the TxGIO store (Bell/McLennan/Guadalupe)", () 
     ).toBe("48187");
   });
 
-  it("REGRESSION: metro-5 + Hays/Comal routing is unchanged by the new bboxes", () => {
-    // Metro-5 stay on their live-ArcGIS entries.
-    expect(resolveTxParcelCounty({ bbox: BBOXES.austin })?.source).toBeUndefined();
-    expect(resolveTxParcelCounty({ bbox: BBOXES.austin })?.fips).toBe("48453");
-    expect(resolveTxParcelCounty({ bbox: BBOXES.roundRock })?.fips).toBe("48491");
+  it("REGRESSION: metro routing is unchanged by the gap-county bboxes", () => {
+    // Bexar/Bastrop/Caldwell stay on their live-ArcGIS entries.
+    expect(resolveTxParcelCounty({ bbox: BBOXES.sanAntonio })?.source).toBeUndefined();
     expect(resolveTxParcelCounty({ bbox: BBOXES.sanAntonio })?.fips).toBe("48029");
+    expect(resolveTxParcelCounty({ bbox: BBOXES.bastrop })?.source).toBeUndefined();
     expect(resolveTxParcelCounty({ bbox: BBOXES.bastrop })?.fips).toBe("48021");
+    expect(
+      resolveTxParcelCounty({ latitude: 29.885, longitude: -97.673 })?.source,
+    ).toBeUndefined();
     expect(
       resolveTxParcelCounty({ latitude: 29.885, longitude: -97.673 })?.fips,
     ).toBe("48055");
+    // Travis/Williamson are now store-backed (F4h) but still route to the
+    // right county from an in-county bbox.
+    expect(resolveTxParcelCounty({ bbox: BBOXES.austin })?.fips).toBe("48453");
+    expect(resolveTxParcelCounty({ bbox: BBOXES.roundRock })?.fips).toBe("48491");
   });
 });
 
 describe("per-county attribute normalization (real probed fixtures)", () => {
-  it("Travis: apn + situsAddress, provenance, no owner (not exposed upstream)", async () => {
-    const result = await queryTxCountyParcelsGeoJson({
-      county: countyByName("Travis"),
-      bbox: BBOXES.austin,
-      fetchImpl: fixtureFetchFor(TX_COUNTY_PARCEL_FIXTURES.travis),
-    });
-    expect(result.queryMode).toBe("bbox");
-    expect(result.featureCount).toBe(2);
-    const props = (result.geojson.features[0] as { properties: Record<string, unknown> })
-      .properties;
-    expect(props.apn).toBe("194502");
-    expect(props.situsAddress).toBe("615 SAN JACINTO BLVD 78701");
-    expect(props.owner).toBeUndefined();
-    expect(props.provider).toBe("county-gis");
-    expect(props.countyFips).toBe("48453");
-    expect(props.sourceUrl).toContain("gis.traviscountytx.gov");
-    expect(typeof props.retrievedAt).toBe("string");
-    expect(props.notSurveyGrade).toBe(true);
-    expect(props.clip).toBeUndefined();
-  });
-
-  it("Williamson: apn/situs/owner/land-use from PropertyNumber/SITEADDRESS/OWNERNME1/USECD", async () => {
-    const result = await queryTxCountyParcelsGeoJson({
-      county: countyByName("Williamson"),
-      bbox: BBOXES.roundRock,
-      fetchImpl: fixtureFetchFor(TX_COUNTY_PARCEL_FIXTURES.williamson),
-    });
-    const props = (result.geojson.features[0] as { properties: Record<string, unknown> })
-      .properties;
-    expect(props.apn).toBe("R-16-5120-0007-0000");
-    expect(props.situsAddress).toBe("BLAIR ST S, ROUND ROCK, TX  78664");
-    expect(props.owner).toBe("ONCOR ELECTRIC DELIVERY COMPANY");
-    expect(props.landUseCode).toBe("L");
-    expect(props.landUseDescription).toBe("Land");
-    expect(props.countyFips).toBe("48491");
-  });
-
+  // Travis + Williamson attribute-normalization tests were removed in F4h:
+  // both are now source: "txgio-store", so queryTxCountyParcelsGeoJson
+  // delegates to the txgio_parcel store reader (mocked here / covered by the
+  // integration suite) and no longer runs the live-ArcGIS normalizeProps
+  // path. The store-side feature shape (apn/situs/owner/landUse via the
+  // cad_property join) is exercised in the txgioParcelStore + f4e integration
+  // suites. Bexar/Bastrop/Caldwell below still cover the live-ArcGIS
+  // normalizers.
   it("Bexar: apn/situs/owner/land-use code; 'NULL' string sentinels dropped", async () => {
     const result = await queryTxCountyParcelsGeoJson({
       county: countyByName("Bexar"),
@@ -283,10 +369,11 @@ describe("per-county attribute normalization (real probed fixtures)", () => {
   });
 
   it("throws no-coverage when the county returns zero features", async () => {
+    // Bexar is still live-ArcGIS (Travis was flipped to the store in F4h).
     await expect(
       queryTxCountyParcelsGeoJson({
-        county: countyByName("Travis"),
-        bbox: BBOXES.austin,
+        county: countyByName("Bexar"),
+        bbox: BBOXES.sanAntonio,
         fetchImpl: fixtureFetchFor({ type: "FeatureCollection", features: [] }),
       }),
     ).rejects.toMatchObject({ code: "no-coverage" });
@@ -297,25 +384,27 @@ describe("per-county attribute normalization (real probed fixtures)", () => {
       new Response("Service unavailable", { status: 503 }),
     ) as unknown as typeof fetch;
     const err = await queryTxCountyParcelsGeoJson({
-      county: countyByName("Travis"),
-      bbox: BBOXES.austin,
+      county: countyByName("Bexar"),
+      bbox: BBOXES.sanAntonio,
       fetchImpl: failFetch,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AdapterRunError);
-    expect(String((err as Error).message)).toContain("Travis County GIS parcels");
+    expect(String((err as Error).message)).toContain("Bexar County GIS parcels");
   });
 });
 
 describe("truncation at the Cotality-parity cap", () => {
   it("caps merged pages at TX_PARCEL_FEATURE_CAP and flags truncated", async () => {
-    const template = TX_COUNTY_PARCEL_FIXTURES.travis.features[0];
+    // Bexar is still live-ArcGIS (Travis was flipped to the store in F4h;
+    // the store path has its own cap/truncation test in the txgio suite).
+    const template = TX_COUNTY_PARCEL_FIXTURES.bexar.features[0];
     const page = {
       type: "FeatureCollection",
       exceededTransferLimit: true,
       features: Array.from({ length: 50 }, (_, i) => ({
         type: "Feature",
         geometry: template.geometry,
-        properties: { ...template.properties, PROP_ID: 100000 + i },
+        properties: { ...template.properties, PropID: 100000 + i },
       })),
     };
     const pagedFetch = vi.fn(async () =>
@@ -326,8 +415,8 @@ describe("truncation at the Cotality-parity cap", () => {
     ) as unknown as typeof fetch;
 
     const result = await queryTxCountyParcelsGeoJson({
-      county: countyByName("Travis"),
-      bbox: BBOXES.austin,
+      county: countyByName("Bexar"),
+      bbox: BBOXES.sanAntonio,
       fetchImpl: pagedFetch,
     });
     expect(result.featureCount).toBe(TX_PARCEL_FEATURE_CAP);
@@ -391,11 +480,12 @@ describe("tile cache read-through", () => {
   });
 
   it("pin queries are uncached (mirrors the Cotality path)", async () => {
+    // Bexar is still live-ArcGIS (Travis was flipped to the store in F4h).
     await queryTxCountyParcelsGeoJson({
-      county: countyByName("Travis"),
-      latitude: 30.2665,
-      longitude: -97.7425,
-      fetchImpl: fixtureFetchFor(TX_COUNTY_PARCEL_FIXTURES.travis),
+      county: countyByName("Bexar"),
+      latitude: 29.4254,
+      longitude: -98.4925,
+      fetchImpl: fixtureFetchFor(TX_COUNTY_PARCEL_FIXTURES.bexar),
     });
     expect(vi.mocked(getTxParcelTile)).not.toHaveBeenCalled();
     expect(vi.mocked(putTxParcelTile)).not.toHaveBeenCalled();
@@ -403,13 +493,17 @@ describe("tile cache read-through", () => {
 });
 
 describe("dispatcher routing (queryGisLayerGeoJson parcels branch)", () => {
-  it("serves an in-county bbox from the county provider with the honesty envelope", async () => {
+  it("serves an in-county live-ArcGIS bbox (Bexar) from the county provider with the honesty envelope", async () => {
+    // Travis was flipped to the store in F4h, so the live-ArcGIS dispatcher
+    // path is now exercised via Bexar (still a live county service). The
+    // store-backed Travis/Williamson dispatch is covered by the Hays store
+    // dispatcher test below.
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL) => {
         const url = String(input);
-        if (url.includes("gis.traviscountytx.gov")) {
-          return new Response(JSON.stringify(TX_COUNTY_PARCEL_FIXTURES.travis), {
+        if (url.includes("maps.bexar.org")) {
+          return new Response(JSON.stringify(TX_COUNTY_PARCEL_FIXTURES.bexar), {
             status: 200,
             headers: { "content-type": "application/json" },
           });
@@ -420,11 +514,11 @@ describe("dispatcher routing (queryGisLayerGeoJson parcels branch)", () => {
 
     const result = await queryGisLayerGeoJson({
       layer: "parcels",
-      bbox: BBOXES.austin,
+      bbox: BBOXES.sanAntonio,
     });
-    expect(result.provider).toBe("Travis County GIS parcels");
-    expect(result.adapterKey).toBe("county-gis:parcels:48453");
-    expect(result.serviceUrl).toContain("gis.traviscountytx.gov");
+    expect(result.provider).toBe("Bexar County GIS parcels");
+    expect(result.adapterKey).toBe("county-gis:parcels:48029");
+    expect(result.serviceUrl).toContain("maps.bexar.org");
     expect(result.notSurveyGrade).toBe(true);
     expect(result.disclaimer).toBe(TX_COUNTY_PARCEL_DISCLAIMER);
     expect(result.featureCount).toBe(2);
@@ -437,7 +531,7 @@ describe("dispatcher routing (queryGisLayerGeoJson parcels branch)", () => {
     process.env.COTALITY_SPATIALTILE_SECRET = "test-secret";
     const fetchSpy = vi.fn(async (input: string | URL) => {
       const url = String(input);
-      if (url.includes("gis.traviscountytx.gov")) {
+      if (url.includes("maps.bexar.org")) {
         throw new Error("county provider must not be hit when off");
       }
       if (url.includes("/oauth/token")) {
@@ -474,13 +568,13 @@ describe("dispatcher routing (queryGisLayerGeoJson parcels branch)", () => {
 
     const result = await queryGisLayerGeoJson({
       layer: "parcels",
-      bbox: BBOXES.austin,
+      bbox: BBOXES.sanAntonio,
     });
     expect(result.provider).toBe("Cotality Spatial Tile");
     expect(result.adapterKey).toBe("cotality:parcels");
     expect(result.notSurveyGrade).toBeUndefined();
     const urls = fetchSpy.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes("gis.traviscountytx.gov"))).toBe(false);
+    expect(urls.some((u) => u.includes("maps.bexar.org"))).toBe(false);
   });
 
   it("out-of-coverage bbox flows to the Cotality branch unchanged", async () => {
