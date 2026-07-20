@@ -68,7 +68,9 @@ import { AdapterRunError } from "@workspace/adapters/types";
 import { tileKey, getTxParcelTile, putTxParcelTile } from "./brokerageGisCache";
 import {
   queryTxgioParcelsGeoJson,
+  countyStoreContainsPoint,
   TXGIO_PARCEL_DISCLAIMER,
+  type TxgioStoreDb,
 } from "./txgioParcelStore";
 import type { GisLayerBbox } from "./brokerageGisLayers";
 import { parcelNodeId } from "./parcelNodeId";
@@ -494,6 +496,107 @@ export function resolveTxParcelCounty(input: {
     }
   }
   return best;
+}
+
+/**
+ * Outcome of the F4j point-in-polygon county pre-resolution.
+ *   - `county` set, `resolvedBy: "pip"`      : exactly one store county's
+ *     parcel fabric CONTAINS the point — authoritative, correct even on a
+ *     straddle where nearest-centroid picks the wrong side.
+ *   - `county` set, `resolvedBy: "pip-tightest"` : several store counties
+ *     reported containment (should not happen for real, non-overlapping
+ *     parcels); the tightest containing parcel's county wins.
+ *   - `county` set, `resolvedBy: "centroid-fallback"` : NO store county
+ *     contains the point (a genuine gap / ROW, or a live-ArcGIS county) —
+ *     fall back to the existing nearest-centroid router so the live-ArcGIS
+ *     counties and the Cotality fall-through keep working unchanged.
+ *   - `county` null                          : not a supported county at all.
+ */
+export interface PipCountyResolution {
+  county: TxParcelCounty | null;
+  resolvedBy: "pip" | "pip-tightest" | "centroid-fallback" | "none";
+}
+
+/**
+ * POINT-IN-POLYGON county pre-resolution (F4j). Fixes straddle mis-routing
+ * that bbox + nearest-centroid cannot: an address on a county line whose
+ * geocode point sits inside county A's parcel but closer to county B's
+ * centroid was routed to B, queried against B's store, found nothing, and
+ * DECLINED — even though A's parcel is right there (the live-verified New
+ * Braunfels / Comal failure: 1400 Common St at ~29.72,-98.10 is a Comal
+ * parcel but nearest-centroid picked Guadalupe).
+ *
+ * Algorithm:
+ *   1. Candidate counties = every STORE county whose routing bbox contains
+ *      the point (already the {@link storeCountiesContainingPoint} set —
+ *      2-3 on a straddle).
+ *   2. Probe each candidate's store for a parcel whose GEOMETRY CONTAINS the
+ *      point ({@link countyStoreContainsPoint} — one bounded, index-using
+ *      grid-cell query + JS ray cast per candidate). The county whose parcel
+ *      contains the point IS the authoritative county.
+ *   3. Exactly one containing county -> route there (`pip`). Several (only
+ *      for overlapping parcels, not real fabric) -> the tightest containing
+ *      parcel's county (`pip-tightest`). NONE contain it (a genuine gap/ROW,
+ *      or the point is only in a live-ArcGIS county's bbox) -> fall back to
+ *      the nearest-centroid {@link resolveTxParcelCounty} (`centroid-fallback`)
+ *      so the live-ArcGIS pin-query and Cotality fall-through are unchanged.
+ *
+ * This NEVER makes routing looser (commitment #1): a point that no store
+ * parcel contains is NOT force-routed to a store county — it falls back to
+ * the exact prior behavior, and a point in a genuine gap honestly declines
+ * downstream. It only makes MORE points route to the county that actually
+ * owns them.
+ *
+ * Perf: bounded to the 2-3 candidate store counties on a straddle, each a
+ * single-cell indexed query returning a handful of rows. No full-county
+ * scan. Probes run concurrently.
+ */
+export async function resolvePointCountyByPip(input: {
+  latitude: number;
+  longitude: number;
+  database?: TxgioStoreDb;
+}): Promise<PipCountyResolution> {
+  const { latitude, longitude } = input;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return { county: null, resolvedBy: "none" };
+  }
+
+  const candidates = storeCountiesContainingPoint(latitude, longitude);
+  if (candidates.length > 0) {
+    const probes = await Promise.all(
+      candidates.map(async (county) => ({
+        county,
+        hit: await countyStoreContainsPoint({
+          countyFips: county.fips,
+          latitude,
+          longitude,
+          database: input.database,
+        }),
+      })),
+    );
+    const containing = probes.filter(
+      (p): p is { county: TxParcelCounty; hit: NonNullable<typeof p.hit> } =>
+        p.hit !== null,
+    );
+    if (containing.length === 1) {
+      return { county: containing[0]!.county, resolvedBy: "pip" };
+    }
+    if (containing.length > 1) {
+      // Overlapping parcels across candidate counties (not expected for real
+      // fabric) — prefer the tightest containing parcel's county.
+      containing.sort((a, b) => a.hit.bboxAreaDeg2 - b.hit.bboxAreaDeg2);
+      return { county: containing[0]!.county, resolvedBy: "pip-tightest" };
+    }
+  }
+
+  // No store county's parcel contains the point (genuine gap/ROW, or the
+  // point is only inside a live-ArcGIS county's bbox). Fall back to the
+  // existing nearest-centroid router — behavior identical to pre-F4j.
+  const fallback = resolveTxParcelCounty({ latitude, longitude });
+  return {
+    county: fallback,
+    resolvedBy: fallback ? "centroid-fallback" : "none",
+  };
 }
 
 /**

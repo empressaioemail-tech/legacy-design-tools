@@ -59,6 +59,7 @@ import {
 } from "../lib/txgioAddressResolve";
 import {
   resolveTxParcelCounty,
+  resolvePointCountyByPip,
   storeCountiesContainingPoint,
   allStoreCounties,
   txCountyProviderLabel,
@@ -336,7 +337,15 @@ async function resolveContext(
         : "geocode-high";
 
     if (addressHint && txParcelProviderMode() === "county-gis") {
-      const county = resolveTxParcelCounty({ latitude: lat, longitude: lng });
+      // F4j: point-in-polygon county pre-resolution so a border address whose
+      // geocode centroid sits in county A's parcel but nearer county B's
+      // centroid looks up its authoritative rooftop in the RIGHT county (the
+      // one that owns the parcel). Falls back to nearest-centroid when the
+      // geocode point is in no store parcel (a coarse centroid often is), so
+      // never worse than before.
+      const county = (
+        await resolvePointCountyByPip({ latitude: lat, longitude: lng })
+      ).county;
       if (county) {
         try {
           const rooftop = await resolveRooftopByAddress({
