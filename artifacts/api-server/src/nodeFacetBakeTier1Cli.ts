@@ -494,7 +494,7 @@ function placeKeyForNode(nodeId: string): string {
   return `node:${nodeId}`;
 }
 
-async function readSnapshot(
+export async function readSnapshot(
   pool: pg.Pool,
   adapterKey: string,
   placeKey: string,
@@ -514,7 +514,7 @@ async function readSnapshot(
   return raw as Tier1FacetPayload;
 }
 
-async function writeSnapshot(
+export async function writeSnapshot(
   pool: pg.Pool,
   adapterKey: string,
   placeKey: string,
@@ -549,6 +549,200 @@ async function writeSnapshot(
       now,
     ],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Batched snapshot read/write (per-page, replaces the per-node round-trips).
+//
+// The per-node `readSnapshot`/`writeSnapshot` above are retained for the unit
+// tests and any single-node caller; the page loop drives these batched forms
+// so a 5000-node page costs ONE read round-trip + a small number of write
+// round-trips instead of 10000 round-trips.
+// ---------------------------------------------------------------------------
+
+/** One row queued for the page's batched upsert. */
+export interface BakeWriteItem {
+  placeKey: string;
+  centroid: { lat: number; lng: number };
+  payload: Tier1FacetPayload;
+}
+
+/**
+ * Batch-read priors for every placeKey in a page with ONE query, returning a
+ * Map(placeKey -> priorPayload). Only entries carrying our comparable
+ * `facetCoverage`+`parcelNodeId` shape are returned (same acceptance filter as
+ * the per-node `readSnapshot`), so a malformed/foreign snapshot is treated as
+ * "no comparable prior" — identical to the per-node path. Absent keys are
+ * simply not in the map (the caller reads that as prior=null).
+ */
+export async function readSnapshotsBatch(
+  pool: pg.Pool,
+  adapterKey: string,
+  placeKeys: string[],
+): Promise<Map<string, Tier1FacetPayload>> {
+  const out = new Map<string, Tier1FacetPayload>();
+  if (placeKeys.length === 0) return out;
+  const r = await pool.query<{ place_key: string; payload_json: unknown }>(
+    `SELECT place_key, payload_json
+       FROM place_layer_snapshots
+      WHERE adapter_key = $1 AND place_key = ANY($2)`,
+    [adapterKey, placeKeys],
+  );
+  for (const row of r.rows) {
+    const raw = row.payload_json;
+    if (!raw || typeof raw !== "object") continue;
+    const p = raw as Partial<Tier1FacetPayload>;
+    if (!p.facetCoverage || !p.parcelNodeId) continue;
+    out.set(row.place_key, raw as Tier1FacetPayload);
+  }
+  return out;
+}
+
+/**
+ * Bound-parameter ceiling for a single pg statement. Postgres caps a query at
+ * 65535 bound parameters. The batched upsert below uses a FIXED 7 params
+ * regardless of row count (adapter_key + now + five per-row arrays), so it can
+ * never approach the ceiling on param count alone; the chunk cap here bounds
+ * the array sizes / statement memory and mirrors the zoning-stamp batch's
+ * 5000-per-chunk discipline. The unnest form means paramsPerRow == 0 (all row
+ * data rides inside array literals), so 5000 rows == 7 params, well under 60k.
+ */
+export const BATCH_WRITE_CHUNK = 5000;
+
+/** Split an array into fixed-size chunks (last chunk may be short). */
+export function chunkItems<T>(items: T[], size: number): T[][] {
+  if (size <= 0) throw new Error("chunk size must be positive");
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Upsert a page's promoted nodes in ONE round-trip per chunk, using unnest
+ * arrays so the parameter count is constant (7) no matter how many rows. The
+ * conflict target `(adapter_key, place_key)`, the written columns, the
+ * content_hash, the coord columns, and the ll_uuid=NULL / owner-exclusion are
+ * BYTE-FOR-BYTE the same as the per-node `writeSnapshot` — only the row count
+ * per statement changes. Chunked at BATCH_WRITE_CHUNK for array-size safety.
+ */
+export async function writeSnapshotsBatch(
+  pool: pg.Pool,
+  adapterKey: string,
+  items: BakeWriteItem[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const now = new Date();
+  for (const chunk of chunkItems(items, BATCH_WRITE_CHUNK)) {
+    const placeKeys: string[] = [];
+    const lats: string[] = [];
+    const lngs: string[] = [];
+    const payloads: string[] = [];
+    const hashes: string[] = [];
+    for (const it of chunk) {
+      placeKeys.push(it.placeKey);
+      lats.push(it.centroid.lat.toFixed(5));
+      lngs.push(it.centroid.lng.toFixed(5));
+      payloads.push(JSON.stringify(it.payload));
+      hashes.push(
+        contentHashForPayload(
+          it.payload as unknown as Record<string, unknown>,
+        ),
+      );
+    }
+    // 7 bound params total (2 scalars + 5 arrays), independent of chunk size.
+    await pool.query(
+      `INSERT INTO place_layer_snapshots
+         (place_key, adapter_key, lat_rounded, lng_rounded, ll_uuid,
+          payload_json, content_hash, snapshot_at, created_at, updated_at)
+       SELECT
+          u.place_key, $1, u.lat_rounded::numeric, u.lng_rounded::numeric, NULL,
+          u.payload_json::jsonb, u.content_hash, $2, $2, $2
+         FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+              AS u(place_key, lat_rounded, lng_rounded, payload_json, content_hash)
+       ON CONFLICT (adapter_key, place_key) DO UPDATE SET
+         lat_rounded = EXCLUDED.lat_rounded,
+         lng_rounded = EXCLUDED.lng_rounded,
+         payload_json = EXCLUDED.payload_json,
+         content_hash = EXCLUDED.content_hash,
+         snapshot_at = EXCLUDED.snapshot_at,
+         updated_at = EXCLUDED.updated_at`,
+      [adapterKey, now, placeKeys, lats, lngs, payloads, hashes],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Page-level promotion decision (pure) — the batched analogue of the per-node
+// read-decide loop, factored out so the counts are unit-testable without a DB.
+// ---------------------------------------------------------------------------
+
+export interface ComputedNode {
+  placeKey: string;
+  payload: Tier1FacetPayload;
+  centroid: { lat: number; lng: number };
+}
+
+export interface PagePromotionResult {
+  /** Nodes to upsert, de-duped to the LAST promoted payload per placeKey. */
+  toWrite: BakeWriteItem[];
+  promotedNew: number;
+  promotedUpgrade: number;
+  keptPriorMonotonic: number;
+}
+
+/**
+ * Decide, for one page of computed nodes, which promote and which are kept on
+ * their prior high-water-mark — using the UNCHANGED `shouldPromote`. This is a
+ * pure re-expression of the per-node loop's decide step:
+ *
+ *  - `priors` is the batch-read map (placeKey -> stored prior, or absent).
+ *  - A placeKey repeating within the page uses the running best-so-far as its
+ *    baseline (mirrors the per-node loop reading its own just-written row), so
+ *    a same-or-better repeat promotes (counted upgrade) and a worse repeat is
+ *    kept — identical to the sequential per-node counts.
+ *  - `toWrite` is de-duped to the LAST promoted payload per key so the batched
+ *    upsert lands the same final row the per-node loop's last write would.
+ *
+ * shouldPromote and its inputs are untouched: the per-node decision for any
+ * given (prior, payload) is byte-for-byte the same here.
+ */
+export function decidePagePromotions(
+  computed: ComputedNode[],
+  priors: Map<string, Tier1FacetPayload>,
+): PagePromotionResult {
+  const pending = new Map<string, Tier1FacetPayload>();
+  const writeIndex = new Map<string, number>();
+  const toWrite: BakeWriteItem[] = [];
+  let promotedNew = 0;
+  let promotedUpgrade = 0;
+  let keptPriorMonotonic = 0;
+
+  for (const c of computed) {
+    const prior = pending.get(c.placeKey) ?? priors.get(c.placeKey) ?? null;
+    if (!shouldPromote(prior, c.payload)) {
+      keptPriorMonotonic += 1;
+      continue;
+    }
+    if (prior) promotedUpgrade += 1;
+    else promotedNew += 1;
+    pending.set(c.placeKey, c.payload);
+    const item: BakeWriteItem = {
+      placeKey: c.placeKey,
+      centroid: c.centroid,
+      payload: c.payload,
+    };
+    const existing = writeIndex.get(c.placeKey);
+    if (existing === undefined) {
+      writeIndex.set(c.placeKey, toWrite.length);
+      toWrite.push(item);
+    } else {
+      toWrite[existing] = item;
+    }
+  }
+
+  return { toWrite, promotedNew, promotedUpgrade, keptPriorMonotonic };
 }
 
 // ---------------------------------------------------------------------------
@@ -630,6 +824,14 @@ async function bakeCounty(args: {
     );
     if (r.rows.length === 0) break;
 
+    // ---- PHASE 1 (COMPUTE) ----------------------------------------------
+    // Iterate the page's rows exactly as the per-node loop did: advance the
+    // keyset cursor, count parcelsSeen, skip no-nodeId / no-geom, do the
+    // facet-hit accounting and sampleSink, and collect the bakeable nodes for
+    // the batched prior-read + write. NONE of the accounting here differs from
+    // the per-node version — it just no longer interleaves a DB round-trip.
+    const computed: ComputedNode[] = [];
+
     for (const row of r.rows) {
       after = row.feature_index;
       stats.parcelsSeen += 1;
@@ -660,23 +862,32 @@ async function bakeCounty(args: {
       args.sampleSink(payload);
 
       const placeKey = placeKeyForNode(payload.parcelNodeId);
+      const centroid = ring ? ringCentroid(ring) : { lat: 0, lng: 0 };
+      computed.push({ placeKey, payload, centroid });
+    }
 
-      // --- Monotonic guard: read prior, score, promote only if >= ---
-      const prior = await readSnapshot(pool, adapterKey, placeKey);
-      if (!shouldPromote(prior, payload)) {
-        stats.keptPriorMonotonic += 1;
-        continue;
-      }
+    // ---- PHASE 2 (BATCH-READ PRIORS) ------------------------------------
+    // ONE query fetches priors for every bakeable placeKey in the page. Runs
+    // in dry-run too, so the dry-run monotonic decision reflects the DB state.
+    const priors = await readSnapshotsBatch(
+      pool,
+      adapterKey,
+      computed.map((c) => c.placeKey),
+    );
 
-      if (!dryRun) {
-        const centroid = ring
-          ? ringCentroid(ring)
-          : { lat: 0, lng: 0 };
-        await writeSnapshot(pool, adapterKey, placeKey, centroid, payload);
-      }
-      stats.baked += 1;
-      if (prior) stats.promotedUpgrade += 1;
-      else stats.promotedNew += 1;
+    // ---- PHASE 3 (DECIDE + BATCH-WRITE) ---------------------------------
+    // Apply the UNCHANGED shouldPromote per node, in page order, partitioning
+    // into promote vs keptPriorMonotonic. Counts land byte-for-byte the same
+    // as the per-node loop (kept / new / upgrade / baked). Promoted nodes are
+    // upserted in one batched statement (chunked); dry-run skips only the
+    // write, keeping every count intact.
+    const decision = decidePagePromotions(computed, priors);
+    stats.promotedNew += decision.promotedNew;
+    stats.promotedUpgrade += decision.promotedUpgrade;
+    stats.keptPriorMonotonic += decision.keptPriorMonotonic;
+    stats.baked += decision.promotedNew + decision.promotedUpgrade;
+    if (!dryRun) {
+      await writeSnapshotsBatch(pool, adapterKey, decision.toWrite);
     }
 
     if (r.rows.length < pageLimit) break;
