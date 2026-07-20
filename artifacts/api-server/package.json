@@ -9,6 +9,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "parcels-pmtiles-bake": "tsx src/parcelsPmtilesBakeCli.ts",
+    "node-facet-bake-tier1": "tsx src/nodeFacetBakeTier1Cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
