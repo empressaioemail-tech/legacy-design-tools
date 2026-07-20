@@ -63,6 +63,21 @@ export interface ZoningLayerConfig {
    * consumed by the envelope; recorded so a stamp run is auditable.
    */
   descriptionField?: string;
+  /**
+   * OPTIONAL. Regex STRING with exactly ONE capture group, applied to the
+   * raw `codeField` value to extract the real district code BEFORE it is
+   * stamped. When present, the field value is matched against
+   * `new RegExp(codeExtractRegex)` and capture group 1 becomes the stamped
+   * code (still RAW — no further transform; the leading-token normalization
+   * in districtMapping does the alignment, per THE MATCH CONTRACT above).
+   * If the regex does not match a given feature's value, that feature's
+   * code falls through to NULL (honest — never a guessed district).
+   * When ABSENT, behavior is exactly as today: the raw field value is the
+   * code (Georgetown has none). Example (Hutto): the field value is
+   * "Single Family (SF-1)"; with `codeExtractRegex` = `\(([^)]+)\)` the
+   * stamped code is "SF-1", which normalizes to the "SF-1 ..." setback row.
+   */
+  codeExtractRegex?: string;
 }
 
 /**
@@ -80,6 +95,52 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       "https://gis.georgetowntexas.gov/arcgis/rest/services/Planning/PlanningDevelopmentNew_WebMap/MapServer/20",
     codeField: "ZONE",
     descriptionField: "FULLZONE",
+  },
+  "round-rock-tx": {
+    cityKey: "round-rock-tx",
+    cityName: "Round Rock",
+    countyFips: "48491",
+    layerUrl:
+      "https://maps.roundrocktexas.gov/arcgis/rest/services/Planning/Planning_Multi/MapServer/12",
+    codeField: "BASE_ZONIN",
+    descriptionField: "URL",
+  },
+  "leander-tx": {
+    cityKey: "leander-tx",
+    cityName: "Leander",
+    countyFips: "48491",
+    layerUrl:
+      "https://services1.arcgis.com/L0MLvN0Ay0iEjnCT/arcgis/rest/services/Leander_Current_Zoning/FeatureServer/3",
+    codeField: "Use_",
+    descriptionField: "Descr",
+  },
+  "new-braunfels-tx": {
+    cityKey: "new-braunfels-tx",
+    cityName: "New Braunfels",
+    countyFips: "48091",
+    layerUrl:
+      "https://gismaps.newbraunfels.gov/arcserverwa22/rest/services/OpenData/PlanningZoning/MapServer/9",
+    codeField: "District",
+    descriptionField: "Name",
+  },
+  "dripping-springs-tx": {
+    cityKey: "dripping-springs-tx",
+    cityName: "Dripping Springs",
+    countyFips: "48209",
+    layerUrl:
+      "https://services6.arcgis.com/XnTA1N5QxtOFa9o8/arcgis/rest/services/CODS_Zoning/FeatureServer/0",
+    codeField: "Zoning_Abbreviation",
+    descriptionField: "Zoning_District",
+  },
+  "hutto-tx": {
+    cityKey: "hutto-tx",
+    cityName: "Hutto",
+    countyFips: "48491",
+    layerUrl:
+      "https://services.arcgis.com/YZhxlqU7ABWQBGTG/arcgis/rest/services/Hutto_Zoning_Districts/FeatureServer/0",
+    codeField: "ZONING",
+    descriptionField: "ZONING",
+    codeExtractRegex: "\\(([^)]+)\\)",
   },
 };
 
