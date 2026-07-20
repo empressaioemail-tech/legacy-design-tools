@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "cad-ingest": "tsx src/cli.ts",
     "txgio-ingest": "tsx src/txgio/cli.ts",
+    "stratmap-landuse": "tsx src/txgio/landuse-cli.ts",
     "permits-ingest": "tsx src/permits/cli.ts",
     "address-ingest": "tsx src/address/cli.ts"
   },
