@@ -253,21 +253,59 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
   {
     name: "Bexar",
     fips: "48029",
+    source: "txgio-store",
+    // FLIPPED from the live BCAD ArcGIS service (maps.bexar.org Parcels
+    // MapServer/0) to the self-hosted TxGIO store (F4i), the LAST metro
+    // county to flip. Bexar geometry is in prod `txgio_parcel`
+    // (747,206 rows / 703,258 distinct parcels), rooftop points to
+    // `txgio_address` (710,316 rows, all carrying coordinates — San Antonio
+    // addresses confirmed geocoded). BCAD situs IS populated
+    // ("6519 TAHOKA ST , SAN ANTONIO, TX 78227") — ~91.9% situs-matchable —
+    // so Bexar gets FULL situs + rooftop authority (like Williamson/Hays/
+    // Comal): the situs pre-pass resolves an address DIRECTLY to its parcel
+    // node id (no geocode), and rooftop covers the rest. serviceUrl is the
+    // TxGIO program resource (provenance only).
+    //
+    // Bexar prop_id is a plain all-numeric appraisal id (1-7 digits, no
+    // "R" prefix, unlike WCAD/TCAD): 741,269 of 747,206 rows are all-digit
+    // (113 carry leading zeros, stripped by normalizeCadPropId). The
+    // ~5,937 non-digit ids are negative sentinels (e.g. "-1021", "-1") on
+    // ROW/placeholder parcels — kept verbatim by normalizeCadPropId (they
+    // fail /^\d+$/) so they never collide with a real parcel node id, and
+    // they carry no cad_property row so they render neutral. Identity is
+    // stamped by txgioParcelStore.ts from the store's own `prop_id` column,
+    // so no arcgis field-mapping or rawPropId is needed here.
+    //
+    // LAND-USE COLOR PENDING: Bexar cad_property is 0 rows (a PARALLEL
+    // ingest is loading it), so store-backed Bexar features carry no
+    // landUseCode/landUseDescription and render neutral until that lands.
+    // This is NOT a resolution regression — the old arcgis path returned an
+    // inline PropUse code, but resolution correctness (situs -> node id,
+    // rooftop -> parcel) does not depend on land-use; the choropleth color
+    // follows automatically when cad_property lands (the serve-time join in
+    // txgioParcelStore.ts already keys on the same normalized prop id).
     serviceUrl:
-      "https://maps.bexar.org/arcgis/rest/services/Parcels/MapServer/0",
-    bbox: { westLng: -98.85, southLat: 29.15, eastLng: -98.0, northLat: 29.8 },
-    centroid: { latitude: 29.449, longitude: -98.52 },
-    // Probed fields: PropID, Owner, Situs, LandVal/ImprVal/TotVal, YrBlt,
-    // PropUse (numeric code, no description field), Exempts. String "NULL"
-    // sentinels are dropped by str().
-    normalizeProps: (p) =>
-      withoutNulls({
-        apn: str(p.PropID),
-        situsAddress: str(p.Situs),
-        owner: str(p.Owner),
-        landUseCode: str(p.PropUse),
-      }),
-    rawPropId: (p) => str(p.PropID),
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48029_lp.zip",
+    // Routing bbox from the prod txgio_parcel geometry
+    // (min/max over all Bexar rows: [-98.8100, 29.1144, -98.1170, 29.7606]),
+    // padded. Centroid is the parcel-MASS centroid (mean of per-parcel bbox
+    // centers over the 747,206 rows), NOT the bbox midpoint — the
+    // nearest-centroid tiebreak in resolveTxParcelCounty needs the mass
+    // point so Bexar places correctly against Comal's (NE), Guadalupe's (E),
+    // and Hays' (NE corner) overlapping bboxes. Bexar parcel mass is dense
+    // in the San Antonio urban core, so the mass centroid sits north/central
+    // of the bbox midpoint. Routing sampled over 3,000 random Bexar parcel
+    // centers: ~94.5% resolve to Bexar; the ~5.5% residual is the E/NE
+    // border straddle handed to Guadalupe (~3%) and Comal (~2.5%) stores
+    // under nearest-centroid — honest no-coverage there, never a WRONG
+    // parcel (the neighbor store filters by its own county_fips and has no
+    // Bexar rows), and the multi-county situs pre-pass recovers any
+    // situs-bearing border address regardless of centroid distance. The
+    // reverse leak is negligible: sampled Guadalupe/Hays parcels misroute
+    // to Bexar 0.00%, Comal only 0.47% (7 of 1,500) on the shared line.
+    bbox: { westLng: -98.82, southLat: 29.10, eastLng: -98.11, northLat: 29.77 },
+    centroid: { latitude: 29.4775, longitude: -98.5324 },
+    normalizeProps: (p) => p,
   },
   {
     name: "Bastrop",
