@@ -127,14 +127,22 @@ const UNIT_DESIGNATORS = new Set([
  * the identical base tokenization.
  */
 function baseStreetTokens(raw: string): string[] {
-  if (!raw) return [];
-  // Take the FIRST comma-delimited segment — the street line. A typed
-  // full address ("6026 Marsh Ln, Buda, TX 78610") and a bare street
-  // line both reduce to the same street tokens this way, and a stored
-  // situs that DOES carry city/state ("6026 MARSH LN, BUDA, TX 78610")
-  // is normalized the same way when we build its comparison key.
-  const firstSegment = raw.split(",")[0] ?? raw;
-  const cleaned = firstSegment
+  return tokenizeSegment(raw.split(",")[0] ?? raw);
+}
+
+/**
+ * Tokenize ONE already-isolated address segment (case-folded,
+ * punctuation-stripped, whitespace-collapsed) to the canonical street-token
+ * stream, applying the unit-truncation and street-type/directional
+ * canonicalization. The caller decides what the "segment" is:
+ * {@link baseStreetTokens} passes the FIRST comma-delimited piece (the
+ * primary key), while {@link normalizeStreetLineCandidates} also passes the
+ * WHOLE comma-flattened address so a trailing `<state> <zip>` anchor that
+ * sits behind a mis-placed comma still survives to drive the drop-N strip.
+ */
+function tokenizeSegment(segment: string): string[] {
+  if (!segment) return [];
+  const cleaned = segment
     .toUpperCase()
     .replace(/[.]/g, "")
     .replace(/\s+/g, " ")
@@ -236,9 +244,6 @@ export function normalizeStreetLine(raw: string): string | null {
  * primary key — behavior identical to `normalizeStreetLine`.
  */
 export function normalizeStreetLineCandidates(raw: string): string[] {
-  const tokens = baseStreetTokens(raw);
-  if (tokens.length < 2) return [];
-
   const candidates: string[] = [];
   const push = (toks: string[]) => {
     if (toks.length < 2) return; // need number + >= one street token
@@ -246,14 +251,67 @@ export function normalizeStreetLineCandidates(raw: string): string[] {
     if (!candidates.includes(key)) candidates.push(key);
   };
 
-  // Primary key: the full first-segment street line (unchanged behavior,
-  // and the correct/only key for comma-delimited input).
-  push(tokens);
+  // Primary key: the full FIRST-comma-segment street line. Unchanged
+  // behavior — and the correct/only key for a comma-delimited address
+  // ("576 Sage Thrasher Cir, Dripping Springs, TX 78620"), whose first
+  // segment IS the bare street line. Byte-identical to the stored-side /
+  // index expression, so no reindex.
+  const primaryTokens = baseStreetTokens(raw);
+  if (primaryTokens.length >= 2) {
+    push(primaryTokens);
+    // If the primary tokens themselves end in a <state> <zip> anchor, the
+    // input was fully comma-LESS ("576 Sage Thrasher Cir Dripping Springs
+    // TX 78620") and the anchor is intact here — enumerate the drop-N city
+    // strip off it (original F4f path).
+    emitAnchorStrippedCandidates(primaryTokens, push);
+  }
 
-  // Comma-less tail: strip a trailing <state> <zip> (or a bare <zip>). Only
-  // when such an anchor is actually present do we treat trailing tokens as
-  // a locality to strip — this keeps bare street lines ("6026 MARSH LN")
-  // and comma-delimited inputs (already just the street line) untouched.
+  // F6b: the FE also sends MIS-PUNCTUATED forms where a comma lands AFTER
+  // the street type or INSIDE the city, so the first-comma split above
+  // discards the <state> <zip> anchor before the drop-N strip can see it:
+  //   "576 Sage Thrasher Cir Dripping Springs, TX 78620"  (street-city comma)
+  //   "576 Sage Thrasher Cir Dripping, Springs, TX 78620" (interior city comma)
+  // Both truncate to "...CIR DRIPPING[ SPRINGS]" with NO anchor left, so the
+  // stored "576 SAGE THRASHER CIR" is never generated and the situs misses.
+  //
+  // Fix, QUERY-side only: tokenize the WHOLE address with every comma
+  // flattened to a space, so the trailing <state> <zip> anchor survives no
+  // matter where the commas fell, then run the SAME anchor-strip + drop-N.
+  // This only ADDS candidates; the resolver's EXACT-match set + unique-prop
+  // rule means an over-/under-stripped candidate matches nothing (or, at
+  // worst, makes the resolver DECLINE as ambiguous) — never a wrong parcel
+  // (commitment #1). Guard the extra work behind an actually-present anchor:
+  // if the flattened tail has no <state> <zip>, emitAnchorStrippedCandidates
+  // is a no-op and we add nothing beyond the primary key above.
+  const flatTokens = baseStreetTokens(raw.replace(/,/g, " "));
+  if (flatTokens.length >= 2) {
+    emitAnchorStrippedCandidates(flatTokens, push);
+  }
+
+  return candidates;
+}
+
+/**
+ * If `tokens` ends in a trailing `<2-letter state> <zip>` (or a bare
+ * `<zip>`, or the rare `<zip> <state>` ordering) anchor, strip it and push
+ * the street-line candidates that drop 0..3 further trailing city tokens
+ * (city is 0..3 words in the store: 0 = "<street> <state> <zip>" with no
+ * city, up to 3 like "FAIR OAKS RANCH"). Each keeps >= number + one street
+ * token. NO-OP when no such anchor is present, so bare street lines
+ * ("6026 MARSH LN") and comma-delimited inputs stay untouched.
+ *
+ * The drop-N enumeration (rather than cut-at-street-type-suffix) is
+ * deliberate: the store's street lines do not reliably end in a recognizable
+ * suffix (highways/FM/US "13341 W US 290", "1531 LOOP 165") and some CITY
+ * names DO end in a street-type word ("GARDEN RIDGE" -> RIDGE). The
+ * <state><zip> tail is the only reliable anchor; from it we enumerate the
+ * 1..3-word city drop and let the DB's EXACT normalized match + unique-prop
+ * rule pick the real street line.
+ */
+function emitAnchorStrippedCandidates(
+  tokens: string[],
+  push: (toks: string[]) => void,
+): void {
   let end = tokens.length;
   const last = tokens[end - 1]!;
   const secondLast = end >= 2 ? tokens[end - 2]! : undefined;
@@ -269,20 +327,13 @@ export function normalizeStreetLineCandidates(raw: string): string[] {
     end -= 2;
     strippedAnchor = true;
   }
+  if (!strippedAnchor) return;
 
-  if (strippedAnchor) {
-    const withoutAnchor = tokens.slice(0, end);
-    // Drop 0, 1, 2, and 3 trailing city tokens (city is 0..3 words: 0 when
-    // the address is "<street> <state> <zip>" with no city, up to 3 like
-    // "FAIR OAKS RANCH"). Each is an EXACT-match candidate; only the real
-    // street line will hit a stored situs, so extra candidates are harmless.
-    for (let drop = 0; drop <= 3; drop++) {
-      if (withoutAnchor.length - drop < 2) break;
-      push(withoutAnchor.slice(0, withoutAnchor.length - drop));
-    }
+  const withoutAnchor = tokens.slice(0, end);
+  for (let drop = 0; drop <= 3; drop++) {
+    if (withoutAnchor.length - drop < 2) break;
+    push(withoutAnchor.slice(0, withoutAnchor.length - drop));
   }
-
-  return candidates;
 }
 
 /**
