@@ -40,12 +40,17 @@ import {
   TX_COUNTY_PARCEL_DISCLAIMER,
   txParcelProviderMode,
   resolveTxParcelCounty,
+  resolvePointCountyByPip,
   queryTxCountyParcelsGeoJson,
   txCountyAdapterKey,
   txCountyDisclaimer,
   txCountyProviderLabel,
   type TxParcelCounty,
 } from "../brokerageTxParcels";
+import {
+  countyStoreContainsPoint,
+  type TxgioStoreDb,
+} from "../txgioParcelStore";
 import { queryGisLayerGeoJson } from "../brokerageGisLayers";
 import { getTxParcelTile, putTxParcelTile } from "../brokerageGisCache";
 import {
@@ -214,20 +219,22 @@ describe("F4h: Travis/Williamson flipped to the TxGIO store", () => {
     expect(resolveTxParcelCounty({ bbox: BBOXES.roundRock })?.fips).toBe("48491");
   });
 
-  it("KNOWN EDGE (documented sliver): SW-Travis near the Hays line routes to the Hays store under nearest-centroid", () => {
+  it("SYNC centroid router (bbox viewport path): SW-Travis near the Hays line still centroid-routes to Hays; the POINT path is fixed by F4j PIP", () => {
     // Real Travis parcel center (11412 ESPERANZA DR, 78739): 30.17047,
-    // -97.87057. Travis' parcel mass centroid sits far east (dense east
-    // Austin), so this SW-Austin point is closer to Hays' centroid and
-    // nearest-centroid pre-routing hands the bbox tile-fetch to the Hays
-    // store. That NEVER returns a wrong parcel: the Hays store filters by
-    // county_fips=48209 and has no Travis rows, so the query is an honest
-    // no-coverage. For ADDRESS resolution the multi-county situs pre-pass
-    // (storeCountiesContainingPoint) still includes Travis, so a
-    // situs-bearing border address resolves regardless of centroid distance;
-    // Travis' mostly-blank situs rides the rooftop path instead. This is the
-    // known bbox+centroid limit at a straddle (~7.5% of sampled Travis
-    // parcels, all along the SW/W edge). If a later change adds point-in-
-    // polygon pre-resolution, flip this expectation to "48453".
+    // -97.87057. `resolveTxParcelCounty` is the SYNCHRONOUS nearest-centroid
+    // router — retained UNCHANGED for the bbox VIEWPORT tile-fetch (a viewport
+    // wants a dominant county, has no single point to PIP-test). Travis' mass
+    // centroid sits far east, so this SW point is nearer Hays' centroid and
+    // the sync router still returns Hays here. That is fine for a viewport:
+    // the Hays store filters by county_fips=48209, has no Travis rows, and
+    // returns honest no-coverage — never a wrong parcel.
+    //
+    // The POINT pin-query + rooftop paths NO LONGER use this centroid router:
+    // F4j routes them through `resolvePointCountyByPip`, which PIP-resolves
+    // this exact point to Travis (48453) because the Travis parcel CONTAINS
+    // it (proven in f4j_pip_county_live_e2e.integration.test.ts). So the
+    // route-level behavior IS fixed; this assertion pins the sync viewport
+    // router's unchanged contract, not the route outcome.
     expect(
       resolveTxParcelCounty({ latitude: 30.17047, longitude: -97.87057 })?.fips,
     ).toBe("48209");
@@ -797,14 +804,18 @@ describe("store-backed counties (Hays/Comal — feat/txgio-parcel-geometry)", ()
     ).toBe("48091");
   });
 
-  it("KNOWN EDGE: the New Braunfels east interleave (a Comal parcel) resolves to Guadalupe under bbox+centroid routing", () => {
-    // Documents a real limitation introduced by adding Guadalupe: the point
-    // (29.703, -98.1245) is a genuine Comal parcel (3 Comal / 0 Guadalupe
-    // parcels cover it) but sits closer to Guadalupe's parcel-mass centroid,
-    // so nearest-centroid pre-routing hands it to the Guadalupe store, which
-    // will read as no-coverage. True separation of interleaved store counties
-    // needs point-in-polygon pre-resolution (out of scope for F4g). If a
-    // later change fixes this, flip the expectation to "48091".
+  it("SYNC centroid router (bbox viewport path): the New Braunfels east interleave still centroid-routes to Guadalupe; the POINT path is fixed by F4j PIP", () => {
+    // The point (29.703, -98.1245) is a genuine Comal parcel (3 Comal / 0
+    // Guadalupe parcels cover it) but sits closer to Guadalupe's parcel-mass
+    // centroid. The SYNCHRONOUS `resolveTxParcelCounty` — retained for the
+    // bbox VIEWPORT tile-fetch — still returns Guadalupe here (nearest
+    // centroid). F4g called true separation "out of scope"; F4j delivers it
+    // for the POINT paths: `resolvePointCountyByPip` PIP-resolves this exact
+    // NB-interleave point to Comal (48091) because a Comal parcel CONTAINS it
+    // and no Guadalupe parcel does (the same fix the live e2e proves for the
+    // 1400 E Common St straddle). This assertion pins the unchanged sync
+    // viewport router; the route outcome is now Comal, not a no-coverage
+    // Guadalupe decline.
     expect(
       resolveTxParcelCounty({ latitude: 29.703, longitude: -98.1245 })?.fips,
     ).toBe("48187");
@@ -884,5 +895,143 @@ describe("store-backed counties (Hays/Comal — feat/txgio-parcel-geometry)", ()
         longitude: -98.1245,
       }),
     ).rejects.toThrow(/Comal County parcels \(TxGIO\/StratMap\) has no ingested/);
+  });
+});
+
+// ── F4j: point-in-polygon county pre-resolution ─────────────────────────────
+//
+// `countyStoreContainsPoint` is unit-tested with an injected fake db returning
+// controlled geometry rows (containment + tightest-parcel tiebreak logic). The
+// full `resolvePointCountyByPip` orchestration over the REAL prod store — the
+// NB/Comal straddle fix and the Travis border-leak fix — is proven live in
+// `src/__tests__/f4j_pip_county_live_e2e.integration.test.ts`.
+
+/** Minimal drizzle-select stub: `.select().from().where()` awaits to `rows`,
+ *  ignoring the (opaque) predicate — each test controls the returned set. */
+function fakeStoreDb(rows: unknown[]): TxgioStoreDb {
+  const thenable = {
+    from: () => thenable,
+    where: () => Promise.resolve(rows),
+  };
+  return { select: () => thenable } as unknown as TxgioStoreDb;
+}
+
+/** Axis-aligned square polygon (GeoJSON), given center + half-size (deg). */
+function squarePolygon(cx: number, cy: number, half: number) {
+  return {
+    type: "Polygon",
+    coordinates: [
+      [
+        [cx - half, cy - half],
+        [cx + half, cy - half],
+        [cx + half, cy + half],
+        [cx - half, cy + half],
+        [cx - half, cy - half],
+      ],
+    ],
+  };
+}
+
+function storeRow(propId: string | null, cx: number, cy: number, half: number) {
+  return {
+    featureIndex: 1,
+    propId,
+    geoId: null,
+    ownerName: null,
+    situsAddress: null,
+    situsCity: null,
+    situsZip: null,
+    geometry: squarePolygon(cx, cy, half),
+    westLng: cx - half,
+    southLat: cy - half,
+    eastLng: cx + half,
+    northLat: cy + half,
+    sourceVintage: "stratmap25",
+  };
+}
+
+describe("countyStoreContainsPoint (F4j PIP probe)", () => {
+  it("returns the containing parcel's prop id when a polygon contains the point", async () => {
+    const db = fakeStoreDb([storeRow("29336", -98.1, 29.72, 0.001)]);
+    const hit = await countyStoreContainsPoint({
+      countyFips: "48091",
+      latitude: 29.72,
+      longitude: -98.1,
+      database: db,
+    });
+    expect(hit?.propId).toBe("29336");
+  });
+
+  it("returns null when no polygon contains the point (honest gap)", async () => {
+    // Row's bbox is near the point but the polygon is a tiny square that does
+    // NOT enclose it -> no containment.
+    const db = fakeStoreDb([storeRow("1", -98.2, 29.72, 0.0005)]);
+    const hit = await countyStoreContainsPoint({
+      countyFips: "48091",
+      latitude: 29.72,
+      longitude: -98.1,
+      database: db,
+    });
+    expect(hit).toBeNull();
+  });
+
+  it("prefers the TIGHTEST containing parcel (smallest bbox) when the point is inside several", async () => {
+    const db = fakeStoreDb([
+      storeRow("big", -98.1, 29.72, 0.01), // large enclosing parcel
+      storeRow("small", -98.1, 29.72, 0.0008), // the real lot
+    ]);
+    const hit = await countyStoreContainsPoint({
+      countyFips: "48091",
+      latitude: 29.72,
+      longitude: -98.1,
+      database: db,
+    });
+    expect(hit?.propId).toBe("small");
+  });
+
+  it("skips a containing parcel with no prop id (cannot identify the parcel)", async () => {
+    const db = fakeStoreDb([
+      storeRow(null, -98.1, 29.72, 0.0008), // contains, but no id
+      storeRow("29336", -98.1, 29.72, 0.01), // contains, has id
+    ]);
+    const hit = await countyStoreContainsPoint({
+      countyFips: "48091",
+      latitude: 29.72,
+      longitude: -98.1,
+      database: db,
+    });
+    expect(hit?.propId).toBe("29336");
+  });
+
+  it("returns null for a non-finite point", async () => {
+    const db = fakeStoreDb([storeRow("29336", -98.1, 29.72, 0.01)]);
+    expect(
+      await countyStoreContainsPoint({
+        countyFips: "48091",
+        latitude: Number.NaN,
+        longitude: -98.1,
+        database: db,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("resolvePointCountyByPip (F4j fallback + guardrails)", () => {
+  it("returns none for a point outside every supported county bbox", async () => {
+    const res = await resolvePointCountyByPip({
+      latitude: 27.0,
+      longitude: -95.0,
+    });
+    expect(res.county).toBeNull();
+    expect(res.resolvedBy).toBe("none");
+  });
+
+  it("returns none for a non-finite point", async () => {
+    const res = await resolvePointCountyByPip({
+      latitude: Number.NaN,
+      longitude: -98.1,
+    });
+    expect(res.county).toBeNull();
+    expect(res.resolvedBy).toBe("none");
   });
 });
