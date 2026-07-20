@@ -68,9 +68,12 @@ import {
 } from "../lib/brokerageTxParcels";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
-import { labelEdges, type RoadPolyline } from "../lib/buildableEnvelope/edgeLabeling";
+import {
+  labelEdges,
+  type RoadCandidate,
+} from "../lib/buildableEnvelope/edgeLabeling";
 import { mapDistrict } from "../lib/buildableEnvelope/districtMapping";
-import { fetchNearestRoads } from "../lib/buildableEnvelope/roads";
+import { fetchNearbyRoads } from "../lib/buildableEnvelope/roads";
 import type { Ring } from "../lib/buildableEnvelope/geometry";
 
 export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
@@ -918,16 +921,20 @@ async function deriveAndRespond(args: {
   //    the road fetch and the point refPoint — a `(0,0)` sentinel would label
   //    edges against null island. Labeling then degrades honestly to lot
   //    shape.
+  //    Pass ALL nearby roads (not just the single longest) plus the parcel's
+  //    situs, so labelEdges can prefer the situs-NAMED fronting street (the
+  //    cul-de-sac defense) and, failing that, pick the best-matching edge across
+  //    every candidate — instead of blindly matching the longest way.
   const hasPoint = ctx.hasPoint !== false;
-  let road: RoadPolyline | null = null;
+  let roads: RoadCandidate[] = [];
   if (!skipRoad && hasPoint) {
-    const roads = await fetchNearestRoads({ lat: ctx.lat, lng: ctx.lng });
-    road = roads[0] ?? null;
+    roads = await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng });
   }
   const labeling = labelEdges({
     ring: parcel.ring,
-    road,
+    roads,
     refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
+    situsAddress: parcel.situsAddress,
   });
   if (!labeling) {
     res.status(422).json(

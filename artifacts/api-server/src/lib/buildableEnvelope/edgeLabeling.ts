@@ -65,6 +65,105 @@ interface XY {
 /** A road centerline as lng/lat points (from OSM `geometry`), any length. */
 export type RoadPolyline = [number, number][];
 
+/**
+ * A road candidate with its OSM `name` (when tagged). Passing MANY of these
+ * (not just the single longest way) lets frontFromRoad pick the best-matching
+ * edge across candidates — and, when a situs street name is known, prefer the
+ * road whose name matches the situs (the cul-de-sac defense: a lot's true
+ * frontage is often a short named cul-de-sac, not the nearby longer through
+ * street).
+ */
+export interface RoadCandidate {
+  name: string | null;
+  polyline: RoadPolyline;
+}
+
+/**
+ * Normalize a street name for tolerant comparison: lowercase, strip
+ * punctuation, collapse whitespace, and canonicalize the common street-type
+ * suffixes (dr/drive, st/street, …) and directionals so "NOLAN DR" matches OSM
+ * "Nolan Drive". Returns "" when nothing usable remains.
+ */
+export function normalizeStreetName(raw: string | null | undefined): string {
+  if (!raw) return "";
+  let s = raw.toLowerCase();
+  // Drop a leading house number ("120 nolan dr" -> "nolan dr").
+  s = s.replace(/^\s*\d+[a-z]?\s+/, "");
+  // Strip unit designators ("apt 3", "#4", "ste b") — keep it simple.
+  s = s.replace(/\b(apt|apartment|unit|ste|suite|#)\s*\S+/g, " ");
+  s = s.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  const suffixMap: Record<string, string> = {
+    dr: "drive",
+    drive: "drive",
+    st: "street",
+    street: "street",
+    rd: "road",
+    road: "road",
+    ln: "lane",
+    lane: "lane",
+    ave: "avenue",
+    av: "avenue",
+    avenue: "avenue",
+    blvd: "boulevard",
+    boulevard: "boulevard",
+    ct: "court",
+    court: "court",
+    cir: "circle",
+    circle: "circle",
+    pl: "place",
+    place: "place",
+    ter: "terrace",
+    terrace: "terrace",
+    trl: "trail",
+    trail: "trail",
+    pkwy: "parkway",
+    parkway: "parkway",
+    hwy: "highway",
+    highway: "highway",
+    way: "way",
+    cv: "cove",
+    cove: "cove",
+    psge: "passage",
+    pass: "pass",
+    run: "run",
+    bnd: "bend",
+    bend: "bend",
+    xing: "crossing",
+    crossing: "crossing",
+    loop: "loop",
+    path: "path",
+  };
+  const dirMap: Record<string, string> = {
+    n: "north",
+    s: "south",
+    e: "east",
+    w: "west",
+    ne: "northeast",
+    nw: "northwest",
+    se: "southeast",
+    sw: "southwest",
+  };
+  const tokens = s.split(" ").map((t) => {
+    if (suffixMap[t]) return suffixMap[t];
+    if (dirMap[t]) return dirMap[t];
+    return t;
+  });
+  return tokens.join(" ").trim();
+}
+
+/**
+ * Extract the street name from a situs address ("120 NOLAN DR, KYLE, TX 78640"
+ * -> "nolan drive"), normalized for comparison. Returns "" when the situs has
+ * no parseable street token (falls back to nearest-road behavior upstream).
+ */
+export function streetNameFromSitus(situs: string | null | undefined): string {
+  if (!situs) return "";
+  // The street is the first comma-delimited component ("120 NOLAN DR").
+  const firstPart = situs.split(",")[0] ?? "";
+  return normalizeStreetName(firstPart);
+}
+
 function midpoint(a: XY, b: XY): XY {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
@@ -132,14 +231,14 @@ function projectPoint(
 }
 
 /**
- * Choose the FRONT edge from the nearest road polyline. The front edge is the
- * one whose midpoint is closest to the road AND is reasonably parallel to it.
- * Returns null when no road segment is close enough to be trustworthy.
+ * Best edge for ONE road polyline: the parcel edge whose midpoint is closest to
+ * the road AND is reasonably parallel to it, subject to the trust gate. Returns
+ * null when no edge is within a plausible frontage distance of this road.
  */
-function frontFromRoad(
+function bestEdgeForRoad(
   edges: ProjEdges,
   road: RoadPolyline,
-): { index: number; confidence: number } | null {
+): { index: number; dist: number; confidence: number } | null {
   const proj = edges.proj!;
   const roadXY = road.map(([lng, lat]) => projectPoint(lng, lat, proj));
   if (roadXY.length < 2) return null;
@@ -178,7 +277,66 @@ function frontFromRoad(
   // Confidence scales down as the road gets farther / less parallel.
   const proximity = Math.max(0, 1 - bestDist / 45);
   const confidence = 0.7 + 0.2 * proximity; // 0.70..0.90
-  return { index: best, confidence: Math.min(0.9, confidence) };
+  return {
+    index: best,
+    dist: bestDist,
+    confidence: Math.min(0.9, confidence),
+  };
+}
+
+/**
+ * Choose the FRONT edge across ALL nearby road candidates, not just the single
+ * longest one. Two-stage:
+ *
+ *   1) SITUS-NAMED PREFERENCE (the cul-de-sac defense): if the situs street name
+ *      is known and one or more candidates carry a matching OSM `name`, resolve
+ *      the front against those roads ONLY — the situs names the true fronting
+ *      street even when a longer through-street runs nearby. Pick the best
+ *      (closest) matching-named road that passes the trust gate.
+ *   2) NEAREST fallback: otherwise (no situs name, no name match, or the named
+ *      road failed the trust gate) pick the candidate that yields the closest
+ *      trustworthy edge across ALL candidates. This fixes the latent bug where
+ *      only roads[0] (longest) was considered, so a lot fronting a shorter side
+ *      street matched the wrong road.
+ *
+ * Returns the chosen front edge + confidence + which strategy fired, or null
+ * when no candidate produces a trustworthy edge (caller degrades to point/shape).
+ */
+function frontFromRoads(
+  edges: ProjEdges,
+  roads: RoadCandidate[],
+  situsStreet: string,
+): { index: number; confidence: number; matchedSitus: boolean } | null {
+  if (!roads.length) return null;
+
+  // Stage 1: situs-named preference.
+  if (situsStreet) {
+    let best: { index: number; dist: number; confidence: number } | null = null;
+    for (const road of roads) {
+      if (normalizeStreetName(road.name) !== situsStreet) continue;
+      const cand = bestEdgeForRoad(edges, road.polyline);
+      if (cand && (!best || cand.dist < best.dist)) best = cand;
+    }
+    if (best) {
+      // Small confidence bump: a name match is stronger evidence than mere
+      // proximity, capped at the road-tier ceiling.
+      const confidence = Math.min(0.9, best.confidence + 0.05);
+      return { index: best.index, confidence, matchedSitus: true };
+    }
+  }
+
+  // Stage 2: nearest trustworthy edge across all candidates.
+  let best: { index: number; dist: number; confidence: number } | null = null;
+  for (const road of roads) {
+    const cand = bestEdgeForRoad(edges, road.polyline);
+    if (cand && (!best || cand.dist < best.dist)) best = cand;
+  }
+  if (!best) return null;
+  return {
+    index: best.index,
+    confidence: best.confidence,
+    matchedSitus: false,
+  };
 }
 
 /** Choose the FRONT edge as the one nearest a reference (geocoded) point. */
@@ -256,10 +414,24 @@ function labelFromFront(edges: ProjEdges, frontIdx: number): EdgeInfo[] {
 
 export interface LabelInputs {
   ring: Ring;
-  /** Nearest road centerline (lng/lat points), when available. */
+  /**
+   * ALL nearby road candidates (preferred). frontFromRoads picks the best-
+   * matching edge across candidates, and — when `situsAddress` names the
+   * fronting street — prefers the road with the matching OSM name.
+   */
+  roads?: RoadCandidate[] | null;
+  /**
+   * Back-compat: a single nearest road centerline. Superseded by `roads`; still
+   * honored (wrapped as one unnamed candidate) so existing callers keep working.
+   */
   road?: RoadPolyline | null;
   /** Reference point (geocoded situs/address point), when available. */
   refPoint?: { lng: number; lat: number } | null;
+  /**
+   * Situs address ("120 NOLAN DR, KYLE, TX 78640"), used to extract the fronting
+   * street name for the cul-de-sac defense. Ignored when unparseable.
+   */
+  situsAddress?: string | null;
 }
 
 /**
@@ -276,12 +448,24 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
   let signal: LabelSignal = "shape";
   let note = "";
 
-  if (input.road && input.road.length >= 2) {
-    front = frontFromRoad(edges, input.road);
-    if (front) {
+  // Assemble road candidates: the preferred `roads` list, plus the back-compat
+  // single `road` (wrapped as one unnamed candidate) when no list was given.
+  const candidates: RoadCandidate[] =
+    input.roads && input.roads.length
+      ? input.roads.filter((r) => r.polyline && r.polyline.length >= 2)
+      : input.road && input.road.length >= 2
+        ? [{ name: null, polyline: input.road }]
+        : [];
+
+  if (candidates.length) {
+    const situsStreet = streetNameFromSitus(input.situsAddress);
+    const chosen = frontFromRoads(edges, candidates, situsStreet);
+    if (chosen) {
+      front = { index: chosen.index, confidence: chosen.confidence };
       signal = "road";
-      note =
-        "Front edge inferred from the nearest street centerline (OpenStreetMap).";
+      note = chosen.matchedSitus
+        ? "Front edge inferred from the situs-named street centerline (OpenStreetMap)."
+        : "Front edge inferred from the nearest street centerline (OpenStreetMap).";
     }
   }
 
