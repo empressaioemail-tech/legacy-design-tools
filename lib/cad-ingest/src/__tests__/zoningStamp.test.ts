@@ -31,6 +31,7 @@ import {
   type ZoningStampDb,
 } from "../txgio/zoning-stamp-db";
 import { reduceZoningFeature } from "../txgio/zoning-service";
+import { resolveZoningLayer } from "../txgio/zoning-layers";
 
 /** A unit square [lo,hi]^2 as a GeoJSON Polygon carrying a district code. */
 function squareFeature(
@@ -172,6 +173,88 @@ describe("reduceZoningFeature (ZONE/FULLZONE field mapping)", () => {
       { codeField: "ZONE", descriptionField: "FULLZONE" },
     );
     expect(reduced.code).toBeNull();
+  });
+});
+
+describe("reduceZoningFeature (codeExtractRegex — Hutto parenthesized code)", () => {
+  // Hutto carries the district code parenthesized inside a longer string:
+  // "Single Family (SF-1)". The regex pulls the token inside the parens so
+  // the stamped code is the raw "SF-1" the setback table's leading token
+  // matches — NOT the whole string, which would normalize to "SINGLEFAMILYSF1"
+  // and match nothing.
+  const HUTTO_REGEX = "\\(([^)]+)\\)";
+
+  it("extracts the parenthesized token as the code", () => {
+    const reduced = reduceZoningFeature(
+      {
+        type: "Feature",
+        properties: { ZONING: "Single Family (SF-1)" },
+        geometry: parcelSquare(-97.55, 30.54),
+      },
+      { codeField: "ZONING", descriptionField: "ZONING", codeExtractRegex: HUTTO_REGEX },
+    );
+    // Raw token, unmodified — the leading-token normalization does the rest.
+    expect(reduced.code).toBe("SF-1");
+    // description keeps the full human string (provenance).
+    expect(reduced.description).toBe("Single Family (SF-1)");
+  });
+
+  it("extracts from other parenthesized values (B-2, OT-3)", () => {
+    const commercial = reduceZoningFeature(
+      { type: "Feature", properties: { ZONING: "General Commercial (B-2)" }, geometry: null },
+      { codeField: "ZONING", codeExtractRegex: HUTTO_REGEX },
+    );
+    expect(commercial.code).toBe("B-2");
+    const overlay = reduceZoningFeature(
+      { type: "Feature", properties: { ZONING: "Residential (OT-3)" }, geometry: null },
+      { codeField: "ZONING", codeExtractRegex: HUTTO_REGEX },
+    );
+    expect(overlay.code).toBe("OT-3");
+  });
+
+  it("yields NULL when the value has no parens (honest, never guessed)", () => {
+    const reduced = reduceZoningFeature(
+      { type: "Feature", properties: { ZONING: "Single Family" }, geometry: null },
+      { codeField: "ZONING", codeExtractRegex: HUTTO_REGEX },
+    );
+    expect(reduced.code).toBeNull();
+  });
+
+  it("WITHOUT a regex returns the raw value unchanged (Georgetown path unaffected)", () => {
+    const reduced = reduceZoningFeature(
+      { type: "Feature", properties: { ZONE: "Single Family (SF-1)" }, geometry: null },
+      { codeField: "ZONE" },
+    );
+    // No codeExtractRegex -> raw field value, exactly as today.
+    expect(reduced.code).toBe("Single Family (SF-1)");
+  });
+});
+
+describe("resolveZoningLayer (the 5 newly registered cities)", () => {
+  it.each([
+    ["round-rock-tx", "Round Rock", "48491", "BASE_ZONIN"],
+    ["leander-tx", "Leander", "48491", "Use_"],
+    ["new-braunfels-tx", "New Braunfels", "48091", "District"],
+    ["dripping-springs-tx", "Dripping Springs", "48209", "Zoning_Abbreviation"],
+    ["hutto-tx", "Hutto", "48491", "ZONING"],
+  ])("resolves %s to %s (county %s, codeField %s)", (key, name, fips, codeField) => {
+    const cfg = resolveZoningLayer(key);
+    expect(cfg).toBeDefined();
+    expect(cfg!.cityName).toBe(name);
+    expect(cfg!.countyFips).toBe(fips);
+    expect(cfg!.codeField).toBe(codeField);
+  });
+
+  it("wires codeExtractRegex ONLY on Hutto (Leander base code Use_, not Comp_Use)", () => {
+    expect(resolveZoningLayer("hutto-tx")!.codeExtractRegex).toBe("\\(([^)]+)\\)");
+    // The other four (and Georgetown) have no regex — raw code path.
+    expect(resolveZoningLayer("round-rock-tx")!.codeExtractRegex).toBeUndefined();
+    expect(resolveZoningLayer("leander-tx")!.codeExtractRegex).toBeUndefined();
+    expect(resolveZoningLayer("new-braunfels-tx")!.codeExtractRegex).toBeUndefined();
+    expect(resolveZoningLayer("dripping-springs-tx")!.codeExtractRegex).toBeUndefined();
+    expect(resolveZoningLayer("georgetown-tx")!.codeExtractRegex).toBeUndefined();
+    // Leander deliberately reads the base Use_ code, not the composite Comp_Use.
+    expect(resolveZoningLayer("leander-tx")!.codeField).toBe("Use_");
   });
 });
 

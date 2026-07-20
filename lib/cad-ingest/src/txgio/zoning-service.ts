@@ -52,12 +52,32 @@ function str(v: unknown): string | null {
 }
 
 /**
+ * Apply an optional `codeExtractRegex` to a raw code value. When the config
+ * carries no regex, the raw value passes through unchanged (Georgetown path).
+ * When it does, the value is matched against `new RegExp(codeExtractRegex)`
+ * and capture group 1 is returned RAW (still no further transform — the
+ * leading-token normalization in districtMapping does the alignment). If the
+ * regex does not match, or its group 1 is empty, the code is NULL — honest,
+ * never a guessed district.
+ */
+function extractCode(raw: string | null, regex?: string): string | null {
+  if (raw === null) return null;
+  if (!regex) return raw;
+  const m = new RegExp(regex).exec(raw);
+  return str(m?.[1] ?? null);
+}
+
+/**
  * Reduce a GeoJSON Feature from the zoning layer to the fields the stamp
- * needs. `codeField`/`descriptionField` come from the layer config.
+ * needs. `codeField`/`descriptionField`/`codeExtractRegex` come from the
+ * layer config.
  */
 export function reduceZoningFeature(
   feature: unknown,
-  cfg: Pick<ZoningLayerConfig, "codeField" | "descriptionField">,
+  cfg: Pick<
+    ZoningLayerConfig,
+    "codeField" | "descriptionField" | "codeExtractRegex"
+  >,
 ): RawZoningFeature {
   const f = feature as {
     properties?: Record<string, unknown> | null;
@@ -65,7 +85,7 @@ export function reduceZoningFeature(
   };
   const props = f?.properties ?? {};
   return {
-    code: str(props[cfg.codeField]),
+    code: extractCode(str(props[cfg.codeField]), cfg.codeExtractRegex),
     description: cfg.descriptionField ? str(props[cfg.descriptionField]) : null,
     geometry: f?.geometry ?? null,
   };
