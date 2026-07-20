@@ -367,9 +367,10 @@ describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map sna
   });
 
   it("emits parcel_node_id on the no-setbacks path so the map still snaps + glows", async () => {
-    // Dripping Springs shape: the parcel EXISTS but the jurisdiction has no
-    // codified setback table -> status no-setbacks, yet the subject parcel must
-    // still glow. parcel_node_id is gated on parcel resolution, NOT on setbacks.
+    // No-setbacks shape: the parcel EXISTS but the jurisdiction has no
+    // codified setback table (here "Nowhere, XX") -> status no-setbacks, yet the
+    // subject parcel must still glow. parcel_node_id is gated on parcel
+    // resolution, NOT on setbacks.
     parcelZoning = "R-MD";
     parcelNodeIdStamped = "48209:123767";
     const res = await post({ address: "1 Main St, Nowhere, XX" });
@@ -435,13 +436,16 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
   it("uses the authoritative situs short-circuit for a Hays store-backed county", async () => {
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
-    // Geocode returns a Hays point (Buda) so the county resolves to the
+    // Geocode returns a Hays point (Wimberley) so the county resolves to the
     // txgio-store-backed Hays; the situs resolver returns a UNIQUE hit,
-    // and the store returns that parcel's geometry by prop id.
+    // and the store returns that parcel's geometry by prop id. Wimberley is a
+    // Hays city with NO codified setback table (Dripping Springs / Kyle / Buda
+    // gained tables in F4k), which is exactly what this test needs to exercise
+    // the no-setbacks-yet-parcel-resolved shape.
     geocodeOverride = {
-      lat: 30.04667,
-      lng: -97.81298,
-      city: "Buda",
+      lat: 29.99741,
+      lng: -98.09836,
+      city: "Wimberley",
       state: "TX",
       matchRung: "street",
     };
@@ -458,8 +462,8 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       featureCount: 1,
       queryMode: "pin" as const,
     };
-    const res = await postWith({ address: "6026 Marsh Ln, Buda, TX 78610" });
-    // Buda (Hays) has no codified setback table, so the envelope itself
+    const res = await postWith({ address: "300 Blanco River Rd, Wimberley, TX 78676" });
+    // Wimberley (Hays) has no codified setback table, so the envelope itself
     // is an honest no-setbacks 404 — but the AUTHORITATIVE situs
     // short-circuit still resolved the SUBJECT PARCEL, so parcel_node_id
     // is populated (the map can snap + glow). That the id is present is
