@@ -241,4 +241,29 @@ describe("fetchNearbyRoads — hardening (retry) + cache", () => {
     expect(decodeURIComponent(capturedBody!)).toContain("way(around:");
     expect(decodeURIComponent(capturedBody!)).toContain("30");
   });
+
+  it("uses the trimmed OVERPASS_URL environment override", async () => {
+    const originalOverpassUrl = process.env.OVERPASS_URL;
+    let capturedUrl: string | undefined;
+    process.env.OVERPASS_URL = "  https://overpass.internal/api/interpreter  ";
+    try {
+      const fetchImpl: FetchLike = vi.fn(async (url) => {
+        capturedUrl = url;
+        return overpassJson(SAMPLE_WAYS);
+      });
+      await fetchNearbyRoads({
+        lat: 30.0,
+        lng: -97.8,
+        fetchImpl,
+        noCache: true,
+      });
+      expect(capturedUrl).toBe("https://overpass.internal/api/interpreter");
+    } finally {
+      if (originalOverpassUrl === undefined) {
+        delete process.env.OVERPASS_URL;
+      } else {
+        process.env.OVERPASS_URL = originalOverpassUrl;
+      }
+    }
+  });
 });
