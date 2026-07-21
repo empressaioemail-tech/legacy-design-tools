@@ -194,9 +194,9 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     cityName: "San Marcos",
     countyFips: "48209",
     layerUrl:
-      "https://maps.san-marcos.net/server/rest/services/Public/Zoning/MapServer/1",
-    codeField: "ZoneCode",
-    descriptionField: "ZoneFull",
+      "https://smgis.sanmarcostx.gov/arcgis/rest/services/MPN/MyPermitNowFeatures/MapServer/6",
+    codeField: "ZONECODE",
+    descriptionField: "ZONINGDISTRICT",
   },
   // Cedar Park (Williamson). No setback table yet. GIS `ZoningAbbrev` clean
   // codes (SR/UR/MF/DR/LB/NB/PO/SU). SETBACK TABLE OWED (cedar-park-tx.json).

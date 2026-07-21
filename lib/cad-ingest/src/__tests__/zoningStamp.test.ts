@@ -245,6 +245,17 @@ describe("resolveZoningLayer (the 5 newly registered cities)", () => {
     expect(cfg!.codeField).toBe(codeField);
   });
 
+  it("uses the official San Marcos, Texas zoning service and its published fields", () => {
+    const cfg = resolveZoningLayer("san-marcos-tx");
+    expect(cfg).toMatchObject({
+      countyFips: "48209",
+      layerUrl:
+        "https://smgis.sanmarcostx.gov/arcgis/rest/services/MPN/MyPermitNowFeatures/MapServer/6",
+      codeField: "ZONECODE",
+      descriptionField: "ZONINGDISTRICT",
+    });
+  });
+
   it("wires codeExtractRegex ONLY on Hutto (Leander base code Use_, not Comp_Use)", () => {
     expect(resolveZoningLayer("hutto-tx")!.codeExtractRegex).toBe("\\(([^)]+)\\)");
     // The other four (and Georgetown) have no regex — raw code path.
