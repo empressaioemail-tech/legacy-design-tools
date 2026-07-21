@@ -115,7 +115,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(cedarPark?.note).toMatch(/UR is omitted/i);
   });
 
-  it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with honest pending setback table", () => {
+  it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with cited setback rows", () => {
     const j = getJurisdictionConfig("48453");
     if (!j) throw new Error("expected Travis");
 
@@ -123,13 +123,13 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.cad).toBe(CAD_COUNTIES["48453"]);
     // Travis/TCAD has no free bulk roll (PIA route) — honestly absent.
     expect(j.bulkSource).toBeUndefined();
-    // Pflugerville is the first Travis-county zoning layer. Its public UDC is
-    // cited in an explicit empty table until source atoms and a complete
-    // district set permit gate-verified extraction.
+    // Pflugerville is the first Travis-county zoning layer. Its UDC-backed
+    // table maps the directly resolvable residential GIS codes; remaining
+    // non-residential codes remain explicitly omitted in the table note.
     expect(j.zoningLayers).toEqual([ZONING_LAYERS["pflugerville-tx"]]);
     const pflugerville = getSetbackTable("pflugerville-tx");
-    expect(pflugerville?.districts).toEqual([]);
-    expect(pflugerville?.note).toMatch(/pending source-atom onboarding/i);
+    expect(pflugerville?.districts).toHaveLength(3);
+    expect(pflugerville?.note).toMatch(/GB1.*omitted/i);
     expect(j.setbackTables).toEqual([pflugerville]);
   });
 

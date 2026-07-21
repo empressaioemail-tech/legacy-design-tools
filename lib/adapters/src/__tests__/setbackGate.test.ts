@@ -301,11 +301,22 @@ describe("runSetbackGate", () => {
 });
 
 describe("San Marcos pilot registration", () => {
-  it("serves an explicit empty pending table (not 404) with an honest note", () => {
+  it("serves a cited, populated table with explicit omitted-code gaps", () => {
     const table = getSetbackTable("san-marcos-tx");
     expect(table).not.toBeNull();
-    expect(table!.districts).toHaveLength(0);
-    expect(table!.note).toMatch(/pending corpus onboarding/i);
+    expect(table!.districts).toHaveLength(3);
+    expect(table!.districts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district_name: "SF-6 Single Family 6",
+          front_ft: 25,
+          rear_ft: 20,
+          side_ft: 5,
+          side_corner_ft: 15,
+        }),
+      ]),
+    );
+    expect(table!.note).toMatch(/OMITTED.*MF-12/i);
   });
 
   it("serves Cedar Park as an ordinance-backed populated table", () => {
@@ -327,12 +338,23 @@ describe("San Marcos pilot registration", () => {
     expect(table!.note).toMatch(/https:\/\//);
   });
 
-  it("serves Pflugerville as an explicit empty pending table", () => {
+  it("serves Pflugerville as a cited, populated table", () => {
     const table = getSetbackTable("pflugerville_tx");
     expect(table).not.toBeNull();
     expect(table!.jurisdictionKey).toBe("pflugerville-tx");
-    expect(table!.districts).toEqual([]);
-    expect(table!.note).toMatch(/pending source-atom onboarding/i);
+    expect(table!.districts).toHaveLength(3);
+    expect(table!.districts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district_name: "SF-S Single Family Suburban",
+          front_ft: 25,
+          rear_ft: 20,
+          side_ft: 7.5,
+          side_corner_ft: 15,
+        }),
+      ]),
+    );
+    expect(table!.note).toMatch(/GB1.*omitted/i);
     expect(table!.note).toMatch(/^.*https:\/\//);
   });
 

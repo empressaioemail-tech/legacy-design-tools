@@ -123,21 +123,27 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
     expect(unknownNormalized.status).toBe(404);
   });
 
-  it("San Marcos serves 200 with an explicit empty pending table, not 404", async () => {
-    // San Marcos is registered but not yet in the code atom corpus, so it
-    // serves 200 with districts:[] + an honest pending note rather than
-    // setback_table_not_found. No fabricated setback values ship — the
-    // acceptance gate blocks population until citation-backed extraction and
-    // human review land. Asserts the serving wire-up while keeping
-    // commitment #1 (no asserted number without a source).
+  it("San Marcos serves its cited, populated table, not 404", async () => {
+    // Direct ZONECODE rows extracted from the City's Development Code are
+    // served with per-value provenance; unresolved district codes remain
+    // explicitly listed as gaps in the table note.
     const res = await request(getApp()).get(
       "/api/local/setbacks/san-marcos-tx",
     );
     expect(res.status).toBe(200);
     expect(res.body.jurisdictionKey).toBe("san-marcos-tx");
     expect(Array.isArray(res.body.districts)).toBe(true);
-    expect(res.body.districts).toHaveLength(0);
-    expect(res.body.note).toMatch(/pending corpus onboarding/i);
+    expect(res.body.districts).toHaveLength(3);
+    expect(res.body.districts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district_name: "SF-6 Single Family 6",
+          front_ft: 25,
+          rear_ft: 20,
+        }),
+      ]),
+    );
+    expect(res.body.note).toMatch(/OMITTED.*MF-12/i);
 
     // The underscore form resolves through the same key normalization.
     const underscore = await request(getApp()).get(

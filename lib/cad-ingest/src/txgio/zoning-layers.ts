@@ -184,11 +184,9 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "Z_Code",
     descriptionField: "Description",
   },
-  // San Marcos (Hays). Setback table is a STUB (san-marcos-tx.json has empty
-  // districts[] — blocked on code-atom corpus onboarding + acceptance gate).
-  // Zoning still stamps the real district (`ZoneCode`, e.g. R-1-10/MU-2/C);
-  // the envelope route returns "no codified setbacks yet" until the table is
-  // populated. SETBACK TABLE OWED (populate districts[] once corpus lands).
+  // San Marcos (Hays). The cited table maps direct ZONECODE rows SF-6,
+  // SF-4.5, and ND-3. Other stamped codes remain explicit table-note gaps
+  // until their district/building-type standards are independently resolved.
   "san-marcos-tx": {
     cityKey: "san-marcos-tx",
     cityName: "San Marcos",
@@ -198,8 +196,8 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "ZONECODE",
     descriptionField: "ZONINGDISTRICT",
   },
-  // Cedar Park (Williamson). No setback table yet. GIS `ZoningAbbrev` clean
-  // codes (SR/UR/MF/DR/LB/NB/PO/SU). SETBACK TABLE OWED (cedar-park-tx.json).
+  // Cedar Park (Williamson). Cited table maps DR/SR/SU/MF/NB/LB/PO; UR and
+  // other live codes remain explicit table-note gaps.
   "cedar-park-tx": {
     cityKey: "cedar-park-tx",
     cityName: "Cedar Park",
@@ -235,9 +233,9 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "SHORT_DESC",
     descriptionField: "ZONING",
   },
-  // Pflugerville (Travis). No setback table yet. GIS `ZOINING_TY` (source
-  // field-name typo, kept verbatim) clean codes (SF-S/R/MF-20/GB1/GB2/LI/O).
-  // First Travis-county zoning layer. SETBACK TABLE OWED (pflugerville-tx.json).
+  // Pflugerville (Travis). GIS `ZOINING_TY` (source field-name typo, kept
+  // verbatim) maps cited rows SF-S/SF-R/MF-20. GB1/GB2/LI/O remain explicit
+  // table-note gaps pending non-residential dimensional extraction.
   "pflugerville-tx": {
     cityKey: "pflugerville-tx",
     cityName: "Pflugerville",
