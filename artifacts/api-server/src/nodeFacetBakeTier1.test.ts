@@ -194,11 +194,11 @@ describe("honest absence (never fabricate a facet)", () => {
     expect(payload.facetCoverage.zoning).toBe(true);
   });
 
-  it("land-use joins via normalizeForJoin (R-prefix fix) when a coded row exists", () => {
-    // TxGIO prop_id "R12345" must join a cad row keyed bare-numeric "12345".
+  it("land-use joins on the bare-numeric key for a REAL county (Bastrop)", () => {
+    // TxGIO prop_id "012345" (leading zeros) joins a cad row keyed "12345".
     const lu = new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]);
     const payload = buildTier1Payload(
-      parcelRow({ prop_id: "R12345" }),
+      parcelRow({ prop_id: "012345" }),
       "48021",
       "Bastrop",
       lu,
@@ -207,6 +207,37 @@ describe("honest absence (never fabricate a facet)", () => {
     expect(payload.baseFacts.landUse?.code).toBe("A1");
     expect(payload.baseFacts.landUse?.source).toBe("cad-roll");
     expect(payload.facetCoverage.landUse).toBe(true);
+  });
+
+  it("Williamson (48491) bakes landUse:null even when a colliding cad row exists (gate)", () => {
+    // The fabrication bug: TxGIO "R062578" R-stripped to "62578" and collided
+    // with an unrelated CAD account. The gate now refuses the join, so the
+    // node bakes honest land-use absence, NOT the colliding code.
+    const lu = new Map([["62578", { landUseCode: "A1", landUseVintage: "2025" }]]);
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "R062578" }),
+      "48491",
+      "Williamson",
+      lu,
+      now,
+    )!;
+    expect(payload.baseFacts.landUse).toBeNull();
+    expect(payload.facetCoverage.landUse).toBe(false);
+    expect(payload.provenance.landUseSource).toBeNull();
+  });
+
+  it("Hays (48209) bakes landUse:null even when a colliding cad row exists (gate)", () => {
+    const lu = new Map([["13599", { landUseCode: "A1", landUseVintage: "2025" }]]);
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "13599" }),
+      "48209",
+      "Hays",
+      lu,
+      now,
+    )!;
+    expect(payload.baseFacts.landUse).toBeNull();
+    expect(payload.facetCoverage.landUse).toBe(false);
+    expect(payload.provenance.landUseSource).toBeNull();
   });
 
   it("unknown jurisdiction declines the envelope (no fabricated setbacks)", () => {

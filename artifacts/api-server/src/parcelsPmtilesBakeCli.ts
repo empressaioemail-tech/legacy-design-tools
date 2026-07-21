@@ -34,23 +34,31 @@
  * renderer (promoteId defaults to the `parcel_node_id` property) keys on
  * it regardless of how tippecanoe resolves the tile id.
  *
- * LAND-USE. Six of the ten counties have a CAD appraisal roll loaded
- * (`cad_property`): Travis, Williamson, Bastrop, Caldwell, Hays, and Bexar.
- * (Bexar was omitted from this list historically; loadLandUse pulls ALL
- * cad_property rows and is NOT county-gated, so any county with a loaded
- * roll joins — Bexar's ~623k coded rows join at ~88% today.) For those,
- * each parcel is joined (latest tax year, coded rows only) to its
- * `property_use_code` and stamped `landUseCode` + a keyword-bucketable
- * `landUseDescription` (via the shared `ptadLandUseDescription`). The
- * remaining counties bake geometry-only with uniform paint — still
- * clickable, honestly neutral (no fabricated code). The join uses the SAME
- * key the cad:* brief adapters use: `(county_fips, cad-normalized prop_id)`,
- * via `normalizeForJoin` (see ./lib/joinNormalize). Williamson's TxGIO
- * prop_ids are in the appraisal "R-account" form ("R000009") while its
- * cad_property rows are bare numeric ("9"); `normalizeForJoin` strips the
- * leading "R" before the leading-zero normalize so Williamson now joins
- * (recovering a large chunk of its parcels — some TxGIO prop_ids have no
- * matching cad row, so this is a partial, not total, join).
+ * LAND-USE. Several counties have a CAD appraisal roll loaded
+ * (`cad_property`): Travis, Bastrop, Caldwell, Bexar, Bell, and others.
+ * loadLandUse pulls ALL cad_property rows and is NOT county-gated, so any
+ * county with a loaded roll and a matching numbering system joins (Bexar's
+ * rows join at ~99% owner-match). For those, each parcel is joined (latest
+ * tax year, coded rows only) to its `property_use_code` and stamped
+ * `landUseCode` + a keyword-bucketable `landUseDescription` (via the shared
+ * `ptadLandUseDescription`). Counties without a roll — and counties gated
+ * off for numbering-mismatch (see next paragraph) — bake geometry-only with
+ * uniform paint — still clickable, honestly neutral (no fabricated code).
+ * The join uses the SAME key the cad:* brief adapters use:
+ * `(county_fips, cad-normalized prop_id)`, via `landUseJoinKey` (see
+ * ./lib/joinNormalize).
+ *
+ * DATA-INTEGRITY GATE (commitment #1 — honest absence over fabrication).
+ * Williamson (48491) and Hays (48209) are GATED OFF: their TxGIO prop_ids do
+ * NOT correspond to their CAD roll (Williamson's are the "R-account" form
+ * over a different six-digit CAD numbering; Hays' are a divergent
+ * bare-numeric system). A prior R-strip made Williamson's key COLLIDE with
+ * unrelated CAD accounts, fabricating a different property's land-use onto
+ * ~97k parcels (owner-match ~0.005%); Hays fabricated ~78k the same way
+ * (~0.013%). `landUseJoinKey` returns null for these two FIPS, so they bake
+ * land-use-absent (honest) until an external account crosswalk exists. The
+ * R-strip is removed entirely — no other county carries an R-prefixed id, so
+ * removing it drops no real join.
  *
  * RE-RUNNABLE + CONTENT-HASHED. Emits a GeoJSONSeq (newline-delimited)
  * export, runs tippecanoe to a temp PMTiles, then renames it to a
@@ -95,7 +103,7 @@ import { parseArgs } from "node:util";
 import pg from "pg";
 
 import { parcelNodeId } from "./lib/parcelNodeId";
-import { normalizeForJoin } from "./lib/joinNormalize";
+import { landUseJoinKey } from "./lib/joinNormalize";
 // The land-use description mapping lives in a dependency-free module (NOT
 // imported from txgioParcelStore, which drags in @workspace/db and would
 // throw on a missing DATABASE_URL at import time — this offline bake
@@ -349,7 +357,12 @@ async function exportCounty(
         // The cad_property key is CAD-normalized (leading zeros stripped),
         // the same key the cad:* brief adapters join on. The store's raw
         // prop_id may carry leading zeros, so join on the normalized form.
-        const lu = landUse.get(normalizeForJoin(row.prop_id));
+        // landUseJoinKey enforces the per-county data-integrity gate: it
+        // returns null for counties whose TxGIO/CAD numbering does not match
+        // (Williamson, Hays), so those parcels bake land-use-absent (honest)
+        // rather than a fabricated collision.
+        const joinKey = landUseJoinKey(county.fips, row.prop_id);
+        const lu = joinKey != null ? landUse.get(joinKey) : undefined;
         if (lu) {
           properties.landUseCode = lu.landUseCode;
           const desc = ptadLandUseDescription(lu.landUseCode);
