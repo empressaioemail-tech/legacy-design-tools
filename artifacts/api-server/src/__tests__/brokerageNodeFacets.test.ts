@@ -33,8 +33,10 @@ import {
   placeKeyForNode,
   sanitizeNodeFacetPayload,
   payloadHasOwnerKey,
+  extractTier2Overlay,
 } from "../routes/brokerageNodeFacets";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
+import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -120,6 +122,54 @@ describe("brokerageNodeFacets helpers (pure)", () => {
   });
 });
 
+describe("extractTier2Overlay (the card's FEMA flood read, pure)", () => {
+  it("pulls flood + envelope + bakedAt from a real Tier-2 payload", () => {
+    const tier2Payload = {
+      facetSchemaVersion: "node-facets-tier2-v1",
+      tier: 2,
+      parcelNodeId: "48055:10068",
+      countyFips: "48055",
+      countyName: "Caldwell",
+      envelope: { status: "declined", edgeSignal: "shape" },
+      flood: {
+        status: "in-sfha",
+        floodZone: "AE",
+        inSpecialFloodHazardArea: true,
+        provenance: { source: "fema-nfhl", vintage: "2026-07-21T00:00:00.000Z" },
+      },
+      bakedAt: "2026-07-21T00:00:00.000Z",
+    };
+    const overlay = extractTier2Overlay(tier2Payload, new Date("2026-07-21T00:00:00.000Z"));
+    expect(overlay).not.toBeNull();
+    expect((overlay!.flood as Record<string, unknown>).status).toBe("in-sfha");
+    expect((overlay!.flood as Record<string, unknown>).floodZone).toBe("AE");
+    expect(overlay!.envelope).not.toBeNull();
+    expect(overlay!.snapshotAt).toBe("2026-07-21T00:00:00.000Z");
+  });
+
+  it("surfaces an honest-absence flood (unavailable) verbatim, never a fabricated zone", () => {
+    const overlay = extractTier2Overlay(
+      {
+        flood: {
+          status: "unavailable",
+          floodZone: null,
+          provenance: { source: "fema-nfhl", unavailableReason: "FEMA NFHL fetch failed" },
+        },
+      },
+      null,
+    );
+    expect(overlay).not.toBeNull();
+    expect((overlay!.flood as Record<string, unknown>).status).toBe("unavailable");
+    expect((overlay!.flood as Record<string, unknown>).floodZone).toBeNull();
+  });
+
+  it("returns null for a payload with no flood facet (malformed/legacy row)", () => {
+    expect(extractTier2Overlay({ tier: 2, envelope: {} }, null)).toBeNull();
+    expect(extractTier2Overlay(null, null)).toBeNull();
+    expect(extractTier2Overlay("not-an-object", null)).toBeNull();
+  });
+});
+
 // -------------------------------------------------------------------------
 // 1b. BOOT-PROOF regression — the anonymous read route must NOT pull the
 //     Tier-1 bake CLI into the server boot graph. The CLI's `main()` runs on
@@ -140,9 +190,13 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     );
     // No import/re-export from any `...Cli` module — that is the whole fix.
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*Cli["']/);
-    // And it pulls the adapter key from the side-effect-free constants module.
+    // And it pulls BOTH adapter keys from the side-effect-free constants
+    // modules (Tier 1 base + Tier 2 flood overlay), never the bake CLIs.
     expect(routeSrc).toMatch(
       /from\s+["']\.\.\/lib\/nodeFacetTier1Constants["']/,
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/nodeFacetTier2Constants["']/,
     );
   });
 
@@ -175,6 +229,8 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
   it("the constants module carries the unchanged deployed adapter_key", () => {
     // Value integrity: deployed place_layer_snapshots rows use this exact key.
     expect(TIER1_ADAPTER_KEY).toBe("node-facets:tier1");
+    // The Tier-2 bake writes rows under this exact key; the read composes them.
+    expect(TIER2_ADAPTER_KEY).toBe("node-facets:tier2");
   });
 });
 
@@ -267,6 +323,35 @@ const comalPayload = {
   bakedAt: "2026-07-20T22:34:46.946Z",
 };
 
+/** A Tier-2 flood overlay for the BAKED node — a real in-SFHA FEMA hit, with a
+ * deliberately-injected owner key to prove the strip runs over the overlay too
+ * (the real Tier-2 bake never writes one). */
+const tier2FloodPayload = {
+  facetSchemaVersion: "node-facets-tier2-v1",
+  tier: 2,
+  parcelNodeId: BAKED_NODE_ID,
+  countyFips: "48055",
+  countyName: "Caldwell",
+  envelope: { status: "declined", edgeSignal: "shape", roadsPending: false },
+  flood: {
+    status: "in-sfha",
+    floodZone: "AE",
+    inSpecialFloodHazardArea: true,
+    zoneSubtype: "FLOODWAY",
+    baseFloodElevation: 512.4,
+    provenance: {
+      source: "fema-nfhl",
+      adapterKey: "fema:nfhl-flood-zone",
+      layer: "flood-hazard-zones",
+      vintage: "2026-07-21T00:00:00.000Z",
+    },
+  },
+  provenance: { roadsPending: false, floodSource: "fema-nfhl" },
+  // Injected — must be stripped by the route.
+  owner_name: "TIER2 PRIVATE OWNER SHOULD NOT LEAK",
+  bakedAt: "2026-07-21T00:00:00.000Z",
+};
+
 describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   beforeAll(async () => {
     if (!ctx.schema) return;
@@ -287,6 +372,15 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
         lngRounded: "-97.67650",
         payloadJson: bakedPayload,
         contentHash: "test-hash-baked",
+      },
+      {
+        // The Tier-2 flood overlay for the SAME node (separate adapter key).
+        placeKey: placeKeyForNode(BAKED_NODE_ID),
+        adapterKey: TIER2_ADAPTER_KEY,
+        latRounded: "30.04220",
+        lngRounded: "-97.67650",
+        payloadJson: tier2FloodPayload,
+        contentHash: "test-hash-tier2",
       },
       {
         placeKey: placeKeyForNode(COMAL_NODE_ID),
@@ -324,6 +418,39 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(payloadHasOwnerKey(res.body.facets)).toBe(false);
     expect(JSON.stringify(res.body)).not.toMatch(/owner/i);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
+  });
+
+  it("composes the Tier-2 FEMA flood overlay onto the card's read (real per-node zone)", async () => {
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    // The Tier-2 overlay the card + the map's "FEMA flood zone" layer consume.
+    expect(res.body.tier2).not.toBeNull();
+    expect(res.body.tier2.flood.status).toBe("in-sfha");
+    expect(res.body.tier2.flood.floodZone).toBe("AE");
+    expect(res.body.tier2.flood.inSpecialFloodHazardArea).toBe(true);
+    // Carries the FEMA vintage so the card can cite it (commitment #1).
+    expect(res.body.tier2.flood.provenance.source).toBe("fema-nfhl");
+    expect(res.body.tier2.flood.provenance.vintage).toBe(
+      "2026-07-21T00:00:00.000Z",
+    );
+    // Tier-1 base still present alongside the overlay.
+    expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
+    // OWNER LEAK GUARD extends to the overlay — the injected Tier-2 owner is gone.
+    expect(payloadHasOwnerKey(res.body.tier2)).toBe(false);
+    expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
+  });
+
+  it("returns tier2:null for a node with a Tier-1 row but no Tier-2 flood overlay yet", async () => {
+    // Comal has only a Tier-1 row — the card renders the base unchanged, no flood.
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(COMAL_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.tier2).toBeNull();
+    // Base facets are still fully served.
+    expect(res.body.facets.baseFacts.acreage.value).toBe(1.0);
   });
 
   it("serves honest absence (Comal land-use null) verbatim, not a fake value", async () => {
