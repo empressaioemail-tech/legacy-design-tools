@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "cedar-park-tx",
   "jurisdictionDisplayName": "City of Cedar Park, TX",
-  "note": "Codified from City of Cedar Park Code of Ordinances, Ch. 11, Art. 11.03: residential dimensional standards at https://ecode360.com/38612844 (§ 11.03.061, Tables 11.03.061A and 11.03.061B) and nonresidential standards at https://ecode360.com/38612863 (§ 11.03.091, Table 11.03.091), accessed 2026-07-21. Rows are limited to ordinance districts with a Cedar Park GIS ZoningAbbrev code (DR, SR, SU, MF, NB, LB, PO). ES is omitted because the zoning layer does not supply ES. UR is omitted because the one GIS code cannot distinguish front-entry from rear-entry townhomes, and its street-side setback varies by street class (15/20/25 feet). max_lot_coverage_pct and max_impervious_pct are not specified by these tables; both carry 100 only as the established non-binding sentinel with per-value provenance.",
+  "note": "Codified from City of Cedar Park Code of Ordinances, Ch. 11, Art. 11.03: residential dimensional standards at https://ecode360.com/38612844 (sec 11.03.061, Tables 11.03.061A and 11.03.061B) and nonresidential standards at https://ecode360.com/38612863 (sec 11.03.091, Table 11.03.091), accessed 2026-07-21. SHIPPED rows (GIS ZoningAbbrev mappable without variant collision): DR, SR, SU, MF, NB, LB, PO. OMITTED - ES: no ZoningAbbrev in the Cedar Park GIS layer. OMITTED - UR: one GIS code cannot distinguish front-entry vs rear-entry townhomes, and street-side setback varies by street class (15/20/25 ft). OMITTED - other live GIS codes seen in the layer (including GB, LI, HC, HI, H, PS, OG, OR, MU, TC, PD and any PD/overlay variants): not yet extracted from the ordinance tables into this file; they remain honest setback-table gaps (envelope declines) until a citation-backed row lands. max_lot_coverage_pct and max_impervious_pct are not specified by these tables; both carry 100 only as the established non-binding sentinel with per-value provenance (not_specified).",
   "districts": [
     {
       "district_name": "DR Development Reserve",
@@ -15,13 +15,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612844",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Development Reserve (DR) ... 75'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Development Reserve (DR) ... 150'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Development Reserve (DR) ... 75'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Development Reserve (DR) ... 75'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Development Reserve (DR) ... 40'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061A states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061A states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Development Reserve (DR) ... 75'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Development Reserve (DR) ... 150'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Development Reserve (DR) ... 75'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Development Reserve (DR) ... 75'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Development Reserve (DR) ... 40'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061A states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061A states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     },
     {
@@ -35,13 +79,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612844",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Suburban Residential (SR) ... 30'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Suburban Residential (SR) ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Suburban Residential (SR) ... 12'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Suburban Residential (SR) ... 20'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Suburban Residential (SR) ... 40'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061A states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061A states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Suburban Residential (SR) ... 30'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Suburban Residential (SR) ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Suburban Residential (SR) ... 12'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Suburban Residential (SR) ... 20'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Suburban Residential (SR) ... 40'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061A states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061A states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     },
     {
@@ -55,13 +143,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612844",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Semi-Urban Residential (SU) ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Semi-Urban Residential (SU) ... 20'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Semi-Urban Residential (SU) ... 10'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Semi-Urban Residential (SU) ... 15'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Semi-Urban Residential (SU) ... 35'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061A states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061A states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Semi-Urban Residential (SU) ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Semi-Urban Residential (SU) ... 20'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Semi-Urban Residential (SU) ... 10'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Semi-Urban Residential (SU) ... 15'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Semi-Urban Residential (SU) ... 35'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061A states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061A states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     },
     {
@@ -75,13 +207,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612844",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Multifamily (MF) ... Garden-style apartment ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Multifamily (MF) ... Garden-style apartment ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Multifamily (MF) ... Garden-style apartment ... 10'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Multifamily (MF) ... Garden-style apartment ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Multifamily (MF) ... Garden-style apartment ... 48'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061B states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.061", "section_number": "11.03.061", "quote": "Table 11.03.061B states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Multifamily (MF) ... Garden-style apartment ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Multifamily (MF) ... Garden-style apartment ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Multifamily (MF) ... Garden-style apartment ... 10'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Multifamily (MF) ... Garden-style apartment ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Multifamily (MF) ... Garden-style apartment ... 48'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061B states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.061",
+          "section_number": "11.03.061",
+          "quote": "Table 11.03.061B states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     },
     {
@@ -95,13 +271,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612863",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "NB ... Front ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "NB ... Rear to property line ... 5'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "NB ... Interior side ... 12'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "NB ... Street side ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "NB ... Maximum building height ... 30'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "Table 11.03.091 states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "Table 11.03.091 states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "NB ... Front ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "NB ... Rear to property line ... 5'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "NB ... Interior side ... 12'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "NB ... Street side ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "NB ... Maximum building height ... 30'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     },
     {
@@ -115,13 +335,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612863",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "LB ... Front ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "LB ... Rear to property line ... 5'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "LB ... Interior side ... 12'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "LB ... Street side ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "LB ... Maximum building height ... 45'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "Table 11.03.091 states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "Table 11.03.091 states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "LB ... Front ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "LB ... Rear to property line ... 5'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "LB ... Interior side ... 12'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "LB ... Street side ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "LB ... Maximum building height ... 45'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     },
     {
@@ -135,13 +399,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://ecode360.com/38612863",
       "provenance": {
-        "front_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "PO ... Front ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "PO ... Rear to property line ... 5'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "PO ... Interior side ... 12'", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "PO ... Street side ... 25'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "PO ... Maximum building height ... 100'", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "Table 11.03.091 states no maximum lot coverage percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "cedar_park_tx/ch11/11.03.091", "section_number": "11.03.091", "quote": "Table 11.03.091 states no maximum impervious-cover percentage.", "confidence": 0.8, "verification_state": "human-verified", "not_specified": true }
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "PO ... Front ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "PO ... Rear to property line ... 5'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "PO ... Interior side ... 12'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "PO ... Street side ... 25'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "PO ... Maximum building height ... 100'",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 states no maximum lot coverage percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 states no maximum impervious-cover percentage.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        }
       }
     }
   ]
