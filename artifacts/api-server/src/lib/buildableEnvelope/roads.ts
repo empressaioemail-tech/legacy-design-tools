@@ -37,7 +37,7 @@
 
 import type { RoadPolyline } from "./edgeLabeling";
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const USER_AGENT =
   "hauska-buildable-envelope/1.0 (+https://hauska.dev; roads via OSM Overpass)";
 const DEFAULT_RADIUS_M = 90;
@@ -195,6 +195,10 @@ export function _clearRoadCache(): void {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+function overpassUrl(): string {
+  return process.env.OVERPASS_URL?.trim() || DEFAULT_OVERPASS_URL;
+}
+
 /**
  * One Overpass attempt. Returns parsed roads on a clean 200+JSON, or a typed
  * failure so the caller can decide whether to retry (504/429/timeout are
@@ -211,7 +215,7 @@ async function overpassAttempt(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await doFetch(OVERPASS_URL, {
+    const res = await doFetch(overpassUrl(), {
       method: "POST",
       // urlencoded `data=` — the well-formed POST the public instance
       // documents, rather than a raw text/plain body.

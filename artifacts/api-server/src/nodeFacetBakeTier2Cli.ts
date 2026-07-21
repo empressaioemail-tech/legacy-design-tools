@@ -878,10 +878,10 @@ async function main(): Promise<void> {
   // the arg definition + the PR body) and is deferred to that infra deliverable.
   const skipRoads = !(values["enable-roads"] ?? false);
   const skipFema = values["skip-fema"] ?? false;
-  if (values["enable-roads"] && !process.env.OVERPASS_URL) {
+  if (values["enable-roads"] && !process.env.OVERPASS_URL?.trim()) {
     log(
-      "WARNING: --enable-roads set but OVERPASS_URL is unset. The road leg will " +
-        "hit the shared PUBLIC Overpass, which is 504-saturated (measured " +
+      "WARNING: --enable-roads set but OVERPASS_URL is unset or empty, so the " +
+        "road leg will use its shared public default, which is 504-saturated (measured " +
         "~0.1 nodes/sec, ~100% failures) — nodes will mostly degrade to the " +
         "point/shape signal. Point OVERPASS_URL at a private/self-hosted mirror " +
         "before enabling roads for a real bake.",
