@@ -84,7 +84,11 @@ import { realpathSync } from "node:fs";
 import pg from "pg";
 
 import { parcelNodeId, normalizeCadPropId } from "./lib/parcelNodeId";
-import { landUseJoinKey } from "./lib/joinNormalize";
+import {
+  landUseJoinKey,
+  LANDUSE_JOIN_DISABLED_FIPS_SEED,
+} from "./lib/joinNormalize";
+import { loadLedgerBlockedFips } from "./lib/joinIntegrityGate";
 import { ptadLandUseDescription } from "./lib/ptadLandUse";
 import { contentHashForPayload } from "./lib/placeLayerUtils";
 import {
@@ -320,6 +324,15 @@ export interface Tier1FacetPayload {
     landUseSource: "cad-roll" | null;
     roadsPending: true;
     tierNote: string;
+    /**
+     * True when this county's land-use join is BLOCKED by the owner-match
+     * integrity gate (ledger `block` verdict / seed). The load-bearing signal
+     * for the monotonic INTEGRITY OVERRIDE: a gate-blocked re-bake must be
+     * allowed to strip a previously-promoted (now-known-fabricated) land-use
+     * even though dropping the facet lowers the monotonic score. See
+     * `shouldPromote`.
+     */
+    landUseGateBlocked: boolean;
   };
   bakedAt: string;
 }
@@ -365,6 +378,7 @@ export function buildTier1Payload(
   countyName: string,
   landUse: Map<string, LandUse>,
   nowIso: string,
+  blockedFips?: ReadonlySet<string>,
 ): Tier1FacetPayload | null {
   const nodeId = parcelNodeId(countyFips, row.prop_id);
   // No node id -> no stable key -> cannot bake this parcel (never fabricate an
@@ -373,6 +387,13 @@ export function buildTier1Payload(
 
   const ring = firstRing(row.geometry);
 
+  // Is this county's land-use join gate-blocked? Drives the honest-absence of
+  // land-use AND the monotonic integrity override that strips a prior
+  // fabricated value. `blockedFips` is the ledger-driven set (gate `block`
+  // verdicts); omitted -> the gate-output seed via landUseJoinKey's default.
+  const landUseGateBlocked =
+    (blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED).has(countyFips);
+
   // --- Base facts ---
   const str = (v: string | null | undefined): string | null =>
     typeof v === "string" && v.trim() ? v.trim() : null;
@@ -380,10 +401,10 @@ export function buildTier1Payload(
   let luFacet: BaseFacts["landUse"] = null;
   if (row.prop_id) {
     // landUseJoinKey enforces the per-county data-integrity gate: it returns
-    // null for counties whose TxGIO/CAD numbering does not correspond
-    // (Williamson 48491, Hays 48209), so those nodes bake landUse: null
-    // (honest absence) instead of a fabricated numeric-collision match.
-    const joinKey = landUseJoinKey(countyFips, row.prop_id);
+    // null for BLOCKED counties (ledger `block` verdict; seed fallback), so
+    // those nodes bake landUse: null (honest absence) instead of a fabricated
+    // numeric-collision match.
+    const joinKey = landUseJoinKey(countyFips, row.prop_id, blockedFips);
     const lu = joinKey != null ? landUse.get(joinKey) : undefined;
     if (lu) {
       luFacet = {
@@ -452,6 +473,7 @@ export function buildTier1Payload(
         "Tier 1 (deterministic). Buildable envelope computed WITHOUT roads " +
         "(lot-shape front-edge labeling) — provisional, lower confidence; " +
         "Tier 2 upgrades it with road-based labeling.",
+      landUseGateBlocked,
     },
     bakedAt: nowIso,
   };
@@ -484,17 +506,56 @@ export function facetScore(payload: Tier1FacetPayload): number {
 }
 
 /**
- * Decide whether `next` may overwrite `prior`. The freshly computed payload
+ * Does `prior` carry a land-use value that `next` (a gate-blocked re-bake)
+ * removes? True exactly when the stored snapshot has a non-null
+ * `baseFacts.landUse` (a promoted, now-known-FABRICATED code) and the fresh
+ * payload has none. This is the precise, narrow shape of a
+ * fabrication-correction: a blocked county whose prior snapshot still carries
+ * the collision-stamped land-use.
+ */
+function isGateBlockedLandUseCorrection(
+  prior: Tier1FacetPayload,
+  next: Tier1FacetPayload,
+): boolean {
+  return (
+    next.provenance.landUseGateBlocked === true &&
+    next.baseFacts.landUse == null &&
+    prior.baseFacts.landUse != null
+  );
+}
+
+/**
+ * Decide whether `next` may overwrite `prior`.
+ *
+ * Normal path (monotonic high-water-mark): the freshly computed payload
  * promotes only when it is at least as good as the stored high-water-mark. A
- * strictly-worse re-computation (fewer facets, or lower envelope confidence
- * at equal facet count) is rejected — the better prior is kept. Equal scores
+ * strictly-worse re-computation (fewer facets, or lower envelope confidence at
+ * equal facet count) is rejected — the better prior is kept. Equal scores
  * promote (a same-quality refresh updates vintage/bakedAt harmlessly).
+ *
+ * INTEGRITY OVERRIDE (the fabrication-correction escape hatch). The monotonic
+ * guard would otherwise KEEP a fabricated snapshot forever: a Williamson node
+ * whose prior payload carries a collision-stamped `baseFacts.landUse` scores
+ * HIGHER than the honest re-bake that drops it, so `facetScore(next) <
+ * facetScore(prior)` and the fabrication survives every re-bake. When the fresh
+ * payload is a GATE-BLOCKED land-use correction (the county's owner-match
+ * verdict is `block` AND the re-bake removes a land-use the prior still
+ * carries), promotion is FORCED so the fabricated value is actually stripped.
+ *
+ * This override is scoped as tightly as possible and is NOT a general downgrade
+ * bypass: it fires only when (a) the county is gate-blocked, and (b) the sole
+ * effect is removing a land-use the prior had. Any other downgrade (an envelope
+ * that lost confidence, a zoning that went null, a non-blocked county) still
+ * takes the monotonic path and is rejected.
  */
 export function shouldPromote(
   prior: Tier1FacetPayload | null,
   next: Tier1FacetPayload,
 ): boolean {
   if (!prior) return true;
+  // Fabrication-correction: force the strip of a gate-blocked county's
+  // previously-promoted (fabricated) land-use, even though it lowers the score.
+  if (isGateBlockedLandUseCorrection(prior, next)) return true;
   return facetScore(next) >= facetScore(prior);
 }
 
@@ -702,6 +763,13 @@ export interface PagePromotionResult {
   promotedNew: number;
   promotedUpgrade: number;
   keptPriorMonotonic: number;
+  /**
+   * Promotions that STRIPPED a prior fabricated land-use via the gate-blocked
+   * integrity override (a subset of `promotedUpgrade`). The load-bearing count
+   * for verifying a blocked county's re-bake actually corrected fabrications
+   * rather than being kept by the monotonic guard.
+   */
+  fabricationCorrected: number;
 }
 
 /**
@@ -730,6 +798,7 @@ export function decidePagePromotions(
   let promotedNew = 0;
   let promotedUpgrade = 0;
   let keptPriorMonotonic = 0;
+  let fabricationCorrected = 0;
 
   for (const c of computed) {
     const prior = pending.get(c.placeKey) ?? priors.get(c.placeKey) ?? null;
@@ -737,8 +806,14 @@ export function decidePagePromotions(
       keptPriorMonotonic += 1;
       continue;
     }
-    if (prior) promotedUpgrade += 1;
-    else promotedNew += 1;
+    if (prior) {
+      promotedUpgrade += 1;
+      if (isGateBlockedLandUseCorrection(prior, c.payload)) {
+        fabricationCorrected += 1;
+      }
+    } else {
+      promotedNew += 1;
+    }
     pending.set(c.placeKey, c.payload);
     const item: BakeWriteItem = {
       placeKey: c.placeKey,
@@ -754,7 +829,13 @@ export function decidePagePromotions(
     }
   }
 
-  return { toWrite, promotedNew, promotedUpgrade, keptPriorMonotonic };
+  return {
+    toWrite,
+    promotedNew,
+    promotedUpgrade,
+    keptPriorMonotonic,
+    fabricationCorrected,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -771,6 +852,7 @@ interface CountyStats {
   promotedNew: number;
   promotedUpgrade: number;
   keptPriorMonotonic: number;
+  fabricationCorrected: number;
   facetHits: {
     landUse: number;
     acreage: number;
@@ -788,9 +870,11 @@ async function bakeCounty(args: {
   pageSize: number;
   limit: number | undefined;
   dryRun: boolean;
+  blockedFips: ReadonlySet<string>;
   sampleSink: (p: Tier1FacetPayload) => void;
 }): Promise<CountyStats> {
   const { pool, county, landUse, adapterKey, pageSize, limit, dryRun } = args;
+  const { blockedFips } = args;
   const stats: CountyStats = {
     fips: county.fips,
     name: county.name,
@@ -801,6 +885,7 @@ async function bakeCounty(args: {
     promotedNew: 0,
     promotedUpgrade: 0,
     keptPriorMonotonic: 0,
+    fabricationCorrected: 0,
     facetHits: {
       landUse: 0,
       acreage: 0,
@@ -854,6 +939,7 @@ async function bakeCounty(args: {
         county.name,
         landUse,
         nowIso,
+        blockedFips,
       );
       if (!payload) {
         stats.skippedNoNodeId += 1;
@@ -897,6 +983,7 @@ async function bakeCounty(args: {
     stats.promotedNew += decision.promotedNew;
     stats.promotedUpgrade += decision.promotedUpgrade;
     stats.keptPriorMonotonic += decision.keptPriorMonotonic;
+    stats.fabricationCorrected += decision.fabricationCorrected;
     stats.baked += decision.promotedNew + decision.promotedUpgrade;
     if (!dryRun) {
       await writeSnapshotsBatch(pool, adapterKey, decision.toWrite);
@@ -973,6 +1060,26 @@ async function main(): Promise<void> {
     const landUse = await fetchCountyLandUse(pool, county.fips);
     log(`CAD land-use rows for ${county.name}: ${landUse.size}`);
 
+    // Ledger-driven block set (the gate's computed `block` verdicts). Empty on
+    // an unscored DB -> buildTier1Payload/landUseJoinKey fall back to the
+    // gate-output seed, so a fresh DB is never left un-gated.
+    const blockedFips = await loadLedgerBlockedFips(pool);
+    const seedApplied = !blockedFips.has(county.fips)
+      ? LANDUSE_JOIN_DISABLED_FIPS_SEED.has(county.fips)
+      : false;
+    if (blockedFips.has(county.fips)) {
+      log(
+        `land-use gate: county ${county.fips} is BLOCKED by the coverage ` +
+          `ledger — baking honest land-use ABSENCE; a fabricated prior ` +
+          `snapshot's land-use will be STRIPPED via the integrity override.`,
+      );
+    } else if (seedApplied) {
+      log(
+        `land-use gate: county ${county.fips} is BLOCKED by the gate-output ` +
+          `seed (ledger not yet scored) — baking honest land-use ABSENCE.`,
+      );
+    }
+
     stats = await bakeCounty({
       pool,
       county,
@@ -981,6 +1088,7 @@ async function main(): Promise<void> {
       pageSize,
       limit,
       dryRun,
+      blockedFips,
       sampleSink,
     });
   } finally {
@@ -1004,6 +1112,7 @@ async function main(): Promise<void> {
   log(`  promoted (new):    ${stats.promotedNew}`);
   log(`  promoted (upgrade):${stats.promotedUpgrade}`);
   log(`  kept prior (mono): ${stats.keptPriorMonotonic}`);
+  log(`  fabrication fixed: ${stats.fabricationCorrected} (gate-blocked land-use stripped from prior snapshot)`);
   log(`facet coverage (of bakeable):`);
   log(`  land-use:          ${stats.facetHits.landUse} (${pct(stats.facetHits.landUse)})`);
   log(`  acreage:           ${stats.facetHits.acreage} (${pct(stats.facetHits.acreage)})`);

@@ -126,6 +126,7 @@ describe("lib/db schema integration", () => {
         "cotality_geocode_cache",
         "cotality_property_attr_cache",
         "cotality_spatial_tile_cache",
+        "county_facet_coverage",
         "coverage_requests",
         // Phase 2 Dataroom/Files tile — document->atom association.
         // One row per engine-ingested extracted atom, pointing back to the

@@ -71,6 +71,7 @@ export * from "./engagementAnnotations";
 export * from "./savedWorkspaceSpaces";
 export * from "./dataroomDocumentAtoms";
 export * from "./cadProperty";
+export * from "./countyFacetCoverage";
 export * from "./txgioParcel";
 export * from "./txgioAddress";
 export * from "./reportRun";
