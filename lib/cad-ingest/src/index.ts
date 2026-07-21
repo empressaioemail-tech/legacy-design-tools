@@ -8,10 +8,7 @@
 
 export * from "./types";
 export * from "./counties";
-export {
-  CAD_BULK_SOURCES,
-  resolveCadBulkSource,
-} from "./sources";
+export { CAD_BULK_SOURCES, resolveCadBulkSource } from "./sources";
 export type {
   CadBulkSource,
   OpenFetchSource,
@@ -69,11 +66,15 @@ export type {
   TxgioUpsertOptions,
   TxgioUpsertSummary,
 } from "./txgio/ingest";
-export {
-  ADDRESS_COUNTIES,
-  resolveAddressCounty,
-} from "./address/counties";
+export { ADDRESS_COUNTIES, resolveAddressCounty } from "./address/counties";
 export type { AddressCounty } from "./address/counties";
+export {
+  getJurisdictionConfig,
+  listJurisdictions,
+  listJurisdictionFips,
+  unlinkedSetbackKeys,
+} from "./jurisdictions";
+export type { JurisdictionConfig } from "./jurisdictions";
 export {
   addressLayerUrl,
   countAddressPoints,
