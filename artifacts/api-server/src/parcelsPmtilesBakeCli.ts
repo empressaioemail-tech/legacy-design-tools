@@ -104,6 +104,7 @@ import pg from "pg";
 
 import { parcelNodeId } from "./lib/parcelNodeId";
 import { landUseJoinKey } from "./lib/joinNormalize";
+import { loadLedgerBlockedFips } from "./lib/joinIntegrityGate";
 // The land-use description mapping lives in a dependency-free module (NOT
 // imported from txgioParcelStore, which drags in @workspace/db and would
 // throw on a missing DATABASE_URL at import time — this offline bake
@@ -307,6 +308,7 @@ async function exportCounty(
   out: NodeJS.WritableStream,
   pageSize: number,
   limit: number | undefined,
+  blockedFips: ReadonlySet<string>,
 ): Promise<{ features: number; landUse: number; nodeIds: number }> {
   let after = -1; // keyset cursor on feature_index (0-based in schema)
   let features = 0;
@@ -358,10 +360,11 @@ async function exportCounty(
         // the same key the cad:* brief adapters join on. The store's raw
         // prop_id may carry leading zeros, so join on the normalized form.
         // landUseJoinKey enforces the per-county data-integrity gate: it
-        // returns null for counties whose TxGIO/CAD numbering does not match
-        // (Williamson, Hays), so those parcels bake land-use-absent (honest)
-        // rather than a fabricated collision.
-        const joinKey = landUseJoinKey(county.fips, row.prop_id);
+        // returns null for BLOCKED counties (the coverage ledger's computed
+        // `block` verdicts, loaded once per run; seed fallback on an unscored
+        // DB), so those parcels bake land-use-absent (honest) rather than a
+        // fabricated collision.
+        const joinKey = landUseJoinKey(county.fips, row.prop_id, blockedFips);
         const lu = joinKey != null ? landUse.get(joinKey) : undefined;
         if (lu) {
           properties.landUseCode = lu.landUseCode;
@@ -607,6 +610,17 @@ async function main(): Promise<void> {
         counties.map((c) => `${c.fips}/${c.name}(${c.parcelCount})`).join(", "),
     );
 
+    // Ledger-driven land-use block set (the gate's computed `block` verdicts);
+    // empty on an unscored DB -> landUseJoinKey falls back to the gate-output
+    // seed, so a fresh DB is never left un-gated.
+    const blockedFips = await loadLedgerBlockedFips(pool);
+    if (blockedFips.size > 0) {
+      log(
+        `land-use gate: ledger BLOCKS ${[...blockedFips].sort().join(", ")} ` +
+          `— those counties bake land-use ABSENT (honest).`,
+      );
+    }
+
     const out = createWriteStream(geojsonPath, { encoding: "utf8" });
     for (const county of counties) {
       const landUse = await fetchCountyLandUse(pool, county.fips);
@@ -621,6 +635,7 @@ async function main(): Promise<void> {
         out,
         pageSize,
         limit,
+        blockedFips,
       );
       stats.featureCount += res.features;
       stats.withLandUse += res.landUse;

@@ -585,6 +585,24 @@ CREATE TABLE @@SCHEMA@@.cotality_spatial_tile_cache (
 );
 
 
+-- Name: county_facet_coverage; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.county_facet_coverage (
+    county_fips text NOT NULL,
+    facet text NOT NULL,
+    honest_coverage_pct numeric(5,2) DEFAULT 0 NOT NULL,
+    integrity_verdict text NOT NULL,
+    owner_match_rate numeric(5,4),
+    source text,
+    source_vintage text,
+    sampled integer DEFAULT 0 NOT NULL,
+    classification text NOT NULL,
+    checked_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT county_facet_coverage_classification_check CHECK ((classification = ANY (ARRAY['real-at-ceiling'::text, 'needs-crosswalk'::text, 'true-source-gap'::text, 'fabricated-blocked'::text]))),
+    CONSTRAINT county_facet_coverage_integrity_verdict_check CHECK ((integrity_verdict = ANY (ARRAY['pass'::text, 'block'::text, 'insufficient-sample'::text, 'n/a'::text])))
+);
+
+
 -- Name: coverage_requests; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.coverage_requests (
@@ -1836,6 +1854,12 @@ ALTER TABLE ONLY @@SCHEMA@@.cotality_spatial_tile_cache
     ADD CONSTRAINT cotality_spatial_tile_cache_pkey PRIMARY KEY (id);
 
 
+-- Name: county_facet_coverage county_facet_coverage_county_fips_facet_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_facet_coverage
+    ADD CONSTRAINT county_facet_coverage_county_fips_facet_pk PRIMARY KEY (county_fips, facet);
+
+
 -- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
@@ -2459,6 +2483,16 @@ CREATE INDEX cotality_spatial_tile_cache_expires_idx ON @@SCHEMA@@.cotality_spat
 -- Name: cotality_spatial_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX cotality_spatial_tile_cache_uniq ON @@SCHEMA@@.cotality_spatial_tile_cache USING btree (tile_key);
+
+
+-- Name: county_facet_coverage_classification_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX county_facet_coverage_classification_idx ON @@SCHEMA@@.county_facet_coverage USING btree (classification);
+
+
+-- Name: county_facet_coverage_verdict_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX county_facet_coverage_verdict_idx ON @@SCHEMA@@.county_facet_coverage USING btree (integrity_verdict);
 
 
 -- Name: coverage_requests_engagement_idx; Type: INDEX; Schema: public; Owner: -

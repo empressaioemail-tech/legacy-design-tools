@@ -28,6 +28,7 @@ import {
   type Tier1FacetPayload,
   type ComputedNode,
 } from "./nodeFacetBakeTier1Cli";
+import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./lib/joinNormalize";
 
 // A ~100ft x 150ft rectangular lot near Bastrop, TX. At lat 30.11:
 //   1 deg lat ~ 364,000 ft, 1 deg lng ~ 314,000 ft.
@@ -552,5 +553,151 @@ describe("batched write chunking (param-limit safety)", () => {
 
   it("rejects a non-positive chunk size", () => {
     expect(() => chunkItems([1, 2, 3], 0)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FABRICATION-CORRECTION integrity override (the monotonic-guard escape hatch).
+//
+// The confirmed prod trap: 81,682 Williamson snapshots carry a FABRICATED
+// baseFacts.landUse (collision-stamped, e.g. node 48491:R062578 owner MILLER
+// stamped "A1"). An honest gate-blocked re-bake produces landUse:null, which
+// scores LOWER than the fabricated prior, so the plain monotonic shouldPromote
+// would KEEP the fabrication forever. The override must FORCE the correction.
+// ---------------------------------------------------------------------------
+
+describe("fabrication-correction integrity override (removes fabricated land-use)", () => {
+  const now = new Date().toISOString();
+
+  // A Williamson node's PRIOR snapshot as it exists in prod today: the R-strip
+  // collision stamped a land-use. We simulate that prior by baking Williamson
+  // with the county NOT in the blocked set (the pre-fix behavior) and a
+  // colliding cad row present, so baseFacts.landUse is the fabricated code.
+  const fabricatedWilliamsonPrior = (): Tier1FacetPayload => {
+    const lu = new Map([
+      ["R062578", { landUseCode: "A1", landUseVintage: "2025" }],
+    ]);
+    // Force the collision-stamped prior by passing an EMPTY blocked set (the
+    // old, un-gated behavior) so land-use lands on the payload. normalizeForJoin
+    // no longer strips R, so the map is keyed on the raw normalized prop_id.
+    const prior = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", zoning_district: "SF" }),
+      "48491",
+      "Williamson",
+      lu,
+      now,
+      new Set<string>(), // empty blocked set -> land-use stamped (the fabrication)
+    )!;
+    return prior;
+  };
+
+  // The honest re-bake: Williamson IS gate-blocked now (seed / ledger), so
+  // landUseJoinKey returns null and baseFacts.landUse is null.
+  const honestBlockedRebake = (): Tier1FacetPayload =>
+    buildTier1Payload(
+      parcelRow({ prop_id: "R062578", zoning_district: "SF" }),
+      "48491",
+      "Williamson",
+      new Map([["R062578", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      now,
+      LANDUSE_JOIN_DISABLED_FIPS_SEED, // Williamson blocked
+    )!;
+
+  it("the fabricated prior actually carries the collision-stamped land-use", () => {
+    const prior = fabricatedWilliamsonPrior();
+    expect(prior.baseFacts.landUse).not.toBeNull();
+    expect(prior.baseFacts.landUse!.code).toBe("A1");
+    expect(prior.facetCoverage.landUse).toBe(true);
+    expect(prior.provenance.landUseGateBlocked).toBe(false);
+  });
+
+  it("the honest gate-blocked re-bake carries NO land-use and is flagged blocked", () => {
+    const next = honestBlockedRebake();
+    expect(next.baseFacts.landUse).toBeNull();
+    expect(next.facetCoverage.landUse).toBe(false);
+    expect(next.provenance.landUseGateBlocked).toBe(true);
+  });
+
+  it("the honest re-bake scores LOWER than the fabricated prior (the trap)", () => {
+    // Proves the plain monotonic guard WOULD keep the fabrication: the honest
+    // payload lost the land-use facet, so its facetScore is strictly lower.
+    expect(facetScore(honestBlockedRebake())).toBeLessThan(
+      facetScore(fabricatedWilliamsonPrior()),
+    );
+  });
+
+  it("shouldPromote FORCES the correction despite the lower score", () => {
+    // Without the override this returns false (score went down) and the
+    // fabrication survives. With the override it returns true.
+    expect(
+      shouldPromote(fabricatedWilliamsonPrior(), honestBlockedRebake()),
+    ).toBe(true);
+  });
+
+  it("decidePagePromotions writes the honest (null land-use) payload and counts the correction", () => {
+    const placeKey = "node:48491:R062578";
+    const priors = new Map<string, Tier1FacetPayload>([
+      [placeKey, fabricatedWilliamsonPrior()],
+    ]);
+    const computed: ComputedNode[] = [
+      {
+        placeKey,
+        payload: honestBlockedRebake(),
+        centroid: { lat: 30.6, lng: -97.6 },
+      },
+    ];
+    const decision = decidePagePromotions(computed, priors);
+
+    // The correction promoted (as an upgrade over the prior) and is counted.
+    expect(decision.promotedUpgrade).toBe(1);
+    expect(decision.keptPriorMonotonic).toBe(0);
+    expect(decision.fabricationCorrected).toBe(1);
+
+    // The row that will be upserted carries NULL land-use — the fabrication is
+    // REMOVED from the snapshot, not kept.
+    expect(decision.toWrite).toHaveLength(1);
+    expect(decision.toWrite[0].payload.baseFacts.landUse).toBeNull();
+    expect(decision.toWrite[0].payload.facetCoverage.landUse).toBe(false);
+  });
+
+  it("the override is SCOPED — a normal (non-blocked) downgrade is still rejected", () => {
+    // A Bastrop (not blocked) node that loses land-use on a worse re-bake must
+    // still be kept on its prior high-water-mark: the override must NOT be a
+    // general downgrade bypass.
+    const bastropFull = buildTier1Payload(
+      parcelRow({ prop_id: "12345", zoning_district: "SF-1" }),
+      "48021",
+      "Bastrop",
+      new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      now,
+      LANDUSE_JOIN_DISABLED_FIPS_SEED,
+    )!;
+    const bastropStripped = buildTier1Payload(
+      parcelRow({ prop_id: "12345", zoning_district: null }),
+      "48021",
+      "Bastrop",
+      new Map(), // land-use lost this pass
+      now,
+      LANDUSE_JOIN_DISABLED_FIPS_SEED,
+    )!;
+    expect(bastropStripped.provenance.landUseGateBlocked).toBe(false);
+    // Bastrop is NOT gate-blocked, so the override does not fire; the downgrade
+    // is rejected and the prior is kept.
+    expect(shouldPromote(bastropFull, bastropStripped)).toBe(false);
+  });
+
+  it("the override does NOT fire when the prior had no land-use to strip", () => {
+    // A gate-blocked re-bake of a node whose prior ALREADY had null land-use is
+    // a normal equal/idempotent promotion, not a forced correction — so it must
+    // not be counted as a fabrication correction.
+    const priorNoLandUse = honestBlockedRebake(); // already null land-use
+    const nextNoLandUse = honestBlockedRebake();
+    const placeKey = "node:48491:R062578";
+    const decision = decidePagePromotions(
+      [{ placeKey, payload: nextNoLandUse, centroid: { lat: 30.6, lng: -97.6 } }],
+      new Map([[placeKey, priorNoLandUse]]),
+    );
+    // Equal-quality refresh promotes (idempotent) but is NOT a correction.
+    expect(decision.fabricationCorrected).toBe(0);
   });
 });
