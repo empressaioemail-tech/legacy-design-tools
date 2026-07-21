@@ -308,6 +308,21 @@ describe("San Marcos pilot registration", () => {
     expect(table!.note).toMatch(/pending corpus onboarding/i);
   });
 
+  it.each([
+    ["cedar_park_tx", "cedar-park-tx"],
+    ["pflugerville_tx", "pflugerville-tx"],
+  ])(
+    "serves %s as an explicit empty pending table while the source-atom gate is blocked",
+    (lookupKey, jurisdictionKey) => {
+      const table = getSetbackTable(lookupKey);
+      expect(table).not.toBeNull();
+      expect(table!.jurisdictionKey).toBe(jurisdictionKey);
+      expect(table!.districts).toEqual([]);
+      expect(table!.note).toMatch(/pending source-atom onboarding/i);
+      expect(table!.note).toMatch(/^.*https:\/\//);
+    },
+  );
+
   it("reports the legacy Bastrop table as un-gated (no provenance)", () => {
     // Bastrop predates the gate: its rows carry a municode-root citation_url
     // and no per-value provenance, so the gate treats it as legacy/un-gated.

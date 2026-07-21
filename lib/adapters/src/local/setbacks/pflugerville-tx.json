@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "pflugerville-tx",
+  "jurisdictionDisplayName": "City of Pflugerville, TX",
+  "note": "Setback table pending source-atom onboarding and acceptance-gate verification. Pflugerville publishes the Unified Development Code zoning regulations at https://online.encodeplus.com/regs/pflugerville/doc-view.aspx?print=1&tocid=004.004, but this repository does not yet have the corresponding source code-section atoms or a complete ordinance-derived district set. The acceptance gate requires every populated numeric value to resolve to a source atom and requires a complete expected-district set. No values are shipped until those inputs are available, per docs/setback-extraction-acceptance-gate.md.",
+  "districts": []
+}

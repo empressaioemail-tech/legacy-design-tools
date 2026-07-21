@@ -88,10 +88,10 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "liberty-hill-tx",
     ]);
 
-    // Each city's setback table, resolved identically to the CLIs. Cedar
-    // Park / Taylor / Liberty Hill have no table yet (getSetbackTable ->
-    // null), so setbackTablesForCounty omits them; only the four with tables
-    // are attached, in order.
+    // Cedar Park is registered with an explicit empty pending table: the
+    // ordinance is public, but its source atoms and complete district set have
+    // not been onboarded to pass the setback gate. Taylor and Liberty Hill
+    // remain unregistered.
     expect(j.setbackTables).toEqual(
       expectedCities
         .map((c) => getSetbackTable(c.cityKey))
@@ -102,10 +102,14 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       getSetbackTable("round-rock-tx"),
       getSetbackTable("leander-tx"),
       getSetbackTable("hutto-tx"),
+      getSetbackTable("cedar-park-tx"),
     ]);
+    const cedarPark = getSetbackTable("cedar-park-tx");
+    expect(cedarPark?.districts).toEqual([]);
+    expect(cedarPark?.note).toMatch(/pending source-atom onboarding/i);
   });
 
-  it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer, no setback table yet", () => {
+  it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with honest pending setback table", () => {
     const j = getJurisdictionConfig("48453");
     if (!j) throw new Error("expected Travis");
 
@@ -113,12 +117,14 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.cad).toBe(CAD_COUNTIES["48453"]);
     // Travis/TCAD has no free bulk roll (PIA route) — honestly absent.
     expect(j.bulkSource).toBeUndefined();
-    // Pflugerville is the first Travis-county zoning layer. Its setback table
-    // is not yet codified, so zoning attaches but setbackTables stays absent
-    // (getSetbackTable("pflugerville-tx") -> null).
+    // Pflugerville is the first Travis-county zoning layer. Its public UDC is
+    // cited in an explicit empty table until source atoms and a complete
+    // district set permit gate-verified extraction.
     expect(j.zoningLayers).toEqual([ZONING_LAYERS["pflugerville-tx"]]);
-    expect(getSetbackTable("pflugerville-tx")).toBeNull();
-    expect(j.setbackTables).toBeUndefined();
+    const pflugerville = getSetbackTable("pflugerville-tx");
+    expect(pflugerville?.districts).toEqual([]);
+    expect(pflugerville?.note).toMatch(/pending source-atom onboarding/i);
+    expect(j.setbackTables).toEqual([pflugerville]);
   });
 
   it("Comal (48091): geometry-only county gains a city zoning layer + setback (New Braunfels)", () => {

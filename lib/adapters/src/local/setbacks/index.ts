@@ -28,6 +28,8 @@ import roundRockTx from "./round-rock-tx.json" with { type: "json" };
 import leanderTx from "./leander-tx.json" with { type: "json" };
 import huttoTx from "./hutto-tx.json" with { type: "json" };
 import newBraunfelsTx from "./new-braunfels-tx.json" with { type: "json" };
+import cedarParkTx from "./cedar-park-tx.json" with { type: "json" };
+import pflugervilleTx from "./pflugerville-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 
@@ -93,6 +95,12 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "leander-tx": leanderTx as SetbackTable,
   "hutto-tx": huttoTx as SetbackTable,
   "new-braunfels-tx": newBraunfelsTx as SetbackTable,
+  // WDLL item 5, Wave 1 batch 1: both cities have published ordinance
+  // sources, but no local source-atom corpus or complete expected-district
+  // set. Register explicit empty tables rather than inventing values; see
+  // each file's note for the cited source and gate blocker.
+  "cedar-park-tx": cedarParkTx as SetbackTable,
+  "pflugerville-tx": pflugervilleTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
 };
