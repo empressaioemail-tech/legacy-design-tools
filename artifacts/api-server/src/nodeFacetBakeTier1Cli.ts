@@ -12,7 +12,8 @@
  *
  * TIER-1 FACETS baked per node (all deterministic, DB-local compute):
  *   1. Base facts — situs address, APN, land-use code+description (via the
- *      merged `normalizeForJoin` R-fix join to `cad_property`), and acreage
+ *      `landUseJoinKey` join to `cad_property`; per-county gated, see below),
+ *      and acreage
  *      (shoelace on the geometry). OWNER NAME IS EXCLUDED from the payload
  *      (privacy: this is a public, anonymous browse read); the owner column
  *      is NEVER selected.
@@ -36,8 +37,12 @@
  *
  * HONEST ABSENCE (structural commitment #1 — never fabricate a facet).
  *   A node that legitimately lacks a facet stores it as absent, never
- *   fabricated: Comal (no CAD roll) bakes with `landUse: null`; a parcel
- *   outside every zoning polygon (null `zoning_district`) bakes with
+ *   fabricated: Comal (no CAD roll) bakes with `landUse: null`; Williamson
+ *   (48491) and Hays (48209) are GATED OFF via `landUseJoinKey` because their
+ *   TxGIO prop_ids do NOT correspond to their CAD roll (a numeric collision
+ *   that stamped an unrelated property's land-use; owner-match ~0%), so they
+ *   also bake `landUse: null` until an external account crosswalk exists; a
+ *   parcel outside every zoning polygon (null `zoning_district`) bakes with
  *   `zoning: null`; a parcel with no codified setback jurisdiction or an
  *   un-mappable district bakes the envelope with an honest non-ok status.
  *
@@ -79,7 +84,7 @@ import { realpathSync } from "node:fs";
 import pg from "pg";
 
 import { parcelNodeId, normalizeCadPropId } from "./lib/parcelNodeId";
-import { normalizeForJoin } from "./lib/joinNormalize";
+import { landUseJoinKey } from "./lib/joinNormalize";
 import { ptadLandUseDescription } from "./lib/ptadLandUse";
 import { contentHashForPayload } from "./lib/placeLayerUtils";
 import {
@@ -229,8 +234,10 @@ async function discoverCounty(
 
 // ---------------------------------------------------------------------------
 // Land-use join — one query per county, latest coded tax-year row per parcel.
-// Keyed by normalizeForJoin(prop_id) (the merged R-prefix fix). Comal (no
-// roll) yields an empty map -> every node bakes land-use-absent, honestly.
+// Looked up via landUseJoinKey(countyFips, prop_id), which normalizes the key
+// AND enforces the per-county data-integrity gate (Williamson 48491 / Hays
+// 48209 return null -> land-use-absent). Comal (no roll) yields an empty map
+// -> every node bakes land-use-absent, honestly.
 // ---------------------------------------------------------------------------
 
 interface LandUse {
@@ -372,7 +379,12 @@ export function buildTier1Payload(
 
   let luFacet: BaseFacts["landUse"] = null;
   if (row.prop_id) {
-    const lu = landUse.get(normalizeForJoin(row.prop_id));
+    // landUseJoinKey enforces the per-county data-integrity gate: it returns
+    // null for counties whose TxGIO/CAD numbering does not correspond
+    // (Williamson 48491, Hays 48209), so those nodes bake landUse: null
+    // (honest absence) instead of a fabricated numeric-collision match.
+    const joinKey = landUseJoinKey(countyFips, row.prop_id);
+    const lu = joinKey != null ? landUse.get(joinKey) : undefined;
     if (lu) {
       luFacet = {
         code: lu.landUseCode,
