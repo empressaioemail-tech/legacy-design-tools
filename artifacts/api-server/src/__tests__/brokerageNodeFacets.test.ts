@@ -17,6 +17,7 @@ import {
   describe,
   it,
   expect,
+  vi,
   beforeAll,
   beforeEach,
   afterEach,
@@ -34,6 +35,23 @@ import {
   payloadHasOwnerKey,
 } from "../routes/brokerageNodeFacets";
 import { TIER1_ADAPTER_KEY } from "../nodeFacetBakeTier1Cli";
+
+// Point the route module's `db` (and this test's seeding `db`) at the
+// per-file test schema, so writes land where `truncateAll` clears them
+// between cases. Without this, `db` uses the default public-schema
+// connection, the shared setupRouteTests truncate (which targets the test
+// schema) never clears the seeded rows, and the second case duplicate-keys.
+vi.mock("@workspace/db", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
+  return {
+    ...actual,
+    get db() {
+      if (!ctx.schema) throw new Error("brokerageNodeFacets: ctx.schema not set");
+      return ctx.schema.db;
+    },
+  };
+});
 
 // -------------------------------------------------------------------------
 // 1. Pure unit tests — no DB, always run, exit-bounded.
@@ -110,7 +128,12 @@ const hasDb = Boolean(
   process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
 );
 
-const { db, placeLayerSnapshots } = await import("@workspace/db");
+// NB: do NOT destructure `db` here — the mocked `db` is a getter that throws
+// until ctx.schema is set (inside setupRouteTests' beforeAll). Destructuring at
+// module scope would invoke the getter too early. `placeLayerSnapshots` is a
+// plain export, safe to destructure; `db` is read lazily inside the hooks.
+const dbMod = await import("@workspace/db");
+const { placeLayerSnapshots } = dbMod;
 const { setupRouteTests } = await import("./setup");
 const { truncateAll } = await import("@workspace/db/testing");
 
@@ -198,7 +221,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   beforeEach(async () => {
-    await db.insert(placeLayerSnapshots).values([
+    await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
         adapterKey: TIER1_ADAPTER_KEY,
