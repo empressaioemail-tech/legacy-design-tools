@@ -33,7 +33,7 @@ import { db, placeLayerSnapshots } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { TIER1_ADAPTER_KEY } from "../nodeFacetBakeTier1Cli";
+import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {

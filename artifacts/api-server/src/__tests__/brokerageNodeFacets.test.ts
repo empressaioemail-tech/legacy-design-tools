@@ -34,7 +34,7 @@ import {
   sanitizeNodeFacetPayload,
   payloadHasOwnerKey,
 } from "../routes/brokerageNodeFacets";
-import { TIER1_ADAPTER_KEY } from "../nodeFacetBakeTier1Cli";
+import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -117,6 +117,64 @@ describe("brokerageNodeFacets helpers (pure)", () => {
     };
     expect(payloadHasOwnerKey(clean)).toBe(false);
     expect(sanitizeNodeFacetPayload(clean)).toEqual(clean);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 1b. BOOT-PROOF regression — the anonymous read route must NOT pull the
+//     Tier-1 bake CLI into the server boot graph. The CLI's `main()` runs on
+//     import in the prod bundle (its entrypoint guard misfires), errors
+//     `--county=<fips> is required`, and `process.exit(1)` before the server
+//     can listen on PORT 8080. This crashed the deployed cortex-api. The route
+//     now imports TIER1_ADAPTER_KEY from a side-effect-free constants module
+//     instead, so its module graph is CLI-free.
+// -------------------------------------------------------------------------
+
+describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+
+  it("the route source imports zero *Cli module (static guarantee)", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    // No import/re-export from any `...Cli` module — that is the whole fix.
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*Cli["']/);
+    // And it pulls the adapter key from the side-effect-free constants module.
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/nodeFacetTier1Constants["']/,
+    );
+  });
+
+  it("importing the route module emits no bake output and does not exit", async () => {
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation(((code?: number) => {
+        throw new Error(`process.exit(${code}) was called on route import`);
+      }) as never);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      // Fresh evaluation of the route module graph — must not run the bake.
+      await vi.resetModules();
+      await import("../routes/brokerageNodeFacets");
+
+      const allOutput = [...errSpy.mock.calls, ...logSpy.mock.calls]
+        .map((args) => args.join(" "))
+        .join("\n");
+      expect(allOutput).not.toContain("[node-facet-bake-t1]");
+      expect(allOutput).not.toContain("--county");
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  it("the constants module carries the unchanged deployed adapter_key", () => {
+    // Value integrity: deployed place_layer_snapshots rows use this exact key.
+    expect(TIER1_ADAPTER_KEY).toBe("node-facets:tier1");
   });
 });
 
