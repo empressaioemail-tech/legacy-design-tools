@@ -136,6 +136,7 @@ import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildable
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
 import { brokerageBillingPublicRouter } from "./brokerageBillingPublic";
+import { brokerageNodeFacetsRouter } from "./brokerageNodeFacets";
 import {
   BROKERAGE_BRIEF_BILLABLE_HEADER,
   brokerageBriefMeteringMeta,
@@ -284,6 +285,15 @@ brokerageV1.use(brokerageCors);
 brokerageV1.use("/gtm", brokerageGtmRouter);
 /** Stripe checkout return pages — reachable without extension API key. */
 brokerageV1.use("/billing", brokerageBillingPublicRouter);
+/**
+ * Baked node-facet inspect-card read — the map's anonymous, NO-AI,
+ * NO-live-compute pure-read source for a parcel's Tier-1 facets. Mounted
+ * BEFORE the auth gate (peer of `/gtm` + `/billing` public) because browse is
+ * a public-tier read that requires no API key. Owner is never in the response
+ * (bake never wrote it; the route strips owner-shaped keys defense-in-depth).
+ * Mounts `/place/node/:parcelNodeId/facets`.
+ */
+brokerageV1.use("/place", brokerageNodeFacetsRouter);
 brokerageV1.use(requireBrokerageAuthOrServiceToken);
 brokerageV1.use("/profile", brokerageProfileRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
