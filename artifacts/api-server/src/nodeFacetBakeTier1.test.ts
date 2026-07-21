@@ -19,6 +19,7 @@ import {
 } from "./lib/nodeFacetBakeTier1";
 import {
   buildTier1Payload,
+  effectiveBlockedFips,
   firstRing,
   facetScore,
   shouldPromote,
@@ -699,5 +700,144 @@ describe("fabrication-correction integrity override (removes fabricated land-use
     );
     // Equal-quality refresh promotes (idempotent) but is NOT a correction.
     expect(decision.fabricationCorrected).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The live-bug regression: the bake must act on the UNION of the ledger's
+// `block` verdicts and the seed. Hays (48209) is a ledger `block`. Williamson
+// (48491) is NOT a ledger block — post R-strip-removal it joins ~0 real pairs
+// and scores `insufficient-sample` — but it IS in the seed (known fabrication).
+// The old CLI passed the raw ledger set, so Williamson's `landUseGateBlocked`
+// stayed false, the integrity override never fired, and ~81,682 fabricated
+// land-use snapshots survived every re-bake. The fix: pass
+// effectiveBlockedFips(ledger) = ledger ∪ seed, which arms the override for a
+// seed-blocked-but-ledger-insufficient county too. These tests exercise the
+// exact CLI effective-set path with a DB-free simulated ledger.
+// ---------------------------------------------------------------------------
+describe("effective block set = ledger ∪ seed (Williamson live-bug regression)", () => {
+  const now = new Date().toISOString();
+
+  // Simulate loadLedgerBlockedFips's return in prod today: Hays is a `block`
+  // verdict; Williamson is NOT (it scored `insufficient-sample`). This is the
+  // set the OLD code passed straight to the bake — the seed was bypassed.
+  const ledgerBlockedOnly = (): ReadonlySet<string> => new Set<string>(["48209"]);
+
+  it("the union adds the seed's Williamson (48491) that the ledger omits", () => {
+    const effective = effectiveBlockedFips(ledgerBlockedOnly());
+    // Hays via the ledger verdict.
+    expect(effective.has("48209")).toBe(true);
+    // Williamson via the seed floor — the ledger did NOT block it.
+    expect(ledgerBlockedOnly().has("48491")).toBe(false);
+    expect(effective.has("48491")).toBe(true);
+  });
+
+  it("the seed is a permanent floor — every seed FIPS survives the union", () => {
+    for (const fips of LANDUSE_JOIN_DISABLED_FIPS_SEED) {
+      expect(effectiveBlockedFips(ledgerBlockedOnly()).has(fips)).toBe(true);
+    }
+  });
+
+  it("the union never DROPS a ledger block (adds, never replaces)", () => {
+    const ledger = new Set<string>(["48209", "48999"]); // a non-seed ledger block
+    const effective = effectiveBlockedFips(ledger);
+    expect(effective.has("48209")).toBe(true);
+    expect(effective.has("48999")).toBe(true);
+  });
+
+  // THE test that would have caught the live bug: bake Williamson with the
+  // EFFECTIVE set derived from a ledger that does NOT block it. The seed drives
+  // landUseGateBlocked true, so the honest re-bake carries null land-use, the
+  // override forces the correction, and the written payload strips the prior's
+  // fabricated land-use.
+  it("Williamson (ledger-insufficient, seed-blocked) strips its fabricated prior via the union", () => {
+    const effective = effectiveBlockedFips(ledgerBlockedOnly());
+
+    // The prior as it sits in prod: the pre-gate collision stamped a land-use.
+    const fabricatedPrior = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", zoning_district: "SF" }),
+      "48491",
+      "Williamson",
+      new Map([["R062578", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      now,
+      new Set<string>(), // un-gated -> land-use fabricated
+    )!;
+    expect(fabricatedPrior.baseFacts.landUse).not.toBeNull();
+    expect(fabricatedPrior.provenance.landUseGateBlocked).toBe(false);
+
+    // The honest re-bake, gated by the EFFECTIVE (union) set the CLI now passes.
+    // Williamson is blocked via the seed even though the ledger omitted it.
+    const honestRebake = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", zoning_district: "SF" }),
+      "48491",
+      "Williamson",
+      new Map([["R062578", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      now,
+      effective,
+    )!;
+
+    // (1) The union drives landUseGateBlocked TRUE — this is what the old raw
+    //     ledger set failed to do for Williamson.
+    expect(honestRebake.provenance.landUseGateBlocked).toBe(true);
+    expect(honestRebake.baseFacts.landUse).toBeNull();
+    expect(honestRebake.facetCoverage.landUse).toBe(false);
+
+    // (2) shouldPromote FORCES the correction despite the lower score.
+    expect(facetScore(honestRebake)).toBeLessThan(facetScore(fabricatedPrior));
+    expect(shouldPromote(fabricatedPrior, honestRebake)).toBe(true);
+
+    // (3) The written payload has null land-use — the fabrication is STRIPPED.
+    const placeKey = "node:48491:R062578";
+    const decision = decidePagePromotions(
+      [{ placeKey, payload: honestRebake, centroid: { lat: 30.6, lng: -97.6 } }],
+      new Map([[placeKey, fabricatedPrior]]),
+    );
+    expect(decision.fabricationCorrected).toBe(1);
+    expect(decision.toWrite).toHaveLength(1);
+    expect(decision.toWrite[0].payload.baseFacts.landUse).toBeNull();
+    expect(decision.toWrite[0].payload.facetCoverage.landUse).toBe(false);
+  });
+
+  it("the union drives landUseGateBlocked TRUE for BOTH Hays (ledger) and Williamson (seed)", () => {
+    const effective = effectiveBlockedFips(ledgerBlockedOnly());
+
+    const hays = buildTier1Payload(
+      parcelRow({ prop_id: "998877" }),
+      "48209",
+      "Hays",
+      new Map([["998877", { landUseCode: "B2", landUseVintage: "2025" }]]),
+      now,
+      effective,
+    )!;
+    const williamson = buildTier1Payload(
+      parcelRow({ prop_id: "R062578" }),
+      "48491",
+      "Williamson",
+      new Map([["R062578", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      now,
+      effective,
+    )!;
+
+    // Hays: blocked by the ledger verdict. Williamson: blocked by the seed.
+    expect(hays.provenance.landUseGateBlocked).toBe(true);
+    expect(hays.baseFacts.landUse).toBeNull();
+    expect(williamson.provenance.landUseGateBlocked).toBe(true);
+    expect(williamson.baseFacts.landUse).toBeNull();
+  });
+
+  it("a real (non-blocked, non-seed) county is UNAFFECTED by the union", () => {
+    const effective = effectiveBlockedFips(ledgerBlockedOnly());
+    // Bastrop (48021): not in the ledger, not in the seed -> joins normally.
+    const bastrop = buildTier1Payload(
+      parcelRow({ prop_id: "12345" }),
+      "48021",
+      "Bastrop",
+      new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      now,
+      effective,
+    )!;
+    expect(bastrop.provenance.landUseGateBlocked).toBe(false);
+    expect(bastrop.baseFacts.landUse).not.toBeNull();
+    expect(bastrop.baseFacts.landUse!.code).toBe("A1");
   });
 });

@@ -368,6 +368,28 @@ export function firstRing(geometry: unknown): Ring | null {
 }
 
 /**
+ * The EFFECTIVE land-use block set the bake acts on: the ledger's computed
+ * `block` verdicts UNION the known-fabricated bootstrap seed
+ * (`LANDUSE_JOIN_DISABLED_FIPS_SEED`). The seed is a PERMANENT FLOOR — a
+ * county in the seed is blocked even if the ledger scores it something other
+ * than `block` (e.g. Williamson 48491 scores `insufficient-sample` after the
+ * R-strip removal drops its real pairs to ~0, so it is NOT a ledger `block`,
+ * yet it is a known fabrication that must never re-acquire a land-use). The
+ * ledger ADDS to the seed; it never replaces it.
+ *
+ * This union is what drives BOTH the honest-absence join (via `landUseJoinKey`)
+ * AND `provenance.landUseGateBlocked` (which arms the fabrication-correction
+ * override). Passing the raw ledger set instead of this union was the live bug:
+ * a seed-blocked-but-ledger-insufficient county (Williamson) kept its fabricated
+ * prior because `landUseGateBlocked` stayed false and the override never fired.
+ */
+export function effectiveBlockedFips(
+  ledgerBlocked: ReadonlySet<string>,
+): Set<string> {
+  return new Set<string>([...ledgerBlocked, ...LANDUSE_JOIN_DISABLED_FIPS_SEED]);
+}
+
+/**
  * Build the Tier-1 payload for one parcel row. Pure + owner-free: the owner
  * column is not even a field on `ParcelRow`, so it CANNOT leak into the
  * payload. Every facet is either real content or an honest null.
@@ -1060,23 +1082,29 @@ async function main(): Promise<void> {
     const landUse = await fetchCountyLandUse(pool, county.fips);
     log(`CAD land-use rows for ${county.name}: ${landUse.size}`);
 
-    // Ledger-driven block set (the gate's computed `block` verdicts). Empty on
-    // an unscored DB -> buildTier1Payload/landUseJoinKey fall back to the
-    // gate-output seed, so a fresh DB is never left un-gated.
-    const blockedFips = await loadLedgerBlockedFips(pool);
-    const seedApplied = !blockedFips.has(county.fips)
-      ? LANDUSE_JOIN_DISABLED_FIPS_SEED.has(county.fips)
-      : false;
-    if (blockedFips.has(county.fips)) {
+    // Ledger-driven block set (the gate's computed `block` verdicts). This is
+    // NOT the set the bake acts on: the seed is the permanent floor, so the
+    // EFFECTIVE block set is the UNION of the ledger blocks and the seed. A
+    // county in the seed but scored something other than `block` (e.g.
+    // Williamson 48491 -> `insufficient-sample`) is still blocked by the union,
+    // so its `landUseGateBlocked` provenance is true and the fabrication
+    // override fires. Before this union the raw ledger set was passed and
+    // seed-blocked-but-not-ledger-blocked counties silently kept their
+    // fabricated land-use (the Williamson override never fired).
+    const ledgerBlockedFips = await loadLedgerBlockedFips(pool);
+    const blockedFips = effectiveBlockedFips(ledgerBlockedFips);
+    if (ledgerBlockedFips.has(county.fips)) {
       log(
         `land-use gate: county ${county.fips} is BLOCKED by the coverage ` +
           `ledger — baking honest land-use ABSENCE; a fabricated prior ` +
           `snapshot's land-use will be STRIPPED via the integrity override.`,
       );
-    } else if (seedApplied) {
+    } else if (LANDUSE_JOIN_DISABLED_FIPS_SEED.has(county.fips)) {
       log(
         `land-use gate: county ${county.fips} is BLOCKED by the gate-output ` +
-          `seed (ledger not yet scored) — baking honest land-use ABSENCE.`,
+          `seed (permanent floor; ledger verdict is not \`block\`) — baking ` +
+          `honest land-use ABSENCE; a fabricated prior snapshot's land-use ` +
+          `will be STRIPPED via the integrity override.`,
       );
     }
 
