@@ -103,10 +103,15 @@ import {
   type Tier1EnvelopeFacet,
   type Ring,
 } from "./lib/nodeFacetBakeTier1";
+import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants";
 
 const { Pool } = pg;
 
-export const TIER1_ADAPTER_KEY = "node-facets:tier1";
+// Re-exported from the side-effect-free constants module so the server boot
+// graph can pull the adapter key WITHOUT importing this bake CLI (whose
+// entrypoint guard misfires in the prod bundle and crashes boot). The CLI's
+// own uses below are unchanged.
+export { TIER1_ADAPTER_KEY };
 export const TIER1_FACET_SCHEMA_VERSION = "node-facets-tier1-v1";
 
 // The ten Central-TX counties unified in the parcel fabric (Wave D1/D2).
