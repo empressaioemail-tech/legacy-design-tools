@@ -142,6 +142,152 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     descriptionField: "ZONING",
     codeExtractRegex: "\\(([^)]+)\\)",
   },
+
+  // ---------------------------------------------------------------------------
+  // Expansion 2026-07-21 — 10 more Central-TX cities, all LIVE-VERIFIED
+  // (f=json metadata + /query sample). Fills the "zoning: not verified here"
+  // gap so a stamped district unlocks the setback/buildable-envelope route.
+  // Per city: whether a setback table already exists is called out below —
+  // where a table is OWED, the zoning stamp still writes the real district
+  // (the envelope route degrades to null dimensional rules until the table
+  // lands, never a guessed setback). Setback-table alignment (per THE MATCH
+  // CONTRACT: leading token of district_name, normalized upper + strip
+  // non-alphanumeric) verified against live GIS codes where a table exists.
+  // ---------------------------------------------------------------------------
+
+  // Buda (Hays). Setback table EXISTS (buda-tx.json, R-1..R-5/R-MH/AG/B-1).
+  // GIS `Zoning_Category` codes "R1"/"B1"/"AG" normalize to "R1"/"B1"/"AG" and
+  // match setback tokens "R-1"/"B-1"/"AG" (hyphens stripped by normalizeCode);
+  // "R2-C"/"R3/R4" prefix-map to R-2/R-3. F1..F5/HI/LI/PD are form-based /
+  // commercial with no setback row -> conservative fallback (honest).
+  "buda-tx": {
+    cityKey: "buda-tx",
+    cityName: "Buda",
+    countyFips: "48209",
+    layerUrl:
+      "https://services6.arcgis.com/vXZW4vAaPRr14z2s/arcgis/rest/services/Zoning/FeatureServer/0",
+    codeField: "Zoning_Category",
+    descriptionField: "Zoning_Description",
+  },
+  // Kyle (Hays). Setback table EXISTS (kyle-tx.json, R-1-1/R-1-2/R-1-3/R-2/
+  // R-3-1/R-3-2). GIS `Z_Code` carries those exact tokens verbatim -> exact
+  // match. Was token-gated in a prior recon; the public path is this
+  // utility.arcgis.com/usrsvcs proxy layer, which resolves WITHOUT a token
+  // (verified live 2026-07-21). Remaining GIS codes (A/C-2/CBD-*/MXD/PUD/...)
+  // have no setback row -> conservative fallback.
+  "kyle-tx": {
+    cityKey: "kyle-tx",
+    cityName: "Kyle",
+    countyFips: "48209",
+    layerUrl:
+      "https://utility.arcgis.com/usrsvcs/servers/cb715452b5464cd08d53449e26fa913d/rest/services/KCH-ESRI/Zoning/FeatureServer/0",
+    codeField: "Z_Code",
+    descriptionField: "Description",
+  },
+  // San Marcos (Hays). Setback table is a STUB (san-marcos-tx.json has empty
+  // districts[] — blocked on code-atom corpus onboarding + acceptance gate).
+  // Zoning still stamps the real district (`ZoneCode`, e.g. R-1-10/MU-2/C);
+  // the envelope route returns "no codified setbacks yet" until the table is
+  // populated. SETBACK TABLE OWED (populate districts[] once corpus lands).
+  "san-marcos-tx": {
+    cityKey: "san-marcos-tx",
+    cityName: "San Marcos",
+    countyFips: "48209",
+    layerUrl:
+      "https://maps.san-marcos.net/server/rest/services/Public/Zoning/MapServer/1",
+    codeField: "ZoneCode",
+    descriptionField: "ZoneFull",
+  },
+  // Cedar Park (Williamson). No setback table yet. GIS `ZoningAbbrev` clean
+  // codes (SR/UR/MF/DR/LB/NB/PO/SU). SETBACK TABLE OWED (cedar-park-tx.json).
+  "cedar-park-tx": {
+    cityKey: "cedar-park-tx",
+    cityName: "Cedar Park",
+    countyFips: "48491",
+    layerUrl:
+      "https://gisrest.cedarparktexas.gov/cpgis/rest/services/Planning/Zoning/MapServer/3",
+    codeField: "ZoningAbbrev",
+    descriptionField: "ZoningType",
+  },
+  // Taylor (Williamson). Form-based SmartCode "Place Type" system (P2/P2.5/
+  // P3/P3M/P4/P5/EC/CS) — no conventional R-1/C-1 districts. `First_Plac`
+  // holds the clean place-type code. SETBACK TABLE OWED (a form-based /
+  // place-type table, if one is codifiable).
+  "taylor-tx": {
+    cityKey: "taylor-tx",
+    cityName: "Taylor",
+    countyFips: "48491",
+    layerUrl:
+      "https://services7.arcgis.com/SQVxkeGOcRYhZqOD/arcgis/rest/services/Zoning_011720/FeatureServer/46",
+    codeField: "First_Plac",
+    descriptionField: "First_Plac",
+  },
+  // Liberty Hill (Williamson). No setback table yet. Field names are INVERTED:
+  // `SHORT_DESC` holds the clean CODE (AG/C1/C2/C3/SF1/SF2/SF3/MF2/I-1/MH1/
+  // PUD/PARK), `ZONING` holds the long name -> descriptionField. SETBACK TABLE
+  // OWED (liberty-hill-tx.json).
+  "liberty-hill-tx": {
+    cityKey: "liberty-hill-tx",
+    cityName: "Liberty Hill",
+    countyFips: "48491",
+    layerUrl:
+      "https://services8.arcgis.com/qwMz1Ra8Qny9RDxC/ArcGIS/rest/services/Zoning_241031/FeatureServer/0",
+    codeField: "SHORT_DESC",
+    descriptionField: "ZONING",
+  },
+  // Pflugerville (Travis). No setback table yet. GIS `ZOINING_TY` (source
+  // field-name typo, kept verbatim) clean codes (SF-S/R/MF-20/GB1/GB2/LI/O).
+  // First Travis-county zoning layer. SETBACK TABLE OWED (pflugerville-tx.json).
+  "pflugerville-tx": {
+    cityKey: "pflugerville-tx",
+    cityName: "Pflugerville",
+    countyFips: "48453",
+    layerUrl:
+      "https://maps.pflugervilletx.gov/arcgis/rest/services/Planning/Zoning_Districts/FeatureServer/0",
+    codeField: "ZOINING_TY",
+    descriptionField: "ZONING_DES",
+  },
+  // Bastrop city (Bastrop). A setback table EXISTS (bastrop-tx.json) but it
+  // codifies the OLD conventional code (R-MD/C-1/I-1/DT-1). The LIVE GIS layer
+  // is the B3 FORM-BASED "Place Type" code (P-1..P-5/P-CS/P-EC/PDD) — these do
+  // NOT align with the existing table's tokens, so the stamp writes the real
+  // Place Type but the envelope will fall back until a P-* table lands.
+  // SETBACK TABLE OWED (a Place-Type table; the current bastrop-tx.json is the
+  // wrong edition for this GIS layer). First Bastrop-county zoning layer.
+  "bastrop-city-tx": {
+    cityKey: "bastrop-city-tx",
+    cityName: "Bastrop",
+    countyFips: "48021",
+    layerUrl:
+      "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoning_Place_Type/FeatureServer/0",
+    codeField: "PlaceTypeClass",
+    descriptionField: "PlaceType",
+  },
+  // San Antonio (Bexar). No setback table yet. Large public COSA layer;
+  // `Base` carries the clean base-zone code (R-*/MF-*/C-*/O-*/I-*/D/UD/...),
+  // the composite `Zoning` field mixes in overlays so `Base` is the correct
+  // field. First Bexar-county zoning layer. SETBACK TABLE OWED
+  // (san-antonio-tx.json — sizeable district set).
+  "san-antonio-tx": {
+    cityKey: "san-antonio-tx",
+    cityName: "San Antonio",
+    countyFips: "48029",
+    layerUrl:
+      "https://services.arcgis.com/g1fRTDLeMgspWrYp/arcgis/rest/services/COSA_Zoning/FeatureServer/12",
+    codeField: "Base",
+    descriptionField: "BaseDescription",
+  },
+  // Lockhart (Caldwell). No setback table yet. GIS `ZONING` carries the bare
+  // code (RLD/RMD/RHD/CCB/CHB/CLB/CMB/IH/IL/MH/PDD/PI/AO). First Caldwell-
+  // county zoning layer. SETBACK TABLE OWED (lockhart-tx.json).
+  "lockhart-tx": {
+    cityKey: "lockhart-tx",
+    cityName: "Lockhart",
+    countyFips: "48055",
+    layerUrl:
+      "https://services3.arcgis.com/kPfGI7KGlXn5IaHL/arcgis/rest/services/Lockhart_City_Zoning_Online/FeatureServer/0",
+    codeField: "ZONING",
+  },
 };
 
 export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined {

@@ -39,14 +39,28 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.cad).toBe(CAD_COUNTIES["48209"]);
     expect(j.bulkSource).toBe(CAD_BULK_SOURCES["48209"]);
 
-    // Dripping Springs is the Hays-county zoning layer.
-    expect(j.zoningLayers).toEqual([ZONING_LAYERS["dripping-springs-tx"]]);
+    // Dripping Springs, Buda, Kyle, and San Marcos are the Hays-county zoning
+    // layers, in registry-declaration order.
+    const haysCities = Object.values(ZONING_LAYERS).filter(
+      (z) => z.countyFips === "48209",
+    );
+    expect(j.zoningLayers).toEqual(haysCities);
     expect(j.zoningLayers?.[0]).toBe(ZONING_LAYERS["dripping-springs-tx"]);
+    expect(haysCities.map((c) => c.cityKey)).toEqual([
+      "dripping-springs-tx",
+      "buda-tx",
+      "kyle-tx",
+      "san-marcos-tx",
+    ]);
 
-    // Its setback table is the one getSetbackTable returns for that city.
+    // Setback tables: Dripping Springs, Buda, Kyle have real tables; San
+    // Marcos has a stub table (empty districts[]) so it too resolves. Each is
+    // the identical object getSetbackTable returns for that city.
     const ds = getSetbackTable("dripping-springs-tx");
     expect(ds).not.toBeNull();
-    expect(j.setbackTables).toEqual([ds]);
+    expect(j.setbackTables).toEqual(
+      haysCities.map((c) => getSetbackTable(c.cityKey)),
+    );
     expect(j.setbackTables?.[0]).toBe(ds);
   });
 
@@ -58,8 +72,8 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.cad).toBe(CAD_COUNTIES["48491"]);
     expect(j.bulkSource).toBe(CAD_BULK_SOURCES["48491"]);
 
-    // Georgetown, Round Rock, Leander, Hutto all target 48491 — in
-    // registry declaration order.
+    // Georgetown, Round Rock, Leander, Hutto, Cedar Park, Taylor, Liberty
+    // Hill all target 48491 — in registry declaration order.
     const expectedCities = Object.values(ZONING_LAYERS).filter(
       (z) => z.countyFips === "48491",
     );
@@ -69,15 +83,29 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "round-rock-tx",
       "leander-tx",
       "hutto-tx",
+      "cedar-park-tx",
+      "taylor-tx",
+      "liberty-hill-tx",
     ]);
 
-    // Each city's setback table, resolved identically to the CLIs.
+    // Each city's setback table, resolved identically to the CLIs. Cedar
+    // Park / Taylor / Liberty Hill have no table yet (getSetbackTable ->
+    // null), so setbackTablesForCounty omits them; only the four with tables
+    // are attached, in order.
     expect(j.setbackTables).toEqual(
-      expectedCities.map((c) => getSetbackTable(c.cityKey)),
+      expectedCities
+        .map((c) => getSetbackTable(c.cityKey))
+        .filter((t) => t !== null),
     );
+    expect(j.setbackTables).toEqual([
+      getSetbackTable("georgetown-tx"),
+      getSetbackTable("round-rock-tx"),
+      getSetbackTable("leander-tx"),
+      getSetbackTable("hutto-tx"),
+    ]);
   });
 
-  it("Travis (48453): geometry + pacs CAD, but NO free bulk source and NO zoning/setbacks", () => {
+  it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer, no setback table yet", () => {
     const j = getJurisdictionConfig("48453");
     if (!j) throw new Error("expected Travis");
 
@@ -85,7 +113,11 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.cad).toBe(CAD_COUNTIES["48453"]);
     // Travis/TCAD has no free bulk roll (PIA route) — honestly absent.
     expect(j.bulkSource).toBeUndefined();
-    expect(j.zoningLayers).toBeUndefined();
+    // Pflugerville is the first Travis-county zoning layer. Its setback table
+    // is not yet codified, so zoning attaches but setbackTables stays absent
+    // (getSetbackTable("pflugerville-tx") -> null).
+    expect(j.zoningLayers).toEqual([ZONING_LAYERS["pflugerville-tx"]]);
+    expect(getSetbackTable("pflugerville-tx")).toBeNull();
     expect(j.setbackTables).toBeUndefined();
   });
 
