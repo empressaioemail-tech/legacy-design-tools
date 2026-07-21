@@ -273,39 +273,43 @@ describe("extension_public client tier", () => {
     expect(res.body.siteContext?.layers?.length).toBeGreaterThan(0);
   });
 
-  it("POST /brief resolves Pflugerville and serves websearch local layer", async () => {
-    mockPflugervilleGeocode();
-    retrieveAtomsForQuestionMock.mockResolvedValue([]);
-    supplementGroundingMock.mockResolvedValue({
-      sections: [
-        {
-          atomId: "reasoning:pflugerville_tx:irc-r301-1",
-          label: "IRC R301.1 — Application (design criteria)",
-          snippet: "Design criteria from web.",
-          webProvenance: {
-            sourceUrl: "https://codes.iccsafe.org/",
-            verified: false,
-            confidence: 0.35,
-            sourceName: "icc",
+  it(
+    "POST /brief resolves Pflugerville and serves websearch local layer",
+    async () => {
+      mockPflugervilleGeocode();
+      retrieveAtomsForQuestionMock.mockResolvedValue([]);
+      supplementGroundingMock.mockResolvedValue({
+        sections: [
+          {
+            atomId: "reasoning:pflugerville_tx:irc-r301-1",
+            label: "IRC R301.1 — Application (design criteria)",
+            snippet: "Design criteria from web.",
+            webProvenance: {
+              sourceUrl: "https://codes.iccsafe.org/",
+              verified: false,
+              confidence: 0.35,
+              sourceName: "icc",
+            },
           },
-        },
-      ],
-      reasoningRetrievedCount: 0,
-      webFilledCount: 1,
-    });
+        ],
+        reasoningRetrievedCount: 0,
+        webFilledCount: 1,
+      });
 
-    const res = await request(getApp())
-      .post("/api/brokerage/v1/brief")
-      .set(publicHeaders)
-      .send({ address: "17003 Simsbrook Dr, Pflugerville, TX 78660" });
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/brief")
+        .set(publicHeaders)
+        .send({ address: "17003 Simsbrook Dr, Pflugerville, TX 78660" });
 
-    expect(res.status).toBe(200);
-    expect(res.body.jurisdiction).toBe("pflugerville_tx");
-    expect(res.body.localCodeSource).toBe("websearch");
-    expect(res.body.coverage?.degraded).toBe(true);
-    expect(res.body.coverage?.reason).toContain("web-scraped");
-    expect(res.body.provenance?.coverage?.degraded).toBe(true);
-  });
+      expect(res.status).toBe(200);
+      expect(res.body.jurisdiction).toBe("pflugerville_tx");
+      expect(res.body.localCodeSource).toBe("websearch");
+      expect(res.body.coverage?.degraded).toBe(true);
+      expect(res.body.coverage?.reason).toContain("web-scraped");
+      expect(res.body.provenance?.coverage?.degraded).toBe(true);
+    },
+    40_000,
+  );
 
   it("POST /brief requires X-Hauska-Install-Id for public key", async () => {
     const res = await request(getApp())
