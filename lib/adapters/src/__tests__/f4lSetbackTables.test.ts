@@ -164,4 +164,24 @@ describe("F4l setback tables", () => {
     expect(r1a8?.side_ft).toBe(10);
     expect(r1a8?.max_height_ft).toBe(35);
   });
+
+  it("registers batch-3 jurisdictions as cited honest gaps when their rules are conditional", () => {
+    const keys = [
+      "liberty-hill-tx",
+      "lockhart-tx",
+      "taylor-tx",
+      "bastrop-city-tx",
+      "san-antonio-tx",
+    ];
+    expect(SETBACK_JURISDICTION_KEYS).toEqual(expect.arrayContaining(keys));
+
+    for (const key of keys) {
+      const table = getSetbackTable(key.replace(/-/g, "_"));
+      expect(table?.jurisdictionKey).toBe(key);
+      expect(table?.districts).toEqual([]);
+      expect(table?.note).toMatch(/^WDLL item 5, Wave 1 batch 3\. HONEST EMPTY:/);
+      expect(table?.note).toMatch(/https:\/\//);
+      expect(table?.note).toMatch(/omitted/i);
+    }
+  });
 });

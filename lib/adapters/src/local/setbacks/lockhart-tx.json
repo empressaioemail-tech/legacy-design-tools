@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "lockhart-tx",
+  "jurisdictionDisplayName": "City of Lockhart, TX",
+  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: the official Lockhart zoning ordinance regulates the live GIS zone codes through development-type tables rather than a single dimensional row per GIS code. Appendix I (residential) and Appendix II (commercial), including Ordinance 2024-18 at https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf (accessed 2026-07-21), contain building-type and adjacency conditions: commercial side/rear setbacks increase when a building exceeds two stories adjoining residential (note 5), drive-through service changes rear and side setbacks (note 6), PDD is plan-specific, and residential street setbacks can reduce to the block average (note 10). The envelope model cannot resolve those facts from `ZONING` alone. Omitted live GIS codes: RLD, RMD, RHD, CCB, CHB, CLB, CMB, IH, IL, MH, PDD, PI, AO. No unconditional district number ships.",
+  "districts": []
+}

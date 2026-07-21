@@ -30,6 +30,11 @@ import huttoTx from "./hutto-tx.json" with { type: "json" };
 import newBraunfelsTx from "./new-braunfels-tx.json" with { type: "json" };
 import cedarParkTx from "./cedar-park-tx.json" with { type: "json" };
 import pflugervilleTx from "./pflugerville-tx.json" with { type: "json" };
+import libertyHillTx from "./liberty-hill-tx.json" with { type: "json" };
+import lockhartTx from "./lockhart-tx.json" with { type: "json" };
+import taylorTx from "./taylor-tx.json" with { type: "json" };
+import bastropCityTx from "./bastrop-city-tx.json" with { type: "json" };
+import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 
@@ -68,11 +73,8 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "grand-county-ut": grandCountyUt as SetbackTable,
   "lemhi-county-id": lemhiCountyId as SetbackTable,
   "bastrop-tx": bastropTx as SetbackTable,
-  // Registered with an empty districts[] — San Marcos is not yet in the code
-  // atom corpus, so it serves 200 with an explicit "pending onboarding" note
-  // (see the file's `note`) rather than 404 setback_table_not_found. No
-  // fabricated setback values ship; the acceptance gate blocks population
-  // until citation-backed extraction + human review lands.
+  // Tables contain only code-backed scalar rules. A conditional rule that the
+  // envelope cannot evaluate is explicitly omitted in the table note.
   "san-marcos-tx": sanMarcosTx as SetbackTable,
   // Hays County batch (F4k) — citation-backed from live ordinances, carry
   // per-value provenance. Dripping Springs from Municode Ch. 30 Exhibit A
@@ -101,6 +103,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // each file's note for the cited source and gate blocker.
   "cedar-park-tx": cedarParkTx as SetbackTable,
   "pflugerville-tx": pflugervilleTx as SetbackTable,
+  // WDLL 5, Wave 1 batch 3. These jurisdictions must resolve to an explicit,
+  // cited honest gap rather than 404 or an invented envelope. Their notes
+  // identify the official source, live GIS codes, and unmodeled conditions.
+  "liberty-hill-tx": libertyHillTx as SetbackTable,
+  "lockhart-tx": lockhartTx as SetbackTable,
+  "taylor-tx": taylorTx as SetbackTable,
+  "bastrop-city-tx": bastropCityTx as SetbackTable,
+  "san-antonio-tx": sanAntonioTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
 };

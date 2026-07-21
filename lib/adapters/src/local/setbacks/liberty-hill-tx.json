@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "liberty-hill-tx",
+  "jurisdictionDisplayName": "City of Liberty Hill, TX",
+  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: official UDC Table 4-4 gives district baseline dimensions at https://ecode360.com/42968563 (Chapter 4, §§4.11.04–.05, Table 4-4; accessed 2026-07-21), but the same codified table conditions the values: residential side setbacks may be waived for one side in zero-lot-line subdivisions (note B), PUD mixed-use development may modify side/rear/lot-area standards (note C), and the impervious limit is additionally subject to Edwards Aquifer Rules (note A). The envelope model cannot evaluate those conditions, so it must not serve the baseline numbers as unconditional. Live GIS SHORT_DESC codes AG, C1, C2, C3, SF1, SF2, SF3, MF2, I-1, MH1, PUD, and PARK are all omitted pending a conditional-rule model. The GIS `I-1` spelling also requires a deliberately reviewed mapping to the UDC `I1` district before a row can ship.",
+  "districts": []
+}
