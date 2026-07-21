@@ -308,20 +308,33 @@ describe("San Marcos pilot registration", () => {
     expect(table!.note).toMatch(/pending corpus onboarding/i);
   });
 
-  it.each([
-    ["cedar_park_tx", "cedar-park-tx"],
-    ["pflugerville_tx", "pflugerville-tx"],
-  ])(
-    "serves %s as an explicit empty pending table while the source-atom gate is blocked",
-    (lookupKey, jurisdictionKey) => {
-      const table = getSetbackTable(lookupKey);
-      expect(table).not.toBeNull();
-      expect(table!.jurisdictionKey).toBe(jurisdictionKey);
-      expect(table!.districts).toEqual([]);
-      expect(table!.note).toMatch(/pending source-atom onboarding/i);
-      expect(table!.note).toMatch(/^.*https:\/\//);
-    },
-  );
+  it("serves Cedar Park as an ordinance-backed populated table", () => {
+    const table = getSetbackTable("cedar_park_tx");
+    expect(table).not.toBeNull();
+    expect(table!.jurisdictionKey).toBe("cedar-park-tx");
+    expect(table!.districts).toHaveLength(7);
+    expect(table!.districts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district_name: "SR Suburban Residential",
+          front_ft: 30,
+          rear_ft: 25,
+          side_ft: 12,
+          side_corner_ft: 20,
+        }),
+      ]),
+    );
+    expect(table!.note).toMatch(/https:\/\//);
+  });
+
+  it("serves Pflugerville as an explicit empty pending table", () => {
+    const table = getSetbackTable("pflugerville_tx");
+    expect(table).not.toBeNull();
+    expect(table!.jurisdictionKey).toBe("pflugerville-tx");
+    expect(table!.districts).toEqual([]);
+    expect(table!.note).toMatch(/pending source-atom onboarding/i);
+    expect(table!.note).toMatch(/^.*https:\/\//);
+  });
 
   it("reports the legacy Bastrop table as un-gated (no provenance)", () => {
     // Bastrop predates the gate: its rows carry a municode-root citation_url
