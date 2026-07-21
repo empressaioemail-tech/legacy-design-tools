@@ -139,8 +139,8 @@ brokerageNodeFacetsRouter.get(
       // client can route to its fallback deterministically.
       res.status(404).json(
         gtmErrorBody(
-          "not_found",
-          "not_found",
+          "no_coverage",
+          "not_baked",
           "No baked facets for this parcel node",
         ),
       );
