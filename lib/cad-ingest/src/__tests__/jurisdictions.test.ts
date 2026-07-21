@@ -88,10 +88,8 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "liberty-hill-tx",
     ]);
 
-    // Cedar Park is registered with an explicit empty pending table: the
-    // ordinance is public, but its source atoms and complete district set have
-    // not been onboarded to pass the setback gate. Taylor and Liberty Hill
-    // remain unregistered.
+    // Cedar Park's GIS-mappable districts now carry ordinance-backed
+    // dimensions. Taylor and Liberty Hill remain unregistered.
     expect(j.setbackTables).toEqual(
       expectedCities
         .map((c) => getSetbackTable(c.cityKey))
@@ -105,8 +103,16 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       getSetbackTable("cedar-park-tx"),
     ]);
     const cedarPark = getSetbackTable("cedar-park-tx");
-    expect(cedarPark?.districts).toEqual([]);
-    expect(cedarPark?.note).toMatch(/pending source-atom onboarding/i);
+    expect(cedarPark?.districts).toHaveLength(7);
+    expect(cedarPark?.districts.map((district) => district.district_name)).toEqual(
+      expect.arrayContaining([
+        "DR Development Reserve",
+        "SR Suburban Residential",
+        "MF Multifamily",
+        "NB Neighborhood Business",
+      ]),
+    );
+    expect(cedarPark?.note).toMatch(/UR is omitted/i);
   });
 
   it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with honest pending setback table", () => {
