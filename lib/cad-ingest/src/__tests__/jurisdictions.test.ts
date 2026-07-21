@@ -64,7 +64,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.setbackTables?.[0]).toBe(ds);
   });
 
-  it("Williamson (48491): orion CAD + open-fetch bulk + FOUR city zoning layers + their setbacks", () => {
+  it("Williamson (48491): orion CAD + open-fetch bulk + seven city zoning layers + their setbacks", () => {
     const j = getJurisdictionConfig("48491");
     if (!j) throw new Error("expected Williamson");
 
@@ -88,8 +88,8 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "liberty-hill-tx",
     ]);
 
-    // Cedar Park's GIS-mappable districts now carry ordinance-backed
-    // dimensions. Taylor and Liberty Hill remain unregistered.
+    // Cedar Park's GIS-mappable districts carry ordinance-backed dimensions.
+    // Taylor and Liberty Hill are cited honest-empty tables (WDLL item 5).
     expect(j.setbackTables).toEqual(
       expectedCities
         .map((c) => getSetbackTable(c.cityKey))
@@ -101,6 +101,8 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       getSetbackTable("leander-tx"),
       getSetbackTable("hutto-tx"),
       getSetbackTable("cedar-park-tx"),
+      getSetbackTable("taylor-tx"),
+      getSetbackTable("liberty-hill-tx"),
     ]);
     const cedarPark = getSetbackTable("cedar-park-tx");
     expect(cedarPark?.districts).toHaveLength(7);
@@ -113,6 +115,10 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       ]),
     );
     expect(cedarPark?.note).toMatch(/UR is omitted/i);
+    expect(getSetbackTable("taylor-tx")?.districts).toEqual([]);
+    expect(getSetbackTable("taylor-tx")?.note).toMatch(/HONEST EMPTY/i);
+    expect(getSetbackTable("liberty-hill-tx")?.districts).toEqual([]);
+    expect(getSetbackTable("liberty-hill-tx")?.note).toMatch(/HONEST EMPTY/i);
   });
 
   it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with cited setback rows", () => {
