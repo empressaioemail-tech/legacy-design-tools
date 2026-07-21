@@ -30,7 +30,7 @@
 CREATE TABLE IF NOT EXISTS "county_facet_coverage" (
   "county_fips" text NOT NULL,
   "facet" text NOT NULL,
-  "honest_coverage_pct" numeric(5, 2) NOT NULL DEFAULT 0,
+  "honest_coverage_pct" numeric(5, 2) NOT NULL DEFAULT '0'::numeric,
   "integrity_verdict" text NOT NULL,
   "owner_match_rate" numeric(5, 4),
   "source" text,

@@ -590,7 +590,7 @@ CREATE TABLE @@SCHEMA@@.cotality_spatial_tile_cache (
 CREATE TABLE @@SCHEMA@@.county_facet_coverage (
     county_fips text NOT NULL,
     facet text NOT NULL,
-    honest_coverage_pct numeric(5,2) DEFAULT 0 NOT NULL,
+    honest_coverage_pct numeric(5,2) DEFAULT '0'::numeric NOT NULL,
     integrity_verdict text NOT NULL,
     owner_match_rate numeric(5,4),
     source text,

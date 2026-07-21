@@ -6,7 +6,9 @@ import {
   timestamp,
   primaryKey,
   index,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Per-county-per-facet coverage + correctness LEDGER.
@@ -79,6 +81,16 @@ export const countyFacetCoverage = pgTable(
     ),
     classificationIdx: index("county_facet_coverage_classification_idx").on(
       t.classification,
+    ),
+    // Enforce the verdict + classification enums at the DB (the gate never
+    // writes a value outside these, and a bad write should fail loudly).
+    integrityVerdictCheck: check(
+      "county_facet_coverage_integrity_verdict_check",
+      sql`${t.integrityVerdict} IN ('pass', 'block', 'insufficient-sample', 'n/a')`,
+    ),
+    classificationCheck: check(
+      "county_facet_coverage_classification_check",
+      sql`${t.classification} IN ('real-at-ceiling', 'needs-crosswalk', 'true-source-gap', 'fabricated-blocked')`,
     ),
   }),
 );
