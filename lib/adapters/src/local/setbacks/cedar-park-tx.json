@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "cedar-park-tx",
+  "jurisdictionDisplayName": "City of Cedar Park, TX",
+  "note": "Setback table pending source-atom onboarding and acceptance-gate verification. Cedar Park publishes its zoning development and design standards at https://ecode360.com/38612811, but this repository does not yet have the corresponding source code-section atoms or a complete ordinance-derived district set. The acceptance gate requires every populated numeric value to resolve to a source atom and requires a complete expected-district set. No values are shipped until those inputs are available, per docs/setback-extraction-acceptance-gate.md.",
+  "districts": []
+}
