@@ -1,0 +1,38 @@
+services:
+  overpass:
+    # The upstream image exposes the standard /api/interpreter endpoint used by
+    # artifacts/api-server/src/lib/buildableEnvelope/roads.ts.
+    image: wiktorn/overpass-api:0.7.62
+    restart: unless-stopped
+    ports:
+      # Keep the unauthenticated interpreter private by default. On GCE, set
+      # OVERPASS_BIND_ADDRESS=0.0.0.0 only after a firewall rule admits the
+      # Cloud Run VPC connector source range and no public source range.
+      - "${OVERPASS_BIND_ADDRESS:-127.0.0.1}:${OVERPASS_PORT:-8080}:80"
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_META: "no"
+      OVERPASS_PLANET_URL: ${OVERPASS_PLANET_URL:-https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf}
+      OVERPASS_COMPRESSION: gz
+      OVERPASS_USE_AREAS: "false"
+      OVERPASS_FASTCGI_PROCESSES: ${OVERPASS_FASTCGI_PROCESSES:-4}
+      OVERPASS_RATE_LIMIT: ${OVERPASS_RATE_LIMIT:-16}
+      OVERPASS_TIME: ${OVERPASS_TIME:-120}
+      OVERPASS_MAX_TIMEOUT: ${OVERPASS_MAX_TIMEOUT:-180}
+      OVERPASS_PLANET_PREPROCESS: >-
+        mv /db/planet.osm.bz2 /db/planet.osm.pbf &&
+        osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf &&
+        rm /db/planet.osm.pbf
+    volumes:
+      # This must be a durable disk. It contains the imported Overpass database.
+      - ${OVERPASS_DB_DIR:-./data}:/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --noproxy '*' -qfg 'http://localhost/api/interpreter?data=[out:json];node(1);out;' | jq -e '.generator | contains(\"Overpass\")' >/dev/null",
+        ]
+      interval: 1m
+      timeout: 30s
+      retries: 5
+      start_period: 48h
