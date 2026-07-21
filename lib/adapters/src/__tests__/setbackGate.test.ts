@@ -304,7 +304,9 @@ describe("San Marcos pilot registration", () => {
   it("serves a cited, populated table with explicit omitted-code gaps", () => {
     const table = getSetbackTable("san-marcos-tx");
     expect(table).not.toBeNull();
-    expect(table!.districts).toHaveLength(3);
+    expect(table!.districts).toHaveLength(2);
+    expect(table!.note).toMatch(/ND-3/i);
+    expect(table!.note).toMatch(/conditional/i);
     expect(table!.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
