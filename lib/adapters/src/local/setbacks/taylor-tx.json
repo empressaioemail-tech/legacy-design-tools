@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "taylor-tx",
+  "jurisdictionDisplayName": "City of Taylor, TX",
+  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: Taylor's adopted 2023 Land Development Code is a form-based Place Type system. The official city zoning page identifies the adopted LDC and Place Type map at https://www.taylortx.gov/1281/Zoning-and-Ordinances (accessed 2026-07-21). The live GIS `First_Plac` values P2, P2.5, P3, P3M, P4, P5, EC, and CS do not themselves select a single building type/frontage/street condition. The city explanation at https://www.taylortx.gov/DocumentCenter/View/15009 states Place Types provide character guidance while the applicable zoning standards define the specific development requirements. Because the envelope model lacks the necessary building-type and frontage inputs, no mappable unconditional dimensional row exists. Omitted GIS codes: P2, P2.5, P3, P3M, P4, P5, EC, CS.",
+  "districts": []
+}

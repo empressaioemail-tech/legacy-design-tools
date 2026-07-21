@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "san-antonio-tx",
+  "jurisdictionDisplayName": "City of San Antonio, TX",
+  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: the official Unified Development Code Table 310-1 in §35-310.01 gives base-zone dimensional standards (https://sanantonio-tx.elaws.us/code/udc_artiii_div2_sec35-310.01, accessed 2026-07-21), but §35-516 applies conditional rules that this envelope model cannot test: reversed corner lots use the adjacent rear lot's required front setback; platted restrictions can be more restrictive; and garage/carport rules add separate street setbacks. A citywide table would therefore falsely present base values as unconditional. Omitted GIS `Base` codes include the residential core RP, RE, R-20, R-6, R-5, R-4, R-3, R-2, R-1, RM-6, RM-5, RM-4, MF-18, MF-25, MF-33, MF-40, MF-50, MF-65, MF-80, MF-120 and all commercial, industrial, downtown, special, overlay, and suffix variants. Add a thin residential set only after the conditional-setback model accepts parcel orientation, plat, and adjacency inputs.",
+  "districts": []
+}

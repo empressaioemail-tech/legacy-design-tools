@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "bastrop-city-tx",
+  "jurisdictionDisplayName": "City of Bastrop, TX (B3 Place Types)",
+  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: this is intentionally separate from legacy `bastrop-tx.json`, whose conventional districts do not map to the live B3 Place Type GIS layer. The official April 2025 B3 Code is https://www.cityofbastrop.org/upload/page/0107/docs/B3/B3%20Code%20-%20April%202025.pdf (Article 3.2 and Place Type standards; accessed 2026-07-21). Its first-layer setback for existing lots is contextual: average front setbacks of two lots on each side, plus or minus five feet; P2/P3 undeveloped-lot rules differ; P4/P5 use build-to-line ranges. The envelope model cannot evaluate lot development status, neighboring setbacks, street type, frontage type, or building type, so no scalar value may be shipped. Omitted live GIS PlaceTypeClass codes: P-1, P-2, P-3, P-4, P-5, P-CS, P-EC, PDD and any overlay/suffix variants.",
+  "districts": []
+}
