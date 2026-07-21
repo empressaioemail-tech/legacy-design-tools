@@ -162,6 +162,61 @@ export function ownersAgree(
 }
 
 // ---------------------------------------------------------------------------
+// Per-match owner gate for the SITUS-ADDRESS recovery join.
+//
+// When a county's prop_id land-use join is gate-blocked (a numeric collision),
+// the land-use is recovered via the parcel's situs ADDRESS instead. But an
+// address match is not, by itself, proof the two rows are the same property —
+// the SAME oracle that gates the prop_id join (owner-name agreement) must gate
+// EACH address match too. This is the per-match analogue of the aggregate
+// `ownerMatchRate` gate: instead of scoring a whole county pass/block, it
+// decides ONE matched pair — promote the code only when the TxGIO owner and the
+// CAD owner agree; otherwise honest null. No un-gated join promotes
+// (commitment #1).
+// ---------------------------------------------------------------------------
+
+/**
+ * A CAD roll entry keyed by normalized situs address, carrying BOTH the
+ * land-use code to (conditionally) promote AND the CAD owner name that the
+ * per-match gate checks against the TxGIO owner. `owner` may be null/blank (an
+ * unnamed CAD row): the gate then declines to promote (an address match with no
+ * owner evidence is uninformative — it can neither confirm nor deny the join —
+ * so it is honest-absence, never a blind promote).
+ */
+export interface AddressLandUseEntry {
+  code: string;
+  vintage: string;
+  owner: string | null;
+}
+
+/**
+ * Resolve a situs-address-matched land-use through the per-match owner gate.
+ *
+ * Returns the CAD entry ONLY when an address match exists AND the TxGIO owner
+ * and the matched CAD owner AGREE (same `ownersAgree` rule the aggregate gate
+ * uses — leading surname/entity token). In every other case returns null:
+ *   - no address key / no address match          -> null (honest absence)
+ *   - address match but owners DISAGREE           -> null (never the wrong code)
+ *   - address match but an owner is blank/missing -> null (uninformative; not
+ *                                                    evidence the join is real)
+ *
+ * This is the whole integrity guarantee of the recovery path: an address join
+ * self-gates per parcel, so only owner-verified matches promote. PURE — no DB.
+ */
+export function resolveAddressLandUse(
+  addressKey: string | null | undefined,
+  txgioOwner: string | null | undefined,
+  lookup: ReadonlyMap<string, AddressLandUseEntry>,
+): AddressLandUseEntry | null {
+  if (!addressKey) return null;
+  const hit = lookup.get(addressKey);
+  if (!hit) return null;
+  // Per-match owner gate — identical rule to the aggregate integrity gate.
+  if (!ownersAgree(txgioOwner, hit.owner)) return null;
+  return hit;
+}
+
+// ---------------------------------------------------------------------------
 // Owner-match rate over a sample.
 // ---------------------------------------------------------------------------
 
@@ -460,6 +515,89 @@ export async function sampleJoinPairs(
        SELECT p.txgio_owner, c.cad_owner
          FROM parcels p
          JOIN cad c ON c.join_key = p.join_key
+        LIMIT $2`,
+      [countyFips, remaining],
+    );
+
+    if (r.rows.length > 0) seenSource.add(countyFips);
+    for (const row of r.rows) {
+      pairs.push({ txgioOwner: row.txgio_owner, cadOwner: row.cad_owner });
+    }
+  }
+
+  return pairs;
+}
+
+/**
+ * Draw up to `limit` joined `(txgioOwner, cadOwner)` pairs for a county on the
+ * SITUS-ADDRESS recovery key — the exact key the address-join land-use bake
+ * uses when a county's prop_id join is gate-blocked. This is the address
+ * analogue of `sampleJoinPairs`, so the coverage scorer can measure the REAL
+ * recovered owner-match rate for a blocked county (Williamson/Hays) rather than
+ * scoring the dead prop_id join and recording 0.
+ *
+ * The address key is `normalizeSitusAddress` expressed in SQL on BOTH sides:
+ * `upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g'))`, so the
+ * sampled join is byte-for-byte the bake's address join. The CAD side is
+ * DISTINCT ON (normalized address), latest coded tax year — the same lookup the
+ * bake builds. A blank situs on either side simply does not match (empty key is
+ * excluded), never a false pair.
+ *
+ * READ-ONLY. Owner names are used FOR THE GATE ONLY and never persisted.
+ */
+export async function sampleAddressJoinPairs(
+  pool: QueryablePool,
+  countyFips: string,
+  limit = 2000,
+): Promise<OwnerPair[]> {
+  if (!(await tableExists(pool, "cad_property"))) return [];
+
+  // `normalizeSitusAddress` in SQL: upper + strip every non-alphanumeric char.
+  const ADDR_NORM = (col: string): string =>
+    `upper(regexp_replace(${col}, '[^A-Za-z0-9]', '', 'g'))`;
+
+  const parcelTables = ["txgio_parcel", "txgio_parcel_staging"] as const;
+  const seenSource = new Set<string>();
+  const pairs: OwnerPair[] = [];
+
+  for (const table of parcelTables) {
+    if (pairs.length >= limit) break;
+    if (!(await tableExists(pool, table))) continue;
+    if (seenSource.has(countyFips) && table === "txgio_parcel_staging") {
+      continue;
+    }
+
+    const remaining = limit - pairs.length;
+    const r = await pool.query<{
+      txgio_owner: string | null;
+      cad_owner: string | null;
+    }>(
+      `WITH parcels AS (
+         SELECT DISTINCT ON (feature_index)
+                feature_index,
+                owner_name AS txgio_owner,
+                ${ADDR_NORM("situs_address")} AS addr_key
+           FROM ${table}
+          WHERE county_fips = $1
+            AND situs_address IS NOT NULL
+            AND situs_address <> ''
+          ORDER BY feature_index
+       ),
+       cad AS (
+         SELECT DISTINCT ON (${ADDR_NORM("situs_address")})
+                ${ADDR_NORM("situs_address")} AS addr_key,
+                owner_name AS cad_owner
+           FROM cad_property
+          WHERE county_fips = $1
+            AND property_use_code IS NOT NULL
+            AND situs_address IS NOT NULL
+            AND situs_address <> ''
+          ORDER BY ${ADDR_NORM("situs_address")}, tax_year DESC
+       )
+       SELECT p.txgio_owner, c.cad_owner
+         FROM parcels p
+         JOIN cad c ON c.addr_key = p.addr_key
+        WHERE p.addr_key <> ''
         LIMIT $2`,
       [countyFips, remaining],
     );

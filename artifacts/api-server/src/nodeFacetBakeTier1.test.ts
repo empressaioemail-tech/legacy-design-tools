@@ -30,6 +30,7 @@ import {
   type ComputedNode,
 } from "./nodeFacetBakeTier1Cli";
 import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./lib/joinNormalize";
+import type { AddressLandUseEntry } from "./lib/joinIntegrityGate";
 
 // A ~100ft x 150ft rectangular lot near Bastrop, TX. At lat 30.11:
 //   1 deg lat ~ 364,000 ft, 1 deg lng ~ 314,000 ft.
@@ -50,7 +51,11 @@ function polygonGeometry(ring: Ring): unknown {
   return { type: "Polygon", coordinates: [ring] };
 }
 
-/** A parcel row as the bake selects it — NOTE: no owner field exists. */
+/**
+ * A parcel row as the bake selects it. `txgioOwnerForGate` is present ONLY for
+ * the address-recovery owner gate (never persisted to the payload); it is null
+ * by default so a normal county row carries no owner.
+ */
 function parcelRow(overrides: Partial<{
   feature_index: number;
   prop_id: string | null;
@@ -60,6 +65,7 @@ function parcelRow(overrides: Partial<{
   zoning_district: string | null;
   source_vintage: string | null;
   geometry: unknown;
+  txgioOwnerForGate: string | null;
 }> = {}) {
   return {
     feature_index: 0,
@@ -70,6 +76,7 @@ function parcelRow(overrides: Partial<{
     zoning_district: null,
     source_vintage: "stratmap25",
     geometry: polygonGeometry(BASTROP_LOT),
+    txgioOwnerForGate: null,
     ...overrides,
   };
 }
@@ -241,6 +248,148 @@ describe("honest absence (never fabricate a facet)", () => {
     expect(payload.facetCoverage.landUse).toBe(false);
     expect(payload.provenance.landUseSource).toBeNull();
   });
+});
+
+describe("situs-address land-use recovery (gate-blocked counties, per-match owner gate)", () => {
+  const now = "2026-07-21T00:00:00.000Z";
+  const seed = LANDUSE_JOIN_DISABLED_FIPS_SEED;
+
+  // The CAD roll keyed by NORMALIZED situs address (upper + strip non-alnum).
+  // "123 MAIN ST, BASTROP, TX 78602" -> "123MAINSTBASTROPTX78602".
+  const addrKey = "123MAINSTBASTROPTX78602";
+  const addrLookup = (owner: string | null): Map<string, AddressLandUseEntry> =>
+    new Map([[addrKey, { code: "F1", vintage: "2025", owner }]]);
+
+  it("RECOVERS land-use for Williamson via the address join when owners AGREE", () => {
+    // prop_id join is blocked (colliding cad row present but gated off); the
+    // address join recovers, and the TxGIO owner agrees with the CAD owner.
+    const propIdColliding = new Map([
+      ["62578", { landUseCode: "WRONG", landUseVintage: "2025" }],
+    ]);
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", txgioOwnerForGate: "PURVIS, MICHAEL" }),
+      "48491",
+      "Williamson",
+      propIdColliding,
+      now,
+      seed,
+      addrLookup("PURVIS MICHAEL"),
+    )!;
+    expect(payload.baseFacts.landUse?.code).toBe("F1");
+    expect(payload.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(payload.facetCoverage.landUse).toBe(true);
+    // The colliding prop_id code must NOT have been used.
+    expect(payload.baseFacts.landUse?.code).not.toBe("WRONG");
+  });
+
+  it("stamps the address-join provenance flag distinguishing it from a prop_id join", () => {
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", txgioOwnerForGate: "PURVIS MICHAEL" }),
+      "48491",
+      "Williamson",
+      new Map(),
+      now,
+      seed,
+      addrLookup("PURVIS, MICHAEL J"),
+    )!;
+    expect(payload.provenance.landUseSource).toBe("cad-roll-address-join");
+    expect(payload.provenance.landUseAddressRecovered).toBe(true);
+    expect(payload.provenance.landUseGateBlocked).toBe(true);
+  });
+
+  it("REJECTS the address match when owners DISAGREE -> honest null (never the wrong code)", () => {
+    // Address matches, but the TxGIO owner (BREM) and CAD owner (PURVIS) are
+    // different people. This is the exact fabrication shape the system stops:
+    // honest null, NOT code "F1".
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", txgioOwnerForGate: "BREM SARAH" }),
+      "48491",
+      "Williamson",
+      new Map(),
+      now,
+      seed,
+      addrLookup("PURVIS MICHAEL"),
+    )!;
+    expect(payload.baseFacts.landUse).toBeNull();
+    expect(payload.facetCoverage.landUse).toBe(false);
+    expect(payload.provenance.landUseSource).toBeNull();
+    expect(payload.provenance.landUseAddressRecovered).toBe(false);
+  });
+
+  it("recovers Hays (48209) the same way (address join + owner agree)", () => {
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "13599", txgioOwnerForGate: "ACME HOLDINGS LLC" }),
+      "48209",
+      "Hays",
+      new Map(),
+      now,
+      seed,
+      addrLookup("ACME HOLDINGS INC"),
+    )!;
+    expect(payload.baseFacts.landUse?.code).toBe("F1");
+    expect(payload.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(payload.provenance.landUseAddressRecovered).toBe(true);
+  });
+
+  it("does NOT run the address join for a NON-blocked county — prop_id path unchanged", () => {
+    // Bexar joins on prop_id. Even if an address lookup is (spuriously) passed,
+    // addressJoinKey returns null for a non-blocked county, so the prop_id join
+    // is the ONLY path and its source stays cad-roll.
+    const propIdLu = new Map([
+      ["12345", { landUseCode: "P1", landUseVintage: "2025" }],
+    ]);
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "012345", txgioOwnerForGate: "SHOULD IGNORE" }),
+      "48029",
+      "Bexar",
+      propIdLu,
+      now,
+      seed,
+      addrLookup("SHOULD IGNORE"),
+    )!;
+    expect(payload.baseFacts.landUse?.code).toBe("P1");
+    expect(payload.baseFacts.landUse?.source).toBe("cad-roll");
+    expect(payload.provenance.landUseAddressRecovered).toBe(false);
+  });
+
+  it("prefers the correct prop_id join over the address join for a non-blocked county (no double join)", () => {
+    // A non-blocked county already has a working prop_id join; the address path
+    // must never fire and never override.
+    const propIdLu = new Map([
+      ["987", { landUseCode: "B1", landUseVintage: "2025" }],
+    ]);
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "000987", txgioOwnerForGate: "OWNER X" }),
+      "48021",
+      "Bastrop",
+      propIdLu,
+      now,
+      seed,
+      addrLookup("OWNER X"),
+    )!;
+    expect(payload.baseFacts.landUse?.code).toBe("B1");
+    expect(payload.baseFacts.landUse?.source).toBe("cad-roll");
+    expect(payload.provenance.landUseAddressRecovered).toBe(false);
+  });
+
+  it("owner-recovered land-use never leaks the owner name into the payload", () => {
+    const payload = buildTier1Payload(
+      parcelRow({ prop_id: "R062578", txgioOwnerForGate: "PURVIS MICHAEL" }),
+      "48491",
+      "Williamson",
+      new Map(),
+      now,
+      seed,
+      addrLookup("PURVIS MICHAEL"),
+    )!;
+    const json = JSON.stringify(payload);
+    expect(/owner/i.test(json)).toBe(false);
+    expect(json.includes("PURVIS")).toBe(false);
+  });
+});
+
+describe("honest absence — envelope + node-id (never fabricate)", () => {
+  const now = "2026-07-21T00:00:00.000Z";
 
   it("unknown jurisdiction declines the envelope (no fabricated setbacks)", () => {
     const env = computeTier1Envelope({

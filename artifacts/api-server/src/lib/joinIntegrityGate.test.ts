@@ -18,10 +18,12 @@ import {
   ownersAgree,
   ownerMatchRate,
   evaluateJoinIntegrity,
+  resolveAddressLandUse,
   DEFAULT_MIN_OWNER_MATCH_RATE,
   MIN_INFORMATIVE_SAMPLE,
   normalizeForJoin,
   type OwnerPair,
+  type AddressLandUseEntry,
 } from "./joinIntegrityGate";
 
 // ---------------------------------------------------------------------------
@@ -293,5 +295,60 @@ describe("SQL join key mirrors normalizeForJoin (the collision oracle)", () => {
     expect(sqlNormalizeMirror("000123")).toBe("123");
     expect(normalizeForJoin("62578")).toBe("62578");
     expect(sqlNormalizeMirror("62578")).toBe("62578");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-match owner gate for the situs-address RECOVERY join. This is the whole
+// integrity guarantee of the recovery path: only owner-verified address matches
+// promote; an address match whose owners DISAGREE gets honest null, never the
+// wrong code.
+// ---------------------------------------------------------------------------
+
+describe("resolveAddressLandUse (per-match owner gate for the address join)", () => {
+  const lookup = new Map<string, AddressLandUseEntry>([
+    ["123MAINST", { code: "A1", vintage: "2025", owner: "PURVIS MICHAEL" }],
+    ["456OAKAVE", { code: "F1", vintage: "2025", owner: "ACME HOLDINGS LLC" }],
+    ["789ELMDR", { code: "B2", vintage: "2025", owner: null }], // CAD owner blank
+  ]);
+
+  it("PROMOTES an address match whose owners AGREE (recovers the land-use)", () => {
+    // TxGIO owner "PURVIS, MICHAEL J" vs CAD "PURVIS MICHAEL" — same surname
+    // lead after normalization -> agree -> promote the matched code.
+    const hit = resolveAddressLandUse("123MAINST", "PURVIS, MICHAEL J", lookup);
+    expect(hit).not.toBeNull();
+    expect(hit?.code).toBe("A1");
+    expect(hit?.vintage).toBe("2025");
+  });
+
+  it("promotes an entity match on the entity lead (ACME LLC vs ACME INC)", () => {
+    const hit = resolveAddressLandUse("456OAKAVE", "ACME HOLDINGS INC", lookup);
+    expect(hit?.code).toBe("F1");
+  });
+
+  it("REJECTS an address match whose owners DISAGREE -> honest null (never the wrong code)", () => {
+    // The address matches (same parcel key) but the owners are different people
+    // (PURVIS's parcel vs owner BREM). This is exactly the fabrication shape the
+    // system exists to stop: honest null, NOT code "A1".
+    expect(resolveAddressLandUse("123MAINST", "BREM SARAH", lookup)).toBeNull();
+  });
+
+  it("REJECTS when the CAD owner is blank (uninformative, not evidence of a real join)", () => {
+    // A match with no owner on the CAD side cannot be verified -> honest null.
+    expect(resolveAddressLandUse("789ELMDR", "SMITH JOHN", lookup)).toBeNull();
+  });
+
+  it("REJECTS when the TxGIO owner is blank/missing (uninformative)", () => {
+    expect(resolveAddressLandUse("123MAINST", null, lookup)).toBeNull();
+    expect(resolveAddressLandUse("123MAINST", "   ", lookup)).toBeNull();
+  });
+
+  it("returns null when there is no address match at all (honest absence)", () => {
+    expect(resolveAddressLandUse("999NOWHERE", "PURVIS MICHAEL", lookup)).toBeNull();
+  });
+
+  it("returns null for a null/empty address key (no key -> no join)", () => {
+    expect(resolveAddressLandUse(null, "PURVIS MICHAEL", lookup)).toBeNull();
+    expect(resolveAddressLandUse("", "PURVIS MICHAEL", lookup)).toBeNull();
   });
 });

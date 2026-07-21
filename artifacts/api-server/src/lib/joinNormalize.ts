@@ -125,3 +125,59 @@ export function landUseJoinKey(
   if (blockedFips.has(countyFips)) return null;
   return normalizeForJoin(propId);
 }
+
+/**
+ * SITUS-ADDRESS RECOVERY JOIN KEY (the fallback for prop_id-gated counties).
+ *
+ * When a county's prop_id land-use join is gate-BLOCKED (a numeric-key
+ * collision, e.g. Williamson 48491 / Hays 48209), the prop_id is a proven
+ * fabrication and `landUseJoinKey` returns null. But the SAME parcel can still
+ * be recovered by a DIFFERENT, independent key: its situs street address. A
+ * TxGIO parcel and its CAD roll row describe the same physical property, so
+ * their situs addresses agree, and the situs address does NOT collide the way
+ * the divergent prop_id numbering does. Verified live: Williamson situs
+ * address-match 99.2% / owner-agree ~89%; Hays 97.4% / owner-agree ~86% (both
+ * on ~100%-situs corpora). See `parcelsPmtilesBakeCli` / `nodeFacetBakeTier1Cli`.
+ *
+ * `normalizeSitusAddress` is the join key on BOTH sides: uppercase, then strip
+ * every non-alphanumeric character. So "123 Main St." and "123 MAIN ST" and
+ * "123  main   st" all key to "123MAINST". A blank/whitespace/null address
+ * returns "" — which the caller treats as no key (never matches), so a parcel
+ * with no situs is honest-absence, not a false match.
+ *
+ * INTEGRITY: this key alone is NOT sufficient to promote a land-use. The
+ * address join must ALSO pass the per-match owner gate (`ownersAgree` in
+ * joinIntegrityGate) exactly like the prop_id join is gate-scored — a parcel
+ * whose address matches but whose TxGIO and CAD owners DISAGREE gets honest
+ * null, never the mismatched code. `normalizeSitusAddress` produces the key;
+ * the owner gate decides whether the matched code may promote.
+ */
+export function normalizeSitusAddress(
+  address: string | null | undefined,
+): string {
+  if (address == null) return "";
+  return String(address).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * The situs-address recovery key for a parcel, honoring the per-county gate in
+ * MIRROR of `landUseJoinKey` — but INVERTED: the address join is the RECOVERY
+ * path that fires ONLY for counties whose prop_id join is BLOCKED. For a
+ * non-blocked county the address join returns null (that county already joins
+ * correctly on prop_id; there is nothing to recover, and running an unnecessary
+ * second join would only add a way to be wrong). For a blocked county it
+ * returns the normalized situs address (or null when the parcel has no situs).
+ *
+ * This keeps the recovery strictly scoped: address-join land-use is emitted for
+ * exactly the counties the prop_id gate took away, and only there.
+ */
+export function addressJoinKey(
+  countyFips: string,
+  situsAddress: string | null | undefined,
+  blockedFips: ReadonlySet<string> = LANDUSE_JOIN_DISABLED_FIPS_SEED,
+): string | null {
+  // Recovery fires only where the prop_id join is blocked.
+  if (!blockedFips.has(countyFips)) return null;
+  const key = normalizeSitusAddress(situsAddress);
+  return key === "" ? null : key;
+}

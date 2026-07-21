@@ -86,9 +86,14 @@ import pg from "pg";
 import { parcelNodeId, normalizeCadPropId } from "./lib/parcelNodeId";
 import {
   landUseJoinKey,
+  addressJoinKey,
   LANDUSE_JOIN_DISABLED_FIPS_SEED,
 } from "./lib/joinNormalize";
-import { loadLedgerBlockedFips } from "./lib/joinIntegrityGate";
+import {
+  loadLedgerBlockedFips,
+  resolveAddressLandUse,
+  type AddressLandUseEntry,
+} from "./lib/joinIntegrityGate";
 import { ptadLandUseDescription } from "./lib/ptadLandUse";
 import { contentHashForPayload } from "./lib/placeLayerUtils";
 import {
@@ -278,6 +283,51 @@ async function fetchCountyLandUse(
 }
 
 // ---------------------------------------------------------------------------
+// SITUS-ADDRESS land-use lookup — the RECOVERY source for prop_id-gate-blocked
+// counties (Williamson/Hays). Keyed by normalized situs address, DISTINCT ON
+// (normalized address) latest coded tax year. Carries the CAD owner_name so the
+// per-match owner gate (`resolveAddressLandUse`) can verify each match; the
+// owner is used ONLY for gating and never enters the baked payload. READ-ONLY.
+// ---------------------------------------------------------------------------
+
+async function fetchCountyLandUseByAddress(
+  pool: pg.Pool,
+  fips: string,
+): Promise<Map<string, AddressLandUseEntry>> {
+  const out = new Map<string, AddressLandUseEntry>();
+  if (!(await tableExists(pool, "cad_property"))) return out;
+  // `normalizeSitusAddress` in SQL: upper + strip non-alphanumeric. Matches the
+  // TS `normalizeSitusAddress` the parcel side keys on.
+  const r = await pool.query<{
+    naddr: string;
+    property_use_code: string;
+    source_vintage: string;
+    owner_name: string | null;
+  }>(
+    `SELECT DISTINCT ON (upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')))
+            upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) AS naddr,
+            property_use_code, source_vintage, owner_name
+       FROM cad_property
+      WHERE county_fips = $1
+        AND property_use_code IS NOT NULL
+        AND situs_address IS NOT NULL
+        AND situs_address <> ''
+      ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
+               tax_year DESC`,
+    [fips],
+  );
+  for (const row of r.rows) {
+    if (!row.naddr) continue;
+    out.set(row.naddr, {
+      code: row.property_use_code,
+      vintage: row.source_vintage,
+      owner: row.owner_name,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Tier-1 facet payload assembly (owner-excluded, honest-absence).
 // ---------------------------------------------------------------------------
 
@@ -289,11 +339,21 @@ interface BaseFacts {
   landUse: {
     code: string;
     description: string | null;
-    source: "cad-roll";
+    /**
+     * How the land-use was joined. `cad-roll` is the normal prop_id join;
+     * `cad-roll-address-join` is the situs-address RECOVERY join used for
+     * prop_id-gate-blocked counties (Williamson/Hays), where each accepted
+     * match ALSO passed the per-match owner gate. The distinct value lets the
+     * card/ledger show HOW the land-use was verified.
+     */
+    source: LandUseSource;
     vintage: string;
   } | null;
   acreage: { value: number; sqft: number; method: "shoelace-wgs84" } | null;
 }
+
+/** The provenance of a recovered land-use — prop_id join vs address recovery. */
+export type LandUseSource = "cad-roll" | "cad-roll-address-join";
 
 export interface Tier1FacetPayload {
   facetSchemaVersion: string;
@@ -321,7 +381,15 @@ export interface Tier1FacetPayload {
   provenance: {
     parcelSource: "txgio";
     parcelVintage: string | null;
-    landUseSource: "cad-roll" | null;
+    landUseSource: LandUseSource | null;
+    /**
+     * True when this node's land-use was recovered via the situs-ADDRESS join
+     * (a prop_id-gate-blocked county) rather than the normal prop_id join, and
+     * the match passed the per-match owner gate. Distinguishes an address-join
+     * land-use from a prop_id-join one at a glance (the ledger/card verification
+     * story). False for a normal prop_id-join land-use or an absent one.
+     */
+    landUseAddressRecovered: boolean;
     roadsPending: true;
     tierNote: string;
     /**
@@ -337,7 +405,18 @@ export interface Tier1FacetPayload {
   bakedAt: string;
 }
 
-/** A parcel row as selected for the bake — NOTE: owner_name is NEVER selected. */
+/**
+ * A parcel row as selected for the bake.
+ *
+ * OWNER-NAME HANDLING. `owner_name` (`txgioOwnerForGate`) is selected ONLY for
+ * counties whose land-use is recovered via the situs-address join, where the
+ * per-match owner gate needs the TxGIO owner to compare against the CAD owner.
+ * It is NEVER copied into the baked payload — `buildTier1Payload` uses it only
+ * inside `resolveAddressLandUse` and discards it. For every other county it is
+ * null (not even selected). The end-to-end owner-leak guard in `main()` still
+ * asserts no `owner` key appears in any serialized payload, so this gating
+ * usage cannot regress the privacy invariant.
+ */
 interface ParcelRow {
   feature_index: number;
   prop_id: string | null;
@@ -347,6 +426,8 @@ interface ParcelRow {
   zoning_district: string | null;
   source_vintage: string | null;
   geometry: unknown;
+  /** TxGIO owner — for the address-join per-match gate ONLY; never persisted. */
+  txgioOwnerForGate?: string | null;
 }
 
 /**
@@ -390,9 +471,21 @@ export function effectiveBlockedFips(
 }
 
 /**
- * Build the Tier-1 payload for one parcel row. Pure + owner-free: the owner
- * column is not even a field on `ParcelRow`, so it CANNOT leak into the
- * payload. Every facet is either real content or an honest null.
+ * Build the Tier-1 payload for one parcel row. Pure. The owner name (when
+ * supplied on `row.txgioOwnerForGate` for the address-recovery gate) is used
+ * ONLY to gate an address match and is NEVER copied into the payload, so the
+ * output stays owner-free (the `main()` owner-leak guard still asserts this).
+ * Every facet is either real content or an honest null.
+ *
+ * LAND-USE (two join paths, both owner-gated):
+ *   - NON-blocked county: the normal prop_id join (`landUseJoinKey`).
+ *   - BLOCKED county (prop_id join is a proven collision): the prop_id join
+ *     returns null, and instead the SITUS-ADDRESS recovery join fires — but
+ *     only PER-MATCH owner-verified. `resolveAddressLandUse` promotes the
+ *     address-matched code ONLY when the TxGIO owner and the CAD owner agree; a
+ *     match whose owners disagree (or where an owner is blank) yields honest
+ *     null, never the mismatched code. A recovered land-use carries
+ *     `source: "cad-roll-address-join"`.
  */
 export function buildTier1Payload(
   row: ParcelRow,
@@ -401,6 +494,7 @@ export function buildTier1Payload(
   landUse: Map<string, LandUse>,
   nowIso: string,
   blockedFips?: ReadonlySet<string>,
+  addressLandUse?: ReadonlyMap<string, AddressLandUseEntry>,
 ): Tier1FacetPayload | null {
   const nodeId = parcelNodeId(countyFips, row.prop_id);
   // No node id -> no stable key -> cannot bake this parcel (never fabricate an
@@ -410,22 +504,23 @@ export function buildTier1Payload(
   const ring = firstRing(row.geometry);
 
   // Is this county's land-use join gate-blocked? Drives the honest-absence of
-  // land-use AND the monotonic integrity override that strips a prior
-  // fabricated value. `blockedFips` is the ledger-driven set (gate `block`
-  // verdicts); omitted -> the gate-output seed via landUseJoinKey's default.
-  const landUseGateBlocked =
-    (blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED).has(countyFips);
+  // the prop_id join, the ADDRESS-RECOVERY path, AND the monotonic integrity
+  // override that strips a prior fabricated value. `blockedFips` is the
+  // ledger-driven set (gate `block` verdicts); omitted -> the gate-output seed.
+  const effectiveBlocked = blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED;
+  const landUseGateBlocked = effectiveBlocked.has(countyFips);
 
   // --- Base facts ---
   const str = (v: string | null | undefined): string | null =>
     typeof v === "string" && v.trim() ? v.trim() : null;
 
   let luFacet: BaseFacts["landUse"] = null;
+  let landUseAddressRecovered = false;
   if (row.prop_id) {
     // landUseJoinKey enforces the per-county data-integrity gate: it returns
     // null for BLOCKED counties (ledger `block` verdict; seed fallback), so
-    // those nodes bake landUse: null (honest absence) instead of a fabricated
-    // numeric-collision match.
+    // those nodes get NO prop_id-join land-use (honest absence) instead of a
+    // fabricated numeric-collision match.
     const joinKey = landUseJoinKey(countyFips, row.prop_id, blockedFips);
     const lu = joinKey != null ? landUse.get(joinKey) : undefined;
     if (lu) {
@@ -435,6 +530,31 @@ export function buildTier1Payload(
         source: "cad-roll",
         vintage: lu.landUseVintage,
       };
+    }
+  }
+
+  // --- SITUS-ADDRESS RECOVERY (blocked counties only, per-match owner-gated) ---
+  // When the prop_id join is gate-blocked (luFacet still null) AND an address
+  // lookup was supplied, attempt the recovery join. `addressJoinKey` returns
+  // null for non-blocked counties (recovery is scoped to blocked counties), and
+  // `resolveAddressLandUse` promotes the matched code ONLY when the TxGIO owner
+  // and the CAD owner AGREE — a disagreeing (or owner-blank) match is honest
+  // null. So no un-gated address join promotes.
+  if (luFacet == null && addressLandUse) {
+    const addrKey = addressJoinKey(countyFips, row.situs_address, blockedFips);
+    const hit = resolveAddressLandUse(
+      addrKey,
+      row.txgioOwnerForGate,
+      addressLandUse,
+    );
+    if (hit) {
+      luFacet = {
+        code: hit.code,
+        description: ptadLandUseDescription(hit.code) ?? null,
+        source: "cad-roll-address-join",
+        vintage: hit.vintage,
+      };
+      landUseAddressRecovered = true;
     }
   }
 
@@ -489,7 +609,8 @@ export function buildTier1Payload(
     provenance: {
       parcelSource: "txgio",
       parcelVintage: str(row.source_vintage),
-      landUseSource: luFacet ? "cad-roll" : null,
+      landUseSource: luFacet ? luFacet.source : null,
+      landUseAddressRecovered,
       roadsPending: true,
       tierNote:
         "Tier 1 (deterministic). Buildable envelope computed WITHOUT roads " +
@@ -877,6 +998,8 @@ interface CountyStats {
   fabricationCorrected: number;
   facetHits: {
     landUse: number;
+    /** Land-use hits recovered specifically via the situs-address join. */
+    landUseAddressRecovered: number;
     acreage: number;
     zoning: number;
     envelopeDerived: number;
@@ -888,6 +1011,7 @@ async function bakeCounty(args: {
   pool: pg.Pool;
   county: CountySource;
   landUse: Map<string, LandUse>;
+  addressLandUse: ReadonlyMap<string, AddressLandUseEntry>;
   adapterKey: string;
   pageSize: number;
   limit: number | undefined;
@@ -895,8 +1019,13 @@ async function bakeCounty(args: {
   blockedFips: ReadonlySet<string>;
   sampleSink: (p: Tier1FacetPayload) => void;
 }): Promise<CountyStats> {
-  const { pool, county, landUse, adapterKey, pageSize, limit, dryRun } = args;
+  const { pool, county, landUse, addressLandUse, adapterKey, pageSize, limit, dryRun } =
+    args;
   const { blockedFips } = args;
+  // The address-recovery join needs the TxGIO owner to gate each match. Select
+  // it ONLY for a blocked county (the only counties that run the recovery);
+  // never for a normal county, and never into the payload.
+  const needsOwnerForGate = blockedFips.has(county.fips);
   const stats: CountyStats = {
     fips: county.fips,
     name: county.name,
@@ -910,6 +1039,7 @@ async function bakeCounty(args: {
     fabricationCorrected: 0,
     facetHits: {
       landUse: 0,
+      landUseAddressRecovered: 0,
       acreage: 0,
       zoning: 0,
       envelopeDerived: 0,
@@ -924,16 +1054,22 @@ async function bakeCounty(args: {
       limit !== undefined ? Math.max(0, limit - stats.parcelsSeen) : pageSize;
     if (remaining === 0) break;
     const pageLimit = Math.min(pageSize, remaining);
-    // OWNER IS NOT SELECTED — the payload cannot contain owner_name.
-    // `zoning_district` is selected only when the table has it (prod does;
-    // the staging table does not) — else NULL, honest zoning-absence.
+    // OWNER: selected as `txgio_owner_for_gate` ONLY for a blocked county, and
+    // ONLY to gate the address-recovery join per match. It is NEVER copied into
+    // the payload (the main() owner-leak guard asserts this). For a non-blocked
+    // county it is not even selected (NULL). `zoning_district` is selected only
+    // when the table has it (prod does; staging does not) — else NULL, honest
+    // zoning-absence.
     const zoningSelect = county.hasZoning
       ? "zoning_district"
       : "NULL::text AS zoning_district";
-    const r = await pool.query<ParcelRow>(
+    const ownerSelect = needsOwnerForGate
+      ? "owner_name AS txgio_owner_for_gate"
+      : "NULL::text AS txgio_owner_for_gate";
+    const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
       `SELECT DISTINCT ON (feature_index)
               feature_index, prop_id, situs_address, situs_city, situs_state,
-              ${zoningSelect}, source_vintage, geometry
+              ${zoningSelect}, ${ownerSelect}, source_vintage, geometry
          FROM ${county.table}
         WHERE county_fips = $1
           AND feature_index > $2
@@ -955,6 +1091,12 @@ async function bakeCounty(args: {
       after = row.feature_index;
       stats.parcelsSeen += 1;
 
+      // Carry the gate-only owner onto the row for the address-recovery match.
+      // Not persisted — buildTier1Payload uses it only inside the owner gate.
+      row.txgioOwnerForGate =
+        (row as ParcelRow & { txgio_owner_for_gate?: string | null })
+          .txgio_owner_for_gate ?? null;
+
       const payload = buildTier1Payload(
         row,
         county.fips,
@@ -962,6 +1104,7 @@ async function bakeCounty(args: {
         landUse,
         nowIso,
         blockedFips,
+        addressLandUse,
       );
       if (!payload) {
         stats.skippedNoNodeId += 1;
@@ -974,6 +1117,9 @@ async function bakeCounty(args: {
 
       // Facet-hit accounting (over PARCELS with a node id, i.e. bakeable).
       if (payload.facetCoverage.landUse) stats.facetHits.landUse += 1;
+      if (payload.provenance.landUseAddressRecovered) {
+        stats.facetHits.landUseAddressRecovered += 1;
+      }
       if (payload.facetCoverage.acreage) stats.facetHits.acreage += 1;
       if (payload.facetCoverage.zoning) stats.facetHits.zoning += 1;
       if (payload.facetCoverage.envelope) stats.facetHits.envelopeDerived += 1;
@@ -1093,18 +1239,33 @@ async function main(): Promise<void> {
     // fabricated land-use (the Williamson override never fired).
     const ledgerBlockedFips = await loadLedgerBlockedFips(pool);
     const blockedFips = effectiveBlockedFips(ledgerBlockedFips);
+    const isBlocked = blockedFips.has(county.fips);
     if (ledgerBlockedFips.has(county.fips)) {
       log(
-        `land-use gate: county ${county.fips} is BLOCKED by the coverage ` +
-          `ledger — baking honest land-use ABSENCE; a fabricated prior ` +
-          `snapshot's land-use will be STRIPPED via the integrity override.`,
+        `land-use gate: county ${county.fips} prop_id join is BLOCKED by the ` +
+          `coverage ledger — prop_id land-use is honest-ABSENT; land-use is ` +
+          `RECOVERED via the owner-gated situs-address join (a fabricated prior ` +
+          `snapshot's land-use is stripped or replaced by the verified code).`,
       );
     } else if (LANDUSE_JOIN_DISABLED_FIPS_SEED.has(county.fips)) {
       log(
-        `land-use gate: county ${county.fips} is BLOCKED by the gate-output ` +
-          `seed (permanent floor; ledger verdict is not \`block\`) — baking ` +
-          `honest land-use ABSENCE; a fabricated prior snapshot's land-use ` +
-          `will be STRIPPED via the integrity override.`,
+        `land-use gate: county ${county.fips} prop_id join is BLOCKED by the ` +
+          `gate-output seed (permanent floor; ledger verdict is not \`block\`) ` +
+          `— prop_id land-use is honest-ABSENT; land-use is RECOVERED via the ` +
+          `owner-gated situs-address join.`,
+      );
+    }
+
+    // Address-recovery lookup: built ONLY for a blocked county (the only place
+    // the recovery join fires). Non-blocked counties get an empty map and never
+    // run the address path (addressJoinKey returns null for them anyway).
+    const addressLandUse = isBlocked
+      ? await fetchCountyLandUseByAddress(pool, county.fips)
+      : new Map<string, AddressLandUseEntry>();
+    if (isBlocked) {
+      log(
+        `address-recovery lookup for ${county.name}: ${addressLandUse.size} ` +
+          `CAD rows keyed by normalized situs address (owner-gated per match).`,
       );
     }
 
@@ -1112,6 +1273,7 @@ async function main(): Promise<void> {
       pool,
       county,
       landUse,
+      addressLandUse,
       adapterKey,
       pageSize,
       limit,
@@ -1143,6 +1305,7 @@ async function main(): Promise<void> {
   log(`  fabrication fixed: ${stats.fabricationCorrected} (gate-blocked land-use stripped from prior snapshot)`);
   log(`facet coverage (of bakeable):`);
   log(`  land-use:          ${stats.facetHits.landUse} (${pct(stats.facetHits.landUse)})`);
+  log(`    via address-join:${stats.facetHits.landUseAddressRecovered} (owner-gated situs-address recovery)`);
   log(`  acreage:           ${stats.facetHits.acreage} (${pct(stats.facetHits.acreage)})`);
   log(`  zoning:            ${stats.facetHits.zoning} (${pct(stats.facetHits.zoning)})`);
   log(`  envelope derived:  ${stats.facetHits.envelopeDerived} (${pct(stats.facetHits.envelopeDerived)})`);
