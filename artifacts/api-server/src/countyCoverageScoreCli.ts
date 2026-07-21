@@ -50,10 +50,12 @@ import pg from "pg";
 
 import {
   sampleJoinPairs,
+  sampleAddressJoinPairs,
   evaluateJoinIntegrity,
   type JoinIntegrityReport,
   type QueryablePool,
 } from "./lib/joinIntegrityGate";
+import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./lib/joinNormalize";
 
 const { Pool } = pg;
 
@@ -285,6 +287,15 @@ interface RawCoverage {
   landUseRawPct: number;
   landUseSourcePresent: boolean;
   landUseVintage: string | null;
+  /**
+   * The situs-address RECOVERY coverage: fraction of bakeable parcels that get
+   * an OWNER-AGREEING address match (the exact rows the bake would promote via
+   * the owner-gated address join). Measured only for prop_id-gate-blocked
+   * counties; null otherwise. This is the honest coverage the ledger records
+   * for a blocked county whose land-use is recovered via address, replacing the
+   * dead-prop_id-join 0.
+   */
+  landUseAddressRecoveredPct: number | null;
   zoningStampedPct: number;
   envelopeDerivablePct: number;
 }
@@ -300,6 +311,7 @@ interface RawCoverage {
 async function measureCoverage(
   pool: pg.Pool,
   county: CountyPresence,
+  measureAddressRecovery: boolean,
 ): Promise<RawCoverage> {
   const { fips, table, hasZoning, parcels } = county;
 
@@ -357,6 +369,88 @@ async function measureCoverage(
     landUseRawPct = total > 0 ? (matched / total) * 100 : 0;
   }
 
+  // --- situs-ADDRESS recovery coverage (owner-gated) ---
+  // For a prop_id-gate-blocked county the recovered coverage is the fraction of
+  // bakeable parcels that get an OWNER-AGREEING address match — exactly the rows
+  // the owner-gated address join promotes. The owner-agreement rule below
+  // mirrors `ownersAgree`: leading-token equality after upper + punctuation-to-
+  // space + first-comma reorder (surname-leading) + noise-token drop, with a
+  // >=4 shared-prefix allowance. Kept in SQL so the measured rate is the same
+  // join the bake runs. Owner names are read for the gate ONLY (aggregate rate);
+  // no owner leaves this measurement.
+  let landUseAddressRecoveredPct: number | null = null;
+  if (measureAddressRecovery && landUseSourcePresent) {
+    const ADDR_NORM = (col: string): string =>
+      `upper(regexp_replace(${col}, '[^A-Za-z0-9]', '', 'g'))`;
+    // Leading owner token, in SQL: reorder "LAST, FIRST" so surname leads, map
+    // non-alphanumerics to spaces, drop the noise tokens the gate drops, take
+    // the first remaining token. NULL when no usable token (uninformative).
+    const OWNER_LEAD = (col: string): string => `(
+      SELECT t FROM (
+        SELECT unnest(
+          string_to_array(
+            btrim(regexp_replace(
+              upper(
+                CASE WHEN position(',' in ${col}) > 0
+                  THEN substring(${col} from 1 for position(',' in ${col}) - 1)
+                       || ' ' ||
+                       substring(${col} from position(',' in ${col}) + 1)
+                  ELSE ${col} END
+              ),
+              '[^A-Z0-9]+', ' ', 'g'
+            )),
+            ' '
+          )
+        ) AS t
+      ) toks
+      WHERE t <> '' AND t NOT IN (
+        'JR','SR','II','III','IV','V','LLC','LP','LLP','LTD','INC','CORP','CO',
+        'COMPANY','TRUST','TR','ESTATE','EST','ET','AL','ETAL','ETUX','ETVIR','THE'
+      )
+      LIMIT 1
+    )`;
+    const r = await pool.query<{ accepted: string; total: string }>(
+      `WITH parcels AS (
+         SELECT DISTINCT ON (feature_index)
+                feature_index,
+                ${ADDR_NORM("situs_address")} AS addr_key,
+                ${OWNER_LEAD("owner_name")} AS owner_lead
+           FROM ${table}
+          WHERE county_fips = $1
+            AND situs_address IS NOT NULL AND situs_address <> ''
+          ORDER BY feature_index
+       ),
+       cad AS (
+         SELECT DISTINCT ON (${ADDR_NORM("situs_address")})
+                ${ADDR_NORM("situs_address")} AS addr_key,
+                ${OWNER_LEAD("owner_name")} AS owner_lead
+           FROM cad_property
+          WHERE county_fips = $1
+            AND property_use_code IS NOT NULL
+            AND situs_address IS NOT NULL AND situs_address <> ''
+          ORDER BY ${ADDR_NORM("situs_address")}, tax_year DESC
+       )
+       SELECT
+         count(*) FILTER (
+           WHERE c.addr_key IS NOT NULL
+             AND p.owner_lead IS NOT NULL AND c.owner_lead IS NOT NULL
+             AND (
+               p.owner_lead = c.owner_lead
+               OR (length(least(p.owner_lead, c.owner_lead)) >= 4
+                   AND greatest(p.owner_lead, c.owner_lead)
+                       LIKE least(p.owner_lead, c.owner_lead) || '%')
+             )
+         ) AS accepted,
+         count(*) AS total
+       FROM parcels p
+       LEFT JOIN cad c ON c.addr_key = p.addr_key AND p.addr_key <> ''`,
+      [fips],
+    );
+    const accepted = Number(r.rows[0]?.accepted ?? 0);
+    const total = Number(r.rows[0]?.total ?? 0);
+    landUseAddressRecoveredPct = total > 0 ? (accepted / total) * 100 : 0;
+  }
+
   // --- zoning stamped % ---
   let zoningStampedPct = 0;
   if (hasZoning) {
@@ -409,6 +503,7 @@ async function measureCoverage(
     landUseRawPct,
     landUseSourcePresent,
     landUseVintage,
+    landUseAddressRecoveredPct,
     zoningStampedPct,
     envelopeDerivablePct,
   };
@@ -429,30 +524,68 @@ async function scoreCounty(
   pool: pg.Pool,
   county: CountyPresence,
 ): Promise<CountyScore> {
-  const cov = await measureCoverage(pool, county);
-
-  // Owner-match gate on the land-use join (only meaningful when a source
-  // exists; with no roll the sample is empty -> insufficient-sample, and the
-  // classifier routes that to true-source-gap via sourcePresent=false).
-  const sample = cov.landUseSourcePresent
+  // The prop_id gate must run BEFORE coverage measurement so we know whether to
+  // also measure the address-recovery coverage. A county is treated as
+  // prop_id-blocked when the fresh gate verdict is `block` OR it is in the
+  // permanent seed floor (Williamson/Hays), matching the effective block set
+  // the bakes act on.
+  const cadPresent = await tableExists(pool, "cad_property");
+  const propIdSample = cadPresent
     ? await sampleJoinPairs(pool as unknown as QueryablePool, county.fips, 2000)
     : [];
-  const gate = evaluateJoinIntegrity({
+  const propIdGate = evaluateJoinIntegrity({
     county: county.fips,
     facet: "land-use",
-    sample,
+    sample: propIdSample,
   });
+  const propIdBlocked =
+    propIdGate.verdict === "block" ||
+    LANDUSE_JOIN_DISABLED_FIPS_SEED.has(county.fips);
 
-  const landUse = classifyFacet({
-    facet: "land-use",
-    rawCoveragePct: cov.landUseRawPct,
-    sourcePresent: cov.landUseSourcePresent,
-    verdict: gate.verdict,
-    ownerMatchRate: cov.landUseSourcePresent ? gate.ownerMatchRate : null,
-    source: cov.landUseSourcePresent ? "cad-roll" : null,
-    sourceVintage: cov.landUseVintage,
-    sampled: gate.sampled,
-  });
+  const cov = await measureCoverage(pool, county, propIdBlocked);
+
+  // --- LAND-USE classification ---
+  // A prop_id-blocked county recovers land-use via the owner-gated situs-address
+  // join, so the ledger must reflect the ADDRESS join's owner-match + recovered
+  // coverage (the effective join the bake uses), not the dead prop_id join's 0.
+  // A non-blocked county classifies on the normal prop_id join, unchanged.
+  let landUse: FacetScore;
+  if (propIdBlocked && cov.landUseSourcePresent) {
+    const addrSample = await sampleAddressJoinPairs(
+      pool as unknown as QueryablePool,
+      county.fips,
+      2000,
+    );
+    const addrGate = evaluateJoinIntegrity({
+      county: county.fips,
+      facet: "land-use",
+      sample: addrSample,
+    });
+    // Classify on the ADDRESS join. When it passes, the recovered coverage is
+    // the owner-agreeing address-match rate (the rows the bake promotes); its
+    // owner-match is the address gate's rate; its source is the address join.
+    landUse = classifyFacet({
+      facet: "land-use",
+      rawCoveragePct: cov.landUseAddressRecoveredPct ?? 0,
+      sourcePresent: cov.landUseSourcePresent,
+      verdict: addrGate.verdict,
+      ownerMatchRate: addrGate.ownerMatchRate,
+      source: "cad-roll-address-join",
+      sourceVintage: cov.landUseVintage,
+      sampled: addrGate.sampled,
+    });
+  } else {
+    landUse = classifyFacet({
+      facet: "land-use",
+      rawCoveragePct: cov.landUseRawPct,
+      sourcePresent: cov.landUseSourcePresent,
+      verdict: propIdGate.verdict,
+      ownerMatchRate: cov.landUseSourcePresent ? propIdGate.ownerMatchRate : null,
+      source: cov.landUseSourcePresent ? "cad-roll" : null,
+      sourceVintage: cov.landUseVintage,
+      sampled: propIdGate.sampled,
+    });
+  }
 
   const zoning = classifyFacet({
     facet: "zoning",

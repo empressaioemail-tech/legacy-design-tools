@@ -124,4 +124,25 @@ describe("classifyFacet", () => {
     });
     expect(r.classification).toBe("fabricated-blocked");
   });
+
+  it("a prop_id-blocked county RECOVERED via the address join -> real-at-ceiling on the address rate (not 0)", () => {
+    // Williamson/Hays: the prop_id join is fabricated-blocked, but the scorer
+    // classifies on the ADDRESS join instead. That join passes the owner gate
+    // (~89% / ~86%), so the ledger records the recovered coverage as honest,
+    // sourced as the address join — NOT the dead-prop_id 0.
+    const r = classifyFacet({
+      facet: "land-use",
+      rawCoveragePct: 89.1, // owner-agreeing address-match rate (Williamson)
+      sourcePresent: true,
+      verdict: "pass", // the ADDRESS gate passed
+      ownerMatchRate: 0.898,
+      source: "cad-roll-address-join",
+      sourceVintage: "2026-certified",
+      sampled: 2000,
+    });
+    expect(r.classification).toBe("real-at-ceiling");
+    expect(r.honestCoveragePct).toBeCloseTo(89.1, 5);
+    expect(r.integrityVerdict).toBe("pass");
+    expect(r.source).toBe("cad-roll-address-join");
+  });
 });

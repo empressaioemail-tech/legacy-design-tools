@@ -103,8 +103,16 @@ import { parseArgs } from "node:util";
 import pg from "pg";
 
 import { parcelNodeId } from "./lib/parcelNodeId";
-import { landUseJoinKey } from "./lib/joinNormalize";
-import { loadLedgerBlockedFips } from "./lib/joinIntegrityGate";
+import {
+  landUseJoinKey,
+  addressJoinKey,
+  LANDUSE_JOIN_DISABLED_FIPS_SEED,
+} from "./lib/joinNormalize";
+import {
+  loadLedgerBlockedFips,
+  resolveAddressLandUse,
+  type AddressLandUseEntry,
+} from "./lib/joinIntegrityGate";
 // The land-use description mapping lives in a dependency-free module (NOT
 // imported from txgioParcelStore, which drags in @workspace/db and would
 // throw on a missing DATABASE_URL at import time — this offline bake
@@ -280,6 +288,49 @@ async function fetchCountyLandUse(
 }
 
 // ---------------------------------------------------------------------------
+// SITUS-ADDRESS land-use lookup — RECOVERY source for prop_id-gate-blocked
+// counties (Williamson/Hays). Keyed by normalized situs address, DISTINCT ON
+// (normalized address) latest coded tax year, carrying the CAD owner_name so
+// the per-match owner gate can verify each match. The owner is used ONLY to
+// gate; it is never emitted to the public PMTiles archive. READ-ONLY.
+// ---------------------------------------------------------------------------
+
+async function fetchCountyLandUseByAddress(
+  pool: pg.Pool,
+  fips: string,
+): Promise<Map<string, AddressLandUseEntry>> {
+  const out = new Map<string, AddressLandUseEntry>();
+  if (!(await tableExists(pool, "cad_property"))) return out;
+  const r = await pool.query<{
+    naddr: string;
+    property_use_code: string;
+    source_vintage: string;
+    owner_name: string | null;
+  }>(
+    `SELECT DISTINCT ON (upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')))
+            upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) AS naddr,
+            property_use_code, source_vintage, owner_name
+       FROM cad_property
+      WHERE county_fips = $1
+        AND property_use_code IS NOT NULL
+        AND situs_address IS NOT NULL
+        AND situs_address <> ''
+      ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
+               tax_year DESC`,
+    [fips],
+  );
+  for (const row of r.rows) {
+    if (!row.naddr) continue;
+    out.set(row.naddr, {
+      code: row.property_use_code,
+      vintage: row.source_vintage,
+      owner: row.owner_name,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Per-county streamed GeoJSONSeq export (keyset-paginated on feature_index,
 // DISTINCT ON to collapse the one-row-per-cell duplication). Bounded memory:
 // one page of parcels in flight at a time.
@@ -288,8 +339,15 @@ async function fetchCountyLandUse(
 interface ExportStats {
   featureCount: number;
   withLandUse: number;
+  withLandUseAddressRecovered: number;
   withNodeId: number;
-  perCounty: { fips: string; name: string; features: number; landUse: number }[];
+  perCounty: {
+    fips: string;
+    name: string;
+    features: number;
+    landUse: number;
+    landUseAddressRecovered: number;
+  }[];
 }
 
 async function writeLine(
@@ -305,28 +363,43 @@ async function exportCounty(
   pool: pg.Pool,
   county: CountySource,
   landUse: Map<string, LandUse>,
+  addressLandUse: ReadonlyMap<string, AddressLandUseEntry>,
   out: NodeJS.WritableStream,
   pageSize: number,
   limit: number | undefined,
   blockedFips: ReadonlySet<string>,
-): Promise<{ features: number; landUse: number; nodeIds: number }> {
+): Promise<{
+  features: number;
+  landUse: number;
+  landUseAddressRecovered: number;
+  nodeIds: number;
+}> {
   let after = -1; // keyset cursor on feature_index (0-based in schema)
   let features = 0;
   let landUseHits = 0;
+  let addressRecoveredHits = 0;
   let nodeIds = 0;
+  // The address-recovery join needs the TxGIO owner to gate each match. Select
+  // it ONLY for a blocked county (never for a normal county), and use it ONLY
+  // inside the owner gate — it is never stamped onto a feature.
+  const needsOwnerForGate = blockedFips.has(county.fips);
   for (;;) {
     const remaining =
       limit !== undefined ? Math.max(0, limit - features) : pageSize;
     if (remaining === 0) break;
     const pageLimit = Math.min(pageSize, remaining);
+    const ownerSelect = needsOwnerForGate
+      ? "owner_name AS txgio_owner_for_gate"
+      : "NULL::text AS txgio_owner_for_gate";
     const r = await pool.query<{
       feature_index: number;
       prop_id: string | null;
       situs_address: string | null;
+      txgio_owner_for_gate: string | null;
       geometry: unknown;
     }>(
       `SELECT DISTINCT ON (feature_index)
-              feature_index, prop_id, situs_address, geometry
+              feature_index, prop_id, situs_address, ${ownerSelect}, geometry
          FROM ${county.table}
         WHERE county_fips = $1
           AND feature_index > $2
@@ -353,8 +426,11 @@ async function exportCounty(
       // owner_name is NOT stamped: the CAD owner NAME is the private pairing
       // and this PMTiles archive is a public, bulk-downloadable, cache-forever
       // artifact. Publishing owner names on ~2.5M features would leak the names
-      // of millions of Texans. The column is not even SELECTed above.
+      // of millions of Texans. `txgio_owner_for_gate` (when selected) is used
+      // ONLY inside the address-recovery owner gate below and never assigned to
+      // `properties`.
       if (row.situs_address) properties.situsAddress = row.situs_address;
+      let luResolved = false;
       if (row.prop_id) {
         // The cad_property key is CAD-normalized (leading zeros stripped),
         // the same key the cad:* brief adapters join on. The store's raw
@@ -362,7 +438,7 @@ async function exportCounty(
         // landUseJoinKey enforces the per-county data-integrity gate: it
         // returns null for BLOCKED counties (the coverage ledger's computed
         // `block` verdicts, loaded once per run; seed fallback on an unscored
-        // DB), so those parcels bake land-use-absent (honest) rather than a
+        // DB), so those parcels get NO prop_id land-use (honest) rather than a
         // fabricated collision.
         const joinKey = landUseJoinKey(county.fips, row.prop_id, blockedFips);
         const lu = joinKey != null ? landUse.get(joinKey) : undefined;
@@ -373,6 +449,34 @@ async function exportCounty(
           properties.landUseSource = "cad-roll";
           properties.landUseVintage = lu.landUseVintage;
           landUseHits += 1;
+          luResolved = true;
+        }
+      }
+      // SITUS-ADDRESS RECOVERY (blocked counties only, per-match owner-gated).
+      // When the prop_id join produced nothing (blocked county), attempt the
+      // address recovery. addressJoinKey returns null for non-blocked counties;
+      // resolveAddressLandUse promotes a matched code ONLY when the TxGIO and
+      // CAD owners AGREE — an owner-disagreeing (or owner-blank) match is honest
+      // absence, never the mismatched code. So no un-gated join promotes.
+      if (!luResolved) {
+        const addrKey = addressJoinKey(
+          county.fips,
+          row.situs_address,
+          blockedFips,
+        );
+        const hit = resolveAddressLandUse(
+          addrKey,
+          row.txgio_owner_for_gate,
+          addressLandUse,
+        );
+        if (hit) {
+          properties.landUseCode = hit.code;
+          const desc = ptadLandUseDescription(hit.code);
+          if (desc) properties.landUseDescription = desc;
+          properties.landUseSource = "cad-roll-address-join";
+          properties.landUseVintage = hit.vintage;
+          landUseHits += 1;
+          addressRecoveredHits += 1;
         }
       }
       const feature = {
@@ -387,7 +491,12 @@ async function exportCounty(
     }
     if (r.rows.length < pageLimit) break;
   }
-  return { features, landUse: landUseHits, nodeIds };
+  return {
+    features,
+    landUse: landUseHits,
+    landUseAddressRecovered: addressRecoveredHits,
+    nodeIds,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +667,7 @@ async function main(): Promise<void> {
   const stats: ExportStats = {
     featureCount: 0,
     withLandUse: 0,
+    withLandUseAddressRecovered: 0,
     withNodeId: 0,
     perCounty: [],
   };
@@ -610,28 +720,46 @@ async function main(): Promise<void> {
         counties.map((c) => `${c.fips}/${c.name}(${c.parcelCount})`).join(", "),
     );
 
-    // Ledger-driven land-use block set (the gate's computed `block` verdicts);
-    // empty on an unscored DB -> landUseJoinKey falls back to the gate-output
-    // seed, so a fresh DB is never left un-gated.
-    const blockedFips = await loadLedgerBlockedFips(pool);
+    // Land-use block set: the ledger's computed `block` verdicts UNION the
+    // gate-output seed (the permanent floor), so a seed-blocked county
+    // (Williamson/Hays) is blocked on the prop_id join AND runs the
+    // address-recovery join even on an unscored DB. This mirrors the Tier-1
+    // bake's `effectiveBlockedFips`.
+    const ledgerBlockedFips = await loadLedgerBlockedFips(pool);
+    const blockedFips = new Set<string>([
+      ...ledgerBlockedFips,
+      ...LANDUSE_JOIN_DISABLED_FIPS_SEED,
+    ]);
     if (blockedFips.size > 0) {
       log(
-        `land-use gate: ledger BLOCKS ${[...blockedFips].sort().join(", ")} ` +
-          `— those counties bake land-use ABSENT (honest).`,
+        `land-use gate: prop_id join BLOCKED for ${[...blockedFips]
+          .sort()
+          .join(", ")} — those counties get NO prop_id land-use; land-use is ` +
+          `RECOVERED via the owner-gated situs-address join.`,
       );
     }
 
     const out = createWriteStream(geojsonPath, { encoding: "utf8" });
     for (const county of counties) {
       const landUse = await fetchCountyLandUse(pool, county.fips);
+      // Address-recovery lookup built ONLY for a blocked county (the only place
+      // the recovery join fires); an empty map for every other county.
+      const addressLandUse = blockedFips.has(county.fips)
+        ? await fetchCountyLandUseByAddress(pool, county.fips)
+        : new Map<string, AddressLandUseEntry>();
       log(
         `county ${county.fips}/${county.name} from ${county.table} ` +
-          `(${county.parcelCount} parcels, ${landUse.size} CAD land-use rows)`,
+          `(${county.parcelCount} parcels, ${landUse.size} CAD land-use rows` +
+          (blockedFips.has(county.fips)
+            ? `, ${addressLandUse.size} address-keyed CAD rows for recovery`
+            : "") +
+          `)`,
       );
       const res = await exportCounty(
         pool,
         county,
         landUse,
+        addressLandUse,
         out,
         pageSize,
         limit,
@@ -639,16 +767,21 @@ async function main(): Promise<void> {
       );
       stats.featureCount += res.features;
       stats.withLandUse += res.landUse;
+      stats.withLandUseAddressRecovered += res.landUseAddressRecovered;
       stats.withNodeId += res.nodeIds;
       stats.perCounty.push({
         fips: county.fips,
         name: county.name,
         features: res.features,
         landUse: res.landUse,
+        landUseAddressRecovered: res.landUseAddressRecovered,
       });
       log(
-        `  -> ${res.features} features (${res.landUse} land-use, ` +
-          `${res.nodeIds} node-ids)`,
+        `  -> ${res.features} features (${res.landUse} land-use` +
+          (res.landUseAddressRecovered > 0
+            ? `, ${res.landUseAddressRecovered} via owner-gated address-join`
+            : "") +
+          `, ${res.nodeIds} node-ids)`,
       );
     }
     out.end();
@@ -745,10 +878,14 @@ function summarize(
     log(`features:         ${stats.featureCount}`);
     log(`with node id:     ${stats.withNodeId}`);
     log(`with land-use:    ${stats.withLandUse}`);
+    log(`  via address-join:${stats.withLandUseAddressRecovered} (owner-gated situs-address recovery)`);
     for (const c of stats.perCounty) {
       log(
         `  ${c.fips} ${c.name.padEnd(11)} ${String(c.features).padStart(8)} ` +
-          `features  ${String(c.landUse).padStart(8)} land-use`,
+          `features  ${String(c.landUse).padStart(8)} land-use` +
+          (c.landUseAddressRecovered > 0
+            ? `  (${c.landUseAddressRecovered} via address-join)`
+            : ""),
       );
     }
   }
