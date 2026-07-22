@@ -28,6 +28,12 @@ import { isGtmErrorClass, type GtmErrorClass } from "../lib/gtmErrorClass";
 import { classifyGtmEvents } from "../lib/gtmTriage";
 import { computeGtmScoreboardMetrics } from "../lib/gtmScoreboardMetrics";
 import { computeInvestorFunnelMetrics, listRecentQualifiedProspects } from "../lib/gtmInvestorFunnel";
+import {
+  computePropertyExplorerFunnelMetrics,
+  isPropertyExplorerFunnelEventType,
+  PE_GTM_CONSENT_VERSION,
+} from "../lib/gtmPropertyExplorerFunnel";
+import { syncPropertyExplorerCrm } from "../lib/propertyExplorerGtmCrm";
 import { syncPipedriveLead } from "../lib/brokeragePipedrive";
 import { attemptOutboundSend } from "../lib/gtmOutbound";
 import { GTM_OUTBOUND_ACTIONS, isOutboundEnabled } from "../lib/gtmPolicy";
@@ -354,6 +360,10 @@ brokerageGtmRouter.get(
 
     const scoreboardMetrics = await computeGtmScoreboardMetrics(since);
     const investorFunnel = await computeInvestorFunnelMetrics(since, windowDays);
+    const propertyExplorerFunnel = await computePropertyExplorerFunnelMetrics(
+      since,
+      windowDays,
+    );
 
     const triageSourceRows = await db
       .select({
@@ -423,6 +433,7 @@ brokerageGtmRouter.get(
       },
       scoreboardMetrics,
       investorFunnel,
+      propertyExplorerFunnel,
       triageSample,
       policyTier: {
         outboundEnabled: isOutboundEnabled(),
@@ -546,5 +557,123 @@ brokerageGtmRouter.post(
     }
 
     res.status(200).json({ ok: true, sent: true, action: result.action });
+  },
+);
+
+const PE_CONSENT_BODY = z.object({
+  installId: z.string().min(8).max(128),
+  termsAcceptedAt: z.string().datetime().optional(),
+});
+
+const PE_EVENT_BODY = z.object({
+  installId: z.string().min(8).max(128),
+  eventType: z.string().min(1).max(64),
+  personaInferred: z.enum(["homeowner", "investor", "architect"]).optional(),
+  listingKey: z.string().max(128).optional(),
+  payload: z.record(z.unknown()).optional(),
+});
+
+/** Property Explorer web consent (WDLL 25) — BFF/service-token path. */
+brokerageGtmRouter.post(
+  "/property-explorer/consent",
+  requireBrokerageAuthOrServiceToken,
+  async (req: Request, res: Response) => {
+    const parse = PE_CONSENT_BODY.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "invalid_request", message: "Invalid consent body" });
+      return;
+    }
+
+    const { installId, termsAcceptedAt } = parse.data;
+    const acceptedAt = termsAcceptedAt ? new Date(termsAcceptedAt) : new Date();
+
+    await db
+      .insert(gtmConsent)
+      .values({
+        installId,
+        consentVersion: PE_GTM_CONSENT_VERSION,
+        termsAcceptedAt: acceptedAt,
+        graphOptIn: false,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: gtmConsent.installId,
+        set: {
+          consentVersion: PE_GTM_CONSENT_VERSION,
+          termsAcceptedAt: acceptedAt,
+          updatedAt: new Date(),
+        },
+      });
+
+    res.json({
+      ok: true,
+      installId,
+      consentVersion: PE_GTM_CONSENT_VERSION,
+      sourceSurface: "property-explorer",
+    });
+  },
+);
+
+/** Property Explorer funnel events + CRM sync (WDLL 25). */
+brokerageGtmRouter.post(
+  "/property-explorer/events",
+  requireBrokerageAuthOrServiceToken,
+  async (req: Request, res: Response) => {
+    const parse = PE_EVENT_BODY.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "invalid_request", message: "Invalid event body" });
+      return;
+    }
+
+    const data = parse.data;
+    if (!isPropertyExplorerFunnelEventType(data.eventType)) {
+      res.status(400).json({
+        error: "invalid_event_type",
+        message: "Unknown property-explorer funnel event",
+      });
+      return;
+    }
+
+    const [consent] = await db
+      .select()
+      .from(gtmConsent)
+      .where(eq(gtmConsent.installId, data.installId))
+      .limit(1);
+
+    if (!consent) {
+      res.status(403).json({
+        error: "consent_required",
+        message: "Call property-explorer/consent before sending events",
+      });
+      return;
+    }
+
+    const [inserted] = await db
+      .insert(gtmEvents)
+      .values({
+        installId: data.installId,
+        eventType: data.eventType,
+        sourceSurface: "property-explorer",
+        listingKey: data.listingKey ?? null,
+        personaInferred: data.personaInferred ?? null,
+        consentVersion: consent.consentVersion,
+        graphOptIn: "false",
+        payloadJson: data.payload ?? {},
+      })
+      .returning({ id: gtmEvents.id });
+
+    const crm = await syncPropertyExplorerCrm({
+      eventType: data.eventType,
+      installId: data.installId,
+      payload: data.payload,
+    });
+
+    res.status(201).json({
+      ok: true,
+      eventId: inserted?.id,
+      pipedrive: crm.pipedrive ?? null,
+      pipedriveConfigured: crm.pipedriveConfigured,
+      pipedriveMode: crm.pipedrive?.mode ?? null,
+    });
   },
 );
