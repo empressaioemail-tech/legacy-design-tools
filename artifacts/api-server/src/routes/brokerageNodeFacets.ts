@@ -115,6 +115,13 @@ export interface Tier2Overlay {
   snapshotAt: string | null;
 }
 
+export interface BakedNodeFacetSnapshot {
+  parcelNodeId: string;
+  facets: unknown;
+  snapshotAt: string | null;
+  tier2: Tier2Overlay | null;
+}
+
 export function extractTier2Overlay(
   payloadJson: unknown,
   snapshotAt: Date | string | null,
@@ -144,6 +151,54 @@ export const brokerageNodeFacetsRouter: IRouter = Router();
 
 brokerageNodeFacetsRouter.use(brokerageCors);
 
+/**
+ * Shared pure-read path for the public facet endpoint and paid Property
+ * Explorer reports. Keeps R1 tethered to the same owner-free baked snapshot
+ * rather than introducing a second query or compute path.
+ */
+export async function loadBakedNodeFacetSnapshot(
+  parcelNodeId: string,
+): Promise<BakedNodeFacetSnapshot | null> {
+  const placeKey = placeKeyForNode(parcelNodeId);
+  const rows = await db
+    .select({
+      adapterKey: placeLayerSnapshots.adapterKey,
+      payloadJson: placeLayerSnapshots.payloadJson,
+      snapshotAt: placeLayerSnapshots.snapshotAt,
+    })
+    .from(placeLayerSnapshots)
+    .where(
+      and(
+        inArray(placeLayerSnapshots.adapterKey, [
+          TIER1_ADAPTER_KEY,
+          TIER2_ADAPTER_KEY,
+        ]),
+        eq(placeLayerSnapshots.placeKey, placeKey),
+      ),
+    )
+    .limit(2);
+
+  const row = rows.find((r) => r.adapterKey === TIER1_ADAPTER_KEY);
+  if (!row) return null;
+  const tier2Row = rows.find((r) => r.adapterKey === TIER2_ADAPTER_KEY);
+  const tier2Raw = tier2Row
+    ? extractTier2Overlay(tier2Row.payloadJson, tier2Row.snapshotAt)
+    : null;
+
+  return {
+    parcelNodeId,
+    facets: sanitizeNodeFacetPayload(row.payloadJson),
+    snapshotAt:
+      row.snapshotAt instanceof Date
+        ? row.snapshotAt.toISOString()
+        : (row.snapshotAt ?? null),
+    tier2:
+      tier2Raw != null
+        ? (sanitizeNodeFacetPayload(tier2Raw) as Tier2Overlay)
+        : null,
+  };
+}
+
 brokerageNodeFacetsRouter.get(
   "/node/:parcelNodeId/facets",
   async (req: Request, res: Response) => {
@@ -166,34 +221,8 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const placeKey = placeKeyForNode(parcelNodeId);
-
-    // Read BOTH tiers for this node in one round-trip: Tier 1 (the base facets
-    // the card renders) and Tier 2 (the FEMA flood overlay +, later, the
-    // road-upgraded envelope). Composing both here means the card's single
-    // anonymous read gets real per-node flood without a second request.
-    const rows = await db
-      .select({
-        adapterKey: placeLayerSnapshots.adapterKey,
-        payloadJson: placeLayerSnapshots.payloadJson,
-        snapshotAt: placeLayerSnapshots.snapshotAt,
-      })
-      .from(placeLayerSnapshots)
-      .where(
-        and(
-          inArray(placeLayerSnapshots.adapterKey, [
-            TIER1_ADAPTER_KEY,
-            TIER2_ADAPTER_KEY,
-          ]),
-          eq(placeLayerSnapshots.placeKey, placeKey),
-        ),
-      )
-      .limit(2);
-
-    const row = rows.find((r) => r.adapterKey === TIER1_ADAPTER_KEY);
-    const tier2Row = rows.find((r) => r.adapterKey === TIER2_ADAPTER_KEY);
-
-    if (!row) {
+    const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+    if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
       // we answer 404 with the honest "not baked" signal and the node id so the
@@ -208,32 +237,16 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const facets = sanitizeNodeFacetPayload(row.payloadJson);
-
-    // Compose the Tier-2 flood overlay (real per-node FEMA zone) when the node
-    // has a Tier-2 row. Owner-strip runs over it too — defense-in-depth, though
-    // the Tier-2 bake never selects an owner either.
-    const tier2Raw = tier2Row
-      ? extractTier2Overlay(tier2Row.payloadJson, tier2Row.snapshotAt)
-      : null;
-    const tier2 =
-      tier2Raw != null
-        ? (sanitizeNodeFacetPayload(tier2Raw) as Tier2Overlay)
-        : null;
-
     res.json({
       parcelNodeId,
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
-      snapshotAt:
-        row.snapshotAt instanceof Date
-          ? row.snapshotAt.toISOString()
-          : (row.snapshotAt ?? null),
-      facets,
+      snapshotAt: snapshot.snapshotAt,
+      facets: snapshot.facets,
       // The FEMA flood overlay the card + the map's "FEMA flood zone" layer
       // read. `null` when the node has no Tier-2 row yet (renders the Tier-1
       // base unchanged). `tier2.flood` carries the real zone + FEMA vintage.
-      tier2,
+      tier2: snapshot.tier2,
     });
   },
 );
