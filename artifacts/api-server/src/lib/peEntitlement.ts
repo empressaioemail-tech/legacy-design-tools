@@ -4,6 +4,7 @@
 
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { getPeAccessTier } from "./peIdentity";
+import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
 export type PeEntitlementSnapshot = {
@@ -14,8 +15,14 @@ export type PeEntitlementSnapshot = {
 };
 
 export function resolvePeOwnerUserId(req: Request): string | null {
-  if (req.session.requestor?.kind === "user" && req.session.requestor.id) {
-    return req.session.requestor.id;
+  const userId = req.session.requestor?.kind === "user"
+    ? req.session.requestor.id
+    : undefined;
+  // `pr_anon_owner` gives browse-only sessions an isolated owner for legacy
+  // workspace writes. It is not an authenticated Property Explorer account:
+  // treating it as one would turn anonymous deep requests into free-tier 402s.
+  if (userId && !isAnonymousOwnerId(userId)) {
+    return userId;
   }
   return null;
 }
