@@ -40,6 +40,9 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // it; must be truncated explicitly so the saved-spaces route suite starts
   // from a known-empty state.
   "saved_workspace_spaces",
+  "pe_user_identities",
+  "pe_user_entitlements",
+  "pe_saved_properties",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",

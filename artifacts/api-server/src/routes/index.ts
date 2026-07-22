@@ -55,6 +55,8 @@ import coverageRequestsRouter from "./coverageRequests";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
+import peAuthRouter from "./peAuth";
+import propertyExplorerRouter from "./propertyExplorer";
 import planReviewBffRouter from "./planReviewBff";
 import { internalQaRunStateRouter } from "./operatorRunState";
 
@@ -62,6 +64,8 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
+router.use(peAuthRouter);
+router.use(propertyExplorerRouter);
 router.use("/plan-review", planReviewBffRouter);
 // Hauska Property Brief Chrome extension — API-key auth + extension CORS.
 router.use(brokerageBriefRouter);
