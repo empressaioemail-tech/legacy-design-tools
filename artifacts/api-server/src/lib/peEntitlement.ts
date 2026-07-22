@@ -3,6 +3,8 @@
  */
 
 import type { Request, Response, NextFunction, RequestHandler } from "express";
+import { and, eq } from "drizzle-orm";
+import { db, peUserIdentities } from "@workspace/db";
 import { getPeAccessTier } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
@@ -74,6 +76,10 @@ export const requirePePaidDeep: RequestHandler = async (
     return;
   }
   const tier = await getPeAccessTier(userId);
+  if (await hasPeDevPaidBypass(userId)) {
+    next();
+    return;
+  }
   if (tier !== "paid") {
     res.status(402).json({
       error: "upgrade_required",
@@ -84,6 +90,40 @@ export const requirePePaidDeep: RequestHandler = async (
   }
   next();
 };
+
+function allowlistEnv(name: "PE_DEV_PAID_EMAILS" | "PE_DEV_PAID_SUBJECTS"): Set<string> {
+  return new Set(
+    (process.env[name] ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Temporary operator-only paid bypass for deep routes. It is deliberately
+ * identity-bound (not a request header) and inert unless an allowlist env is
+ * configured. Billing remains the source of truth for every other user.
+ */
+export async function hasPeDevPaidBypass(userId: string): Promise<boolean> {
+  const emails = allowlistEnv("PE_DEV_PAID_EMAILS");
+  const subjects = allowlistEnv("PE_DEV_PAID_SUBJECTS");
+  if (emails.size === 0 && subjects.size === 0) return false;
+
+  const identities = await db
+    .select({
+      email: peUserIdentities.email,
+      subject: peUserIdentities.subject,
+    })
+    .from(peUserIdentities)
+    .where(eq(peUserIdentities.userId, userId));
+
+  return identities.some(
+    (identity) =>
+      (identity.email != null && emails.has(identity.email.trim().toLowerCase())) ||
+      subjects.has(identity.subject.trim().toLowerCase()),
+  );
+}
 
 /** Test fixture: flip a user to paid tier (non-production or test header). */
 export async function setPeAccessTierForTest(

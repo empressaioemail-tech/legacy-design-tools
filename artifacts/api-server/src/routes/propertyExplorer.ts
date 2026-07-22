@@ -15,9 +15,166 @@ import {
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
-import { logger } from "../lib/logger";
+import {
+  isValidParcelNodeId,
+  loadBakedNodeFacetSnapshot,
+} from "./brokerageNodeFacets";
 
 const router: IRouter = Router();
+
+type JsonRecord = Record<string, unknown>;
+
+type BriefSection = {
+  id: "zoning" | "setbacks-envelope" | "flood" | "land-use";
+  title: string;
+  data: unknown;
+  citations: string[];
+};
+
+function asRecord(value: unknown): JsonRecord | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
+}
+
+function urlsFrom(value: unknown): string[] {
+  const urls = new Set<string>();
+  const visit = (candidate: unknown, key?: string): void => {
+    if (typeof candidate === "string") {
+      if (
+        key &&
+        /(?:citation|source).*url|url.*(?:citation|source)/i.test(key) &&
+        /^https?:\/\//i.test(candidate)
+      ) {
+        urls.add(candidate);
+      }
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      candidate.forEach((item) => visit(item, key));
+      return;
+    }
+    const record = asRecord(candidate);
+    if (record) {
+      Object.entries(record).forEach(([nestedKey, nestedValue]) =>
+        visit(nestedValue, nestedKey),
+      );
+    }
+  };
+  visit(value);
+  return [...urls];
+}
+
+function verbatimValues(value: unknown, keys: ReadonlySet<string>): string[] {
+  const values = new Set<string>();
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    const record = asRecord(candidate);
+    if (!record) return;
+    for (const [key, nested] of Object.entries(record)) {
+      if (keys.has(key) && typeof nested === "string" && nested.trim()) {
+        values.add(nested);
+      }
+      visit(nested);
+    }
+  };
+  visit(value);
+  return [...values];
+}
+
+function buildR1RunId(parcelNodeId: string, bakedAt: string | null): string {
+  return `pe-r1-${Buffer.from(parcelNodeId).toString("base64url")}.${Buffer.from(
+    bakedAt ?? "undated",
+  ).toString("base64url")}`;
+}
+
+function parcelNodeIdFromR1RunId(runId: string): string | null {
+  const match = /^pe-r1-([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+$/.exec(runId);
+  if (!match) return null;
+  try {
+    const parcelNodeId = Buffer.from(match[1], "base64url").toString("utf8");
+    return isValidParcelNodeId(parcelNodeId) ? parcelNodeId : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildR1Brief(facets: unknown, tier2: unknown): {
+  sections: BriefSection[];
+  disclosure: string[];
+  citations: string[];
+} {
+  const root = asRecord(facets) ?? {};
+  const baseFacts = asRecord(root.baseFacts) ?? {};
+  const envelope = root.envelope ?? null;
+  const sections: BriefSection[] = [
+    { id: "zoning", title: "Zoning", data: root.zoning ?? null, citations: urlsFrom(root.zoning) },
+    {
+      id: "setbacks-envelope",
+      title: "Setbacks and buildable envelope",
+      data: envelope,
+      citations: urlsFrom(envelope),
+    },
+    {
+      id: "flood",
+      title: "Flood",
+      data: asRecord(tier2)?.flood ?? null,
+      citations: urlsFrom(asRecord(tier2)?.flood),
+    },
+    {
+      id: "land-use",
+      title: "Land use",
+      data: baseFacts.landUse ?? null,
+      citations: urlsFrom(baseFacts.landUse),
+    },
+  ];
+  const disclosures = verbatimValues(
+    { facets, tier2 },
+    new Set(["districtNote", "disclosure", "emptyReason"]),
+  );
+  return {
+    sections,
+    disclosure: disclosures,
+    citations: [...new Set(sections.flatMap((section) => section.citations))],
+  };
+}
+
+function manifestLayers(facets: unknown, tier2: unknown): {
+  layers: Array<Record<string, unknown>>;
+  degraded: boolean;
+  reason?: string;
+} {
+  const envelope = asRecord(facets)?.envelope;
+  const envelopeGeojson = asRecord(envelope)?.geojson;
+  const flood = asRecord(tier2)?.flood;
+  const layers: Array<Record<string, unknown>> = [];
+  if (envelopeGeojson) {
+    layers.push({
+      id: "buildable-envelope",
+      kind: "geojson",
+      feature: envelopeGeojson,
+      source: "baked-snapshot",
+    });
+  }
+  if (flood) {
+    layers.push({
+      id: "flood",
+      kind: "flood-facet",
+      data: flood,
+      source: "baked-snapshot",
+    });
+  }
+  return layers.length > 0
+    ? { layers, degraded: false }
+    : {
+        layers,
+        degraded: true,
+        reason: "Baked snapshot has no envelope geometry or Tier-2 flood facet.",
+      };
+}
 
 function ownerScope(req: Request): { tenantId: string; ownerUserId: string } | null {
   const ownerUserId = resolvePeOwnerUserId(req);
@@ -154,7 +311,7 @@ router.delete(
   },
 );
 
-/** R1 scaffold — Property brief behind paid entitlement (Wave 3). */
+/** R1 cited property intelligence from the existing baked node facets. */
 router.post(
   "/property-explorer/v1/research/brief",
   requirePeAuthenticated,
@@ -164,17 +321,35 @@ router.post(
       typeof req.body?.parcelNodeId === "string"
         ? req.body.parcelNodeId.trim()
         : "";
-    if (!parcelNodeId) {
+    if (!parcelNodeId || !isValidParcelNodeId(parcelNodeId)) {
       res.status(400).json({ error: "invalid_parcel_node_id" });
       return;
     }
-    // Honest degrade until spine report_run wired — never fake a brief.
-    res.status(503).json({
-      error: "report_not_ready",
-      message:
-        "Property brief spine path is scaffolded; report_run integration pending.",
-      parcelNodeId,
+    const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+    if (!snapshot) {
+      res.status(404).json({
+        error: "baked_snapshot_not_found",
+        message: "No baked facet snapshot exists for this parcel node.",
+        parcelNodeId,
+      });
+      return;
+    }
+    const root = asRecord(snapshot.facets);
+    const bakedAt =
+      typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
+    const brief = buildR1Brief(snapshot.facets, snapshot.tier2);
+    res.json({
+      runId: buildR1RunId(parcelNodeId, bakedAt),
       reportFamily: "R1",
+      mode: "baked-facet-intel-v1",
+      parcelNodeId,
+      brief: {
+        sections: brief.sections,
+        disclosure: brief.disclosure,
+      },
+      citations: brief.citations,
+      bakedAt,
+      source: "baked-snapshot",
     });
   },
 );
@@ -208,7 +383,7 @@ router.post(
   },
 );
 
-/** Layer manifest contract scaffold (R2/R21) — returns empty manifest until report_run serves. */
+/** Layer manifest projected from the same R1 baked snapshot. */
 router.get(
   "/property-explorer/v1/research/layer-manifest/:runId",
   requirePeAuthenticated,
@@ -220,12 +395,29 @@ router.get(
       res.status(400).json({ error: "invalid_run_id" });
       return;
     }
+    const parcelNodeId = parcelNodeIdFromR1RunId(runId);
+    if (!parcelNodeId) {
+      res.status(400).json({ error: "invalid_run_id" });
+      return;
+    }
+    const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+    if (!snapshot) {
+      res.status(404).json({
+        error: "baked_snapshot_not_found",
+        message: "No baked facet snapshot exists for this report run.",
+        parcelNodeId,
+      });
+      return;
+    }
+    const manifest = manifestLayers(snapshot.facets, snapshot.tier2);
     res.json({
       runId,
-      layers: [],
       contract: "layer-manifest-v1",
-      degraded: true,
-      message: "Manifest populated when spine report_run completes.",
+      parcelNodeId,
+      layers: manifest.layers,
+      degraded: manifest.degraded,
+      ...(manifest.reason ? { reason: manifest.reason } : {}),
+      source: "baked-snapshot",
     });
   },
 );
