@@ -77,3 +77,6 @@ export * from "./txgioAddress";
 export * from "./reportRun";
 export * from "./permitRecord";
 export * from "./terrainGenerationJobs";
+export * from "./peUserIdentities";
+export * from "./peUserEntitlements";
+export * from "./peSavedProperties";

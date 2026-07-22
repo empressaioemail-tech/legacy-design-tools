@@ -172,6 +172,9 @@ describe("lib/db schema integration", () => {
         "package_share_comments",
         "package_shares",
         "parcel_briefings",
+        "pe_saved_properties",
+        "pe_user_entitlements",
+        "pe_user_identities",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
         // feat/permits-brief-slot — owned municipal issued-permit corpus

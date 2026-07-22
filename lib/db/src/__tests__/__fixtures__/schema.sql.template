@@ -989,6 +989,43 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: pe_saved_properties; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_saved_properties (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    owner_user_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    label text,
+    snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: pe_user_entitlements; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    access_tier text DEFAULT 'free'::text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: pe_user_identities; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_user_identities (
+    id text NOT NULL,
+    user_id text NOT NULL,
+    provider text NOT NULL,
+    subject text NOT NULL,
+    email text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: permit_counters; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.permit_counters (
@@ -1992,6 +2029,24 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_saved_properties pe_saved_properties_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
+    ADD CONSTRAINT pe_saved_properties_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
+    ADD CONSTRAINT pe_user_entitlements_pkey PRIMARY KEY (owner_user_id);
+
+
+-- Name: pe_user_identities pe_user_identities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_identities
+    ADD CONSTRAINT pe_user_identities_pkey PRIMARY KEY (id);
+
+
 -- Name: permit_counters permit_counters_tenant_id_year_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.permit_counters
@@ -2685,6 +2740,31 @@ CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: pe_saved_properties_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, updated_at);
+
+
+-- Name: pe_saved_properties_owner_parcel_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_saved_properties_owner_parcel_uidx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, parcel_node_id);
+
+
+-- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_user_entitlements_tenant_idx ON @@SCHEMA@@.pe_user_entitlements USING btree (tenant_id);
+
+
+-- Name: pe_user_identities_provider_subject_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_user_identities_provider_subject_uidx ON @@SCHEMA@@.pe_user_identities USING btree (provider, subject);
+
+
+-- Name: pe_user_identities_user_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_user_identities_user_idx ON @@SCHEMA@@.pe_user_identities USING btree (user_id);
+
+
 -- Name: permit_record_metro_address_issued_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX permit_record_metro_address_issued_idx ON @@SCHEMA@@.permit_record USING btree (metro, address_normalized, issued_date);
@@ -3183,6 +3263,18 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
+
+
+-- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
+    ADD CONSTRAINT pe_user_entitlements_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_user_identities pe_user_identities_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_identities
+    ADD CONSTRAINT pe_user_identities_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: plan_set_piece_classifications plan_set_piece_classifications_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
