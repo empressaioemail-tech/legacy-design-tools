@@ -135,6 +135,7 @@ import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildableEnvelope";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
+import { propertyExplorerBillingRouter } from "./propertyExplorerBilling";
 import { brokerageBillingPublicRouter } from "./brokerageBillingPublic";
 import { brokerageNodeFacetsRouter } from "./brokerageNodeFacets";
 import {
@@ -283,6 +284,8 @@ router.get("/brief-coverage", (_req: Request, res: Response) => {
 brokerageV1.use(brokerageCors);
 /** GTM consent/events use {@link brokerageAuth} only — extension wedge, no service token. */
 brokerageV1.use("/gtm", brokerageGtmRouter);
+/** Property Explorer checkout seam — service token + install id (WDLL 26). */
+brokerageV1.use("/property-explorer/billing", propertyExplorerBillingRouter);
 /** Stripe checkout return pages — reachable without extension API key. */
 brokerageV1.use("/billing", brokerageBillingPublicRouter);
 /**
