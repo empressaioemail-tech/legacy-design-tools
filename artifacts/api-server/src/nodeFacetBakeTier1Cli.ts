@@ -104,6 +104,7 @@ import {
   type Ring,
 } from "./lib/nodeFacetBakeTier1";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants";
+import { soleZoningJurisdictionKey } from "@workspace/cad-ingest/zoning-layers";
 
 const { Pool } = pg;
 
@@ -579,8 +580,10 @@ export function buildTier1Payload(
   const zoning = zoningDistrict ? { district: zoningDistrict } : null;
 
   // --- Setbacks + buildable envelope (skipRoad / shape-only, provisional) ---
-  // Deterministic given zoning + geometry; needs the jurisdiction (city/state)
-  // for the setback table lookup, taken from the parcel's own situs.
+  // Deterministic given zoning + geometry. Jurisdiction for the setback table
+  // prefers situs city/address; when situs is blank (Travis TxGIO) and this
+  // county has exactly one registered zoning layer, fall back to that city
+  // key only for parcels that already carry a zoning stamp.
   const envelope: Tier1EnvelopeFacet | null = ring
     ? computeTier1Envelope({
         ring,
@@ -588,6 +591,7 @@ export function buildTier1Payload(
         situsCity: baseFacts.situsCity,
         situsState: baseFacts.situsState,
         situsAddress: baseFacts.situsAddress,
+        zoningJurisdictionFallback: soleZoningJurisdictionKey(countyFips),
       })
     : null;
 

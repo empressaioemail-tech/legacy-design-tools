@@ -78,6 +78,13 @@ export interface Tier1EnvelopeInput {
   situsCity: string | null;
   situsState: string | null;
   situsAddress: string | null;
+  /**
+   * When situs cannot synthesize a jurisdiction key but the parcel already
+   * carries a zoning stamp from a county with exactly one registered city
+   * zoning layer, the bake CLI may pass that layer's key here (underscore
+   * form). Never invent for multi-city counties.
+   */
+  zoningJurisdictionFallback?: string | null;
 }
 
 export interface Tier1EnvelopeFacet {
@@ -130,11 +137,19 @@ export function computeTier1Envelope(
 ): Tier1EnvelopeFacet {
   const base = { provisional: true, roadsPending: true } as const;
 
-  const jurisdictionKey = keyFromEngagementOrSynthesize({
+  const fromSitus = keyFromEngagementOrSynthesize({
     jurisdictionCity: input.situsCity,
     jurisdictionState: input.situsState,
     address: input.situsAddress ?? undefined,
   });
+  // Zoning-layer fallback only when (a) situs failed, (b) a sole-city key was
+  // supplied by the bake CLI, and (c) the parcel actually has a zoning stamp
+  // — never use the fallback to invent jurisdiction on unzoned parcels.
+  const jurisdictionKey =
+    fromSitus ??
+    (input.zoningCode && input.zoningJurisdictionFallback
+      ? input.zoningJurisdictionFallback
+      : null);
   if (!jurisdictionKey) {
     return {
       ...base,

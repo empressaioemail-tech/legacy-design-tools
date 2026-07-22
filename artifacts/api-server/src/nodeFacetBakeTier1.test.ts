@@ -404,6 +404,38 @@ describe("honest absence — envelope + node-id (never fabricate)", () => {
     expect(env.setbacks).toBeUndefined();
   });
 
+  it("blank situs declines even with a zoning fallback when zoning is absent", () => {
+    const env = computeTier1Envelope({
+      ring: BASTROP_LOT,
+      zoningCode: null,
+      situsCity: null,
+      situsState: "TX",
+      situsAddress: null,
+      zoningJurisdictionFallback: "pflugerville_tx",
+    });
+    expect(env.status).toBe("declined");
+    expect(env.declineReason).toBe("no-jurisdiction-key");
+  });
+
+  it("blank situs uses sole-zoning-layer fallback when a district is stamped", () => {
+    const env = computeTier1Envelope({
+      ring: BASTROP_LOT,
+      zoningCode: "SF-S",
+      situsCity: null,
+      situsState: "TX",
+      situsAddress: null,
+      zoningJurisdictionFallback: "pflugerville_tx",
+    });
+    expect(env.jurisdictionKey).toBe("pflugerville_tx");
+    // SF-S is a shipped Pflugerville district — envelope should not decline
+    // for no-jurisdiction-key (ok / no-buildable-area / no-district only).
+    expect(env.declineReason).not.toBe("no-jurisdiction-key");
+    expect(["ok", "no-buildable-area", "declined"]).toContain(env.status);
+    if (env.status === "declined") {
+      expect(env.declineReason).toBe("no-district");
+    }
+  });
+
   it("a parcel with no prop_id is not baked (no fabricated node id)", () => {
     const payload = buildTier1Payload(
       parcelRow({ prop_id: null }),
