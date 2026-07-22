@@ -58,6 +58,20 @@ function mostConservative(districts: SetbackDistrict[]): SetbackDistrict {
 }
 
 /**
+ * Prefixes are a deliberately weak fallback for suffix variants such as
+ * `R-1A` against a table's `R-1` row. A one-character token is never enough
+ * evidence: it would collapse `P-5` (a Bastrop B3 place type) into the
+ * unrelated `P Public/Institutional` row.
+ */
+function isSafePrefixMatch(zoningCode: string, districtCode: string): boolean {
+  const shorter = Math.min(zoningCode.length, districtCode.length);
+  return (
+    shorter >= 2 &&
+    (zoningCode.startsWith(districtCode) || districtCode.startsWith(zoningCode))
+  );
+}
+
+/**
  * Map a zoningCode to a district. Never returns a wrong-but-confident district:
  * an unmatched code degrades to the most-conservative district with a low
  * confidence and an explicit "verify" note.
@@ -82,8 +96,9 @@ export function mapDistrict(
   const code = (zoningCode ?? "").trim();
   if (code) {
     const norm = normalizeCode(code);
-    // Exact code match first, then prefix match (e.g. "R1" matches "R1A" only
-    // if no exact hit — prefer the longest matching district code).
+    // Exact code match first, then a guarded segment/stem prefix match (e.g.
+    // "R-1" matches "R-1A"). One-character tokens never prefix-match: "P"
+    // must not map B3 "P-5" to "P Public/Institutional".
     let exact: SetbackDistrict | null = null;
     let prefix: SetbackDistrict | null = null;
     let prefixLen = -1;
@@ -94,10 +109,10 @@ export function mapDistrict(
         exact = d;
         break;
       }
-      // The zoning code STARTS WITH the district code (or vice-versa) — a
-      // weaker signal; keep the longest such district code.
+      // A multi-character shared stem is a weaker signal; keep the longest
+      // matching district code.
       if (
-        (norm.startsWith(dc) || dc.startsWith(norm)) &&
+        isSafePrefixMatch(norm, dc) &&
         dc.length > prefixLen
       ) {
         prefix = d;
