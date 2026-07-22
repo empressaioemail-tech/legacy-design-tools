@@ -248,10 +248,10 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // Bastrop city (Bastrop). A setback table EXISTS (bastrop-tx.json) but it
   // codifies the OLD conventional code (R-MD/C-1/I-1/DT-1). The LIVE GIS layer
   // is the B3 FORM-BASED "Place Type" code (P-1..P-5/P-CS/P-EC/PDD) — these do
-  // NOT align with the existing table's tokens, so the stamp writes the real
-  // Place Type but the envelope will fall back until a P-* table lands.
-  // SETBACK TABLE OWED (a Place-Type table; the current bastrop-tx.json is the
-  // wrong edition for this GIS layer). First Bastrop-county zoning layer.
+  // NOT align with the existing table's tokens. The dedicated bastrop-city-tx
+  // table is cited honest-empty because B3 setbacks are conditional on lot and
+  // frontage context, so the envelope correctly returns no-setbacks rather
+  // than an invented scalar row. First Bastrop-county zoning layer.
   "bastrop-city-tx": {
     cityKey: "bastrop-city-tx",
     cityName: "Bastrop",

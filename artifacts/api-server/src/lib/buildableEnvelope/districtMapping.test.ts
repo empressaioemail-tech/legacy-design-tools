@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { SetbackTable } from "@workspace/adapters";
+import { getSetbackTable, type SetbackTable } from "@workspace/adapters";
 import { mapDistrict, districtCode, normalizeCode } from "./districtMapping";
 
 const TABLE: SetbackTable = {
@@ -66,6 +66,25 @@ describe("mapDistrict — exact match", () => {
     const r = mapDistrict(TABLE, "rmd")!;
     expect(r.district.district_name).toContain("R-MD");
     expect(r.kind).toBe("matched");
+  });
+});
+
+describe("mapDistrict — guarded prefix match", () => {
+  it("maps a multi-character district stem to a suffix variant", () => {
+    const r = mapDistrict(TABLE, "R-MDA")!;
+    expect(r.kind).toBe("matched");
+    expect(r.district.district_name).toContain("R-MD");
+    expect(r.confidence).toBe(0.7);
+  });
+
+  it("does not map Bastrop B3 P-5 to the unrelated one-token P district", () => {
+    const bastrop = getSetbackTable("bastrop-tx");
+    expect(bastrop).not.toBeNull();
+
+    const r = mapDistrict(bastrop!, "P-5")!;
+    expect(r.kind).toBe("fallback-conservative");
+    expect(r.district.district_name).not.toBe("P Public/Institutional");
+    expect(r.note).toMatch(/did not match/i);
   });
 });
 
