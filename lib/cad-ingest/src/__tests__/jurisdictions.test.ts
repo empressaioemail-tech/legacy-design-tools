@@ -18,7 +18,10 @@ import {
 import { TXGIO_COUNTIES } from "../txgio/counties";
 import { CAD_COUNTIES } from "../counties";
 import { CAD_BULK_SOURCES } from "../sources";
-import { ZONING_LAYERS } from "../txgio/zoning-layers";
+import {
+  ZONING_LAYERS,
+  soleZoningJurisdictionKey,
+} from "../txgio/zoning-layers";
 import {
   getSetbackTable,
   SETBACK_JURISDICTION_KEYS,
@@ -226,6 +229,17 @@ describe("listJurisdictions / listJurisdictionFips", () => {
         (j.zoningLayers?.length ?? 0) > 0;
       expect(hasFacet).toBe(true);
     }
+  });
+});
+
+describe("soleZoningJurisdictionKey", () => {
+  it("returns the underscore city key for Travis (sole Pflugerville layer)", () => {
+    expect(soleZoningJurisdictionKey("48453")).toBe("pflugerville_tx");
+  });
+
+  it("returns null for multi-city counties (Hays, Williamson)", () => {
+    expect(soleZoningJurisdictionKey("48209")).toBeNull();
+    expect(soleZoningJurisdictionKey("48491")).toBeNull();
   });
 });
 

@@ -295,3 +295,22 @@ export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined
     (c) => c.cityName.toLowerCase() === key || c.countyFips === key,
   );
 }
+
+/**
+ * When a county has exactly one registered city zoning layer, a parcel that
+ * already carries a stamped `zoning_district` from that layer may use the
+ * layer's city as the setback-jurisdiction key if situs city/address cannot
+ * synthesize one (Travis TxGIO ships blank `situs_city`). Multi-city counties
+ * must not guess — return null and keep the honest `no-jurisdiction-key`
+ * decline until situs or per-layer provenance exists.
+ *
+ * Returns the underscore form used by envelope facets (`pflugerville_tx`).
+ */
+export function soleZoningJurisdictionKey(
+  countyFips: string,
+): string | null {
+  const fips = countyFips.trim();
+  const layers = Object.values(ZONING_LAYERS).filter((z) => z.countyFips === fips);
+  if (layers.length !== 1) return null;
+  return layers[0]!.cityKey.replace(/-/g, "_");
+}
