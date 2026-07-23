@@ -194,17 +194,18 @@ describe("PE entitlement gate", () => {
     expect(res.body.reportFamily).toBe("R1");
     expect(res.body.mode).toBe("baked-facet-intel-v1");
     expect(res.body.source).toBe("baked-snapshot");
+    // Anti-zombie: baked envelope is stripped from the facets wire, so setbacks
+    // citation is no longer composed from Tier-1 envelope. Land-use + flood remain.
     expect(res.body.citations).toEqual(
       expect.arrayContaining([
         "https://example.test/land-use",
-        "https://example.test/setbacks",
         "https://example.test/flood",
       ]),
     );
+    expect(res.body.citations).not.toContain("https://example.test/setbacks");
     expect(res.body.brief.disclosure).toEqual(
       expect.arrayContaining([
         "Mapped from the published district table.",
-        "Approximate envelope only.",
       ]),
     );
 
@@ -216,8 +217,10 @@ describe("PE entitlement gate", () => {
     );
     expect(manifest.status).toBe(200);
     expect(manifest.body.contract).toBe("layer-manifest-v1");
+    // Flood remains; buildable-envelope layer may be absent when baked envelope
+    // is stripped (atom path owns envelope product truth).
     expect(manifest.body.layers.map((layer: { id: string }) => layer.id)).toEqual(
-      expect.arrayContaining(["buildable-envelope", "flood"]),
+      expect.arrayContaining(["flood"]),
     );
   });
 

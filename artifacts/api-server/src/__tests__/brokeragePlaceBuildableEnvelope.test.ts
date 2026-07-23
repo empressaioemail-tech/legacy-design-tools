@@ -371,16 +371,15 @@ describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map sna
     expect(res.body.payload.parcel.parcel_node_id).toBeNull();
   });
 
-  it("emits parcel_node_id on the no-setbacks path so the map still snaps + glows", async () => {
-    // No-setbacks shape: the parcel EXISTS but the jurisdiction has no
-    // codified setback table (here "Nowhere, XX") -> status no-setbacks, yet the
-    // subject parcel must still glow. parcel_node_id is gated on parcel
-    // resolution, NOT on setbacks.
+  it("emits parcel_node_id on the atom_path_pending decline so the map still snaps + glows", async () => {
+    // Anti-zombie: parcel resolves; product envelope declines atom_path_pending
+    // (no multiply). parcel_node_id is gated on parcel resolution.
     parcelZoning = "R-MD";
     parcelNodeIdStamped = "48209:123767";
     const res = await post({ address: "1 Main St, Nowhere, XX" });
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-setbacks");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("atom_path_pending");
     expect(res.body.parcel_node_id).toBe("48209:123767");
   });
 });
@@ -468,13 +467,11 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       queryMode: "pin" as const,
     };
     const res = await postWith({ address: "300 Blanco River Rd, Wimberley, TX 78676" });
-    // Wimberley (Hays) has no codified setback table, so the envelope itself
-    // is an honest no-setbacks 404 — but the AUTHORITATIVE situs
-    // short-circuit still resolved the SUBJECT PARCEL, so parcel_node_id
-    // is populated (the map can snap + glow). That the id is present is
-    // the proof the situs path resolved the right parcel.
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-setbacks");
+    // Anti-zombie: AUTHORITATIVE situs short-circuit still resolves the subject
+    // parcel; product envelope honest-declines atom_path_pending (no multiply).
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("atom_path_pending");
     expect(res.body.parcel_node_id).toBe("48209:193340");
     // The point pin-query must NOT have been consulted — the situs path
     // short-circuited it.
