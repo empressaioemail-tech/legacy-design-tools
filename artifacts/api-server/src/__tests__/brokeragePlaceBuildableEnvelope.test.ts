@@ -308,50 +308,45 @@ beforeEach(() => {
 });
 
 describe("POST /place/buildable-envelope", () => {
-  it("returns an envelope with confidence + citation for a matched parcel", async () => {
+  it("honest-declines atom_path_pending (multiply path retired)", async () => {
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("ok");
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("atom_path_pending");
     expect(res.body.layer).toBe("buildable-envelope");
-    // Envelope geometry present.
-    const feat = res.body.payload.geojson.features[0];
-    expect(feat.geometry.type).toBe("Polygon");
-    // Honesty envelope.
     expect(res.body.confidence).toBeDefined();
-    expect(res.body.confidence.value).toBeGreaterThan(0);
     expect(res.body.confidence.kind).toBe("asserted");
-    // Citation present (Municode).
-    expect(res.body.source.citationIds[0]).toMatch(/municode/i);
-    expect(feat.properties.citationUrl).toMatch(/municode/i);
-    expect(feat.properties.notSurveyGrade).toBe(true);
-    expect(feat.properties.disclosure).toMatch(/not survey grade/i);
-    // R-MD matched -> not approximate (road front + matched district).
-    expect(res.body.payload.approximate).toBe(false);
+    expect(res.body.payload.approximate).toBe(true);
+    expect(res.body.coverage.degraded).toBe(true);
   });
 
-  it("marks approximate when zoning is absent (conservative fallback)", async () => {
+  it("honest-declines no-zoning-stamp when zoning is absent", async () => {
     parcelZoning = null;
     parcelNodeIdStamped = null;
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("no-zoning-stamp");
     expect(res.body.payload.approximate).toBe(true);
-    const feat = res.body.payload.geojson.features[0];
-    expect(feat.properties.disclosure).toMatch(/verify/i);
   });
 
-  it("404s honestly when the jurisdiction has no setback table", async () => {
+  it("still resolves a parcel for an unknown jurisdiction (decline, not invent)", async () => {
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
     const res = await post({ address: "1 Main St, Nowhere, XX" });
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-setbacks");
+    // Parcel may 404 (no coverage) or 200 decline — never invent multiply confidence.
+    expect([200, 404]).toContain(res.status);
+    if (res.status === 200) {
+      expect(res.body.status).toBe("declined");
+      expect(res.body.declineReason).toMatch(/atom_path_pending|no-zoning-stamp/);
+    }
   });
 });
 
 describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map snap)", () => {
-  it("emits the tile-matching parcel_node_id on the ok path (top-level + payload.parcel)", async () => {
+  it("emits the tile-matching parcel_node_id on the decline path (top-level + payload.parcel)", async () => {
     parcelZoning = "R-MD";
     // The Hays 576 Sage Thrasher known case: Hays fips 48209, prop_id 123767
     // -> the parcel provider stamps parcel_node_id "48209:123767", which must
@@ -360,10 +355,10 @@ describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map sna
     parcelNodeIdStamped = "48209:123767";
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("ok");
+    expect(res.body.status).toBe("declined");
     // FE contract: uniform top-level field across all statuses.
     expect(res.body.parcel_node_id).toBe("48209:123767");
-    // And inside the parcel identity block on the ok payload.
+    // And inside the parcel identity block on the payload.
     expect(res.body.payload.parcel.parcel_node_id).toBe("48209:123767");
   });
 
@@ -376,16 +371,15 @@ describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map sna
     expect(res.body.payload.parcel.parcel_node_id).toBeNull();
   });
 
-  it("emits parcel_node_id on the no-setbacks path so the map still snaps + glows", async () => {
-    // No-setbacks shape: the parcel EXISTS but the jurisdiction has no
-    // codified setback table (here "Nowhere, XX") -> status no-setbacks, yet the
-    // subject parcel must still glow. parcel_node_id is gated on parcel
-    // resolution, NOT on setbacks.
+  it("emits parcel_node_id on the atom_path_pending decline so the map still snaps + glows", async () => {
+    // Anti-zombie: parcel resolves; product envelope declines atom_path_pending
+    // (no multiply). parcel_node_id is gated on parcel resolution.
     parcelZoning = "R-MD";
     parcelNodeIdStamped = "48209:123767";
     const res = await post({ address: "1 Main St, Nowhere, XX" });
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-setbacks");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("atom_path_pending");
     expect(res.body.parcel_node_id).toBe("48209:123767");
   });
 });
@@ -473,13 +467,11 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       queryMode: "pin" as const,
     };
     const res = await postWith({ address: "300 Blanco River Rd, Wimberley, TX 78676" });
-    // Wimberley (Hays) has no codified setback table, so the envelope itself
-    // is an honest no-setbacks 404 — but the AUTHORITATIVE situs
-    // short-circuit still resolved the SUBJECT PARCEL, so parcel_node_id
-    // is populated (the map can snap + glow). That the id is present is
-    // the proof the situs path resolved the right parcel.
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-setbacks");
+    // Anti-zombie: AUTHORITATIVE situs short-circuit still resolves the subject
+    // parcel; product envelope honest-declines atom_path_pending (no multiply).
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("atom_path_pending");
     expect(res.body.parcel_node_id).toBe("48209:193340");
     // The point pin-query must NOT have been consulted — the situs path
     // short-circuited it.
@@ -510,16 +502,16 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     expect(lastPinQueryPoint).toBeNull();
   });
 
-  it("still returns a full 200 envelope through the point path (no regression)", async () => {
-    // The default point path (no situs short-circuit) still flows all the
-    // way to a 200 envelope for a jurisdiction WITH a setback table
-    // (bastrop-tx) — the F4d changes are additive and don't regress it.
+  it("still returns 200 honest decline through the point path (no regression)", async () => {
+    // The default point path (no situs short-circuit) still resolves a parcel
+    // and honest-declines atom_path_pending — multiply path retired.
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
     situsOutcome = { hit: null, reason: "no-situs-match" }; // point path
-    geocodeOverride = null; // Bastrop (has setbacks)
+    geocodeOverride = null; // Bastrop
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("ok");
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("atom_path_pending");
   });
 });

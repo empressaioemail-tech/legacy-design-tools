@@ -600,14 +600,9 @@ export function buildTier1Payload(
     landUse: luFacet != null,
     acreage: acreage != null,
     zoning: zoning != null,
-    // Envelope counts as a present facet when it derived (ok / honestly-empty)
-    // OR when it is the absent-zoning conservative estimate (declined with
-    // no-zoning-stamp but still carrying a drawable geojson). Other declines
-    // (no table / unmatched GIS / ungeometric) stay uncovered.
-    envelope:
-      envelope != null &&
-      (envelope.status !== "declined" ||
-        envelope.declineReason === "no-zoning-stamp"),
+    // Anti-zombie (WDLL 3.7): Tier-1 never counts envelope as product coverage.
+    // Product envelope is the atom-chain path only.
+    envelope: false,
   };
 
   return {
@@ -627,9 +622,9 @@ export function buildTier1Payload(
       landUseAddressRecovered,
       roadsPending: true,
       tierNote:
-        "Tier 1 (deterministic). Buildable envelope computed WITHOUT roads " +
-        "(lot-shape front-edge labeling) — provisional, lower confidence; " +
-        "Tier 2 upgrades it with road-based labeling.",
+        "Tier 1 (deterministic). Buildable envelope product path retired " +
+        "(anti-zombie / atom_path_pending) — read envelope from property atom " +
+        "chain. Tier 2 may still carry flood overlay.",
       landUseGateBlocked,
     },
     bakedAt: nowIso,
@@ -658,7 +653,8 @@ export function facetScore(payload: Tier1FacetPayload): number {
     (c.acreage ? 1 : 0) +
     (c.zoning ? 1 : 0) +
     (c.envelope ? 1 : 0);
-  const conf = payload.envelope?.confidence ?? 0;
+  const rawConf = payload.envelope?.confidence;
+  const conf = typeof rawConf === "number" && Number.isFinite(rawConf) ? rawConf : 0;
   return facetCount * 1000 + Math.round(conf * 100);
 }
 
@@ -701,7 +697,8 @@ function isBastropB3SetbackCorrection(
     next.countyFips === "48021" &&
     isB3PlaceType &&
     next.envelope?.status === "declined" &&
-    next.envelope.declineReason === "setback-table-pending" &&
+    (next.envelope.declineReason === "setback-table-pending" ||
+      next.envelope.declineReason === "atom_path_pending") &&
     next.facetCoverage.envelope === false &&
     prior.envelope?.district === "P Public/Institutional"
   );
@@ -719,7 +716,12 @@ function isUnmatchedZoningCorrection(
   const zoningCode = next.zoning?.district?.trim() ?? "";
   if (!zoningCode) return false;
   if (next.envelope?.status !== "declined") return false;
-  if (next.envelope.declineReason !== "setback-table-pending") return false;
+  if (
+    next.envelope.declineReason !== "setback-table-pending" &&
+    next.envelope.declineReason !== "atom_path_pending"
+  ) {
+    return false;
+  }
   if (next.facetCoverage.envelope !== false) return false;
   if (!prior.envelope || prior.envelope.status === "declined") return false;
   const priorDistrict = prior.envelope.district?.trim() ?? "";
@@ -749,6 +751,26 @@ function isAbsentZoningInventCorrection(
   if (prior.envelope?.declineReason === "no-zoning-stamp") return false;
   const priorDistrict = prior.envelope?.district?.trim() ?? "";
   return priorDistrict.length > 0;
+}
+
+/**
+ * Anti-zombie cut: force replace any prior product envelope (multiply-era)
+ * with the fresh atom_path_pending decline so Tier-1 never keeps zombie
+ * envelope truth after the cutover.
+ */
+function isAtomPathEnvelopeRetirement(
+  prior: Tier1FacetPayload,
+  next: Tier1FacetPayload,
+): boolean {
+  if (next.envelope?.status !== "declined") return false;
+  if (next.envelope.declineReason !== "atom_path_pending") return false;
+  if (prior.envelope?.declineReason === "atom_path_pending") return false;
+  if (!prior.envelope) return false;
+  return (
+    prior.facetCoverage.envelope === true ||
+    prior.envelope.status === "ok" ||
+    prior.envelope.status === "no-buildable-area"
+  );
 }
 
 /**
@@ -793,6 +815,7 @@ export function shouldPromote(
   // Map-truth correction: force honest absent-zoning decline over a prior that
   // stamped the conservative row (e.g. I-2) as if it were a real district.
   if (isAbsentZoningInventCorrection(prior, next)) return true;
+  if (isAtomPathEnvelopeRetirement(prior, next)) return true;
   return facetScore(next) >= facetScore(prior);
 }
 

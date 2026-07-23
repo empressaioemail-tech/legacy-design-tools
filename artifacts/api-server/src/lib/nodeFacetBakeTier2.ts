@@ -1,66 +1,18 @@
-/**
+﻿/**
  * Tier-2 node-facet bake — pure compute helpers (DB-free, live-dep-shaped).
  *
- * Tier 2 is the LIVE-EXTERNAL-DEPENDENCY layer of the node-facet bake. Where
- * Tier 1 (nodeFacetBakeTier1.ts) computed everything DB-local + deterministic
- * — including the buildable envelope WITHOUT roads (the skipRoad / lot-shape
- * path, marked `provisional` + `roadsPending`) — Tier 2 upgrades exactly the
- * facets that need an external fetch:
- *
- *   1. ENVELOPE UPGRADE (roads). The Tier-1 envelope guessed the front edge
- *      from lot shape alone (low confidence, `roadsPending: true`). Tier 2
- *      re-labels the parcel's front edge from the nearest OSM road centerline
- *      (the same road signal the buildable-envelope route uses), producing a
- *      HIGH-confidence envelope carrying `roadsPending: false` + the road
- *      source. Because higher confidence scores higher, the Tier-1 monotonic
- *      guard PROMOTES it — that is the guard working as intended, not a fight.
- *      Honest degradation (commitment #1): when the road fetch fails or returns
- *      no usable candidate, labeling falls back to the geocoded centroid
- *      (`point`) or lot shape (`shape`) exactly as the route does, and the
- *      facet records which signal actually fired. A failed fetch NEVER
- *      fabricates a road-based front; it degrades and says so.
- *
- *   2. FEMA FLOOD (NFHL). A per-node point-query against the FEMA National
- *      Flood Hazard Layer (layer 28) yields the parcel's effective flood zone
- *      (AE / X / VE / …), SFHA flag, and BFE, carrying the FEMA vintage. Honest
- *      absence: a FEMA OUTAGE stores `status: "unavailable"` (never a fabricated
- *      zone); a clean empty result stores `status: "outside-sfha"` (the parcel
- *      is genuinely outside any mapped flood zone — effectively Zone X — which
- *      is a real, citeable answer, not an absence).
- *
- * This module is PURE: it consumes an already-fetched road candidate list and
- * an already-fetched FEMA arcgis result and returns the two facets + a
- * monotonic score. ALL network I/O (the tile-cached Overpass fetch, the FEMA
- * point query) lives in the CLI (nodeFacetBakeTier2Cli.ts), which is where the
- * cache-first tile batching that makes a county bake affordable also lives.
- * Keeping the fetch out of here is what lets the unit tests exercise every
- * branch (upgrade / degrade / flood / outside / unavailable) offline.
- *
- * No `@workspace/db` import (loads with no DATABASE_URL), mirroring
- * nodeFacetBakeTier1.ts.
+ * Anti-zombie cut (Master WDLL 3.7 / I-A): Tier-2 no longer authors a bespoke
+ * buildable envelope via labeling×district multiply. Flood overlay remains.
+ * Product envelope is the atom-chain path; this helper returns honest
+ * `atom_path_pending` / `no-zoning-stamp` declines only.
  */
 
-import {
-  absentZoningDisclosure,
-  isAbsentZoningFallback,
-  NO_ZONING_STAMP_REASON,
-  scrubAbsentZoningGeojson,
-} from "./buildableEnvelope/absentZoningHonesty";
-import { deriveBuildableEnvelope } from "./buildableEnvelope/derive";
-import {
-  labelEdges,
-  type RoadCandidate,
-} from "./buildableEnvelope/edgeLabeling";
-import { mapDistrict } from "./buildableEnvelope/districtMapping";
-import {
-  getSetbackTableForZoning,
-  type SetbackTable,
-} from "@workspace/adapters";
-import { keyFromEngagementOrSynthesize } from "@workspace/codes/jurisdictions";
+import { NO_ZONING_STAMP_REASON } from "./buildableEnvelope/absentZoningHonesty";
+import type { RoadCandidate } from "./buildableEnvelope/edgeLabeling";
 import type { Ring } from "./buildableEnvelope/geometry";
 
 // ---------------------------------------------------------------------------
-// Envelope upgrade (road-based front-edge labeling).
+// Envelope upgrade slot (retired multiply path — honest decline only).
 // ---------------------------------------------------------------------------
 
 export interface Tier2EnvelopeInput {
@@ -69,47 +21,20 @@ export interface Tier2EnvelopeInput {
   situsCity: string | null;
   situsState: string | null;
   situsAddress: string | null;
-  /**
-   * Nearby OSM road candidates for THIS parcel, already fetched (tile-cached)
-   * by the CLI. An empty array means the road fetch was attempted and produced
-   * nothing usable (rural parcel, or an Overpass outage the CLI could not clear
-   * even with retry) — labeling then degrades to the centroid/shape signal.
-   */
   roads: RoadCandidate[];
-  /**
-   * The parcel centroid, used as the geocoded-point fallback signal when no
-   * road candidate produces a trustworthy front edge. This is the SAME medium-
-   * confidence `point` signal the buildable-envelope route uses; it is strictly
-   * better than pure lot shape.
-   */
   refPoint: { lng: number; lat: number } | null;
-  /**
-   * Whether a road fetch was even ATTEMPTED for this node (false when the CLI
-   * skipped it — e.g. a node with no usable centroid). Drives `roadFetch`
-   * provenance so an absent road signal is honestly attributable.
-   */
   roadFetchAttempted: boolean;
 }
 
 export interface Tier2EnvelopeFacet {
-  /**
-   * - "ok"                : a buildable envelope was derived.
-   * - "no-buildable-area" : setbacks consume the lot (honest empty).
-   * - "declined"          : no codified setback jurisdiction / no mappable
-   *                         district / unusable geometry (honest).
-   */
   status: "ok" | "no-buildable-area" | "declined";
-  /** Tier 2 is NO LONGER provisional when the road signal fired. */
   provisional: boolean;
-  /** False once Tier 2 has resolved the road signal (the whole point of T2). */
   roadsPending: false;
-  /** Which signal produced the front edge: road (high) / point / shape (low). */
   edgeSignal: "road" | "point" | "shape";
-  /** Overall confidence 0..1 (labeling x district). */
-  confidence: number;
+  /** Always null — product confidence is atom readContract only. */
+  confidence: null;
   approximate: boolean;
   declineReason?: string;
-  /** Absent-zoning conservative estimate (district name deliberately omitted). */
   matchKind?: "fallback-conservative";
   jurisdictionKey?: string | null;
   district?: string;
@@ -123,169 +48,67 @@ export interface Tier2EnvelopeFacet {
   citationUrl?: string;
   disclosure?: string;
   geojson?: unknown;
-  /** Provenance of the road signal, so an absent/degraded signal is honest. */
   roadProvenance: {
-    /** Was a road fetch attempted for this node at all? */
     fetchAttempted: boolean;
-    /** How many road candidates the fetch returned (0 == empty/outage). */
     candidateCount: number;
-    /** True when the road signal actually won the front edge (signal==road). */
     roadSignalUsed: boolean;
-    /** OSM Overpass is the only in-tree road source. */
     source: "osm-overpass";
   };
 }
 
 /**
- * Compute the Tier-2 (road-based) buildable envelope for one parcel. Pure +
- * owner-free + honest-absence. The composition is byte-for-byte the route's
- * FULL (non-skipRoad) path: resolve the setback table from situs, map the
- * zoning district, label edges preferring the nearest road (then centroid,
- * then shape), and inset. When there is no jurisdiction / table / district /
- * usable ring, it DECLINES honestly.
- *
- * The only difference from Tier 1's `computeTier1Envelope` is that `roads` and
- * `refPoint` are POPULATED here, so `labelEdges` can fire its high-confidence
- * `road` (or medium `point`) signal instead of being forced onto the low-
- * confidence `shape` fallback. Everything else — the honesty envelope, the
- * disclosure, the declined-status handling — is identical.
+ * Honest Tier-2 envelope slot: never compute multiply confidence.
+ * Flood remains the Tier-2 product facet; envelope is atom-path only.
  */
 export function computeTier2Envelope(
   input: Tier2EnvelopeInput,
 ): Tier2EnvelopeFacet {
-  const roadProvenanceBase = {
+  const roadProvenance = {
     fetchAttempted: input.roadFetchAttempted,
     candidateCount: input.roads.length,
+    roadSignalUsed: false,
     source: "osm-overpass" as const,
   };
-  const declined = (
-    declineReason: string,
-    jurisdictionKey: string | null,
-  ): Tier2EnvelopeFacet => ({
-    status: "declined",
-    provisional: true,
-    roadsPending: false,
-    edgeSignal: "shape",
-    confidence: 0,
-    approximate: true,
-    declineReason,
-    jurisdictionKey,
-    roadProvenance: { ...roadProvenanceBase, roadSignalUsed: false },
-  });
 
-  const jurisdictionKey = keyFromEngagementOrSynthesize({
-    jurisdictionCity: input.situsCity,
-    jurisdictionState: input.situsState,
-    address: input.situsAddress ?? undefined,
-  });
-  if (!jurisdictionKey) return declined("no-jurisdiction-key", null);
-
-  const table: SetbackTable | null = getSetbackTableForZoning(
-    jurisdictionKey,
-    input.zoningCode,
-  );
-  if (!table || table.districts.length === 0) {
-    return declined(
-      table ? "setback-table-pending" : "no-setback-table",
-      jurisdictionKey,
-    );
-  }
-
-  const district = mapDistrict(table, input.zoningCode);
-  if (!district) {
-    return declined(
-      input.zoningCode ? "setback-table-pending" : "no-district",
-      jurisdictionKey,
-    );
-  }
-
-  // The upgrade: pass the fetched roads + centroid refPoint. labelEdges prefers
-  // the road signal (high, situs-named cul-de-sac defense included), degrades
-  // to the point signal, then to shape — all HONESTLY reported via signal.
-  const labeling = labelEdges({
-    ring: input.ring,
-    roads: input.roads,
-    refPoint: input.refPoint,
-    situsAddress: input.situsAddress,
-  });
-  if (!labeling) return declined("ungeometric-parcel", jurisdictionKey);
-
-  const derived = deriveBuildableEnvelope({
-    ring: input.ring,
-    table,
-    district,
-    labeling,
-  });
-
-  const props = derived.geojson.features[0]?.properties;
-  const roadSignalUsed = labeling.signal === "road";
-  const setbacks = props
-    ? {
-        front_ft: props.setbacks.front_ft,
-        side_ft: props.setbacks.side_ft,
-        rear_ft: props.setbacks.rear_ft,
-      }
-    : undefined;
-
-  if (isAbsentZoningFallback(district) && setbacks) {
-    const geojson = scrubAbsentZoningGeojson(derived.geojson, setbacks);
+  if (!input.zoningCode || !input.zoningCode.trim()) {
     return {
       status: "declined",
-      declineReason: NO_ZONING_STAMP_REASON,
-      matchKind: "fallback-conservative",
-      provisional: labeling.signal === "shape",
+      provisional: true,
       roadsPending: false,
-      edgeSignal: labeling.signal,
-      confidence: derived.confidence,
+      edgeSignal: "shape",
+      confidence: null,
       approximate: true,
-      jurisdictionKey,
-      setbacks,
-      parcelAreaSqFt: props?.parcelAreaSqFt,
-      buildableAreaSqFt: props?.buildableAreaSqFt,
-      buildableAreaPct: props?.buildableAreaPct,
-      maxLotCoveragePct: props?.maxLotCoveragePct ?? null,
-      maxHeightFt: props?.maxHeightFt ?? null,
-      maxFootprintSqFt: props?.maxFootprintSqFt ?? null,
-      citationUrl: derived.citationUrl,
-      disclosure: absentZoningDisclosure(setbacks),
-      geojson,
-      roadProvenance: { ...roadProvenanceBase, roadSignalUsed },
+      declineReason: NO_ZONING_STAMP_REASON,
+      disclosure:
+        "No zoning stamp — honest absence; envelope via atom path when present.",
+      jurisdictionKey: null,
+      roadProvenance,
     };
   }
 
   return {
-    status: derived.empty ? "no-buildable-area" : "ok",
-    // Provisional only when the front edge is STILL a pure-shape guess (the
-    // road fetch produced nothing and there was no usable centroid). A road- or
-    // point-labeled envelope is no longer the Tier-1-grade shape guess.
-    provisional: labeling.signal === "shape",
+    status: "declined",
+    provisional: true,
     roadsPending: false,
-    edgeSignal: labeling.signal,
-    confidence: derived.confidence,
-    approximate: derived.approximate,
-    jurisdictionKey,
-    district: derived.district,
-    setbacks,
-    parcelAreaSqFt: props?.parcelAreaSqFt,
-    buildableAreaSqFt: props?.buildableAreaSqFt,
-    buildableAreaPct: props?.buildableAreaPct,
-    maxLotCoveragePct: props?.maxLotCoveragePct ?? null,
-    maxHeightFt: props?.maxHeightFt ?? null,
-    maxFootprintSqFt: props?.maxFootprintSqFt ?? null,
-    citationUrl: derived.citationUrl,
-    disclosure: props?.disclosure,
-    geojson: derived.geojson,
-    roadProvenance: { ...roadProvenanceBase, roadSignalUsed },
+    edgeSignal: input.roads.length > 0 ? "road" : "shape",
+    confidence: null,
+    approximate: true,
+    declineReason: "atom_path_pending",
+    disclosure:
+      "Tier-2 bake no longer authors product envelope confidence (anti-zombie). " +
+      "Read buildable-envelope from the property atom chain, or honest-decline. " +
+      "Flood overlay remains on this tier.",
+    jurisdictionKey: null,
+    roadProvenance,
   };
 }
 
-// ---------------------------------------------------------------------------
 // FEMA flood facet (from a FEMA NFHL arcgis point-query result).
 // ---------------------------------------------------------------------------
 
 /**
  * The minimal shape of an ArcGIS point-query result the flood parser consumes
- * — a `features` list of `{ attributes }`. Structurally compatible with
+ * - a `features` list of `{ attributes }`. Structurally compatible with
  * `ArcGisQueryResult` from `@workspace/adapters/arcgis` so the CLI can pass the
  * live result straight in, while the tests can hand-build one offline.
  */
@@ -296,21 +119,21 @@ export interface FemaQueryLike {
 export interface Tier2FloodFacet {
   /**
    * - "in-sfha"      : parcel intersects a mapped Special Flood Hazard Area
-   *                    (an AE/VE/A/AO/AH… zone). `floodZone` is populated.
+   *                    (an AE/VE/A/AO/AH... zone). `floodZone` is populated.
    * - "flood-zone"   : parcel intersects a mapped, NON-SFHA zone (e.g. X
    *                    shaded / 0.2% annual chance). `floodZone` is populated.
-   * - "outside-sfha" : the query SUCCEEDED and returned no intersecting zone —
+   * - "outside-sfha" : the query SUCCEEDED and returned no intersecting zone -
    *                    the parcel is outside any mapped flood zone (effectively
    *                    Zone X). A real, citeable answer, NOT an absence.
    * - "unavailable"  : the FEMA fetch FAILED (outage / non-JSON / query error).
-   *                    Honest absence — never a fabricated zone (commitment #1).
+   *                    Honest absence - never a fabricated zone (commitment #1).
    */
   status: "in-sfha" | "flood-zone" | "outside-sfha" | "unavailable";
-  /** FEMA flood zone code (AE, X, VE, …). Null when outside-sfha/unavailable. */
+  /** FEMA flood zone code (AE, X, VE, ...). Null when outside-sfha/unavailable. */
   floodZone: string | null;
   /** FEMA SFHA_TF normalized to a boolean. Null when unavailable. */
   inSpecialFloodHazardArea: boolean | null;
-  /** Zone subtype (FLOODWAY, "0.2 PCT ANNUAL CHANCE FLOOD HAZARD", …). */
+  /** Zone subtype (FLOODWAY, "0.2 PCT ANNUAL CHANCE FLOOD HAZARD", ...). */
   zoneSubtype: string | null;
   /** Static base flood elevation (feet), when FEMA carries one. */
   baseFloodElevation: number | null;
@@ -318,7 +141,7 @@ export interface Tier2FloodFacet {
     source: "fema-nfhl";
     adapterKey: "fema:nfhl-flood-zone";
     layer: "flood-hazard-zones";
-    /** FEMA vintage (the read timestamp — a FEMA reading is as-of when read). */
+    /** FEMA vintage (the read timestamp - a FEMA reading is as-of when read). */
     vintage: string;
     /** Why the facet is unavailable, when status === "unavailable". */
     unavailableReason?: string;
@@ -444,6 +267,8 @@ export function tier2FacetScore(payload: {
       payload.envelope.declineReason === NO_ZONING_STAMP_REASON);
   const floodResolved = payload.flood.status !== "unavailable";
   const facetCount = (envelopeResolved ? 1 : 0) + (floodResolved ? 1 : 0);
-  const conf = payload.envelope?.confidence ?? 0;
+  const conf = 0; // envelope confidence retired (atom path)
   return facetCount * 1000 + Math.round(conf * 100);
 }
+
+

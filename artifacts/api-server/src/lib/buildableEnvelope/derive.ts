@@ -1,24 +1,15 @@
-/**
- * Buildable-envelope derivation (Problem C: the honest composition).
+﻿/**
+ * Buildable-envelope GEOMETRY helper (anti-zombie cut, Master WDLL 3.7 / I-A).
  *
  * Composes the real parcel polygon + the jurisdiction setback table into a
- * buildable-envelope GeoJSON polygon carrying an HONEST confidence + provenance
- * + citation, exactly like every other Brief output (structural commitment #1:
- * a wrong envelope drawn confidently is worse than none).
+ * buildable-envelope GeoJSON polygon. This module is a pure geometry helper â€”
+ * product confidence MUST NOT be `labeling×district product`.
+ * Product confidence comes from the atom-chain readContract / engine compose
+ * path. Callers that still need a wire confidence field must read atoms or
+ * honest-decline (`atom_path_pending`), never invent a multiply.
  *
- * The geometry (per-edge inset) is DETERMINISTIC given labeled edges + a
- * district; the UNCERTAINTY lives in two upstream inferences:
- *   - edge labeling (which edge is the front) — road / point / shape signal
- *   - district mapping (which setback row applies) — zoningCode match / fallback
- * The envelope confidence is the product of those two, and whenever either is
- * weak the payload is marked APPROXIMATE with an explicit disclosure. A
- * high-confidence envelope still reads as "not survey grade". Never a bare
- * confident polygon a user would treat as a survey.
- *
- * This module is pure (no Express, no DB): callers supply the parcel ring, the
- * setback table + mapped district, the labeling, and the citation. The route
- * (brokeragePlaceBuildableEnvelope.ts) does the fetching and wraps the result
- * in the engine envelope.
+ * Approximate-ness here is geometry-signal only (shape front edge / empty
+ * inset), not a substitute for atom assertedConfidence.
  */
 
 import type { SetbackDistrict, SetbackTable } from "@workspace/adapters";
@@ -29,14 +20,11 @@ import {
 } from "./edgeLabeling";
 import type { DistrictMappingResult } from "./districtMapping";
 
-/** Confidence floor below which the envelope is always "approximate". */
-export const APPROXIMATE_THRESHOLD = 0.7;
-
 export interface BuildableEnvelopeProps {
   kind: "buildable-envelope";
-  /** True unless BOTH labeling and district mapping were high-confidence. */
+  /** True when geometry signal is weak (shape front) or inset empty. */
   approximate: boolean;
-  /** Always true — derived from public parcel + codified setbacks, not a survey. */
+  /** Always true â€” derived from public parcel + codified setbacks, not a survey. */
   notSurveyGrade: true;
   /** Human disclosure string for the UI. */
   disclosure: string;
@@ -77,9 +65,13 @@ export interface BuildableEnvelopeResult {
       properties: BuildableEnvelopeProps;
     }[];
   };
-  /** Overall confidence 0..1 (labeling x district), for the honesty envelope. */
-  confidence: number;
-  /** True when the envelope should render as approximate. */
+  /**
+   * Product confidence is intentionally absent. The retired multiply
+   * (`labeling×district product`) must not reappear.
+   * Use atom readContract / engine compose for product confidence.
+   */
+  confidence: null;
+  /** True when the envelope should render as approximate (geometry signal). */
   approximate: boolean;
   /** True when setbacks consume the lot (no buildable area). */
   empty: boolean;
@@ -113,7 +105,7 @@ function composeDisclosure(
   if (empty) {
     return (
       `No buildable area: ${emptyReason ?? "setbacks exceed the lot"}. ` +
-      `Approximate — verify with a survey and the city.`
+      `Approximate â€” verify with a survey and the city.`
     );
   }
   const parts: string[] = [];
@@ -125,7 +117,7 @@ function composeDisclosure(
   parts.push(labeling.note.replace(/\.$/, ""));
   parts.push(district.note.replace(/\.$/, ""));
   parts.push(
-    "Not survey grade — front/side/rear orientation and district are inferred; " +
+    "Not survey grade â€” front/side/rear orientation and district are inferred; " +
       "verify with a survey and the city before relying on it",
   );
   return parts.join(". ") + ".";
@@ -145,10 +137,8 @@ export function deriveBuildableEnvelope(
 
   const inset = insetPerEdge(ring, insetFeet);
 
-  // Overall confidence = labeling confidence x district confidence. Both are
-  // inferences; a weak either makes the whole thing weak.
-  const confidence = round(labeling.confidence * district.confidence, 3);
-  const approximate = confidence < APPROXIMATE_THRESHOLD || inset.empty;
+  // Geometry-only approximate signal. NEVER product confidence multiply.
+  const approximate = labeling.signal === "shape" || inset.empty;
 
   const parcelAreaSqFt = round(
     inset.parcelAreaSqFt || ringAreaSqFt(ring),
@@ -162,9 +152,6 @@ export function deriveBuildableEnvelope(
   const maxHeightFt =
     typeof d.max_height_ft === "number" ? d.max_height_ft : null;
 
-  // Max footprint feeds downstream ADU/addition sizing: the buildable footprint
-  // is bounded by BOTH the setback envelope AND the lot-coverage cap (applied to
-  // the PARCEL area, which is how coverage ordinances read). Take the smaller.
   let maxFootprintSqFt: number | null = null;
   if (!inset.empty && maxLotCoveragePct != null) {
     const coverageCap = (maxLotCoveragePct / 100) * parcelAreaSqFt;
@@ -213,9 +200,6 @@ export function deriveBuildableEnvelope(
       properties: props,
     });
   } else {
-    // Empty-envelope: an honest feature carrying null geometry + the reason, so
-    // the consumer can render the "no buildable area" state with the disclosure
-    // rather than silently drawing nothing.
     features.push({
       type: "Feature",
       geometry: null,
@@ -225,10 +209,11 @@ export function deriveBuildableEnvelope(
 
   return {
     geojson: { type: "FeatureCollection", features },
-    confidence,
+    confidence: null,
     approximate,
     empty: inset.empty,
     citationUrl: d.citation_url,
     district: d.district_name,
   };
 }
+
