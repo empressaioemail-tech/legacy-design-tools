@@ -2,6 +2,1042 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "san-antonio-tx",
   "jurisdictionDisplayName": "City of San Antonio, TX",
-  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: the official Unified Development Code Table 310-1 in §35-310.01 gives base-zone dimensional standards (https://sanantonio-tx.elaws.us/code/udc_artiii_div2_sec35-310.01, accessed 2026-07-21), but §35-516 applies conditional rules that this envelope model cannot test: reversed corner lots use the adjacent rear lot's required front setback; platted restrictions can be more restrictive; and garage/carport rules add separate street setbacks. A citywide table would therefore falsely present base values as unconditional. Omitted GIS `Base` codes include the residential core RP, RE, R-20, R-6, R-5, R-4, R-3, R-2, R-1, RM-6, RM-5, RM-4, MF-18, MF-25, MF-33, MF-40, MF-50, MF-65, MF-80, MF-120 and all commercial, industrial, downtown, special, overlay, and suffix variants. Add a thin residential set only after the conditional-setback model accepts parcel orientation, plat, and adjacency inputs.",
-  "districts": []
+  "note": "WDLL 51. Base-zone scalar rows from UDC Table 310-1, ?35-310.01, public official table at https://sanantonio-tx.elaws.us/code/udc_artiii_div2_sec35-310.01 with the City Information Bulletin rendering at https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf (accessed 2026-07-23). side_corner_ft mirrors the base side value only as a non-binding sentinel because Table 310-1 has no separate corner-side column; height and cover fields are likewise non-binding sentinels where the cited table extract does not provide a scalar field. OMITTED: RP; commercial/industrial/special/downtown/overlay codes; zero-lot-line variants; reversed-corner, platted-restriction, alley, adjacency, and height-increase conditions in ??35-373 and 35-515?517.",
+  "districts": [
+    {
+      "district_name": "RE San Antonio base district",
+      "front_ft": 15,
+      "rear_ft": 30,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RE row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-20 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 30,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-20 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-6 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-5 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-4 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-3 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 R-3 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RM-6 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-6 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RM-5 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-5 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RM-4 San Antonio base district",
+      "front_ft": 10,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 RM-4 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-18 San Antonio base district",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-18 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-25 San Antonio base district",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-25 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-33 San Antonio base district",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-33 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-40 San Antonio base district",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-40 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-50 San Antonio base district",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-50 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-65 San Antonio base district",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://docsonline.sanantonio.gov/FileUploads/DSD/IB565.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "san_antonio_tx/udc/35-310.01/35-310.01",
+          "section_number": "35-310.01",
+          "quote": "UDC Table 310-1 MF-65 row: the published lot-and-building dimensions provide the stated minimum front, side, and rear yard values; corner-side, height, and cover values are not scalar fields in this extraction.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    }
+  ]
 }

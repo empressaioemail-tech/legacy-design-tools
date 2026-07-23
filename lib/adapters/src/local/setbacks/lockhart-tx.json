@@ -2,6 +2,283 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "lockhart-tx",
   "jurisdictionDisplayName": "City of Lockhart, TX",
-  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: the official Lockhart zoning ordinance regulates the live GIS zone codes through development-type tables rather than a single dimensional row per GIS code. Appendix I (residential) and Appendix II (commercial), including Ordinance 2024-18 at https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf (accessed 2026-07-21), contain building-type and adjacency conditions: commercial side/rear setbacks increase when a building exceeds two stories adjoining residential (note 5), drive-through service changes rear and side setbacks (note 6), PDD is plan-specific, and residential street setbacks can reduce to the block average (note 10). The envelope model cannot resolve those facts from `ZONING` alone. Omitted live GIS codes: RLD, RMD, RHD, CCB, CHB, CLB, CMB, IH, IL, MH, PDD, PI, AO. No unconditional district number ships.",
-  "districts": []
+  "note": "WDLL 51. Main commercial and light-industrial scalar rows transcribed from official Ordinance 2024-18, Appendix II, at https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf (accessed 2026-07-23). side_corner_ft mirrors base side only as a non-binding sentinel; the appendix does not give a separate corner-side field. OMITTED: RLD/RMD/RHD because their development-type table does not select one scalar row from the GIS zone alone; CCB because its central-business setbacks vary by alley/end condition; IH because its line uses variable building-setback triggers; MH corner and adjacent-lot rules; AO, PI, PDD, and all two-story-adjacency, drive-through, and block-average exceptions in notes 5, 6, and 10.",
+  "districts": [
+    {
+      "district_name": "CLB Light Business",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CLB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "CMB Medium Business",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CMB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "CHB Heavy Business",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II CHB row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "IL Light Industrial",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 50,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
+          "section_number": "Appendix II",
+          "quote": "Ordinance 2024-18 Appendix II IL row: stated minimum street, side, and rear building setbacks and maximum height; cover values are not stated in the appendix.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    }
+  ]
 }

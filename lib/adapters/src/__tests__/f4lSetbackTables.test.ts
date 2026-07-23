@@ -165,21 +165,32 @@ describe("F4l setback tables", () => {
     expect(r1a8?.max_height_ft).toBe(35);
   });
 
-  it("registers batch-3 jurisdictions as cited honest gaps when their rules are conditional", () => {
-    const keys = [
-      "liberty-hill-tx",
-      "lockhart-tx",
-      "taylor-tx",
-      "bastrop-city-tx",
-      "san-antonio-tx",
-    ];
-    expect(SETBACK_JURISDICTION_KEYS).toEqual(expect.arrayContaining(keys));
+  it("keeps Bastrop as the remaining cited empty table", () => {
+    const table = getSetbackTable("bastrop_city_tx");
+    expect(table?.jurisdictionKey).toBe("bastrop-city-tx");
+    expect(table?.districts).toEqual([]);
+    expect(table?.note).toMatch(/honest empty/i);
+    expect(table?.note).toMatch(/https:\/\//);
+  });
 
-    for (const key of keys) {
+  it("populates WDLL 51 cited no-honest-empty tables", () => {
+    const expectedCounts = {
+      "austin-tx": 9,
+      "liberty-hill-tx": 14,
+      "lockhart-tx": 4,
+      "san-antonio-tx": 15,
+      "taylor-tx": 6,
+    };
+    expect(SETBACK_JURISDICTION_KEYS).toEqual(
+      expect.arrayContaining(Object.keys(expectedCounts)),
+    );
+
+    for (const [key, count] of Object.entries(expectedCounts)) {
       const table = getSetbackTable(key.replace(/-/g, "_"));
       expect(table?.jurisdictionKey).toBe(key);
-      expect(table?.districts).toEqual([]);
-      expect(table?.note).toMatch(/^WDLL item 5, Wave 1 batch 3\. HONEST EMPTY:/);
+      expect(table?.districts).toHaveLength(count);
+      assertWellFormed(table!);
+      expect(table?.note).toMatch(/WDLL 51/i);
       expect(table?.note).toMatch(/https:\/\//);
       expect(table?.note).toMatch(/omitted/i);
     }

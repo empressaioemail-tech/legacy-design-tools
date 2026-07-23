@@ -2,6 +2,973 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "liberty-hill-tx",
   "jurisdictionDisplayName": "City of Liberty Hill, TX",
-  "note": "WDLL item 5, Wave 1 batch 3. HONEST EMPTY: official UDC Table 4-4 gives district baseline dimensions at https://ecode360.com/42968563 (Chapter 4, §§4.11.04–.05, Table 4-4; accessed 2026-07-21), but the same codified table conditions the values: residential side setbacks may be waived for one side in zero-lot-line subdivisions (note B), PUD mixed-use development may modify side/rear/lot-area standards (note C), and the impervious limit is additionally subject to Edwards Aquifer Rules (note A). The envelope model cannot evaluate those conditions, so it must not serve the baseline numbers as unconditional. Live GIS SHORT_DESC codes AG, C1, C2, C3, SF1, SF2, SF3, MF2, I-1, MH1, PUD, and PARK are all omitted pending a conditional-rule model. The GIS `I-1` spelling also requires a deliberately reviewed mapping to the UDC `I1` district before a row can ship.",
-  "districts": []
+  "note": "WDLL 51. Standard-lot baseline rows transcribed from official UDC Table 4-4 at https://ecode360.com/42968563 (Chapter 4, ??4.11.04?.05; accessed 2026-07-23). side_corner_ft mirrors base side only as a non-binding sentinel because the table does not provide a distinct corner-side column; cover values are non-binding sentinels in this extraction. OMITTED: zero-lot-line one-side waivers, PUD mixed-use modifications, Edwards Aquifer controls, MH2 special separation, PARK, and all district variants not represented by a direct standard-lot row. GIS I-1 is deliberately not mapped here until its spelling-to-I1 mapping is reviewed.",
+  "districts": [
+    {
+      "district_name": "AG Agricultural",
+      "front_ft": 35,
+      "rear_ft": 30,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 AG row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF1 Low Density Residential",
+      "front_ft": 30,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF2 Medium Density Residential",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF3 High Density Residential",
+      "front_ft": 15,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 SF3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "TF Duplex Residential",
+      "front_ft": 15,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 TF row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF1 Multifamily",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF2 Multifamily",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MF2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MH1 Manufactured Housing",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 MH1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C1 Neighborhood Commercial/Retail",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 7,
+      "max_height_ft": 25,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C2 Downtown Commercial/Retail",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 7,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C3 General Commercial/Retail",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 7,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 C3 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "I1 Light Industrial",
+      "front_ft": 40,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I1 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "I2 General Industrial",
+      "front_ft": 50,
+      "rear_ft": 30,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 I2 row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "P Public/Institutional/Civic",
+      "front_ft": 15,
+      "rear_ft": 15,
+      "side_ft": 35,
+      "side_corner_ft": 35,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/42968563",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "liberty_hill_tx/udc/4.11.04/Table 4-4",
+          "section_number": "Table 4-4",
+          "quote": "UDC Table 4-4 P row: minimum front, rear, side, and maximum-height values as tabulated; corner-side and cover fields are not separately modeled in this scalar table.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    }
+  ]
 }
