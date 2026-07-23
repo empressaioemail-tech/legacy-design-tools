@@ -165,12 +165,21 @@ describe("F4l setback tables", () => {
     expect(r1a8?.max_height_ft).toBe(35);
   });
 
-  it("keeps Bastrop as the remaining cited empty table", () => {
+  it("populates Bastrop B3 with cited conservative scalar rows", () => {
     const table = getSetbackTable("bastrop_city_tx");
     expect(table?.jurisdictionKey).toBe("bastrop-city-tx");
-    expect(table?.districts).toEqual([]);
-    expect(table?.note).toMatch(/honest empty/i);
-    expect(table?.note).toMatch(/https:\/\//);
+    expect(table?.districts).toHaveLength(6);
+    expect(table?.districts.map((district) => district.district_name)).toEqual([
+      "P-1 Nature",
+      "P-2 Rural",
+      "P-3 Neighborhood",
+      "P-4 Neighborhood Mix",
+      "P-5 Core",
+      "P-EC Employment Center",
+    ]);
+    expect(table?.note).toMatch(/WDLL items 51-52/i);
+    expect(table?.districts.every((district) => district.citation_url.startsWith("https://"))).toBe(true);
+    assertWellFormed(table!);
   });
 
   it("populates WDLL 51 cited no-honest-empty tables", () => {
