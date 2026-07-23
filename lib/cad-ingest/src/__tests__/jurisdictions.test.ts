@@ -139,7 +139,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     // non-residential codes remain explicitly omitted in the table note.
     expect(j.zoningLayers).toEqual([ZONING_LAYERS["pflugerville-tx"]]);
     const pflugerville = getSetbackTable("pflugerville-tx");
-    expect(pflugerville?.districts).toHaveLength(3);
+    expect(pflugerville?.districts).toHaveLength(10);
     expect(pflugerville?.note).toMatch(/GB1.*omitted/i);
     expect(j.setbackTables).toEqual([pflugerville]);
   });
