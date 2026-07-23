@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  getSetbackTable,
   getSetbackTableForZoning,
   type SetbackTable,
 } from "@workspace/adapters";
@@ -96,6 +97,12 @@ describe("mapDistrict — guarded prefix match", () => {
     expect(result?.kind).toBe("matched");
     expect(result?.district.district_name).toBe("P-5 Core");
     expect(result?.district.district_name).not.toMatch(/^P Public\/Institutional$/);
+  });
+  it("does not invent Kyle R-1 envelopes for R-1-T townhouse stamps", () => {
+    const table = getSetbackTable("kyle-tx");
+    expect(table).not.toBeNull();
+    // Bare R-1 was omitted from the table because its code prefixes R-1-T.
+    expect(mapDistrict(table!, "R-1-T")).toBeNull();
   });
 });
 
