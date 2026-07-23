@@ -1,6 +1,6 @@
 # Property Explorer Central-TX setback coverage
 
-WDLL acceptance: 43, 44, 51, 54
+WDLL acceptance: 43, 44, 51, 52, 54
 Audited: 2026-07-23
 Scope: cities with a live Central-Texas zoning layer, plus Austin because it is a corpus and extension-public jurisdiction.
 
@@ -9,7 +9,7 @@ This is an envelope eligibility inventory, not a claim that every zoning code in
 | jurisdictionKey | action | evidence |
 | --- | --- | --- |
 | `austin-tx` | populated (9 base districts) | `lib/adapters/src/local/setbacks/austin-tx.json`; City public [Section 25-2-492 table record](https://services.austintexas.gov/edims/document.cfm?id=419477), cross-checked with [Austin zoning resources](https://www.austintexas.gov/planning/zoning-resources-site-regulations). Base SF and MF rows only; overlays, combining districts, compatibility, and lot/use conditions remain omitted. |
-| `bastrop-city-tx` | honest-empty | `lib/adapters/src/local/setbacks/bastrop-city-tx.json`; official [B3 Code, April 2025](https://www.cityofbastrop.org/upload/page/0107/docs/B3/B3%20Code%20-%20April%202025.pdf). P-1 through P-5 need frontage, existing-lot, and building-type facts. |
+| `bastrop-city-tx` | populated | `lib/adapters/src/local/setbacks/bastrop-city-tx.json`; official [B3 Code, April 2025](https://www.cityofbastrop.org/upload/page/0107/docs/B3/B3%20Code%20-%20April%202025.pdf), ?6.5.003(A), plus ?2.4.006(a) for P-EC. P-2/P-3 ship the 25-ft undeveloped-lot build-to scalar; P-4/P-5 and P-EC ship the conservative 15-ft top of their build-to ranges. The contextual developed-lot first-layer rule, side/rear dimensions, and height-in-stories remain declared in provenance but are not modeled as asserted scalars. |
 | `buda-tx` | populated | `lib/adapters/src/local/setbacks/buda-tx.json`; City UDC ?2.07 at [eCode360](https://ecode360.com/40956702). |
 | `cedar-park-tx` | populated | `lib/adapters/src/local/setbacks/cedar-park-tx.json`; cited local ordinance rows, with unmapped codes explicitly omitted. |
 | `dripping-springs-tx` | populated | `lib/adapters/src/local/setbacks/dripping-springs-tx.json`; Municode Chapter 30, Exhibit A, Section 3. |
@@ -26,4 +26,4 @@ This is an envelope eligibility inventory, not a claim that every zoning code in
 | `san-marcos-tx` | populated | `lib/adapters/src/local/setbacks/san-marcos-tx.json`; 2025 Development Code ??4.4.1.3, 4.4.1.4, and 4.4.2.1. |
 | `taylor-tx` | populated (6 Place Types) | `lib/adapters/src/local/setbacks/taylor-tx.json`; City-adopted [Taylor Made LDC](https://www.taylortx.gov/DocumentCenter/View/14244/Taylor-Land-Development-Code---Revised-091224), Sections 4.3.1.2 and 4.3.1.4 through 4.3.1.8. Front is the lower build-to-line bound; side/rear zoning scalar values are absent and carried only as explicit non-binding sentinels, with building-code separation still controlling. EC/CS remain TBD. |
 
-The policy is deliberately narrow: known Bastrop B3 Place Type codes select a cited table and return an honest decline until its separate mapping is complete. Other populated tables retain their documented matching and omission rules; this inventory does not turn an unreviewed GIS code into a newly asserted dimensional value.
+The Bastrop routing policy is explicit: City of Bastrop GIS and situs paths retain their legacy `bastrop-tx` key, while `getSetbackTableForZoning` resolves every B3 `P-*` code to `bastrop-city-tx`. This prevents P-1 through P-5 from reaching the legacy `P Public/Institutional` district. Other populated tables retain their existing documented matching and omission rules; this inventory does not turn an unreviewed GIS code into a newly asserted dimensional value.
