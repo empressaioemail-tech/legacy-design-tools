@@ -250,6 +250,24 @@ describe("honest absence (never fabricate a facet)", () => {
   });
 });
 
+describe("Bastrop B3 place types", () => {
+  it("declines P-5 instead of applying legacy Public/Institutional setbacks", () => {
+    const envelope = computeTier1Envelope({
+      ring: BASTROP_LOT,
+      zoningCode: "P-5",
+      situsCity: "Bastrop",
+      situsState: "TX",
+      situsAddress: "123 MAIN ST, BASTROP, TX 78602",
+    });
+
+    expect(envelope.status).toBe("declined");
+    expect(envelope.declineReason).toBe("setback-table-pending");
+    expect(envelope.jurisdictionKey).toBe("bastrop_tx");
+    expect(envelope.district).toBeUndefined();
+    expect(envelope.setbacks).toBeUndefined();
+  });
+});
+
 describe("situs-address land-use recovery (gate-blocked counties, per-match owner gate)", () => {
   const now = "2026-07-21T00:00:00.000Z";
   const seed = LANDUSE_JOIN_DISABLED_FIPS_SEED;

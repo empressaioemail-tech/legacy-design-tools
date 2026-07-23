@@ -46,7 +46,10 @@ import {
   type RoadCandidate,
 } from "./buildableEnvelope/edgeLabeling";
 import { mapDistrict } from "./buildableEnvelope/districtMapping";
-import { getSetbackTable, type SetbackTable } from "@workspace/adapters";
+import {
+  getSetbackTableForZoning,
+  type SetbackTable,
+} from "@workspace/adapters";
 import { keyFromEngagementOrSynthesize } from "@workspace/codes/jurisdictions";
 import type { Ring } from "./buildableEnvelope/geometry";
 
@@ -169,7 +172,10 @@ export function computeTier2Envelope(
   });
   if (!jurisdictionKey) return declined("no-jurisdiction-key", null);
 
-  const table: SetbackTable | null = getSetbackTable(jurisdictionKey);
+  const table: SetbackTable | null = getSetbackTableForZoning(
+    jurisdictionKey,
+    input.zoningCode,
+  );
   if (!table || table.districts.length === 0) {
     return declined(
       table ? "setback-table-pending" : "no-setback-table",

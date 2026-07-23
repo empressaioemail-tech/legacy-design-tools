@@ -19,6 +19,7 @@
 import grandCountyUt from "./grand-county-ut.json" with { type: "json" };
 import lemhiCountyId from "./lemhi-county-id.json" with { type: "json" };
 import bastropTx from "./bastrop-tx.json" with { type: "json" };
+import austinTx from "./austin-tx.json" with { type: "json" };
 import sanMarcosTx from "./san-marcos-tx.json" with { type: "json" };
 import drippingSpringsTx from "./dripping-springs-tx.json" with { type: "json" };
 import kyleTx from "./kyle-tx.json" with { type: "json" };
@@ -73,6 +74,10 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "grand-county-ut": grandCountyUt as SetbackTable,
   "lemhi-county-id": lemhiCountyId as SetbackTable,
   "bastrop-tx": bastropTx as SetbackTable,
+  // Austin has live corpus coverage but no safe city zoning-stamp alignment
+  // yet. An explicit cited empty table makes that a served honest gap rather
+  // than a missing-table ambiguity.
+  "austin-tx": austinTx as SetbackTable,
   // Tables contain only code-backed scalar rules. A conditional rule that the
   // envelope cannot evaluate is explicitly omitted in the table note.
   "san-marcos-tx": sanMarcosTx as SetbackTable,
@@ -134,6 +139,33 @@ function normalizeJurisdictionKey(key: string): string {
  */
 export function getSetbackTable(jurisdictionKey: string): SetbackTable | null {
   const normalized = normalizeJurisdictionKey(jurisdictionKey);
+  return SETBACK_TABLES[normalized] ?? null;
+}
+
+/**
+ * Resolve the table applicable to a parcel's stamped zoning code.
+ *
+ * Bastrop's legacy corpus key is `bastrop-tx`, but the live city GIS stamps
+ * B3 PlaceTypeClass codes (P-1 through P-5, P-CS, P-EC, and PDD). Those are not conventional
+ * `bastrop-tx` districts: they require lot, frontage, and building-type facts
+ * the scalar envelope model does not have. Route those codes to the cited
+ * `bastrop-city-tx` honest-empty table rather than falling back to a legacy
+ * conventional district and drawing an invented envelope.
+ */
+export function getSetbackTableForZoning(
+  jurisdictionKey: string,
+  zoningCode: string | null | undefined,
+): SetbackTable | null {
+  const normalized = normalizeJurisdictionKey(jurisdictionKey);
+  const code = (zoningCode ?? "").trim().toUpperCase();
+  if (
+    normalized === "bastrop-tx" &&
+    (/^P-[1-5](?:$|[-_\s])/.test(code) ||
+      /^P-(?:CS|EC)(?:$|[-_\s])/.test(code) ||
+      /^PDD(?:$|[-_\s])/.test(code))
+  ) {
+    return SETBACK_TABLES["bastrop-city-tx"] ?? null;
+  }
   return SETBACK_TABLES[normalized] ?? null;
 }
 

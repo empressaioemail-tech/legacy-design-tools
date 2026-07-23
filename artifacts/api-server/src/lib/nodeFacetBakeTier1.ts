@@ -20,7 +20,10 @@
  *      `declined` facet (never a fabricated envelope).
  */
 
-import { getSetbackTable, type SetbackTable } from "@workspace/adapters";
+import {
+  getSetbackTableForZoning,
+  type SetbackTable,
+} from "@workspace/adapters";
 // Import the jurisdiction-key synthesizer from the DB-FREE subpath, NOT the
 // `@workspace/codes` barrel — the barrel transitively loads `@workspace/db`
 // (throws on a missing DATABASE_URL at module load), which would break this
@@ -161,7 +164,10 @@ export function computeTier1Envelope(
     };
   }
 
-  const table: SetbackTable | null = getSetbackTable(jurisdictionKey);
+  const table: SetbackTable | null = getSetbackTableForZoning(
+    jurisdictionKey,
+    input.zoningCode,
+  );
   if (!table || table.districts.length === 0) {
     return {
       ...base,

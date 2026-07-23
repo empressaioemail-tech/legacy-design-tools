@@ -34,7 +34,7 @@ import {
 } from "express";
 import { z } from "zod";
 import {
-  getSetbackTable,
+  getSetbackTableForZoning,
   type SetbackTable,
 } from "@workspace/adapters";
 import { keyFromEngagementOrSynthesize } from "@workspace/codes";
@@ -860,7 +860,7 @@ async function deriveAndRespond(args: {
     address: ctx.address ?? undefined,
   });
   const table: SetbackTable | null = jurisdictionKey
-    ? getSetbackTable(jurisdictionKey)
+    ? getSetbackTableForZoning(jurisdictionKey, parcel.zoningCode)
     : null;
   if (!table) {
     res.status(404).json(
