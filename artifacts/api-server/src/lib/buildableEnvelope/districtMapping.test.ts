@@ -1,6 +1,6 @@
 /**
- * District-mapping tests (Problem B): zoningCode -> district, with the honest
- * most-conservative fallback for absent/unmatched codes.
+ * District-mapping tests (Problem B): zoningCode -> district, with honest
+ * null for absent/unmatched codes (caller declines; no invented district).
  */
 
 import { describe, it, expect } from "vitest";
@@ -99,14 +99,9 @@ describe("mapDistrict — guarded prefix match", () => {
   });
 });
 
-describe("mapDistrict — unmatched/absent -> conservative fallback", () => {
-  it("uses the most-conservative district for an unknown code", () => {
-    const r = mapDistrict(TABLE, "C-2")!;
-    expect(r.kind).toBe("fallback-conservative");
-    // R-LD has the largest combined setback (30+25+2*10=65) -> most conservative.
-    expect(r.district.district_name).toContain("R-LD");
-    expect(r.confidence).toBeLessThan(0.5);
-    expect(r.note).toMatch(/verify/i);
+describe("mapDistrict — unmatched/absent", () => {
+  it("returns null for an unknown explicit code so the caller can decline", () => {
+    expect(mapDistrict(TABLE, "C-2")).toBeNull();
   });
 
   it("uses the conservative fallback when no zoning is present", () => {

@@ -186,7 +186,10 @@ export function computeTier1Envelope(
       status: "declined",
       confidence: 0,
       approximate: true,
-      declineReason: "no-district",
+      // Table exists but GIS code (or missing code) has no scalar row yet.
+      declineReason: input.zoningCode
+        ? "setback-table-pending"
+        : "no-district",
       jurisdictionKey,
     };
   }
