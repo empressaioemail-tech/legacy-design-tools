@@ -29,6 +29,12 @@ import {
 // (throws on a missing DATABASE_URL at module load), which would break this
 // offline-safe bake's lazy gcloud DB-url resolution.
 import { keyFromEngagementOrSynthesize } from "@workspace/codes/jurisdictions";
+import {
+  absentZoningDisclosure,
+  isAbsentZoningFallback,
+  NO_ZONING_STAMP_REASON,
+  scrubAbsentZoningGeojson,
+} from "./buildableEnvelope/absentZoningHonesty";
 import { deriveBuildableEnvelope } from "./buildableEnvelope/derive";
 import { labelEdges } from "./buildableEnvelope/edgeLabeling";
 import { mapDistrict } from "./buildableEnvelope/districtMapping";
@@ -95,7 +101,9 @@ export interface Tier1EnvelopeFacet {
    * - "ok"           : a buildable envelope was derived (provisional).
    * - "no-buildable-area" : setbacks consume the lot (honest empty).
    * - "declined"     : no codified setback jurisdiction / no mappable
-   *                    district / unusable geometry — no envelope (honest).
+   *                    district / unusable geometry — or absent-zoning
+   *                    honesty (declineReason no-zoning-stamp) which may
+   *                    still carry a conservative-estimate geojson.
    */
   status: "ok" | "no-buildable-area" | "declined";
   /** Always true for Tier 1 — computed WITHOUT roads; Tier 2 upgrades it. */
@@ -108,6 +116,11 @@ export interface Tier1EnvelopeFacet {
   approximate: boolean;
   /** Why it declined, when status === "declined". */
   declineReason?: string;
+  /**
+   * Present when status is declined for absent zoning but a conservative
+   * estimate shape/setbacks are still attached.
+   */
+  matchKind?: "fallback-conservative";
   jurisdictionKey?: string | null;
   district?: string;
   setbacks?: { front_ft: number; side_ft: number; rear_ft: number };
@@ -222,6 +235,40 @@ export function computeTier1Envelope(
   });
 
   const props = derived.geojson.features[0]?.properties;
+  const setbacks = props
+    ? {
+        front_ft: props.setbacks.front_ft,
+        side_ft: props.setbacks.side_ft,
+        rear_ft: props.setbacks.rear_ft,
+      }
+    : undefined;
+
+  // Absent zoning: draw a conservative estimate, never stamp a district name.
+  if (isAbsentZoningFallback(district) && setbacks) {
+    const geojson = scrubAbsentZoningGeojson(derived.geojson, setbacks);
+    return {
+      ...base,
+      status: "declined",
+      declineReason: NO_ZONING_STAMP_REASON,
+      matchKind: "fallback-conservative",
+      confidence: derived.confidence,
+      approximate: true,
+      jurisdictionKey,
+      // deliberately omit district — do not assert the conservative row name
+      setbacks,
+      parcelAreaSqFt: props?.parcelAreaSqFt,
+      buildableAreaSqFt: props?.buildableAreaSqFt,
+      buildableAreaPct: props?.buildableAreaPct,
+      maxLotCoveragePct: props?.maxLotCoveragePct ?? null,
+      maxHeightFt: props?.maxHeightFt ?? null,
+      maxFootprintSqFt: props?.maxFootprintSqFt ?? null,
+      citationUrl: derived.citationUrl,
+      disclosure: absentZoningDisclosure(setbacks),
+      edgeSignal: props?.edgeSignal,
+      geojson,
+    };
+  }
+
   return {
     ...base,
     status: derived.empty ? "no-buildable-area" : "ok",
@@ -229,13 +276,7 @@ export function computeTier1Envelope(
     approximate: derived.approximate,
     jurisdictionKey,
     district: derived.district,
-    setbacks: props
-      ? {
-          front_ft: props.setbacks.front_ft,
-          side_ft: props.setbacks.side_ft,
-          rear_ft: props.setbacks.rear_ft,
-        }
-      : undefined,
+    setbacks,
     parcelAreaSqFt: props?.parcelAreaSqFt,
     buildableAreaSqFt: props?.buildableAreaSqFt,
     buildableAreaPct: props?.buildableAreaPct,

@@ -317,6 +317,19 @@ export function shouldPromoteTier2(
   next: Tier2Prior,
 ): boolean {
   if (!prior) return true;
+  // Force replace stamped invent (null zoning → named district) with the
+  // honest no-zoning-stamp decline+estimate. Prior must also have been
+  // absent-zoning invent (no zoning stamp + stamped district name).
+  const nextAbsent =
+    next.envelope?.status === "declined" &&
+    next.envelope.declineReason === "no-zoning-stamp";
+  const priorStampedInvent =
+    (prior.envelope?.district?.trim() ?? "").length > 0 &&
+    prior.envelope?.declineReason !== "no-zoning-stamp";
+  // Tier-2 prior shape has no zoning facet; treat a stamped district name on
+  // a non-no-zoning-stamp prior as invent when next is the honest decline.
+  // (Matched-district priors that lose zoning on a worse re-bake stay on mono.)
+  if (nextAbsent && priorStampedInvent) return true;
   return tier2FacetScore(next) >= tier2FacetScore(prior);
 }
 

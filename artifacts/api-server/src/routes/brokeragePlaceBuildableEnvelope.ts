@@ -67,6 +67,12 @@ import {
   type TxParcelCounty,
 } from "../lib/brokerageTxParcels";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
+import {
+  absentZoningDisclosure,
+  isAbsentZoningFallback,
+  NO_ZONING_STAMP_REASON,
+  scrubAbsentZoningGeojson,
+} from "../lib/buildableEnvelope/absentZoningHonesty";
 import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
 import {
   labelEdges,
@@ -959,20 +965,41 @@ async function deriveAndRespond(args: {
     labeling,
   });
 
+  // Absent zoning: keep the conservative estimate shape, but never stamp the
+  // fallback row name (e.g. I-2) as a real district determination.
+  const absentZoning = isAbsentZoningFallback(district);
+  const setbacksForDisclosure = {
+    front_ft: district.district.front_ft,
+    side_ft: district.district.side_ft,
+    rear_ft: district.district.rear_ft,
+  };
+  const geojson = absentZoning
+    ? scrubAbsentZoningGeojson(derived.geojson, setbacksForDisclosure)
+    : derived.geojson;
+  const wireDistrict = absentZoning ? null : derived.district;
+  const wireStatus = absentZoning
+    ? "declined"
+    : derived.empty
+      ? "no-buildable-area"
+      : "ok";
+
   const honesty: EngineHonesty = {
     // The GEOMETRY is deterministic; the CONFIDENCE reflects the labeling +
     // district inference. Use `asserted` (never `calibrated`/`deterministic`)
     // so the wire never claims survey-grade certainty for an inferred envelope.
     confidence: { value: derived.confidence, kind: "asserted" },
     dataVintage: new Date().toISOString().slice(0, 10),
-    coverage: derived.approximate
-      ? {
-          degraded: true,
-          reason: derived.empty
-            ? "No buildable area — setbacks exceed the lot."
-            : "Approximate — edge orientation and/or zoning district inferred; verify with survey + city.",
-        }
-      : { degraded: false },
+    coverage:
+      derived.approximate || absentZoning
+        ? {
+            degraded: true,
+            reason: absentZoning
+              ? absentZoningDisclosure(setbacksForDisclosure)
+              : derived.empty
+                ? "No buildable area — setbacks exceed the lot."
+                : "Approximate — edge orientation and/or zoning district inferred; verify with survey + city.",
+          }
+        : { degraded: false },
     source: {
       adapter: "brokerage:buildable-envelope",
       citationIds: [derived.citationUrl],
@@ -982,7 +1009,10 @@ async function deriveAndRespond(args: {
   res.status(200).json(
     withPlace(
       {
-        status: derived.empty ? "no-buildable-area" : "ok",
+        status: wireStatus,
+        ...(absentZoning
+          ? { declineReason: NO_ZONING_STAMP_REASON, matchKind: "fallback-conservative" }
+          : {}),
         layer: "buildable-envelope",
         // Top-level mirror of payload.parcel.parcel_node_id, so the map-snap
         // consumer reads ONE uniform field (`parcel_node_id`) across every
@@ -990,9 +1020,9 @@ async function deriveAndRespond(args: {
         parcel_node_id: parcelNodeIdValue,
         ...wrapEngineEnvelope(
           {
-            geojson: derived.geojson,
-            district: derived.district,
-            approximate: derived.approximate,
+            geojson,
+            district: wireDistrict,
+            approximate: derived.approximate || absentZoning,
             empty: derived.empty,
             citationUrl: derived.citationUrl,
             parcel: {

@@ -600,9 +600,14 @@ export function buildTier1Payload(
     landUse: luFacet != null,
     acreage: acreage != null,
     zoning: zoning != null,
-    // Envelope counts as a present facet only when it actually derived (ok or
-    // honestly-empty), NOT when it declined (no table / no district / no ring).
-    envelope: envelope != null && envelope.status !== "declined",
+    // Envelope counts as a present facet when it derived (ok / honestly-empty)
+    // OR when it is the absent-zoning conservative estimate (declined with
+    // no-zoning-stamp but still carrying a drawable geojson). Other declines
+    // (no table / unmatched GIS / ungeometric) stay uncovered.
+    envelope:
+      envelope != null &&
+      (envelope.status !== "declined" ||
+        envelope.declineReason === "no-zoning-stamp"),
   };
 
   return {
@@ -725,6 +730,28 @@ function isUnmatchedZoningCorrection(
 }
 
 /**
+ * Force-replace a stamped invent (null zoning painted as a real district,
+ * e.g. Bexar → I-2) when the fresh bake declines with no-zoning-stamp and
+ * keeps only a conservative estimate. Without this, mono keeps the invent.
+ *
+ * Scoped tightly: prior must ALSO have had no zoning stamp. A matched-zoning
+ * prior that a worse re-bake strips to null zoning is a normal mono reject,
+ * not this correction.
+ */
+function isAbsentZoningInventCorrection(
+  prior: Tier1FacetPayload,
+  next: Tier1FacetPayload,
+): boolean {
+  if (next.zoning?.district?.trim()) return false;
+  if (prior.zoning?.district?.trim()) return false;
+  if (next.envelope?.status !== "declined") return false;
+  if (next.envelope.declineReason !== "no-zoning-stamp") return false;
+  if (prior.envelope?.declineReason === "no-zoning-stamp") return false;
+  const priorDistrict = prior.envelope?.district?.trim() ?? "";
+  return priorDistrict.length > 0;
+}
+
+/**
  * Decide whether `next` may overwrite `prior`.
  *
  * Normal path (monotonic high-water-mark): the freshly computed payload
@@ -744,8 +771,9 @@ function isUnmatchedZoningCorrection(
  *
  * This override is scoped as tightly as possible and is NOT a general downgrade
  * bypass. It fires only for a gate-blocked land-use correction, the known
- * Bastrop B3 P-code/Public-Institutional correction, or an unmatched-zoning
- * correction that replaces an invented district with setback-table-pending.
+ * Bastrop B3 P-code/Public-Institutional correction, an unmatched-zoning
+ * correction that replaces an invented district with setback-table-pending,
+ * or an absent-zoning invent correction (stamped district → no-zoning-stamp).
  * Any other downgrade still takes the monotonic path and is rejected.
  */
 export function shouldPromote(
@@ -762,6 +790,9 @@ export function shouldPromote(
   // Map-truth correction: force decline when an explicit GIS code no longer
   // matches any setback row (stop keeping invented districts like PDD→RHD).
   if (isUnmatchedZoningCorrection(prior, next)) return true;
+  // Map-truth correction: force honest absent-zoning decline over a prior that
+  // stamped the conservative row (e.g. I-2) as if it were a real district.
+  if (isAbsentZoningInventCorrection(prior, next)) return true;
   return facetScore(next) >= facetScore(prior);
 }
 
