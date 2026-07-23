@@ -703,6 +703,28 @@ function isBastropB3SetbackCorrection(
 }
 
 /**
+ * Force-replace an invented envelope district when a fresh re-bake declines
+ * for unmatched zoning. Without this, monotonic scoring keeps the invented
+ * ok/no-buildable-area prior forever (e.g. Lockhart PDD painted as RHD).
+ */
+function isUnmatchedZoningCorrection(
+  prior: Tier1FacetPayload,
+  next: Tier1FacetPayload,
+): boolean {
+  const zoningCode = next.zoning?.district?.trim() ?? "";
+  if (!zoningCode) return false;
+  if (next.envelope?.status !== "declined") return false;
+  if (next.envelope.declineReason !== "setback-table-pending") return false;
+  if (next.facetCoverage.envelope !== false) return false;
+  if (!prior.envelope || prior.envelope.status === "declined") return false;
+  const priorDistrict = prior.envelope.district?.trim() ?? "";
+  if (!priorDistrict) return false;
+  const priorCode = priorDistrict.split(/\s+/)[0]?.toUpperCase().replace(/[^A-Z0-9]/g, "") ?? "";
+  const nextCode = zoningCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return priorCode !== nextCode;
+}
+
+/**
  * Decide whether `next` may overwrite `prior`.
  *
  * Normal path (monotonic high-water-mark): the freshly computed payload
@@ -721,10 +743,10 @@ function isBastropB3SetbackCorrection(
  * carries), promotion is FORCED so the fabricated value is actually stripped.
  *
  * This override is scoped as tightly as possible and is NOT a general downgrade
- * bypass. It fires only for a gate-blocked land-use correction or the known
- * Bastrop B3 P-code/Public-Institutional correction. Any other downgrade (an
- * envelope that lost confidence, a zoning that went null, a non-blocked county)
- * still takes the monotonic path and is rejected.
+ * bypass. It fires only for a gate-blocked land-use correction, the known
+ * Bastrop B3 P-code/Public-Institutional correction, or an unmatched-zoning
+ * correction that replaces an invented district with setback-table-pending.
+ * Any other downgrade still takes the monotonic path and is rejected.
  */
 export function shouldPromote(
   prior: Tier1FacetPayload | null,
@@ -737,6 +759,9 @@ export function shouldPromote(
   // Map-truth correction: force removal of the legacy P Public/Institutional
   // envelope when a Bastrop B3 Place Type now resolves to honest-empty.
   if (isBastropB3SetbackCorrection(prior, next)) return true;
+  // Map-truth correction: force decline when an explicit GIS code no longer
+  // matches any setback row (stop keeping invented districts like PDD→RHD).
+  if (isUnmatchedZoningCorrection(prior, next)) return true;
   return facetScore(next) >= facetScore(prior);
 }
 
