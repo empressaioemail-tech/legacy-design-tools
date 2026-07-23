@@ -186,8 +186,8 @@ describe("F4l setback tables", () => {
     const expectedCounts = {
       "austin-tx": 9,
       "liberty-hill-tx": 14,
-      "lockhart-tx": 4,
-      "san-antonio-tx": 15,
+      "lockhart-tx": 5,
+      "san-antonio-tx": 18,
       "taylor-tx": 6,
     };
     expect(SETBACK_JURISDICTION_KEYS).toEqual(

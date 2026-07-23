@@ -325,7 +325,7 @@ describe("San Marcos pilot registration", () => {
     const table = getSetbackTable("cedar_park_tx");
     expect(table).not.toBeNull();
     expect(table!.jurisdictionKey).toBe("cedar-park-tx");
-    expect(table!.districts).toHaveLength(7);
+    expect(table!.districts).toHaveLength(16);
     expect(table!.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
