@@ -527,6 +527,31 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
     expect(shouldPromote(fullPayload(), strippedPayload())).toBe(false);
   });
 
+  it("forces removal of a legacy Public/Institutional envelope from Bastrop B3 P-5", () => {
+    const honestP5 = buildTier1Payload(
+      parcelRow({ zoning_district: "P-5" }),
+      county.fips,
+      county.name,
+      new Map(),
+      now,
+    )!;
+    const invalidPrior: Tier1FacetPayload = {
+      ...honestP5,
+      envelope: {
+        ...honestP5.envelope!,
+        status: "ok",
+        confidence: 0.245,
+        district: "P Public/Institutional",
+        setbacks: { front_ft: 25, side_ft: 15, rear_ft: 20 },
+      },
+      facetCoverage: { ...honestP5.facetCoverage, envelope: true },
+    };
+
+    expect(honestP5.envelope?.declineReason).toBe("setback-table-pending");
+    expect(facetScore(honestP5)).toBeLessThan(facetScore(invalidPrior));
+    expect(shouldPromote(invalidPrior, honestP5)).toBe(true);
+  });
+
   it("promotes an equal-quality refresh (idempotent re-run is safe)", () => {
     expect(shouldPromote(fullPayload(), fullPayload())).toBe(true);
   });

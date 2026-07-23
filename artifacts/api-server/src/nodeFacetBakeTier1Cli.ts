@@ -677,6 +677,32 @@ function isGateBlockedLandUseCorrection(
 }
 
 /**
+ * Does a fresh Bastrop B3 re-bake remove the known-invalid legacy
+ * Public/Institutional envelope? This is deliberately narrower than a general
+ * setback downgrade: only the live B3 Place Type codes, only Bastrop County,
+ * only the old P Public/Institutional district, and only the cited
+ * honest-empty decline qualify.
+ */
+function isBastropB3SetbackCorrection(
+  prior: Tier1FacetPayload,
+  next: Tier1FacetPayload,
+): boolean {
+  const zoningCode = next.zoning?.district?.trim().toUpperCase() ?? "";
+  const isB3PlaceType =
+    /^P-[1-5](?:$|[-_\s])/.test(zoningCode) ||
+    /^P-(?:CS|EC)(?:$|[-_\s])/.test(zoningCode) ||
+    /^PDD(?:$|[-_\s])/.test(zoningCode);
+  return (
+    next.countyFips === "48021" &&
+    isB3PlaceType &&
+    next.envelope?.status === "declined" &&
+    next.envelope.declineReason === "setback-table-pending" &&
+    next.facetCoverage.envelope === false &&
+    prior.envelope?.district === "P Public/Institutional"
+  );
+}
+
+/**
  * Decide whether `next` may overwrite `prior`.
  *
  * Normal path (monotonic high-water-mark): the freshly computed payload
@@ -695,10 +721,10 @@ function isGateBlockedLandUseCorrection(
  * carries), promotion is FORCED so the fabricated value is actually stripped.
  *
  * This override is scoped as tightly as possible and is NOT a general downgrade
- * bypass: it fires only when (a) the county is gate-blocked, and (b) the sole
- * effect is removing a land-use the prior had. Any other downgrade (an envelope
- * that lost confidence, a zoning that went null, a non-blocked county) still
- * takes the monotonic path and is rejected.
+ * bypass. It fires only for a gate-blocked land-use correction or the known
+ * Bastrop B3 P-code/Public-Institutional correction. Any other downgrade (an
+ * envelope that lost confidence, a zoning that went null, a non-blocked county)
+ * still takes the monotonic path and is rejected.
  */
 export function shouldPromote(
   prior: Tier1FacetPayload | null,
@@ -708,6 +734,9 @@ export function shouldPromote(
   // Fabrication-correction: force the strip of a gate-blocked county's
   // previously-promoted (fabricated) land-use, even though it lowers the score.
   if (isGateBlockedLandUseCorrection(prior, next)) return true;
+  // Map-truth correction: force removal of the legacy P Public/Institutional
+  // envelope when a Bastrop B3 Place Type now resolves to honest-empty.
+  if (isBastropB3SetbackCorrection(prior, next)) return true;
   return facetScore(next) >= facetScore(prior);
 }
 
