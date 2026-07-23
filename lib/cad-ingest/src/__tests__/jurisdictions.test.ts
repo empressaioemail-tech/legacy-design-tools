@@ -108,13 +108,15 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       getSetbackTable("liberty-hill-tx"),
     ]);
     const cedarPark = getSetbackTable("cedar-park-tx");
-    expect(cedarPark?.districts).toHaveLength(7);
+    expect(cedarPark?.districts).toHaveLength(16);
     expect(cedarPark?.districts.map((district) => district.district_name)).toEqual(
       expect.arrayContaining([
         "DR Development Reserve",
         "SR Suburban Residential",
         "MF Multifamily",
         "NB Neighborhood Business",
+        "GB General Business",
+        "LI Light Industrial",
       ]),
     );
     expect(cedarPark?.note).toMatch(/UR is omitted/i);
