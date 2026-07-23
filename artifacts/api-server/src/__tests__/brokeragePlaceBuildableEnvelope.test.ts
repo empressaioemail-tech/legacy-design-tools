@@ -249,6 +249,16 @@ vi.mock("../lib/buildableEnvelope/roads", async () => {
   const roadLat = BASTROP_LAT - feetToMeters(120) / mPerDegLat;
   return {
     ...actual,
+    fetchNearbyRoads: vi.fn(async () => [
+      {
+        name: "Main St",
+        highway: "residential",
+        polyline: [
+          [BASTROP_LNG - 0.002, roadLat],
+          [BASTROP_LNG + 0.002, roadLat],
+        ],
+      },
+    ]),
     fetchNearestRoads: vi.fn(async () => [
       [
         [BASTROP_LNG - 0.002, roadLat],

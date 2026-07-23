@@ -119,12 +119,17 @@ describe("Tier-2 envelope upgrade (road-based labeling)", () => {
     expect(declined.roadProvenance.roadSignalUsed).toBe(false);
   });
 
-  it("declines Bastrop B3 P-5 instead of using legacy Public/Institutional setbacks", () => {
-    const declined = computeTier2Envelope(envInput({ zoningCode: "P-5" }));
-    expect(declined.status).toBe("declined");
-    expect(declined.declineReason).toBe("setback-table-pending");
-    expect(declined.jurisdictionKey).toBe("bastrop_tx");
-    expect(declined.setbacks).toBeUndefined();
+  it("maps Bastrop B3 P-5 to its cited Core row, not legacy Public/Institutional", () => {
+    const envelope = computeTier2Envelope(envInput({ zoningCode: "P-5" }));
+    expect(envelope.status).toBe("ok");
+    expect(envelope.jurisdictionKey).toBe("bastrop_tx");
+    expect(envelope.district).toBe("P-5 Core");
+    expect(envelope.district).not.toBe("P Public/Institutional");
+    expect(envelope.setbacks).toEqual({
+      front_ft: 15,
+      side_ft: 0,
+      rear_ft: 0,
+    });
   });
 });
 

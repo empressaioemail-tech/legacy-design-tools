@@ -80,11 +80,22 @@ describe("mapDistrict — guarded prefix match", () => {
     expect(r.confidence).toBe(0.7);
   });
 
-  it("routes Bastrop B3 P-5 to the cited honest-empty place-type table", () => {
+  it("routes Bastrop B3 P-5 to its populated city place-type row", () => {
     const table = getSetbackTableForZoning("bastrop_tx", "P-5");
     expect(table?.jurisdictionKey).toBe("bastrop-city-tx");
-    expect(table?.districts).toEqual([]);
+    expect(table?.districts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district_name: "P-5 Core",
+          front_ft: 15,
+        }),
+      ]),
+    );
     expect(table?.note).toMatch(/B3 Code/i);
+    const result = mapDistrict(table!, "P-5");
+    expect(result?.kind).toBe("matched");
+    expect(result?.district.district_name).toBe("P-5 Core");
+    expect(result?.district.district_name).not.toMatch(/^P Public\/Institutional$/);
   });
 });
 
