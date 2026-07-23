@@ -560,6 +560,41 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
     expect(shouldPromote(invalidPrior, populatedP5)).toBe(true);
   });
 
+  it("replaces an invented unmatched-district envelope with setback-table-pending", () => {
+    // Lockhart PDD previously fell back to RHD via conservative invent; after
+    // #346 the re-bake declines. Monotonic must force the honest decline.
+    const declined = buildTier1Payload(
+      parcelRow({
+        zoning_district: "PDD",
+        situs_city: "Lockhart",
+        situs_state: "TX",
+      }),
+      "48055",
+      "Caldwell",
+      new Map(),
+      now,
+    )!;
+    expect(declined.envelope?.status).toBe("declined");
+    expect(declined.envelope?.declineReason).toBe("setback-table-pending");
+    expect(declined.facetCoverage.envelope).toBe(false);
+
+    const inventedPrior: Tier1FacetPayload = {
+      ...declined,
+      envelope: {
+        provisional: true,
+        roadsPending: true,
+        status: "ok",
+        confidence: 0.245,
+        approximate: true,
+        district: "RHD Residential High Density (conservative allowed-type envelope)",
+        setbacks: { front_ft: 25, side_ft: 20, rear_ft: 25 },
+        jurisdictionKey: "lockhart_tx",
+      },
+      facetCoverage: { ...declined.facetCoverage, envelope: true },
+    };
+    expect(shouldPromote(inventedPrior, declined)).toBe(true);
+  });
+
   it("promotes an equal-quality refresh (idempotent re-run is safe)", () => {
     expect(shouldPromote(fullPayload(), fullPayload())).toBe(true);
   });
