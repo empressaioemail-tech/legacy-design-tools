@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "lockhart-tx",
   "jurisdictionDisplayName": "City of Lockhart, TX",
-  "note": "WDLL 51. Main commercial and light-industrial scalar rows transcribed from official Ordinance 2024-18, Appendix II, at https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf (accessed 2026-07-23). side_corner_ft mirrors base side only as a non-binding sentinel; the appendix does not give a separate corner-side field. OMITTED: RLD/RMD/RHD because their development-type table does not select one scalar row from the GIS zone alone; CCB because its central-business setbacks vary by alley/end condition; IH because its line uses variable building-setback triggers; MH corner and adjacent-lot rules; AO, PI, PDD, and all two-story-adjacency, drive-through, and block-average exceptions in notes 5, 6, and 10. ADDED 2026-07-23: RLD is now modeled from its sole allowed SF-1 development type. RMD and RHD remain intentionally unmapped because each GIS district admits multiple development types with materially different setbacks; a zoning stamp alone cannot select a scalar row.",
+  "note": "WDLL 51. Main commercial and light-industrial scalar rows transcribed from official Ordinance 2024-18, Appendix II, at https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf (accessed 2026-07-23). side_corner_ft mirrors base side only as a non-binding sentinel; the appendix does not give a separate corner-side field. RLD uses SF-1, the sole Allowed development type. RMD and RHD use conservative envelopes: max front/side/rear across Appendix I types Allowed by-right (RMD SF-1/SF-2/DF-1/PH-1 => F25/S10/R20; RHD including CF-1/MF-1 abutting-R => F25/S20/R25). Envelope is intentionally stricter than some allowed types and is not a development-type election. OMITTED: CCB alley/end conditions; IH variable triggers; MH corner/adjacent-lot rules; AO, PI, PDD; two-story-adjacency, drive-through, and block-average exceptions in notes 5, 6, and 10.",
   "districts": [
     {
       "district_name": "CLB Light Business",
@@ -343,6 +343,144 @@
           "atom_did": "lockhart_tx/ord_2024-18/Appendix II",
           "section_number": "Appendix II",
           "quote": "Ordinance 2024-18 Appendix II, Specific Requirements for Residential Development Types: SF-1 provides 25-foot street, 7.5-foot side, and 10-foot rear setbacks; the table gives 2.5 stories rather than a scalar feet height.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RMD Residential Medium Density (conservative allowed-type envelope)",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 30,
+      "max_impervious_pct": 100,
+      "citation_url": "https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RMD Allowed types SF-1, SF-2, DF-1, PH-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RHD Residential High Density (conservative allowed-type envelope)",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://mcclibraryfunctions-stage.azurewebsites.us/api/ordinanceDownload/11173/1309249/pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "lockhart_tx/ord_2024-18/Appendix I",
+          "section_number": "Appendix I",
+          "quote": "Conservative max of Appendix I setbacks for RHD Allowed types including CF-1 and MF-1 abutting-R side.",
           "confidence": 0.6,
           "verification_state": "asserted",
           "not_specified": true

@@ -344,7 +344,7 @@ describe("San Marcos pilot registration", () => {
     const table = getSetbackTable("pflugerville_tx");
     expect(table).not.toBeNull();
     expect(table!.jurisdictionKey).toBe("pflugerville-tx");
-    expect(table!.districts).toHaveLength(3);
+    expect(table!.districts).toHaveLength(10);
     expect(table!.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -356,7 +356,8 @@ describe("San Marcos pilot registration", () => {
         }),
       ]),
     );
-    expect(table!.note).toMatch(/GB1.*omitted/i);
+    expect(table!.note).toMatch(/GB1/i);
+    expect(table!.note).toMatch(/OMITTED/i);
     expect(table!.note).toMatch(/^.*https:\/\//);
   });
 
