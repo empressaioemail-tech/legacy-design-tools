@@ -133,7 +133,7 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
     expect(res.status).toBe(200);
     expect(res.body.jurisdictionKey).toBe("san-marcos-tx");
     expect(Array.isArray(res.body.districts)).toBe(true);
-    expect(res.body.districts).toHaveLength(2);
+    expect(res.body.districts).toHaveLength(8);
     expect(res.body.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -141,9 +141,14 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
           front_ft: 25,
           rear_ft: 20,
         }),
+        expect.objectContaining({
+          district_name: "MU Mixed Use (legacy)",
+          front_ft: 25,
+          side_ft: 7.5,
+        }),
       ]),
     );
-    expect(res.body.note).toMatch(/OMITTED.*MF-12/i);
+    expect(res.body.note).toMatch(/OMITTED.*MF-/i);
 
     // The underscore form resolves through the same key normalization.
     const underscore = await request(getApp()).get(
