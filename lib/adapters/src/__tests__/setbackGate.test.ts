@@ -304,7 +304,7 @@ describe("San Marcos pilot registration", () => {
   it("serves a cited, populated table with explicit omitted-code gaps", () => {
     const table = getSetbackTable("san-marcos-tx");
     expect(table).not.toBeNull();
-    expect(table!.districts).toHaveLength(2);
+    expect(table!.districts).toHaveLength(8);
     expect(table!.note).toMatch(/ND-3/i);
     expect(table!.note).toMatch(/conditional/i);
     expect(table!.districts).toEqual(
@@ -316,9 +316,15 @@ describe("San Marcos pilot registration", () => {
           side_ft: 5,
           side_corner_ft: 15,
         }),
+        expect.objectContaining({
+          district_name: "MU Mixed Use (legacy)",
+          front_ft: 25,
+          side_ft: 7.5,
+          rear_ft: 5,
+        }),
       ]),
     );
-    expect(table!.note).toMatch(/OMITTED.*MF-12/i);
+    expect(table!.note).toMatch(/OMITTED.*MF-/i);
   });
 
   it("serves Cedar Park as an ordinance-backed populated table", () => {
