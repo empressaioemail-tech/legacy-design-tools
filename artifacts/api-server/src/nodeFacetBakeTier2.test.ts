@@ -57,7 +57,9 @@ const ROAD_SOUTH: RoadCandidate = {
 
 const envInput = (over: Partial<Parameters<typeof computeTier2Envelope>[0]> = {}) => ({
   ring: BASTROP_LOT,
-  zoningCode: null as string | null,
+  // Matched district so road/point/shape tests are not conflated with
+  // absent-zoning honesty (null zoning → declined no-zoning-stamp).
+  zoningCode: "R-MD" as string | null,
   situsCity: "BASTROP",
   situsState: "TX",
   situsAddress: "123 MAIN ST, BASTROP, TX 78602",
@@ -107,6 +109,19 @@ describe("Tier-2 envelope upgrade (road-based labeling)", () => {
     // Shape-only is the Tier-1-grade guess: still provisional (roads didn't help).
     expect(shapeOnly.provisional).toBe(true);
     expect(shapeOnly.roadProvenance.roadSignalUsed).toBe(false);
+  });
+
+  it("absent zoning declines with road estimate — does not stamp a district", () => {
+    const env = computeTier2Envelope(
+      envInput({ zoningCode: null, roads: [ROAD_SOUTH] }),
+    );
+    expect(env.status).toBe("declined");
+    expect(env.declineReason).toBe("no-zoning-stamp");
+    expect(env.district).toBeUndefined();
+    expect(env.edgeSignal).toBe("road");
+    expect(env.setbacks).toBeDefined();
+    expect(env.geojson).toBeDefined();
+    expect(JSON.stringify(env.geojson)).toMatch(/conservative-estimate/);
   });
 
   it("DECLINES honestly for a jurisdiction with no codified setback table", () => {

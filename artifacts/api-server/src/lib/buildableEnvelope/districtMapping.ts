@@ -134,13 +134,15 @@ export function mapDistrict(
     return null;
   }
 
-  // No zoning stamp: conservative fallback with verify note.
+  // No zoning stamp: conservative setback estimate only. Callers must not
+  // stamp safe.district_name as a real district (see absentZoningHonesty.ts).
   const safe = mostConservative(districts);
   return {
     district: safe,
     kind: "fallback-conservative",
     confidence: 0.35,
-    note: `No zoning on this parcel — using the most-conservative district (${safe.district_name}). Verify the district.`,
+    note:
+      "No zoning stamp — conservative setback estimate only; not a district determination. Verify zoning with the city.",
     zoningCode: null,
   };
 }

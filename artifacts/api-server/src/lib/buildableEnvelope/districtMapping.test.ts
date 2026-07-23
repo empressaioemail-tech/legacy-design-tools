@@ -115,7 +115,8 @@ describe("mapDistrict — unmatched/absent", () => {
     const r = mapDistrict(TABLE, null)!;
     expect(r.kind).toBe("fallback-conservative");
     expect(r.district.district_name).toContain("R-LD");
-    expect(r.note).toMatch(/no zoning/i);
+    expect(r.note).toMatch(/no zoning stamp/i);
+    expect(r.note).toMatch(/not a district determination/i);
   });
 });
 

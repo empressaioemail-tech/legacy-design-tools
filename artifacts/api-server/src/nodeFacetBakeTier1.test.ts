@@ -471,7 +471,7 @@ describe("honest absence — envelope + node-id (never fabricate)", () => {
 });
 
 describe("Tier-1 envelope (skipRoad / provisional)", () => {
-  it("derives a provisional, roads-pending, shape-signal envelope for a known city", () => {
+  it("absent zoning declines with conservative estimate — does not stamp a district", () => {
     const env = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: null,
@@ -479,7 +479,10 @@ describe("Tier-1 envelope (skipRoad / provisional)", () => {
       situsState: "TX",
       situsAddress: "123 MAIN ST, BASTROP, TX 78602",
     });
-    expect(env.status).toBe("ok");
+    expect(env.status).toBe("declined");
+    expect(env.declineReason).toBe("no-zoning-stamp");
+    expect(env.matchKind).toBe("fallback-conservative");
+    expect(env.district).toBeUndefined();
     expect(env.provisional).toBe(true);
     expect(env.roadsPending).toBe(true);
     // Shape-only labeling (no roads) => the low-confidence approximate path.
@@ -489,6 +492,22 @@ describe("Tier-1 envelope (skipRoad / provisional)", () => {
     expect(env.confidence).toBeLessThan(0.7);
     expect(env.setbacks).toBeDefined();
     expect(env.buildableAreaSqFt).toBeGreaterThan(0);
+    expect(env.disclosure).toMatch(/not a district determination/i);
+    expect(JSON.stringify(env.geojson)).not.toMatch(/I-2|R-LD Residential/i);
+    expect(JSON.stringify(env.geojson)).toMatch(/conservative-estimate/);
+  });
+
+  it("matched zoning still returns ok with the real district name", () => {
+    const env = computeTier1Envelope({
+      ring: BASTROP_LOT,
+      zoningCode: "R-MD",
+      situsCity: "Bastrop",
+      situsState: "TX",
+      situsAddress: "123 MAIN ST, BASTROP, TX 78602",
+    });
+    expect(env.status).toBe("ok");
+    expect(env.district).toBeTruthy();
+    expect(env.declineReason).toBeUndefined();
   });
 });
 
@@ -593,6 +612,40 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
       facetCoverage: { ...declined.facetCoverage, envelope: true },
     };
     expect(shouldPromote(inventedPrior, declined)).toBe(true);
+  });
+
+  it("replaces absent-zoning invent (stamped I-2) with no-zoning-stamp decline", () => {
+    const honest = buildTier1Payload(
+      parcelRow({
+        zoning_district: null,
+        situs_city: "San Antonio",
+        situs_state: "TX",
+      }),
+      "48029",
+      "Bexar",
+      new Map(),
+      now,
+    )!;
+    expect(honest.envelope?.status).toBe("declined");
+    expect(honest.envelope?.declineReason).toBe("no-zoning-stamp");
+    expect(honest.envelope?.district).toBeUndefined();
+    expect(honest.facetCoverage.envelope).toBe(true);
+
+    const inventPrior: Tier1FacetPayload = {
+      ...honest,
+      envelope: {
+        provisional: true,
+        roadsPending: true,
+        status: "ok",
+        confidence: 0.245,
+        approximate: true,
+        district: "I-2 San Antonio heavy industrial district",
+        setbacks: { front_ft: 30, side_ft: 50, rear_ft: 50 },
+        jurisdictionKey: "san_antonio_tx",
+      },
+      facetCoverage: { ...honest.facetCoverage, envelope: true },
+    };
+    expect(shouldPromote(inventPrior, honest)).toBe(true);
   });
 
   it("promotes an equal-quality refresh (idempotent re-run is safe)", () => {

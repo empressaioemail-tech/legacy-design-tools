@@ -40,6 +40,12 @@
  * nodeFacetBakeTier1.ts.
  */
 
+import {
+  absentZoningDisclosure,
+  isAbsentZoningFallback,
+  NO_ZONING_STAMP_REASON,
+  scrubAbsentZoningGeojson,
+} from "./buildableEnvelope/absentZoningHonesty";
 import { deriveBuildableEnvelope } from "./buildableEnvelope/derive";
 import {
   labelEdges,
@@ -103,6 +109,8 @@ export interface Tier2EnvelopeFacet {
   confidence: number;
   approximate: boolean;
   declineReason?: string;
+  /** Absent-zoning conservative estimate (district name deliberately omitted). */
+  matchKind?: "fallback-conservative";
   jurisdictionKey?: string | null;
   district?: string;
   setbacks?: { front_ft: number; side_ft: number; rear_ft: number };
@@ -211,6 +219,40 @@ export function computeTier2Envelope(
 
   const props = derived.geojson.features[0]?.properties;
   const roadSignalUsed = labeling.signal === "road";
+  const setbacks = props
+    ? {
+        front_ft: props.setbacks.front_ft,
+        side_ft: props.setbacks.side_ft,
+        rear_ft: props.setbacks.rear_ft,
+      }
+    : undefined;
+
+  if (isAbsentZoningFallback(district) && setbacks) {
+    const geojson = scrubAbsentZoningGeojson(derived.geojson, setbacks);
+    return {
+      status: "declined",
+      declineReason: NO_ZONING_STAMP_REASON,
+      matchKind: "fallback-conservative",
+      provisional: labeling.signal === "shape",
+      roadsPending: false,
+      edgeSignal: labeling.signal,
+      confidence: derived.confidence,
+      approximate: true,
+      jurisdictionKey,
+      setbacks,
+      parcelAreaSqFt: props?.parcelAreaSqFt,
+      buildableAreaSqFt: props?.buildableAreaSqFt,
+      buildableAreaPct: props?.buildableAreaPct,
+      maxLotCoveragePct: props?.maxLotCoveragePct ?? null,
+      maxHeightFt: props?.maxHeightFt ?? null,
+      maxFootprintSqFt: props?.maxFootprintSqFt ?? null,
+      citationUrl: derived.citationUrl,
+      disclosure: absentZoningDisclosure(setbacks),
+      geojson,
+      roadProvenance: { ...roadProvenanceBase, roadSignalUsed },
+    };
+  }
+
   return {
     status: derived.empty ? "no-buildable-area" : "ok",
     // Provisional only when the front edge is STILL a pure-shape guess (the
@@ -223,13 +265,7 @@ export function computeTier2Envelope(
     approximate: derived.approximate,
     jurisdictionKey,
     district: derived.district,
-    setbacks: props
-      ? {
-          front_ft: props.setbacks.front_ft,
-          side_ft: props.setbacks.side_ft,
-          rear_ft: props.setbacks.rear_ft,
-        }
-      : undefined,
+    setbacks,
     parcelAreaSqFt: props?.parcelAreaSqFt,
     buildableAreaSqFt: props?.buildableAreaSqFt,
     buildableAreaPct: props?.buildableAreaPct,
@@ -403,7 +439,9 @@ export function tier2FacetScore(payload: {
   flood: Tier2FloodFacet;
 }): number {
   const envelopeResolved =
-    payload.envelope != null && payload.envelope.status !== "declined";
+    payload.envelope != null &&
+    (payload.envelope.status !== "declined" ||
+      payload.envelope.declineReason === NO_ZONING_STAMP_REASON);
   const floodResolved = payload.flood.status !== "unavailable";
   const facetCount = (envelopeResolved ? 1 : 0) + (floodResolved ? 1 : 0);
   const conf = payload.envelope?.confidence ?? 0;
