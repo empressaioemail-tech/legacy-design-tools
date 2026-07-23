@@ -94,7 +94,7 @@ async function tryServeAtomChainEnvelope(args: {
     process.env.RETRIEVAL_API_KEY?.trim();
   if (!key) return false;
 
-  let chain: {
+  type AtomChainWire = {
     zoningFact?: { district?: string | null; absence?: { kind?: string } | null } | null;
     setbackRule?: {
       front?: number;
@@ -108,7 +108,8 @@ async function tryServeAtomChainEnvelope(args: {
         axes?: { assertedConfidence?: { estimate?: number } };
       } | null;
     } | null;
-  } | null = null;
+  };
+  let chain: AtomChainWire | null = null;
   try {
     const upstream = await fetch(
       `${baseUrl}/property-nodes/${encodeURIComponent(parcelNodeId)}/atom-chain`,
@@ -121,7 +122,7 @@ async function tryServeAtomChainEnvelope(args: {
       },
     );
     if (!upstream.ok) return false;
-    chain = (await upstream.json()) as typeof chain;
+    chain = (await upstream.json()) as AtomChainWire;
   } catch {
     return false;
   }
