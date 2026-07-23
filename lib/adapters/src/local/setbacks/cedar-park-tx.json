@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "cedar-park-tx",
   "jurisdictionDisplayName": "City of Cedar Park, TX",
-  "note": "Codified from City of Cedar Park Code of Ordinances, Ch. 11, Art. 11.03: residential dimensional standards at https://ecode360.com/38612844 (sec 11.03.061, Tables 11.03.061A and 11.03.061B) and nonresidential standards at https://ecode360.com/38612863 (sec 11.03.091, Table 11.03.091), accessed 2026-07-21. SHIPPED rows (GIS ZoningAbbrev mappable without variant collision): DR, SR, SU, MF, NB, LB, PO. OMITTED - ES is omitted: no ZoningAbbrev in the Cedar Park GIS layer. OMITTED - UR is omitted: one GIS code cannot distinguish front-entry vs rear-entry townhomes, and street-side setback varies by street class (15/20/25 ft). OMITTED - other live GIS codes seen in the layer (including GB, LI, HC, HI, H, PS, OG, OR, MU, TC, PD and any PD/overlay variants): not yet extracted from the ordinance tables into this file; they remain honest setback-table gaps (envelope declines) until a citation-backed row lands. max_lot_coverage_pct and max_impervious_pct are not specified by these tables; both carry 100 only as the established non-binding sentinel with per-value provenance (not_specified).",
+  "note": "Codified from City of Cedar Park Code of Ordinances, Ch. 11, Art. 11.03: residential dimensional standards at https://ecode360.com/38612844 (sec 11.03.061, Tables 11.03.061A and 11.03.061B) and nonresidential standards at https://ecode360.com/38612863 (sec 11.03.091, Table 11.03.091), accessed 2026-07-21. SHIPPED rows (GIS ZoningAbbrev mappable without variant collision): DR, SR, SU, MF, NB, LB, PO. OMITTED - ES is omitted: no ZoningAbbrev in the Cedar Park GIS layer. OMITTED - UR is omitted: one GIS code cannot distinguish front-entry vs rear-entry townhomes, and street-side setback varies by street class (15/20/25 ft). OMITTED - other live GIS codes seen in the layer (including GB, LI, HC, HI, H, PS, OG, OR, MU, TC, PD and any PD/overlay variants): not yet extracted from the ordinance tables into this file; they remain honest setback-table gaps (envelope declines) until a citation-backed row lands. max_lot_coverage_pct and max_impervious_pct are not specified by these tables; both carry 100 only as the established non-binding sentinel with per-value provenance (not_specified). ADDED 2026-07-23: Table 11.03.091 scalar rows for GB, HC, LI, HI, H, PS, OG, OR, and MU. PA remains omitted because its standards require master-development-plan review. The source table?s residential-boundary buffer, major-corridor, bufferyard, and mixed-use addenda remain conditional and are not asserted by this scalar envelope.",
   "districts": [
     {
       "district_name": "DR Development Reserve",
@@ -448,6 +448,627 @@
           "quote": "Table 11.03.091 states no maximum impervious-cover percentage.",
           "confidence": 0.8,
           "verification_state": "human-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "GB General Business",
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 12,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 GB column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "HC Highway Commercial",
+      "front_ft": 50,
+      "rear_ft": 25,
+      "side_ft": 20,
+      "side_corner_ft": 50,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HC column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "LI Light Industrial",
+      "front_ft": 50,
+      "rear_ft": 25,
+      "side_ft": 20,
+      "side_corner_ft": 50,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 LI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "HI Heavy Industrial",
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 HI column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "H Hotel",
+      "front_ft": 50,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 50,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 H column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "PS Public Service",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 12,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 PS column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "OG Open Greenbelt",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OG column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "OR Outdoor Recreation",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 12,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 OR column: stated front, interior-side, street-side, rear, and maximum-height values. Where Table 11.03.091 lists different rear values for property line versus street right-of-way, this row uses the larger value as the conservative scalar baseline.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MU Mixed Use",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 0,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612863",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "cedar_park_tx/ch11/11.03.091",
+          "section_number": "11.03.091",
+          "quote": "Table 11.03.091 MU column: stated front, interior-side, street-side, rear, and maximum-height values.",
+          "confidence": 0.8,
+          "verification_state": "asserted",
           "not_specified": true
         }
       }
