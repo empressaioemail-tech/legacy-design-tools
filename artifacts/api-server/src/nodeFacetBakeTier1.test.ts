@@ -498,7 +498,7 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
 
   const fullPayload = () =>
     buildTier1Payload(
-      parcelRow({ zoning_district: "SF-1" }),
+      parcelRow({ zoning_district: "R-MD" }),
       county.fips,
       county.name,
       new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]),
@@ -639,7 +639,7 @@ describe("batched bake — decision + counts match the per-node loop", () => {
 
   const nodeFull = (fi: number): ComputedNode => {
     const payload = buildTier1Payload(
-      parcelRow({ feature_index: fi, prop_id: `R${fi}0000`, zoning_district: "SF-1" }),
+      parcelRow({ feature_index: fi, prop_id: `R${fi}0000`, zoning_district: "R-MD" }),
       CTY.fips,
       CTY.name,
       new Map([[`${fi}0000`, { landUseCode: "A1", landUseVintage: "2025" }]]),
@@ -898,7 +898,7 @@ describe("fabrication-correction integrity override (removes fabricated land-use
     // still be kept on its prior high-water-mark: the override must NOT be a
     // general downgrade bypass.
     const bastropFull = buildTier1Payload(
-      parcelRow({ prop_id: "12345", zoning_district: "SF-1" }),
+      parcelRow({ prop_id: "12345", zoning_district: "R-MD" }),
       "48021",
       "Bastrop",
       new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]),

@@ -99,13 +99,16 @@ describe("mapDistrict — guarded prefix match", () => {
   });
 });
 
-describe("mapDistrict — unmatched/absent -> null (honest decline)", () => {
-  it("returns null for an unknown code so the caller can decline", () => {
+describe("mapDistrict — unmatched/absent", () => {
+  it("returns null for an unknown explicit code so the caller can decline", () => {
     expect(mapDistrict(TABLE, "C-2")).toBeNull();
   });
 
-  it("returns null when no zoning is present on a multi-district table", () => {
-    expect(mapDistrict(TABLE, null)).toBeNull();
+  it("uses the conservative fallback when no zoning is present", () => {
+    const r = mapDistrict(TABLE, null)!;
+    expect(r.kind).toBe("fallback-conservative");
+    expect(r.district.district_name).toContain("R-LD");
+    expect(r.note).toMatch(/no zoning/i);
   });
 });
 
