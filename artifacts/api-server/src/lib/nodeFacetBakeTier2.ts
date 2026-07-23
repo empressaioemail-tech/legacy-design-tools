@@ -184,7 +184,12 @@ export function computeTier2Envelope(
   }
 
   const district = mapDistrict(table, input.zoningCode);
-  if (!district) return declined("no-district", jurisdictionKey);
+  if (!district) {
+    return declined(
+      input.zoningCode ? "setback-table-pending" : "no-district",
+      jurisdictionKey,
+    );
+  }
 
   // The upgrade: pass the fetched roads + centroid refPoint. labelEdges prefers
   // the road signal (high, situs-named cul-de-sac defense included), degrades

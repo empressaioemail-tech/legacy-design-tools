@@ -896,16 +896,17 @@ async function deriveAndRespond(args: {
     return;
   }
 
-  // 3) District mapping (Problem B). Never returns a wrong-but-confident
-  //    district — an unmatched/absent zoningCode degrades to the most-
-  //    conservative district, flagged for verification.
+  // 3) District mapping (Problem B). Unmatched/absent zoningCode returns null
+  //    so we decline honestly instead of inventing a district row.
   const district = mapDistrict(table, parcel.zoningCode);
   if (!district) {
     res.status(404).json(
       withPlace(
         {
           status: "no-district",
-          reason: "Setback table has no districts.",
+          reason: parcel.zoningCode
+            ? "Zoning code did not match a setback district row."
+            : "Setback table has no matching district for this parcel.",
           parcel_node_id: parcelNodeIdValue,
         },
         ctx,

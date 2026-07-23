@@ -1,7 +1,7 @@
 /**
  * Derivation/honesty-composition tests (Problem C): a high-confidence envelope
- * (road front + matched district) vs an approximate one (no signal + fallback
- * district), and the empty case. Verifies confidence, the approximate flag, the
+ * (road front + matched district) vs an approximate one (no road signal +
+ * matched district), and the empty case. Verifies confidence, the approximate flag, the
  * disclosure, and the downstream sizing fields.
  */
 
@@ -94,10 +94,10 @@ describe("deriveBuildableEnvelope — high confidence", () => {
 });
 
 describe("deriveBuildableEnvelope — approximate", () => {
-  it("no signal + fallback district -> approximate + verify disclosure", () => {
+  it("no road signal + matched district -> approximate shape path", () => {
     const ring = rectRing();
     const labeling = labelEdges({ ring, road: null, refPoint: null })!; // shape
-    const district = mapDistrict(TABLE, "UNKNOWN-CODE")!; // fallback
+    const district = mapDistrict(TABLE, "R-MD")!;
     const res = deriveBuildableEnvelope({ ring, table: TABLE, district, labeling });
 
     expect(res.approximate).toBe(true);
@@ -105,7 +105,6 @@ describe("deriveBuildableEnvelope — approximate", () => {
     const feat = res.geojson.features[0]!;
     expect(feat.properties.approximate).toBe(true);
     expect(feat.properties.disclosure).toMatch(/approximate/i);
-    expect(feat.properties.disclosure).toMatch(/verify/i);
     expect(feat.properties.edgeSignal).toBe("shape");
   });
 });
