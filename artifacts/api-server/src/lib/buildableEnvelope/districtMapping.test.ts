@@ -4,7 +4,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { getSetbackTable, type SetbackTable } from "@workspace/adapters";
+import {
+  getSetbackTableForZoning,
+  type SetbackTable,
+} from "@workspace/adapters";
 import { mapDistrict, districtCode, normalizeCode } from "./districtMapping";
 
 const TABLE: SetbackTable = {
@@ -77,14 +80,11 @@ describe("mapDistrict — guarded prefix match", () => {
     expect(r.confidence).toBe(0.7);
   });
 
-  it("does not map Bastrop B3 P-5 to the unrelated one-token P district", () => {
-    const bastrop = getSetbackTable("bastrop-tx");
-    expect(bastrop).not.toBeNull();
-
-    const r = mapDistrict(bastrop!, "P-5")!;
-    expect(r.kind).toBe("fallback-conservative");
-    expect(r.district.district_name).not.toBe("P Public/Institutional");
-    expect(r.note).toMatch(/did not match/i);
+  it("routes Bastrop B3 P-5 to the cited honest-empty place-type table", () => {
+    const table = getSetbackTableForZoning("bastrop_tx", "P-5");
+    expect(table?.jurisdictionKey).toBe("bastrop-city-tx");
+    expect(table?.districts).toEqual([]);
+    expect(table?.note).toMatch(/B3 Code/i);
   });
 });
 

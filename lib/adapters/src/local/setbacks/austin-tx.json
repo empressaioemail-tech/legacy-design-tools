@@ -1,0 +1,7 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "austin-tx",
+  "jurisdictionDisplayName": "City of Austin, TX",
+  "note": "WDLL items 43–44. HONEST EMPTY: the City of Austin identifies Land Development Code §25-2-492 as the site-development-regulations source for zoning-district setbacks at https://www.austintexas.gov/planning/zoning-resources-site-regulations (accessed 2026-07-22). The same official page says zoning cases can carry combining districts that impose site- or use-specific conditions; the City's HOME guidance also distinguishes residential use and lot-size cases. This envelope model has no Austin zoning-stamp source or parcel facts for combining districts, use, lot-size, or compatibility controls, so it must not emit a scalar setback row. No buildable envelope is served until a public zoning GIS mapping and conditional-rule model establish a safe, mappable subset.",
+  "districts": []
+}

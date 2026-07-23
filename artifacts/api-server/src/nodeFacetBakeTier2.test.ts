@@ -118,6 +118,14 @@ describe("Tier-2 envelope upgrade (road-based labeling)", () => {
     expect(declined.roadsPending).toBe(false);
     expect(declined.roadProvenance.roadSignalUsed).toBe(false);
   });
+
+  it("declines Bastrop B3 P-5 instead of using legacy Public/Institutional setbacks", () => {
+    const declined = computeTier2Envelope(envInput({ zoningCode: "P-5" }));
+    expect(declined.status).toBe("declined");
+    expect(declined.declineReason).toBe("setback-table-pending");
+    expect(declined.jurisdictionKey).toBe("bastrop_tx");
+    expect(declined.setbacks).toBeUndefined();
+  });
 });
 
 describe("Tier-2 FEMA flood facet", () => {
