@@ -310,7 +310,7 @@ brokerageMapDataRouter.post(
     const useFixture =
       gisFixtureRequested(req, parsed.data) || parsed.data.fixture === true;
 
-    const envelope = queryCompositeLayer({
+    const envelope = await queryCompositeLayer({
       layer: parsed.data.layer,
       bbox,
       fixture: useFixture,
