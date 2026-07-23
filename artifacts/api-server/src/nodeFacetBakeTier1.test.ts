@@ -251,7 +251,7 @@ describe("honest absence (never fabricate a facet)", () => {
 });
 
 describe("Bastrop B3 place types", () => {
-  it("maps P-5 to the cited B3 Core row, not legacy Public/Institutional", () => {
+  it("P-5 envelope slot is atom_path_pending (anti-zombie; no multiply)", () => {
     const envelope = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: "P-5",
@@ -260,15 +260,10 @@ describe("Bastrop B3 place types", () => {
       situsAddress: "123 MAIN ST, BASTROP, TX 78602",
     });
 
-    expect(envelope.status).toBe("ok");
-    expect(envelope.jurisdictionKey).toBe("bastrop_tx");
-    expect(envelope.district).toBe("P-5 Core");
-    expect(envelope.district).not.toBe("P Public/Institutional");
-    expect(envelope.setbacks).toEqual({
-      front_ft: 15,
-      side_ft: 0,
-      rear_ft: 0,
-    });
+    expect(envelope.status).toBe("declined");
+    expect(envelope.declineReason).toBe("atom_path_pending");
+    expect(envelope.confidence).toBeNull();
+    expect(envelope.district).toBeUndefined();
   });
 });
 
@@ -426,7 +421,7 @@ describe("honest absence — envelope + node-id (never fabricate)", () => {
     expect(env.setbacks).toBeUndefined();
   });
 
-  it("blank situs declines even with a zoning fallback when zoning is absent", () => {
+  it("blank situs declines with no-zoning-stamp when zoning is absent", () => {
     const env = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: null,
@@ -436,10 +431,10 @@ describe("honest absence — envelope + node-id (never fabricate)", () => {
       zoningJurisdictionFallback: "pflugerville_tx",
     });
     expect(env.status).toBe("declined");
-    expect(env.declineReason).toBe("no-jurisdiction-key");
+    expect(env.declineReason).toBe("no-zoning-stamp");
   });
 
-  it("blank situs uses sole-zoning-layer fallback when a district is stamped", () => {
+  it("stamped district declines atom_path_pending (envelope via atoms)", () => {
     const env = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: "SF-S",
@@ -448,14 +443,9 @@ describe("honest absence — envelope + node-id (never fabricate)", () => {
       situsAddress: null,
       zoningJurisdictionFallback: "pflugerville_tx",
     });
-    expect(env.jurisdictionKey).toBe("pflugerville_tx");
-    // SF-S is a shipped Pflugerville district — envelope should not decline
-    // for no-jurisdiction-key (ok / no-buildable-area / no-district only).
-    expect(env.declineReason).not.toBe("no-jurisdiction-key");
-    expect(["ok", "no-buildable-area", "declined"]).toContain(env.status);
-    if (env.status === "declined") {
-      expect(env.declineReason).toBe("no-district");
-    }
+    expect(env.status).toBe("declined");
+    expect(env.declineReason).toBe("atom_path_pending");
+    expect(env.confidence).toBeNull();
   });
 
   it("a parcel with no prop_id is not baked (no fabricated node id)", () => {
@@ -470,8 +460,8 @@ describe("honest absence — envelope + node-id (never fabricate)", () => {
   });
 });
 
-describe("Tier-1 envelope (skipRoad / provisional)", () => {
-  it("absent zoning declines with conservative estimate — does not stamp a district", () => {
+describe("Tier-1 envelope (anti-zombie / atom_path_pending)", () => {
+  it("absent zoning declines with no-zoning-stamp — does not stamp a district", () => {
     const env = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: null,
@@ -481,23 +471,15 @@ describe("Tier-1 envelope (skipRoad / provisional)", () => {
     });
     expect(env.status).toBe("declined");
     expect(env.declineReason).toBe("no-zoning-stamp");
-    expect(env.matchKind).toBe("fallback-conservative");
     expect(env.district).toBeUndefined();
     expect(env.provisional).toBe(true);
     expect(env.roadsPending).toBe(true);
-    // Shape-only labeling (no roads) => the low-confidence approximate path.
-    expect(env.edgeSignal).toBe("shape");
     expect(env.approximate).toBe(true);
-    expect(env.confidence).toBeGreaterThan(0);
-    expect(env.confidence).toBeLessThan(0.7);
-    expect(env.setbacks).toBeDefined();
-    expect(env.buildableAreaSqFt).toBeGreaterThan(0);
-    expect(env.disclosure).toMatch(/not a district determination/i);
-    expect(JSON.stringify(env.geojson)).not.toMatch(/I-2|R-LD Residential/i);
-    expect(JSON.stringify(env.geojson)).toMatch(/conservative-estimate/);
+    expect(env.confidence).toBeNull();
+    expect(env.setbacks).toBeUndefined();
   });
 
-  it("matched zoning still returns ok with the real district name", () => {
+  it("matched zoning declines atom_path_pending (no multiply product confidence)", () => {
     const env = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: "R-MD",
@@ -505,9 +487,9 @@ describe("Tier-1 envelope (skipRoad / provisional)", () => {
       situsState: "TX",
       situsAddress: "123 MAIN ST, BASTROP, TX 78602",
     });
-    expect(env.status).toBe("ok");
-    expect(env.district).toBeTruthy();
-    expect(env.declineReason).toBeUndefined();
+    expect(env.status).toBe("declined");
+    expect(env.declineReason).toBe("atom_path_pending");
+    expect(env.confidence).toBeNull();
   });
 });
 
@@ -520,7 +502,8 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
       parcelRow({ zoning_district: "R-MD" }),
       county.fips,
       county.name,
-      new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]),
+      // Join key is the prop_id as selected (`R12345`), not a bare numeric.
+      new Map([["R12345", { landUseCode: "A1", landUseVintage: "2025" }]]),
       now,
     )!;
 
@@ -570,18 +553,15 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
       facetCoverage: { ...populatedP5.facetCoverage, envelope: true },
     };
 
-    expect(populatedP5.envelope?.district).toBe("P-5 Core");
-    expect(populatedP5.envelope?.setbacks).toEqual({
-      front_ft: 15,
-      side_ft: 0,
-      rear_ft: 0,
-    });
+    expect(populatedP5.envelope?.status).toBe("declined");
+    expect(populatedP5.envelope?.declineReason).toBe("atom_path_pending");
+    expect(populatedP5.facetCoverage.envelope).toBe(false);
     expect(shouldPromote(invalidPrior, populatedP5)).toBe(true);
   });
 
-  it("replaces an invented unmatched-district envelope with setback-table-pending", () => {
+  it("replaces an invented unmatched-district envelope with atom_path_pending", () => {
     // Lockhart PDD previously fell back to RHD via conservative invent; after
-    // #346 the re-bake declines. Monotonic must force the honest decline.
+    // anti-zombie cut the re-bake declines atom_path_pending.
     const declined = buildTier1Payload(
       parcelRow({
         zoning_district: "PDD",
@@ -594,7 +574,7 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
       now,
     )!;
     expect(declined.envelope?.status).toBe("declined");
-    expect(declined.envelope?.declineReason).toBe("setback-table-pending");
+    expect(declined.envelope?.declineReason).toBe("atom_path_pending");
     expect(declined.facetCoverage.envelope).toBe(false);
 
     const inventedPrior: Tier1FacetPayload = {
@@ -629,7 +609,7 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
     expect(honest.envelope?.status).toBe("declined");
     expect(honest.envelope?.declineReason).toBe("no-zoning-stamp");
     expect(honest.envelope?.district).toBeUndefined();
-    expect(honest.facetCoverage.envelope).toBe(true);
+    expect(honest.facetCoverage.envelope).toBe(false);
 
     const inventPrior: Tier1FacetPayload = {
       ...honest,
@@ -652,18 +632,10 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
     expect(shouldPromote(fullPayload(), fullPayload())).toBe(true);
   });
 
-  it("at equal facet count, higher envelope confidence wins; lower is rejected", () => {
+  it("equal atom_path_pending refreshes promote (confidence no longer a product axis)", () => {
     const base = fullPayload();
-    const higher: Tier1FacetPayload = {
-      ...base,
-      envelope: { ...base.envelope!, confidence: 0.9 },
-    };
-    const lower: Tier1FacetPayload = {
-      ...base,
-      envelope: { ...base.envelope!, confidence: 0.1 },
-    };
-    expect(shouldPromote(lower, higher)).toBe(true);
-    expect(shouldPromote(higher, lower)).toBe(false);
+    expect(base.envelope?.confidence).toBeNull();
+    expect(shouldPromote(base, fullPayload())).toBe(true);
   });
 });
 
@@ -726,11 +698,12 @@ describe("batched bake — decision + counts match the per-node loop", () => {
   const CTY = { fips: "48021", name: "Bastrop" };
 
   const nodeFull = (fi: number): ComputedNode => {
+    const propId = `R${fi}0000`;
     const payload = buildTier1Payload(
-      parcelRow({ feature_index: fi, prop_id: `R${fi}0000`, zoning_district: "R-MD" }),
+      parcelRow({ feature_index: fi, prop_id: propId, zoning_district: "R-MD" }),
       CTY.fips,
       CTY.name,
-      new Map([[`${fi}0000`, { landUseCode: "A1", landUseVintage: "2025" }]]),
+      new Map([[propId, { landUseCode: "A1", landUseVintage: "2025" }]]),
       now,
     )!;
     return { placeKey: `node:${payload.parcelNodeId}`, payload, centroid: { lat: 30.11, lng: -97.31 } };

@@ -143,7 +143,8 @@ describe("extractTier2Overlay (the card's FEMA flood read, pure)", () => {
     expect(overlay).not.toBeNull();
     expect((overlay!.flood as Record<string, unknown>).status).toBe("in-sfha");
     expect((overlay!.flood as Record<string, unknown>).floodZone).toBe("AE");
-    expect(overlay!.envelope).not.toBeNull();
+    // Anti-zombie: Tier-2 envelope is never product truth on the wire.
+    expect(overlay!.envelope).toBeNull();
     expect(overlay!.snapshotAt).toBe("2026-07-21T00:00:00.000Z");
   });
 
@@ -461,8 +462,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     // land-use is honestly absent — null, coverage:false — never fabricated.
     expect(res.body.facets.baseFacts.landUse).toBeNull();
     expect(res.body.facets.facetCoverage.landUse).toBe(false);
-    // envelope declined honestly (still a legible state for the card).
-    expect(res.body.facets.envelope.status).toBe("declined");
+    // Anti-zombie: baked envelope stripped from the wire (atom path only).
+    expect(res.body.facets.envelope).toBeNull();
+    expect(res.body.facets.facetCoverage.envelope).toBe(false);
     // Facets that DO resolve are still present.
     expect(res.body.facets.baseFacts.acreage.value).toBe(1.0);
   });

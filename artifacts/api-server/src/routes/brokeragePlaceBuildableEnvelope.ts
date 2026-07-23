@@ -1,5 +1,5 @@
-/**
- * Buildable-envelope derivation route — the "show me the setbacks / where the
+﻿/**
+ * Buildable-envelope derivation route â€” the "show me the setbacks / where the
  * ADU fits" wedge geometry, spine-side so every consumer (Property Brief, the
  * Brief extension, the digital-design-center app) gets the same envelope.
  *
@@ -15,12 +15,11 @@
  * return the buildable-envelope GeoJSON wrapped in the standard engine honesty
  * envelope (confidence + provenance + Municode citation).
  *
- * HONESTY (commitment #1): a WRONG envelope drawn confidently is worse than
- * none. The envelope confidence is the product of the edge-labeling and
- * district-mapping confidences; whenever either is weak the payload is marked
- * `approximate` with an explicit "verify with survey + city" disclosure and the
- * confidence is `asserted`, never presented as survey-grade. Empty envelopes
- * (setbacks exceed the lot) return honestly with null geometry + a reason.
+ * HONESTY (commitment #1 / Master WDLL 3.7 I-A): product envelope confidence
+ * is NEVER `labeling×district product`. This route serves the
+ * retrieval atom-chain when present, otherwise honest-declines
+ * (`atom_path_pending` / `no-zoning-stamp`). Geometry helper may remain in
+ * lib/buildableEnvelope/derive.ts but does not author product confidence.
  *
  * Auth: mounted under the brokerage gate (parent `brokerageV1` applies
  * `requireBrokerageAuthOrServiceToken`); a missing/bad key is 401'd upstream.
@@ -33,11 +32,6 @@ import {
   type Response,
 } from "express";
 import { z } from "zod";
-import {
-  getSetbackTableForZoning,
-  type SetbackTable,
-} from "@workspace/adapters";
-import { keyFromEngagementOrSynthesize } from "@workspace/codes";
 import {
   wrapEngineEnvelope,
   type EngineHonesty,
@@ -67,22 +61,158 @@ import {
   type TxParcelCounty,
 } from "../lib/brokerageTxParcels";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
-import {
-  absentZoningDisclosure,
-  isAbsentZoningFallback,
-  NO_ZONING_STAMP_REASON,
-  scrubAbsentZoningGeojson,
-} from "../lib/buildableEnvelope/absentZoningHonesty";
-import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
-import {
-  labelEdges,
-  type RoadCandidate,
-} from "../lib/buildableEnvelope/edgeLabeling";
-import { mapDistrict } from "../lib/buildableEnvelope/districtMapping";
-import { fetchNearbyRoads } from "../lib/buildableEnvelope/roads";
+import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
 import type { Ring } from "../lib/buildableEnvelope/geometry";
 
 export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
+
+const DEFAULT_RETRIEVAL =
+  "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
+
+async function tryServeAtomChainEnvelope(args: {
+  res: Response;
+  ctx: EnvelopeContext;
+  parcelNodeId: string | null;
+  parcel: {
+    apn: string | null;
+    situsAddress: string | null;
+    zoningCode: string | null;
+    parcelNodeId: string | null;
+    ring: Ring;
+  };
+  provider: string | null;
+}): Promise<boolean> {
+  const { res, ctx, parcelNodeId, parcel, provider } = args;
+  if (!parcelNodeId) return false;
+  const baseUrl = (
+    process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
+    process.env.RETRIEVAL_API_URL?.trim() ||
+    DEFAULT_RETRIEVAL
+  ).replace(/\/$/, "");
+  const key =
+    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
+    process.env.RETRIEVAL_API_KEY?.trim();
+  if (!key) return false;
+
+  let chain: {
+    zoningFact?: { district?: string | null; absence?: { kind?: string } | null } | null;
+    setbackRule?: {
+      front?: number;
+      side?: number;
+      rear?: number;
+      districtCode?: string | null;
+    } | null;
+    buildableEnvelope?: {
+      outcome?: { kind?: string; areaSqFt?: number } | null;
+      readContract?: {
+        axes?: { assertedConfidence?: { estimate?: number } };
+      } | null;
+    } | null;
+  } | null = null;
+  try {
+    const upstream = await fetch(
+      `${baseUrl}/property-nodes/${encodeURIComponent(parcelNodeId)}/atom-chain`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          Accept: "application/json",
+        },
+      },
+    );
+    if (!upstream.ok) return false;
+    chain = (await upstream.json()) as typeof chain;
+  } catch {
+    return false;
+  }
+  if (!chain?.buildableEnvelope?.outcome) return false;
+
+  const outcome = chain.buildableEnvelope.outcome;
+  const rule = chain.setbackRule;
+  const absenceKind = chain.zoningFact?.absence?.kind;
+  const district =
+    typeof chain.zoningFact?.district === "string"
+      ? chain.zoningFact.district
+      : typeof rule?.districtCode === "string"
+        ? rule.districtCode
+        : null;
+  const estimate =
+    chain.buildableEnvelope.readContract?.axes?.assertedConfidence?.estimate;
+  const confidenceValue =
+    typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
+
+  let status: "ok" | "no-buildable-area" | "declined" = "ok";
+  if (absenceKind === "no-zoning-stamp") status = "declined";
+  else if (outcome.kind === "no-buildable-area") status = "no-buildable-area";
+  else if (outcome.kind !== "buildable") status = "declined";
+
+  const honesty: EngineHonesty = {
+    confidence: { value: confidenceValue, kind: "asserted" },
+    dataVintage: new Date().toISOString().slice(0, 10),
+    coverage: {
+      degraded: true,
+      reason: "Served from property atom-chain readContract (not cortex multiply).",
+    },
+    source: {
+      adapter: "brokerage:buildable-envelope:atom-chain",
+      citationIds: [],
+    },
+  };
+
+  res.status(200).json(
+    withPlace(
+      {
+        status,
+        ...(status === "declined"
+          ? {
+              declineReason:
+                absenceKind === "no-zoning-stamp"
+                  ? NO_ZONING_STAMP_REASON
+                  : "atom_path_pending",
+            }
+          : {}),
+        layer: "buildable-envelope",
+        parcel_node_id: parcelNodeId,
+        atomPath: "atom-chain",
+        setbacks:
+          rule &&
+          typeof rule.front === "number" &&
+          typeof rule.side === "number" &&
+          typeof rule.rear === "number"
+            ? {
+                front_ft: rule.front,
+                side_ft: rule.side,
+                rear_ft: rule.rear,
+                district,
+              }
+            : undefined,
+        buildableAreaSqFt:
+          typeof outcome.areaSqFt === "number" ? outcome.areaSqFt : undefined,
+        ...wrapEngineEnvelope(
+          {
+            geojson: { type: "FeatureCollection", features: [] },
+            district,
+            approximate: true,
+            empty: status !== "ok",
+            citationUrl: "",
+            parcel: {
+              apn: parcel.apn,
+              situsAddress: parcel.situsAddress,
+              zoningCode: parcel.zoningCode,
+              parcel_node_id: parcelNodeId,
+              provider,
+              notSurveyGrade: true,
+            },
+          },
+          honesty,
+        ),
+        readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+      },
+      ctx,
+    ),
+  );
+  return true;
+}
 
 const PLACE_KEY_PARAM = z.string().min(1);
 const POST_BODY = z
@@ -90,7 +220,7 @@ const POST_BODY = z
     address: z.string().min(1).optional(),
     lat: z.number().finite().optional(),
     lng: z.number().finite().optional(),
-    /** Skip the (slow, best-effort) OSM road fetch — labeling uses point/shape. */
+    /** Skip the (slow, best-effort) OSM road fetch â€” labeling uses point/shape. */
     skipRoad: z.boolean().optional(),
   })
   .strict();
@@ -109,14 +239,14 @@ function decodePlaceKeyParam(raw: string | string[] | undefined): string {
  *
  *  `parcelNodeId` is the canonical tile-matching parcel identity
  *  (`{county_fips}:{normalizeCadPropId(prop_id)}`). It is NOT re-derived here:
- *  both parcel emit paths — the live county-GIS provider
+ *  both parcel emit paths â€” the live county-GIS provider
  *  (`brokerageTxParcels.ts`) and the self-hosted TxGIO store
- *  (`txgioParcelStore.ts`) — already stamp `parcel_node_id` onto each feature's
+ *  (`txgioParcelStore.ts`) â€” already stamp `parcel_node_id` onto each feature's
  *  properties via the shared `parcelNodeId()` helper (the same helper the
  *  PMTiles bake uses), so reading it straight off the feature guarantees the
  *  value byte-matches the tile `promoteId`. Null when the parcel source did not
  *  stamp one (e.g. the dormant Cotality fallback, or a county parcel with no
- *  appraisal prop id) — a mismatching id would glow the wrong parcel or
+ *  appraisal prop id) â€” a mismatching id would glow the wrong parcel or
  *  nothing, so null is the honest answer. */
 function firstParcelRing(geojson: unknown): {
   ring: Ring;
@@ -171,7 +301,7 @@ interface EnvelopeContext {
    *   - "authoritative": county rooftop point from `txgio_address`.
    *   - "geocode-high" : Nominatim returned a hit for the full address.
    *   - "geocode-low"  : Nominatim only matched a coarser rung
-   *                       (city/ZIP centroid) — the point is NOT rooftop.
+   *                       (city/ZIP centroid) â€” the point is NOT rooftop.
    */
   pointConfidence:
     | "coordinates"
@@ -216,7 +346,7 @@ async function resolveContext(
    * A geocode already fetched by the situs pre-pass, reused here so the
    * no-situs-match fall-through path does NOT geocode a second time. Only
    * consulted for the address-only branch (explicit coords never geocode).
-   * `null` means the pre-pass geocoded and MISSED — honored as a genuine
+   * `null` means the pre-pass geocoded and MISSED â€” honored as a genuine
    * geocode miss (422) exactly as `resolvePlace` would have.
    */
   pregeocoded?: {
@@ -228,7 +358,7 @@ async function resolveContext(
     | { address: string }
     | { lat: number; lng: number; address?: string };
   let addressHint: string | null = null;
-  // Set when the caller passed explicit coordinates — those are honored
+  // Set when the caller passed explicit coordinates â€” those are honored
   // verbatim as the point, bypassing the geocode-derived point entirely.
   let explicitCoords: { lat: number; lng: number } | null = null;
 
@@ -337,9 +467,9 @@ async function resolveContext(
   } else {
     // Address-only resolution. Try to UPGRADE the fuzzy geocode point to
     // the county's authoritative rooftop before we trust it. The county
-    // is chosen from the (approximate) geocode point — county routing
+    // is chosen from the (approximate) geocode point â€” county routing
     // bboxes are generous enough that even a ZIP centroid lands in the
-    // right county — then the rooftop is matched by address WITHIN it.
+    // right county â€” then the rooftop is matched by address WITHIN it.
     pointConfidence =
       resolved.geocode.matchRung && resolved.geocode.matchRung !== "street"
         ? "geocode-low"
@@ -369,7 +499,7 @@ async function resolveContext(
           }
         } catch (err) {
           // Authoritative lookup is best-effort; a store hiccup must not
-          // sink the request — fall through to the geocode point.
+          // sink the request â€” fall through to the geocode point.
           logger.warn(
             { err, address: addressHint, county: county.fips },
             "buildable-envelope: authoritative rooftop lookup failed",
@@ -404,20 +534,20 @@ function storeCountyByFips(fips: string): TxParcelCounty | null {
  * AUTHORITATIVE situs->parcel resolution (F4e; supersedes the F4d
  * single-county unique-only `resolveParcelBySitusDirect`). Runs the
  * disambiguating, multi-county situs resolve and, on an authoritative hit,
- * fetches that parcel's polygon DIRECTLY by prop id — skipping the geocode
+ * fetches that parcel's polygon DIRECTLY by prop id â€” skipping the geocode
  * pin-query entirely.
  *
  * Returns:
  *   - `{ parcelGeo, provider }` on an authoritative hit (unique situs, or an
  *     ambiguous situs the point disambiguated to a single containing parcel).
  *   - `{ decline: true }` when the situs was AMBIGUOUS and the point could
- *     NOT disambiguate it — the caller must DECLINE HONESTLY, never
+ *     NOT disambiguate it â€” the caller must DECLINE HONESTLY, never
  *     blind-point-guess a wrong-situs neighbor (commitment #1, item 1).
- *   - `null` when there was NO situs match at all — the caller falls through
+ *   - `null` when there was NO situs match at all â€” the caller falls through
  *     to the existing rooftop/geocode/pin path unchanged.
  *
  * The candidate county set is EVERY store county whose routing bbox
- * contains the point (item 2), or — when there is no point (geocode miss) —
+ * contains the point (item 2), or â€” when there is no point (geocode miss) â€”
  * ALL store counties (item 3); a unique situs needs no point. This inverts
  * F4d's "situs downstream of geocode-derived county routing": situs
  * authority is evaluated FIRST, over all candidate counties, and only the
@@ -436,8 +566,8 @@ async function resolveParcelBySitusAuthoritative(input: {
   if (txParcelProviderMode() !== "county-gis") return null;
 
   // Candidate store counties: those whose routing bbox contains the point
-  // (item 2 — all containing, not nearest-centroid); ALL store counties when
-  // there is no point to route by (item 3 — a unique situs still resolves).
+  // (item 2 â€” all containing, not nearest-centroid); ALL store counties when
+  // there is no point to route by (item 3 â€” a unique situs still resolves).
   const counties =
     input.point &&
     Number.isFinite(input.point.latitude) &&
@@ -467,7 +597,7 @@ async function resolveParcelBySitusAuthoritative(input: {
     return { decline: outcome };
   }
 
-  // Authoritative hit — recover the owning store county from the node id
+  // Authoritative hit â€” recover the owning store county from the node id
   // (`{fips}:{propId}`) to fetch geometry + label the provider.
   const nodeCountyFips = outcome.hit.parcelNodeId.split(":")[0] ?? "";
   const county = storeCountyByFips(nodeCountyFips);
@@ -520,7 +650,7 @@ function extractSitusInputs(
 }
 
 /**
- * SITUS-FIRST pre-pass (F4e item 3 — the authority inversion). Run the
+ * SITUS-FIRST pre-pass (F4e item 3 â€” the authority inversion). Run the
  * authoritative, multi-county, disambiguating situs resolve BEFORE any
  * geocode-quality or geocode-miss gate, so the STRONGEST signal (situs) is
  * no longer downstream of the WEAKEST (geocode-derived county routing).
@@ -529,7 +659,7 @@ function extractSitusInputs(
  *   - explicit caller point (honored verbatim), else
  *   - a BEST-EFFORT geocode purely to obtain a disambiguation point +
  *     city/state. A geocode MISS is NON-FATAL here: `point` stays null and a
- *     UNIQUE situs still resolves (that is the whole point — a clean unique
+ *     UNIQUE situs still resolves (that is the whole point â€” a clean unique
  *     situs must not be lost to a geocode miss). The geocode is NOT re-run
  *     downstream; its result is threaded back so the no-situs path reuses it.
  *
@@ -556,7 +686,7 @@ async function situsFirstPreResolve(input: {
   let geocode: Awaited<ReturnType<typeof geocodeAddress>> | null = null;
   if (!point) {
     // Best-effort geocode ONLY for a disambiguation point + city/state. A
-    // miss (or a service hiccup) must NOT abort — a unique situs resolves
+    // miss (or a service hiccup) must NOT abort â€” a unique situs resolves
     // with no point at all.
     try {
       geocode = await geocodeAddress(address);
@@ -705,12 +835,12 @@ async function handleBuildableEnvelope(
       state: pregeocode?.jurisdictionState ?? fromSitus.state,
       address: situsAddress,
       pointConfidence: explicitPoint ? "coordinates" : "authoritative",
-      // No real point when the geocode missed AND no explicit coords — edge
+      // No real point when the geocode missed AND no explicit coords â€” edge
       // labeling must not treat the (0,0) sentinel as a reference point.
       hasPoint: pt !== null,
     };
     parcelGeo = situs.parcelGeo;
-    // Skip the geocode gate and the pin-query — the parcel is already in hand.
+    // Skip the geocode gate and the pin-query â€” the parcel is already in hand.
     await deriveAndRespond({ req, res, ctx, parcelGeo, skipRoad, log });
     return;
   }
@@ -767,7 +897,7 @@ async function handleBuildableEnvelope(
   } catch (err) {
     // ERROR CLASSIFICATION (F4d). The store/provider readers throw a
     // named `AdapterRunError`: `no-coverage` means the query SUCCEEDED but
-    // no parcel matched (an honest "no parcel here" — 404), whereas
+    // no parcel matched (an honest "no parcel here" â€” 404), whereas
     // network/upstream/parse/timeout/unknown are genuine provider failures
     // (502). Previously ALL throws collapsed to a 502 "provider
     // unavailable", so a geocode miss / point outside every polygon
@@ -827,12 +957,13 @@ async function deriveAndRespond(args: {
   skipRoad: boolean;
   log: typeof logger;
 }): Promise<void> {
-  const { res, ctx, parcelGeo, skipRoad } = args;
+  const { res, ctx, parcelGeo } = args;
+  void args.skipRoad;
   const parcel = firstParcelRing(parcelGeo.geojson);
   if (!parcel) {
     // The query succeeded but returned no usable polygon at this point.
     // This is the honest "no parcel here" case (404), NOT a provider
-    // outage — the live county-GIS provider returns an empty collection
+    // outage â€” the live county-GIS provider returns an empty collection
     // rather than throwing for a point outside every parcel.
     res.status(404).json(
       withPlace(
@@ -853,186 +984,58 @@ async function deriveAndRespond(args: {
   // response below so the map can snap + glow regardless of envelope outcome.
   const parcelNodeIdValue: string | null = parcel.parcelNodeId;
 
-  // 2) Resolve the jurisdiction's setback table. No table => honest 404 (no
-  //    codified setbacks here — the geometry can't be derived confidently) —
-  //    but the parcel DID resolve, so still emit `parcel_node_id` for the snap.
-  //    City/state come from the geocode when available, else from the parcel's
-  //    own situs (F4e: a situs-resolved parcel with a missed geocode still
-  //    synthesizes a jurisdiction key from its situs city/state).
-  const situsCityState = cityStateFromSitus(parcel.situsAddress);
-  const jurisdictionKey = keyFromEngagementOrSynthesize({
-    jurisdictionCity: ctx.city ?? situsCityState.city,
-    jurisdictionState: ctx.state ?? situsCityState.state,
-    address: ctx.address ?? undefined,
+  // Anti-zombie (Master WDLL 3.7 / I-A): this cortex route no longer computes
+  // product envelope confidence via labelingÃ—district multiply. Serve from the
+  // retrieval atom-chain when available; otherwise honest-decline.
+  const atomServed = await tryServeAtomChainEnvelope({
+    res,
+    ctx,
+    parcelNodeId: parcelNodeIdValue,
+    parcel,
+    provider: parcelGeo.provider ?? null,
   });
-  const table: SetbackTable | null = jurisdictionKey
-    ? getSetbackTableForZoning(jurisdictionKey, parcel.zoningCode)
-    : null;
-  if (!table) {
-    res.status(404).json(
-      withPlace(
-        {
-          status: "no-setbacks",
-          reason:
-            "No codified setback table for this jurisdiction yet, so a buildable envelope can't be derived.",
-          jurisdictionKey: jurisdictionKey ?? null,
-          parcel_node_id: parcelNodeIdValue,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-  // A registered-but-empty table (e.g. San Marcos pending onboarding) is an
-  // honest "pending", not a fabricated envelope.
-  if (!table.districts.length) {
-    res.status(200).json(
-      withPlace(
-        {
-          status: "pending",
-          reason:
-            table.note ??
-            "Setback table for this jurisdiction is pending onboarding.",
-          jurisdictionKey,
-          parcel_node_id: parcelNodeIdValue,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
+  if (atomServed) return;
 
-  // 3) District mapping (Problem B). Unmatched/absent zoningCode returns null
-  //    so we decline honestly instead of inventing a district row.
-  const district = mapDistrict(table, parcel.zoningCode);
-  if (!district) {
-    res.status(404).json(
-      withPlace(
-        {
-          status: "no-district",
-          reason: parcel.zoningCode
-            ? "Zoning code did not match a setback district row."
-            : "Setback table has no matching district for this parcel.",
-          parcel_node_id: parcelNodeIdValue,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  // 4) Edge labeling (Problem A — the crux). Best signal wins: nearest OSM road
-  //    (high), else the geocoded point (medium), else lot shape (low). The road
-  //    fetch is best-effort; failure degrades to the point signal.
-  //    When there is NO real point (F4e situs hit + geocode miss), skip BOTH
-  //    the road fetch and the point refPoint — a `(0,0)` sentinel would label
-  //    edges against null island. Labeling then degrades honestly to lot
-  //    shape.
-  //    Pass ALL nearby roads (not just the single longest) plus the parcel's
-  //    situs, so labelEdges can prefer the situs-NAMED fronting street (the
-  //    cul-de-sac defense) and, failing that, pick the best-matching edge across
-  //    every candidate — instead of blindly matching the longest way.
-  const hasPoint = ctx.hasPoint !== false;
-  let roads: RoadCandidate[] = [];
-  if (!skipRoad && hasPoint) {
-    roads = await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng });
-  }
-  const labeling = labelEdges({
-    ring: parcel.ring,
-    roads,
-    refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
-    situsAddress: parcel.situsAddress,
-  });
-  if (!labeling) {
-    res.status(422).json(
-      withPlace(
-        {
-          status: "ungeometric-parcel",
-          reason: "Parcel geometry is not a usable polygon for envelope derivation.",
-          parcel_node_id: parcelNodeIdValue,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  // 5) Derive + honesty-wrap.
-  const derived = deriveBuildableEnvelope({
-    ring: parcel.ring,
-    table,
-    district,
-    labeling,
-  });
-
-  // Absent zoning: keep the conservative estimate shape, but never stamp the
-  // fallback row name (e.g. I-2) as a real district determination.
-  const absentZoning = isAbsentZoningFallback(district);
-  const setbacksForDisclosure = {
-    front_ft: district.district.front_ft,
-    side_ft: district.district.side_ft,
-    rear_ft: district.district.rear_ft,
-  };
-  const geojson = absentZoning
-    ? scrubAbsentZoningGeojson(derived.geojson, setbacksForDisclosure)
-    : derived.geojson;
-  const wireDistrict = absentZoning ? null : derived.district;
-  const wireStatus = absentZoning
-    ? "declined"
-    : derived.empty
-      ? "no-buildable-area"
-      : "ok";
-
+  const absentZoning = !parcel.zoningCode || !String(parcel.zoningCode).trim();
+  const declineReason = absentZoning
+    ? NO_ZONING_STAMP_REASON
+    : "atom_path_pending";
   const honesty: EngineHonesty = {
-    // The GEOMETRY is deterministic; the CONFIDENCE reflects the labeling +
-    // district inference. Use `asserted` (never `calibrated`/`deterministic`)
-    // so the wire never claims survey-grade certainty for an inferred envelope.
-    confidence: { value: derived.confidence, kind: "asserted" },
+    confidence: { value: 0, kind: "asserted" },
     dataVintage: new Date().toISOString().slice(0, 10),
-    coverage:
-      derived.approximate || absentZoning
-        ? {
-            degraded: true,
-            reason: absentZoning
-              ? absentZoningDisclosure(setbacksForDisclosure)
-              : derived.empty
-                ? "No buildable area — setbacks exceed the lot."
-                : "Approximate — edge orientation and/or zoning district inferred; verify with survey + city.",
-          }
-        : { degraded: false },
+    coverage: {
+      degraded: true,
+      reason: absentZoning
+        ? "No zoning stamp on this parcel â€” honest absence; no district invented."
+        : "Buildable envelope product path is the property atom chain. Cortex multiply path retired (anti-zombie).",
+    },
     source: {
       adapter: "brokerage:buildable-envelope",
-      citationIds: [derived.citationUrl],
+      citationIds: [],
     },
   };
 
   res.status(200).json(
     withPlace(
       {
-        status: wireStatus,
-        ...(absentZoning
-          ? { declineReason: NO_ZONING_STAMP_REASON, matchKind: "fallback-conservative" }
-          : {}),
+        status: "declined",
+        declineReason,
         layer: "buildable-envelope",
-        // Top-level mirror of payload.parcel.parcel_node_id, so the map-snap
-        // consumer reads ONE uniform field (`parcel_node_id`) across every
-        // status (ok, no-buildable-area, no-setbacks, pending, no-parcel, ...).
         parcel_node_id: parcelNodeIdValue,
         ...wrapEngineEnvelope(
           {
-            geojson,
-            district: wireDistrict,
-            approximate: derived.approximate || absentZoning,
-            empty: derived.empty,
-            citationUrl: derived.citationUrl,
+            geojson: {
+              type: "FeatureCollection",
+              features: [],
+            },
+            district: null,
+            approximate: true,
+            empty: true,
+            citationUrl: "",
             parcel: {
               apn: parcel.apn,
               situsAddress: parcel.situsAddress,
               zoningCode: parcel.zoningCode,
-              // Canonical tile-matching id for canvas-free map snap + glow.
-              // Read straight off the resolved feature (already stamped by the
-              // parcel provider via the shared parcelNodeId() helper), so it
-              // byte-matches the PMTiles promoteId. Null when unresolvable.
               parcel_node_id: parcelNodeIdValue,
               provider: parcelGeo.provider ?? null,
               notSurveyGrade: true,
@@ -1076,7 +1079,7 @@ brokeragePlaceBuildableEnvelopeRouter.post("/buildable-envelope", (req, res) => 
     });
     return;
   }
-  // Pass ALL of address+lat+lng through — DO NOT drop lat/lng when an
+  // Pass ALL of address+lat+lng through â€” DO NOT drop lat/lng when an
   // address is also present (the F4d bug: caller-supplied coordinates
   // were ignored and the address re-geocoded to a possibly-wrong point).
   // `resolveContext` honors explicit coordinates over the geocode.
@@ -1087,3 +1090,4 @@ brokeragePlaceBuildableEnvelopeRouter.post("/buildable-envelope", (req, res) => 
     skipRoad === true,
   );
 });
+

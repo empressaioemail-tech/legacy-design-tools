@@ -134,16 +134,36 @@ export function extractTier2Overlay(
   if (!p.flood || typeof p.flood !== "object") return null;
   return {
     flood: p.flood,
-    // The road-upgraded envelope overlay (present only once the road leg is
-    // enabled). FEMA-only bakes still write an `envelope` object, but it is the
-    // point/shape-degraded envelope; the card prefers the Tier-1 envelope until
-    // a road-signal upgrade exists. Surfaced verbatim; the card decides.
-    envelope: p.envelope ?? null,
+    // Anti-zombie (WDLL 3.7): never overlay zombie Tier-2 envelope as product
+    // truth. Envelope comes from the property atom chain (or null).
+    envelope: null,
     bakedAt: p.bakedAt ?? null,
     snapshotAt:
       snapshotAt instanceof Date
         ? snapshotAt.toISOString()
         : (snapshotAt ?? null),
+  };
+}
+
+/**
+ * Strip baked Tier-1 envelope from the wire so legacy multiply snapshots cannot
+ * remain product truth after the anti-zombie cut. Land-use / zoning / baseFacts
+ * stay; envelope is atom-path only.
+ */
+export function stripZombieEnvelopeFromFacets(facets: unknown): unknown {
+  if (!facets || typeof facets !== "object") return facets;
+  const f = facets as Record<string, unknown>;
+  const coverage =
+    f.facetCoverage && typeof f.facetCoverage === "object"
+      ? {
+          ...(f.facetCoverage as Record<string, unknown>),
+          envelope: false,
+        }
+      : f.facetCoverage;
+  return {
+    ...f,
+    envelope: null,
+    facetCoverage: coverage,
   };
 }
 
@@ -187,7 +207,9 @@ export async function loadBakedNodeFacetSnapshot(
 
   return {
     parcelNodeId,
-    facets: sanitizeNodeFacetPayload(row.payloadJson),
+    facets: sanitizeNodeFacetPayload(
+      stripZombieEnvelopeFromFacets(row.payloadJson),
+    ),
     snapshotAt:
       row.snapshotAt instanceof Date
         ? row.snapshotAt.toISOString()

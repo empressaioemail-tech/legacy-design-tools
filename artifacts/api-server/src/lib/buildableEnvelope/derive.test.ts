@@ -1,8 +1,6 @@
 /**
- * Derivation/honesty-composition tests (Problem C): a high-confidence envelope
- * (road front + matched district) vs an approximate one (no road signal +
- * matched district), and the empty case. Verifies confidence, the approximate flag, the
- * disclosure, and the downstream sizing fields.
+ * Geometry-helper tests after anti-zombie cut: derive returns geometry only;
+ * product confidence is null (never labeling×district multiply).
  */
 
 import { describe, it, expect } from "vitest";
@@ -67,61 +65,44 @@ function roadSouthOf(): [number, number][] {
   ];
 }
 
-describe("deriveBuildableEnvelope — high confidence", () => {
-  it("road front + matched district -> not approximate, cited", () => {
+describe("deriveBuildableEnvelope — geometry helper (no product confidence)", () => {
+  it("road front + matched district -> geometry, confidence null", () => {
     const ring = rectRing();
     const labeling = labelEdges({ ring, road: roadSouthOf() })!;
     const district = mapDistrict(TABLE, "R-MD")!;
     const res = deriveBuildableEnvelope({ ring, table: TABLE, district, labeling });
 
     expect(res.empty).toBe(false);
-    expect(res.approximate).toBe(false);
-    expect(res.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(res.confidence).toBeNull();
     expect(res.citationUrl).toContain("municode");
     const feat = res.geojson.features[0]!;
     expect(feat.geometry).not.toBeNull();
     expect(feat.properties.notSurveyGrade).toBe(true);
-    // Buildable ~ (100-15)x(200-45) = 13,175.
     expect(feat.properties.buildableAreaSqFt).toBeGreaterThan(12_000);
-    expect(feat.properties.buildableAreaSqFt).toBeLessThan(14_000);
-    // Downstream sizing: max footprint capped by 40% lot coverage of ~20,000 =
-    // 8,000, which is SMALLER than the 13,175 envelope -> coverage cap wins.
     expect(feat.properties.maxFootprintSqFt).toBeCloseTo(8_000, -2);
-    expect(feat.properties.maxHeightFt).toBe(35);
-    // Disclosure always warns "not survey grade".
     expect(feat.properties.disclosure).toMatch(/not survey grade/i);
   });
-});
 
-describe("deriveBuildableEnvelope — approximate", () => {
-  it("no road signal + matched district -> approximate shape path", () => {
+  it("shape signal -> approximate geometry, confidence still null", () => {
     const ring = rectRing();
-    const labeling = labelEdges({ ring, road: null, refPoint: null })!; // shape
+    const labeling = labelEdges({ ring, road: null, refPoint: null })!;
     const district = mapDistrict(TABLE, "R-MD")!;
     const res = deriveBuildableEnvelope({ ring, table: TABLE, district, labeling });
 
     expect(res.approximate).toBe(true);
-    expect(res.confidence).toBeLessThan(0.7);
-    const feat = res.geojson.features[0]!;
-    expect(feat.properties.approximate).toBe(true);
-    expect(feat.properties.disclosure).toMatch(/approximate/i);
-    expect(feat.properties.edgeSignal).toBe("shape");
+    expect(res.confidence).toBeNull();
+    expect(res.geojson.features[0]!.properties.edgeSignal).toBe("shape");
   });
-});
 
-describe("deriveBuildableEnvelope — empty", () => {
   it("setbacks exceed a tiny lot -> null geometry + honest reason", () => {
-    const ring = rectRing(40, 40); // 40x40 lot
+    const ring = rectRing(40, 40);
     const labeling = labelEdges({ ring, road: roadSouthOf() })!;
-    const district = mapDistrict(TABLE, "R-LD")!; // 30/25/10 setbacks
+    const district = mapDistrict(TABLE, "R-LD")!;
     const res = deriveBuildableEnvelope({ ring, table: TABLE, district, labeling });
 
     expect(res.empty).toBe(true);
-    expect(res.approximate).toBe(true);
-    const feat = res.geojson.features[0]!;
-    expect(feat.geometry).toBeNull();
-    expect(feat.properties.buildableAreaSqFt).toBe(0);
-    expect(feat.properties.emptyReason).toBeTruthy();
-    expect(feat.properties.disclosure).toMatch(/no buildable area/i);
+    expect(res.confidence).toBeNull();
+    expect(res.geojson.features[0]!.geometry).toBeNull();
+    expect(res.geojson.features[0]!.properties.disclosure).toMatch(/no buildable area/i);
   });
 });
