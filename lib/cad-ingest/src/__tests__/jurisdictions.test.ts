@@ -118,10 +118,10 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       ]),
     );
     expect(cedarPark?.note).toMatch(/UR is omitted/i);
-    expect(getSetbackTable("taylor-tx")?.districts).toEqual([]);
-    expect(getSetbackTable("taylor-tx")?.note).toMatch(/HONEST EMPTY/i);
-    expect(getSetbackTable("liberty-hill-tx")?.districts).toEqual([]);
-    expect(getSetbackTable("liberty-hill-tx")?.note).toMatch(/HONEST EMPTY/i);
+    expect(getSetbackTable("taylor-tx")?.districts).toHaveLength(6);
+    expect(getSetbackTable("taylor-tx")?.note).toMatch(/WDLL 51/i);
+    expect(getSetbackTable("liberty-hill-tx")?.districts).toHaveLength(14);
+    expect(getSetbackTable("liberty-hill-tx")?.note).toMatch(/WDLL 51/i);
   });
 
   it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with cited setback rows", () => {
