@@ -251,7 +251,7 @@ describe("honest absence (never fabricate a facet)", () => {
 });
 
 describe("Bastrop B3 place types", () => {
-  it("declines P-5 instead of applying legacy Public/Institutional setbacks", () => {
+  it("maps P-5 to the cited B3 Core row, not legacy Public/Institutional", () => {
     const envelope = computeTier1Envelope({
       ring: BASTROP_LOT,
       zoningCode: "P-5",
@@ -260,11 +260,15 @@ describe("Bastrop B3 place types", () => {
       situsAddress: "123 MAIN ST, BASTROP, TX 78602",
     });
 
-    expect(envelope.status).toBe("declined");
-    expect(envelope.declineReason).toBe("setback-table-pending");
+    expect(envelope.status).toBe("ok");
     expect(envelope.jurisdictionKey).toBe("bastrop_tx");
-    expect(envelope.district).toBeUndefined();
-    expect(envelope.setbacks).toBeUndefined();
+    expect(envelope.district).toBe("P-5 Core");
+    expect(envelope.district).not.toBe("P Public/Institutional");
+    expect(envelope.setbacks).toEqual({
+      front_ft: 15,
+      side_ft: 0,
+      rear_ft: 0,
+    });
   });
 });
 
@@ -527,8 +531,8 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
     expect(shouldPromote(fullPayload(), strippedPayload())).toBe(false);
   });
 
-  it("forces removal of a legacy Public/Institutional envelope from Bastrop B3 P-5", () => {
-    const honestP5 = buildTier1Payload(
+  it("replaces a legacy Public/Institutional envelope with the populated Bastrop B3 P-5 row", () => {
+    const populatedP5 = buildTier1Payload(
       parcelRow({ zoning_district: "P-5" }),
       county.fips,
       county.name,
@@ -536,20 +540,24 @@ describe("monotonic high-water-mark guard (verify-before-promote)", () => {
       now,
     )!;
     const invalidPrior: Tier1FacetPayload = {
-      ...honestP5,
+      ...populatedP5,
       envelope: {
-        ...honestP5.envelope!,
+        ...populatedP5.envelope!,
         status: "ok",
         confidence: 0.245,
         district: "P Public/Institutional",
         setbacks: { front_ft: 25, side_ft: 15, rear_ft: 20 },
       },
-      facetCoverage: { ...honestP5.facetCoverage, envelope: true },
+      facetCoverage: { ...populatedP5.facetCoverage, envelope: true },
     };
 
-    expect(honestP5.envelope?.declineReason).toBe("setback-table-pending");
-    expect(facetScore(honestP5)).toBeLessThan(facetScore(invalidPrior));
-    expect(shouldPromote(invalidPrior, honestP5)).toBe(true);
+    expect(populatedP5.envelope?.district).toBe("P-5 Core");
+    expect(populatedP5.envelope?.setbacks).toEqual({
+      front_ft: 15,
+      side_ft: 0,
+      rear_ft: 0,
+    });
+    expect(shouldPromote(invalidPrior, populatedP5)).toBe(true);
   });
 
   it("promotes an equal-quality refresh (idempotent re-run is safe)", () => {
