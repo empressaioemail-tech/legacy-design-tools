@@ -139,6 +139,7 @@ async function main(): Promise<void> {
     summary = await stampCountyZoning({
       db,
       countyFips: cfg.countyFips,
+      cityKey: cfg.cityKey,
       index,
       dryRun,
       limit,

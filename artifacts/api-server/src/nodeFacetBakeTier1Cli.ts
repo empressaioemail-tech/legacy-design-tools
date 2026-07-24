@@ -104,7 +104,7 @@ import {
   type Ring,
 } from "./lib/nodeFacetBakeTier1";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants";
-import { soleZoningJurisdictionKey } from "@workspace/cad-ingest/zoning-layers";
+import { resolveZoningJurisdiction } from "@workspace/cad-ingest/zoning-layers";
 
 const { Pool } = pg;
 
@@ -204,6 +204,11 @@ interface CountySource {
    * crashing the SELECT — never a fabricated district.
    */
   hasZoning: boolean;
+  /**
+   * Whether `zoning_jurisdiction` (PIP cityKey provenance) is present.
+   * Absent on staging / pre-0062 tables — resolve falls back to situs only.
+   */
+  hasZoningJurisdiction: boolean;
 }
 
 async function columnExists(
@@ -235,12 +240,18 @@ async function discoverCounty(
     const n = Number(r.rows[0]?.parcels ?? 0);
     if (n > 0) {
       const hasZoning = await columnExists(pool, table, "zoning_district");
+      const hasZoningJurisdiction = await columnExists(
+        pool,
+        table,
+        "zoning_jurisdiction",
+      );
       return {
         fips,
         name: COUNTY_NAMES[fips] ?? fips,
         table,
         parcelCount: n,
         hasZoning,
+        hasZoningJurisdiction,
       };
     }
   }
@@ -368,7 +379,11 @@ export interface Tier1FacetPayload {
   countyFips: string;
   countyName: string;
   baseFacts: BaseFacts;
-  zoning: { district: string } | null;
+  zoning: {
+    district: string;
+    /** Hyphen or underscore cityKey from PIP stamp / situs fallback. */
+    jurisdictionKey?: string | null;
+  } | null;
   envelope: Tier1EnvelopeFacet | null;
   /**
    * Per-facet presence, the load-bearing input to the monotonic scorer. A
@@ -430,6 +445,7 @@ interface ParcelRow {
   situs_city: string | null;
   situs_state: string | null;
   zoning_district: string | null;
+  zoning_jurisdiction: string | null;
   source_vintage: string | null;
   geometry: unknown;
   /** TxGIO owner — for the address-join per-match gate ONLY; never persisted. */
@@ -576,14 +592,32 @@ export function buildTier1Payload(
   };
 
   // --- Zoning (stored column, verbatim; honest null when unstamped) ---
+  // Per-parcel jurisdiction: PIP-stamped zoning_jurisdiction is authoritative;
+  // situs_city is a FALLBACK only (overlapping layers / pre-migration rows).
   const zoningDistrict = str(row.zoning_district);
-  const zoning = zoningDistrict ? { district: zoningDistrict } : null;
+  const resolvedCityKey = resolveZoningJurisdiction(
+    {
+      zoningJurisdiction: row.zoning_jurisdiction,
+      situsCity: baseFacts.situsCity,
+      countyFips,
+    },
+    {
+      onSitusFallback: ({ cityKey, situsCity }) => {
+        console.warn(
+          `[node-facet-bake-t1] situs fallback jurisdiction=${cityKey} ` +
+            `situs_city=${situsCity} county=${countyFips} ` +
+            `feature_index=${row.feature_index}`,
+        );
+      },
+    },
+  );
+  const jurisdictionFacetKey = resolvedCityKey
+    ? resolvedCityKey.replace(/-/g, "_")
+    : null;
+  const zoning = zoningDistrict
+    ? { district: zoningDistrict, jurisdictionKey: jurisdictionFacetKey }
+    : null;
 
-  // --- Setbacks + buildable envelope (skipRoad / shape-only, provisional) ---
-  // Deterministic given zoning + geometry. Jurisdiction for the setback table
-  // prefers situs city/address; when situs is blank (Travis TxGIO) and this
-  // county has exactly one registered zoning layer, fall back to that city
-  // key only for parcels that already carry a zoning stamp.
   const envelope: Tier1EnvelopeFacet | null = ring
     ? computeTier1Envelope({
         ring,
@@ -591,7 +625,7 @@ export function buildTier1Payload(
         situsCity: baseFacts.situsCity,
         situsState: baseFacts.situsState,
         situsAddress: baseFacts.situsAddress,
-        zoningJurisdictionFallback: soleZoningJurisdictionKey(countyFips),
+        zoningJurisdictionFallback: jurisdictionFacetKey,
       })
     : null;
 
@@ -1180,13 +1214,17 @@ async function bakeCounty(args: {
     const zoningSelect = county.hasZoning
       ? "zoning_district"
       : "NULL::text AS zoning_district";
+    const zoningJurisdictionSelect = county.hasZoningJurisdiction
+      ? "zoning_jurisdiction"
+      : "NULL::text AS zoning_jurisdiction";
     const ownerSelect = needsOwnerForGate
       ? "owner_name AS txgio_owner_for_gate"
       : "NULL::text AS txgio_owner_for_gate";
     const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
       `SELECT DISTINCT ON (feature_index)
               feature_index, prop_id, situs_address, situs_city, situs_state,
-              ${zoningSelect}, ${ownerSelect}, source_vintage, geometry
+              ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
+              source_vintage, geometry
          FROM ${county.table}
         WHERE county_fips = $1
           AND feature_index > $2

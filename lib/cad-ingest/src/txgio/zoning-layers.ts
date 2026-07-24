@@ -262,8 +262,8 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // `BASE_ZONE` carries clean tokens (SF-1..SF-6, MF-1..MF-6, …). Setback
   // table EXISTS (austin-tx.json) for SF-1/2/3 + MF-1..MF-6 — remaining GIS
   // codes stamp as zoning-present / setback-pending (honest). Match contract
-  // CLEAN (leading-token). Second Travis layer → soleZoningJurisdictionKey
-  // returns null (multi-city; situs or stamp provenance required).
+  // CLEAN (leading-token). Second Travis layer — jurisdiction is per-parcel
+  // via stamped zoning_jurisdiction (PIP cityKey), not a county sole-key.
   "austin-tx": {
     cityKey: "austin-tx",
     cityName: "Austin",
@@ -330,20 +330,89 @@ export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined
 }
 
 /**
- * When a county has exactly one registered city zoning layer, a parcel that
- * already carries a stamped `zoning_district` from that layer may use the
- * layer's city as the setback-jurisdiction key if situs city/address cannot
- * synthesize one (Travis TxGIO ships blank `situs_city`). Multi-city counties
- * must not guess — return null and keep the honest `no-jurisdiction-key`
- * decline until situs or per-layer provenance exists.
- *
- * Returns the underscore form used by envelope facets (`pflugerville_tx`).
+ * All wired cityKeys for a county FIPS. Always a Set — never assume one.
+ * Empty set means no zoning layer is registered for that county.
  */
-export function soleZoningJurisdictionKey(
-  countyFips: string,
-): string | null {
+export function wiredZoningCityKeys(countyFips: string): Set<string> {
   const fips = countyFips.trim();
-  const layers = Object.values(ZONING_LAYERS).filter((z) => z.countyFips === fips);
-  if (layers.length !== 1) return null;
-  return layers[0]!.cityKey.replace(/-/g, "_");
+  return new Set(
+    Object.values(ZONING_LAYERS)
+      .filter((z) => z.countyFips === fips)
+      .map((z) => z.cityKey),
+  );
+}
+
+export interface ZoningJurisdictionParcel {
+  /** Stamped cityKey from the PIP-matched layer (`austin-tx`). */
+  zoningJurisdiction?: string | null;
+  /** Optional situs city — FALLBACK only when stamped jurisdiction is null. */
+  situsCity?: string | null;
+  countyFips?: string | null;
+}
+
+/**
+ * Resolve the zoning jurisdiction for ONE parcel.
+ *
+ * PIP membership is authoritative: when `zoning_jurisdiction` was stamped
+ * from the matched city layer, return that cityKey. Unincorporated / no
+ * match → null (honest fact, not a failure).
+ *
+ * `situs_city` is a FALLBACK tiebreaker only (rare overlapping-layer or
+ * pre-migration rows). When used, the caller's `onSitusFallback` may log.
+ * Returns hyphen cityKey form matching ZONING_LAYERS / setback tables.
+ */
+export function resolveZoningJurisdiction(
+  parcel: ZoningJurisdictionParcel,
+  opts?: {
+    onSitusFallback?: (info: {
+      cityKey: string;
+      situsCity: string;
+      countyFips: string;
+    }) => void;
+  },
+): string | null {
+  const stamped = typeof parcel.zoningJurisdiction === "string"
+    ? parcel.zoningJurisdiction.trim().toLowerCase().replace(/_/g, "-")
+    : "";
+  if (stamped && ZONING_LAYERS[stamped]) return stamped;
+  if (stamped) return stamped; // unknown-but-stamped key still wins over guess
+
+  const situs = typeof parcel.situsCity === "string"
+    ? parcel.situsCity.trim()
+    : "";
+  const fips = typeof parcel.countyFips === "string"
+    ? parcel.countyFips.trim()
+    : "";
+  if (!situs || !fips) return null;
+
+  const wired = wiredZoningCityKeys(fips);
+  if (wired.size === 0) return null;
+
+  const situsNorm = situs.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  for (const cityKey of wired) {
+    const layer = ZONING_LAYERS[cityKey];
+    if (!layer) continue;
+    const nameNorm = layer.cityName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (situsNorm === nameNorm || situsNorm.includes(nameNorm)) {
+      opts?.onSitusFallback?.({
+        cityKey,
+        situsCity: situs,
+        countyFips: fips,
+      });
+      return cityKey;
+    }
+  }
+  return null;
+}
+
+/**
+ * @deprecated Use {@link resolveZoningJurisdiction} (per-parcel) or
+ * {@link wiredZoningCityKeys} (county Set). County-level "sole city" was
+ * the wrong model — every county is multi-city; this always returns null.
+ */
+export function soleZoningJurisdictionKey(_countyFips: string): string | null {
+  return null;
 }
