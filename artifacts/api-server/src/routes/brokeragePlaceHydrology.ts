@@ -4,8 +4,8 @@
  *   POST /api/brokerage/v1/place/site-topography/refresh
  *   GET  /api/brokerage/v1/place/:placeKey/site-topography
  *   POST /api/brokerage/v1/place/:placeKey/site-topography/refresh
- *   GET  /api/brokerage/v1/place/:placeKey/site-topography/mesh
- *   GET  /api/brokerage/v1/place/:placeKey/site-topography/ifc
+ *   GET  /api/brokerage/v1/place/:placeKey/site-topography/mesh  (410 Gone — retired)
+ *   GET  /api/brokerage/v1/place/:placeKey/site-topography/ifc   (410 Gone — retired)
  *   POST /api/brokerage/v1/place/site-drainage/refresh
  *   GET  /api/brokerage/v1/place/:placeKey/site-drainage
  *   POST /api/brokerage/v1/place/:placeKey/site-drainage/refresh
@@ -15,19 +15,10 @@
  * Internally resolves to a deterministic MCP place engagement and reuses
  * the engagement-scoped ingest workers.
  *
- * ARTIFACT RETRIEVAL (mesh / ifc) — the two `.../mesh` and `.../ifc` reads are
- * the authorized way to fetch the terrain object bytes. They are engagement-
- * scoped BY CONSTRUCTION: the caller supplies only a placeKey (address-plane),
- * the route resolves it to THIS engagement under the caller's gate/jurisdiction
- * tenant (same resolution the sibling `GET :placeKey/site-topography` metadata
- * read uses), then derives the object path from THAT engagement's materialized
- * read model (`propertySet.meshRef` / `propertySet.ifcRef`) and serves only that
- * object. The caller can never pass a raw object UUID, so the pre-existing
- * "any /objects/uploads/<uuid> to any anonymous caller" hole on the ungated
- * `GET /storage/objects/*` route is closed here by construction — this route
- * derives the path server-side and inherits the brokerage gate (401 on a
- * missing/bad key via `requireBrokerageAuthOrServiceToken` on the parent
- * `brokerageV1` router).
+ * ARTIFACT RETRIEVAL (mesh / ifc) — RETIRED (WDLL item 7 / I-A). The legacy
+ * cortex mesh/IFC authoring path is gone; callers must use spine
+ * `refresh_parcel_terrain_export` for terrain deliverables. The two GET routes
+ * remain registered but return 410 Gone with a pointer message.
  */
 
 import {
@@ -36,13 +27,11 @@ import {
   type Request,
   type Response,
 } from "express";
-import { Readable } from "stream";
 import { z } from "zod";
 import { logger } from "../lib/logger";
 import { resolveRequestJurisdictionTenant } from "../lib/gateFrontSeam";
 import { getHistoryService } from "../atoms/registry";
 import { ensureMcpPlaceEngagement } from "../lib/mcpPlaceEngagement";
-import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import {
   loadActiveSiteTopographyRow,
   rematerializeFromLatestEvent,
@@ -64,60 +53,17 @@ import { ingestDrainageResultToHttp } from "./siteDrainage";
 
 export const brokeragePlaceHydrologyRouter: IRouter = Router();
 
-const terrainObjectStorage = new ObjectStorageService();
-
 const PLACE_KEY_PARAM = z.string().min(1);
 
-/**
- * The terrain artifact kinds a caller can retrieve, mapped to the read-model
- * `propertySet` key that holds the object path and the wire content-type.
- *
- * GLB objects are uploaded to storage as `application/octet-stream` (the DEM
- * mesh authoring path writes them without a glTF MIME), so we override the
- * content-type on the way out rather than trusting the stored metadata — a
- * 3D viewer / the Brief download needs `model/gltf-binary` to treat the bytes
- * as a GLB.
- */
-const TERRAIN_ARTIFACTS = {
-  mesh: {
-    refKey: "meshRef",
-    contentType: "model/gltf-binary",
-    filename: "site-topography.glb",
-  },
-  ifc: {
-    refKey: "ifcRef",
-    // No registered IANA type for IFC; `application/octet-stream` is the safe
-    // download default and matches how the object was stored.
-    contentType: "application/octet-stream",
-    filename: "site-topography.ifc",
-  },
-} as const;
+const RETIRED_TERRAIN_ARTIFACT_MESSAGE =
+  "Cortex terrain mesh/IFC authoring retired. Use spine refresh_parcel_terrain_export for terrain deliverables.";
 
-type TerrainArtifactKind = keyof typeof TERRAIN_ARTIFACTS;
-
-/**
- * Pure resolver: given a materialized site-topography `propertySet` and an
- * artifact kind, return the object-storage path for that artifact, or null
- * when the read model doesn't carry one (pre-mesh/pre-ifc payload, or authoring
- * skipped/failed). Kept pure so the authorization/derivation logic is unit-
- * testable without a DB or object store.
- *
- * The returned path is ALWAYS taken from the engagement's own read model — it
- * is never influenced by caller input beyond the placeKey that resolved the
- * engagement. This is the property that closes the arbitrary-UUID hole.
- */
-export function resolveTerrainArtifactPath(
-  propertySet: Record<string, unknown> | null | undefined,
-  kind: TerrainArtifactKind,
-): string | null {
-  if (!propertySet || typeof propertySet !== "object") return null;
-  const raw = propertySet[TERRAIN_ARTIFACTS[kind].refKey];
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  // Only ever serve an object we minted into the private object dir. A ref that
-  // is not an `/objects/...` entity path is not servable through this route.
-  if (!trimmed.startsWith("/objects/")) return null;
-  return trimmed;
+function handleRetiredTerrainArtifact(_req: Request, res: Response): void {
+  res.status(410).json({
+    status: "gone",
+    reason: RETIRED_TERRAIN_ARTIFACT_MESSAGE,
+    replacement: "refresh_parcel_terrain_export",
+  });
 }
 
 const TOPO_REFRESH_BODY = z
@@ -546,126 +492,6 @@ async function handleDrainageRead(
   );
 }
 
-/**
- * Stream a terrain artifact (mesh GLB or IFC) for a place.
- *
- * Authorization is engagement-scoped by construction:
- *   1. The caller is already past the brokerage gate (parent router applies
- *      `requireBrokerageAuthOrServiceToken`; a missing/bad key never reaches
- *      this handler — it is 401'd upstream).
- *   2. We resolve the placeKey to a deterministic engagement under the caller's
- *      jurisdiction tenant — the SAME resolution the metadata read uses.
- *   3. We load THAT engagement's materialized site-topography row and read the
- *      object path off its `propertySet` (`meshRef` / `ifcRef`). The caller
- *      supplies no object path/UUID; it is derived server-side.
- *   4. We stream only that derived object.
- *
- * A caller therefore cannot retrieve an object outside the engagement their
- * placeKey resolves to, and cannot address an arbitrary object by UUID.
- */
-async function handleArtifactRead(
-  req: Request,
-  res: Response,
-  placeKeyParam: string,
-  kind: TerrainArtifactKind,
-): Promise<void> {
-  const placeKeyParse = PLACE_KEY_PARAM.safeParse(placeKeyParam);
-  if (!placeKeyParse.success) {
-    res.status(400).json({ error: "invalid_request", message: "placeKey required" });
-    return;
-  }
-
-  const ensured = await ensureMcpPlaceEngagement({
-    placeKey: placeKeyParse.data,
-    jurisdictionTenant: resolveRequestJurisdictionTenant(req),
-  });
-  if (!ensured.ok) {
-    res.status(ensured.status).json(ensured.body);
-    return;
-  }
-
-  const log = reqLog(req);
-
-  // Load the authorized engagement's active read model. Replay-from-events
-  // recovers a row whose read model was dropped, exactly as the metadata read
-  // does — so a completed run that lost its cached row still serves.
-  let row = await loadActiveSiteTopographyRow(ensured.engagementId);
-  if (!row) {
-    const replayed = await rematerializeFromLatestEvent({
-      history: getHistoryService(),
-      engagementId: ensured.engagementId,
-      log,
-    }).catch(() => ({ status: "no-event" as const, reason: "replay failed" }));
-    if (replayed.status === "ok") {
-      row = await loadActiveSiteTopographyRow(ensured.engagementId);
-    }
-  }
-
-  // Derive the object path from THIS engagement's read model. Never from the
-  // caller. Honest 404 when the artifact isn't materialized yet (job pending,
-  // no coverage, or an older payload that predates mesh/ifc authoring).
-  const objectPath = resolveTerrainArtifactPath(row?.propertySet, kind);
-  if (!objectPath) {
-    res.status(404).json({
-      status: "not-found",
-      reason:
-        `No ${kind} artifact for this place yet; POST …/site-topography/refresh ` +
-        `and poll GET …/site-topography until jobStatus is "ready".`,
-    });
-    return;
-  }
-
-  const spec = TERRAIN_ARTIFACTS[kind];
-  try {
-    const objectFile = await terrainObjectStorage.getObjectEntityFile(objectPath);
-    const response = await terrainObjectStorage.downloadObject(objectFile);
-
-    res.status(response.status);
-    // Preserve storage headers (Content-Length, Cache-Control: private, ...)
-    // but force the correct artifact content-type and mark it a download.
-    response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === "content-type") return;
-      res.setHeader(key, value);
-    });
-    res.setHeader("Content-Type", spec.contentType);
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${spec.filename}"`,
-    );
-
-    if (response.body) {
-      const nodeStream = Readable.fromWeb(
-        response.body as ReadableStream<Uint8Array>,
-      );
-      nodeStream.pipe(res);
-    } else {
-      res.end();
-    }
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) {
-      // The read model referenced an object that no longer exists in storage.
-      // Honest 404 rather than a 500 — the artifact is effectively gone.
-      log.warn(
-        { engagementId: ensured.engagementId, kind, objectPath },
-        "terrain artifact object missing in storage",
-      );
-      res.status(404).json({
-        status: "not-found",
-        reason: `The ${kind} artifact for this place is no longer available.`,
-      });
-      return;
-    }
-    log.error(
-      { err, engagementId: ensured.engagementId, kind },
-      "terrain artifact serve failed",
-    );
-    res.status(500).json({
-      status: "error",
-      reason: "Failed to serve terrain artifact.",
-    });
-  }
-}
-
 brokeragePlaceHydrologyRouter.post(
   "/site-topography/refresh",
   (req, res) => void handleTopoRefresh(req, res),
@@ -683,30 +509,14 @@ brokeragePlaceHydrologyRouter.get(
     void handleTopoRead(req, res, decodePlaceKeyParam(req.params.placeKey)),
 );
 
-// Gated, engagement-scoped artifact retrieval. These sit behind the SAME
-// brokerage gate as the metadata read above (parent `brokerageV1` applies
-// `requireBrokerageAuthOrServiceToken`), and derive the object path from the
-// resolved engagement's read model — never from caller-supplied input.
 brokeragePlaceHydrologyRouter.get(
   "/:placeKey/site-topography/mesh",
-  (req, res) =>
-    void handleArtifactRead(
-      req,
-      res,
-      decodePlaceKeyParam(req.params.placeKey),
-      "mesh",
-    ),
+  handleRetiredTerrainArtifact,
 );
 
 brokeragePlaceHydrologyRouter.get(
   "/:placeKey/site-topography/ifc",
-  (req, res) =>
-    void handleArtifactRead(
-      req,
-      res,
-      decodePlaceKeyParam(req.params.placeKey),
-      "ifc",
-    ),
+  handleRetiredTerrainArtifact,
 );
 
 brokeragePlaceHydrologyRouter.post(

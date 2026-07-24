@@ -8,6 +8,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const MULTIPLY_RE = /labeling\.confidence\s*\*\s*district\.confidence/;
+const TERRAIN_MESH_IFC_AUTHORING_RE =
+  /runIfcWorker|buildTerrainMeshInWorker|buildTerrainMeshGeometry|deriveTerrainMeshGlb/;
 const ROOT = join(__dirname, "../..");
 
 function walkTsFiles(dir: string, out: string[] = []): string[] {
@@ -29,6 +31,18 @@ describe("anti-zombie: labeling×district multiply retired (WDLL 3.7)", () => {
       if (file.endsWith("antiZombieConfidence.test.ts")) continue;
       const text = readFileSync(file, "utf8");
       if (MULTIPLY_RE.test(text)) hits.push(file);
+    }
+    expect(hits).toEqual([]);
+  });
+});
+
+describe("anti-zombie: cortex terrain mesh/IFC authoring retired (WDLL item 7 / I-A)", () => {
+  it("no live-path api-server source reintroduces mesh/IFC authoring symbols", () => {
+    const hits: string[] = [];
+    for (const file of walkTsFiles(ROOT)) {
+      if (file.endsWith("antiZombieConfidence.test.ts")) continue;
+      const text = readFileSync(file, "utf8");
+      if (TERRAIN_MESH_IFC_AUTHORING_RE.test(text)) hits.push(file);
     }
     expect(hits).toEqual([]);
   });
