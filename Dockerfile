@@ -82,10 +82,7 @@ ENV NODE_ENV=production \
     SPA_STATIC_ROOT=/app/artifacts \
     BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data \
     HYDROLOGY_PYTHON=python3 \
-    HYDROLOGY_PYSHEDS_INSTALLED=1 \
-    IFC_PYTHON=/opt/ifc-venv/bin/python3 \
-    IFC_WORKER_PATH=/app/artifacts/ifc-worker/run.py \
-    HAUSKA_IFC_WORKER_INSTALLED=1
+    HYDROLOGY_PYSHEDS_INSTALLED=1
 
 WORKDIR /app
 
@@ -154,29 +151,6 @@ COPY --from=build --chown=node:node /app /app
 # (it still calls np.in1d, removed in NumPy 2), so the system numpy is <2.
 RUN pip3 install --break-system-packages --no-cache-dir \
       -r artifacts/hydrology-worker/requirements.txt
-
-# Python sidecar for IFC authoring (artifacts/ifc-worker/run.py) — installed
-# into a DEDICATED venv, NOT the system interpreter. ifcopenshell 0.8.x's
-# native extension is built against the NumPy 2 C-ABI; co-installing it with
-# the hydrology worker's required numpy<2 makes `import ifcopenshell` raise
-# the NumPy-2-vs-1 ABI error at import. run.py's import guard then exits 0
-# BEFORE reading stdin, the api-server parent's payload write EPIPEs, and IFC
-# is silently skipped ("died early -> EPIPE"). Isolating IFC in its own venv
-# lets it take numpy 2 while hydrology keeps numpy<2. IFC_PYTHON (set in the
-# ENV block above) points ifcWorkerClient.ts at this venv's interpreter.
-#
-# ifcopenshell dlopens libgomp at import, so libgomp1 is installed in the
-# runtime apt set above. The trailing import smoke test FAILS THE BUILD if
-# the native lib cannot import — catching a broken image at build time
-# instead of silently at first request (the old failure mode).
-RUN python3 -m venv /opt/ifc-venv \
- && /opt/ifc-venv/bin/pip install --no-cache-dir \
-      -r artifacts/ifc-worker/requirements.txt \
- && /opt/ifc-venv/bin/python3 -c "import ifcopenshell, numpy; print('ifcopenshell', ifcopenshell.version, '| numpy', numpy.__version__)" \
- && apt-get purge -y gcc g++ \
- && apt-get autoremove -y \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
 
 USER node
 

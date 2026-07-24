@@ -43,17 +43,6 @@ import {
 } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
 import { ctx } from "./test-context";
-import {
-  __setTerrainMeshWorkerFactoryForTests,
-} from "../lib/terrainMeshWorker/workerClient";
-import {
-  buildTerrainMeshGeometry,
-  deriveTerrainMeshGlb,
-} from "../lib/siteTopographyMesh";
-import type {
-  TerrainMeshWorkerInput,
-  TerrainMeshWorkerMessage,
-} from "../lib/terrainMeshWorker/types";
 
 // Hoisted mock helpers — the `geotiff` mock has to land before any
 // import of `siteTopographyIngest.ts` resolves the real module.
@@ -79,49 +68,6 @@ vi.mock("geotiff", () => ({
         getHeight: () => geotiffMockState.height,
         readRasters: async () => [new Float32Array(geotiffMockState.values)],
       }),
-    };
-  }),
-}));
-
-// Mock the IFC worker client so these DB integration tests never spawn a
-// real Python process (deterministic + no ifcopenshell dependency in the
-// test env). `ifcWorkerMockState.mode` picks the behavior:
-//   - "skip-error": the worker returns a structured error (the real
-//     behavior when python/ifcopenshell is absent) -> IFC skipped
-//     best-effort, no `ifc` payload block.
-//   - "ok": the worker returns a well-formed IFC result -> `ifc` block
-//     lands. `capturedRequest` records the geometry the ingest handed the
-//     worker so a test can assert it matches the mesh.
-//   - "throw": the client throws -> ingest's try/catch swallows it.
-const ifcWorkerMockState: {
-  mode: "skip-error" | "ok" | "throw";
-  capturedRequest: unknown;
-} = { mode: "skip-error", capturedRequest: null };
-
-vi.mock("../lib/ifcWorkerClient", () => ({
-  runIfcWorker: vi.fn(async (req: unknown) => {
-    ifcWorkerMockState.capturedRequest = req;
-    if (ifcWorkerMockState.mode === "throw") {
-      throw new Error("ifc client threw");
-    }
-    if (ifcWorkerMockState.mode === "ok") {
-      return {
-        status: "ok",
-        library: "ifcopenshell",
-        libraryVersion: "0.7.0",
-        schemaVersion: "IFC4",
-        geometryPrimitive: "IfcTriangulatedFaceSet",
-        georefCrs: "EPSG:4326",
-        vertexCount: 100,
-        triangleCount: 162,
-        byteCount: 4096,
-        ifcText: "ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;",
-      };
-    }
-    return {
-      status: "error",
-      code: "spawn-failed",
-      message: "python3 not available in test env",
     };
   }),
 }));
@@ -300,61 +246,9 @@ async function seedEngagementWithoutAnything(): Promise<void> {
 
 beforeAll(async () => {
   ctx.schema = await createTestSchema();
-  // Run the terrain-mesh build IN-PROCESS (not on a real worker thread) so
-  // these DB integration tests stay deterministic and fast — same geometry the
-  // production worker thread produces, just without spawning a thread. A fake
-  // "worker" that computes the result synchronously and posts one message keeps
-  // the async terrain fix's mesh contract identical to the pre-async inline
-  // path the assertions were written against.
-  __setTerrainMeshWorkerFactoryForTests((input: TerrainMeshWorkerInput) => {
-    const listeners: Record<string, Array<(arg: never) => void>> = {
-      message: [],
-      error: [],
-      exit: [],
-    };
-    void (async () => {
-      let msg: TerrainMeshWorkerMessage;
-      try {
-        const dem = {
-          width: input.dem.width,
-          height: input.dem.height,
-          values: input.dem.values,
-        };
-        const geometry = buildTerrainMeshGeometry(dem, input.bbox, {
-          verticalExaggeration: input.verticalExaggeration,
-        });
-        const { glb } = await deriveTerrainMeshGlb(dem, input.bbox, {
-          verticalExaggeration: input.verticalExaggeration,
-        });
-        msg = {
-          ok: true,
-          result: {
-            glb,
-            positions: geometry.positions,
-            indices: geometry.indices,
-            meta: geometry.meta,
-          },
-        };
-      } catch (err) {
-        msg = { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
-      for (const cb of listeners.message)
-        (cb as (m: TerrainMeshWorkerMessage) => void)(msg);
-    })();
-    return {
-      on(event: string, cb: (arg: never) => void) {
-        (listeners[event] ??= []).push(cb);
-        return this;
-      },
-      terminate() {
-        return Promise.resolve(0);
-      },
-    };
-  });
 });
 
 afterAll(async () => {
-  __setTerrainMeshWorkerFactoryForTests(null);
   if (ctx.schema) {
     await dropTestSchema(ctx.schema);
     ctx.schema = null;
@@ -368,10 +262,6 @@ beforeEach(async () => {
   geotiffMockState.height = 10;
   geotiffMockState.values = Array.from({ length: 100 }, (_, i) => 100 + i / 10);
   geotiffMockState.rejectWith = undefined;
-  // Default: IFC worker unavailable (structured error) — the common
-  // dev/CI-without-ifcopenshell case. Tests that want IFC opt into "ok".
-  ifcWorkerMockState.mode = "skip-error";
-  ifcWorkerMockState.capturedRequest = null;
 });
 
 afterEach(async () => {
@@ -404,10 +294,8 @@ describe("site-topography ingest worker", () => {
     expect(result.reusedExisting).toBe(false);
     expect(result.contourCount).toBeGreaterThan(0);
     expect(result.demGcsObjectPath).toMatch(/^\/objects\/test-dem-/);
-    // Two blobs upload on the happy path: the DEM GeoTIFF + the terrain mesh
-    // GLB. IFC is skipped in this test (ifcWorkerMockState.mode = "skip-error"),
-    // so there is no third blob.
-    expect(blobs.size).toBe(2);
+    // One blob upload on the happy path: the DEM GeoTIFF only.
+    expect(blobs.size).toBe(1);
 
     // atom_events row landed.
     const events = await ctx.schema!.db
@@ -678,137 +566,5 @@ describe("site-topography ingest worker", () => {
     expect(typed.parcelOrigin).toBe("county-gis-parcel");
     expect(summary.keyMetrics.length).toBeGreaterThan(0);
     expect(summary.prose).toMatch(/contour features/i);
-  });
-
-  it("[9] IFC best-effort — worker error does NOT fail the ingest; mesh + contours still land, no ifc block", async () => {
-    await seedEngagementWithGrandCountyParcel();
-    ifcWorkerMockState.mode = "skip-error";
-    const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
-    const { shim } = makeInMemStorage();
-
-    const result = await ingestSiteTopography({
-      engagementId: ENGAGEMENT_ID,
-      history: getHistoryService(),
-      fetchImpl,
-      storage: shim,
-    });
-
-    // Ingest still succeeds — the IFC failure is best-effort.
-    expect(result.status).toBe("ok");
-    if (result.status !== "ok") throw new Error("unreachable");
-    expect(result.contourCount).toBeGreaterThan(0);
-
-    const events = await ctx.schema!.db
-      .select()
-      .from(atomEvents)
-      .where(
-        and(
-          eq(atomEvents.entityType, "site-topography"),
-          eq(atomEvents.entityId, ENGAGEMENT_ID),
-        ),
-      );
-    expect(events).toHaveLength(1);
-    const payload = events[0]!.payload as Record<string, unknown>;
-    // The mesh still landed (mesh is independent of the IFC step).
-    expect(payload.mesh).toBeTruthy();
-    // The IFC block is absent because the worker errored.
-    expect(payload.ifc).toBeUndefined();
-
-    // Read model mirrors: meshRef present, ifcRef null.
-    const row = await loadActiveSiteTopographyRow(ENGAGEMENT_ID);
-    const ps = row!.propertySet as Record<string, unknown>;
-    expect(ps.meshRef).toBeTruthy();
-    expect(ps.ifcRef).toBeNull();
-  });
-
-  it("[10] IFC ok — the ifc block lands, is fed the SAME geometry as the mesh, and reaches the read model", async () => {
-    await seedEngagementWithGrandCountyParcel();
-    ifcWorkerMockState.mode = "ok";
-    const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
-    const { shim } = makeInMemStorage();
-
-    const result = await ingestSiteTopography({
-      engagementId: ENGAGEMENT_ID,
-      history: getHistoryService(),
-      fetchImpl,
-      storage: shim,
-    });
-    expect(result.status).toBe("ok");
-
-    const events = await ctx.schema!.db
-      .select()
-      .from(atomEvents)
-      .where(
-        and(
-          eq(atomEvents.entityType, "site-topography"),
-          eq(atomEvents.entityId, ENGAGEMENT_ID),
-        ),
-      );
-    const payload = events[0]!.payload as Record<string, unknown>;
-    const mesh = payload.mesh as Record<string, unknown>;
-    const ifc = payload.ifc as Record<string, unknown>;
-    expect(mesh).toBeTruthy();
-    expect(ifc).toBeTruthy();
-    expect(ifc.ifcSchemaVersion).toBe("IFC4");
-    expect(ifc.geometryPrimitive).toBe("IfcTriangulatedFaceSet");
-    expect(ifc.georefCrs).toBe("EPSG:4326");
-    expect(ifc.gcsObjectPath).toMatch(/^\/objects\//);
-
-    // The geometry the ingest handed the IFC worker is the SAME compacted
-    // buffer the mesh reports: positions length = meshVertexCount * 3,
-    // indices length = meshTriangleCount * 3. This is the ingest-level
-    // guarantee that the IFC and the GLB share one triangulation.
-    const captured = ifcWorkerMockState.capturedRequest as {
-      positions: number[];
-      indices: number[];
-      crsConvention: string;
-      provenance: Record<string, unknown>;
-      confidence: Record<string, unknown>;
-    };
-    expect(captured.positions.length).toBe(
-      (mesh.vertexCount as number) * 3,
-    );
-    expect(captured.indices.length).toBe(
-      (mesh.triangleCount as number) * 3,
-    );
-    // The IFC worker got the same coverage-honest provenance/confidence the
-    // topo derivation computed (structural commitment 1).
-    expect(captured.provenance.sourceCitation).toMatch(/USGS 3DEP/);
-    expect(typeof captured.confidence.estimate).toBe("number");
-    expect(captured.confidence.provenance).toBe("asserted");
-
-    // Read model carries the ifc block + ifcRef.
-    const row = await loadActiveSiteTopographyRow(ENGAGEMENT_ID);
-    const ps = row!.propertySet as Record<string, unknown>;
-    expect(ps.ifcRef).toBe(ifc.gcsObjectPath);
-    const psIfc = ps.ifc as Record<string, unknown>;
-    expect(psIfc.ifcSchemaVersion).toBe("IFC4");
-  });
-
-  it("[11] IFC client throw — swallowed best-effort, ingest still ok", async () => {
-    await seedEngagementWithGrandCountyParcel();
-    ifcWorkerMockState.mode = "throw";
-    const fetchImpl = vi.fn(async () => makeMinimalTiffResponse());
-    const { shim } = makeInMemStorage();
-
-    const result = await ingestSiteTopography({
-      engagementId: ENGAGEMENT_ID,
-      history: getHistoryService(),
-      fetchImpl,
-      storage: shim,
-    });
-    expect(result.status).toBe("ok");
-    const events = await ctx.schema!.db
-      .select()
-      .from(atomEvents)
-      .where(
-        and(
-          eq(atomEvents.entityType, "site-topography"),
-          eq(atomEvents.entityId, ENGAGEMENT_ID),
-        ),
-      );
-    const payload = events[0]!.payload as Record<string, unknown>;
-    expect(payload.ifc).toBeUndefined();
-    expect(payload.mesh).toBeTruthy();
   });
 });

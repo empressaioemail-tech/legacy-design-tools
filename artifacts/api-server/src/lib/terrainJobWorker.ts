@@ -2,23 +2,10 @@
  * Async parcel-terrain job — enqueue + fire-and-forget worker
  * (async-terrain-job).
  *
- * The site-topography ingest (DEM -> gridded triangle mesh -> GLB ->
- * ifcopenshell IFC) used to run SYNCHRONOUSLY inside the refresh request
- * handler. The mesh triangulation is a nested per-pixel loop and the IFC author
- * spawns a Python sidecar; on the shared 2-CPU cortex-api container both pegged
- * the cores and starved the co-scheduled 29s brief request, producing Cloud Run
- * "malformed response" 503s.
- *
- * This module moves that authoring OFF the request path using the same
- * fire-and-forget shape `viewpoint_renders` uses:
- *
- *   enqueueTerrainJob()  inserts a `queued` terrain_generation_jobs row and
- *                        `void`-launches runTerrainJob(); the route returns 202
- *                        immediately (no awaiting the mesh/IFC authoring).
- *   runTerrainJob()      flips the row to `generating`, runs ingestSiteTopography
- *                        (which now builds the mesh on a worker thread — see
- *                        terrainMeshWorker), and drives the row to a terminal
- *                        state (ready | failed | no-coverage).
+ * The site-topography ingest (DEM -> contours + coverage honesty) used to
+ * also author mesh/IFC on the live path; that authoring is retired (WDLL
+ * item 7 / I-A). Async jobs still run ingestSiteTopography for DEM/contour
+ * materialization only.
  *
  * Single-flight is enforced by the partial unique index on (engagement_id)
  * WHERE status in ('queued','generating'): a concurrent enqueue loses on the

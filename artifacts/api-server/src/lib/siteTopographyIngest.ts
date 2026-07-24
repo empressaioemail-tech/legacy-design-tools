@@ -88,10 +88,6 @@ import {
   SITE_TOPOGRAPHY_EVENT_TYPES,
   type SiteTopographyEventType,
 } from "../atoms/site-topography.atom";
-import { type TerrainMeshMeta } from "./siteTopographyMesh";
-import { runIfcWorker } from "./ifcWorkerClient";
-import { buildTerrainMeshInWorker } from "./terrainMeshWorker/workerClient";
-import type { TerrainMeshWorkerResult } from "./terrainMeshWorker/types";
 
 /**
  * Default contour interval in meters. 5m is the operator-set Phase
@@ -836,8 +832,12 @@ export interface SiteTopographyEventPayload {
     /** True when nodata cells left holes in the surface. */
     hasHoles: boolean;
     /** Georef origin + CRS convention so a consumer places the local frame. */
-    georefOrigin: TerrainMeshMeta["georefOrigin"];
-    crsConvention: TerrainMeshMeta["crsConvention"];
+    georefOrigin: {
+      originLng: number;
+      originLat: number;
+      originHeightMeters: number;
+    };
+    crsConvention: "local-enu-meters";
     minElevationMeters: number;
     maxElevationMeters: number;
   };
@@ -1126,8 +1126,7 @@ export async function ingestSiteTopography(
     };
   }
 
-  // Layer-0 coverage honesty, computed here (before the mesh/IFC steps) so
-  // the Layer-2 IFC provenance/confidence Psets can carry the SAME numbers.
+  // Layer-0 coverage honesty, computed here before the event payload is built.
   // `totalCells` is the parsed grid size; the parser proved at least one
   // finite cell (it throws on all-nodata), so `totalCells` is always > 0
   // and `coverageFraction` is well-defined.
@@ -1143,121 +1142,6 @@ export async function ingestSiteTopography(
   };
   const confidence = computeTopoAssertedConfidence(coverage);
   const sourceCitation = `USGS 3DEP (${demResult.endpoint})`;
-
-  // 5.5) Build the terrain geometry ONCE (on a worker thread), then derive
-  //      the Layer-1 GLB and the Layer-2 IFC from that SAME compacted
-  //      positions + indices. This single-triangulation seam is what
-  //      guarantees the GLB surface and the IFC surface can never diverge:
-  //      nothing re-triangulates the grid. The triangulation + GLB encode is
-  //      the CPU-heavy nested per-pixel loop that used to run inline on the
-  //      request path and peg a core on the shared 2-CPU container, starving
-  //      the co-scheduled 29s brief request (Cloud Run 503s). It now runs off
-  //      the event loop in a one-shot worker_threads worker
-  //      (`terrainMeshWorker`), which returns both the GLB bytes and the
-  //      compacted positions/indices so the IFC author consumes the identical
-  //      geometry. Best-effort: a mesh failure NEVER fails the ingest — the
-  //      contour + coverage + confidence output (the coverage-honesty
-  //      product) still lands, and the `mesh`/`ifc` payload fields simply
-  //      stay absent.
-  let meshPayload: SiteTopographyEventPayload["mesh"] | undefined;
-  let meshResult: TerrainMeshWorkerResult | undefined;
-  try {
-    meshResult = await buildTerrainMeshInWorker({
-      dem: { width: dem.width, height: dem.height, values: dem.values },
-      bbox: catchmentBbox,
-    });
-    const meshGcsObjectPath = await storage.uploadObjectEntityFromBuffer(
-      Buffer.from(meshResult.glb),
-      "model/gltf-binary",
-    );
-    const meta = meshResult.meta;
-    meshPayload = {
-      gcsObjectPath: meshGcsObjectPath,
-      format: "glb",
-      vertexCount: meta.vertexCount,
-      triangleCount: meta.triangleCount,
-      hasHoles: meta.hasHoles,
-      georefOrigin: meta.georefOrigin,
-      crsConvention: meta.crsConvention,
-      minElevationMeters: meta.minElevationMeters,
-      maxElevationMeters: meta.maxElevationMeters,
-    };
-  } catch (err) {
-    // Log and continue — the topo output is not gated on the mesh.
-    log.warn(
-      { err, engagementId: args.engagementId },
-      "site-topography ingest: terrain mesh generation/upload failed (continuing without mesh)",
-    );
-  }
-
-  // 5.6) Author the Layer-2 IFC from the SAME geometry the GLB used, and
-  //      upload it. Best-effort and gated on a successful mesh build (we
-  //      reuse its compacted positions + indices so the IFC surface is the
-  //      identical triangulation). Spawns the ifcopenshell Python worker;
-  //      when Python / ifcopenshell is unavailable the worker client
-  //      returns a structured error and we skip IFC (no hand-authored
-  //      fallback — that would be a second, divergent implementation of the
-  //      correctness core). An IFC failure NEVER fails the ingest.
-  let ifcPayload: SiteTopographyEventPayload["ifc"] | undefined;
-  if (meshResult) {
-    try {
-      const ifcResult = await runIfcWorker({
-        positions: meshResult.positions,
-        indices: meshResult.indices,
-        georefOrigin: {
-          originLng: meshResult.meta.georefOrigin.originLng,
-          originLat: meshResult.meta.georefOrigin.originLat,
-          originHeightMeters: 0,
-        },
-        crsConvention: meshResult.meta.crsConvention,
-        provenance: {
-          sourceCitation,
-          coverageFraction: coverage.coverageFraction,
-          demResolutionMeters,
-          demResolutionMeasured: coverage.resolutionMeasured,
-          collectionProxyDate: demResult.fetchedAt,
-          hasHoles: meshResult.meta.hasHoles,
-        },
-        confidence: {
-          estimate: confidence.estimate,
-          provenance: confidence.provenance,
-          n: confidence.n,
-          intervalWidth: confidence.intervalWidth,
-        },
-      });
-      if (ifcResult.status === "ok") {
-        const ifcGcsObjectPath = await storage.uploadObjectEntityFromBuffer(
-          Buffer.from(ifcResult.ifcText, "utf8"),
-          "application/x-step",
-        );
-        ifcPayload = {
-          gcsObjectPath: ifcGcsObjectPath,
-          ifcSchemaVersion: ifcResult.schemaVersion,
-          geometryPrimitive: ifcResult.geometryPrimitive,
-          georefCrs: ifcResult.georefCrs,
-          byteCount: ifcResult.byteCount,
-          vertexCount: ifcResult.vertexCount,
-          triangleCount: ifcResult.triangleCount,
-          confidence,
-        };
-      } else {
-        log.warn(
-          {
-            engagementId: args.engagementId,
-            code: ifcResult.code,
-            message: ifcResult.message,
-          },
-          "site-topography ingest: IFC worker returned error (continuing without IFC)",
-        );
-      }
-    } catch (err) {
-      // Log and continue — the topo output is not gated on the IFC.
-      log.warn(
-        { err, engagementId: args.engagementId },
-        "site-topography ingest: IFC authoring/upload failed (continuing without IFC)",
-      );
-    }
-  }
 
   // 6) Upload DEM bytes to GCS.
   let demGcsObjectPath: string;
@@ -1285,9 +1169,6 @@ export async function ingestSiteTopography(
       ? SITE_TOPOGRAPHY_EVENT_TYPES[0] // .ingested
       : SITE_TOPOGRAPHY_EVENT_TYPES[1]; // .refreshed
 
-  // `coverage`, `confidence`, and `sourceCitation` were computed above
-  // (before the mesh/IFC steps) so the IFC provenance/confidence Psets
-  // carry the identical numbers; reuse them here for the event payload.
   const payload: SiteTopographyEventPayload = {
     schemaVersion: 1,
     computedOrigin: true,
@@ -1326,8 +1207,6 @@ export async function ingestSiteTopography(
       featureCount: contoursResult.featureCollection.features.length,
       featureCollection: contoursResult.featureCollection,
     },
-    ...(meshPayload ? { mesh: meshPayload } : {}),
-    ...(ifcPayload ? { ifc: ifcPayload } : {}),
     coverage,
     confidence,
     qualityGate: {
