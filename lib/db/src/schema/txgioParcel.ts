@@ -79,6 +79,12 @@ export const txgioParcel = pgTable(
      * re-stamped) — the honest fallback, never a stale wrong district.
      */
     zoningDistrict: text("zoning_district"),
+    /**
+     * CityKey of the ZONING_LAYERS entry whose polygon PIP-matched this
+     * parcel (e.g. `austin-tx`). Authoritative jurisdiction for setback
+     * table lookup on multi-city counties. NULL when no polygon matched.
+     */
+    zoningJurisdiction: text("zoning_jurisdiction"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
     /** Feature bbox, WGS84. */

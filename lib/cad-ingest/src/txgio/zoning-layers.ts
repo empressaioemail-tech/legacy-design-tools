@@ -78,6 +78,19 @@ export interface ZoningLayerConfig {
    * stamped code is "SF-1", which normalizes to the "SF-1 ..." setback row.
    */
   codeExtractRegex?: string;
+  /**
+   * OPTIONAL. Codes that are NOT zoning districts and must never be stamped
+   * (left as NULL on the parcel). Example: San Antonio `OCL` (Outside City
+   * Limits) and `UZROW` (unzoneable right-of-way). Compared case-insensitively
+   * after trim against the extracted code.
+   */
+  nullDistrictCodes?: string[];
+  /**
+   * OPTIONAL. ArcGIS `where` clause for the zoning-layer query (default
+   * `1=1`). Use to shrink oversized layers before fetch (e.g. San Antonio
+   * excluding OCL/UZROW polygons so the in-memory index stays tractable).
+   */
+  layerWhere?: string;
 }
 
 /**
@@ -245,6 +258,21 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "ZOINING_TY",
     descriptionField: "ZONING_DES",
   },
+  // Austin (Travis). LIVE-VERIFIED 2026-07-24: Publish_Zoning_AGOL/0,
+  // `BASE_ZONE` carries clean tokens (SF-1..SF-6, MF-1..MF-6, …). Setback
+  // table EXISTS (austin-tx.json) for SF-1/2/3 + MF-1..MF-6 — remaining GIS
+  // codes stamp as zoning-present / setback-pending (honest). Match contract
+  // CLEAN (leading-token). Second Travis layer — jurisdiction is per-parcel
+  // via stamped zoning_jurisdiction (PIP cityKey), not a county sole-key.
+  "austin-tx": {
+    cityKey: "austin-tx",
+    cityName: "Austin",
+    countyFips: "48453",
+    layerUrl:
+      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/Publish_Zoning_AGOL/FeatureServer/0",
+    codeField: "BASE_ZONE",
+    descriptionField: "BASE_ZONE_CATEGORY",
+  },
   // Bastrop city (Bastrop). A setback table EXISTS (bastrop-tx.json) but it
   // codifies the OLD conventional code (R-MD/C-1/I-1/DT-1). The LIVE GIS layer
   // is the B3 FORM-BASED "Place Type" code (P-1..P-5/P-CS/P-EC/PDD) — these do
@@ -261,11 +289,14 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "PlaceTypeClass",
     descriptionField: "PlaceType",
   },
-  // San Antonio (Bexar). No setback table yet. Large public COSA layer;
-  // `Base` carries the clean base-zone code (R-*/MF-*/C-*/O-*/I-*/D/UD/...),
-  // the composite `Zoning` field mixes in overlays so `Base` is the correct
-  // field. First Bexar-county zoning layer. SETBACK TABLE OWED
-  // (san-antonio-tx.json — sizeable district set).
+  // San Antonio (Bexar). Setback table EXISTS (san-antonio-tx.json, WDLL 51
+  // Table 310-1 rows — RE/R-*/RM-*/MF-*/C-1..C-3/O-2/I-1/I-2). GIS `Base`
+  // carries the clean base-zone code; composite `Zoning` mixes overlays so
+  // `Base` is correct. OCL (Outside City Limits) and UZROW are NOT districts
+  // — nullDistrictCodes + layerWhere exclude them from the index/stamp.
+  // Under-stamp root cause (0.37%): ArcGIS paging stopped after one full page
+  // when hosts omit `exceededTransferLimit` — fixed in zoning-service
+  // fetchZoningFeatures 2026-07-24.
   "san-antonio-tx": {
     cityKey: "san-antonio-tx",
     cityName: "San Antonio",
@@ -274,6 +305,8 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       "https://services.arcgis.com/g1fRTDLeMgspWrYp/arcgis/rest/services/COSA_Zoning/FeatureServer/12",
     codeField: "Base",
     descriptionField: "BaseDescription",
+    nullDistrictCodes: ["OCL", "UZROW"],
+    layerWhere: "Base NOT IN ('OCL','UZROW')",
   },
   // Lockhart (Caldwell). No setback table yet. GIS `ZONING` carries the bare
   // code (RLD/RMD/RHD/CCB/CHB/CLB/CMB/IH/IL/MH/PDD/PI/AO). First Caldwell-
@@ -297,20 +330,89 @@ export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined
 }
 
 /**
- * When a county has exactly one registered city zoning layer, a parcel that
- * already carries a stamped `zoning_district` from that layer may use the
- * layer's city as the setback-jurisdiction key if situs city/address cannot
- * synthesize one (Travis TxGIO ships blank `situs_city`). Multi-city counties
- * must not guess — return null and keep the honest `no-jurisdiction-key`
- * decline until situs or per-layer provenance exists.
- *
- * Returns the underscore form used by envelope facets (`pflugerville_tx`).
+ * All wired cityKeys for a county FIPS. Always a Set — never assume one.
+ * Empty set means no zoning layer is registered for that county.
  */
-export function soleZoningJurisdictionKey(
-  countyFips: string,
-): string | null {
+export function wiredZoningCityKeys(countyFips: string): Set<string> {
   const fips = countyFips.trim();
-  const layers = Object.values(ZONING_LAYERS).filter((z) => z.countyFips === fips);
-  if (layers.length !== 1) return null;
-  return layers[0]!.cityKey.replace(/-/g, "_");
+  return new Set(
+    Object.values(ZONING_LAYERS)
+      .filter((z) => z.countyFips === fips)
+      .map((z) => z.cityKey),
+  );
+}
+
+export interface ZoningJurisdictionParcel {
+  /** Stamped cityKey from the PIP-matched layer (`austin-tx`). */
+  zoningJurisdiction?: string | null;
+  /** Optional situs city — FALLBACK only when stamped jurisdiction is null. */
+  situsCity?: string | null;
+  countyFips?: string | null;
+}
+
+/**
+ * Resolve the zoning jurisdiction for ONE parcel.
+ *
+ * PIP membership is authoritative: when `zoning_jurisdiction` was stamped
+ * from the matched city layer, return that cityKey. Unincorporated / no
+ * match → null (honest fact, not a failure).
+ *
+ * `situs_city` is a FALLBACK tiebreaker only (rare overlapping-layer or
+ * pre-migration rows). When used, the caller's `onSitusFallback` may log.
+ * Returns hyphen cityKey form matching ZONING_LAYERS / setback tables.
+ */
+export function resolveZoningJurisdiction(
+  parcel: ZoningJurisdictionParcel,
+  opts?: {
+    onSitusFallback?: (info: {
+      cityKey: string;
+      situsCity: string;
+      countyFips: string;
+    }) => void;
+  },
+): string | null {
+  const stamped = typeof parcel.zoningJurisdiction === "string"
+    ? parcel.zoningJurisdiction.trim().toLowerCase().replace(/_/g, "-")
+    : "";
+  if (stamped && ZONING_LAYERS[stamped]) return stamped;
+  if (stamped) return stamped; // unknown-but-stamped key still wins over guess
+
+  const situs = typeof parcel.situsCity === "string"
+    ? parcel.situsCity.trim()
+    : "";
+  const fips = typeof parcel.countyFips === "string"
+    ? parcel.countyFips.trim()
+    : "";
+  if (!situs || !fips) return null;
+
+  const wired = wiredZoningCityKeys(fips);
+  if (wired.size === 0) return null;
+
+  const situsNorm = situs.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  for (const cityKey of wired) {
+    const layer = ZONING_LAYERS[cityKey];
+    if (!layer) continue;
+    const nameNorm = layer.cityName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (situsNorm === nameNorm || situsNorm.includes(nameNorm)) {
+      opts?.onSitusFallback?.({
+        cityKey,
+        situsCity: situs,
+        countyFips: fips,
+      });
+      return cityKey;
+    }
+  }
+  return null;
+}
+
+/**
+ * @deprecated Use {@link resolveZoningJurisdiction} (per-parcel) or
+ * {@link wiredZoningCityKeys} (county Set). County-level "sole city" was
+ * the wrong model — every county is multi-city; this always returns null.
+ */
+export function soleZoningJurisdictionKey(_countyFips: string): string | null {
+  return null;
 }

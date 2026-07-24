@@ -20,7 +20,8 @@ import { CAD_COUNTIES } from "../counties";
 import { CAD_BULK_SOURCES } from "../sources";
 import {
   ZONING_LAYERS,
-  soleZoningJurisdictionKey,
+  resolveZoningJurisdiction,
+  wiredZoningCityKeys,
 } from "../txgio/zoning-layers";
 import {
   getSetbackTable,
@@ -126,7 +127,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(getSetbackTable("liberty-hill-tx")?.note).toMatch(/WDLL 51/i);
   });
 
-  it("Travis (48453): geometry + pacs CAD, no free bulk source; Pflugerville zoning layer with cited setback rows", () => {
+  it("Travis (48453): geometry + pacs CAD, no free bulk source; multi-city Austin+Pflugerville zoning SET", () => {
     const j = getJurisdictionConfig("48453");
     if (!j) throw new Error("expected Travis");
 
@@ -134,14 +135,24 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.cad).toBe(CAD_COUNTIES["48453"]);
     // Travis/TCAD has no free bulk roll (PIA route) — honestly absent.
     expect(j.bulkSource).toBeUndefined();
-    // Pflugerville is the first Travis-county zoning layer. Its UDC-backed
-    // table maps the directly resolvable residential GIS codes; remaining
-    // non-residential codes remain explicitly omitted in the table note.
-    expect(j.zoningLayers).toEqual([ZONING_LAYERS["pflugerville-tx"]]);
+    // Multi-city county: wired layers are a SET, never a sole-city assumption.
+    const travisCities = Object.values(ZONING_LAYERS).filter(
+      (z) => z.countyFips === "48453",
+    );
+    expect(j.zoningLayers).toEqual(travisCities);
+    expect(new Set(travisCities.map((c) => c.cityKey))).toEqual(
+      new Set(["pflugerville-tx", "austin-tx"]),
+    );
     const pflugerville = getSetbackTable("pflugerville-tx");
+    const austin = getSetbackTable("austin-tx");
     expect(pflugerville?.districts).toHaveLength(10);
     expect(pflugerville?.note).toMatch(/GB1.*omitted/i);
-    expect(j.setbackTables).toEqual([pflugerville]);
+    expect(austin?.districts.length).toBeGreaterThan(0);
+    expect(j.setbackTables).toEqual(
+      travisCities
+        .map((c) => getSetbackTable(c.cityKey))
+        .filter((t) => t !== null),
+    );
   });
 
   it("Comal (48091): geometry-only county gains a city zoning layer + setback (New Braunfels)", () => {
@@ -234,14 +245,73 @@ describe("listJurisdictions / listJurisdictionFips", () => {
   });
 });
 
-describe("soleZoningJurisdictionKey", () => {
-  it("returns the underscore city key for Travis (sole Pflugerville layer)", () => {
-    expect(soleZoningJurisdictionKey("48453")).toBe("pflugerville_tx");
+describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
+  it("Travis composes the SET {austin-tx, pflugerville-tx}", () => {
+    expect(wiredZoningCityKeys("48453")).toEqual(
+      new Set(["austin-tx", "pflugerville-tx"]),
+    );
   });
 
-  it("returns null for multi-city counties (Hays, Williamson)", () => {
-    expect(soleZoningJurisdictionKey("48209")).toBeNull();
-    expect(soleZoningJurisdictionKey("48491")).toBeNull();
+  it("Hays and Williamson return multi-city Sets (never a sole key)", () => {
+    expect(wiredZoningCityKeys("48209").size).toBeGreaterThan(1);
+    expect(wiredZoningCityKeys("48491").size).toBeGreaterThan(1);
+  });
+
+  it("named Austin parcel resolves austin-tx from stamped PIP jurisdiction", () => {
+    expect(
+      resolveZoningJurisdiction({
+        zoningJurisdiction: "austin-tx",
+        situsCity: null,
+        countyFips: "48453",
+      }),
+    ).toBe("austin-tx");
+  });
+
+  it("named Pflugerville parcel resolves pflugerville-tx from stamped PIP jurisdiction", () => {
+    expect(
+      resolveZoningJurisdiction({
+        zoningJurisdiction: "pflugerville-tx",
+        situsCity: null,
+        countyFips: "48453",
+      }),
+    ).toBe("pflugerville-tx");
+  });
+
+  it("unincorporated / no match resolves null (honest fact)", () => {
+    expect(
+      resolveZoningJurisdiction({
+        zoningJurisdiction: null,
+        situsCity: null,
+        countyFips: "48453",
+      }),
+    ).toBeNull();
+  });
+
+  it("situs_city is FALLBACK only when stamp is null (logs via callback)", () => {
+    const calls: string[] = [];
+    expect(
+      resolveZoningJurisdiction(
+        {
+          zoningJurisdiction: null,
+          situsCity: "Austin",
+          countyFips: "48453",
+        },
+        {
+          onSitusFallback: ({ cityKey }) => {
+            calls.push(cityKey);
+          },
+        },
+      ),
+    ).toBe("austin-tx");
+    expect(calls).toEqual(["austin-tx"]);
+    // Stamped PIP wins over a conflicting situs.
+    expect(
+      resolveZoningJurisdiction({
+        zoningJurisdiction: "pflugerville-tx",
+        situsCity: "Austin",
+        countyFips: "48453",
+      }),
+    ).toBe("pflugerville-tx");
   });
 });
 

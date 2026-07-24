@@ -63,6 +63,7 @@ function parcelRow(overrides: Partial<{
   situs_city: string | null;
   situs_state: string | null;
   zoning_district: string | null;
+  zoning_jurisdiction?: string | null;
   source_vintage: string | null;
   geometry: unknown;
   txgioOwnerForGate: string | null;
@@ -74,6 +75,7 @@ function parcelRow(overrides: Partial<{
     situs_city: "BASTROP",
     situs_state: "TX",
     zoning_district: null,
+    zoning_jurisdiction: null,
     source_vintage: "stratmap25",
     geometry: polygonGeometry(BASTROP_LOT),
     txgioOwnerForGate: null,
@@ -199,7 +201,7 @@ describe("honest absence (never fabricate a facet)", () => {
       new Map(),
       now,
     )!;
-    expect(payload.zoning).toEqual({ district: "SF-1" });
+    expect(payload.zoning?.district).toBe("SF-1");
     expect(payload.facetCoverage.zoning).toBe(true);
   });
 

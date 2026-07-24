@@ -291,6 +291,7 @@ interface FakeParcelRow {
   tileKey: string;
   geometry: GeoJsonGeometry;
   zoningDistrict: string | null;
+  zoningJurisdiction: string | null;
 }
 
 /**
@@ -338,25 +339,28 @@ function makeFakeDb(rows: FakeParcelRow[]): FakeDb {
     execute(query: SQL) {
       calls += 1;
       const { params } = dialect.sqlToQuery(query);
-      // Template param order: the VALUES pairs (featureIndex, code) come
-      // first, then the single trailing county_fips param. Peel the county
-      // off the tail, then read pairs off the head.
+      // Template param order: VALUES triples (featureIndex, code, jurisdiction)
+      // then the trailing county_fips param.
       const county = params[params.length - 1] as string;
-      const pairParams = params.slice(0, params.length - 1);
-      const codeByFeature = new Map<number, string>();
-      for (let i = 0; i < pairParams.length; i += 2) {
-        codeByFeature.set(
-          Number(pairParams[i]),
-          String(pairParams[i + 1]),
-        );
+      const tripleParams = params.slice(0, params.length - 1);
+      const stampByFeature = new Map<
+        number,
+        { code: string; jurisdiction: string }
+      >();
+      for (let i = 0; i < tripleParams.length; i += 3) {
+        stampByFeature.set(Number(tripleParams[i]), {
+          code: String(tripleParams[i + 1]),
+          jurisdiction: String(tripleParams[i + 2]),
+        });
       }
       let rowCount = 0;
       for (const r of table) {
         if (r.countyFips !== county) continue;
-        const code = codeByFeature.get(r.featureIndex);
-        if (code === undefined) continue;
-        r.zoningDistrict = code; // update in place (overwrite -> idempotent)
-        rowCount += 1; // every physical (per-cell) row counts
+        const stamp = stampByFeature.get(r.featureIndex);
+        if (stamp === undefined) continue;
+        r.zoningDistrict = stamp.code;
+        r.zoningJurisdiction = stamp.jurisdiction;
+        rowCount += 1;
       }
       return Promise.resolve({ rowCount });
     },
@@ -389,8 +393,8 @@ describe("chunkPairs", () => {
   });
 
   it("keeps the batch cap under pg's bound-param ceiling", () => {
-    // 2 params/pair + 1 shared county param must stay < 65535.
-    expect(ZONING_STAMP_BATCH_SIZE * 2 + 1).toBeLessThan(65535);
+    // 3 params/triple + 1 shared county param must stay < 65535.
+    expect(ZONING_STAMP_BATCH_SIZE * 3 + 1).toBeLessThan(65535);
   });
 });
 
@@ -411,21 +415,59 @@ describe("stampCountyZoning (batched write)", () => {
     const outGeom = parcelSquare(-97.5, 30.5); // -> null (no polygon)
     return [
       // feature 10 (RS) across 3 cells
-      { countyFips: COUNTY, featureIndex: 10, tileKey: "c1", geometry: rsGeom, zoningDistrict: null },
-      { countyFips: COUNTY, featureIndex: 10, tileKey: "c2", geometry: rsGeom, zoningDistrict: null },
-      { countyFips: COUNTY, featureIndex: 10, tileKey: "c3", geometry: rsGeom, zoningDistrict: null },
+      {
+        countyFips: COUNTY,
+        featureIndex: 10,
+        tileKey: "c1",
+        geometry: rsGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+      {
+        countyFips: COUNTY,
+        featureIndex: 10,
+        tileKey: "c2",
+        geometry: rsGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+      {
+        countyFips: COUNTY,
+        featureIndex: 10,
+        tileKey: "c3",
+        geometry: rsGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
       // feature 11 (MF-2) single cell
-      { countyFips: COUNTY, featureIndex: 11, tileKey: "c1", geometry: mfGeom, zoningDistrict: null },
+      {
+        countyFips: COUNTY,
+        featureIndex: 11,
+        tileKey: "c1",
+        geometry: mfGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
       // feature 12 (outside) single cell -> stays NULL
-      { countyFips: COUNTY, featureIndex: 12, tileKey: "c9", geometry: outGeom, zoningDistrict: null },
+      {
+        countyFips: COUNTY,
+        featureIndex: 12,
+        tileKey: "c9",
+        geometry: outGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
     ];
   }
+
+  const CITY = "new-braunfels-tx";
 
   it("stamps the right code per feature_index and rowsUpdated sums per-cell dupes", async () => {
     const fake = makeFakeDb(seedRows());
     const summary = await stampCountyZoning({
       db: fake.db,
       countyFips: COUNTY,
+      cityKey: CITY,
       index,
     });
 
@@ -442,9 +484,12 @@ describe("stampCountyZoning (batched write)", () => {
     // Every physical row of the matched features carries the right code...
     const f10 = fake.rows.filter((r) => r.featureIndex === 10);
     expect(f10.map((r) => r.zoningDistrict)).toEqual(["RS", "RS", "RS"]);
+    expect(f10.map((r) => r.zoningJurisdiction)).toEqual([CITY, CITY, CITY]);
     expect(fake.rows.find((r) => r.featureIndex === 11)!.zoningDistrict).toBe("MF-2");
+    expect(fake.rows.find((r) => r.featureIndex === 11)!.zoningJurisdiction).toBe(CITY);
     // ...and the unmatched feature stays NULL (never guessed — invariant #4).
     expect(fake.rows.find((r) => r.featureIndex === 12)!.zoningDistrict).toBeNull();
+    expect(fake.rows.find((r) => r.featureIndex === 12)!.zoningJurisdiction).toBeNull();
   });
 
   it("dryRun writes nothing (no execute, all rows stay NULL)", async () => {
@@ -452,6 +497,7 @@ describe("stampCountyZoning (batched write)", () => {
     const summary = await stampCountyZoning({
       db: fake.db,
       countyFips: COUNTY,
+      cityKey: CITY,
       index,
       dryRun: true,
     });
@@ -467,9 +513,19 @@ describe("stampCountyZoning (batched write)", () => {
 
   it("re-run overwrites in place (idempotent + additive)", async () => {
     const fake = makeFakeDb(seedRows());
-    await stampCountyZoning({ db: fake.db, countyFips: COUNTY, index });
+    await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+    });
     const first = fake.rows.map((r) => r.zoningDistrict);
-    const summary2 = await stampCountyZoning({ db: fake.db, countyFips: COUNTY, index });
+    const summary2 = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+    });
     expect(fake.rows.map((r) => r.zoningDistrict)).toEqual(first);
     expect(summary2.rowsUpdated).toBe(4); // same rows re-stamped, same count
   });
@@ -479,6 +535,7 @@ describe("stampCountyZoning (batched write)", () => {
     const summary = await stampCountyZoning({
       db: fake.db,
       countyFips: COUNTY,
+      cityKey: CITY,
       index,
       limit: 1,
     });
@@ -503,10 +560,16 @@ describe("stampCountyZoning (batched write)", () => {
         tileKey: "c1",
         geometry: parcelSquare(cx, cy, 0.00001),
         zoningDistrict: null,
+        zoningJurisdiction: null,
       });
     }
     const fake = makeFakeDb(rows);
-    const summary = await stampCountyZoning({ db: fake.db, countyFips: COUNTY, index });
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+    });
 
     expect(summary.parcelsMatched).toBe(n);
     expect(summary.rowsUpdated).toBe(n); // one cell each

@@ -74,9 +74,9 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "grand-county-ut": grandCountyUt as SetbackTable,
   "lemhi-county-id": lemhiCountyId as SetbackTable,
   "bastrop-tx": bastropTx as SetbackTable,
-  // Austin has live corpus coverage but no safe city zoning-stamp alignment
-  // yet. An explicit cited empty table makes that a served honest gap rather
-  // than a missing-table ambiguity.
+  // Austin: SF-1/2/3 + MF-1..MF-6 scalar rows (austin-tx.json). Wired to
+  // Publish_Zoning_AGOL BASE_ZONE stamp 2026-07-24; remaining GIS codes are
+  // zoning-present / setback-pending until the table deepens.
   "austin-tx": austinTx as SetbackTable,
   // Tables contain only code-backed scalar rules. A conditional rule that the
   // envelope cannot evaluate is explicitly omitted in the table note.
