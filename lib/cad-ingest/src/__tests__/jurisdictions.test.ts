@@ -235,8 +235,8 @@ describe("listJurisdictions / listJurisdictionFips", () => {
 });
 
 describe("soleZoningJurisdictionKey", () => {
-  it("returns the underscore city key for Travis (sole Pflugerville layer)", () => {
-    expect(soleZoningJurisdictionKey("48453")).toBe("pflugerville_tx");
+  it("returns null for Travis after Austin+Pflugerville (multi-city)", () => {
+    expect(soleZoningJurisdictionKey("48453")).toBeNull();
   });
 
   it("returns null for multi-city counties (Hays, Williamson)", () => {

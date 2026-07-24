@@ -72,11 +72,23 @@ function extractCode(raw: string | null, regex?: string): string | null {
  * needs. `codeField`/`descriptionField`/`codeExtractRegex` come from the
  * layer config.
  */
+function isNullDistrictCode(
+  code: string | null,
+  nullCodes: string[] | undefined,
+): boolean {
+  if (!code || !nullCodes || nullCodes.length === 0) return false;
+  const upper = code.trim().toUpperCase();
+  return nullCodes.some((c) => c.trim().toUpperCase() === upper);
+}
+
 export function reduceZoningFeature(
   feature: unknown,
   cfg: Pick<
     ZoningLayerConfig,
-    "codeField" | "descriptionField" | "codeExtractRegex"
+    | "codeField"
+    | "descriptionField"
+    | "codeExtractRegex"
+    | "nullDistrictCodes"
   >,
 ): RawZoningFeature {
   const f = feature as {
@@ -84,8 +96,9 @@ export function reduceZoningFeature(
     geometry?: GeoJsonGeometry | null;
   };
   const props = f?.properties ?? {};
+  const code = extractCode(str(props[cfg.codeField]), cfg.codeExtractRegex);
   return {
-    code: extractCode(str(props[cfg.codeField]), cfg.codeExtractRegex),
+    code: isNullDistrictCode(code, cfg.nullDistrictCodes) ? null : code,
     description: cfg.descriptionField ? str(props[cfg.descriptionField]) : null,
     geometry: f?.geometry ?? null,
   };
@@ -124,8 +137,9 @@ export async function fetchZoningFeatures(
     const outFields = [opts.cfg.codeField, opts.cfg.descriptionField]
       .filter((v): v is string => typeof v === "string" && v.length > 0)
       .join(",");
+    const where = opts.cfg.layerWhere?.trim() || "1=1";
     const url =
-      `${base}/query?where=1%3D1` +
+      `${base}/query?where=${encodeURIComponent(where)}` +
       `&outFields=${encodeURIComponent(outFields)}` +
       `&resultOffset=${offset}&resultRecordCount=${want}` +
       `&returnGeometry=true&outSR=4326&f=geojson`;
@@ -142,8 +156,13 @@ export async function fetchZoningFeatures(
       }
     }
     opts.onPage?.({ offset, got: feats.length, total: out.length });
-    if (feats.length < want || page.exceededTransferLimit !== true) return out;
+    // ArcGIS paging: some hosts omit `exceededTransferLimit` on a full page.
+    // Stopping when it is not strictly `true` truncates large layers (Austin
+    // ~22k / San Antonio ~700k) to a single page — the under-stamp root cause
+    // for Bexar 0.37%. Continue while the page is full; stop on a short page.
+    if (feats.length === 0) return out;
     offset += feats.length;
+    if (feats.length < want) return out;
     await sleep(rateMs);
   }
 }

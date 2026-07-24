@@ -152,8 +152,12 @@ export async function stampCountyZoning(opts: {
     rowsUpdated: 0,
   };
 
-  // PIP loop: collect matched pairs in memory, no per-parcel round-trip.
+  // PIP loop: collect matched pairs and flush in batches as we go so a
+  // long county run (Bexar ~700k parcels / ~400k matches) cannot lose the
+  // entire stamp if the process dies after PIP but before a single end-of-
+  // run write. dryRun collects for the histogram only and writes nothing.
   const matches: StampPair[] = [];
+  let rowsUpdated = 0;
   for (const p of parcels) {
     if (limit !== undefined && summary.parcelsRead >= limit) break;
     summary.parcelsRead += 1;
@@ -165,19 +169,20 @@ export async function stampCountyZoning(opts: {
       summary.codeHistogram[hit.code] =
         (summary.codeHistogram[hit.code] ?? 0) + 1;
       matches.push({ featureIndex: p.featureIndex, code: hit.code });
+      if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
+        rowsUpdated += await flushBatch(db, countyFips, matches);
+        matches.length = 0;
+      }
     }
     if (summary.parcelsRead % progressEvery === 0) {
       opts.onProgress?.(summary.parcelsRead, summary.parcelsMatched);
     }
   }
 
-  // Batched write. dryRun writes nothing; matching semantics above already
-  // ran identically either way.
   if (!dryRun && matches.length > 0) {
-    for (const batch of chunkPairs(matches, ZONING_STAMP_BATCH_SIZE)) {
-      summary.rowsUpdated += await flushBatch(db, countyFips, batch);
-    }
+    rowsUpdated += await flushBatch(db, countyFips, matches);
   }
+  summary.rowsUpdated = rowsUpdated;
 
   return summary;
 }
