@@ -319,6 +319,74 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       "https://services3.arcgis.com/kPfGI7KGlXn5IaHL/arcgis/rest/services/Lockhart_City_Zoning_Online/FeatureServer/0",
     codeField: "ZONING",
   },
+
+  // ---------------------------------------------------------------------------
+  // Post-breadth zero-county wires (2026-07-24) — Guadalupe / McLennan / Bell
+  // were recorded at honest-0% zoning; re-probe after ArcGIS paging fix showed
+  // published city layers (un-wired), not genuine unzoned counties. Temple TX
+  // and Schertz TX still lack a verified public FeatureServer → stay unwired
+  // (honest absence for those city footprints until a layer is published).
+  // SETBACK TABLES OWED for all five; stamp writes real districts only.
+  // ---------------------------------------------------------------------------
+
+  // Seguin (Guadalupe 48187). Planning/Zoning layer 1 `zone` (A-R/R-1/M-R/…).
+  // Layer 0 is corridor overlays — do NOT use. SETBACK TABLE OWED.
+  "seguin-tx": {
+    cityKey: "seguin-tx",
+    cityName: "Seguin",
+    countyFips: "48187",
+    layerUrl:
+      "https://gis.seguintexas.gov/arcgis/rest/services/Planning/Zoning/FeatureServer/1",
+    codeField: "zone",
+    descriptionField: "orgzon",
+    nullDistrictCodes: ["None", "ROW"],
+  },
+  // Cibolo (Guadalupe 48187). Hosted view `ZONING` (SF-1..SF-6/MF-*/C-*/…).
+  // SETBACK TABLE OWED.
+  "cibolo-tx": {
+    cityKey: "cibolo-tx",
+    cityName: "Cibolo",
+    countyFips: "48187",
+    layerUrl:
+      "https://services3.arcgis.com/D32JCd9p0r1BYMwd/arcgis/rest/services/City_of_Cibolo__Zoning_(view)/FeatureServer/0",
+    codeField: "ZONING",
+    descriptionField: "Zoning_des",
+  },
+  // Waco (McLennan 48309). PublicMap Planning FS layer 1 `ZONING`
+  // (R-1A../C-*/M-*/PUD). OUT/STATE are not districts. SETBACK TABLE OWED.
+  "waco-tx": {
+    cityKey: "waco-tx",
+    cityName: "Waco",
+    countyFips: "48309",
+    layerUrl:
+      "https://gis.wacotx.gov/server/rest/services/PublicMap/PublicMap_Planning_and_Economical_Development/FeatureServer/1",
+    codeField: "ZONING",
+    nullDistrictCodes: ["OUT", "STATE"],
+    layerWhere: "ZONING NOT IN ('OUT','STATE')",
+  },
+  // Killeen (Bell 48027). Zoning/MapServer/7 Current Zoning `CODE`
+  // (R-1/R-2/R-3/B-*/…). SETBACK TABLE OWED.
+  "killeen-tx": {
+    cityKey: "killeen-tx",
+    cityName: "Killeen",
+    countyFips: "48027",
+    layerUrl:
+      "https://killeengis.killeentexas.gov/arcgis/rest/services/Zoning/MapServer/7",
+    codeField: "CODE",
+  },
+  // Belton (Bell 48027). Planning FS layer 6 Current_Zoning `Zoning_Abbr`.
+  // Values include PD composites — stamped RAW (fact); setback match may
+  // miss until a table lands. SETBACK TABLE OWED. Temple remains unwired
+  // (no verified public FeatureServer as of 2026-07-24).
+  "belton-tx": {
+    cityKey: "belton-tx",
+    cityName: "Belton",
+    countyFips: "48027",
+    layerUrl:
+      "https://services5.arcgis.com/FkDUU6xkZJTbBa9X/arcgis/rest/services/Planning/FeatureServer/6",
+    codeField: "Zoning_Abbr",
+    descriptionField: "Zoning",
+  },
 };
 
 export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined {

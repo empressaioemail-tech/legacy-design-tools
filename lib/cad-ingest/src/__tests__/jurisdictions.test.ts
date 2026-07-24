@@ -257,6 +257,16 @@ describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
     expect(wiredZoningCityKeys("48491").size).toBeGreaterThan(1);
   });
 
+  it("Guadalupe / McLennan / Bell compose wired Sets (post-breadth zero re-probe)", () => {
+    expect(wiredZoningCityKeys("48187")).toEqual(
+      new Set(["seguin-tx", "cibolo-tx"]),
+    );
+    expect(wiredZoningCityKeys("48309")).toEqual(new Set(["waco-tx"]));
+    expect(wiredZoningCityKeys("48027")).toEqual(
+      new Set(["killeen-tx", "belton-tx"]),
+    );
+  });
+
   it("named Austin parcel resolves austin-tx from stamped PIP jurisdiction", () => {
     expect(
       resolveZoningJurisdiction({

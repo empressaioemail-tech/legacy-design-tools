@@ -2,12 +2,11 @@
  * Public zoning-layer ArcGIS REST client for the parcel zoning stamp.
  *
  * Fetches a city's zoning polygon layer (config in `zoning-layers.ts`) as
- * GeoJSON in WGS84 (`outSR=4326`, `f=geojson`) so the polygons share the
- * coordinate frame of the stored parcels (`txgio_parcel` geometry is WGS84).
- * Paged by `resultOffset`/`resultRecordCount` (same shape as the address
- * service), exit-bounded: RETURNS when the server stops paging. The zoning
- * layer is small (Georgetown ~1,888 polygons), so this is a couple of pages
- * fetched ONCE into the in-memory index, never per parcel.
+ * ArcGIS JSON in WGS84 (`outSR=4326`, `f=json`) and converts `rings` to
+ * GeoJSON Polygon so the polygons share the coordinate frame of the stored
+ * parcels (`txgio_parcel` geometry is WGS84). Prefer json over geojson:
+ * some hosts (Killeen MapServer) 400 mid-layer on `f=geojson` while json
+ * succeeds. Paged by `resultOffset`/`resultRecordCount`, exit-bounded.
  *
  * Egress note: some public ArcGIS hosts sit behind a TLS setup whose OCSP/
  * CRL endpoint is unreachable from a sandboxed runner; the CLI is run with
@@ -37,6 +36,45 @@ const defaultFetchJson: FetchJson = async (url) => {
   }
   return body;
 };
+
+/**
+ * Convert an ArcGIS REST polygon (`geometry.rings`) to GeoJSON Polygon.
+ * Prefer `f=json` over `f=geojson` for paging: some MapServers (Killeen)
+ * 400 on geojson past mid-layer offsets while json+rings succeeds.
+ */
+export function esriRingsToGeoJson(geometry: unknown): GeoJsonGeometry | null {
+  if (!geometry || typeof geometry !== "object") return null;
+  const g = geometry as {
+    type?: string;
+    coordinates?: unknown;
+    rings?: unknown;
+  };
+  if (g.type === "Polygon" || g.type === "MultiPolygon") {
+    return g as GeoJsonGeometry;
+  }
+  if (!Array.isArray(g.rings) || g.rings.length === 0) return null;
+  return { type: "Polygon", coordinates: g.rings };
+}
+
+/** Normalize a GeoJSON Feature or ArcGIS json feature for reduceZoningFeature. */
+export function normalizeZoningPageFeature(feature: unknown): {
+  properties: Record<string, unknown>;
+  geometry: GeoJsonGeometry | null;
+} {
+  const f = feature as {
+    properties?: Record<string, unknown> | null;
+    attributes?: Record<string, unknown> | null;
+    geometry?: unknown;
+  };
+  const properties = (f.properties ?? f.attributes ?? {}) as Record<
+    string,
+    unknown
+  >;
+  return {
+    properties,
+    geometry: esriRingsToGeoJson(f.geometry),
+  };
+}
 
 /** One raw zoning feature reduced to (code, description, geometry). */
 export interface RawZoningFeature {
@@ -91,16 +129,12 @@ export function reduceZoningFeature(
     | "nullDistrictCodes"
   >,
 ): RawZoningFeature {
-  const f = feature as {
-    properties?: Record<string, unknown> | null;
-    geometry?: GeoJsonGeometry | null;
-  };
-  const props = f?.properties ?? {};
+  const { properties: props, geometry } = normalizeZoningPageFeature(feature);
   const code = extractCode(str(props[cfg.codeField]), cfg.codeExtractRegex);
   return {
     code: isNullDistrictCode(code, cfg.nullDistrictCodes) ? null : code,
     description: cfg.descriptionField ? str(props[cfg.descriptionField]) : null,
-    geometry: f?.geometry ?? null,
+    geometry,
   };
 }
 
@@ -120,6 +154,29 @@ export interface ZoningFetchOptions {
  * features (code/description/geometry). Paged + exit-bounded. The caller
  * feeds this to `buildZoningIndex`.
  */
+/**
+ * Resolve the per-request page size from the layer's `maxRecordCount`.
+ * Asking above the server cap both under-fetches (silent truncate) and can
+ * 400 on later offsets (Killeen MapServer at offset 5000 with want=2000).
+ */
+async function resolveZoningPageSize(
+  layerUrl: string,
+  fetchJson: FetchJson,
+): Promise<number> {
+  try {
+    const meta = (await fetchJson(`${layerUrl}?f=json`)) as {
+      maxRecordCount?: unknown;
+    };
+    const max = meta.maxRecordCount;
+    if (typeof max === "number" && Number.isFinite(max) && max > 0) {
+      return Math.min(ZONING_PAGE_SIZE, Math.floor(max));
+    }
+  } catch {
+    // Fall through to default — paging loop still handles full-page continue.
+  }
+  return ZONING_PAGE_SIZE;
+}
+
 export async function fetchZoningFeatures(
   opts: ZoningFetchOptions,
 ): Promise<RawZoningFeature[]> {
@@ -127,13 +184,14 @@ export async function fetchZoningFeatures(
   const rateMs = opts.rateMs ?? ZONING_RATE_MS;
   const base = opts.cfg.layerUrl.replace(/\/+$/, "");
   const out: RawZoningFeature[] = [];
+  let pageSize = await resolveZoningPageSize(base, fetchJson);
 
   let offset = 0;
   for (;;) {
     const remaining =
-      opts.limit !== undefined ? opts.limit - out.length : ZONING_PAGE_SIZE;
+      opts.limit !== undefined ? opts.limit - out.length : pageSize;
     if (remaining <= 0) return out;
-    const want = Math.min(ZONING_PAGE_SIZE, remaining);
+    const want = Math.min(pageSize, remaining);
     const outFields = [opts.cfg.codeField, opts.cfg.descriptionField]
       .filter((v): v is string => typeof v === "string" && v.length > 0)
       .join(",");
@@ -142,7 +200,7 @@ export async function fetchZoningFeatures(
       `${base}/query?where=${encodeURIComponent(where)}` +
       `&outFields=${encodeURIComponent(outFields)}` +
       `&resultOffset=${offset}&resultRecordCount=${want}` +
-      `&returnGeometry=true&outSR=4326&f=geojson`;
+      `&returnGeometry=true&outSR=4326&f=json`;
     const page = (await fetchJson(url)) as {
       features?: unknown[];
       exceededTransferLimit?: boolean;
@@ -156,13 +214,22 @@ export async function fetchZoningFeatures(
       }
     }
     opts.onPage?.({ offset, got: feats.length, total: out.length });
-    // ArcGIS paging: some hosts omit `exceededTransferLimit` on a full page.
-    // Stopping when it is not strictly `true` truncates large layers (Austin
-    // ~22k / San Antonio ~700k) to a single page — the under-stamp root cause
-    // for Bexar 0.37%. Continue while the page is full; stop on a short page.
+    // ArcGIS paging contract (observed live 2026-07-24):
+    // 1) Hosts omit `exceededTransferLimit` on a full page (Austin / SA) —
+    //    continue while feats.length >= want (want already capped to
+    //    maxRecordCount when the layer publishes one).
+    // 2) Asking above maxRecordCount can 400 on later offsets (Killeen) —
+    //    resolveZoningPageSize prevents that; adaptive shrink is backup.
+    // 3) Prefer f=json: Killeen geojson 400s past offset ~5000 with
+    //    resultRecordCount>100 while json+rings returns the rest.
     if (feats.length === 0) return out;
     offset += feats.length;
-    if (feats.length < want) return out;
+    if (feats.length < want && page.exceededTransferLimit === true) {
+      pageSize = feats.length;
+    }
+    const morePages =
+      page.exceededTransferLimit === true || feats.length >= want;
+    if (!morePages) return out;
     await sleep(rateMs);
   }
 }

@@ -30,7 +30,10 @@ import {
   ZONING_STAMP_BATCH_SIZE,
   type ZoningStampDb,
 } from "../txgio/zoning-stamp-db";
-import { reduceZoningFeature } from "../txgio/zoning-service";
+import {
+  esriRingsToGeoJson,
+  reduceZoningFeature,
+} from "../txgio/zoning-service";
 import { resolveZoningLayer } from "../txgio/zoning-layers";
 
 /** A unit square [lo,hi]^2 as a GeoJSON Polygon carrying a district code. */
@@ -173,6 +176,31 @@ describe("reduceZoningFeature (ZONE/FULLZONE field mapping)", () => {
       { codeField: "ZONE", descriptionField: "FULLZONE" },
     );
     expect(reduced.code).toBeNull();
+  });
+
+  it("accepts ArcGIS f=json features (attributes + rings)", () => {
+    const reduced = reduceZoningFeature(
+      {
+        attributes: { CODE: "R-1" },
+        geometry: {
+          rings: [
+            [
+              [-97.7, 31.1],
+              [-97.69, 31.1],
+              [-97.69, 31.11],
+              [-97.7, 31.11],
+              [-97.7, 31.1],
+            ],
+          ],
+        },
+      },
+      { codeField: "CODE" },
+    );
+    expect(reduced.code).toBe("R-1");
+    expect(reduced.geometry?.type).toBe("Polygon");
+    expect(esriRingsToGeoJson({ rings: [[[0, 0], [1, 0], [1, 1], [0, 0]]] })?.type).toBe(
+      "Polygon",
+    );
   });
 });
 
