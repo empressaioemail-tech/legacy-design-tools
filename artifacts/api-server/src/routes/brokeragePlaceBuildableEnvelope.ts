@@ -73,7 +73,7 @@ import {
   type RoadCandidate,
 } from "../lib/buildableEnvelope/edgeLabeling";
 import { mapDistrict } from "../lib/buildableEnvelope/districtMapping";
-import { fetchNearbyRoads } from "../lib/buildableEnvelope/roads";
+import { fetchNearbyRoads, namedRoadsToCandidates } from "../lib/buildableEnvelope/roads";
 import {
   resolveSpineZoningWhenGisAbsent,
   spineZoningProvenanceNote,
@@ -1236,7 +1236,9 @@ async function deriveGeometryFromSpineZoning(args: {
   const hasPoint = ctx.hasPoint !== false;
   let roads: RoadCandidate[] = [];
   if (!skipRoad && hasPoint) {
-    roads = await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng });
+    roads = namedRoadsToCandidates(
+      await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng }),
+    );
   }
   const labeling = labelEdges({
     ring: parcel.ring,
