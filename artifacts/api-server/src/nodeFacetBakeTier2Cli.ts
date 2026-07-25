@@ -103,6 +103,7 @@ import {
 } from "./lib/nodeFacetBakeTier2";
 import {
   fetchNearbyRoads,
+  namedRoadsToCandidates,
   type NamedRoad,
 } from "./lib/buildableEnvelope/roads";
 import { arcgisPointQuery } from "@workspace/adapters/arcgis";
@@ -454,7 +455,7 @@ interface TileStats {
 
 /** Convert fetched NamedRoads into labelEdges RoadCandidates. */
 function toCandidates(roads: NamedRoad[]): RoadCandidate[] {
-  return roads.map((r) => ({ name: r.name, polyline: r.polyline }));
+  return namedRoadsToCandidates(roads);
 }
 
 /**

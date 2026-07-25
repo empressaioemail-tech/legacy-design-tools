@@ -13,6 +13,7 @@ import {
   streetNameFromSitus,
   type RoadCandidate,
 } from "./edgeLabeling";
+import { BASTROP_P5_ROAD_CLASS_SETBACKS } from "./roadClassSetbacks";
 import { PARCEL_714_SPRING_33512 } from "./fixtures/parcelRings";
 
 /** 100ft (E-W) x 200ft (N-S) rect centered at (lng0, lat0). */
@@ -413,5 +414,63 @@ describe("labelEdges — corner lot (2 named street frontages)", () => {
     expect(result.edges.some((e) => e.label === "side_corner")).toBe(false);
     // Either single-front (same edge) or cornerUnresolved — never invent.
     expect(result.cornerLot).not.toBe(true);
+  });
+});
+
+describe("insetFeetForLabeling — road-class-aware (R2)", () => {
+  const LNG0 = -97.318;
+  const LAT0 = 30.11;
+
+  it("applies 15 ft street front and 5 ft alley rear on Bastrop P-5 fixture lot", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const southEdgeLat = LAT0 - feetToMeters(100) / mPerDegLat;
+    const northEdgeLat = LAT0 + feetToMeters(100) / mPerDegLat;
+    const southRoadLat = southEdgeLat - feetToMeters(15) / mPerDegLat;
+    const northAlleyLat = northEdgeLat + feetToMeters(12) / mPerDegLat;
+    const roads: RoadCandidate[] = [
+      {
+        name: "Spring Street",
+        classification: "residential",
+        polyline: [
+          [LNG0 - 0.002, southRoadLat],
+          [LNG0 + 0.002, southRoadLat],
+        ],
+      },
+      {
+        name: null,
+        classification: "alley",
+        highway: "service",
+        polyline: [
+          [LNG0 - 0.002, northAlleyLat],
+          [LNG0 + 0.002, northAlleyLat],
+        ],
+      },
+    ];
+    const labeling = labelEdges({
+      ring,
+      roads,
+      situsAddress: "714 SPRING ST",
+    })!;
+    expect(labeling.edges.some((e) => e.label === "front" && e.roadClass === "residential")).toBe(
+      true,
+    );
+    expect(labeling.edges.some((e) => e.label === "rear" && e.roadClass === "alley")).toBe(true);
+
+    const feet = insetFeetForLabeling(
+      labeling,
+      {
+        front_ft: 15,
+        side_ft: 0,
+        rear_ft: 0,
+        not_specified: { side: true, rear: true },
+      },
+      { districtCode: "P-5 Core", roadClassTable: BASTROP_P5_ROAD_CLASS_SETBACKS },
+    );
+    const frontIdx = labeling.edges.find((e) => e.label === "front")!.index;
+    const rearIdx = labeling.edges.find((e) => e.label === "rear")!.index;
+    expect(feet[frontIdx]).toBe(15);
+    expect(feet[rearIdx]).toBe(5);
+    expect(feet[rearIdx]).not.toBe(feet[frontIdx]);
   });
 });

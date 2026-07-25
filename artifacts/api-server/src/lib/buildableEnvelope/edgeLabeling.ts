@@ -31,6 +31,11 @@
  */
 
 import { openRing, projectRing, SURVEY_NOISE_THRESHOLD_M, type Ring } from "./geometry";
+import type { V1RoadClassification } from "./roadClassify";
+import {
+  roadClassSetbackFt,
+  type RoadClassSetbackDistrictRow,
+} from "./roadClassSetbacks";
 
 export type EdgeLabel = "front" | "side" | "rear" | "side_corner";
 
@@ -42,6 +47,8 @@ export interface EdgeInfo {
   label: EdgeLabel;
   /** Edge length in metres. */
   lengthM: number;
+  /** v1 road classification of the nearest classified road (when known). */
+  roadClass?: V1RoadClassification;
 }
 
 export interface EdgeLabelingResult {
@@ -84,6 +91,10 @@ export type RoadPolyline = [number, number][];
 export interface RoadCandidate {
   name: string | null;
   polyline: RoadPolyline;
+  /** OSM highway tag when known (residential, service, …). */
+  highway?: string | null;
+  /** v1 classification derived from highway tag or road-node spine. */
+  classification?: V1RoadClassification;
 }
 
 /**
@@ -290,6 +301,38 @@ function bestEdgeForRoad(
     dist: bestDist,
     confidence: Math.min(0.9, confidence),
   };
+}
+
+/** Nearest road classification for a parcel edge (when a candidate trust-gates). */
+function roadClassForEdge(
+  edges: ProjEdges,
+  edgeIdx: number,
+  roads: RoadCandidate[],
+): V1RoadClassification | undefined {
+  let bestDist = Infinity;
+  let bestClass: V1RoadClassification | undefined;
+  for (const road of roads) {
+    if (!road.classification) continue;
+    const cand = bestEdgeForRoad(edges, road.polyline);
+    if (!cand || cand.index !== edgeIdx) continue;
+    if (cand.dist < bestDist) {
+      bestDist = cand.dist;
+      bestClass = road.classification;
+    }
+  }
+  return bestClass;
+}
+
+function attachRoadClasses(
+  labeled: EdgeInfo[],
+  edges: ProjEdges,
+  roads: RoadCandidate[],
+): EdgeInfo[] {
+  if (!roads.length) return labeled;
+  return labeled.map((e) => {
+    const roadClass = roadClassForEdge(edges, e.index, roads);
+    return roadClass ? { ...e, roadClass } : e;
+  });
 }
 
 /**
@@ -647,7 +690,11 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
     }
   }
 
-  const labeled = labelFromFront(edges, front.index, cornerIdx);
+  const labeled = attachRoadClasses(
+    labelFromFront(edges, front.index, cornerIdx),
+    edges,
+    candidates,
+  );
   return {
     edges: labeled,
     signal,
@@ -682,6 +729,10 @@ export type InsetSetbacks = {
 export function insetFeetForLabeling(
   labeling: EdgeLabelingResult,
   setbacks: InsetSetbacks,
+  options?: {
+    districtCode?: string;
+    roadClassTable?: RoadClassSetbackDistrictRow | null;
+  },
 ): number[] {
   const ns = setbacks.not_specified;
   const frontFt = ns?.front ? 0 : setbacks.front_ft;
@@ -697,10 +748,34 @@ export function insetFeetForLabeling(
   } else if (ns?.side_corner && ns?.front) {
     cornerFt = 0;
   }
-  return labeling.edges.map((e) => {
-    if (e.label === "front") return frontFt;
-    if (e.label === "rear") return rearFt;
-    if (e.label === "side_corner") return cornerFt;
+
+  const flatForRole = (role: EdgeLabel): number => {
+    if (role === "front") return frontFt;
+    if (role === "rear") return rearFt;
+    if (role === "side_corner") return cornerFt;
     return sideFt;
+  };
+  const nsForRole = (role: EdgeLabel): boolean => {
+    if (role === "front") return !!ns?.front;
+    if (role === "rear") return !!ns?.rear;
+    if (role === "side_corner") return !!ns?.side_corner;
+    return !!ns?.side;
+  };
+
+  const districtCode = options?.districtCode ?? "";
+  const roadTable = options?.roadClassTable;
+
+  return labeling.edges.map((e) => {
+    if (roadTable && districtCode) {
+      return roadClassSetbackFt(
+        roadTable,
+        districtCode,
+        e.roadClass,
+        e.label,
+        flatForRole,
+        nsForRole,
+      );
+    }
+    return flatForRole(e.label);
   });
 }

@@ -35,7 +35,8 @@
  * MORE, it does not remove the point/shape fallback (honest degradation).
  */
 
-import type { RoadPolyline } from "./edgeLabeling";
+import type { RoadCandidate, RoadPolyline } from "./edgeLabeling";
+import { classifyOsmHighwayTag, type V1RoadClassification } from "./roadClassify";
 
 const DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const USER_AGENT =
@@ -73,6 +74,8 @@ export interface NamedRoad {
   polyline: RoadPolyline;
   /** OSM `highway` class (residential, tertiary, service, …), for debugging. */
   highway: string | null;
+  /** v1 road classification for road-type-aware setbacks (27c R2). */
+  classification: V1RoadClassification;
 }
 
 /** Injected fetch (tests); defaults to global fetch. */
@@ -119,7 +122,8 @@ export function namedRoadsFromOverpass(elements: unknown): NamedRoad[] {
         : null;
     const highway =
       typeof el.tags?.highway === "string" ? el.tags.highway : null;
-    roads.push({ name, polyline: pts, highway });
+    const classification = classifyOsmHighwayTag(highway, el.tags as Record<string, string> | undefined);
+    roads.push({ name, polyline: pts, highway, classification });
   }
   // Longest first (a substantial street beats a driveway stub).
   roads.sort(
@@ -135,6 +139,16 @@ export function namedRoadsFromOverpass(elements: unknown): NamedRoad[] {
  */
 export function roadPolylinesFromOverpass(elements: unknown): RoadPolyline[] {
   return namedRoadsFromOverpass(elements).map((r) => r.polyline);
+}
+
+/** Convert NamedRoad fetch results to edge-labeling RoadCandidates. */
+export function namedRoadsToCandidates(roads: NamedRoad[]): RoadCandidate[] {
+  return roads.map((r) => ({
+    name: r.name,
+    polyline: r.polyline,
+    highway: r.highway,
+    classification: r.classification,
+  }));
 }
 
 function polylineLengthDeg(line: RoadPolyline): number {

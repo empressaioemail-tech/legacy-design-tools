@@ -19,6 +19,10 @@ import {
   type EdgeLabelingResult,
 } from "./edgeLabeling";
 import type { DistrictMappingResult } from "./districtMapping";
+import {
+  roadClassSetbackTableForJurisdiction,
+  type RoadClassSetbackDistrictRow,
+} from "./roadClassSetbacks";
 
 export interface BuildableEnvelopeProps {
   kind: "buildable-envelope";
@@ -92,6 +96,8 @@ export interface DeriveInput {
   table: SetbackTable;
   district: DistrictMappingResult;
   labeling: EdgeLabelingResult;
+  /** When set, per-edge setbacks resolve from (road-class, edge-role). */
+  roadClassSetbackTable?: RoadClassSetbackDistrictRow | null;
 }
 
 function round(n: number, dp = 0): number {
@@ -148,7 +154,7 @@ function composeDisclosure(
 export function deriveBuildableEnvelope(
   input: DeriveInput,
 ): BuildableEnvelopeResult {
-  const { ring, district, labeling } = input;
+  const { ring, district, labeling, table } = input;
   const d: SetbackDistrict = district.district;
 
   const not_specified = {
@@ -159,13 +165,27 @@ export function deriveBuildableEnvelope(
   };
   const hasSilent = Object.keys(not_specified).length > 0;
 
-  const insetFeet = insetFeetForLabeling(labeling, {
-    front_ft: d.front_ft,
-    side_ft: d.side_ft,
-    rear_ft: d.rear_ft,
-    side_corner_ft: d.side_corner_ft,
-    ...(hasSilent ? { not_specified } : {}),
-  });
+  const roadClassTable =
+    input.roadClassSetbackTable ??
+    roadClassSetbackTableForJurisdiction(
+      table.jurisdictionKey,
+      d.district_name,
+    );
+
+  const insetFeet = insetFeetForLabeling(
+    labeling,
+    {
+      front_ft: d.front_ft,
+      side_ft: d.side_ft,
+      rear_ft: d.rear_ft,
+      side_corner_ft: d.side_corner_ft,
+      ...(hasSilent ? { not_specified } : {}),
+    },
+    {
+      districtCode: d.district_name,
+      roadClassTable,
+    },
+  );
 
   const inset = insetPerEdge(ring, insetFeet);
 
