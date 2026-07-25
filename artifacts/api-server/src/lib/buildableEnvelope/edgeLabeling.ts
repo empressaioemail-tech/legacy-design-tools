@@ -30,7 +30,7 @@
  * The network fetch of the road lives in roads.ts.
  */
 
-import { openRing, projectRing, type Ring } from "./geometry";
+import { openRing, projectRing, SURVEY_NOISE_THRESHOLD_M, type Ring } from "./geometry";
 
 export type EdgeLabel = "front" | "side" | "rear" | "side_corner";
 
@@ -369,21 +369,82 @@ function frontFromPoint(
   return { index: best, confidence: 0.55 };
 }
 
+/** |cos| below this => edge is street-facing (perpendicular to lot depth). */
+const FRONT_PERP_COS_MAX = 0.5;
+
 /**
  * Pure-shape fallback: for a roughly-rectangular lot the front is a SHORT edge
- * (residential lots are deeper than wide). Pick the shorter of the two shortest
- * edges as the front. LOW confidence.
+ * (residential lots are deeper than wide). Survey-artifact slivers shorter than
+ * SURVEY_NOISE_THRESHOLD_M are ignored; among eligible edges prefer those
+ * perpendicular to the lot's depth axis (longest edge direction). Edges parallel
+ * to depth (the long sides of an irregular lot) are excluded from front candidacy
+ * so a tiny notch parallel to the depth axis cannot win as "front."
  */
 function frontFromShape(edges: ProjEdges): { index: number; confidence: number } {
-  let best = 0;
-  let bestLen = Infinity;
-  for (let i = 0; i < edges.edgeLen.length; i++) {
-    if (edges.edgeLen[i]! < bestLen) {
-      bestLen = edges.edgeLen[i]!;
+  const n = edges.edgeLen.length;
+  const eligible: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (edges.edgeLen[i]! >= SURVEY_NOISE_THRESHOLD_M) {
+      eligible.push(i);
+    }
+  }
+
+  const pickFrom = eligible.length > 0 ? eligible : [...Array(n).keys()];
+
+  let depthIdx = pickFrom[0]!;
+  for (const i of pickFrom) {
+    if (edges.edgeLen[i]! > edges.edgeLen[depthIdx]!) depthIdx = i;
+  }
+  const depthDir = edges.edgeDir[depthIdx]!;
+
+  let frontCandidates = pickFrom.filter((i) => {
+    const dir = edges.edgeDir[i]!;
+    const par = absCosBetween(depthDir.x, depthDir.y, dir.x, dir.y);
+    return par < FRONT_PERP_COS_MAX;
+  });
+  if (frontCandidates.length === 0) {
+    frontCandidates = pickFrom.slice();
+  }
+
+  let best = frontCandidates[0]!;
+  let bestScore = Infinity;
+  for (const i of frontCandidates) {
+    const dir = edges.edgeDir[i]!;
+    const par = absCosBetween(depthDir.x, depthDir.y, dir.x, dir.y);
+    const score = edges.edgeLen[i]! * (0.35 + par);
+    if (score < bestScore) {
+      bestScore = score;
       best = i;
     }
   }
-  return { index: best, confidence: 0.35 };
+
+  // Irregular ring (≥5 edges): refuse the unique globally-shortest eligible
+  // edge when other front candidates exist — jagged survey notches must not
+  // become front on shape-only signal.
+  if (n >= 5 && eligible.length > 1 && frontCandidates.length > 1) {
+    const minLen = Math.min(...eligible.map((i) => edges.edgeLen[i]!));
+    const uniqueShortest = eligible.filter(
+      (i) => edges.edgeLen[i]! <= minLen + 1e-6,
+    );
+    if (uniqueShortest.length === 1 && best === uniqueShortest[0]) {
+      let altBest = best;
+      let altScore = Infinity;
+      for (const i of frontCandidates) {
+        if (i === best) continue;
+        const dir = edges.edgeDir[i]!;
+        const par = absCosBetween(depthDir.x, depthDir.y, dir.x, dir.y);
+        const score = edges.edgeLen[i]! * (0.35 + par);
+        if (score < altScore) {
+          altScore = score;
+          altBest = i;
+        }
+      }
+      if (altBest !== best) best = altBest;
+    }
+  }
+
+  const confidence = eligible.length > 0 ? 0.35 : 0.25;
+  return { index: best, confidence };
 }
 
 /**

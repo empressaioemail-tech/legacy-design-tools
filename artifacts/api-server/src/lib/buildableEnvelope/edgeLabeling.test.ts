@@ -13,6 +13,7 @@ import {
   streetNameFromSitus,
   type RoadCandidate,
 } from "./edgeLabeling";
+import { PARCEL_714_SPRING_33512 } from "./fixtures/parcelRings";
 
 /** 100ft (E-W) x 200ft (N-S) rect centered at (lng0, lat0). */
 function rectRing(lng0: number, lat0: number, wFt = 100, hFt = 200): Ring {
@@ -104,12 +105,42 @@ describe("labelEdges — shape fallback (LOW confidence, flagged)", () => {
     const result = labelEdges({ ring, road: null, refPoint: null })!;
     expect(result.signal).toBe("shape");
     expect(result.confidence).toBeLessThan(0.5);
-    // Front should be one of the SHORT (100ft E-W) edges.
     const frontEdge = result.edges.find((e) => e.label === "front")!;
-    expect(frontEdge.lengthM).toBeLessThan(
-      // shorter than the 200ft edges
-      feetToMeters(150),
-    );
+    expect(frontEdge.lengthM).toBeLessThan(feetToMeters(150));
+  });
+
+  it("ignores survey-artifact sliver edges on jagged rings (WDLL 5)", () => {
+    const latRad = (LAT0 * Math.PI) / 180;
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const mPerDegLng = mPerDegLat * Math.cos(latRad);
+    const hw = feetToMeters(50) / mPerDegLng;
+    const hd = feetToMeters(100) / mPerDegLat;
+    const sliver = feetToMeters(0.8) / mPerDegLng;
+    const ring: Ring = [
+      [LNG0 - hw, LAT0 - hd / 2],
+      [LNG0 + hw, LAT0 - hd / 2],
+      [LNG0 + hw + sliver, LAT0 - hd / 2 + feetToMeters(0.5) / mPerDegLat],
+      [LNG0 + hw, LAT0 + hd / 2],
+      [LNG0 - hw, LAT0 + hd / 2],
+      [LNG0 - hw, LAT0 - hd / 2],
+    ];
+    const result = labelEdges({ ring, road: null, refPoint: null })!;
+    const frontEdge = result.edges.find((e) => e.label === "front")!;
+    expect(frontEdge.lengthM).toBeGreaterThan(1.5);
+    expect(frontEdge.lengthM).toBeLessThan(feetToMeters(120));
+  });
+
+  it("714 Spring St shape fallback does not pick globally shortest edge (WDLL 5)", () => {
+    const result = labelEdges({
+      ring: PARCEL_714_SPRING_33512,
+      road: null,
+      refPoint: null,
+    })!;
+    expect(result.signal).toBe("shape");
+    const frontEdge = result.edges.find((e) => e.label === "front")!;
+    const minLen = Math.min(...result.edges.map((e) => e.lengthM));
+    expect(frontEdge.lengthM).toBeGreaterThan(minLen + 1e-6);
+    expect(frontEdge.lengthM).toBeGreaterThan(15);
   });
 });
 
