@@ -33,7 +33,15 @@ export interface BuildableEnvelopeProps {
     front_ft: number;
     side_ft: number;
     rear_ft: number;
+    side_corner_ft?: number;
     district: string;
+    /** Axes where the code is silent (build-to-line) — not real zero feet. */
+    not_specified?: {
+      front?: boolean;
+      side?: boolean;
+      rear?: boolean;
+      side_corner?: boolean;
+    };
   };
   /** How the front edge was inferred. */
   edgeSignal: EdgeLabelingResult["signal"];
@@ -95,17 +103,30 @@ function round(n: number, dp = 0): number {
  * Compose the disclosure sentence from the two inference notes + the survey
  * caveat. Always names the weakest link so the user knows what to verify.
  */
+function fieldNotSpecified(
+  d: SetbackDistrict,
+  key: "front_ft" | "side_ft" | "rear_ft" | "side_corner_ft",
+): boolean {
+  const p = d.provenance?.[key];
+  return !!(
+    p &&
+    typeof p === "object" &&
+    (p as { not_specified?: boolean }).not_specified === true
+  );
+}
+
 function composeDisclosure(
   approximate: boolean,
   labeling: EdgeLabelingResult,
   district: DistrictMappingResult,
   empty: boolean,
   emptyReason?: string,
+  notSpecifiedNote?: string,
 ): string {
   if (empty) {
     return (
       `No buildable area: ${emptyReason ?? "setbacks exceed the lot"}. ` +
-      `Approximate â€” verify with a survey and the city.`
+      `Approximate — verify with a survey and the city.`
     );
   }
   const parts: string[] = [];
@@ -114,10 +135,11 @@ function composeDisclosure(
   } else {
     parts.push("Estimated buildable area");
   }
+  if (notSpecifiedNote) parts.push(notSpecifiedNote.replace(/\.$/, ""));
   parts.push(labeling.note.replace(/\.$/, ""));
   parts.push(district.note.replace(/\.$/, ""));
   parts.push(
-    "Not survey grade â€” front/side/rear orientation and district are inferred; " +
+    "Not survey grade — front/side/rear orientation and district are inferred; " +
       "verify with a survey and the city before relying on it",
   );
   return parts.join(". ") + ".";
@@ -129,16 +151,31 @@ export function deriveBuildableEnvelope(
   const { ring, district, labeling } = input;
   const d: SetbackDistrict = district.district;
 
+  const not_specified = {
+    ...(fieldNotSpecified(d, "front_ft") ? { front: true } : {}),
+    ...(fieldNotSpecified(d, "side_ft") ? { side: true } : {}),
+    ...(fieldNotSpecified(d, "rear_ft") ? { rear: true } : {}),
+    ...(fieldNotSpecified(d, "side_corner_ft") ? { side_corner: true } : {}),
+  };
+  const hasSilent = Object.keys(not_specified).length > 0;
+
   const insetFeet = insetFeetForLabeling(labeling, {
     front_ft: d.front_ft,
     side_ft: d.side_ft,
     rear_ft: d.rear_ft,
+    side_corner_ft: d.side_corner_ft,
+    ...(hasSilent ? { not_specified } : {}),
   });
 
   const inset = insetPerEdge(ring, insetFeet);
 
   // Geometry-only approximate signal. NEVER product confidence multiply.
-  const approximate = labeling.signal === "shape" || inset.empty;
+  // Corner-unresolved and silent axes force approximate disclosure.
+  const approximate =
+    labeling.signal === "shape" ||
+    inset.empty ||
+    labeling.cornerUnresolved === true ||
+    hasSilent;
 
   const parcelAreaSqFt = round(
     inset.parcelAreaSqFt || ringAreaSqFt(ring),
@@ -160,12 +197,28 @@ export function deriveBuildableEnvelope(
     maxFootprintSqFt = buildableAreaSqFt;
   }
 
+  // When every applied inset is silence (not_specified), an empty inset is a
+  // geometry failure — never "setbacks consume the lot" from fabricated zeros.
+  const allSilentPrimary =
+    fieldNotSpecified(d, "front_ft") &&
+    fieldNotSpecified(d, "side_ft") &&
+    fieldNotSpecified(d, "rear_ft");
+  const emptyReason =
+    inset.empty && allSilentPrimary
+      ? "Envelope geometry failed; code states no scalar setbacks (build-to-line governs) — not a consume-lot finding"
+      : inset.emptyReason;
+
+  const silentNote = hasSilent
+    ? "One or more scalar setbacks are not specified in the code (build-to-line governs); silent axes are not treated as 0 ft entitlements"
+    : undefined;
+
   const disclosure = composeDisclosure(
     approximate,
     labeling,
     district,
     inset.empty,
-    inset.emptyReason,
+    emptyReason,
+    silentNote,
   );
 
   const props: BuildableEnvelopeProps = {
@@ -177,7 +230,9 @@ export function deriveBuildableEnvelope(
       front_ft: d.front_ft,
       side_ft: d.side_ft,
       rear_ft: d.rear_ft,
+      side_corner_ft: d.side_corner_ft,
       district: d.district_name,
+      ...(hasSilent ? { not_specified } : {}),
     },
     edgeSignal: labeling.signal,
     edgeNote: labeling.note,
@@ -189,7 +244,7 @@ export function deriveBuildableEnvelope(
     maxHeightFt,
     maxFootprintSqFt,
     citationUrl: d.citation_url,
-    ...(inset.empty ? { emptyReason: inset.emptyReason } : {}),
+    ...(inset.empty ? { emptyReason } : {}),
   };
 
   const features: BuildableEnvelopeResult["geojson"]["features"] = [];

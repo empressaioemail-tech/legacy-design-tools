@@ -105,4 +105,48 @@ describe("deriveBuildableEnvelope — geometry helper (no product confidence)", 
     expect(res.geojson.features[0]!.geometry).toBeNull();
     expect(res.geojson.features[0]!.properties.disclosure).toMatch(/no buildable area/i);
   });
+
+  it("not_specified side/rear (P-3 shape) does not consume the lot", () => {
+    const p3Table: SetbackTable = {
+      jurisdictionKey: "bastrop-city-tx",
+      jurisdictionDisplayName: "Bastrop B3",
+      districts: [
+        {
+          district_name: "P-3 Neighborhood",
+          front_ft: 25,
+          rear_ft: 0,
+          side_ft: 0,
+          side_corner_ft: 0,
+          max_height_ft: 100,
+          max_lot_coverage_pct: 50,
+          max_impervious_pct: 100,
+          citation_url: "https://example.test/b3",
+          provenance: {
+            front_ft: { not_specified: false },
+            side_ft: { not_specified: true },
+            rear_ft: { not_specified: true },
+            side_corner_ft: { not_specified: true },
+          },
+        },
+      ],
+    };
+    const ring = rectRing(100, 200);
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const district = mapDistrict(p3Table, "P-3")!;
+    const res = deriveBuildableEnvelope({
+      ring,
+      table: p3Table,
+      district,
+      labeling,
+    });
+    expect(res.empty).toBe(false);
+    expect(res.geojson.features[0]!.geometry).not.toBeNull();
+    expect(res.geojson.features[0]!.properties.setbacks.not_specified).toEqual({
+      side: true,
+      rear: true,
+      side_corner: true,
+    });
+    expect(res.geojson.features[0]!.properties.disclosure).toMatch(/build-to-line/i);
+    expect(res.geojson.features[0]!.properties.disclosure).not.toMatch(/consume/i);
+  });
 });

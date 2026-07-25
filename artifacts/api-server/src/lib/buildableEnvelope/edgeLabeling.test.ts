@@ -179,6 +179,9 @@ describe("labelEdges — situs-named road preference (cul-de-sac defense)", () =
     const a = proj.points[front.index]!;
     const b = proj.points[(front.index + 1) % proj.points.length]!;
     expect((a.y + b.y) / 2).toBeLessThan(0); // southern edge
+    // Two named roads on opposite edges → corner geometry (side_corner on north).
+    expect(result.cornerLot).toBe(true);
+    expect(result.edges.some((e) => e.label === "side_corner")).toBe(true);
   });
 
   it("falls back to NEAREST across all candidates when situs name has no match", () => {
@@ -283,5 +286,101 @@ describe("insetFeetForLabeling", () => {
       if (e.label === "rear") expect(feet[i]).toBe(20);
       if (e.label === "side") expect(feet[i]).toBe(7.5);
     });
+  });
+
+  it("not_specified axes inset 0 (silence ≠ real zero entitlement at display)", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const roadLat = LAT0 - feetToMeters(120) / mPerDegLat;
+    const labeling = labelEdges({
+      ring,
+      road: [
+        [LNG0 - 0.002, roadLat],
+        [LNG0 + 0.002, roadLat],
+      ],
+    })!;
+    const feet = insetFeetForLabeling(labeling, {
+      front_ft: 25,
+      side_ft: 0,
+      rear_ft: 0,
+      not_specified: { side: true, rear: true },
+    });
+    labeling.edges.forEach((e, i) => {
+      if (e.label === "front") expect(feet[i]).toBe(25);
+      if (e.label === "side" || e.label === "rear") expect(feet[i]).toBe(0);
+    });
+  });
+});
+
+describe("labelEdges — corner lot (2 named street frontages)", () => {
+  it("labels a second named road edge as side_corner and applies side_corner_ft", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const mPerDegLng = mPerDegLat * Math.cos((LAT0 * Math.PI) / 180);
+    const southEdgeLat = LAT0 - feetToMeters(100) / mPerDegLat;
+    const southRoadLat = southEdgeLat - feetToMeters(15) / mPerDegLat;
+    // West road just outside the west frontage.
+    const westLng = LNG0 - feetToMeters(60) / mPerDegLng;
+    const roads: RoadCandidate[] = [
+      {
+        name: "Pecan Street",
+        polyline: [
+          [LNG0 - 0.002, southRoadLat],
+          [LNG0 + 0.002, southRoadLat],
+        ],
+      },
+      {
+        name: "Main Avenue",
+        polyline: [
+          [westLng, LAT0 - 0.002],
+          [westLng, LAT0 + 0.002],
+        ],
+      },
+    ];
+    const result = labelEdges({ ring, roads, situsAddress: "703 PECAN ST" })!;
+    expect(result.signal).toBe("road");
+    expect(result.cornerLot).toBe(true);
+    expect(result.note).toMatch(/situs-named|nearest street/i);
+    expect(result.note).toMatch(/corner lot/i);
+    expect(result.edges.some((e) => e.label === "side_corner")).toBe(true);
+    const feet = insetFeetForLabeling(result, {
+      front_ft: 25,
+      side_ft: 5,
+      rear_ft: 10,
+      side_corner_ft: 15,
+    });
+    result.edges.forEach((e, i) => {
+      if (e.label === "front") expect(feet[i]).toBe(25);
+      if (e.label === "side_corner") expect(feet[i]).toBe(15);
+      if (e.label === "side") expect(feet[i]).toBe(5);
+    });
+  });
+
+  it("does not fabricate side_corner when second named frontage is unresolved", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const southEdgeLat = LAT0 - feetToMeters(100) / mPerDegLat;
+    const southRoadLat = southEdgeLat - feetToMeters(15) / mPerDegLat;
+    // Two named roads both map to the same south edge — no distinct corner edge.
+    const roads: RoadCandidate[] = [
+      {
+        name: "Pecan Street",
+        polyline: [
+          [LNG0 - 0.002, southRoadLat],
+          [LNG0 + 0.002, southRoadLat],
+        ],
+      },
+      {
+        name: "Pecan Court",
+        polyline: [
+          [LNG0 - 0.0015, southRoadLat - 0.00001],
+          [LNG0 + 0.0015, southRoadLat - 0.00001],
+        ],
+      },
+    ];
+    const result = labelEdges({ ring, roads })!;
+    expect(result.edges.some((e) => e.label === "side_corner")).toBe(false);
+    // Either single-front (same edge) or cornerUnresolved — never invent.
+    expect(result.cornerLot).not.toBe(true);
   });
 });
