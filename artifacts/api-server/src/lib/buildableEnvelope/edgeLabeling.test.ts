@@ -13,6 +13,7 @@ import {
   streetNameFromSitus,
   type RoadCandidate,
 } from "./edgeLabeling";
+import { PARCEL_714_SPRING_33512 } from "./fixtures/parcelRings";
 
 /** 100ft (E-W) x 200ft (N-S) rect centered at (lng0, lat0). */
 function rectRing(lng0: number, lat0: number, wFt = 100, hFt = 200): Ring {
@@ -127,6 +128,19 @@ describe("labelEdges — shape fallback (LOW confidence, flagged)", () => {
     const frontEdge = result.edges.find((e) => e.label === "front")!;
     expect(frontEdge.lengthM).toBeGreaterThan(1.5);
     expect(frontEdge.lengthM).toBeLessThan(feetToMeters(120));
+  });
+
+  it("714 Spring St shape fallback does not pick globally shortest edge (WDLL 5)", () => {
+    const result = labelEdges({
+      ring: PARCEL_714_SPRING_33512,
+      road: null,
+      refPoint: null,
+    })!;
+    expect(result.signal).toBe("shape");
+    const frontEdge = result.edges.find((e) => e.label === "front")!;
+    const minLen = Math.min(...result.edges.map((e) => e.lengthM));
+    expect(frontEdge.lengthM).toBeGreaterThan(minLen + 1e-6);
+    expect(frontEdge.lengthM).toBeGreaterThan(15);
   });
 });
 

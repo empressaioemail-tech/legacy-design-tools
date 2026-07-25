@@ -251,3 +251,17 @@ describe("geometryCorrectnessGate — known-bad rings (WDLL 2 RED)", () => {
     expect(gate.pass).toBe(false);
   });
 });
+
+describe("insetPerEdge — throw-safety (WDLL 2 / R0.1)", () => {
+  it("returns honest empty on non-finite inset feet (never throws)", () => {
+    const proj = projectRing(PARCEL_714_SPRING_33512)!;
+    const n = proj.points.length;
+    const insetFeet = proj.points.map(() => 15);
+    insetFeet[0] = Number.NaN;
+    expect(() => insetPerEdge(PARCEL_714_SPRING_33512, insetFeet)).not.toThrow();
+    const res = insetPerEdge(PARCEL_714_SPRING_33512, insetFeet);
+    expect(res.empty).toBe(true);
+    expect(res.ring).toBeNull();
+    expect(res.emptyReason).toMatch(/non-finite/i);
+  });
+});

@@ -220,6 +220,10 @@ function insetProjected(
   const n = pts.length;
   if (n < 3 || insetMetersPerEdge.length !== n) return null;
 
+  for (const d of insetMetersPerEdge) {
+    if (!Number.isFinite(d) || d < 0) return null;
+  }
+
   const parcelPoly: polygonClipping.Polygon = [closeClipRing(pts)];
 
   let forbidden: polygonClipping.MultiPolygon | null = null;
@@ -230,16 +234,25 @@ function insetProjected(
     if (!nrm) continue;
     const strip = setbackStrip(a, b, nrm, insetMetersPerEdge[i]!);
     if (!strip) continue;
-    forbidden = forbidden
-      ? polygonClipping.union(forbidden, strip)
-      : [strip];
+    try {
+      forbidden = forbidden
+        ? polygonClipping.union(forbidden, strip)
+        : [strip];
+    } catch {
+      return null;
+    }
   }
 
   if (!forbidden) {
     return { points: pts.map((p) => ({ x: p.x, y: p.y })) };
   }
 
-  const diff = polygonClipping.difference(parcelPoly, forbidden);
+  let diff: polygonClipping.MultiPolygon;
+  try {
+    diff = polygonClipping.difference(parcelPoly, forbidden);
+  } catch {
+    return null;
+  }
   if (!diff.length) return null;
 
   let best: XY[] | null = null;
@@ -493,6 +506,16 @@ export function insetPerEdge(
     };
   }
 
+  if (insetFeetPerEdge.some((ft) => !Number.isFinite(ft))) {
+    return {
+      ring: null,
+      areaSqFt: 0,
+      parcelAreaSqFt,
+      empty: true,
+      emptyReason: "non-finite setback distance",
+    };
+  }
+
   const insetMeters = insetFeetPerEdge.map((ft) =>
     feetToMeters(Math.max(0, ft)),
   );
@@ -503,7 +526,8 @@ export function insetPerEdge(
       areaSqFt: 0,
       parcelAreaSqFt,
       empty: true,
-      emptyReason: "setbacks leave no buildable area (offset lines did not close)",
+      emptyReason:
+        "setbacks leave no buildable area (offset lines did not close)",
     };
   }
 
