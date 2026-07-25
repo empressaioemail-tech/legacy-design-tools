@@ -20,9 +20,10 @@
  *            of the two "end" edges. LOW confidence — flagged approximate.
  *
  * Sides/rear, once the front is chosen: the edge "opposite" the front (most
- * anti-parallel, farthest) is the REAR; everything else is a SIDE. Corner-lot
- * side_corner handling is deferred (v1 uses side_ft for all sides) and noted in
- * the disclosure.
+ * anti-parallel, farthest) is the REAR; everything else is a SIDE. Corner lots
+ * (parcel touches 2+ distinct NAMED street frontages) label a second street
+ * edge as side_corner and apply the street-side setback there. Unresolved
+ * corners are disclosed honestly — never fabricate a second frontage.
  *
  * This module is pure: it consumes an already-fetched nearest-road polyline
  * and/or reference point and returns a per-edge label + a labeling confidence.
@@ -31,7 +32,7 @@
 
 import { openRing, projectRing, type Ring } from "./geometry";
 
-export type EdgeLabel = "front" | "side" | "rear";
+export type EdgeLabel = "front" | "side" | "rear" | "side_corner";
 
 export type LabelSignal = "road" | "point" | "shape";
 
@@ -55,6 +56,13 @@ export interface EdgeLabelingResult {
   confidence: number;
   /** Human note describing how the front edge was inferred. */
   note: string;
+  /** True when two distinct named street frontages were resolved. */
+  cornerLot?: boolean;
+  /**
+   * True when nearby roads suggest a corner but a second named frontage could
+   * not be resolved — caller must not invent side_corner geometry.
+   */
+  cornerUnresolved?: boolean;
 }
 
 interface XY {
@@ -379,10 +387,15 @@ function frontFromShape(edges: ProjEdges): { index: number; confidence: number }
 }
 
 /**
- * Given the chosen front edge, label the rest: the edge most ANTI-parallel to
- * the front and farthest from it is the REAR; all others are SIDES.
+ * Given the chosen front edge (and optional second street edge for a corner),
+ * label the rest: the edge most ANTI-parallel to the front and farthest from
+ * it is the REAR; the second street edge is side_corner; all others are SIDES.
  */
-function labelFromFront(edges: ProjEdges, frontIdx: number): EdgeInfo[] {
+function labelFromFront(
+  edges: ProjEdges,
+  frontIdx: number,
+  cornerIdx: number | null = null,
+): EdgeInfo[] {
   const n = edges.edgeLen.length;
   const front = edges.edgeDir[frontIdx]!;
   const frontMid = edges.edgeMid[frontIdx]!;
@@ -392,6 +405,7 @@ function labelFromFront(edges: ProjEdges, frontIdx: number): EdgeInfo[] {
   let rearScore = -Infinity;
   for (let i = 0; i < n; i++) {
     if (i === frontIdx) continue;
+    if (cornerIdx != null && i === cornerIdx) continue;
     const dir = edges.edgeDir[i]!;
     const par = absCosBetween(front.x, front.y, dir.x, dir.y); // parallel-ness
     const d = dist(frontMid, edges.edgeMid[i]!);
@@ -406,10 +420,52 @@ function labelFromFront(edges: ProjEdges, frontIdx: number): EdgeInfo[] {
   for (let i = 0; i < n; i++) {
     let label: EdgeLabel = "side";
     if (i === frontIdx) label = "front";
+    else if (cornerIdx != null && i === cornerIdx) label = "side_corner";
     else if (i === rearIdx) label = "rear";
     out.push({ index: i, label, lengthM: edges.edgeLen[i]! });
   }
   return out;
+}
+
+/**
+ * Detect a second named street frontage for corner lots.
+ * Requires a distinct NAMED road (different normalized name from the primary)
+ * whose best edge is a different ring edge within the trust gate.
+ * Returns null when unresolved — never fabricates a second frontage.
+ */
+function secondNamedStreetEdge(
+  edges: ProjEdges,
+  roads: RoadCandidate[],
+  primaryEdgeIdx: number,
+  primaryRoadName: string | null,
+): { index: number; roadName: string } | null {
+  const primaryNorm = normalizeStreetName(primaryRoadName);
+  let best: { index: number; dist: number; roadName: string } | null = null;
+  for (const road of roads) {
+    const name = normalizeStreetName(road.name);
+    if (!name) continue;
+    if (primaryNorm && name === primaryNorm) continue;
+    const cand = bestEdgeForRoad(edges, road.polyline);
+    if (!cand || cand.index === primaryEdgeIdx) continue;
+    if (!best || cand.dist < best.dist) {
+      best = { index: cand.index, dist: cand.dist, roadName: name };
+    }
+  }
+  return best ? { index: best.index, roadName: best.roadName } : null;
+}
+
+/** Count distinct named roads that trust-gate to some parcel edge. */
+function namedRoadsTouchingParcel(
+  edges: ProjEdges,
+  roads: RoadCandidate[],
+): number {
+  const names = new Set<string>();
+  for (const road of roads) {
+    const name = normalizeStreetName(road.name);
+    if (!name) continue;
+    if (bestEdgeForRoad(edges, road.polyline)) names.add(name);
+  }
+  return names.size;
 }
 
 export interface LabelInputs {
@@ -457,6 +513,7 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
         ? [{ name: null, polyline: input.road }]
         : [];
 
+  let primaryRoadName: string | null = null;
   if (candidates.length) {
     const situsStreet = streetNameFromSitus(input.situsAddress);
     const chosen = frontFromRoads(edges, candidates, situsStreet);
@@ -466,6 +523,16 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
       note = chosen.matchedSitus
         ? "Front edge inferred from the situs-named street centerline (OpenStreetMap)."
         : "Front edge inferred from the nearest street centerline (OpenStreetMap).";
+      // Recover the primary road name for corner pairing.
+      for (const road of candidates) {
+        const cand = bestEdgeForRoad(edges, road.polyline);
+        if (cand && cand.index === chosen.index) {
+          primaryRoadName = road.name;
+          if (chosen.matchedSitus && normalizeStreetName(road.name) === situsStreet) {
+            break;
+          }
+        }
+      }
     }
   }
 
@@ -483,27 +550,96 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
       "Front edge inferred from lot shape only (no street or address reference) — orientation is approximate.";
   }
 
-  const labeled = labelFromFront(edges, front.index);
+  let cornerIdx: number | null = null;
+  let cornerLot = false;
+  let cornerUnresolved = false;
+  if (signal === "road" && candidates.length) {
+    const second = secondNamedStreetEdge(
+      edges,
+      candidates,
+      front.index,
+      primaryRoadName,
+    );
+    if (second) {
+      cornerIdx = second.index;
+      cornerLot = true;
+      note =
+        note.replace(/\.$/, "") +
+        ". Corner lot: second named street frontage resolved; " +
+        "corner-side setback applied";
+      front = {
+        index: front.index,
+        confidence: Math.min(front.confidence, 0.85),
+      };
+    } else if (namedRoadsTouchingParcel(edges, candidates) >= 2) {
+      // Suggests a corner but second frontage did not resolve — honest decline
+      // of corner geometry (still label as single-front; disclose).
+      cornerUnresolved = true;
+      note =
+        note.replace(/\.$/, "") +
+        ". Possible corner lot — second named street frontage unresolved; " +
+        "corner-side setback not applied (honest absence, not fabricated).";
+      front = {
+        index: front.index,
+        confidence: Math.min(front.confidence, 0.65),
+      };
+    }
+  }
+
+  const labeled = labelFromFront(edges, front.index, cornerIdx);
   return {
     edges: labeled,
     signal,
     confidence: front.confidence,
     note,
+    ...(cornerLot ? { cornerLot: true } : {}),
+    ...(cornerUnresolved ? { cornerUnresolved: true } : {}),
   };
 }
 
+export type InsetSetbacks = {
+  front_ft: number;
+  side_ft: number;
+  rear_ft: number;
+  side_corner_ft?: number;
+  /** When true for an axis, that axis insets 0 (silence ≠ zero entitlement). */
+  not_specified?: {
+    front?: boolean;
+    side?: boolean;
+    rear?: boolean;
+    side_corner?: boolean;
+  };
+};
+
 /**
  * Compose the per-edge setback (feet) array the geometry core consumes, from a
- * labeling and the district's front/side/rear feet. Aligned to the same
- * opened+CCW ring order (projectRing) as insetPerEdge expects.
+ * labeling and the district's front/side/rear(/corner) feet. Aligned to the
+ * same opened+CCW ring order (projectRing) as insetPerEdge expects.
+ * not_specified axes inset 0 and must not be treated as real zero setbacks by
+ * callers when grading empty/consume-lot.
  */
 export function insetFeetForLabeling(
   labeling: EdgeLabelingResult,
-  setbacks: { front_ft: number; side_ft: number; rear_ft: number },
+  setbacks: InsetSetbacks,
 ): number[] {
+  const ns = setbacks.not_specified;
+  const frontFt = ns?.front ? 0 : setbacks.front_ft;
+  const sideFt = ns?.side ? 0 : setbacks.side_ft;
+  const rearFt = ns?.rear ? 0 : setbacks.rear_ft;
+  // Street-side on the corner edge: prefer side_corner when specified; else
+  // the primary street-side (front) — never invent a value when both silent.
+  let cornerFt = frontFt;
+  if (!ns?.side_corner && typeof setbacks.side_corner_ft === "number") {
+    cornerFt = setbacks.side_corner_ft;
+  } else if (ns?.side_corner && !ns?.front) {
+    cornerFt = frontFt;
+  } else if (ns?.side_corner && ns?.front) {
+    cornerFt = 0;
+  }
   return labeling.edges.map((e) => {
-    if (e.label === "front") return setbacks.front_ft;
-    if (e.label === "rear") return setbacks.rear_ft;
-    return setbacks.side_ft;
+    if (e.label === "front") return frontFt;
+    if (e.label === "rear") return rearFt;
+    if (e.label === "side_corner") return cornerFt;
+    return sideFt;
   });
 }
