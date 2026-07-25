@@ -33,6 +33,11 @@ import {
 } from "express";
 import { z } from "zod";
 import {
+  getSetbackTableForZoning,
+  type SetbackTable,
+} from "@workspace/adapters";
+import { keyFromEngagementOrSynthesize } from "@workspace/codes";
+import {
   wrapEngineEnvelope,
   type EngineHonesty,
 } from "../../../../lib/engine-core/src/envelope";
@@ -62,6 +67,18 @@ import {
 } from "../lib/brokerageTxParcels";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
+import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
+import {
+  labelEdges,
+  type RoadCandidate,
+} from "../lib/buildableEnvelope/edgeLabeling";
+import { mapDistrict } from "../lib/buildableEnvelope/districtMapping";
+import { fetchNearbyRoads } from "../lib/buildableEnvelope/roads";
+import {
+  resolveSpineZoningWhenGisAbsent,
+  spineZoningProvenanceNote,
+  type SpineZoningResolution,
+} from "../lib/buildableEnvelope/spineZoningDistrict";
 import type { Ring } from "../lib/buildableEnvelope/geometry";
 
 export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
@@ -130,13 +147,30 @@ async function tryServeAtomChainEnvelope(args: {
 
   const outcome = chain.buildableEnvelope.outcome;
   const rule = chain.setbackRule;
-  const absenceKind = chain.zoningFact?.absence?.kind;
-  const district =
+  let absenceKind = chain.zoningFact?.absence?.kind;
+  let district =
     typeof chain.zoningFact?.district === "string"
       ? chain.zoningFact.district
       : typeof rule?.districtCode === "string"
         ? rule.districtCode
         : null;
+  let spineProvenance: SpineZoningResolution | null = null;
+
+  const gisZoningBlank =
+    !parcel.zoningCode || !String(parcel.zoningCode).trim();
+  if (
+    gisZoningBlank &&
+    (!district || absenceKind === "no-zoning-stamp")
+  ) {
+    spineProvenance = await resolveSpineZoningWhenGisAbsent(
+      parcelNodeId,
+      parcel.zoningCode,
+    );
+    if (spineProvenance) {
+      district = spineProvenance.district;
+      absenceKind = undefined;
+    }
+  }
   const estimate =
     chain.buildableEnvelope.readContract?.axes?.assertedConfidence?.estimate;
   const confidenceValue =
@@ -152,10 +186,14 @@ async function tryServeAtomChainEnvelope(args: {
     dataVintage: new Date().toISOString().slice(0, 10),
     coverage: {
       degraded: true,
-      reason: "Served from property atom-chain readContract (not cortex multiply).",
+      reason: spineProvenance
+        ? spineZoningProvenanceNote(spineProvenance)
+        : "Served from property atom-chain readContract (not cortex multiply).",
     },
     source: {
-      adapter: "brokerage:buildable-envelope:atom-chain",
+      adapter: spineProvenance
+        ? `brokerage:buildable-envelope:atom-chain+${spineProvenance.source}`
+        : "brokerage:buildable-envelope:atom-chain",
       citationIds: [],
     },
   };
@@ -958,8 +996,7 @@ async function deriveAndRespond(args: {
   skipRoad: boolean;
   log: typeof logger;
 }): Promise<void> {
-  const { res, ctx, parcelGeo } = args;
-  void args.skipRoad;
+  const { res, ctx, parcelGeo, skipRoad } = args;
   const parcel = firstParcelRing(parcelGeo.geojson);
   if (!parcel) {
     // The query succeeded but returned no usable polygon at this point.
@@ -997,47 +1034,277 @@ async function deriveAndRespond(args: {
   });
   if (atomServed) return;
 
-  const absentZoning = !parcel.zoningCode || !String(parcel.zoningCode).trim();
-  const declineReason = absentZoning
-    ? NO_ZONING_STAMP_REASON
-    : "atom_path_pending";
+  const gisZoning = (parcel.zoningCode ?? "").trim();
+  const spineZoning = gisZoning
+    ? null
+    : await resolveSpineZoningWhenGisAbsent(parcelNodeIdValue, parcel.zoningCode);
+
+  if (!gisZoning && !spineZoning) {
+    const honesty: EngineHonesty = {
+      confidence: { value: 0, kind: "asserted" },
+      dataVintage: new Date().toISOString().slice(0, 10),
+      coverage: {
+        degraded: true,
+        reason:
+          "No zoning stamp on this parcel — honest absence; no district invented.",
+      },
+      source: {
+        adapter: "brokerage:buildable-envelope",
+        citationIds: [],
+      },
+    };
+
+    res.status(200).json(
+      withPlace(
+        {
+          status: "declined",
+          declineReason: NO_ZONING_STAMP_REASON,
+          layer: "buildable-envelope",
+          parcel_node_id: parcelNodeIdValue,
+          ...wrapEngineEnvelope(
+            {
+              geojson: {
+                type: "FeatureCollection",
+                features: [],
+              },
+              district: null,
+              approximate: true,
+              empty: true,
+              citationUrl: "",
+              parcel: {
+                apn: parcel.apn,
+                situsAddress: parcel.situsAddress,
+                zoningCode: parcel.zoningCode,
+                parcel_node_id: parcelNodeIdValue,
+                provider: parcelGeo.provider ?? null,
+                notSurveyGrade: true,
+              },
+            },
+            honesty,
+          ),
+          readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  if (gisZoning && !spineZoning) {
+    const honesty: EngineHonesty = {
+      confidence: { value: 0, kind: "asserted" },
+      dataVintage: new Date().toISOString().slice(0, 10),
+      coverage: {
+        degraded: true,
+        reason:
+          "Buildable envelope product path is the property atom chain. Cortex multiply path retired (anti-zombie).",
+      },
+      source: {
+        adapter: "brokerage:buildable-envelope",
+        citationIds: [],
+      },
+    };
+
+    res.status(200).json(
+      withPlace(
+        {
+          status: "declined",
+          declineReason: "atom_path_pending",
+          layer: "buildable-envelope",
+          parcel_node_id: parcelNodeIdValue,
+          ...wrapEngineEnvelope(
+            {
+              geojson: {
+                type: "FeatureCollection",
+                features: [],
+              },
+              district: null,
+              approximate: true,
+              empty: true,
+              citationUrl: "",
+              parcel: {
+                apn: parcel.apn,
+                situsAddress: parcel.situsAddress,
+                zoningCode: parcel.zoningCode,
+                parcel_node_id: parcelNodeIdValue,
+                provider: parcelGeo.provider ?? null,
+                notSurveyGrade: true,
+              },
+            },
+            honesty,
+          ),
+          readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  await deriveGeometryFromSpineZoning({
+    res,
+    ctx,
+    parcel,
+    parcelGeo,
+    skipRoad,
+    spineZoning: spineZoning!,
+    parcelNodeId: parcelNodeIdValue,
+  });
+}
+
+/**
+ * Geometry-only derive when GIS `zoningCode` is absent but the spine (baked
+ * facets or atom-chain zoningFact) carries a district. Product confidence
+ * stays asserted baseline — never cortex multiply.
+ */
+async function deriveGeometryFromSpineZoning(args: {
+  res: Response;
+  ctx: EnvelopeContext;
+  parcel: {
+    apn: string | null;
+    situsAddress: string | null;
+    zoningCode: string | null;
+    parcelNodeId: string | null;
+    ring: Ring;
+  };
+  parcelGeo: { geojson: unknown; provider: string | null };
+  skipRoad: boolean;
+  spineZoning: SpineZoningResolution;
+  parcelNodeId: string | null;
+}): Promise<void> {
+  const { res, ctx, parcel, parcelGeo, skipRoad, spineZoning, parcelNodeId } =
+    args;
+
+  const situsCityState = cityStateFromSitus(parcel.situsAddress);
+  const jurisdictionKey = keyFromEngagementOrSynthesize({
+    jurisdictionCity: ctx.city ?? situsCityState.city,
+    jurisdictionState: ctx.state ?? situsCityState.state,
+    address: ctx.address ?? undefined,
+  });
+  const effectiveZoningCode = spineZoning.district;
+  const table: SetbackTable | null = jurisdictionKey
+    ? getSetbackTableForZoning(jurisdictionKey, effectiveZoningCode)
+    : null;
+  if (!table) {
+    res.status(404).json(
+      withPlace(
+        {
+          status: "no-setbacks",
+          reason:
+            "No codified setback table for this jurisdiction yet, so a buildable envelope can't be derived.",
+          jurisdictionKey: jurisdictionKey ?? null,
+          parcel_node_id: parcelNodeId,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+  if (!table.districts.length) {
+    res.status(200).json(
+      withPlace(
+        {
+          status: "pending",
+          reason:
+            table.note ??
+            "Setback table for this jurisdiction is pending onboarding.",
+          jurisdictionKey,
+          parcel_node_id: parcelNodeId,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  const district = mapDistrict(table, effectiveZoningCode);
+  if (!district || district.kind === "fallback-conservative") {
+    res.status(404).json(
+      withPlace(
+        {
+          status: "no-district",
+          reason:
+            "Spine zoning district did not match a setback table row (not invented).",
+          parcel_node_id: parcelNodeId,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  const hasPoint = ctx.hasPoint !== false;
+  let roads: RoadCandidate[] = [];
+  if (!skipRoad && hasPoint) {
+    roads = await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng });
+  }
+  const labeling = labelEdges({
+    ring: parcel.ring,
+    roads,
+    refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
+    situsAddress: parcel.situsAddress,
+  });
+  if (!labeling) {
+    res.status(422).json(
+      withPlace(
+        {
+          status: "ungeometric-parcel",
+          reason: "Parcel geometry is not a usable polygon for envelope derivation.",
+          parcel_node_id: parcelNodeId,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  const derived = deriveBuildableEnvelope({
+    ring: parcel.ring,
+    table,
+    district,
+    labeling,
+  });
+
+  const provenanceNote = spineZoningProvenanceNote(spineZoning);
   const honesty: EngineHonesty = {
     confidence: { value: 0, kind: "asserted" },
     dataVintage: new Date().toISOString().slice(0, 10),
     coverage: {
       degraded: true,
-      reason: absentZoning
-        ? "No zoning stamp on this parcel â€” honest absence; no district invented."
-        : "Buildable envelope product path is the property atom chain. Cortex multiply path retired (anti-zombie).",
+      reason: derived.approximate
+        ? `${provenanceNote} Geometry approximate — verify with survey + city.`
+        : provenanceNote,
     },
     source: {
-      adapter: "brokerage:buildable-envelope",
-      citationIds: [],
+      adapter: `brokerage:buildable-envelope:spine-${spineZoning.source}`,
+      citationIds: derived.citationUrl ? [derived.citationUrl] : [],
     },
   };
+
+  const wireStatus = derived.empty ? "no-buildable-area" : "ok";
 
   res.status(200).json(
     withPlace(
       {
-        status: "declined",
-        declineReason,
+        status: wireStatus,
         layer: "buildable-envelope",
-        parcel_node_id: parcelNodeIdValue,
+        parcel_node_id: parcelNodeId,
+        spineZoningSource: spineZoning.source,
+        effectiveZoningCode,
         ...wrapEngineEnvelope(
           {
-            geojson: {
-              type: "FeatureCollection",
-              features: [],
-            },
-            district: null,
-            approximate: true,
-            empty: true,
-            citationUrl: "",
+            geojson: derived.geojson,
+            district: derived.district,
+            approximate: derived.approximate,
+            empty: derived.empty,
+            citationUrl: derived.citationUrl,
             parcel: {
               apn: parcel.apn,
               situsAddress: parcel.situsAddress,
               zoningCode: parcel.zoningCode,
-              parcel_node_id: parcelNodeIdValue,
+              effectiveZoningCode,
+              spineZoningSource: spineZoning.source,
+              parcel_node_id: parcelNodeId,
               provider: parcelGeo.provider ?? null,
               notSurveyGrade: true,
             },

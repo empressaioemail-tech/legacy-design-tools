@@ -268,6 +268,18 @@ vi.mock("../lib/buildableEnvelope/roads", async () => {
   };
 });
 
+const resolveSpineZoningWhenGisAbsentMock = vi.hoisted(() => vi.fn());
+vi.mock("../lib/buildableEnvelope/spineZoningDistrict", () => ({
+  resolveSpineZoningWhenGisAbsent: resolveSpineZoningWhenGisAbsentMock,
+  spineZoningProvenanceNote: (resolution: {
+    district: string;
+    source: string;
+    snapshotAt?: string | null;
+  }) =>
+    `Zoning district ${resolution.district} read from baked node-facet snapshot` +
+    ` (GIS parcel.zoningCode absent; not invented).`,
+}));
+
 const { setupRouteTests } = await import("./setup");
 const { resetBrokerageApiKeysForTests } = await import(
   "../middlewares/brokerageAuth"
@@ -305,6 +317,8 @@ beforeEach(() => {
   byPropIdResult = null;
   geocodeOverride = null;
   geocodeMiss = false;
+  resolveSpineZoningWhenGisAbsentMock.mockReset();
+  resolveSpineZoningWhenGisAbsentMock.mockResolvedValue(null);
 });
 
 describe("POST /place/buildable-envelope", () => {
@@ -330,6 +344,26 @@ describe("POST /place/buildable-envelope", () => {
     expect(res.body.status).toBe("declined");
     expect(res.body.declineReason).toBe("no-zoning-stamp");
     expect(res.body.payload.approximate).toBe(true);
+  });
+
+  it("derives from baked P-5 when GIS zoningCode is null (R0.2)", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = "48021:33512";
+    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+      district: "P-5",
+      source: "baked-snapshot",
+      snapshotAt: "2026-07-20T12:00:00.000Z",
+    });
+    const res = await post({ address: "714 Spring St, Bastrop, TX 78602" });
+    expect(res.status).toBe(200);
+    expect(res.body.declineReason).not.toBe("no-zoning-stamp");
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.spineZoningSource).toBe("baked-snapshot");
+    expect(res.body.effectiveZoningCode).toBe("P-5");
+    expect(res.body.payload.district).toBeTruthy();
+    expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
+    expect(res.body.coverage.reason).toContain("baked node-facet snapshot");
+    expect(res.body.coverage.reason).toContain("not invented");
   });
 
   it("still resolves a parcel for an unknown jurisdiction (decline, not invent)", async () => {
