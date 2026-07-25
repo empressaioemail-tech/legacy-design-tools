@@ -30,7 +30,7 @@
  * The network fetch of the road lives in roads.ts.
  */
 
-import { openRing, projectRing, type Ring } from "./geometry";
+import { openRing, projectRing, SURVEY_NOISE_THRESHOLD_M, type Ring } from "./geometry";
 
 export type EdgeLabel = "front" | "side" | "rear" | "side_corner";
 
@@ -371,19 +371,41 @@ function frontFromPoint(
 
 /**
  * Pure-shape fallback: for a roughly-rectangular lot the front is a SHORT edge
- * (residential lots are deeper than wide). Pick the shorter of the two shortest
- * edges as the front. LOW confidence.
+ * (residential lots are deeper than wide). Survey-artifact slivers shorter than
+ * SURVEY_NOISE_THRESHOLD_M are ignored; among eligible edges prefer those
+ * perpendicular to the lot's depth axis (longest edge direction).
  */
 function frontFromShape(edges: ProjEdges): { index: number; confidence: number } {
-  let best = 0;
-  let bestLen = Infinity;
-  for (let i = 0; i < edges.edgeLen.length; i++) {
-    if (edges.edgeLen[i]! < bestLen) {
-      bestLen = edges.edgeLen[i]!;
+  const n = edges.edgeLen.length;
+  const eligible: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (edges.edgeLen[i]! >= SURVEY_NOISE_THRESHOLD_M) {
+      eligible.push(i);
+    }
+  }
+
+  const pickFrom = eligible.length > 0 ? eligible : [...Array(n).keys()];
+
+  let depthIdx = pickFrom[0]!;
+  for (const i of pickFrom) {
+    if (edges.edgeLen[i]! > edges.edgeLen[depthIdx]!) depthIdx = i;
+  }
+  const depthDir = edges.edgeDir[depthIdx]!;
+
+  let best = pickFrom[0]!;
+  let bestScore = Infinity;
+  for (const i of pickFrom) {
+    const dir = edges.edgeDir[i]!;
+    const par = absCosBetween(depthDir.x, depthDir.y, dir.x, dir.y);
+    const score = edges.edgeLen[i]! * (0.35 + par);
+    if (score < bestScore) {
+      bestScore = score;
       best = i;
     }
   }
-  return { index: best, confidence: 0.35 };
+
+  const confidence = eligible.length > 0 ? 0.35 : 0.25;
+  return { index: best, confidence };
 }
 
 /**

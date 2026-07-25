@@ -51,6 +51,7 @@
     "geotiff": "^2.1.4-beta.0",
     "google-auth-library": "^10.6.2",
     "pdf-lib": "^1.17.1",
+    "polygon-clipping": "^0.15.7",
     "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10",
