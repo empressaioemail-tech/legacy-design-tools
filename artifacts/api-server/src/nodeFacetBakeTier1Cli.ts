@@ -105,6 +105,11 @@ import {
 } from "./lib/nodeFacetBakeTier1";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants";
 import { resolveZoningJurisdiction } from "@workspace/cad-ingest/zoning-layers";
+import {
+  resolveZoningLayerForDistrict,
+  zoningProvenanceFromLayer,
+  type ZoningGisProvenance,
+} from "./lib/zoningProvenance";
 
 const { Pool } = pg;
 
@@ -383,6 +388,12 @@ export interface Tier1FacetPayload {
     district: string;
     /** Hyphen or underscore cityKey from PIP stamp / situs fallback. */
     jurisdictionKey?: string | null;
+    /**
+     * GIS origin for the district FACT (ZONING_LAYERS layer). Required when
+     * district is present — breadth bake is a TRANSFORM, not the source
+     * (COMPLETE-BASTROP A1 / S-01/S-02).
+     */
+    provenance?: ZoningGisProvenance;
   } | null;
   envelope: Tier1EnvelopeFacet | null;
   /**
@@ -422,6 +433,11 @@ export interface Tier1FacetPayload {
      * `shouldPromote`.
      */
     landUseGateBlocked: boolean;
+    /**
+     * Top-level twin of zoning.provenance.sourceUrl when a district is
+     * present (COMPLETE-BASTROP A1). Null when zoning is honestly absent.
+     */
+    zoningSource: string | null;
   };
   bakedAt: string;
 }
@@ -614,8 +630,31 @@ export function buildTier1Payload(
   const jurisdictionFacetKey = resolvedCityKey
     ? resolvedCityKey.replace(/-/g, "_")
     : null;
+  // GIS provenance when a district is present (A1). Prefer PIP/situs cityKey;
+  // sole wired layer for the county is the fallback when zj was never written
+  // (Bastrop mold: bastrop-city-tx). Multi-city + no key → no invent.
+  const zoningLayer = zoningDistrict
+    ? resolveZoningLayerForDistrict({
+        resolvedCityKey,
+        countyFips,
+      })
+    : null;
+  const zoningGisProvenance = zoningLayer
+    ? zoningProvenanceFromLayer(zoningLayer, nowIso)
+    : undefined;
+  // Prefer the layer's hyphen cityKey for jurisdiction when sole-layer
+  // fallback filled a missing stamp (keeps setback routing on ZONING_LAYERS).
+  const jurisdictionFromLayer = zoningLayer
+    ? zoningLayer.cityKey.replace(/-/g, "_")
+    : null;
+  const effectiveJurisdictionKey =
+    jurisdictionFacetKey ?? jurisdictionFromLayer;
   const zoning = zoningDistrict
-    ? { district: zoningDistrict, jurisdictionKey: jurisdictionFacetKey }
+    ? {
+        district: zoningDistrict,
+        jurisdictionKey: effectiveJurisdictionKey,
+        ...(zoningGisProvenance ? { provenance: zoningGisProvenance } : {}),
+      }
     : null;
 
   const envelope: Tier1EnvelopeFacet | null = ring
@@ -625,7 +664,7 @@ export function buildTier1Payload(
         situsCity: baseFacts.situsCity,
         situsState: baseFacts.situsState,
         situsAddress: baseFacts.situsAddress,
-        zoningJurisdictionFallback: jurisdictionFacetKey,
+        zoningJurisdictionFallback: effectiveJurisdictionKey,
       })
     : null;
 
@@ -660,6 +699,7 @@ export function buildTier1Payload(
         "(anti-zombie / atom_path_pending) — read envelope from property atom " +
         "chain. Tier 2 may still carry flood overlay.",
       landUseGateBlocked,
+      zoningSource: zoningGisProvenance?.sourceUrl ?? null,
     },
     bakedAt: nowIso,
   };
