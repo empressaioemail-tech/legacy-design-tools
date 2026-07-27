@@ -205,6 +205,61 @@ describe("honest absence (never fabricate a facet)", () => {
     expect(payload.facetCoverage.zoning).toBe(true);
   });
 
+  it("Bastrop district carries AGOL zoning.provenance + provenance.zoningSource (A1)", () => {
+    const payload = buildTier1Payload(
+      parcelRow({
+        zoning_district: "P-5",
+        zoning_jurisdiction: "bastrop-city-tx",
+        prop_id: "33512",
+      }),
+      "48021",
+      "Bastrop",
+      new Map(),
+      now,
+    )!;
+    expect(payload.zoning?.district).toBe("P-5");
+    expect(payload.zoning?.provenance).toEqual({
+      sourceUrl:
+        "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoning_Place_Type/FeatureServer/0",
+      codeField: "PlaceTypeClass",
+      cityKey: "bastrop-city-tx",
+      layerName: "Zoning_Place_Type",
+      stampedAt: now,
+    });
+    expect(payload.provenance.zoningSource).toBe(
+      payload.zoning?.provenance?.sourceUrl,
+    );
+  });
+
+  it("Bastrop district without zj still gets sole-layer AGOL provenance (A1)", () => {
+    const payload = buildTier1Payload(
+      parcelRow({
+        zoning_district: "P-3",
+        zoning_jurisdiction: null,
+        prop_id: "28286",
+      }),
+      "48021",
+      "Bastrop",
+      new Map(),
+      now,
+    )!;
+    expect(payload.zoning?.provenance?.cityKey).toBe("bastrop-city-tx");
+    expect(payload.zoning?.provenance?.codeField).toBe("PlaceTypeClass");
+    expect(payload.provenance.zoningSource).toContain("Zoning_Place_Type");
+  });
+
+  it("null zoning leaves provenance.zoningSource null", () => {
+    const payload = buildTier1Payload(
+      parcelRow({ zoning_district: null }),
+      "48021",
+      "Bastrop",
+      new Map(),
+      now,
+    )!;
+    expect(payload.zoning).toBeNull();
+    expect(payload.provenance.zoningSource).toBeNull();
+  });
+
   it("land-use joins on the bare-numeric key for a REAL county (Bastrop)", () => {
     // TxGIO prop_id "012345" (leading zeros) joins a cad row keyed "12345".
     const lu = new Map([["12345", { landUseCode: "A1", landUseVintage: "2025" }]]);
