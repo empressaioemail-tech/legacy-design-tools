@@ -679,8 +679,22 @@ export async function queryGisLayerGeoJson(input: {
           disclaimer: txCountyDisclaimer(county),
         };
       }
+
+      // COTALITY DECOMMISSION: Cotality is extinguished (parcels migrate to the
+      // uniform public-record path). In county-gis mode a point that resolves
+      // to NO supported county is an honest "no parcel here" — decline with a
+      // named no-coverage error (the envelope handler maps this to a 404), NEVER
+      // fall through to the dead-keyed Cotality Spatial Tile (which 502'd on an
+      // "invalid client identifier" OAuth). Do not reintroduce Cotality/Regrid.
+      throw new AdapterRunError(
+        "no-coverage",
+        "No supported county parcel service covers this point (Cotality decommissioned; no public-record parcel provider for this location).",
+      );
     }
 
+    // TX_PARCEL_PROVIDER=off only: the county path is explicitly disabled. The
+    // Cotality branch is retained solely as the off-mode escape hatch and is not
+    // reached in normal (default county-gis) operation.
     const result = await queryCotalityParcelsGeoJson({
       bbox,
       latitude: input.latitude,
