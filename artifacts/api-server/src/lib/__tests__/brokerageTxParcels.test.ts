@@ -691,7 +691,37 @@ describe("dispatcher routing (queryGisLayerGeoJson parcels branch)", () => {
     expect(urls.some((u) => u.includes("maps.co.bastrop.tx.us"))).toBe(false);
   });
 
-  it("out-of-coverage bbox flows to the Cotality branch unchanged", async () => {
+  it("COTALITY DECOMMISSION: out-of-coverage bbox declines honestly (no-coverage), never calls Cotality", async () => {
+    // Cotality is extinguished (parcels migrate to the uniform public-record /
+    // county-GIS path). In the default county-gis mode a point/bbox that lands
+    // in no supported county is an honest "no parcel here" — it MUST throw a
+    // named no-coverage AdapterRunError (which the envelope handler maps to a
+    // 404), and MUST NOT reach the dead-keyed Cotality Spatial Tile (which 502'd
+    // on an "invalid client identifier" OAuth). The fetch spy fails the test if
+    // any Cotality/OAuth call is made.
+    process.env.COTALITY_SPATIALTILE_KEY = "test-key";
+    process.env.COTALITY_SPATIALTILE_SECRET = "test-secret";
+    const fetchSpy = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/oauth/token") || url.includes("cotality")) {
+        throw new Error(`Cotality must not be called after decommission: ${url}`);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(
+      queryGisLayerGeoJson({
+        layer: "parcels",
+        bbox: BBOXES.moabUt,
+      }),
+    ).rejects.toMatchObject({ code: "no-coverage" });
+  });
+
+  it("TX_PARCEL_PROVIDER=off ONLY: out-of-coverage still reaches the Cotality escape hatch", async () => {
+    // The off-mode escape hatch is retained (explicit opt-out of county-gis).
+    // Only in this mode does an out-of-coverage bbox reach Cotality.
+    process.env.TX_PARCEL_PROVIDER = "off";
     process.env.COTALITY_SPATIALTILE_KEY = "test-key";
     process.env.COTALITY_SPATIALTILE_SECRET = "test-secret";
     const fetchSpy = vi.fn(async (input: string | URL) => {
