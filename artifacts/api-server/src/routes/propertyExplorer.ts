@@ -19,6 +19,7 @@ import {
   resolvePeEntitlement,
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
+import { requireServiceToken } from "../middlewares/serviceAuth";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
   isValidParcelNodeId,
@@ -345,6 +346,79 @@ router.delete(
       return;
     }
     res.json({ ok: true });
+  },
+);
+
+/**
+ * Service-key single-row dossier read for the anonymous share view.
+ *
+ * The PE BFF (holds CORTEX_SERVICE_API_KEY) validates an HMAC share token
+ * minted by the sharer (single parcel, expiry- and entitlement-gated at
+ * mint), then calls this route server-side to fetch the SHARER's saved
+ * dossier (drawings GeoJSON, chat summary, notes in `snapshot`) for the
+ * share view. The owner scope (tenantId + ownerUserId) comes from the
+ * token minted at share time, never from a session.
+ *
+ * Guard: {@link requireServiceToken} — `Authorization: Bearer
+ * <SERVICE_API_KEY>` only. Session auth is never accepted here; without a
+ * valid service bearer the route 401s before any query runs. Exactly one
+ * (tenantId, ownerUserId, parcelNodeId) row is addressable per call; there
+ * is no list mode and no wildcarding (all three params are required and
+ * shape-checked; duplicate query params are rejected by the string schema).
+ * The body echoes only what was queried (parcelNodeId) plus the sharer's
+ * own content for that parcel — no owner identifiers.
+ */
+const ShareDossierQuerySchema = z.object({
+  tenantId: z.string().trim().min(1).max(128),
+  ownerUserId: z.string().trim().min(1).max(128),
+  parcelNodeId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .refine(isValidParcelNodeId, { message: "invalid parcelNodeId" }),
+});
+
+router.get(
+  "/property-explorer/v1/internal/share-dossier",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const parsed = ShareDossierQuerySchema.safeParse({
+      tenantId: req.query.tenantId,
+      ownerUserId: req.query.ownerUserId,
+      parcelNodeId: req.query.parcelNodeId,
+    });
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const { tenantId, ownerUserId, parcelNodeId } = parsed.data;
+    const rows = await db
+      .select({
+        label: peSavedProperties.label,
+        snapshot: peSavedProperties.snapshot,
+        updatedAt: peSavedProperties.updatedAt,
+      })
+      .from(peSavedProperties)
+      .where(
+        and(
+          eq(peSavedProperties.tenantId, tenantId),
+          eq(peSavedProperties.ownerUserId, ownerUserId),
+          eq(peSavedProperties.parcelNodeId, parcelNodeId),
+        ),
+      )
+      .limit(1);
+    const row = rows[0];
+    if (!row) {
+      res.status(404).json({ error: "saved_property_not_found" });
+      return;
+    }
+    res.json({
+      parcelNodeId,
+      label: row.label,
+      updatedAt: row.updatedAt,
+      snapshot: row.snapshot,
+    });
   },
 );
 
