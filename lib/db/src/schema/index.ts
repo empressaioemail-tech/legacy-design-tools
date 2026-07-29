@@ -80,3 +80,5 @@ export * from "./terrainGenerationJobs";
 export * from "./peUserIdentities";
 export * from "./peUserEntitlements";
 export * from "./peSavedProperties";
+export * from "./pePropertyUnlocks";
+export * from "./peChatMessageCounts";

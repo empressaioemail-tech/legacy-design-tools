@@ -172,6 +172,11 @@ describe("lib/db schema integration", () => {
         "package_share_comments",
         "package_shares",
         "parcel_briefings",
+        // R1 paywall (LOCK 2026-07-29) — signed-in-free chat counter +
+        // per-property unlock record. Listed alphabetically to match
+        // `ORDER BY tablename`.
+        "pe_chat_message_counts",
+        "pe_property_unlocks",
         "pe_saved_properties",
         "pe_user_entitlements",
         "pe_user_identities",
