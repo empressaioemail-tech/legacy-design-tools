@@ -43,6 +43,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "pe_user_identities",
   "pe_user_entitlements",
   "pe_saved_properties",
+  // R1 paywall (LOCK 2026-07-29) — per-property unlock record + signed-in
+  // free chat counter. Both cascade off `users`, but listed explicitly per
+  // the "if a route writes to it, it's in this list" invariant so the
+  // property-entitlement suite starts from a known-empty state.
+  "pe_property_unlocks",
+  "pe_chat_message_counts",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",
