@@ -492,7 +492,10 @@ const DevUnlockBodySchema = z.object({
  * `source: "stripe"`; this route is the interface proof, not the payment.
  */
 router.post(
-  "/property-explorer/v1/internal/dev-unlock",
+  // Both paths serve the same handler: the PE client's stub seam calls
+  // /entitlement/dev-unlock (pinned in PE PR #110); /internal/dev-unlock is
+  // the operator-support alias.
+  ["/property-explorer/v1/entitlement/dev-unlock", "/property-explorer/v1/internal/dev-unlock"],
   requirePeAuthenticated,
   async (req: Request, res: Response) => {
     const callerUserId = resolvePeOwnerUserId(req);

@@ -324,6 +324,14 @@ describe("dev-unlock stub writer", () => {
     expect(res.status).toBe(401);
   });
 
+  it("serves the PE-pinned alias path /entitlement/dev-unlock (same guard)", async () => {
+    // PE PR #110's stub seam calls this exact path; both paths share the handler.
+    const res = await request(getApp())
+      .post("/api/property-explorer/v1/entitlement/dev-unlock")
+      .send({ parcelNodeId: PARCEL });
+    expect(res.status).toBe(401);
+  });
+
   it("rejects authenticated users without the dev bypass", async () => {
     const res = await asUser(
       request(getApp())
