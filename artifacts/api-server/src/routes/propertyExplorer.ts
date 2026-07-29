@@ -9,8 +9,13 @@ import { z } from "zod/v4";
 import { and, desc, eq } from "drizzle-orm";
 import { db, peSavedProperties } from "@workspace/db";
 import {
+  PE_FREE_CHAT_MESSAGE_LIMIT,
+  createPePropertyUnlock,
+  getPeFreeChatMessagesUsed,
+  hasPeDevPaidBypass,
+  isPePropertyEntitled,
   requirePeAuthenticated,
-  requirePePaidDeep,
+  requirePePaidOrPropertyUnlocked,
   resolvePeEntitlement,
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
@@ -186,13 +191,45 @@ function ownerScope(req: Request): { tenantId: string; ownerUserId: string } | n
   };
 }
 
+/**
+ * Entitlement read (R1 pinned contract, LOCK 2026-07-29). With
+ * `?parcelNodeId=` and an authenticated user, adds the property block the
+ * PE BFF consults for per-property gating (site-plan export, locked-bubble
+ * state, chat allowance). Anonymous callers keep today's shape.
+ */
 router.get("/property-explorer/v1/entitlement", async (req: Request, res: Response) => {
   const snap = await resolvePeEntitlement(req);
-  res.json({
+  const base = {
     authenticated: snap.authenticated,
     tier: snap.tier,
     tenantId: snap.tenantId,
     userId: snap.userId,
+  };
+  const parcelNodeIdRaw = req.query.parcelNodeId;
+  const parcelNodeId = (
+    Array.isArray(parcelNodeIdRaw) ? parcelNodeIdRaw[0] : parcelNodeIdRaw
+  );
+  if (!snap.authenticated || !snap.userId || typeof parcelNodeId !== "string" || !parcelNodeId.trim()) {
+    res.json(base);
+    return;
+  }
+  const trimmed = parcelNodeId.trim();
+  if (!isValidParcelNodeId(trimmed)) {
+    res.status(400).json({ error: "invalid_parcel_node_id" });
+    return;
+  }
+  const [unlocked, freeMessagesUsed] = await Promise.all([
+    isPePropertyEntitled(snap.userId, trimmed),
+    getPeFreeChatMessagesUsed(snap.userId, trimmed),
+  ]);
+  res.json({
+    ...base,
+    property: {
+      parcelNodeId: trimmed,
+      unlocked,
+      freeMessagesUsed,
+      freeMessagesLimit: PE_FREE_CHAT_MESSAGE_LIMIT,
+    },
   });
 });
 
@@ -385,11 +422,16 @@ router.get(
   },
 );
 
-/** R1 cited property intelligence from the existing baked node facets. */
+/**
+ * R1 cited property intelligence from the existing baked node facets.
+ * Paid OR property-unlocked (LOCK 2026-07-29) — the parcelNodeId in the
+ * body scopes the unlock check. Terrain is NOT here: terrain export is
+ * gated PE-BFF-side off `/entitlement` tier and stays Pro-only.
+ */
 router.post(
   "/property-explorer/v1/research/brief",
   requirePeAuthenticated,
-  requirePePaidDeep,
+  requirePePaidOrPropertyUnlocked(),
   async (req: Request, res: Response) => {
     const parcelNodeId =
       typeof req.body?.parcelNodeId === "string"
@@ -432,7 +474,7 @@ router.post(
 router.post(
   "/property-explorer/v1/research/hydrology",
   requirePeAuthenticated,
-  requirePePaidDeep,
+  requirePePaidOrPropertyUnlocked(),
   async (req: Request, res: Response) => {
     res.status(503).json({
       error: "spine_degraded",
@@ -446,7 +488,7 @@ router.post(
 router.post(
   "/property-explorer/v1/research/subsurface",
   requirePeAuthenticated,
-  requirePePaidDeep,
+  requirePePaidOrPropertyUnlocked(),
   async (req: Request, res: Response) => {
     res.status(503).json({
       error: "spine_degraded",
@@ -457,11 +499,19 @@ router.post(
   },
 );
 
-/** Layer manifest projected from the same R1 baked snapshot. */
+/**
+ * Layer manifest projected from the same R1 baked snapshot. Same gate as
+ * the brief it belongs to — the parcelNodeId is decoded from the runId so
+ * an unlocked property's manifest never 402s behind its own brief.
+ */
 router.get(
   "/property-explorer/v1/research/layer-manifest/:runId",
   requirePeAuthenticated,
-  requirePePaidDeep,
+  requirePePaidOrPropertyUnlocked((req) => {
+    const runIdRaw = req.params.runId;
+    const runId = (Array.isArray(runIdRaw) ? runIdRaw[0] : runIdRaw)?.trim();
+    return runId ? parcelNodeIdFromR1RunId(runId) : null;
+  }),
   async (req: Request, res: Response) => {
     const runIdRaw = req.params.runId;
     const runId = (Array.isArray(runIdRaw) ? runIdRaw[0] : runIdRaw)?.trim();
@@ -492,6 +542,61 @@ router.get(
       degraded: manifest.degraded,
       ...(manifest.reason ? { reason: manifest.reason } : {}),
       source: "baked-snapshot",
+    });
+  },
+);
+
+const DevUnlockBodySchema = z.object({
+  parcelNodeId: z.string().min(1).max(128),
+  ownerUserId: z.string().min(1).max(128).optional(),
+});
+
+/**
+ * Stub unlock writer — dev/ops path to create a per-property unlock without
+ * payments (LOCK 2026-07-29: gate interface only, NO live charging).
+ *
+ * Guarded exactly like the existing dev paid bypass: identity-bound via the
+ * `PE_DEV_PAID_EMAILS` / `PE_DEV_PAID_SUBJECTS` allowlists and inert when
+ * neither env is configured ({@link hasPeDevPaidBypass} precedent) — never
+ * a request-header check. The caller may unlock for another user
+ * (`ownerUserId`) to support operator support flows.
+ *
+ * The future Stripe one-time checkout flow calls the SAME writer
+ * ({@link createPePropertyUnlock}) from its webhook handler with
+ * `source: "stripe"`; this route is the interface proof, not the payment.
+ */
+router.post(
+  // Both paths serve the same handler: the PE client's stub seam calls
+  // /entitlement/dev-unlock (pinned in PE PR #110); /internal/dev-unlock is
+  // the operator-support alias.
+  ["/property-explorer/v1/entitlement/dev-unlock", "/property-explorer/v1/internal/dev-unlock"],
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const callerUserId = resolvePeOwnerUserId(req);
+    if (!callerUserId || !(await hasPeDevPaidBypass(callerUserId))) {
+      res.status(403).json({ error: "dev_bypass_required" });
+      return;
+    }
+    const parsed = DevUnlockBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const parcelNodeId = parsed.data.parcelNodeId.trim();
+    if (!isValidParcelNodeId(parcelNodeId)) {
+      res.status(400).json({ error: "invalid_parcel_node_id" });
+      return;
+    }
+    const ownerUserId = parsed.data.ownerUserId?.trim() || callerUserId;
+    await createPePropertyUnlock({
+      ownerUserId,
+      tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
+      parcelNodeId,
+      source: "dev",
+    });
+    res.status(201).json({
+      ok: true,
+      unlock: { ownerUserId, parcelNodeId, source: "dev" },
     });
   },
 );

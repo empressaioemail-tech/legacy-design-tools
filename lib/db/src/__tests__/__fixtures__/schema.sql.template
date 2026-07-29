@@ -989,6 +989,27 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: pe_chat_message_counts; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
+    owner_user_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    count integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: pe_property_unlocks; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_property_unlocks (
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    parcel_node_id text NOT NULL,
+    unlocked_at timestamp with time zone DEFAULT now() NOT NULL,
+    source text DEFAULT 'stub'::text NOT NULL
+);
+
+
 -- Name: pe_saved_properties; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_saved_properties (
@@ -2028,6 +2049,18 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
+    ADD CONSTRAINT pe_chat_message_counts_owner_user_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, parcel_node_id);
+
+
+-- Name: pe_property_unlocks pe_property_unlocks_owner_user_id_tenant_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
+    ADD CONSTRAINT pe_property_unlocks_owner_user_id_tenant_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, tenant_id, parcel_node_id);
 
 
 -- Name: pe_saved_properties pe_saved_properties_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3264,6 +3297,18 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
+
+
+-- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
+    ADD CONSTRAINT pe_chat_message_counts_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_property_unlocks pe_property_unlocks_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
+    ADD CONSTRAINT pe_property_unlocks_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

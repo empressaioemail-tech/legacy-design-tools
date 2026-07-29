@@ -143,6 +143,12 @@ import {
   brokerageBriefMeteringMeta,
 } from "../lib/brokerageMetering";
 import { UUID_RE } from "../lib/lSurfaceRoute";
+import {
+  PE_FREE_CHAT_MESSAGE_LIMIT,
+  consumePeFreeChatMessage,
+  isPePropertyEntitled,
+  resolvePeOwnerUserId,
+} from "../lib/peEntitlement";
 import { buildBrokerageBriefProvenanceEnvelope } from "../lib/brokerageProvenanceEnvelope";
 import {
   BRIEF_WEB_SCRAPED_DISCLOSURE,
@@ -205,6 +211,13 @@ const RESEARCH_CHAT_BASE = z.object({
     .default([]),
   presentationMode: presentationModeSchema.optional(),
   areaContext: RESEARCH_AREA_CONTEXT,
+  /**
+   * PE workbench call classification (LOCK 2026-07-29): `"summary"` marks
+   * the WB6 chat-summary call — part of PAID chat, requires the
+   * property-scoped entitlement and never consumes a free message.
+   * Absent / `"chat"` = a normal user chat turn.
+   */
+  purpose: z.enum(["chat", "summary"]).optional(),
   ...starterFields,
 });
 
@@ -1043,6 +1056,7 @@ brokerageV1.post(
             "personaBucket",
             "mls_id",
             "areaContext",
+            "purpose",
           ],
         },
       });
@@ -1056,6 +1070,7 @@ brokerageV1.post(
       starterPromptId,
       personaBucket,
       areaContext,
+      purpose,
       runId: runIdField,
       address: addressField,
       mls_id: mlsIdField,
@@ -1089,6 +1104,69 @@ brokerageV1.post(
         if (!debit.ok) {
           sendBriefUpgradeRequiredResponse(res, debit);
           return;
+        }
+      }
+    } else {
+      // PE-session branch (LOCK 2026-07-29) — signed-in Property Explorer
+      // web user: session bearer, no install id, not the MCP service path.
+      // Server-enforced per-property gate: entitled (Pro / property
+      // unlocked / dev bypass) chats unlimited and uncounted; the free
+      // tier gets PE_FREE_CHAT_MESSAGE_LIMIT server-counted messages per
+      // property. Unauthenticated API-key callers (operator tier) fall
+      // through unchanged; the extension_public and service branches
+      // above are untouched.
+      const peUserId = resolvePeOwnerUserId(req);
+      if (peUserId) {
+        const peParcelNodeId =
+          areaContext?.subject?.parcelNodeId?.trim() || null;
+        let peEntitled = await isPePropertyEntitled(peUserId, peParcelNodeId);
+        if (!peEntitled) {
+          // Regression guard for the install-less web-portal path: an
+          // active brokerage Pro/Max subscription (user-aware across
+          // claimed installs) still counts as paid chat access.
+          const brokerageEnt = await resolveEntitlementSnapshot(req);
+          if (brokerageEnt?.paidActive) peEntitled = true;
+        }
+        if (purpose === "summary") {
+          // WB6 chat-summary is part of PAID chat: requires the
+          // property-scoped entitlement, never consumes a free message.
+          if (!peEntitled) {
+            res.status(402).json({
+              error: "upgrade_required",
+              message:
+                "The property summary is part of paid chat — unlock this property or go Pro.",
+              ...(peParcelNodeId
+                ? { property: { parcelNodeId: peParcelNodeId, unlocked: false } }
+                : {}),
+            });
+            return;
+          }
+        } else if (!peEntitled) {
+          if (!peParcelNodeId) {
+            // Honest wall: without a parcel to meter against there is no
+            // free allowance to spend — never uncounted free usage.
+            res.status(402).json({
+              error: "upgrade_required",
+              message:
+                "Free messages are metered per property and this chat has no property attached — select a property, unlock it, or go Pro.",
+              freeMessagesLimit: PE_FREE_CHAT_MESSAGE_LIMIT,
+            });
+            return;
+          }
+          const consumed = await consumePeFreeChatMessage(
+            peUserId,
+            peParcelNodeId,
+          );
+          if (!consumed.allowed) {
+            res.status(402).json({
+              error: "free_messages_exhausted",
+              message:
+                "Free messages used for this property — unlock it or go Pro.",
+              freeMessagesUsed: consumed.used,
+              freeMessagesLimit: PE_FREE_CHAT_MESSAGE_LIMIT,
+            });
+            return;
+          }
         }
       }
     }
