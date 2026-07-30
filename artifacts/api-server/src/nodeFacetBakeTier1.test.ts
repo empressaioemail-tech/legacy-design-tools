@@ -208,22 +208,22 @@ describe("honest absence (never fabricate a facet)", () => {
   it("Bastrop district carries AGOL zoning.provenance + provenance.zoningSource (A1)", () => {
     const payload = buildTier1Payload(
       parcelRow({
-        zoning_district: "P-5",
+        zoning_district: "SF-1",
         zoning_jurisdiction: "bastrop-city-tx",
-        prop_id: "33512",
+        prop_id: "105054",
       }),
       "48021",
       "Bastrop",
       new Map(),
       now,
     )!;
-    expect(payload.zoning?.district).toBe("P-5");
+    expect(payload.zoning?.district).toBe("SF-1");
     expect(payload.zoning?.provenance).toEqual({
       sourceUrl:
-        "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoning_Place_Type/FeatureServer/0",
-      codeField: "PlaceTypeClass",
+        "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83",
+      codeField: "ZoneTypeClass",
       cityKey: "bastrop-city-tx",
-      layerName: "Zoning_Place_Type",
+      layerName: "Zoned_Parcels",
       stampedAt: now,
     });
     expect(payload.provenance.zoningSource).toBe(
@@ -234,9 +234,9 @@ describe("honest absence (never fabricate a facet)", () => {
   it("Bastrop district without zj still gets sole-layer AGOL provenance (A1)", () => {
     const payload = buildTier1Payload(
       parcelRow({
-        zoning_district: "P-3",
+        zoning_district: "SF-1",
         zoning_jurisdiction: null,
-        prop_id: "28286",
+        prop_id: "105054",
       }),
       "48021",
       "Bastrop",
@@ -244,8 +244,8 @@ describe("honest absence (never fabricate a facet)", () => {
       now,
     )!;
     expect(payload.zoning?.provenance?.cityKey).toBe("bastrop-city-tx");
-    expect(payload.zoning?.provenance?.codeField).toBe("PlaceTypeClass");
-    expect(payload.provenance.zoningSource).toContain("Zoning_Place_Type");
+    expect(payload.zoning?.provenance?.codeField).toBe("ZoneTypeClass");
+    expect(payload.provenance.zoningSource).toContain("Zoned_Parcels");
   });
 
   it("null zoning leaves provenance.zoningSource null", () => {

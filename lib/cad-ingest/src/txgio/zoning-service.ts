@@ -90,6 +90,16 @@ function str(v: unknown): string | null {
 }
 
 /**
+ * Coerce a zoning codeField value to a non-empty string. ArcGIS coded-domain
+ * fields arrive as small integers (Bastrop ZoneTypeClass=3); string fields
+ * (Georgetown ZONE) stay strings. Non-finite numbers / other types → null.
+ */
+function codeFieldRaw(v: unknown): string | null {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return str(v);
+}
+
+/**
  * Apply an optional `codeExtractRegex` to a raw code value. When the config
  * carries no regex, the raw value passes through unchanged (Georgetown path).
  * When it does, the value is matched against `new RegExp(codeExtractRegex)`
@@ -106,9 +116,26 @@ function extractCode(raw: string | null, regex?: string): string | null {
 }
 
 /**
+ * Decode ArcGIS coded-domain ints (etc.) via `codeDomainMap`. When the map is
+ * present, unmapped values become NULL — never stamp a bare `"3"` that the
+ * setback router cannot match as `"SF-1"`.
+ */
+function applyCodeDomainMap(
+  raw: string | null,
+  map: Record<string, string> | undefined,
+): string | null {
+  if (raw === null) return null;
+  if (!map) return raw;
+  const mapped = map[raw];
+  if (typeof mapped !== "string") return null;
+  const t = mapped.trim();
+  return t.length > 0 ? t : null;
+}
+
+/**
  * Reduce a GeoJSON Feature from the zoning layer to the fields the stamp
- * needs. `codeField`/`descriptionField`/`codeExtractRegex` come from the
- * layer config.
+ * needs. `codeField`/`descriptionField`/`codeExtractRegex`/`codeDomainMap`
+ * come from the layer config.
  */
 function isNullDistrictCode(
   code: string | null,
@@ -126,11 +153,16 @@ export function reduceZoningFeature(
     | "codeField"
     | "descriptionField"
     | "codeExtractRegex"
+    | "codeDomainMap"
     | "nullDistrictCodes"
   >,
 ): RawZoningFeature {
   const { properties: props, geometry } = normalizeZoningPageFeature(feature);
-  const code = extractCode(str(props[cfg.codeField]), cfg.codeExtractRegex);
+  const decoded = applyCodeDomainMap(
+    codeFieldRaw(props[cfg.codeField]),
+    cfg.codeDomainMap,
+  );
+  const code = extractCode(decoded, cfg.codeExtractRegex);
   return {
     code: isNullDistrictCode(code, cfg.nullDistrictCodes) ? null : code,
     description: cfg.descriptionField ? str(props[cfg.descriptionField]) : null,
