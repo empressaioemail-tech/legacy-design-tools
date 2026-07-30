@@ -258,6 +258,63 @@ describe("reduceZoningFeature (codeExtractRegex — Hutto parenthesized code)", 
   });
 });
 
+describe("reduceZoningFeature (codeDomainMap — Bastrop ZoneTypeClass)", () => {
+  // Zoned_Parcels/83 ZoneTypeClass is esriFieldTypeSmallInteger. LIVE REST
+  // returns ZoneTypeClass:3 for prop_id 105054 (1010 Jefferson); domain name
+  // is SF-1. Without the map the stamp would write "3" (or null if numbers
+  // were rejected) and the BDC router looking for "SF-1" would miss.
+  const BASTROP_DOMAIN = {
+    "1": "P/OS",
+    "2": "RR",
+    "3": "SF-1",
+    "4": "SF-2",
+    "5": "SF-3",
+    "6": "MU",
+    "7": "GC",
+    "8": "PI",
+    "9": "IND",
+    "10": "PDD",
+  } as const;
+
+  it("decodes LIVE prop_id 105054 ZoneTypeClass=3 to string SF-1", () => {
+    const reduced = reduceZoningFeature(
+      {
+        attributes: {
+          ZoneTypeClass: 3,
+          ZoneDesc:
+            "A district for detached single-family dwelling on larger lots",
+          prop_id: 105054,
+        },
+        geometry: null,
+      },
+      {
+        codeField: "ZoneTypeClass",
+        descriptionField: "ZoneDesc",
+        codeDomainMap: { ...BASTROP_DOMAIN },
+      },
+    );
+    expect(reduced.code).toBe("SF-1");
+    expect(reduced.code).not.toBe("3");
+  });
+
+  it("leaves unmapped domain ints null (never stamps bare 99)", () => {
+    const reduced = reduceZoningFeature(
+      { attributes: { ZoneTypeClass: 99 }, geometry: null },
+      { codeField: "ZoneTypeClass", codeDomainMap: { ...BASTROP_DOMAIN } },
+    );
+    expect(reduced.code).toBeNull();
+  });
+
+  it("without a domain map, integer fields coerce to string (no silent drop)", () => {
+    // Guard: numbers must not become null via string-only str().
+    const reduced = reduceZoningFeature(
+      { attributes: { ZoneTypeClass: 3 }, geometry: null },
+      { codeField: "ZoneTypeClass" },
+    );
+    expect(reduced.code).toBe("3");
+  });
+});
+
 describe("resolveZoningLayer (the 5 newly registered cities)", () => {
   it.each([
     ["round-rock-tx", "Round Rock", "48491", "BASE_ZONIN"],
@@ -294,6 +351,25 @@ describe("resolveZoningLayer (the 5 newly registered cities)", () => {
     expect(resolveZoningLayer("georgetown-tx")!.codeExtractRegex).toBeUndefined();
     // Leander deliberately reads the base Use_ code, not the composite Comp_Use.
     expect(resolveZoningLayer("leander-tx")!.codeField).toBe("Use_");
+  });
+
+  it("wires bastrop-city-tx to Zoned_Parcels/83 ZoneTypeClass + BDC domain map (WDLL 6)", () => {
+    const cfg = resolveZoningLayer("bastrop-city-tx")!;
+    expect(cfg.layerUrl).toBe(
+      "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83",
+    );
+    expect(cfg.codeField).toBe("ZoneTypeClass");
+    expect(cfg.descriptionField).toBe("ZoneDesc");
+    expect(cfg.layerUrl).not.toContain("Zoning_Place_Type");
+    expect(cfg.codeField).not.toBe("PlaceTypeClass");
+    expect(cfg.codeDomainMap?.["3"]).toBe("SF-1");
+    expect(cfg.codeExtractRegex).toBeUndefined();
+    // LIVE-shaped attributes → stamped district string, not integer 3.
+    const reduced = reduceZoningFeature(
+      { attributes: { ZoneTypeClass: 3, prop_id: 105054 }, geometry: null },
+      cfg,
+    );
+    expect(reduced.code).toBe("SF-1");
   });
 });
 

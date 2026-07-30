@@ -76,8 +76,18 @@ export interface ZoningLayerConfig {
    * code (Georgetown has none). Example (Hutto): the field value is
    * "Single Family (SF-1)"; with `codeExtractRegex` = `\(([^)]+)\)` the
    * stamped code is "SF-1", which normalizes to the "SF-1 ..." setback row.
+   * Applied AFTER `codeDomainMap` (when both are set).
    */
   codeExtractRegex?: string;
+  /**
+   * OPTIONAL. Map ArcGIS coded-domain integer (or other raw) values to the
+   * district string that must be stamped. Keys are the string form of the
+   * raw field value (`"3"` for small-integer domain code 3). When present,
+   * only mapped values stamp; unmapped raw codes become NULL (never stamp
+   * a bare `"3"` that the setback router cannot match). Example (Bastrop
+   * Zoned_Parcels/83 `ZoneTypeClass`): `"3"` → `"SF-1"`.
+   */
+  codeDomainMap?: Record<string, string>;
   /**
    * OPTIONAL. Codes that are NOT zoning districts and must never be stamped
    * (left as NULL on the parcel). Example: San Antonio `OCL` (Outside City
@@ -273,21 +283,36 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "BASE_ZONE",
     descriptionField: "BASE_ZONE_CATEGORY",
   },
-  // Bastrop city (Bastrop). A setback table EXISTS (bastrop-tx.json) but it
-  // codifies the OLD conventional code (R-MD/C-1/I-1/DT-1). The LIVE GIS layer
-  // is the B3 FORM-BASED "Place Type" code (P-1..P-5/P-CS/P-EC/PDD) — these do
-  // NOT align with the existing table's tokens. The dedicated bastrop-city-tx
-  // table is cited honest-empty because B3 setbacks are conditional on lot and
-  // frontage context, so the envelope correctly returns no-setbacks rather
-  // than an invented scalar row. First Bastrop-county zoning layer.
+  // Bastrop city (Bastrop). B3 Place Types are REPEALED (Ord. 2026-06 /
+  // 2026-04-14). LIVE law is BDC Euclidean districts. Stamp reads
+  // Zoned_Parcels FeatureServer/83 `ZoneTypeClass` (short coded domain:
+  // 1=P/OS … 3=SF-1 … 10=PDD). Prefer ZoneTypeClass over ZoneType (long
+  // names). Domain ints MUST decode via codeDomainMap — naive stamp of "3"
+  // would miss the BDC router looking for "SF-1". CORRECTION A: this layer
+  // maps parcel→district ONLY; setback NUMBERS come from ordinance text
+  // (Sec. 14.02.003), never GIS card FrontSetback/SideSetback fields.
+  // Abandoned Zoning_Place_Type/0 PlaceTypeClass (P-x) must not be used.
   "bastrop-city-tx": {
     cityKey: "bastrop-city-tx",
     cityName: "Bastrop",
     countyFips: "48021",
     layerUrl:
-      "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoning_Place_Type/FeatureServer/0",
-    codeField: "PlaceTypeClass",
-    descriptionField: "PlaceType",
+      "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83",
+    codeField: "ZoneTypeClass",
+    descriptionField: "ZoneDesc",
+    // LIVE ZoneTypeClass codedValue domain (planner-probed 2026-07-29).
+    codeDomainMap: {
+      "1": "P/OS",
+      "2": "RR",
+      "3": "SF-1",
+      "4": "SF-2",
+      "5": "SF-3",
+      "6": "MU",
+      "7": "GC",
+      "8": "PI",
+      "9": "IND",
+      "10": "PDD",
+    },
   },
   // San Antonio (Bexar). Setback table EXISTS (san-antonio-tx.json, WDLL 51
   // Table 310-1 rows — RE/R-*/RM-*/MF-*/C-1..C-3/O-2/I-1/I-2). GIS `Base`

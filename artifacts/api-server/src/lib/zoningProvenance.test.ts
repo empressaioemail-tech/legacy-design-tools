@@ -1,5 +1,7 @@
 /**
  * Unit tests for zoning GIS provenance helpers (COMPLETE-BASTROP A1).
+ * Bastrop layer repointed 2026-07-29 (WDLL item 6 / BDC STEP 2):
+ * Zoning_Place_Type/0 PlaceTypeClass → Zoned_Parcels/83 ZoneTypeClass.
  */
 
 import { describe, expect, it } from "vitest";
@@ -11,11 +13,11 @@ import {
 } from "./zoningProvenance";
 
 const BASTROP_AGOL =
-  "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoning_Place_Type/FeatureServer/0";
+  "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83";
 
 describe("zoningProvenance (A1)", () => {
-  it("extracts Zoning_Place_Type from AGOL FeatureServer URL", () => {
-    expect(layerNameFromZoningUrl(BASTROP_AGOL)).toBe("Zoning_Place_Type");
+  it("extracts Zoned_Parcels from AGOL FeatureServer URL", () => {
+    expect(layerNameFromZoningUrl(BASTROP_AGOL)).toBe("Zoned_Parcels");
   });
 
   it("resolves bastrop-city-tx from stamped cityKey", () => {
@@ -24,7 +26,7 @@ describe("zoningProvenance (A1)", () => {
       countyFips: "48021",
     });
     expect(layer?.cityKey).toBe("bastrop-city-tx");
-    expect(layer?.codeField).toBe("PlaceTypeClass");
+    expect(layer?.codeField).toBe("ZoneTypeClass");
     expect(layer?.layerUrl).toBe(BASTROP_AGOL);
   });
 
@@ -52,9 +54,9 @@ describe("zoningProvenance (A1)", () => {
     const stampedAt = "2026-07-27T12:00:00.000Z";
     expect(zoningProvenanceFromLayer(layer, stampedAt)).toEqual({
       sourceUrl: BASTROP_AGOL,
-      codeField: "PlaceTypeClass",
+      codeField: "ZoneTypeClass",
       cityKey: "bastrop-city-tx",
-      layerName: "Zoning_Place_Type",
+      layerName: "Zoned_Parcels",
       stampedAt,
     });
   });
