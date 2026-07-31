@@ -132,3 +132,23 @@ export function briefRunAccessibleToCaller(input: {
   }
   return true;
 }
+
+/** Whether a stored workspace may be read/mutated by the current caller. */
+export function workspaceAccessibleToCaller(input: {
+  workspace: { installId: string; ownerUserId: string | null };
+  requestInstallId: string | null;
+  serviceCaller: boolean;
+  ownerUserId: string | null;
+  claimedInstallIds: ReadonlySet<string>;
+}): boolean {
+  return briefRunAccessibleToCaller({
+    run: {
+      installId: input.workspace.installId,
+      ownerUserId: input.workspace.ownerUserId,
+    },
+    requestInstallId: input.requestInstallId,
+    serviceCaller: input.serviceCaller,
+    ownerUserId: input.ownerUserId,
+    claimedInstallIds: input.claimedInstallIds,
+  });
+}

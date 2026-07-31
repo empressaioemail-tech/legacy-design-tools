@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
-import { claimInstallHistoryForUser, briefRunAccessibleToCaller } from "../lib/brokerageInstallClaim";
+import { claimInstallHistoryForUser, briefRunAccessibleToCaller, workspaceAccessibleToCaller } from "../lib/brokerageInstallClaim";
 import { listingKeyFromAddress } from "../lib/brokerageWorkspace";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
@@ -167,6 +167,20 @@ describe("briefRunAccessibleToCaller", () => {
   });
 });
 
+describe("workspaceAccessibleToCaller", () => {
+  it("accepts cross-install workspaces for the signed-in owner", () => {
+    expect(
+      workspaceAccessibleToCaller({
+        workspace: { installId: INSTALL_MAX, ownerUserId: USER_ID },
+        requestInstallId: INSTALL_NEW,
+        serviceCaller: false,
+        ownerUserId: USER_ID,
+        claimedInstallIds: new Set([INSTALL_MAX, INSTALL_NEW]),
+      }),
+    ).toBe(true);
+  });
+});
+
 describe("user-aware brokerage entitlement + workspaces", () => {
   it("GET /entitlement returns Max from a different install when tier user", async () => {
     const res = await request(getApp())
@@ -238,5 +252,32 @@ describe("user-aware brokerage entitlement + workspaces", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/ADU/i);
+  });
+
+  it("POST /brief returns Max packageTier from another claimed install", async () => {
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(sessionHeaders(INSTALL_NEW))
+      .send({ address: "500 Brief Tier Rd, Austin, TX 78701" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.packageTier).toBe("max");
+  });
+
+  it("GET /workspaces/:id opens a workspace from another claimed install", async () => {
+    const [ws] = await ctx.schema!.db
+      .select({ id: brokerageWorkspaces.id })
+      .from(brokerageWorkspaces)
+      .where(eq(brokerageWorkspaces.listingKey, "lk-max-only"))
+      .limit(1);
+
+    expect(ws?.id).toBeTruthy();
+
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/workspaces/${ws!.id}`)
+      .set(sessionHeaders(INSTALL_NEW));
+
+    expect(res.status).toBe(200);
+    expect(res.body.address).toContain("Max Install Ln");
   });
 });
