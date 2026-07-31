@@ -2,7 +2,7 @@
  * User-aware entitlement + workspace history across claimed installs.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { readFileSync } from "node:fs";
@@ -19,6 +19,17 @@ const completeChatMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
 const geocodeAddressMock = vi.hoisted(() => vi.fn());
 const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
+const recordGtmEventMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../lib/recordGtmEvent", () => ({
+  recordGtmEvent: recordGtmEventMock,
+  GTM_CONSENT_VERSION: "2026-05-26-v1",
+}));
+
+vi.mock("../lib/brokerageParcelKey", () => ({
+  captureParcelKey: vi.fn(async () => null),
+  parcelKeyKind: vi.fn(() => "apn"),
+}));
 
 vi.mock("@workspace/site-context/server", () => ({
   geocodeAddress: geocodeAddressMock,
@@ -69,6 +80,7 @@ vi.mock("@workspace/codes", async () => {
   return {
     ...actual,
     retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
+    countAtomsForJurisdiction: vi.fn(async () => 10),
   };
 });
 
@@ -106,6 +118,7 @@ const { setupRouteTests } = await import("./setup");
 const { resetBrokerageApiKeysForTests } = await import(
   "../middlewares/brokerageAuth"
 );
+const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
 const {
   brokerageBriefRuns,
   brokerageWallets,
@@ -129,6 +142,43 @@ function sessionHeaders(installId?: string) {
   };
   if (installId) headers["X-Hauska-Install-Id"] = installId;
   return headers;
+}
+
+const mockAtom = {
+  id: "did:hauska:atom:austin-adu-1",
+  sourceName: "austin_municode",
+  jurisdictionKey: "austin_tx",
+  codeBook: "MUNI_CODE",
+  edition: "current",
+  sectionNumber: "3.2.1",
+  sectionTitle: "Accessory dwelling units",
+  body: "ADUs shall comply with setback requirements.",
+  sourceUrl: "https://example.com/adu",
+  score: 0.82,
+  retrievalMode: "vector",
+};
+
+function mockGrokResponses() {
+  completeChatMock.mockImplementation(async (opts: { system?: string }) => {
+    const system = opts.system ?? "";
+    if (system.includes("lay-friendly") || system.includes("verdicts")) {
+      return JSON.stringify({
+        verdicts: [
+          {
+            id: "adu",
+            label: "ADU",
+            status: "maybe",
+            oneLine: "Confirm with city.",
+            detailParagraph: "Zoning controls.",
+          },
+        ],
+      });
+    }
+    return JSON.stringify({
+      headline: "ADU may apply.",
+      body: "Code addresses accessory dwellings [1].",
+    });
+  });
 }
 
 beforeEach(async () => {
@@ -180,23 +230,44 @@ beforeEach(async () => {
     address: "100 Max Install Ln, Austin, TX",
   });
 
-  retrieveAtomsForQuestionMock.mockResolvedValue([]);
+  retrieveAtomsForQuestionMock.mockResolvedValue([mockAtom]);
   completeChatMock.mockResolvedValue(
     JSON.stringify({ answer: "The brief supports an ADU subject to zoning." }),
   );
+  mockGrokResponses();
+  setBriefingLlmClient({
+    kind: "grok",
+    client: { completeChat: completeChatMock },
+  });
   geocodeAddressMock.mockResolvedValue({
     latitude: 30.2672,
     longitude: -97.7431,
     jurisdictionCity: "Austin",
     jurisdictionState: "TX",
+    jurisdictionFips: null,
+    source: "nominatim",
+    geocodedAt: new Date().toISOString(),
   });
   fetchBrokerageSiteContextMock.mockImplementation(
     async (input: { packageTier?: string }) => ({
       placeKey: "coord:30.26720:-97.74310",
       packageTier: input.packageTier ?? "free",
-      layers: [{ layerKind: "fema-nfhl-flood-zone", source: "mock" }],
+      layers: [
+        {
+          layerKind: "fema-nfhl-flood-zone",
+          adapterKey: "fema:nfhl-flood-zone",
+          tier: "federal",
+          status: "ok",
+          summary: "Flood Zone AE (high-risk)",
+        },
+      ],
     }),
   );
+  recordGtmEventMock.mockReset();
+});
+
+afterEach(() => {
+  setBriefingLlmClient(null);
 });
 
 describe("briefRunAccessibleToCaller", () => {
