@@ -237,6 +237,48 @@ brokerageWorkspaceRouter.post("/open", async (req: Request, res: Response) => {
 
   const { address, mls_id, page_url, run_id } = parse.data;
   const listingKey = listingKeyFromAddress(address, mls_id);
+  const ownerUserId = authenticatedBrokerageUserId(req);
+
+  let existingAccessible: typeof brokerageWorkspaces.$inferSelect | null = null;
+  if (ownerUserId) {
+    const claimedInstallIds = await listClaimedInstallIdsForUser(ownerUserId);
+    const claimedSet = new Set(claimedInstallIds);
+    claimedSet.add(installId);
+
+    const candidates = await db
+      .select()
+      .from(brokerageWorkspaces)
+      .where(eq(brokerageWorkspaces.listingKey, listingKey))
+      .limit(20);
+
+    for (const candidate of candidates) {
+      if (
+        workspaceAccessibleToCaller({
+          workspace: candidate,
+          requestInstallId: installId,
+          serviceCaller: isBrokerageServiceCaller(req),
+          ownerUserId,
+          claimedInstallIds: claimedSet,
+        })
+      ) {
+        existingAccessible = candidate;
+        break;
+      }
+    }
+  }
+
+  if (existingAccessible) {
+    if (run_id) {
+      await db
+        .update(brokerageWorkspaces)
+        .set({ latestRunId: run_id, updatedAt: new Date() })
+        .where(eq(brokerageWorkspaces.id, existingAccessible.id));
+    }
+    await touchWorkspaceOpen(installId, existingAccessible.id);
+    const pkg = await loadWorkspacePackage(existingAccessible.id);
+    res.json(serializeWorkspacePackage(pkg!));
+    return;
+  }
 
   await upsertWorkspaceFromBrief({
     installId,
@@ -244,6 +286,7 @@ brokerageWorkspaceRouter.post("/open", async (req: Request, res: Response) => {
     address,
     sourceListingUrl: page_url ?? null,
     runId: run_id ?? null,
+    ownerUserId: ownerUserId ?? undefined,
   });
 
   const [ws] = await db

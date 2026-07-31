@@ -17,6 +17,51 @@ import { listingKeyFromAddress } from "../lib/brokerageWorkspace";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
+const geocodeAddressMock = vi.hoisted(() => vi.fn());
+const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@workspace/site-context/server", () => ({
+  geocodeAddress: geocodeAddressMock,
+}));
+
+vi.mock("../lib/brokerageSiteContext", () => ({
+  fetchBrokerageSiteContext: fetchBrokerageSiteContextMock,
+  formatSiteContextForLlm: (ctx: { layers: unknown[] }) =>
+    ctx.layers.length ? "Site context layers:\n- mock" : "",
+  formatBrokerageContextForLlm: (input: {
+    siteContext?: { layers: unknown[] };
+    privateRestrictionsBlock?: string;
+  }) => {
+    const parts = [
+      input.siteContext?.layers.length ? "Site context layers:\n- mock" : "",
+      input.privateRestrictionsBlock ?? "",
+    ].filter(Boolean);
+    return parts.join("\n\n");
+  },
+  stripSiteContextForClient: (ctx: {
+    placeKey: string;
+    layers: Array<{ payload?: unknown; [key: string]: unknown }>;
+  }) => ({
+    placeKey: ctx.placeKey,
+    layers: ctx.layers.map(({ payload: _payload, ...layer }) => layer),
+  }),
+  stripBriefPayloadForClient: (brief: Record<string, unknown>) => {
+    const raw = brief.siteContext as
+      | {
+          placeKey: string;
+          layers: Array<{ payload?: unknown; [key: string]: unknown }>;
+        }
+      | undefined;
+    if (!raw) return brief;
+    return {
+      ...brief,
+      siteContext: {
+        placeKey: raw.placeKey,
+        layers: raw.layers.map(({ payload: _payload, ...layer }) => layer),
+      },
+    };
+  },
+}));
 
 vi.mock("@workspace/codes", async () => {
   const actual =
@@ -138,6 +183,19 @@ beforeEach(async () => {
   retrieveAtomsForQuestionMock.mockResolvedValue([]);
   completeChatMock.mockResolvedValue(
     JSON.stringify({ answer: "The brief supports an ADU subject to zoning." }),
+  );
+  geocodeAddressMock.mockResolvedValue({
+    latitude: 30.2672,
+    longitude: -97.7431,
+    jurisdictionCity: "Austin",
+    jurisdictionState: "TX",
+  });
+  fetchBrokerageSiteContextMock.mockImplementation(
+    async (input: { packageTier?: string }) => ({
+      placeKey: "coord:30.26720:-97.74310",
+      packageTier: input.packageTier ?? "free",
+      layers: [{ layerKind: "fema-nfhl-flood-zone", source: "mock" }],
+    }),
   );
 });
 
