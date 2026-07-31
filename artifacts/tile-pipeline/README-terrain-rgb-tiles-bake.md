@@ -26,7 +26,7 @@ Defined in `aoi_presets.json`:
 
 | Preset | Purpose |
 |--------|---------|
-| `bastrop-city-2mi` | Proof AOI — Bastrop city + ~2 mi buffer (12 StratMap qquads) |
+| `bastrop-city-2mi` | Proof AOI — Bastrop city + ~2 mi buffer (8 StratMap qquads) |
 | `bastrop-county` | County-wide extension example |
 
 Add presets by bbox + `tile_name_patterns` (fnmatch against TxGIO `area_type_name`).
@@ -61,16 +61,46 @@ Metadata fields are load-bearing for Phase 3 (`T-012` flood depth = BFE − grou
 3. Run T-009 bake → upload new `terrain-rgb.<hash12>/` to `gs://hauska-map-tiles`.
 4. Update hauska-map config hash. No code fork.
 
-## T-009 — Terrain-RGB bake (planned)
+## T-009 — Terrain-RGB bake
 
 ```powershell
+python -m pip install -r artifacts/tile-pipeline/requirements.txt
+
 python artifacts/tile-pipeline/terrain_rgb_tiles_bake.py `
-  --dem=./.terrain-bake/terrain-dem.<hash12>.tif `
-  --metadata=./.terrain-bake/terrain-dem.<hash12>.metadata.json `
+  --dem=./.terrain-bake/terrain-dem.6fb2e610e91b.tif `
+  --metadata=./.terrain-bake/terrain-dem.6fb2e610e91b.metadata.json `
   --out-dir=./.terrain-bake
 ```
 
-Steps: warp EPSG:3857 → `rio rgbify` (Mapbox encoding) → `gdal2tiles.py` z0–z16 → `gcloud storage rsync`.
+Steps: warp EPSG:3857 → vertical unit to meters during rgbify (US survey foot × 1200/3937) → Mapbox encoding (`base -10000`, `interval 0.1` m) → `gdal2tiles.py` z0–z16 (XYZ PNG). Intermediate warp3857.tif is deleted after rgbify unless `--keep-intermediates`.
+
+GDAL via native PATH or Docker `ghcr.io/osgeo/gdal:ubuntu-full-latest` (warp, gdal_calc, gdal2tiles).
+
+### Output
+
+```
+.terrain-bake/
+  terrain-rgb.<hash12>/              # {z}/{x}/{y}.png pyramid
+  terrain-rgb.<hash12>.metadata.json # encoding, zoom range, datum preserved
+  terrain-rgb.<hash12>.wire.env      # T-010 constants for hauska-map
+  terrain-rgb.warp3857.tif           # intermediate (cache)
+  terrain-rgb.meters.tif             # intermediate (cache)
+  terrain-rgb.rgb.tif                # intermediate (cache)
+```
+
+Publish (planner-owned, after merge coordination):
+
+```powershell
+gcloud storage rsync -r .\terrain-rgb.<hash12>\ `
+  gs://hauska-map-tiles/terrain-rgb.<hash12>/ `
+  --cache-control="public, max-age=31536000, immutable" `
+  --project=legacy-design-tools-prod
+
+gcloud storage cp .\terrain-rgb.<hash12>.metadata.json `
+  gs://hauska-map-tiles/terrain-rgb.<hash12>.metadata.json `
+  --cache-control="public, max-age=31536000, immutable" `
+  --project=legacy-design-tools-prod
+```
 
 ## T-010 — hauska-map wire
 
