@@ -17,7 +17,7 @@ import {
   installIdFromRequest,
   requireInstallId,
 } from "../lib/brokerageInstallId";
-import { listClaimedInstallIdsForUser } from "../lib/brokerageInstallClaim";
+import { listClaimedInstallIdsForUser, workspaceAccessibleToCaller } from "../lib/brokerageInstallClaim";
 import {
   createWorkspaceShare,
   listingKeyFromAddress,
@@ -29,6 +29,59 @@ import {
 } from "../lib/brokerageWorkspace";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
 import { requireBrokerageDevClient } from "../lib/brokerageExtensionPublic";
+import { isBrokerageServiceCaller } from "../middlewares/brokerageServiceAuth";
+
+async function loadWorkspaceForCaller(
+  req: Request,
+  workspaceId: string,
+): Promise<
+  | { ok: true; workspace: typeof brokerageWorkspaces.$inferSelect }
+  | { ok: false; status: 400 | 404 }
+> {
+  const trimmed = workspaceId.trim();
+  if (!trimmed) {
+    return { ok: false, status: 400 };
+  }
+
+  const [ws] = await db
+    .select()
+    .from(brokerageWorkspaces)
+    .where(eq(brokerageWorkspaces.id, trimmed))
+    .limit(1);
+
+  if (!ws) {
+    return { ok: false, status: 404 };
+  }
+
+  const ownerUserId = authenticatedBrokerageUserId(req);
+  const requestInstallId = installIdFromRequest(req);
+  const serviceCaller = isBrokerageServiceCaller(req);
+
+  if (ownerUserId) {
+    const claimedInstallIds = await listClaimedInstallIdsForUser(ownerUserId);
+    const claimedSet = new Set(claimedInstallIds);
+    if (requestInstallId) claimedSet.add(requestInstallId);
+
+    if (
+      workspaceAccessibleToCaller({
+        workspace: ws,
+        requestInstallId,
+        serviceCaller,
+        ownerUserId,
+        claimedInstallIds: claimedSet,
+      })
+    ) {
+      return { ok: true, workspace: ws };
+    }
+    return { ok: false, status: 404 };
+  }
+
+  if (!requestInstallId || ws.installId !== requestInstallId) {
+    return { ok: false, status: 404 };
+  }
+
+  return { ok: true, workspace: ws };
+}
 
 const ATTACHMENT_BODY = z.object({
   kind: z.enum(["link", "image", "pdf", "note"]),
@@ -184,6 +237,48 @@ brokerageWorkspaceRouter.post("/open", async (req: Request, res: Response) => {
 
   const { address, mls_id, page_url, run_id } = parse.data;
   const listingKey = listingKeyFromAddress(address, mls_id);
+  const ownerUserId = authenticatedBrokerageUserId(req);
+
+  let existingAccessible: typeof brokerageWorkspaces.$inferSelect | null = null;
+  if (ownerUserId) {
+    const claimedInstallIds = await listClaimedInstallIdsForUser(ownerUserId);
+    const claimedSet = new Set(claimedInstallIds);
+    claimedSet.add(installId);
+
+    const candidates = await db
+      .select()
+      .from(brokerageWorkspaces)
+      .where(eq(brokerageWorkspaces.listingKey, listingKey))
+      .limit(20);
+
+    for (const candidate of candidates) {
+      if (
+        workspaceAccessibleToCaller({
+          workspace: candidate,
+          requestInstallId: installId,
+          serviceCaller: isBrokerageServiceCaller(req),
+          ownerUserId,
+          claimedInstallIds: claimedSet,
+        })
+      ) {
+        existingAccessible = candidate;
+        break;
+      }
+    }
+  }
+
+  if (existingAccessible) {
+    if (run_id) {
+      await db
+        .update(brokerageWorkspaces)
+        .set({ latestRunId: run_id, updatedAt: new Date() })
+        .where(eq(brokerageWorkspaces.id, existingAccessible.id));
+    }
+    await touchWorkspaceOpen(installId, existingAccessible.id);
+    const pkg = await loadWorkspacePackage(existingAccessible.id);
+    res.json(serializeWorkspacePackage(pkg!));
+    return;
+  }
 
   await upsertWorkspaceFromBrief({
     installId,
@@ -191,6 +286,7 @@ brokerageWorkspaceRouter.post("/open", async (req: Request, res: Response) => {
     address,
     sourceListingUrl: page_url ?? null,
     runId: run_id ?? null,
+    ownerUserId: ownerUserId ?? undefined,
   });
 
   const [ws] = await db
@@ -222,9 +318,6 @@ brokerageWorkspaceRouter.post("/open", async (req: Request, res: Response) => {
 });
 
 brokerageWorkspaceRouter.get("/:id", async (req: Request, res: Response) => {
-  const installId = requireInstallId(req, res);
-  if (!installId) return;
-
   const raw = req.params.id;
   const workspaceId = (Array.isArray(raw) ? raw[0] : raw)?.trim();
   if (!workspaceId) {
@@ -232,23 +325,18 @@ brokerageWorkspaceRouter.get("/:id", async (req: Request, res: Response) => {
     return;
   }
 
-  const [ws] = await db
-    .select()
-    .from(brokerageWorkspaces)
-    .where(
-      and(
-        eq(brokerageWorkspaces.id, workspaceId),
-        eq(brokerageWorkspaces.installId, installId),
-      ),
-    )
-    .limit(1);
-
-  if (!ws) {
-    res.status(404).json({ error: "not_found", message: "Workspace not found" });
+  const access = await loadWorkspaceForCaller(req, workspaceId);
+  if (!access.ok) {
+    res
+      .status(access.status)
+      .json({ error: access.status === 404 ? "not_found" : "invalid_request", message: "Workspace not found" });
     return;
   }
 
-  await touchWorkspaceOpen(installId, workspaceId);
+  const requestInstallId = installIdFromRequest(req);
+  if (requestInstallId) {
+    await touchWorkspaceOpen(requestInstallId, workspaceId);
+  }
   const pkg = await loadWorkspacePackage(workspaceId);
   res.json(serializeWorkspacePackage(pkg!));
 });
@@ -256,23 +344,10 @@ brokerageWorkspaceRouter.get("/:id", async (req: Request, res: Response) => {
 brokerageWorkspaceRouter.get(
   "/:id/attachments",
   async (req: Request, res: Response) => {
-    const installId = requireInstallId(req, res);
-    if (!installId) return;
-
     const workspaceId = String(req.params.id);
-    const [ws] = await db
-      .select({ id: brokerageWorkspaces.id })
-      .from(brokerageWorkspaces)
-      .where(
-        and(
-          eq(brokerageWorkspaces.id, workspaceId),
-          eq(brokerageWorkspaces.installId, installId),
-        ),
-      )
-      .limit(1);
-
-    if (!ws) {
-      res.status(404).json({ error: "not_found" });
+    const access = await loadWorkspaceForCaller(req, workspaceId);
+    if (!access.ok) {
+      res.status(access.status).json({ error: "not_found" });
       return;
     }
 
@@ -308,19 +383,9 @@ brokerageWorkspaceRouter.post(
     }
 
     const workspaceId = String(req.params.id);
-    const [ws] = await db
-      .select({ id: brokerageWorkspaces.id })
-      .from(brokerageWorkspaces)
-      .where(
-        and(
-          eq(brokerageWorkspaces.id, workspaceId),
-          eq(brokerageWorkspaces.installId, installId),
-        ),
-      )
-      .limit(1);
-
-    if (!ws) {
-      res.status(404).json({ error: "not_found" });
+    const access = await loadWorkspaceForCaller(req, workspaceId);
+    if (!access.ok) {
+      res.status(access.status).json({ error: "not_found" });
       return;
     }
 
@@ -365,19 +430,9 @@ brokerageWorkspaceRouter.delete(
     const workspaceId = String(req.params.id);
     const attachmentId = String(req.params.attachmentId);
 
-    const [ws] = await db
-      .select({ id: brokerageWorkspaces.id })
-      .from(brokerageWorkspaces)
-      .where(
-        and(
-          eq(brokerageWorkspaces.id, workspaceId),
-          eq(brokerageWorkspaces.installId, installId),
-        ),
-      )
-      .limit(1);
-
-    if (!ws) {
-      res.status(404).json({ error: "not_found" });
+    const access = await loadWorkspaceForCaller(req, workspaceId);
+    if (!access.ok) {
+      res.status(access.status).json({ error: "not_found" });
       return;
     }
 
@@ -407,21 +462,12 @@ brokerageWorkspaceRouter.post(
     }
 
     const workspaceId = String(req.params.id);
-    const [ws] = await db
-      .select()
-      .from(brokerageWorkspaces)
-      .where(
-        and(
-          eq(brokerageWorkspaces.id, workspaceId),
-          eq(brokerageWorkspaces.installId, installId),
-        ),
-      )
-      .limit(1);
-
-    if (!ws) {
-      res.status(404).json({ error: "not_found" });
+    const access = await loadWorkspaceForCaller(req, workspaceId);
+    if (!access.ok) {
+      res.status(access.status).json({ error: "not_found" });
       return;
     }
+    const ws = access.workspace;
 
     const share = await createWorkspaceShare({
       workspaceId,

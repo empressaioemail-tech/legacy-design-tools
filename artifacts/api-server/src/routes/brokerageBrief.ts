@@ -105,6 +105,7 @@ import {
   resolveInvestorPackageTier,
   depthMeterAllowance,
 } from "../lib/brokerageTierGate";
+import { entitlementPackageTier } from "../lib/brokerageEntitlement";
 import {
   buildPrivateRestrictionsBriefing,
   formatPrivateRestrictionsForLlm,
@@ -667,9 +668,14 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   if (authenticatedUser) {
     profileRow = await getOrCreateBrokerageUserProfile(authenticatedUser);
   }
+  const entitlementSnapshot = await resolveEntitlementSnapshot(req);
+  const entitlementTier = entitlementSnapshot
+    ? entitlementPackageTier(entitlementSnapshot)
+    : null;
   const packageTier = resolveInvestorPackageTier({
     brokerageAuthTier: req.brokerageAuth?.tier ?? null,
     profileTier: packageTierFromProfile(profileRow),
+    entitlementTier,
   });
   const depthMeterRemaining =
     profileRow?.depthMeterRemaining ?? depthMeterAllowance(packageTier);

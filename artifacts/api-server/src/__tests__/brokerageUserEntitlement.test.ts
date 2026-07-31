@@ -2,7 +2,7 @@
  * User-aware entitlement + workspace history across claimed installs.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { readFileSync } from "node:fs";
@@ -12,11 +12,72 @@ import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
-import { claimInstallHistoryForUser, briefRunAccessibleToCaller } from "../lib/brokerageInstallClaim";
+import { claimInstallHistoryForUser, briefRunAccessibleToCaller, workspaceAccessibleToCaller } from "../lib/brokerageInstallClaim";
 import { listingKeyFromAddress } from "../lib/brokerageWorkspace";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
+const geocodeAddressMock = vi.hoisted(() => vi.fn());
+const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
+const recordGtmEventMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../lib/recordGtmEvent", () => ({
+  recordGtmEvent: recordGtmEventMock,
+  GTM_CONSENT_VERSION: "2026-05-26-v1",
+}));
+
+vi.mock("../lib/brokerageParcelKey", async () => {
+  const actual = await vi.importActual<
+    typeof import("../lib/brokerageParcelKey")
+  >("../lib/brokerageParcelKey");
+  return {
+    ...actual,
+    captureParcelKey: vi.fn(async () => null),
+  };
+});
+
+vi.mock("@workspace/site-context/server", () => ({
+  geocodeAddress: geocodeAddressMock,
+}));
+
+vi.mock("../lib/brokerageSiteContext", () => ({
+  fetchBrokerageSiteContext: fetchBrokerageSiteContextMock,
+  formatSiteContextForLlm: (ctx: { layers: unknown[] }) =>
+    ctx.layers.length ? "Site context layers:\n- mock" : "",
+  formatBrokerageContextForLlm: (input: {
+    siteContext?: { layers: unknown[] };
+    privateRestrictionsBlock?: string;
+  }) => {
+    const parts = [
+      input.siteContext?.layers.length ? "Site context layers:\n- mock" : "",
+      input.privateRestrictionsBlock ?? "",
+    ].filter(Boolean);
+    return parts.join("\n\n");
+  },
+  stripSiteContextForClient: (ctx: {
+    placeKey: string;
+    layers: Array<{ payload?: unknown; [key: string]: unknown }>;
+  }) => ({
+    placeKey: ctx.placeKey,
+    layers: ctx.layers.map(({ payload: _payload, ...layer }) => layer),
+  }),
+  stripBriefPayloadForClient: (brief: Record<string, unknown>) => {
+    const raw = brief.siteContext as
+      | {
+          placeKey: string;
+          layers: Array<{ payload?: unknown; [key: string]: unknown }>;
+        }
+      | undefined;
+    if (!raw) return brief;
+    return {
+      ...brief,
+      siteContext: {
+        placeKey: raw.placeKey,
+        layers: raw.layers.map(({ payload: _payload, ...layer }) => layer),
+      },
+    };
+  },
+}));
 
 vi.mock("@workspace/codes", async () => {
   const actual =
@@ -24,6 +85,12 @@ vi.mock("@workspace/codes", async () => {
   return {
     ...actual,
     retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
+    countAtomsForJurisdiction: vi.fn(async () => 10),
+    supplementCodeSectionsWithReasoningGrounding: vi.fn(async () => ({
+      sections: [],
+      citations: [],
+      retrievedAtoms: [],
+    })),
   };
 });
 
@@ -61,6 +128,7 @@ const { setupRouteTests } = await import("./setup");
 const { resetBrokerageApiKeysForTests } = await import(
   "../middlewares/brokerageAuth"
 );
+const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
 const {
   brokerageBriefRuns,
   brokerageWallets,
@@ -86,8 +154,46 @@ function sessionHeaders(installId?: string) {
   return headers;
 }
 
+const mockAtom = {
+  id: "did:hauska:atom:austin-adu-1",
+  sourceName: "austin_municode",
+  jurisdictionKey: "austin_tx",
+  codeBook: "MUNI_CODE",
+  edition: "current",
+  sectionNumber: "3.2.1",
+  sectionTitle: "Accessory dwelling units",
+  body: "ADUs shall comply with setback requirements.",
+  sourceUrl: "https://example.com/adu",
+  score: 0.82,
+  retrievalMode: "vector",
+};
+
+function mockGrokResponses() {
+  completeChatMock.mockImplementation(async (opts: { system?: string }) => {
+    const system = opts.system ?? "";
+    if (system.includes("lay-friendly") || system.includes("verdicts")) {
+      return JSON.stringify({
+        verdicts: [
+          {
+            id: "adu",
+            label: "ADU",
+            status: "maybe",
+            oneLine: "Confirm with city.",
+            detailParagraph: "Zoning controls.",
+          },
+        ],
+      });
+    }
+    return JSON.stringify({
+      headline: "ADU may apply.",
+      body: "Code addresses accessory dwellings [1].",
+    });
+  });
+}
+
 beforeEach(async () => {
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
+  process.env.BROKERAGE_WALLET_BYPASS = "1";
   resetBrokerageApiKeysForTests();
 
   if (!ctx.schema) return;
@@ -135,10 +241,45 @@ beforeEach(async () => {
     address: "100 Max Install Ln, Austin, TX",
   });
 
-  retrieveAtomsForQuestionMock.mockResolvedValue([]);
+  retrieveAtomsForQuestionMock.mockResolvedValue([mockAtom]);
   completeChatMock.mockResolvedValue(
     JSON.stringify({ answer: "The brief supports an ADU subject to zoning." }),
   );
+  mockGrokResponses();
+  setBriefingLlmClient({
+    kind: "grok",
+    client: { completeChat: completeChatMock },
+  });
+  geocodeAddressMock.mockResolvedValue({
+    latitude: 30.2672,
+    longitude: -97.7431,
+    jurisdictionCity: "Austin",
+    jurisdictionState: "TX",
+    jurisdictionFips: null,
+    source: "nominatim",
+    geocodedAt: new Date().toISOString(),
+  });
+  fetchBrokerageSiteContextMock.mockImplementation(
+    async (input: { packageTier?: string }) => ({
+      placeKey: "coord:30.26720:-97.74310",
+      packageTier: input.packageTier ?? "free",
+      layers: [
+        {
+          layerKind: "fema-nfhl-flood-zone",
+          adapterKey: "fema:nfhl-flood-zone",
+          tier: "federal",
+          status: "ok",
+          summary: "Flood Zone AE (high-risk)",
+        },
+      ],
+    }),
+  );
+  recordGtmEventMock.mockReset();
+});
+
+afterEach(() => {
+  delete process.env.BROKERAGE_WALLET_BYPASS;
+  setBriefingLlmClient(null);
 });
 
 describe("briefRunAccessibleToCaller", () => {
@@ -164,6 +305,20 @@ describe("briefRunAccessibleToCaller", () => {
         claimedInstallIds: new Set(),
       }),
     ).toBe(false);
+  });
+});
+
+describe("workspaceAccessibleToCaller", () => {
+  it("accepts cross-install workspaces for the signed-in owner", () => {
+    expect(
+      workspaceAccessibleToCaller({
+        workspace: { installId: INSTALL_MAX, ownerUserId: USER_ID },
+        requestInstallId: INSTALL_NEW,
+        serviceCaller: false,
+        ownerUserId: USER_ID,
+        claimedInstallIds: new Set([INSTALL_MAX, INSTALL_NEW]),
+      }),
+    ).toBe(true);
   });
 });
 
@@ -238,5 +393,55 @@ describe("user-aware brokerage entitlement + workspaces", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/ADU/i);
+  });
+
+  it("brief package tier resolves Max from another claimed install (C7b)", async () => {
+    const { resolveInvestorPackageTier } = await import("../lib/brokerageTierGate");
+    const { getEntitlementSnapshotForUser, entitlementPackageTier } =
+      await import("../lib/brokerageEntitlement");
+
+    const snapshot = await getEntitlementSnapshotForUser({
+      ownerUserId: USER_ID,
+      requestInstallId: INSTALL_NEW,
+    });
+    expect(snapshot?.maxActive).toBe(true);
+
+    const packageTier = resolveInvestorPackageTier({
+      brokerageAuthTier: "user",
+      profileTier: "pro",
+      entitlementTier: snapshot ? entitlementPackageTier(snapshot) : null,
+    });
+    expect(packageTier).toBe("max");
+  });
+
+  it("POST /brief passes Max packageTier into site-context fetch", async () => {
+    fetchBrokerageSiteContextMock.mockClear();
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(sessionHeaders(INSTALL_NEW))
+      .send({ address: "500 Brief Tier Rd, Austin, TX 78701" });
+
+    expect(fetchBrokerageSiteContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ packageTier: "max" }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.packageTier).toBe("max");
+  });
+
+  it("GET /workspaces/:id opens a workspace from another claimed install", async () => {
+    const [ws] = await ctx.schema!.db
+      .select({ id: brokerageWorkspaces.id })
+      .from(brokerageWorkspaces)
+      .where(eq(brokerageWorkspaces.listingKey, "lk-max-only"))
+      .limit(1);
+
+    expect(ws?.id).toBeTruthy();
+
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/workspaces/${ws!.id}`)
+      .set(sessionHeaders(INSTALL_NEW));
+
+    expect(res.status).toBe(200);
+    expect(res.body.address).toContain("Max Install Ln");
   });
 });
