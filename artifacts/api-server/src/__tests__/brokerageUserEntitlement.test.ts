@@ -26,10 +26,15 @@ vi.mock("../lib/recordGtmEvent", () => ({
   GTM_CONSENT_VERSION: "2026-05-26-v1",
 }));
 
-vi.mock("../lib/brokerageParcelKey", () => ({
-  captureParcelKey: vi.fn(async () => null),
-  parcelKeyKind: vi.fn(() => "apn"),
-}));
+vi.mock("../lib/brokerageParcelKey", async () => {
+  const actual = await vi.importActual<
+    typeof import("../lib/brokerageParcelKey")
+  >("../lib/brokerageParcelKey");
+  return {
+    ...actual,
+    captureParcelKey: vi.fn(async () => null),
+  };
+});
 
 vi.mock("@workspace/site-context/server", () => ({
   geocodeAddress: geocodeAddressMock,
@@ -81,6 +86,11 @@ vi.mock("@workspace/codes", async () => {
     ...actual,
     retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
     countAtomsForJurisdiction: vi.fn(async () => 10),
+    supplementCodeSectionsWithReasoningGrounding: vi.fn(async () => ({
+      sections: [],
+      citations: [],
+      retrievedAtoms: [],
+    })),
   };
 });
 
@@ -183,6 +193,7 @@ function mockGrokResponses() {
 
 beforeEach(async () => {
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
+  process.env.BROKERAGE_WALLET_BYPASS = "1";
   resetBrokerageApiKeysForTests();
 
   if (!ctx.schema) return;
@@ -267,6 +278,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  delete process.env.BROKERAGE_WALLET_BYPASS;
   setBriefingLlmClient(null);
 });
 
@@ -383,12 +395,35 @@ describe("user-aware brokerage entitlement + workspaces", () => {
     expect(res.body.message).toMatch(/ADU/i);
   });
 
-  it("POST /brief returns Max packageTier from another claimed install", async () => {
+  it("brief package tier resolves Max from another claimed install (C7b)", async () => {
+    const { resolveInvestorPackageTier } = await import("../lib/brokerageTierGate");
+    const { getEntitlementSnapshotForUser, entitlementPackageTier } =
+      await import("../lib/brokerageEntitlement");
+
+    const snapshot = await getEntitlementSnapshotForUser({
+      ownerUserId: USER_ID,
+      requestInstallId: INSTALL_NEW,
+    });
+    expect(snapshot?.maxActive).toBe(true);
+
+    const packageTier = resolveInvestorPackageTier({
+      brokerageAuthTier: "user",
+      profileTier: "pro",
+      entitlementTier: snapshot ? entitlementPackageTier(snapshot) : null,
+    });
+    expect(packageTier).toBe("max");
+  });
+
+  it("POST /brief passes Max packageTier into site-context fetch", async () => {
+    fetchBrokerageSiteContextMock.mockClear();
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
       .set(sessionHeaders(INSTALL_NEW))
       .send({ address: "500 Brief Tier Rd, Austin, TX 78701" });
 
+    expect(fetchBrokerageSiteContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ packageTier: "max" }),
+    );
     expect(res.status).toBe(200);
     expect(res.body.packageTier).toBe("max");
   });
