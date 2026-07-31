@@ -1,0 +1,25 @@
+{
+  "bastrop-city-2mi": {
+    "description": "City of Bastrop plus ~2 mile buffer (proof AOI for terrain-RGB pipeline)",
+    "bbox_wgs84": {
+      "west": -97.409,
+      "south": 30.006,
+      "east": -97.231,
+      "north": 30.224
+    },
+    "tile_name_patterns": [
+      "Bastrop|*",
+      "Bastrop SW|*"
+    ]
+  },
+  "bastrop-county": {
+    "description": "Full Bastrop County (statewide extension example)",
+    "bbox_wgs84": {
+      "west": -97.65,
+      "south": 29.75,
+      "east": -96.95,
+      "north": 30.45
+    },
+    "tile_name_patterns": ["Bastrop", "Smithville", "Elgin", "McDade", "Rosanky"]
+  }
+}
