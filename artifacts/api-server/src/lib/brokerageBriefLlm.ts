@@ -27,6 +27,7 @@ export interface BriefAtomInput {
   atomDid: string;
   snippet: string;
   label?: string;
+  sourceUrl?: string;
 }
 
 export interface NumberedCitation {
@@ -34,6 +35,7 @@ export interface NumberedCitation {
   atomDid: string;
   label: string;
   snippet?: string;
+  sourceUrl?: string;
 }
 
 export interface ReasoningSummaryResult {
@@ -112,6 +114,7 @@ function parseInlineCitations(
       atomDid: atom.atomDid,
       label: atom.label ?? `Source ${n}`,
       snippet: atom.snippet?.slice(0, 280),
+      ...(atom.sourceUrl ? { sourceUrl: atom.sourceUrl } : {}),
     });
   }
   return citations;
