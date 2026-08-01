@@ -21,6 +21,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import {
+  keyFromEngagement,
   retrieveAtomsForQuestion,
   type RetrievedAtom,
 } from "@workspace/codes";
@@ -1216,15 +1217,30 @@ brokerageV1.post(
       }>;
     };
 
-    const jurisdictionKey =
-      payload.jurisdiction ??
-      areaContext?.jurisdictionKey ??
-      null;
     const address =
       payload.property?.address ??
       run?.address ??
       areaContext?.visibleParcels?.[0]?.address ??
       (areaEligible ? "Map selection" : "");
+
+    // Canonicalize the retrieval jurisdiction key. The corpus persists every
+    // code atom under a REGISTERED slug (e.g. `bastrop_tx`), and
+    // retrieveAtomsForQuestion filters with an EXACT eq() on that key. The
+    // Property Explorer client supplies areaContext.jurisdictionKey derived
+    // from the zoning-stamp source adapter suffix ("txgio-zoning-stamp:
+    // bastrop-city-tx" -> "bastrop-city-tx"), which is NOT the corpus slug —
+    // so trusting it verbatim made retrieval return zero atoms and the chat
+    // answered with no citations. Resolve a registered key from the property
+    // address the same way the brief does (keyFromEngagement), then fall back
+    // to a stored run key, then to the raw client key as a last resort.
+    const jurisdictionKey =
+      payload.jurisdiction ??
+      keyFromEngagement({
+        jurisdiction: areaContext?.jurisdictionKey ?? null,
+        address,
+      }) ??
+      areaContext?.jurisdictionKey ??
+      null;
 
     if (installId && starterPromptId && runId) {
       logStarterPromptSelected(req, {
