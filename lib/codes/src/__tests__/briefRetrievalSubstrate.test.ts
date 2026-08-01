@@ -38,9 +38,38 @@ describe("retrieveAtomsFromSubstrate", () => {
     });
 
     expect(hits).toHaveLength(1);
-    expect(hits[0]?.id).toBe("did:hauska:code-section:abc");
+    expect(hits[0]?.id).toBe("abc");
     expect(hits[0]?.retrievalMode).toBe("substrate-gate");
     expect(hits[0]?.body).toBe("ADU requirements");
+  });
+
+  it("prefers entityId for BDC section citations", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            atomDid:
+              "did:hauska:code-section:bastrop_tx-bdc-2026-adopted/14-02-003",
+            entityId: "bastrop_tx-bdc-2026-adopted/14-02-003",
+            snippet: "GC General Commercial district uses and dimensions",
+            score: 0.88,
+            sectionNumber: "14-02-003",
+            jurisdictionTenant: "bastrop_tx",
+          },
+        ],
+      }),
+    }) as typeof fetch;
+
+    const hits = await retrieveAtomsFromSubstrate({
+      jurisdictionKey: "bastrop_tx",
+      question: "GC zoning district permitted uses dimensional standards",
+      limit: 5,
+    });
+
+    expect(hits[0]?.id).toBe("bastrop_tx-bdc-2026-adopted/14-02-003");
+    expect(hits[0]?.codeBook).toBe("BDC");
+    expect(hits[0]?.sectionTitle).toBe("§14-02-003");
   });
 
   it("returns empty array when substrate URL is unset", async () => {

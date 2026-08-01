@@ -6,7 +6,7 @@
  * resolving to whatever rows the test queued via `mocks.dbResponses.push()`.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   dbResponses: [] as unknown[][],
@@ -291,6 +291,55 @@ describe("retrieveAtomsForQuestion: lexical path scoring", () => {
       limit: 2,
     });
     expect(out).toHaveLength(2);
+  });
+});
+
+describe("retrieveAtomsForQuestion: substrate-first when configured", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env.BRIEF_RETRIEVAL_API_URL;
+    delete process.env.BRIEF_RETRIEVAL_API_KEY;
+    delete process.env.BRIEF_CODE_RETRIEVAL;
+    delete process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT;
+  });
+
+  it("prefers retrieval-api over stale Neon when BRIEF_RETRIEVAL_API_URL is set", async () => {
+    process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
+    process.env.BRIEF_RETRIEVAL_API_KEY = "test-key";
+    process.env.BRIEF_CODE_RETRIEVAL = "neon";
+    process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT = "false";
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            atomDid:
+              "did:hauska:code-section:bastrop_tx-bdc-2026-adopted/14-02-003",
+            entityId: "bastrop_tx-bdc-2026-adopted/14-02-003",
+            snippet: "General Commercial (GC) permitted uses and dimensions",
+            score: 0.91,
+            sectionNumber: "14-02-003",
+            jurisdictionTenant: "bastrop_tx",
+          },
+        ],
+      }),
+    }) as typeof fetch;
+
+    const out = await retrieveAtomsForQuestion({
+      jurisdictionKey: "bastrop_tx",
+      question: "GC zoning district permitted uses dimensional standards",
+      applyMinScore: false,
+      includeIccModelCodeSupplement: false,
+    });
+
+    expect(out).toHaveLength(1);
+    expect(out[0]?.id).toBe("bastrop_tx-bdc-2026-adopted/14-02-003");
+    expect(out[0]?.retrievalMode).toBe("substrate-gate");
+    expect(globalThis.fetch).toHaveBeenCalled();
+    expect(mocks.dbResponses).toHaveLength(0);
   });
 });
 

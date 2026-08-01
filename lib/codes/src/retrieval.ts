@@ -92,11 +92,15 @@ export async function retrieveAtomsForQuestion(
 ): Promise<RetrievedAtom[]> {
   const mode = (process.env.BRIEF_CODE_RETRIEVAL ?? "neon").toLowerCase();
   let primaryAtoms: RetrievedAtom[] = [];
-  
-  if (mode === "gate" || mode === "mcp") {
-    const { retrieveAtomsFromSubstrate } = await import(
-      "./briefRetrievalSubstrate.js"
-    );
+
+  const { isSubstrateRetrievalConfigured, retrieveAtomsFromSubstrate } =
+    await import("./briefRetrievalSubstrate.js");
+  const preferSubstrate =
+    mode === "gate" ||
+    mode === "mcp" ||
+    (mode === "neon" && isSubstrateRetrievalConfigured());
+
+  if (preferSubstrate) {
     try {
       const substrateHits = await retrieveAtomsFromSubstrate(opts);
       if (substrateHits.length > 0) {
