@@ -15,8 +15,10 @@ export function isUserRateLimitExemptPath(
   if (
     path === "/api/healthz" ||
     path === "/api/health" ||
+    path === "/api/health/ready" ||
     path === "/healthz" ||
-    path === "/health"
+    path === "/health" ||
+    path === "/health/ready"
   ) {
     return true;
   }

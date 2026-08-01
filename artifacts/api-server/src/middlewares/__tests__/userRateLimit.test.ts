@@ -33,6 +33,7 @@ describe("isUserRateLimitExemptPath", () => {
     expect(isUserRateLimitExemptPath("/api/auth")).toBe(true);
     expect(isUserRateLimitExemptPath("/api/healthz")).toBe(true);
     expect(isUserRateLimitExemptPath("/api/health")).toBe(true);
+    expect(isUserRateLimitExemptPath("/api/health/ready")).toBe(true);
     expect(isUserRateLimitExemptPath("/healthz")).toBe(true);
     expect(
       isUserRateLimitExemptPath("/api/brokerage/v1/billing/stripe/webhook"),
