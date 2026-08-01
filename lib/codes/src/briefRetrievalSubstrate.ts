@@ -1,7 +1,9 @@
 /**
  * Substrate retrieval-api client — spine code search through the gate seam.
  *
- * Used when `BRIEF_CODE_RETRIEVAL=gate|mcp` or brokerage brief gate cut is on.
+ * Used when `BRIEF_CODE_RETRIEVAL=gate|mcp`, when brokerage brief gate cut is on,
+ * or when `BRIEF_RETRIEVAL_API_URL` is mounted (prod default: substrate-first
+ * over stale Neon warmup for jurisdictions like Bastrop BDC).
  * Calls retrieval-api `GET /search` (same contract the MCP gate proxies).
  */
 
@@ -16,6 +18,8 @@ export interface SubstrateSearchOptions {
 }
 
 function resolveSubstrateBaseUrl(): string | null {
+  const testOverride = process.env.__TEST_SUBSTRATE_BASE__?.trim();
+  if (testOverride) return testOverride.replace(/\/$/, "");
   for (const envName of [
     "BRIEF_RETRIEVAL_API_URL",
     "HAUSKA_BACKEND_URL",
@@ -27,7 +31,14 @@ function resolveSubstrateBaseUrl(): string | null {
   return null;
 }
 
+/** True when cortex-api can reach retrieval-api (prod mounts BRIEF_RETRIEVAL_API_URL). */
+export function isSubstrateRetrievalConfigured(): boolean {
+  return resolveSubstrateBaseUrl() !== null;
+}
+
 function resolveSubstrateApiKey(): string | null {
+  const testOverride = process.env.__TEST_SUBSTRATE_KEY__?.trim();
+  if (testOverride) return testOverride;
   for (const envName of [
     "BRIEF_RETRIEVAL_API_KEY",
     "RETRIEVAL_API_KEY",
@@ -40,9 +51,40 @@ function resolveSubstrateApiKey(): string | null {
   return null;
 }
 
+/** Strip `did:hauska:code-section:` prefix; prefer stable entityId for citations. */
+function substrateCitationId(hit: {
+  atomDid?: string;
+  entityId?: string;
+}): string {
+  const entityId = String(hit.entityId ?? "").trim();
+  if (entityId) return entityId;
+  const rawDid = String(hit.atomDid ?? "").trim();
+  const prefix = "did:hauska:code-section:";
+  if (rawDid.startsWith(prefix)) return rawDid.slice(prefix.length);
+  return rawDid;
+}
+
+function sectionLabelFromEntityId(entityId: string): {
+  sectionNumber: string | null;
+  codeBook: string;
+  edition: string;
+} {
+  const slash = entityId.indexOf("/");
+  if (slash === -1) {
+    return { sectionNumber: null, codeBook: entityId, edition: entityId };
+  }
+  const edition = entityId.slice(0, slash);
+  const sectionNumber = entityId.slice(slash + 1) || null;
+  const bdcIdx = edition.indexOf("-bdc-");
+  const codeBook =
+    bdcIdx >= 0 ? "BDC" : edition.includes("b3-code") ? "B3" : edition;
+  return { sectionNumber, codeBook, edition };
+}
+
 function mapSubstrateHit(
   hit: {
     atomDid?: string;
+    entityId?: string;
     snippet?: string;
     score?: number;
     sectionNumber?: string | null;
@@ -50,16 +92,19 @@ function mapSubstrateHit(
   },
   jurisdictionKey: string,
 ): RetrievedAtom {
-  const id = String(hit.atomDid ?? "").trim();
+  const id = substrateCitationId(hit);
   const snippet = String(hit.snippet ?? "").trim();
+  const parsed = sectionLabelFromEntityId(id);
+  const sectionNumber = hit.sectionNumber ?? parsed.sectionNumber;
+  const sectionTitle = sectionNumber ? `§${sectionNumber}` : null;
   return {
     id,
     sourceName: "substrate",
     jurisdictionKey: hit.jurisdictionTenant?.trim() || jurisdictionKey,
-    codeBook: "",
-    edition: "",
-    sectionNumber: hit.sectionNumber ?? null,
-    sectionTitle: null,
+    codeBook: parsed.codeBook,
+    edition: parsed.edition,
+    sectionNumber,
+    sectionTitle,
     body: snippet,
     sourceUrl: "",
     score: Number(hit.score ?? 0),
@@ -108,6 +153,7 @@ export async function retrieveAtomsFromSubstrate(
   const body = (await res.json()) as {
     results?: Array<{
       atomDid?: string;
+      entityId?: string;
       snippet?: string;
       score?: number;
       sectionNumber?: string | null;
