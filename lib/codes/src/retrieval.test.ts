@@ -341,6 +341,57 @@ describe("retrieveAtomsForQuestion: substrate-first when configured", () => {
     expect(globalThis.fetch).toHaveBeenCalled();
     expect(mocks.dbResponses).toHaveLength(0);
   });
+
+  it("allows Neon fallback after a successful substrate search with zero hits", async () => {
+    process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
+    process.env.BRIEF_RETRIEVAL_API_KEY = "test-key";
+    process.env.BRIEF_CODE_RETRIEVAL = "neon";
+    process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT = "false";
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ results: [] }),
+    }) as typeof fetch;
+    mocks.dbResponses.push([
+      stubAtomRow({
+        id: "neon-fallback",
+        jurisdictionKey: "bastrop_tx",
+        sectionTitle: "General Commercial",
+        body: "general commercial permitted uses",
+      }),
+    ]);
+
+    const out = await retrieveAtomsForQuestion({
+      jurisdictionKey: "bastrop_tx",
+      question: "general commercial permitted uses",
+      includeIccModelCodeSupplement: false,
+    });
+
+    expect(out.map((atom) => atom.id)).toEqual(["neon-fallback"]);
+    expect(out[0]?.retrievalMode).toBe("lexical");
+  });
+
+  it("surfaces substrate errors without silently querying Neon", async () => {
+    process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
+    process.env.BRIEF_RETRIEVAL_API_KEY = "test-key";
+    process.env.BRIEF_CODE_RETRIEVAL = "neon";
+    process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT = "false";
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+    }) as typeof fetch;
+
+    await expect(retrieveAtomsForQuestion({
+      jurisdictionKey: "bastrop_tx",
+      question: "setbacks",
+      includeIccModelCodeSupplement: false,
+    })).rejects.toMatchObject({
+      name: "SubstrateRetrievalError",
+      reason: "http_error",
+      status: 503,
+    });
+    expect(mocks.dbResponses).toHaveLength(0);
+  });
 });
 
 describe("getAtomsByIds", () => {

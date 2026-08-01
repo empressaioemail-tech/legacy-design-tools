@@ -8,6 +8,7 @@ import {
   retrieveAtomsForQuestion,
   getAtomsByIds,
   countAtomsForJurisdiction,
+  isSubstrateRetrievalError,
   buildChatPrompt,
   MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
   type RetrievedAtom,
@@ -639,6 +640,7 @@ router.post("/chat", async (req: Request, res: Response) => {
   );
   const explicitAtoms: RetrievedAtom[] = [];
   const retrievedAtoms: RetrievedAtom[] = [];
+  const degradedReasons: string[] = [];
   if (jurisdictionKey) {
     if (referencedAtomIds && referencedAtomIds.length > 0) {
       try {
@@ -665,8 +667,20 @@ router.post("/chat", async (req: Request, res: Response) => {
         if (!explicitIds.has(a.id)) retrievedAtoms.push(a);
       }
     } catch (err) {
+      if (isSubstrateRetrievalError(err)) {
+        degradedReasons.push(
+          "Code retrieval substrate unavailable; response may lack code citations",
+        );
+      }
       logger.warn(
-        { err, engagementId, jurisdictionKey },
+        {
+          err,
+          engagementId,
+          jurisdictionKey,
+          substrateFailureReason: isSubstrateRetrievalError(err)
+            ? err.reason
+            : undefined,
+        },
         "chat: atom retrieval failed — continuing without code context",
       );
     }
@@ -726,6 +740,15 @@ router.post("/chat", async (req: Request, res: Response) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
+  if (degradedReasons.length > 0) {
+    res.write(
+      `data: ${JSON.stringify({
+        type: "degraded",
+        substrateStatus: "error",
+        degradedReasons,
+      })}\n\n`,
+    );
+  }
 
   // Pull the inline-reference vocabulary directly from the registry so
   // the prompt enumerates registered atoms instead of hardcoding them.

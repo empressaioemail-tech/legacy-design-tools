@@ -101,21 +101,13 @@ export async function retrieveAtomsForQuestion(
     (mode === "neon" && isSubstrateRetrievalConfigured());
 
   if (preferSubstrate) {
-    try {
-      const substrateHits = await retrieveAtomsFromSubstrate(opts);
-      if (substrateHits.length > 0) {
-        primaryAtoms = substrateHits;
-      } else {
-        opts.logger?.warn?.(
-          { jurisdictionKey: opts.jurisdictionKey, mode },
-          "substrate retrieval returned no hits — falling back to neon",
-        );
-        primaryAtoms = await retrieveAtomsFromNeon(opts);
-      }
-    } catch (err) {
+    const substrateHits = await retrieveAtomsFromSubstrate(opts);
+    if (substrateHits.length > 0) {
+      primaryAtoms = substrateHits;
+    } else {
       opts.logger?.warn?.(
-        { err, jurisdictionKey: opts.jurisdictionKey, mode },
-        "substrate retrieval failed — falling back to neon",
+        { jurisdictionKey: opts.jurisdictionKey, mode },
+        "substrate retrieval returned no hits — falling back to neon",
       );
       primaryAtoms = await retrieveAtomsFromNeon(opts);
     }

@@ -210,6 +210,41 @@ describe("POST /api/chat", () => {
     expect(Array.isArray(anthropicMocks.lastArgs.messages)).toBe(true);
   });
 
+  it("streams a degraded annotation when the retrieval substrate errors", async () => {
+    const originalFetch = globalThis.fetch;
+    process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
+    process.env.BRIEF_RETRIEVAL_API_KEY = "test-key";
+    process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT = "false";
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+    }) as typeof fetch;
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+
+    try {
+      const eng = await seedEngagementWithSnapshot();
+      const res = await request(getApp())
+        .post("/api/chat")
+        .send({ engagementId: eng.id, question: "What are the setbacks?" });
+
+      expect(res.status).toBe(200);
+      expect(parseSseFrames(res.text)).toContainEqual({
+        type: "degraded",
+        substrateStatus: "error",
+        degradedReasons: [
+          "Code retrieval substrate unavailable; response may lack code citations",
+        ],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.BRIEF_RETRIEVAL_API_URL;
+      delete process.env.BRIEF_RETRIEVAL_API_KEY;
+      delete process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT;
+    }
+  });
+
   it("registry path: an internal session sees the Revit binding in the system prompt", async () => {
     // The engagement atom's `contextSummary` only emits the
     // "Bound to Revit document …" sentence when the scope's audience is

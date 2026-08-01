@@ -38,6 +38,13 @@ export {
 } from "./retrieval";
 
 export {
+  SubstrateRetrievalError,
+  isSubstrateRetrievalError,
+  isSubstrateRetrievalConfigured,
+  type SubstrateRetrievalFailureReason,
+} from "./briefRetrievalSubstrate";
+
+export {
   embedTexts,
   embedQuery,
   isEmbeddingAvailable,

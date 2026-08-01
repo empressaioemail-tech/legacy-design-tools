@@ -23,6 +23,7 @@ import { geocodeAddress } from "@workspace/site-context/server";
 import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
+  isSubstrateRetrievalError,
   type RetrievedAtom,
 } from "@workspace/codes";
 import { db, brokerageBriefRuns } from "@workspace/db";
@@ -669,6 +670,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const corpusStatus = localCodeLayer.corpusStatus;
   const localCodeCoverage = localCodeLayer.coverage;
   const localCodeSource = localCodeLayer.localCodeSource;
+  const substrateStatus = localCodeLayer.substrateStatus;
+  const degradedReasons = localCodeLayer.degradedReasons;
   const finishedAt = new Date().toISOString();
 
   let profileRow = null;
@@ -861,6 +864,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     jurisdiction: jurisdictionKey,
     corpusStatus,
     localCodeSource,
+    substrateStatus,
+    degradedReasons,
     coverage: localCodeCoverage,
     packageTier,
     precedenceStatus,
@@ -1259,6 +1264,7 @@ brokerageV1.post(
     }
 
     const atomMap = new Map<string, BriefAtomInput>();
+    const degradedReasons: string[] = [];
 
     for (const c of payload.citations ?? []) {
       if (c.atomDid && !atomMap.has(c.atomDid)) {
@@ -1327,8 +1333,26 @@ brokerageV1.post(
             }
           }
         } catch (err) {
+          if (
+            isSubstrateRetrievalError(err) &&
+            !degradedReasons.includes(
+              "Code retrieval substrate unavailable; response may lack code citations",
+            )
+          ) {
+            degradedReasons.push(
+              "Code retrieval substrate unavailable; response may lack code citations",
+            );
+          }
           logger.warn(
-            { err, runId, jurisdictionKey, query },
+            {
+              err,
+              runId,
+              jurisdictionKey,
+              query,
+              substrateFailureReason: isSubstrateRetrievalError(err)
+                ? err.reason
+                : undefined,
+            },
             "brokerage: research chat retrieval failed",
           );
         }
@@ -1387,6 +1411,12 @@ brokerageV1.post(
 
     res.json({
       ...result,
+      ...(degradedReasons.length > 0
+        ? {
+            substrateStatus: "error" as const,
+            degradedReasons,
+          }
+        : {}),
       ...(workspaceId && !extensionPublic && run
         ? {
             workspaceId,

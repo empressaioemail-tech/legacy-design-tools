@@ -109,6 +109,7 @@ const { __resetServiceApiKeyCacheForTests } = await import(
 const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
 const { brokerageBriefRuns } = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
+const { SubstrateRetrievalError } = await import("@workspace/codes");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -306,6 +307,37 @@ describe("POST /api/brokerage/v1/brief", () => {
       .where(eq(brokerageBriefRuns.id, res.body.runId))
       .limit(1);
     expect(row).toBeTruthy();
+  });
+
+  it("annotates an errored substrate and does not silently websearch", async () => {
+    retrieveAtomsForQuestionMock.mockRejectedValue(
+      new SubstrateRetrievalError(
+        "http_error",
+        "Code retrieval substrate returned HTTP 503",
+        503,
+      ),
+    );
+
+    const res = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.substrateStatus).toBe("error");
+    expect(res.body.degradedReasons).toContain(
+      "Code retrieval substrate unavailable; local code results may be incomplete",
+    );
+    expect(res.body.coverage).toEqual({
+      degraded: true,
+      reason:
+        "Code retrieval substrate unavailable; local code results may be incomplete",
+    });
+    expect(res.body.localCodeSource).toBe("none");
+    expect(res.body.citations).toEqual([]);
+    expect(res.body.sections.every((section: { hits: unknown[] }) =>
+      section.hits.length === 0,
+    )).toBe(true);
   });
 
   it("service token path skips install id and surfaces billable signal", async () => {

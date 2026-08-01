@@ -11,6 +11,8 @@ import {
   retrieveAtomsForQuestion,
   countAtomsForJurisdiction,
   supplementCodeSectionsWithReasoningGrounding,
+  isSubstrateRetrievalConfigured,
+  isSubstrateRetrievalError,
   type RetrievedAtom,
 } from "@workspace/codes";
 import { logger } from "./logger";
@@ -19,6 +21,8 @@ import { brokerageBriefRetrievalMode } from "./brokerageSpineGate";
 
 export const BRIEF_WEB_SCRAPED_DISCLOSURE =
   "Local code from web search — unverified, web-scraped";
+export const BRIEF_SUBSTRATE_DEGRADED_REASON =
+  "Code retrieval substrate unavailable; local code results may be incomplete";
 
 export interface BriefSectionHit {
   atomDid: string;
@@ -48,6 +52,8 @@ export interface BriefLocalCodeLayer {
   corpusStatus: "in_corpus" | "partial" | "no_match" | "unknown";
   coverage: { degraded: boolean; reason?: string };
   localCodeSource: "corpus" | "websearch" | "none";
+  substrateStatus: "ok" | "error" | "not_used";
+  degradedReasons: string[];
 }
 
 function sectionTitle(query: string): string {
@@ -83,11 +89,19 @@ async function runCorpusRetrieval(
   sections: BriefCodeSection[];
   citations: Array<{ atomDid: string; query: string; snippet: string }>;
   retrievedAtoms: RetrievedAtom[];
+  substrateStatus: "ok" | "error" | "not_used";
+  degradedReasons: string[];
 }> {
   const sections: BriefCodeSection[] = [];
   const citations: Array<{ atomDid: string; query: string; snippet: string }> =
     [];
   const retrievedAtoms: RetrievedAtom[] = [];
+  const substrateConfigured =
+    retrievalMode === "gate" || isSubstrateRetrievalConfigured();
+  let substrateStatus: "ok" | "error" | "not_used" = substrateConfigured
+    ? "ok"
+    : "not_used";
+  const degradedReasons: string[] = [];
   const priorMode = process.env.BRIEF_CODE_RETRIEVAL;
   if (retrievalMode === "gate") {
     process.env.BRIEF_CODE_RETRIEVAL = "gate";
@@ -95,6 +109,10 @@ async function runCorpusRetrieval(
 
   try {
     for (const query of BROKERAGE_CODE_QUERIES) {
+      if (substrateStatus === "error") {
+        sections.push({ title: sectionTitle(query), query, hits: [] });
+        continue;
+      }
       let hits: RetrievedAtom[] = [];
       try {
         hits = await retrieveAtomsForQuestion({
@@ -105,7 +123,24 @@ async function runCorpusRetrieval(
           applyMinScore: false,
         });
       } catch (err) {
-        logger.warn({ err, jurisdictionKey, query }, "brokerage: retrieval failed");
+        if (isSubstrateRetrievalError(err)) {
+          substrateStatus = "error";
+          if (!degradedReasons.includes(BRIEF_SUBSTRATE_DEGRADED_REASON)) {
+            degradedReasons.push(BRIEF_SUBSTRATE_DEGRADED_REASON);
+          }
+          logger.error(
+            {
+              err,
+              jurisdictionKey,
+              query,
+              substrateFailureReason: err.reason,
+              substrateHttpStatus: err.status,
+            },
+            "brokerage: code retrieval substrate failed",
+          );
+        } else {
+          logger.warn({ err, jurisdictionKey, query }, "brokerage: retrieval failed");
+        }
       }
 
       for (const h of hits) retrievedAtoms.push(h);
@@ -141,7 +176,13 @@ async function runCorpusRetrieval(
     }
   }
 
-  return { sections, citations, retrievedAtoms };
+  return {
+    sections,
+    citations,
+    retrievedAtoms,
+    substrateStatus,
+    degradedReasons,
+  };
 }
 
 export async function resolveBriefLocalCodeLayer(input: {
@@ -174,11 +215,30 @@ export async function resolveBriefLocalCodeLayer(input: {
       corpusStatus: "no_match",
       coverage: { degraded: true, reason: BRIEF_WEB_SCRAPED_DISCLOSURE },
       localCodeSource: "none",
+      substrateStatus: "not_used",
+      degradedReasons: [BRIEF_WEB_SCRAPED_DISCLOSURE],
     };
   }
 
   const corpus = await runCorpusRetrieval(jurisdictionKey);
   const hasCorpusHits = corpus.sections.some((s) => s.hits.length > 0);
+
+  if (corpus.substrateStatus === "error") {
+    return {
+      jurisdictionKey,
+      sections: corpus.sections,
+      citations: corpus.citations,
+      retrievedAtoms: corpus.retrievedAtoms,
+      corpusStatus: hasCorpusHits ? "in_corpus" : "unknown",
+      coverage: {
+        degraded: true,
+        reason: BRIEF_SUBSTRATE_DEGRADED_REASON,
+      },
+      localCodeSource: hasCorpusHits ? "corpus" : "none",
+      substrateStatus: "error",
+      degradedReasons: corpus.degradedReasons,
+    };
+  }
 
   if (hasCorpusHits) {
     const corpusStatus = await resolveCorpusStatus(jurisdictionKey, true);
@@ -190,6 +250,8 @@ export async function resolveBriefLocalCodeLayer(input: {
       corpusStatus,
       coverage: { degraded: false },
       localCodeSource: "corpus",
+      substrateStatus: corpus.substrateStatus,
+      degradedReasons: [],
     };
   }
 
@@ -213,6 +275,8 @@ export async function resolveBriefLocalCodeLayer(input: {
       corpusStatus,
       coverage: { degraded: true, reason: BRIEF_WEB_SCRAPED_DISCLOSURE },
       localCodeSource: "none",
+      substrateStatus: corpus.substrateStatus,
+      degradedReasons: [BRIEF_WEB_SCRAPED_DISCLOSURE],
     };
   }
 
@@ -257,5 +321,7 @@ export async function resolveBriefLocalCodeLayer(input: {
     corpusStatus,
     coverage: sectionCoverage,
     localCodeSource: "websearch",
+    substrateStatus: corpus.substrateStatus,
+    degradedReasons: [BRIEF_WEB_SCRAPED_DISCLOSURE],
   };
 }
