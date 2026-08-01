@@ -479,10 +479,16 @@ function atomSnippet(atom: RetrievedAtom): string {
 }
 
 function toBriefAtom(atom: RetrievedAtom, label?: string): BriefAtomInput {
+  const sectionLabel =
+    atom.sectionTitle?.trim() ||
+    (atom.sectionNumber ? `§${atom.sectionNumber}` : null) ||
+    atom.codeBook ||
+    "Municipal code";
   return {
     atomDid: atom.id,
     snippet: atomSnippet(atom),
-    label,
+    label: label ?? sectionLabel,
+    ...(atom.sourceUrl ? { sourceUrl: atom.sourceUrl } : {}),
   };
 }
 
@@ -1275,7 +1281,16 @@ brokerageV1.post(
     }
 
     if (jurisdictionKey) {
+      const district =
+        areaContext?.subject?.setbacks?.district ??
+        areaContext?.visibleParcels?.[0]?.zoning ??
+        null;
       const researchQueries = [message];
+      if (district) {
+        researchQueries.unshift(
+          `${district} zoning district permitted uses conditional prohibited dimensional standards`,
+        );
+      }
       if (
         starterPromptId === "adu" ||
         ADU_TOPIC_RE.test(message) ||
@@ -1301,7 +1316,7 @@ brokerageV1.post(
             const existing = atomMap.get(a.id);
             const snippet = atomSnippet(a);
             if (!existing) {
-              atomMap.set(a.id, toBriefAtom(a, "Research retrieval"));
+              atomMap.set(a.id, toBriefAtom(a));
               continue;
             }
             if (snippet.length > (existing.snippet?.length ?? 0)) {
