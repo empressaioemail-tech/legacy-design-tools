@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { retrieveAtomsFromSubstrate } from "../briefRetrievalSubstrate";
+import {
+  SubstrateRetrievalError,
+  retrieveAtomsFromSubstrate,
+} from "../briefRetrievalSubstrate";
 
 describe("retrieveAtomsFromSubstrate", () => {
   const originalFetch = globalThis.fetch;
@@ -72,12 +75,42 @@ describe("retrieveAtomsFromSubstrate", () => {
     expect(hits[0]?.sectionTitle).toBe("§14-02-003");
   });
 
-  it("returns empty array when substrate URL is unset", async () => {
+  it("distinguishes a missing substrate configuration from zero hits", async () => {
     delete process.env.BRIEF_RETRIEVAL_API_URL;
-    const hits = await retrieveAtomsFromSubstrate({
+    await expect(retrieveAtomsFromSubstrate({
       jurisdictionKey: "austin_tx",
       question: "setbacks",
+    })).rejects.toMatchObject({
+      name: "SubstrateRetrievalError",
+      reason: "not_configured",
     });
-    expect(hits).toEqual([]);
+  });
+
+  it("returns [] only for a successful search with zero legitimate hits", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ results: [] }),
+    }) as typeof fetch;
+
+    await expect(retrieveAtomsFromSubstrate({
+      jurisdictionKey: "austin_tx",
+      question: "setbacks",
+    })).resolves.toEqual([]);
+  });
+
+  it("throws a typed observable error for a non-ok substrate response", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+    }) as typeof fetch;
+
+    const error = await retrieveAtomsFromSubstrate({
+      jurisdictionKey: "austin_tx",
+      question: "setbacks",
+    }).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(SubstrateRetrievalError);
+    expect(error).toMatchObject({ reason: "http_error", status: 503 });
   });
 });

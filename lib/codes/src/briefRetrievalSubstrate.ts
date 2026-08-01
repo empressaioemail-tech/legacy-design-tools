@@ -17,6 +17,32 @@ export interface SubstrateSearchOptions {
   logger?: OrchestratorLogger;
 }
 
+export type SubstrateRetrievalFailureReason =
+  | "not_configured"
+  | "unreachable"
+  | "http_error"
+  | "invalid_response";
+
+/** Distinguishes substrate failure from a successful search with zero hits. */
+export class SubstrateRetrievalError extends Error {
+  readonly name = "SubstrateRetrievalError";
+
+  constructor(
+    readonly reason: SubstrateRetrievalFailureReason,
+    message: string,
+    readonly status?: number,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
+export function isSubstrateRetrievalError(
+  error: unknown,
+): error is SubstrateRetrievalError {
+  return error instanceof SubstrateRetrievalError;
+}
+
 function resolveSubstrateBaseUrl(): string | null {
   const testOverride = process.env.__TEST_SUBSTRATE_BASE__?.trim();
   if (testOverride) return testOverride.replace(/\/$/, "");
@@ -121,7 +147,10 @@ export async function retrieveAtomsFromSubstrate(
       { jurisdictionKey: opts.jurisdictionKey },
       "substrate retrieval: no BRIEF_RETRIEVAL_API_URL / HAUSKA_BACKEND_URL",
     );
-    return [];
+    throw new SubstrateRetrievalError(
+      "not_configured",
+      "Code retrieval substrate is not configured",
+    );
   }
 
   const limit = opts.limit ?? 8;
@@ -141,16 +170,34 @@ export async function retrieveAtomsFromSubstrate(
     headers["x-hauska-jurisdiction-tenant"] = jurisdictionTenant;
   }
 
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  } catch (cause) {
+    opts.logger?.warn?.(
+      { err: cause, jurisdictionKey: opts.jurisdictionKey },
+      "substrate retrieval: unreachable",
+    );
+    throw new SubstrateRetrievalError(
+      "unreachable",
+      "Code retrieval substrate is unreachable",
+      undefined,
+      { cause },
+    );
+  }
   if (!res.ok) {
     opts.logger?.warn?.(
       { status: res.status, jurisdictionKey: opts.jurisdictionKey },
       "substrate retrieval: HTTP error",
     );
-    return [];
+    throw new SubstrateRetrievalError(
+      "http_error",
+      `Code retrieval substrate returned HTTP ${res.status}`,
+      res.status,
+    );
   }
 
-  const body = (await res.json()) as {
+  let body: {
     results?: Array<{
       atomDid?: string;
       entityId?: string;
@@ -160,9 +207,34 @@ export async function retrieveAtomsFromSubstrate(
       jurisdictionTenant?: string;
     }>;
   };
+  try {
+    body = (await res.json()) as typeof body;
+  } catch (cause) {
+    opts.logger?.warn?.(
+      { err: cause, jurisdictionKey: opts.jurisdictionKey },
+      "substrate retrieval: invalid JSON response",
+    );
+    throw new SubstrateRetrievalError(
+      "invalid_response",
+      "Code retrieval substrate returned invalid JSON",
+      res.status,
+      { cause },
+    );
+  }
 
-  const hits = Array.isArray(body.results) ? body.results : [];
-  return hits
+  if (!Array.isArray(body.results)) {
+    opts.logger?.warn?.(
+      { jurisdictionKey: opts.jurisdictionKey },
+      "substrate retrieval: response missing results array",
+    );
+    throw new SubstrateRetrievalError(
+      "invalid_response",
+      "Code retrieval substrate response is missing results",
+      res.status,
+    );
+  }
+
+  return body.results
     .map((h) => mapSubstrateHit(h, opts.jurisdictionKey))
     .filter((a) => a.id.length > 0);
 }
