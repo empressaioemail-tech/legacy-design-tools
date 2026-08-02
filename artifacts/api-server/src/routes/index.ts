@@ -52,6 +52,7 @@ import siteDrainageRouter from "./siteDrainage";
 import encumbrancesRouter from "./encumbrances";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
+import { countyLedgerRouter } from "./countyLedger";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
@@ -100,6 +101,9 @@ router.use(briefingSourcesRouter);
 // the C# Revit add-in calls.
 router.use(bimModelsRouter);
 router.use(coverageRequestsRouter);
+// County ledger — the CC factory-floor performance layer (R-FND-6, OPS-6).
+// Reachable at /api/county-ledger (mounted under the /api router).
+router.use("/county-ledger", countyLedgerRouter);
 router.use(packagesRouter);
 router.use(canvaRouter);
 router.use(collateralRouter);
