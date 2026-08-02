@@ -4,6 +4,7 @@ import {
   integer,
   numeric,
   timestamp,
+  boolean,
   primaryKey,
   index,
   check,
@@ -30,6 +31,16 @@ import { sql } from "drizzle-orm";
  * (`artifacts/api-server/src/countyCoverageScoreCli.ts`), which is READ-ONLY
  * on the parcel/CAD data and only upserts this table. Re-scoring a
  * `(county, facet)` upserts in place (idempotent).
+ *
+ * Phase A7 (additive) — performance fields. The ledger started as a
+ * coverage/correctness scorecard; these columns extend it into the
+ * rewarmable-factory PERFORMANCE layer: what recipe a jurisdiction was
+ * warmed under, its cert progression, when it was last rewarmed/refreshed,
+ * whether it has drifted stale or is unsafe to rewarm (an unfrozen
+ * sticky-part decision blocks it), its onboarding cost against the
+ * per-jurisdiction budget commitment, and whether it has been through the
+ * onboarding line at all. All nullable/defaulted so every pre-existing row
+ * stays valid without a backfill.
  */
 export const countyFacetCoverage = pgTable(
   "county_facet_coverage",
@@ -73,6 +84,50 @@ export const countyFacetCoverage = pgTable(
     checkedAt: timestamp("checked_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * Phase A7. The recipe version the jurisdiction's atoms were warmed
+     * under — the rewarm trigger (a bumped recipe version means every
+     * jurisdiction still on an older version is a rewarm candidate). NULL
+     * for rows written before recipe-version tracking existed.
+     */
+    recipeVersion: text("recipe_version"),
+    /**
+     * Phase A7. `uncerted` | `mechanical-pass` | `r6-pass` | `certified`.
+     * NULL for rows that predate cert tracking. Enforced at the DB via
+     * check constraint below.
+     */
+    certState: text("cert_state"),
+    /** Phase A7. When this jurisdiction was last rewarmed. NULL if never. */
+    lastRewarmAt: timestamp("last_rewarm_at", { withTimezone: true }),
+    /**
+     * Phase A7. When this jurisdiction's sources were last re-acquired
+     * (distinct from `lastRewarmAt`: a refresh re-pulls source data, a
+     * rewarm re-derives atoms from whatever sources are on hand).
+     */
+    lastRefreshAt: timestamp("last_refresh_at", { withTimezone: true }),
+    /**
+     * Phase A7. True when `source_vintage` has aged past the refresh
+     * cadence for this facet. Defaults false; a staleness sweep flips it.
+     */
+    stalenessFlag: boolean("staleness_flag").notNull().default(false),
+    /**
+     * Phase A7. True when an unfrozen sticky-part decision exists for this
+     * jurisdiction, blocking a safe rewarm until it is resolved. Defaults
+     * false (safe to rewarm absent a known blocker).
+     */
+    rewarmUnsafe: boolean("rewarm_unsafe").notNull().default(false),
+    /**
+     * Phase A7. Compute + human-review cost to onboard this jurisdiction,
+     * in USD, scored against the $200/jurisdiction hard-kill commitment.
+     * NULL until the jurisdiction has an onboarding cost recorded.
+     */
+    costUsd: numeric("cost_usd", { precision: 10, scale: 2 }),
+    /**
+     * Phase A7. Whether this jurisdiction has been through the onboarding
+     * line at all (distinct from cert/rewarm state — a jurisdiction can be
+     * onboarded but not yet certified). Defaults false.
+     */
+    onboarded: boolean("onboarded").notNull().default(false),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.countyFips, t.facet] }),
@@ -91,6 +146,12 @@ export const countyFacetCoverage = pgTable(
     classificationCheck: check(
       "county_facet_coverage_classification_check",
       sql`${t.classification} IN ('real-at-ceiling', 'needs-crosswalk', 'true-source-gap', 'fabricated-blocked')`,
+    ),
+    // Phase A7 — cert_state enum. NULL allowed (pre-cert-tracking rows);
+    // any non-NULL value must be one of the four cert stages.
+    certStateCheck: check(
+      "county_facet_coverage_cert_state_check",
+      sql`${t.certState} IS NULL OR ${t.certState} IN ('uncerted', 'mechanical-pass', 'r6-pass', 'certified')`,
     ),
   }),
 );

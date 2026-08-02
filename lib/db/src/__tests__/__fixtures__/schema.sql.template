@@ -598,6 +598,15 @@ CREATE TABLE @@SCHEMA@@.county_facet_coverage (
     sampled integer DEFAULT 0 NOT NULL,
     classification text NOT NULL,
     checked_at timestamp with time zone DEFAULT now() NOT NULL,
+    recipe_version text,
+    cert_state text,
+    last_rewarm_at timestamp with time zone,
+    last_refresh_at timestamp with time zone,
+    staleness_flag boolean DEFAULT false NOT NULL,
+    rewarm_unsafe boolean DEFAULT false NOT NULL,
+    cost_usd numeric(10,2),
+    onboarded boolean DEFAULT false NOT NULL,
+    CONSTRAINT county_facet_coverage_cert_state_check CHECK (((cert_state IS NULL) OR (cert_state = ANY (ARRAY['uncerted'::text, 'mechanical-pass'::text, 'r6-pass'::text, 'certified'::text])))),
     CONSTRAINT county_facet_coverage_classification_check CHECK ((classification = ANY (ARRAY['real-at-ceiling'::text, 'needs-crosswalk'::text, 'true-source-gap'::text, 'fabricated-blocked'::text]))),
     CONSTRAINT county_facet_coverage_integrity_verdict_check CHECK ((integrity_verdict = ANY (ARRAY['pass'::text, 'block'::text, 'insufficient-sample'::text, 'n/a'::text])))
 );

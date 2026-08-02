@@ -25,6 +25,7 @@ import {
   codeAtomSources,
   codeAtoms,
   codeAtomFetchQueue,
+  countyFacetCoverage,
 } from "../../schema";
 import { withTestSchema } from "../../testing";
 
@@ -271,6 +272,82 @@ describe("lib/db schema integration", () => {
         // QA-57 — pilot workspace branding (firm display name, logo URL).
         "workspace_settings",
       ]);
+    });
+  });
+
+  it("county_facet_coverage Phase A7 performance columns: defaults + nullability", async () => {
+    await withTestSchema(async ({ db }) => {
+      const [row] = await db
+        .insert(countyFacetCoverage)
+        .values({
+          countyFips: "48491",
+          facet: "zoning",
+          integrityVerdict: "n/a",
+          classification: "real-at-ceiling",
+        })
+        .returning();
+
+      // Pre-existing columns still behave (additive change didn't disturb them).
+      expect(row.honestCoveragePct).toBe("0.00");
+      expect(row.sampled).toBe(0);
+
+      // New performance columns: nullable ones default to NULL absent
+      // an explicit value, defaulted ones land on their DB default.
+      expect(row.recipeVersion).toBeNull();
+      expect(row.certState).toBeNull();
+      expect(row.lastRewarmAt).toBeNull();
+      expect(row.lastRefreshAt).toBeNull();
+      expect(row.stalenessFlag).toBe(false);
+      expect(row.rewarmUnsafe).toBe(false);
+      expect(row.costUsd).toBeNull();
+      expect(row.onboarded).toBe(false);
+    });
+  });
+
+  it("county_facet_coverage rejects a cert_state outside the enum", async () => {
+    await withTestSchema(async ({ db }) => {
+      await expectPgError(
+        db.insert(countyFacetCoverage).values({
+          countyFips: "48491",
+          facet: "envelope",
+          integrityVerdict: "n/a",
+          classification: "real-at-ceiling",
+          certState: "not-a-real-state",
+        }),
+        "23514", // PG check_violation
+      );
+    });
+  });
+
+  it("county_facet_coverage accepts every cert_state enum value + full performance-field write", async () => {
+    await withTestSchema(async ({ db }) => {
+      const now = new Date();
+      const [row] = await db
+        .insert(countyFacetCoverage)
+        .values({
+          countyFips: "48453",
+          facet: "land-use",
+          integrityVerdict: "pass",
+          classification: "real-at-ceiling",
+          recipeVersion: "recipe-2026.08.0",
+          certState: "certified",
+          lastRewarmAt: now,
+          lastRefreshAt: now,
+          stalenessFlag: true,
+          rewarmUnsafe: true,
+          costUsd: "184.50",
+          onboarded: true,
+        })
+        .returning();
+
+      expect(row.certState).toBe("certified");
+      expect(row.recipeVersion).toBe("recipe-2026.08.0");
+      expect(row.stalenessFlag).toBe(true);
+      expect(row.rewarmUnsafe).toBe(true);
+      expect(row.costUsd).toBe("184.50");
+      expect(row.onboarded).toBe(true);
+      expect(row.lastRewarmAt).toBeInstanceOf(Date);
+      expect(row.lastRefreshAt).toBeInstanceOf(Date);
     });
   });
 
