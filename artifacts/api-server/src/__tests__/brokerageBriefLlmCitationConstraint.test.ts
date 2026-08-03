@@ -28,8 +28,9 @@ vi.mock("../lib/brokerageSiteContext", () => ({
 }));
 
 const { generateResearchChat } = await import("../lib/brokerageBriefLlm");
+type BriefAtomInput = Parameters<typeof generateResearchChat>[0]["atoms"][number];
 
-const ATOMS = [
+const ATOMS: BriefAtomInput[] = [
   {
     atomDid: "did:hauska:code-section:bastrop-udc-5-1",
     label: "Setbacks",
@@ -131,6 +132,16 @@ describe("presentation modes — pro keeps [n], consumer strips", () => {
     expect(r.citations.map((c) => c.n)).toEqual([1]);
   });
 
+  it("consumer mode: no [n] markers in the text, but the structured sources array is still populated", async () => {
+    const r = await chat("Front setback is 15 ft [1]; ADUs allowed [2].", {
+      presentationMode: "consumer",
+    });
+    expect(r.message).not.toMatch(/\[\d+\]/);
+    expect(r.sources.length).toBeGreaterThan(0);
+    expect(r.sources.map((c) => c.n)).toEqual([1, 2]);
+    expect(r.sources[0]!.atomDid).toBe(ATOMS[0]!.atomDid);
+  });
+
   it("PRO mode: an invented [99] may remain in TEXT but resolves to NO citation (the client renders it plain)", async () => {
     const r = await chat("Real [1] and invented [99].", {
       presentationMode: "pro",
@@ -156,5 +167,32 @@ describe("the prompt carries the constraint", () => {
     await chat("Answer.", { presentationMode: "consumer" });
     const call = completeChatMock.mock.calls[0]![0] as { system: string };
     expect(call.system).toContain("Do NOT include [n] citation markers");
+  });
+});
+
+describe("DID-less entity-sourced entries (subject-parcel-facts citability)", () => {
+  it("a source entry with entityId but no did numbers normally and carries entityId through the citation, did left undefined", async () => {
+    const atomsWithParcelEntry = [
+      {
+        atomDid: "node-abc123",
+        entityId: "node-abc123",
+        label: "Parcel record — 251 Cool Water Dr (Hauska property atom chain)",
+        snippet: "SUBJECT PARCEL CONSTRAINTS: Zoning district: R-1",
+      },
+      ...ATOMS,
+    ];
+    const r = await chat("Setbacks per the parcel record [1] and code [2].", {
+      presentationMode: "pro",
+      atoms: atomsWithParcelEntry,
+    });
+    const parcelCitation = r.citations.find((c) => c.n === 1);
+    expect(parcelCitation).toBeTruthy();
+    expect(parcelCitation!.atomDid).toBe("node-abc123");
+    expect(parcelCitation!.entityId).toBe("node-abc123");
+    expect(parcelCitation!.did).toBeUndefined();
+    // Second numbered source is unaffected — same sequence space, not a
+    // separate parallel numbering.
+    const codeCitation = r.citations.find((c) => c.n === 2);
+    expect(codeCitation!.atomDid).toBe(ATOMS[0]!.atomDid);
   });
 });

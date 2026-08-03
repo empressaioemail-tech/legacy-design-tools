@@ -28,6 +28,19 @@ export interface BriefAtomInput {
   snippet: string;
   label?: string;
   sourceUrl?: string;
+  /**
+   * Non-atom-chain entity identifier for sources that aren't (yet) backed by
+   * a Hauska property atom DID — e.g. the subject-parcel constraints entry,
+   * keyed by parcelNodeId until the hauska-engine atom-chain wire enrichment
+   * (feat/atom-chain-wire-dids) ships a real DID. Optional and additive.
+   */
+  entityId?: string;
+  /**
+   * Hauska property atom DID for this source entry, once the atom chain
+   * carries one. Undefined/omitted today for entity-sourced (non-code-atom)
+   * entries — populate later without a wire break.
+   */
+  did?: string;
 }
 
 export interface NumberedCitation {
@@ -36,6 +49,10 @@ export interface NumberedCitation {
   label: string;
   snippet?: string;
   sourceUrl?: string;
+  /** See BriefAtomInput.entityId. */
+  entityId?: string;
+  /** See BriefAtomInput.did. */
+  did?: string;
 }
 
 export interface ReasoningSummaryResult {
@@ -115,6 +132,8 @@ function parseInlineCitations(
       label: atom.label ?? `Source ${n}`,
       snippet: atom.snippet?.slice(0, 280),
       ...(atom.sourceUrl ? { sourceUrl: atom.sourceUrl } : {}),
+      ...(atom.entityId ? { entityId: atom.entityId } : {}),
+      ...(atom.did ? { did: atom.did } : {}),
     });
   }
   return citations;
