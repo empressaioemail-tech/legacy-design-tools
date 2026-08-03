@@ -112,19 +112,41 @@ async function tryServeAtomChainEnvelope(args: {
   if (!key) return false;
 
   type AtomChainWire = {
-    zoningFact?: { district?: string | null; absence?: { kind?: string } | null } | null;
+    zoningFact?: {
+      district?: string | null;
+      absence?: { kind?: string } | null;
+      /**
+       * Hauska property atom DID for the zoning fact, once the
+       * hauska-engine atom-chain wire enrichment (feat/atom-chain-wire-dids,
+       * separate repo) ships it. Absent on today's wire — optional/additive.
+       */
+      atomDid?: string | null;
+    } | null;
     setbackRule?: {
       front?: number;
       side?: number;
       rear?: number;
       districtCode?: string | null;
+      /** See zoningFact.atomDid — same not-yet-shipped DID enrichment. */
+      atomDid?: string | null;
     } | null;
     buildableEnvelope?: {
       outcome?: { kind?: string; areaSqFt?: number } | null;
       readContract?: {
         axes?: { assertedConfidence?: { estimate?: number } };
       } | null;
+      /** See zoningFact.atomDid — same not-yet-shipped DID enrichment. */
+      atomDid?: string | null;
     } | null;
+    /**
+     * Adopted-code sections backing this envelope derivation, once the wire
+     * carries them with DIDs. Absent on today's wire — optional/additive.
+     */
+    codeSections?: Array<{
+      atomDid?: string | null;
+      sectionNumber?: string | null;
+      title?: string | null;
+    }> | null;
   };
   let chain: AtomChainWire | null = null;
   try {
@@ -198,10 +220,59 @@ async function tryServeAtomChainEnvelope(args: {
     },
   };
 
+  // Optional additive provenance: populated only from atom-chain wire fields
+  // that are actually present. The hauska-engine wire enrichment that adds
+  // these DIDs (feat/atom-chain-wire-dids) ships separately from this repo —
+  // until it deploys, every sub-field (and the whole block) is simply
+  // omitted, never emitted as null/empty placeholders.
+  const zoningAtomDid = chain.zoningFact?.atomDid;
+  const setbackAtomDid = rule?.atomDid;
+  const envelopeAtomDid = chain.buildableEnvelope?.atomDid;
+  const codeSectionRefs = (chain.codeSections ?? [])
+    .filter(
+      (s): s is { atomDid: string; sectionNumber: string; title?: string | null } =>
+        typeof s?.atomDid === "string" &&
+        s.atomDid.length > 0 &&
+        typeof s.sectionNumber === "string" &&
+        s.sectionNumber.length > 0,
+    )
+    .map((s) => ({
+      atomDid: s.atomDid,
+      sectionNumber: s.sectionNumber,
+      ...(typeof s.title === "string" && s.title ? { title: s.title } : {}),
+    }));
+
+  type ProvenanceRefs = {
+    zoning?: { atomDid: string };
+    setback?: { atomDid: string };
+    envelope?: { atomDid: string };
+    codeSections?: Array<{
+      atomDid: string;
+      sectionNumber: string;
+      title?: string;
+    }>;
+  };
+  const builtProvenanceRefs: ProvenanceRefs = {};
+  if (typeof zoningAtomDid === "string" && zoningAtomDid) {
+    builtProvenanceRefs.zoning = { atomDid: zoningAtomDid };
+  }
+  if (typeof setbackAtomDid === "string" && setbackAtomDid) {
+    builtProvenanceRefs.setback = { atomDid: setbackAtomDid };
+  }
+  if (typeof envelopeAtomDid === "string" && envelopeAtomDid) {
+    builtProvenanceRefs.envelope = { atomDid: envelopeAtomDid };
+  }
+  if (codeSectionRefs.length > 0) {
+    builtProvenanceRefs.codeSections = codeSectionRefs;
+  }
+  const provenanceRefs: ProvenanceRefs | undefined =
+    Object.keys(builtProvenanceRefs).length > 0 ? builtProvenanceRefs : undefined;
+
   res.status(200).json(
     withPlace(
       {
         status,
+        ...(provenanceRefs ? { provenanceRefs } : {}),
         ...(status === "declined"
           ? {
               declineReason:
