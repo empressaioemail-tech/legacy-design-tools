@@ -24,6 +24,7 @@ import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
   isSubstrateRetrievalError,
+  isSubstrateRetrievalConfigured,
   type RetrievedAtom,
 } from "@workspace/codes";
 import { db, brokerageBriefRuns } from "@workspace/db";
@@ -1309,6 +1310,9 @@ brokerageV1.post(
         researchQueries.push(...BROKERAGE_ADU_RESEARCH_QUERIES);
       }
 
+      let retrievalThrew = false;
+      let totalAtomsRetrieved = 0;
+
       for (const query of researchQueries) {
         try {
           const retrieved = await retrieveAtomsForQuestion({
@@ -1318,6 +1322,7 @@ brokerageV1.post(
             logger,
             applyMinScore: false,
           });
+          totalAtomsRetrieved += retrieved.length;
           for (const a of retrieved) {
             const existing = atomMap.get(a.id);
             const snippet = atomSnippet(a);
@@ -1333,6 +1338,7 @@ brokerageV1.post(
             }
           }
         } catch (err) {
+          retrievalThrew = true;
           if (
             isSubstrateRetrievalError(err) &&
             !degradedReasons.includes(
@@ -1356,6 +1362,35 @@ brokerageV1.post(
             "brokerage: research chat retrieval failed",
           );
         }
+      }
+
+      // Distinguishes "substrate reachable but returned nothing" from a
+      // thrown substrate error (handled above): every query completed
+      // without throwing, substrate is configured, yet zero atoms came
+      // back across the whole batch. This is a silent-degrade risk (the
+      // chat answer still generates, ungrounded) so it feeds the same
+      // degradedReasons signal the thrown-error path already populates.
+      if (
+        !retrievalThrew &&
+        totalAtomsRetrieved === 0 &&
+        researchQueries.length > 0 &&
+        isSubstrateRetrievalConfigured()
+      ) {
+        degradedReasons.push(
+          `substrate returned zero atoms for ${researchQueries.length} queries (jurisdiction=${jurisdictionKey})`,
+        );
+      }
+
+      if (degradedReasons.length > 0) {
+        logger.error(
+          {
+            runId,
+            jurisdictionKey,
+            queryCount: researchQueries.length,
+            reasons: degradedReasons,
+          },
+          "brokerage: research chat retrieval degraded",
+        );
       }
     }
 

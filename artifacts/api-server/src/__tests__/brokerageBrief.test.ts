@@ -15,6 +15,10 @@ const geocodeAddressMock = vi.hoisted(() => vi.fn());
 const completeChatMock = vi.hoisted(() => vi.fn());
 const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
 const recordGtmEventMock = vi.hoisted(() => vi.fn());
+// Defaults to true so existing tests (which rely on retrieveAtomsForQuestion
+// resolving atoms and never exercise the "not configured" branch) keep their
+// current substrateStatus/degradedReasons behavior unchanged.
+const isSubstrateRetrievalConfiguredMock = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -39,6 +43,7 @@ vi.mock("@workspace/codes", async () => {
     ...actual,
     retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
     countAtomsForJurisdiction: vi.fn(async () => 10),
+    isSubstrateRetrievalConfigured: isSubstrateRetrievalConfiguredMock,
   };
 });
 
@@ -207,6 +212,8 @@ beforeEach(() => {
   });
   retrieveAtomsForQuestionMock.mockReset();
   retrieveAtomsForQuestionMock.mockResolvedValue([mockAtom]);
+  isSubstrateRetrievalConfiguredMock.mockReset();
+  isSubstrateRetrievalConfiguredMock.mockReturnValue(true);
   fetchBrokerageSiteContextMock.mockReset();
   fetchBrokerageSiteContextMock.mockResolvedValue({
     placeKey: "coord:30.00000:-97.00000",
@@ -460,6 +467,73 @@ describe("POST /api/brokerage/v1/research/chat", () => {
         ),
     );
     expect(aduRetrievalCalls.length).toBeGreaterThan(0);
+  });
+
+  it("annotates a zero-atom substrate result without throwing, and still answers", async () => {
+    retrieveAtomsForQuestionMock.mockReset();
+    retrieveAtomsForQuestionMock.mockResolvedValue([]);
+    isSubstrateRetrievalConfiguredMock.mockReturnValue(true);
+    completeChatMock.mockResolvedValueOnce(
+      JSON.stringify({
+        answer: "An ADU may be permitted subject to zoning. Confirm with Bastrop planning.",
+      }),
+    );
+
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+    expect(briefRes.status).toBe(200);
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        runId: briefRes.body.runId,
+        message: "Can the buyer add an ADU?",
+        history: [],
+      });
+
+    expect(chatRes.status).toBe(200);
+    // The chat answer must still generate exactly as it does today — this
+    // is observability/degrade-signaling only, not a behavior gate.
+    expect(chatRes.body.message).toMatch(/ADU/i);
+    expect(chatRes.body.substrateStatus).toBe("error");
+    expect(
+      chatRes.body.degradedReasons.some((r: string) =>
+        /substrate returned zero atoms for \d+ queries \(jurisdiction=bastrop_tx\)/.test(
+          r,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not set substrateStatus/degradedReasons on a healthy non-zero retrieval", async () => {
+    isSubstrateRetrievalConfiguredMock.mockReturnValue(true);
+    completeChatMock.mockResolvedValueOnce(
+      JSON.stringify({
+        answer: "An ADU may be permitted subject to zoning [1]. Confirm with Bastrop planning.",
+      }),
+    );
+
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+    expect(briefRes.status).toBe(200);
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        runId: briefRes.body.runId,
+        message: "Can the buyer add an ADU?",
+        history: [],
+      });
+
+    expect(chatRes.status).toBe(200);
+    expect(chatRes.body.substrateStatus).toBeUndefined();
+    expect(chatRes.body.degradedReasons).toBeUndefined();
   });
 
   it("accepts message + address without runId when a brief exists", async () => {
