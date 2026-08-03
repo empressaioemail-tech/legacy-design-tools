@@ -8,7 +8,7 @@
  * has no codified setback table.
  */
 
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { AdapterRunError } from "@workspace/adapters/types";
@@ -547,5 +547,93 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("declined");
     expect(res.body.declineReason).toBe("atom_path_pending");
+  });
+});
+
+describe("POST /place/buildable-envelope — atom-chain provenanceRefs (R3)", () => {
+  const RETRIEVAL_KEY = "test-retrieval-key";
+
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  function baseChainWire(): Record<string, unknown> {
+    return {
+      zoningFact: { district: "R-MD" },
+      setbackRule: { front: 25, side: 5, rear: 10, districtCode: "R-MD" },
+      buildableEnvelope: {
+        outcome: { kind: "buildable", areaSqFt: 4200 },
+        readContract: { axes: { assertedConfidence: { estimate: 0.62 } } },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    process.env.HAUSKA_RETRIEVAL_API_KEY = RETRIEVAL_KEY;
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48021:33512";
+  });
+
+  afterEach(() => {
+    delete process.env.HAUSKA_RETRIEVAL_API_KEY;
+    vi.unstubAllGlobals();
+  });
+
+  it("populates provenanceRefs when the atom-chain wire carries DID fields", async () => {
+    const wire = baseChainWire();
+    (wire.zoningFact as Record<string, unknown>).atomDid = "did:hauska:zoning:1";
+    (wire.setbackRule as Record<string, unknown>).atomDid = "did:hauska:setback:1";
+    (wire.buildableEnvelope as Record<string, unknown>).atomDid =
+      "did:hauska:envelope:1";
+    wire.codeSections = [
+      { atomDid: "did:hauska:code-section:1", sectionNumber: "5.4.2", title: "Setbacks" },
+      // Malformed entry (no atomDid) must be dropped, not passed through.
+      { sectionNumber: "9.9.9" },
+    ];
+
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(wire), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.atomPath).toBe("atom-chain");
+    expect(res.body.provenanceRefs).toEqual({
+      zoning: { atomDid: "did:hauska:zoning:1" },
+      setback: { atomDid: "did:hauska:setback:1" },
+      envelope: { atomDid: "did:hauska:envelope:1" },
+      codeSections: [
+        { atomDid: "did:hauska:code-section:1", sectionNumber: "5.4.2", title: "Setbacks" },
+      ],
+    });
+  });
+
+  it("omits provenanceRefs entirely when the wire carries no DID fields (today's baseline)", async () => {
+    const wire = baseChainWire();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(wire), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.atomPath).toBe("atom-chain");
+    // Nothing to attach yet — omitted, not emitted as null/empty.
+    expect(res.body.provenanceRefs).toBeUndefined();
+    // Everything else on the atom-chain path still works unchanged.
+    expect(res.body.status).toBe("ok");
+    expect(res.body.setbacks).toEqual({
+      front_ft: 25,
+      side_ft: 5,
+      rear_ft: 10,
+      district: "R-MD",
+    });
+    expect(res.body.buildableAreaSqFt).toBe(4200);
   });
 });
