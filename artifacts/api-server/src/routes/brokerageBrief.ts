@@ -133,6 +133,7 @@ import { brokerageOperatorRouter } from "./operatorRunState";
 import {
   RESEARCH_AREA_CONTEXT,
   formatResearchAreaContextForLlm,
+  formatSubjectConstraintsForLlm,
   isAreaResearchChatEligible,
 } from "../lib/brokerageResearchAreaContext";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
@@ -1395,6 +1396,32 @@ brokerageV1.post(
     }
 
     const atoms = [...atomMap.values()];
+
+    // Register the researched subject parcel's constraints (zoning district,
+    // setbacks, envelope numbers) as a NUMBERED source so inline [n]
+    // citation markers can point at it — previously this content was only
+    // injected as free-text context outside the numbered sources list, so
+    // [n] could never resolve to it. Prepended (not appended) so it always
+    // lands at source [1] and survives generateResearchChat's atoms.slice
+    // cap regardless of how many code atoms were retrieved. DID-less for
+    // now: the hauska-engine atom-chain wire enrichment that adds a real
+    // atomDid for this entity ships separately (feat/atom-chain-wire-dids),
+    // so `did` stays undefined here without a wire break — atomDid carries
+    // the parcelNodeId as a stable, non-empty identifier in the meantime.
+    const subjectConstraintsText = formatSubjectConstraintsForLlm(
+      areaContext?.subject,
+    );
+    if (subjectConstraintsText && areaContext?.subject?.parcelNodeId) {
+      const parcelNodeId = areaContext.subject.parcelNodeId;
+      const situs = areaContext.subject.address?.trim() || parcelNodeId;
+      atoms.unshift({
+        atomDid: parcelNodeId,
+        entityId: parcelNodeId,
+        snippet: subjectConstraintsText,
+        label: `Parcel record — ${situs} (Hauska property atom chain)`,
+      });
+    }
+
     const storedSiteContext = (
       payload as { siteContext?: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> }
     ).siteContext;
@@ -1410,7 +1437,14 @@ brokerageV1.post(
       );
     }
 
-    const areaContextBlock = formatResearchAreaContextForLlm(areaContext);
+    // atoms[0] is the subject-parcel entry above when present, so its
+    // citation number in the shared numbering sequence is always 1 — tell
+    // the prompt instruction to cite it by that number instead of the
+    // generic "cite the source" phrasing that had no numbered target.
+    const areaContextBlock = formatResearchAreaContextForLlm(
+      areaContext,
+      subjectConstraintsText ? 1 : undefined,
+    );
 
     const result = await generateResearchChat({
       address,

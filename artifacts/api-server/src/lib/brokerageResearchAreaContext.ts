@@ -82,6 +82,7 @@ export function isAreaResearchChatEligible(
 
 export function formatResearchAreaContextForLlm(
   areaContext: ResearchAreaContext | undefined,
+  subjectCitationNumber?: number,
 ): string {
   if (!areaContext) return "";
 
@@ -129,7 +130,10 @@ export function formatResearchAreaContextForLlm(
     }
   }
 
-  const subjectBlock = formatSubjectConstraintsForLlm(areaContext.subject);
+  const subjectBlock = formatSubjectConstraintsForLlm(
+    areaContext.subject,
+    subjectCitationNumber,
+  );
   if (subjectBlock) {
     lines.push("");
     lines.push(subjectBlock);
@@ -142,9 +146,17 @@ export function formatResearchAreaContextForLlm(
  * Renders the researched subject parcel's setbacks + buildable envelope for the
  * LLM prompt, present-fields-only, always carrying the not-survey-grade hedge.
  * Returns "" when no subject (or no usable subject fields) are supplied.
+ *
+ * `citationNumber` is optional and additive: when the caller has registered
+ * this subject as a numbered source (see brokerageBrief.ts research/chat —
+ * the subject-parcel-facts entry is prepended to the numbered atom sources
+ * so [n] citations can resolve to it), pass that number so the instruction
+ * tells the model to cite it by number instead of the generic "cite the
+ * source" phrasing that had no numbered target to point at.
  */
 export function formatSubjectConstraintsForLlm(
   subject: z.infer<typeof RESEARCH_AREA_SUBJECT> | null | undefined,
+  citationNumber?: number,
 ): string {
   if (!subject) return "";
 
@@ -201,9 +213,13 @@ export function formatSubjectConstraintsForLlm(
 
   const header =
     "SUBJECT PARCEL CONSTRAINTS (approximate, not survey-grade — verify with city):";
+  const citeInstruction =
+    citationNumber != null
+      ? `answer from them and cite them as [${citationNumber}]`
+      : "answer from them and cite the source";
   const instruction =
     "When the user asks about setbacks / ADU / additions and SUBJECT PARCEL " +
-    "CONSTRAINTS are present, answer from them and cite the source; state they " +
+    `CONSTRAINTS are present, ${citeInstruction}; state they ` +
     "are approximate and to verify with the city. If absent, say the setbacks " +
     "aren't resolved for this parcel yet — do not fabricate.";
 
