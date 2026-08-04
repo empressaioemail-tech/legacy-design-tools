@@ -492,6 +492,10 @@ function toBriefAtom(atom: RetrievedAtom, label?: string): BriefAtomInput {
     snippet: atomSnippet(atom),
     label: label ?? sectionLabel,
     ...(atom.sourceUrl ? { sourceUrl: atom.sourceUrl } : {}),
+    // Retrieval strength passthrough for grounding-derived confidence (see
+    // computeGroundingConfidence in lib/brokerageBriefLlm.ts). Additive.
+    ...(typeof atom.score === "number" ? { score: atom.score } : {}),
+    ...(atom.retrievalMode ? { retrievalMode: atom.retrievalMode } : {}),
   };
 }
 

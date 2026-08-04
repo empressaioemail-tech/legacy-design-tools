@@ -41,6 +41,17 @@ export interface BriefAtomInput {
    * entries — populate later without a wire break.
    */
   did?: string;
+  /**
+   * Retrieval strength for this atom, when the caller has one (e.g.
+   * RetrievedAtom.score from lib/codes retrieval — vector path: 1 -
+   * cosine_distance, roughly 0-1; lexical path: integer bag-of-words match
+   * count, NOT on the same scale). Omitted for entries with no retrieval
+   * score (subject-parcel-facts, prior-brief citations). Additive; feeds the
+   * grounding-derived confidence estimate (see computeGroundingConfidence).
+   */
+  score?: number;
+  /** "vector" | "lexical", mirrors RetrievedAtom.retrievalMode when known. */
+  retrievalMode?: string;
 }
 
 export interface NumberedCitation {
@@ -73,13 +84,35 @@ export interface SummarizeResult {
   method: "grok" | "anthropic" | "rules-v1";
 }
 
+/**
+ * Grounding-derived signal: which numbered atoms were actually SUPPLIED to
+ * the prompt (independent of whether the model's prose happened to cite
+ * them with a surviving [n] marker). Optional and additive — see
+ * _decisions/2026-08-03_consumer_mode_citation_posture.md.
+ */
+export interface GroundingInfo {
+  /** Count of atoms in the grounding record (delivered-and-eligible sources). */
+  atomCount: number;
+  /** How the record was produced. "supplied-atoms" today; room for a future
+   * post-hoc relevance filter without a wire break. */
+  method: "supplied-atoms";
+}
+
 export interface ResearchChatResult {
   message: string;
   messageHtml: string;
   /** Pro-mode inline citations (backward compatible). */
   citations: NumberedCitation[];
-  /** Consumer contract: technical sources for “See sources” / “For your agent”. */
+  /**
+   * Consumer contract: technical sources for “See sources” / “For your
+   * agent”. Populated from the GROUNDING record (atoms actually supplied to
+   * the prompt) in every presentation mode, unioned with any marker-parsed
+   * citations pro mode also produced — never solely a marker-survival
+   * artifact. See _decisions/2026-08-03_consumer_mode_citation_posture.md.
+   */
   sources: NumberedCitation[];
+  /** Optional grounding metadata behind `sources`. Cheap, additive. */
+  grounding?: GroundingInfo;
   disclaimer: string;
   confidence: number;
   generatedAt: string;
@@ -111,6 +144,126 @@ function numberedAtomBlock(atoms: BriefAtomInput[]): string {
       return `[${i + 1}] atomDid=${a.atomDid}\nlabel: ${label}\n${snip}`;
     })
     .join("\n\n");
+}
+
+/**
+ * Build the grounding-derived numbered-source record: every atom that was
+ * actually SUPPLIED to the prompt (the same `atoms` array numberedAtomBlock
+ * rendered), independent of whether the model's prose cited it with a
+ * surviving [n] marker. This is what makes consumer-mode `sources`
+ * non-empty even though consumer prose is forbidden from carrying markers —
+ * per _decisions/2026-08-03_consumer_mode_citation_posture.md, the sources
+ * array reflects what grounded the answer, not what the model happened to
+ * cite in text.
+ *
+ * Deliberately does NOT attempt to detect whether the model's answer
+ * actually USED a given atom's content (that would require a second LLM
+ * pass or semantic diffing); "supplied and eligible" is the honest claim
+ * this method can back today. If atoms-used later proves systematically
+ * over-broad (claims grounding the text doesn't reflect), the reversal
+ * criteria in the decision record apply.
+ */
+function buildGroundingRecord(atoms: BriefAtomInput[]): {
+  sources: NumberedCitation[];
+  grounding: GroundingInfo;
+} {
+  const sources: NumberedCitation[] = atoms.map((a, i) => ({
+    n: i + 1,
+    atomDid: a.atomDid,
+    label: a.label ?? `Source ${i + 1}`,
+    snippet: a.snippet?.slice(0, 280),
+    ...(a.sourceUrl ? { sourceUrl: a.sourceUrl } : {}),
+    ...(a.entityId ? { entityId: a.entityId } : {}),
+    ...(a.did ? { did: a.did } : {}),
+  }));
+  return {
+    sources,
+    grounding: { atomCount: sources.length, method: "supplied-atoms" },
+  };
+}
+
+/**
+ * ESTIMATE-CLASS v1 — an asserted-not-earned confidence estimate derived
+ * from what actually grounded the answer (grounding atom count + retrieval
+ * strength, when scores are available, + whether the subject-parcel-facts
+ * entry is present), replacing the 0.75/0.5 marker-survival proxy this
+ * function retires. This is NOT a calibrated probability: no outcome
+ * feedback loop feeds it yet (commitment #2's calibration arrow is a later
+ * build). It is a documented, reproducible formula so the number means the
+ * same thing every time, versus an arbitrary constant.
+ *
+ * Formula (all constants named, tunable, no claimed precision beyond one
+ * significant figure):
+ *   - BASE_NO_GROUNDING = 0.35: floor when zero atoms grounded the answer
+ *     (still above 0 — an LLM answer with no sources is not automatically
+ *     worthless, but must never look confident).
+ *   - BASE_WITH_GROUNDING = 0.55: floor once at least one atom grounded
+ *     the answer, before any strength/count adjustment.
+ *   - COUNT_BONUS_PER_ATOM = 0.03, capped at COUNT_BONUS_CAP = 0.15: more
+ *     grounding atoms (up to ~5) modestly raise confidence — a single
+ *     matched section is weaker signal than five converging sections.
+ *   - SCORE_BONUS_CAP = 0.15: when vector retrieval scores are present
+ *     (0-1 range; lexical integer counts are excluded from this term since
+ *     they are not on a comparable scale), the mean of AVAILABLE vector
+ *     scores (clamped 0-1) contributes up to this much.
+ *   - SUBJECT_PARCEL_BONUS = 0.05: the subject-parcel-facts entry (present
+ *     when areaContext.subject resolved) is a strong, structured grounding
+ *     signal distinct from retrieved code text; small additive bump when
+ *     present alongside code grounding.
+ *   - Result clamped to [0.1, 0.95] — never 0 (that is reserved for "no
+ *     answer generated" paths) and never 1 (nothing here is verified
+ *     against outcome yet).
+ */
+const CONFIDENCE_BASE_NO_GROUNDING = 0.35;
+const CONFIDENCE_BASE_WITH_GROUNDING = 0.55;
+const CONFIDENCE_COUNT_BONUS_PER_ATOM = 0.03;
+const CONFIDENCE_COUNT_BONUS_CAP = 0.15;
+const CONFIDENCE_SCORE_BONUS_CAP = 0.15;
+const CONFIDENCE_SUBJECT_PARCEL_BONUS = 0.05;
+const CONFIDENCE_MIN = 0.1;
+const CONFIDENCE_MAX = 0.95;
+
+/**
+ * ASSERTED-NOT-EARNED. Separate scale from computeGroundingConfidence: this
+ * fires only when no LLM completion is available (mock/offline mode), so
+ * there is no generated answer to derive grounding strength from — these
+ * are hand-picked constants, not a formula, and intentionally do not share
+ * the grounded-mode scale above.
+ */
+const RULES_V1_FALLBACK_CONFIDENCE_WITH_ATOMS = 0.4;
+const RULES_V1_FALLBACK_CONFIDENCE_NO_ATOMS = 0.1;
+
+function computeGroundingConfidence(atoms: BriefAtomInput[]): number {
+  if (atoms.length === 0) return CONFIDENCE_BASE_NO_GROUNDING;
+
+  let confidence = CONFIDENCE_BASE_WITH_GROUNDING;
+
+  const countBonus = Math.min(
+    atoms.length * CONFIDENCE_COUNT_BONUS_PER_ATOM,
+    CONFIDENCE_COUNT_BONUS_CAP,
+  );
+  confidence += countBonus;
+
+  // Vector-path scores are ~0-1 (1 - cosine_distance); lexical-path scores
+  // are integer match counts on a different scale entirely and are excluded
+  // here so they cannot spuriously inflate confidence.
+  const vectorScores = atoms
+    .filter((a) => a.retrievalMode === "vector" && typeof a.score === "number")
+    .map((a) => Math.max(0, Math.min(1, a.score as number)));
+  if (vectorScores.length > 0) {
+    const meanScore =
+      vectorScores.reduce((sum, s) => sum + s, 0) / vectorScores.length;
+    confidence += meanScore * CONFIDENCE_SCORE_BONUS_CAP;
+  }
+
+  const hasSubjectParcelEntry = atoms.some(
+    (a) => a.entityId && !a.sourceUrl,
+  );
+  if (hasSubjectParcelEntry) {
+    confidence += CONFIDENCE_SUBJECT_PARCEL_BONUS;
+  }
+
+  return Math.max(CONFIDENCE_MIN, Math.min(CONFIDENCE_MAX, confidence));
 }
 
 function parseInlineCitations(
@@ -372,17 +525,46 @@ function finalizeResearchChatAnswer(
   const citations = parseInlineCitations(answer, atoms);
   const consumer = presentationMode === "consumer";
   const plain = consumer ? stripInlineCitations(answer) : answer;
+
+  // Grounding-derived sources: the atoms actually supplied to the prompt,
+  // independent of marker survival. Populates `sources` in EVERY
+  // presentation mode per the 2026-08-03 ruling. Pro mode's marker-parsed
+  // `citations` stay unchanged (backward compatible); `sources` in pro mode
+  // unions the grounding record with any marker-parsed citations so nothing
+  // regresses for existing pro consumers of `sources`.
+  const { sources: groundingSources, grounding } = buildGroundingRecord(atoms);
+  const sources = consumer
+    ? groundingSources
+    : unionCitationsByN(groundingSources, citations);
+
+  const confidence = computeGroundingConfidence(atoms);
+
   return {
     message: plain,
     messageHtml: textToHtmlParagraphs(plain),
     citations,
-    sources: citations,
+    sources,
+    grounding,
     disclaimer: PROPERTY_BRIEF_DISCLAIMER,
-    confidence: citations.length > 0 ? 0.75 : 0.5,
+    confidence,
     generatedAt,
     method,
     presentationMode,
   };
+}
+
+/** Union two NumberedCitation arrays by `n`, preferring the second list's
+ * entry on collision (marker-parsed citations carry a truncated 280-char
+ * snippet identical in shape to the grounding record, so collisions are
+ * inert) and sorted by `n` ascending for a stable, readable order. */
+function unionCitationsByN(
+  base: NumberedCitation[],
+  extra: NumberedCitation[],
+): NumberedCitation[] {
+  const byN = new Map<number, NumberedCitation>();
+  for (const c of base) byN.set(c.n, c);
+  for (const c of extra) byN.set(c.n, c);
+  return [...byN.values()].sort((a, b) => a.n - b.n);
 }
 
 export async function generateResearchChat(input: {
@@ -450,13 +632,21 @@ export async function generateResearchChat(input: {
       atoms.length > 0
         ? `Based on the available code sources for ${input.address}, please review the cited provisions with city staff. I do not have enough grounded context to answer "${input.message}" in mock mode.`
         : `No code atoms are available for this jurisdiction. Confirm corpus coverage for ${input.jurisdiction ?? "this market"} before answering "${input.message}".`;
+    // rules-v1 fallback: no LLM ran, so nothing actually grounded a
+    // generated answer — sources stays empty (the atoms were AVAILABLE, not
+    // consumed into a grounded response) and confidence uses its OWN scale,
+    // deliberately separate from computeGroundingConfidence's grounded-mode
+    // formula above. ASSERTED-NOT-EARNED: 0.4/0.1 are hand-picked constants
+    // reflecting "atoms exist but no reasoning ran" vs "nothing at all",
+    // not a calibrated estimate. Keep distinct from the grounding formula
+    // so a future calibration pass can retire this scale independently.
     return {
       message: msg,
       messageHtml: `<p>${escapeHtml(msg)}</p>`,
       citations: [],
       sources: [],
       disclaimer: PROPERTY_BRIEF_DISCLAIMER,
-      confidence: atoms.length > 0 ? 0.4 : 0.1,
+      confidence: atoms.length > 0 ? RULES_V1_FALLBACK_CONFIDENCE_WITH_ATOMS : RULES_V1_FALLBACK_CONFIDENCE_NO_ATOMS,
       generatedAt,
       method: "rules-v1",
       presentationMode,

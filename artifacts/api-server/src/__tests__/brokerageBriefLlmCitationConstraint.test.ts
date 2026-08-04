@@ -72,8 +72,15 @@ describe("anti-fabrication: invented [n] never survives", () => {
       "Front setback is 15 ft [1] per invented provisions [99], [7] and [3].",
     );
     expect(r.citations.map((c) => c.n)).toEqual([1]);
-    expect(r.sources.map((c) => c.n)).toEqual([1]);
-    // The one real citation maps VERBATIM to the delivered source.
+    // sources is grounding-derived (2026-08-03 ruling): it reflects every
+    // atom actually SUPPLIED to the prompt, not just the ones the model's
+    // prose happened to cite with a surviving marker — so [2] (ADU
+    // standards, delivered but uncited in this answer) legitimately
+    // appears here even though it is absent from `citations`. No
+    // fabrication risk: [2] is a real delivered source, unlike the
+    // invented [99]/[7]/[3] markers, which never resolve anywhere.
+    expect(r.sources.map((c) => c.n)).toEqual([1, 2]);
+    // The one real MARKER-PARSED citation maps VERBATIM to the delivered source.
     expect(r.citations[0]!.atomDid).toBe(
       "did:hauska:code-section:bastrop-udc-5-1",
     );
@@ -148,6 +155,101 @@ describe("presentation modes — pro keeps [n], consumer strips", () => {
     });
     expect(r.message).toContain("[99]"); // text survives…
     expect(r.citations.some((c) => c.n === 99)).toBe(false); // …evidence does not
+  });
+
+  it("REGRESSION (2026-08-03 ruling): consumer mode with a MARKERLESS answer still carries a non-empty grounding-derived sources array", async () => {
+    // The model followed its own consumer-mode instruction and emitted NO
+    // [n] markers at all. Before the ruling, sources === citations (a
+    // regex parse of markers), so this answer would have shipped ZERO
+    // attribution despite two atoms having grounded it. sources must now
+    // populate from what was actually SUPPLIED to the prompt.
+    const r = await chat(
+      "Front setback is fifteen feet, and accessory dwelling units are allowed subject to standards.",
+      { presentationMode: "consumer" },
+    );
+    expect(r.message).not.toMatch(/\[\d+\]/);
+    expect(r.citations).toEqual([]); // no markers survived to parse — expected
+    expect(r.sources.length).toBeGreaterThan(0); // grounding record fills the gap
+    expect(r.sources.map((c) => c.n)).toEqual([1, 2]);
+    expect(r.sources[0]!.atomDid).toBe(ATOMS[0]!.atomDid);
+    expect(r.sources[1]!.atomDid).toBe(ATOMS[1]!.atomDid);
+    expect(r.grounding).toEqual({ atomCount: 2, method: "supplied-atoms" });
+  });
+
+  it("HONEST-EMPTY still holds for sources: zero delivered atoms -> zero sources even in consumer mode", async () => {
+    const r = await chat("No grounded answer available.", {
+      presentationMode: "consumer",
+      atoms: [],
+    });
+    expect(r.sources).toEqual([]);
+    expect(r.grounding).toEqual({ atomCount: 0, method: "supplied-atoms" });
+  });
+});
+
+describe("confidence derives from grounding, not marker survival (2026-08-03 ruling)", () => {
+  it("a markerless consumer answer with grounded atoms reports confidence ABOVE the old always-0.5 marker-proxy floor", async () => {
+    const r = await chat(
+      "Front setback is fifteen feet, and accessory dwelling units are allowed subject to standards.",
+      { presentationMode: "consumer" },
+    );
+    expect(r.citations).toEqual([]); // old proxy would have pinned this at 0.5 forever
+    expect(r.confidence).toBeGreaterThan(0.5);
+  });
+
+  it("zero grounded atoms produces the lowest-band confidence, distinct from the grounded floor", async () => {
+    const r = await chat("Nothing to cite.", {
+      presentationMode: "pro",
+      atoms: [],
+    });
+    expect(r.confidence).toBeLessThan(0.55);
+  });
+
+  it("confidence is deterministic for a fixed grounding set (same atoms -> same score regardless of prose)", async () => {
+    const r1 = await chat("Setbacks [1].", { presentationMode: "pro" });
+    const r2 = await chat("Totally different wording, no markers at all.", {
+      presentationMode: "pro",
+    });
+    expect(r1.confidence).toBe(r2.confidence);
+  });
+
+  it("confidence stays within the documented [0.1, 0.95] band", async () => {
+    const r = await chat("Setbacks [1]; ADUs [2].", {
+      presentationMode: "pro",
+    });
+    expect(r.confidence).toBeGreaterThanOrEqual(0.1);
+    expect(r.confidence).toBeLessThanOrEqual(0.95);
+  });
+});
+
+describe("rules-v1 fallback (no LLM completion available) keeps its OWN asserted-not-earned scale", () => {
+  it("no LLM + atoms available -> 0.4 confidence, empty sources (nothing was actually grounded into an answer)", async () => {
+    completeChatMock.mockResolvedValue(null);
+    const r = await generateResearchChat({
+      address: "251 Cool Water Dr, Bastrop, TX 78602",
+      jurisdiction: "bastrop_tx",
+      message: "What are the setbacks?",
+      history: [],
+      atoms: ATOMS,
+      presentationMode: "pro",
+    });
+    expect(r.method).toBe("rules-v1");
+    expect(r.confidence).toBe(0.4);
+    expect(r.sources).toEqual([]);
+    expect(r.citations).toEqual([]);
+  });
+
+  it("no LLM + zero atoms -> 0.1 confidence", async () => {
+    completeChatMock.mockResolvedValue(null);
+    const r = await generateResearchChat({
+      address: "251 Cool Water Dr, Bastrop, TX 78602",
+      jurisdiction: "bastrop_tx",
+      message: "What are the setbacks?",
+      history: [],
+      atoms: [],
+      presentationMode: "pro",
+    });
+    expect(r.method).toBe("rules-v1");
+    expect(r.confidence).toBe(0.1);
   });
 });
 
