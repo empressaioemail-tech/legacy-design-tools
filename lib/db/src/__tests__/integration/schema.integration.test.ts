@@ -128,6 +128,10 @@ describe("lib/db schema integration", () => {
         "cotality_property_attr_cache",
         "cotality_spatial_tile_cache",
         "county_facet_coverage",
+        // OPS-9 S1 onboarding ledger, per-registry-row OPS-8 pre-flight
+        // gate + cert-grade state. Sorts after `county_facet_coverage`
+        // (`_f` < `_g`) per `ORDER BY tablename`.
+        "county_gate_cert_state",
         "coverage_requests",
         // Phase 2 Dataroom/Files tile — document->atom association.
         // One row per engine-ingested extracted atom, pointing back to the
@@ -168,8 +172,17 @@ describe("lib/db schema integration", () => {
         // GTM observation layer — Property Brief extension consent + events.
         "gtm_consent",
         "gtm_events",
+        // OPS-9 S1 onboarding ledger, read-side mirror of hauska-engine's
+        // frozen JurisdictionRegistryRow. Sorts before `knowledge_atoms`
+        // (`j` < `k`) per `ORDER BY tablename`.
+        "jurisdiction_registry_row_mirror",
         "knowledge_atoms",
         "materializable_elements",
+        // OPS-9 S1 onboarding ledger, one row per pre-flight decline /
+        // block13-quarantine parcel / future warden-sweep finding. Sorts
+        // after `materializable_elements` and before `package_share_comments`
+        // (`o` between `m` and `p`) per `ORDER BY tablename`.
+        "onboarding_ledger_event",
         "package_share_comments",
         "package_shares",
         "parcel_briefings",

@@ -246,6 +246,14 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // invariant so store-backed route suites start from a known-empty
   // state.
   "txgio_address",
+  // OPS-9 S1 onboarding ledger, no FK to anything (written by the
+  // ingest route from hauska-engine's report wrappers), so the
+  // engagements truncate does not clear these. Listed per the "if a
+  // route writes to it, it's in this list" invariant so the ingest-route
+  // suite starts from a known-empty state.
+  "onboarding_ledger_event",
+  "jurisdiction_registry_row_mirror",
+  "county_gate_cert_state",
 ];
 
 /**

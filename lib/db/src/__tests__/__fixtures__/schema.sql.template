@@ -612,6 +612,22 @@ CREATE TABLE @@SCHEMA@@.county_facet_coverage (
 );
 
 
+-- Name: county_gate_cert_state; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.county_gate_cert_state (
+    row_id text NOT NULL,
+    fips text NOT NULL,
+    gate_pass_count integer,
+    gate_decline_count integer,
+    gate_checks jsonb,
+    cert_label text,
+    cert_block_pass boolean,
+    cert_scope_annotations jsonb,
+    cert_graded_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: coverage_requests; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.coverage_requests (
@@ -902,6 +918,18 @@ CREATE TABLE @@SCHEMA@@.gtm_events (
 );
 
 
+-- Name: jurisdiction_registry_row_mirror; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.jurisdiction_registry_row_mirror (
+    row_id text NOT NULL,
+    fips text NOT NULL,
+    county_name text NOT NULL,
+    status text NOT NULL,
+    zoning_regime text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: knowledge_atoms; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.knowledge_atoms (
@@ -943,6 +971,32 @@ CREATE TABLE @@SCHEMA@@.materializable_elements (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT materializable_elements_provenance_invariants_check CHECK ((((source_kind = 'briefing-derived'::text) AND (briefing_id IS NOT NULL)) OR ((source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])) AND (source_snapshot_id IS NOT NULL) AND (engagement_id IS NOT NULL) AND (ifc_global_id IS NOT NULL) AND (ifc_type IS NOT NULL)) OR ((source_kind = 'site-topography'::text) AND (engagement_id IS NOT NULL)) OR ((source_kind = 'site-drainage'::text) AND (engagement_id IS NOT NULL)))),
     CONSTRAINT materializable_elements_source_kind_check CHECK ((source_kind = ANY (ARRAY['briefing-derived'::text, 'as-built-ifc'::text, 'as-built-ifc-bundle'::text, 'site-topography'::text, 'site-drainage'::text])))
+);
+
+
+-- Name: onboarding_ledger_event; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.onboarding_ledger_event (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ts timestamp with time zone NOT NULL,
+    fips text NOT NULL,
+    row_id text NOT NULL,
+    parcel_node_id text,
+    source_kind text NOT NULL,
+    rail_or_check text,
+    check_id text,
+    sweep_id text,
+    decline_reason text,
+    defect_class text NOT NULL,
+    severity text,
+    evidence jsonb,
+    artifact_ref text,
+    status text DEFAULT 'open'::text NOT NULL,
+    first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    CONSTRAINT onboarding_ledger_event_source_kind_check CHECK ((source_kind = ANY (ARRAY['preflight'::text, 'cert-grade'::text, 'block13-quarantine'::text, 'warden-sweep'::text]))),
+    CONSTRAINT onboarding_ledger_event_status_check CHECK ((status = ANY (ARRAY['open'::text, 'resolved'::text])))
 );
 
 
@@ -1928,6 +1982,12 @@ ALTER TABLE ONLY @@SCHEMA@@.county_facet_coverage
     ADD CONSTRAINT county_facet_coverage_county_fips_facet_pk PRIMARY KEY (county_fips, facet);
 
 
+-- Name: county_gate_cert_state county_gate_cert_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_gate_cert_state
+    ADD CONSTRAINT county_gate_cert_state_pkey PRIMARY KEY (row_id);
+
+
 -- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
@@ -2024,6 +2084,12 @@ ALTER TABLE ONLY @@SCHEMA@@.gtm_events
     ADD CONSTRAINT gtm_events_pkey PRIMARY KEY (id);
 
 
+-- Name: jurisdiction_registry_row_mirror jurisdiction_registry_row_mirror_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.jurisdiction_registry_row_mirror
+    ADD CONSTRAINT jurisdiction_registry_row_mirror_pkey PRIMARY KEY (row_id);
+
+
 -- Name: knowledge_atoms knowledge_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.knowledge_atoms
@@ -2034,6 +2100,12 @@ ALTER TABLE ONLY @@SCHEMA@@.knowledge_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_pkey PRIMARY KEY (id);
+
+
+-- Name: onboarding_ledger_event onboarding_ledger_event_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.onboarding_ledger_event
+    ADD CONSTRAINT onboarding_ledger_event_pkey PRIMARY KEY (id);
 
 
 -- Name: package_share_comments package_share_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2761,6 +2833,31 @@ CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_eleme
 -- Name: materializable_elements_snapshot_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX materializable_elements_snapshot_idx ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id) WHERE (source_snapshot_id IS NOT NULL);
+
+
+-- Name: onboarding_ledger_event_defect_class_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX onboarding_ledger_event_defect_class_idx ON @@SCHEMA@@.onboarding_ledger_event USING btree (defect_class);
+
+
+-- Name: onboarding_ledger_event_fips_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX onboarding_ledger_event_fips_idx ON @@SCHEMA@@.onboarding_ledger_event USING btree (fips);
+
+
+-- Name: onboarding_ledger_event_open_natural_key_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX onboarding_ledger_event_open_natural_key_idx ON @@SCHEMA@@.onboarding_ledger_event USING btree (row_id, parcel_node_id, defect_class, rail_or_check, check_id) WHERE (status = 'open'::text);
+
+
+-- Name: onboarding_ledger_event_row_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX onboarding_ledger_event_row_idx ON @@SCHEMA@@.onboarding_ledger_event USING btree (row_id);
+
+
+-- Name: onboarding_ledger_event_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX onboarding_ledger_event_status_idx ON @@SCHEMA@@.onboarding_ledger_event USING btree (status);
 
 
 -- Name: package_share_comments_share_created_idx; Type: INDEX; Schema: public; Owner: -

@@ -53,6 +53,7 @@ import encumbrancesRouter from "./encumbrances";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import { countyLedgerRouter } from "./countyLedger";
+import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
@@ -104,6 +105,9 @@ router.use(coverageRequestsRouter);
 // County ledger — the CC factory-floor performance layer (R-FND-6, OPS-6).
 // Reachable at /api/county-ledger (mounted under the /api router).
 router.use("/county-ledger", countyLedgerRouter);
+// Onboarding ledger ingest, OPS-9 S1 write path for hauska-engine's report
+// wrappers. Reachable at POST /api/onboarding-ledger/ingest (pinned contract).
+router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
 router.use(packagesRouter);
 router.use(canvaRouter);
 router.use(collateralRouter);
