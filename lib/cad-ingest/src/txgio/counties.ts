@@ -26,6 +26,13 @@
  * The three gap counties (Guadalupe 48187, Bell 48027, McLennan 48309)
  * had geometry in no store at all and are added here for the same bake.
  *
+ * Scope extension (DFW fan, 2026-08-04): nine DFW-area counties (Dallas
+ * 48113, Tarrant 48439, Collin 48085, Denton 48121, Rockwall 48397,
+ * Ellis 48139, Johnson 48251, Kaufman 48257, Parker 48367) are added
+ * per `_inbox/2026-08-04_dfw_phase0_recon.md` Phase 1 recommendation.
+ * Central-TX entries above are unchanged; this registry now spans two
+ * regions on the same uniform StratMap URL template.
+ *
  * URL/schema uniformity (verified 2026-07-18): every county resolves on
  * the same `stratmap25-landparcels_{fips}_lp.zip` template — all ten
  * range-GET verified live (sizes 12MB Caldwell .. 346MB Travis) — and
@@ -68,9 +75,10 @@ function county(fips: string, name: string): TxgioCounty {
 }
 
 /**
- * The ten Central-Texas counties whose parcel geometry is unified into
- * `txgio_parcel` for the PMTiles bake. Order: original v1 pair, then
- * the metro-5 (formerly live-only), then the three gap counties.
+ * The Central-Texas and DFW counties whose parcel geometry is unified
+ * into `txgio_parcel` for the PMTiles bake. Order: original v1 pair,
+ * then the metro-5 (formerly live-only), then the three gap counties,
+ * then the DFW fan.
  */
 export const TXGIO_COUNTIES: Record<string, TxgioCounty> = {
   // v1 (had no live county GIS)
@@ -86,6 +94,16 @@ export const TXGIO_COUNTIES: Record<string, TxgioCounty> = {
   "48187": county("48187", "Guadalupe"),
   "48027": county("48027", "Bell"),
   "48309": county("48309", "McLennan"),
+  // DFW fan (2026-08-04)
+  "48113": county("48113", "Dallas"),
+  "48439": county("48439", "Tarrant"),
+  "48085": county("48085", "Collin"),
+  "48121": county("48121", "Denton"),
+  "48397": county("48397", "Rockwall"),
+  "48139": county("48139", "Ellis"),
+  "48251": county("48251", "Johnson"),
+  "48257": county("48257", "Kaufman"),
+  "48367": county("48367", "Parker"),
 };
 
 export function resolveTxgioCounty(input: string): TxgioCounty | undefined {
