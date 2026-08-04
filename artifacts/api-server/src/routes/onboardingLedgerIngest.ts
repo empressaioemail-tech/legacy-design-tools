@@ -48,19 +48,29 @@ const RowMirrorSchema = z.object({
   zoningRegime: z.string().min(1),
 });
 
+/**
+ * Liberal-reader fix: the pinned Warden event type is `string | null` on
+ * these six fields (not `string | undefined`), and the Warden clean-sweep
+ * event (plus any row-scoped finding) posts an explicit `null` for
+ * parcelNodeId. The two planner dispatch pins diverged (optional vs
+ * nullable) on this contract; `.nullish()` accepts undefined, missing, AND
+ * explicit null so both callers' shapes parse. `evidence` already accepts
+ * anything via z.unknown().optional() and needs no change (null is a valid
+ * "unknown" value there already).
+ */
 const EventSchema = z.object({
   ts: z.string().min(1),
   fips: z.string().min(1),
   rowId: z.string().min(1),
-  parcelNodeId: z.string().min(1).optional(),
-  railOrCheck: z.string().min(1).optional(),
-  checkId: z.string().min(1).optional(),
-  sweepId: z.string().min(1).optional(),
-  declineReason: z.string().min(1).optional(),
+  parcelNodeId: z.string().min(1).nullish(),
+  railOrCheck: z.string().min(1).nullish(),
+  checkId: z.string().min(1).nullish(),
+  sweepId: z.string().min(1).nullish(),
+  declineReason: z.string().min(1).nullish(),
   defectClass: z.string().min(1),
-  severity: z.string().min(1).optional(),
+  severity: z.string().min(1).nullish(),
   evidence: z.unknown().optional(),
-  artifactRef: z.string().min(1).optional(),
+  artifactRef: z.string().min(1).nullish(),
 });
 
 const CertSummarySchema = z.object({
@@ -94,6 +104,30 @@ const IngestBodySchema = z.object({
   gateSummary: GateSummarySchema.optional(),
 });
 
+type ParsedEvent = z.infer<typeof EventSchema>;
+
+/**
+ * Normalizes an explicit `null` (Warden's shape) to `undefined` (the
+ * original optional-field shape) on the six nullish event fields, so every
+ * existing `event.field ?? <default>` read below the parse boundary
+ * behaves identically regardless of which caller shape sent the field.
+ * Both `null` and `undefined` already trigger `??`, so this is belt-and-
+ * suspenders explicitness (and keeps this route's DB-write logic
+ * unchanged) rather than a behavior change on its own.
+ */
+function normalizeEventNullsToUndefined(event: ParsedEvent): ParsedEvent {
+  return {
+    ...event,
+    parcelNodeId: event.parcelNodeId ?? undefined,
+    railOrCheck: event.railOrCheck ?? undefined,
+    checkId: event.checkId ?? undefined,
+    sweepId: event.sweepId ?? undefined,
+    declineReason: event.declineReason ?? undefined,
+    severity: event.severity ?? undefined,
+    artifactRef: event.artifactRef ?? undefined,
+  };
+}
+
 /**
  * POST /api/onboarding-ledger/ingest, the pinned contract. Bearer
  * service-token auth (hard 401 on missing/wrong token, no session
@@ -108,7 +142,8 @@ router.post("/ingest", requireServiceToken, async (req: Request, res: Response) 
     });
     return;
   }
-  const { sourceKind, rowMirror, events, certSummary, gateSummary } = parsed.data;
+  const { sourceKind, rowMirror, certSummary, gateSummary } = parsed.data;
+  const events = parsed.data.events.map(normalizeEventNullsToUndefined);
 
   try {
     if (rowMirror && rowMirror.length > 0) {
