@@ -333,6 +333,48 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     nullDistrictCodes: ["OCL", "UZROW"],
     layerWhere: "Base NOT IN ('OCL','UZROW')",
   },
+  // Elgin (Bastrop, 48021). SECOND Bastrop-county city zoning layer
+  // (Bastrop city is "bastrop-city-tx" above). Elgin_Zoning FeatureServer
+  // layer 0 covers the Bastrop-county-side cohort (CITY_LIMIT='ELGIN',
+  // ~3,220 parcels); the SAME FeatureServer's layer 1 (~500 parcels,
+  // fips 48453 Travis-county-side sliver) is a NAMED FOLLOW-ON, out of
+  // this pass — not wired here. `Zone_Code` carries the raw district
+  // token; every district's raw value equals its canonical setback
+  // district_name leading token (Sec. 46-203 roster: R-1/R-2/R-3/C-1/
+  // C-2/C-3/I) EXCEPT the multifamily district, which the ordinance names
+  // "R-4" (Sec. 46-203(1)d) but the GIS layer stamps "A" (a legacy code
+  // letter — confirmed by ordinance text: Sec. 46-391/46-417 both read
+  // C-2/C-3 dwelling uses as governed "the same as ... the A-Multiple-
+  // Family Residential District"). codeDomainMap decodes that one
+  // divergence (A -> R-4). Per codeDomainMap semantics (see the type doc
+  // above), when the map is present ONLY listed values stamp — unmapped
+  // raw codes become NULL — so the other 7 districts are listed here too,
+  // each as an identity mapping (e.g. "R-1" -> "R-1"), to keep them
+  // stamping rather than silently falling through to NULL. SETBACK TABLE
+  // OWED (elgin-development-code.json is a DRAFT in hauska-engine
+  // packages/adapters/src/local/setbacks/, pending planner row-
+  // verification + operator ratification — not yet ported to this repo's
+  // lib/adapters copy or registered for serve).
+  "elgin-tx": {
+    cityKey: "elgin-tx",
+    cityName: "Elgin",
+    countyFips: "48021",
+    layerUrl:
+      "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Elgin_Zoning/FeatureServer/0",
+    codeField: "Zone_Code",
+    descriptionField: "Zoning",
+    layerWhere: "CITY_LIMIT = 'ELGIN'",
+    codeDomainMap: {
+      "R-1": "R-1",
+      "R-2": "R-2",
+      "R-3": "R-3",
+      A: "R-4",
+      "C-1": "C-1",
+      "C-2": "C-2",
+      "C-3": "C-3",
+      I: "I",
+    },
+  },
   // Lockhart (Caldwell). No setback table yet. GIS `ZONING` carries the bare
   // code (RLD/RMD/RHD/CCB/CHB/CLB/CMB/IH/IL/MH/PDD/PI/AO). First Caldwell-
   // county zoning layer. SETBACK TABLE OWED (lockhart-tx.json).
