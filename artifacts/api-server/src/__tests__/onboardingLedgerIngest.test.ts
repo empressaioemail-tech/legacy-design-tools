@@ -316,6 +316,86 @@ describe("POST /api/onboarding-ledger/ingest, idempotent event re-ingest", () =>
   });
 });
 
+describe("POST /api/onboarding-ledger/ingest, Warden nullable fields (liberal reader)", () => {
+  it("accepts a verbatim warden-shaped body (explicit null parcelNodeId on a row-level event, a real id on a parcel-level one) and inserts one row each", async () => {
+    // The pinned Warden event type is `string | null` on parcelNodeId (and
+    // the other five previously-optional-only fields), not
+    // `string | undefined`. The clean-sweep event and any row-scoped
+    // finding post an explicit `null`, which the original .optional()
+    // schema 422'd (confirmed live by the Warden's first real POST).
+    const res = await request(getApp())
+      .post(INGEST_PATH)
+      .set(serviceAuth)
+      .send({
+        sourceKind: "warden-sweep",
+        rowMirror: [
+          {
+            rowId: "Bastrop",
+            fips: "48021",
+            countyName: "Bastrop",
+            status: "active",
+            zoningRegime: "euclidean-zoned",
+          },
+        ],
+        events: [
+          {
+            ts: "2026-08-04T00:00:00.000Z",
+            fips: "48021",
+            rowId: "Bastrop",
+            parcelNodeId: null,
+            railOrCheck: null,
+            checkId: null,
+            sweepId: "warden-sweep-2026-08-04",
+            declineReason: null,
+            defectClass: "WARDEN-CLEAN-SWEEP",
+            severity: null,
+            artifactRef: null,
+          },
+          {
+            ts: "2026-08-04T00:00:00.000Z",
+            fips: "48021",
+            rowId: "Bastrop",
+            parcelNodeId: "48021:34200",
+            railOrCheck: null,
+            checkId: null,
+            sweepId: "warden-sweep-2026-08-04",
+            declineReason: "neighbor adjacency mismatch",
+            defectClass: "WARDEN-ADJACENCY-DIVERGE",
+            severity: "warn",
+            artifactRef: null,
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, sourceKind: "warden-sweep", eventsIngested: 2 });
+
+    const cleanSweepRows = await db
+      .select()
+      .from(onboardingLedgerEvent)
+      .where(eq(onboardingLedgerEvent.defectClass, "WARDEN-CLEAN-SWEEP"));
+    expect(cleanSweepRows).toHaveLength(1);
+    // Not toBeNull(): parcelNodeId/railOrCheck/checkId are stored as the
+    // NO_VALUE_SENTINEL empty string, never NULL, by design (the earlier
+    // idempotent-upsert fix, see the long comment at the insert site in
+    // onboardingLedgerIngest.ts, since Postgres unique indexes treat two
+    // NULLs as distinct and would break ON CONFLICT matching). This test's
+    // job is proving the explicit-null WIRE input is accepted (422 -> 200)
+    // and correctly normalized, not that null survives to storage.
+    expect(cleanSweepRows[0].parcelNodeId).toBe("");
+    expect(cleanSweepRows[0].declineReason).toBeNull();
+    expect(cleanSweepRows[0].sourceKind).toBe("warden-sweep");
+
+    const parcelRows = await db
+      .select()
+      .from(onboardingLedgerEvent)
+      .where(eq(onboardingLedgerEvent.defectClass, "WARDEN-ADJACENCY-DIVERGE"));
+    expect(parcelRows).toHaveLength(1);
+    expect(parcelRows[0].parcelNodeId).toBe("48021:34200");
+    expect(parcelRows[0].declineReason).toBe("neighbor adjacency mismatch");
+  });
+});
+
 describe("POST /api/onboarding-ledger/ingest, body validation", () => {
   it("422s an invalid sourceKind", async () => {
     const res = await request(getApp())
