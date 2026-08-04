@@ -371,6 +371,49 @@ describe("resolveZoningLayer (the 5 newly registered cities)", () => {
     );
     expect(reduced.code).toBe("SF-1");
   });
+
+  it("wires elgin-tx to Elgin_Zoning/0 Zone_Code + CITY_LIMIT filter (2026-08-03 onboarding, Bastrop-county side only)", () => {
+    const cfg = resolveZoningLayer("elgin-tx")!;
+    expect(cfg.countyFips).toBe("48021");
+    expect(cfg.layerUrl).toBe(
+      "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Elgin_Zoning/FeatureServer/0",
+    );
+    expect(cfg.codeField).toBe("Zone_Code");
+    expect(cfg.layerWhere).toBe("CITY_LIMIT = 'ELGIN'");
+    expect(cfg.codeExtractRegex).toBeUndefined();
+    // Named follow-on: the same FeatureServer's layer 1 (Travis-side sliver,
+    // fips 48453) is NOT this layer's URL.
+    expect(cfg.layerUrl).not.toContain("FeatureServer/1");
+  });
+
+  it("elgin-tx codeDomainMap: identity for 7 districts, A -> R-4 for the sole GIS/ordinance-naming divergence", () => {
+    const cfg = resolveZoningLayer("elgin-tx")!;
+    expect(cfg.codeDomainMap?.A).toBe("R-4");
+    for (const code of ["R-1", "R-2", "R-3", "C-1", "C-2", "C-3", "I"]) {
+      expect(cfg.codeDomainMap?.[code]).toBe(code);
+    }
+    // LIVE-shaped attributes → stamped district string.
+    expect(
+      reduceZoningFeature(
+        { attributes: { Zone_Code: "A", PROP_ID: 1 }, geometry: null },
+        cfg,
+      ).code,
+    ).toBe("R-4");
+    expect(
+      reduceZoningFeature(
+        { attributes: { Zone_Code: "R-1", PROP_ID: 2 }, geometry: null },
+        cfg,
+      ).code,
+    ).toBe("R-1");
+    // An unmapped raw code (not in the domain map) falls through to NULL —
+    // never a guessed district.
+    expect(
+      reduceZoningFeature(
+        { attributes: { Zone_Code: "ETJ", PROP_ID: 3 }, geometry: null },
+        cfg,
+      ).code,
+    ).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

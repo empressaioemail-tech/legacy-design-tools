@@ -30,18 +30,36 @@ describe("zoningProvenance (A1)", () => {
     expect(layer?.layerUrl).toBe(BASTROP_AGOL);
   });
 
-  it("sole wired layer fills Bastrop when cityKey missing", () => {
+  it("sole wired layer fills San Antonio when cityKey missing (48029 — genuinely one wired layer)", () => {
     const layer = resolveZoningLayerForDistrict({
       resolvedCityKey: null,
-      countyFips: "48021",
+      countyFips: "48029",
     });
-    expect(layer?.cityKey).toBe("bastrop-city-tx");
+    expect(layer?.cityKey).toBe("san-antonio-tx");
   });
 
   it("does not invent a layer for multi-city county without cityKey", () => {
     const layer = resolveZoningLayerForDistrict({
       resolvedCityKey: null,
       countyFips: "48453", // Travis — austin + others
+    });
+    expect(layer).toBeNull();
+  });
+
+  it("Bastrop (48021) is now a two-layer county (bastrop-city-tx + elgin-tx, 2026-08-03 Elgin onboarding) — cityKey-missing correctly returns null, not a guess", () => {
+    // Prior to Elgin onboarding, 48021 wired exactly one city layer
+    // (bastrop-city-tx), so the sole-wired-layer fallback filled a missing
+    // stamp for it — see the (renamed) San Antonio test above for that
+    // still-valid single-layer case. Elgin's onboarding makes 48021 wire a
+    // SECOND city layer, so the sole-layer inference correctly stops
+    // firing for 48021: with two layers and no stamped cityKey, which
+    // layer matched the parcel is genuinely ambiguous. Per this file's own
+    // "does not invent a layer for multi-city county" precedent (Travis,
+    // above), the honest answer is null — never guess which of two
+    // polygons a parcel's centroid actually fell in.
+    const layer = resolveZoningLayerForDistrict({
+      resolvedCityKey: null,
+      countyFips: "48021",
     });
     expect(layer).toBeNull();
   });

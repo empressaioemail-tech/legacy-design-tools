@@ -231,9 +231,49 @@ describe("honest absence (never fabricate a facet)", () => {
     );
   });
 
-  it("Bastrop district without zj still gets sole-layer AGOL provenance (A1)", () => {
+  it("Bastrop (48021) district without zj AND without a name-matching situs city: two-layer county (bastrop-city-tx + elgin-tx, 2026-08-03) — honest null provenance, not a guess", () => {
+    // Prior to Elgin onboarding, 48021 wired exactly one city layer, so a
+    // district-without-zj row could honestly fill provenance from that sole
+    // layer (the case this test used to assert). Elgin onboarding makes
+    // 48021 wire a SECOND layer, so which of the two polygons matched a
+    // cityKey-missing parcel is now genuinely ambiguous when NEITHER the
+    // stamped zoning_jurisdiction NOR the situs city name resolves it — the
+    // honest answer is no provenance (never guess), matching the existing
+    // multi-city precedent (Travis: austin-tx + pflugerville-tx).
+    //
+    // situs_city is overridden to null here: parcelRow()'s default situs
+    // city ("BASTROP") would otherwise resolve via resolveZoningJurisdiction's
+    // situs-name-match fallback (a DIFFERENT, still-valid disambiguation path
+    // that is unaffected by Elgin's onboarding — a parcel whose situs address
+    // literally says "BASTROP" correctly still resolves to bastrop-city-tx
+    // even in a two-layer county, exactly as a "ELGIN" situs would resolve to
+    // elgin-tx). This test isolates the case where NEITHER the stamp NOR the
+    // situs name can disambiguate — the only case the sole-layer heuristic
+    // used to (wrongly, for a two-layer county) paper over.
     const payload = buildTier1Payload(
       parcelRow({
+        situs_city: null,
+        zoning_district: "SF-1",
+        zoning_jurisdiction: null,
+        prop_id: "105054",
+      }),
+      "48021",
+      "Bastrop",
+      new Map(),
+      now,
+    )!;
+    expect(payload.zoning?.district).toBe("SF-1");
+    expect(payload.zoning?.provenance).toBeUndefined();
+  });
+
+  it("Bastrop (48021) district without zj but WITH a name-matching situs city still resolves via situs fallback (unaffected by Elgin onboarding)", () => {
+    // Confirms the situs-name-match path (a separate, still-valid mechanism
+    // from the sole-layer guess) continues to disambiguate correctly in the
+    // new two-layer county — it does not depend on there being only one
+    // wired layer, only on the situs city name matching one of them.
+    const payload = buildTier1Payload(
+      parcelRow({
+        situs_city: "BASTROP",
         zoning_district: "SF-1",
         zoning_jurisdiction: null,
         prop_id: "105054",
@@ -244,8 +284,22 @@ describe("honest absence (never fabricate a facet)", () => {
       now,
     )!;
     expect(payload.zoning?.provenance?.cityKey).toBe("bastrop-city-tx");
-    expect(payload.zoning?.provenance?.codeField).toBe("ZoneTypeClass");
-    expect(payload.provenance.zoningSource).toContain("Zoned_Parcels");
+  });
+
+  it("San Antonio (48029) district without zj still gets sole-layer AGOL provenance (A1) — genuinely one wired layer", () => {
+    const payload = buildTier1Payload(
+      parcelRow({
+        zoning_district: "SF-1",
+        zoning_jurisdiction: null,
+        prop_id: "1",
+      }),
+      "48029",
+      "San Antonio",
+      new Map(),
+      now,
+    )!;
+    expect(payload.zoning?.provenance?.cityKey).toBe("san-antonio-tx");
+    expect(payload.zoning?.provenance?.codeField).toBe("Base");
   });
 
   it("null zoning leaves provenance.zoningSource null", () => {
