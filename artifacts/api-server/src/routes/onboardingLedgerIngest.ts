@@ -31,6 +31,15 @@ import { requireServiceToken } from "../middlewares/serviceAuth";
 
 const router: IRouter = Router();
 
+/**
+ * Internal storage sentinel for an absent parcelNodeId / railOrCheck /
+ * checkId on an onboarding_ledger_event row. See the long comment at the
+ * insert site below for why NULL cannot be used here. A real value from
+ * the wire can never collide with this because the ingest body schema
+ * requires `.min(1)` on all three fields when present.
+ */
+const NO_VALUE_SENTINEL = "";
+
 const RowMirrorSchema = z.object({
   rowId: z.string().min(1),
   fips: z.string().min(1),
@@ -174,16 +183,34 @@ router.post("/ingest", requireServiceToken, async (req: Request, res: Response) 
     }
 
     for (const event of events) {
+      // Postgres unique indexes (partial or not) treat two NULLs in an
+      // indexed column as DISTINCT by default, so ON CONFLICT never
+      // matches a row whose conflict-target columns are NULL (confirmed by
+      // local repro: two inserts with parcelNodeId/checkId both NULL
+      // produced two rows, not one upsert). NULLS NOT DISTINCT (the
+      // Postgres 15+ fix) is not usable here because CI runs
+      // pgvector/pgvector:pg14 (.github/workflows/pr-checks.yml). Fix:
+      // coalesce the three nullable conflict-target columns
+      // (parcelNodeId, railOrCheck, checkId) to the empty-string sentinel
+      // NO_VALUE_SENTINEL at the write boundary, so ON CONFLICT always has
+      // a non-NULL value to match on. The wire contract keeps these fields
+      // optional/absent; the sentinel is purely an internal storage detail
+      // of this route (zod's `.min(1)` on each field means a real value
+      // from the wire can never collide with the empty-string sentinel).
+      const parcelNodeId = event.parcelNodeId ?? NO_VALUE_SENTINEL;
+      const railOrCheck = event.railOrCheck ?? NO_VALUE_SENTINEL;
+      const checkId = event.checkId ?? NO_VALUE_SENTINEL;
+
       await db
         .insert(onboardingLedgerEvent)
         .values({
           ts: new Date(event.ts),
           fips: event.fips,
           rowId: event.rowId,
-          parcelNodeId: event.parcelNodeId ?? null,
+          parcelNodeId,
           sourceKind,
-          railOrCheck: event.railOrCheck ?? null,
-          checkId: event.checkId ?? null,
+          railOrCheck,
+          checkId,
           sweepId: event.sweepId ?? null,
           declineReason: event.declineReason ?? null,
           defectClass: event.defectClass,

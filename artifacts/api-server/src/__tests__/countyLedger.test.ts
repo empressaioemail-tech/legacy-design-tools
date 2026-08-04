@@ -138,6 +138,15 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
   });
 
   it("creates a county entry from a registry mirror row even with no county_facet_coverage rows yet", async () => {
+    // Deliberately a DIFFERENT fips than every other test in this file
+    // (48021 carries a county_facet_coverage row seeded by the
+    // "pre-existing facet-scorecard shape" describe block above, and that
+    // table is NOT in setup.ts's TRUNCATE_TABLES, so it persists across
+    // this file's tests, see setup.ts's TRUNCATE_TABLES comment for the
+    // "if a route writes to it, it's in this list" invariant, which
+    // county_facet_coverage predates and is out of this change's scope).
+    // Using an untouched fips is what actually proves the "no coverage
+    // rows yet" case, independent of that pre-existing gap.
     await request(getApp())
       .post("/api/onboarding-ledger/ingest")
       .set(serviceAuth)
@@ -146,7 +155,7 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
         rowMirror: [
           {
             rowId: "Smithville",
-            fips: "48021",
+            fips: "48091",
             countyName: "Smithville",
             status: "pre-flight-pending",
             zoningRegime: "euclidean-zoned",
@@ -159,7 +168,7 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
     expect(res.status).toBe(200);
     const county = res.body.counties.find(
       (c: { countyFips: string; rows: Array<{ rowId: string }> }) =>
-        c.countyFips === "48021" && c.rows.some((r) => r.rowId === "Smithville"),
+        c.countyFips === "48091" && c.rows.some((r) => r.rowId === "Smithville"),
     );
     expect(county).toBeDefined();
     // No county_facet_coverage rows were seeded for this county, so facets
