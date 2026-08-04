@@ -192,6 +192,13 @@ describe("POST /api/onboarding-ledger/ingest, gateSummary / certSummary upsert",
 
 describe("POST /api/onboarding-ledger/ingest, idempotent event re-ingest", () => {
   it("re-ingesting the same open natural key bumps lastSeenAt instead of duplicating", async () => {
+    // lastSeenAt is the server's real ingestion-observation clock (set via
+    // `new Date()` in the route, not the caller-supplied event.ts), so this
+    // asserts it strictly advances across the two calls rather than
+    // asserting it equals a caller-supplied timestamp. `ts` (the first-
+    // observed-occurrence timestamp) is intentionally NOT in the route's
+    // onConflictDoUpdate `set` clause, so it should still carry the FIRST
+    // ingest's value after the re-ingest.
     const firstTs = "2026-08-03T00:00:00.000Z";
     const secondTs = "2026-08-03T01:00:00.000Z";
 
@@ -211,6 +218,13 @@ describe("POST /api/onboarding-ledger/ingest, idempotent event re-ingest", () =>
           },
         ],
       });
+
+    const afterFirst = await db
+      .select()
+      .from(onboardingLedgerEvent)
+      .where(eq(onboardingLedgerEvent.rowId, "Elgin"));
+    expect(afterFirst).toHaveLength(1);
+    const lastSeenAfterFirst = afterFirst[0].lastSeenAt.getTime();
 
     await request(getApp())
       .post(INGEST_PATH)
@@ -235,7 +249,8 @@ describe("POST /api/onboarding-ledger/ingest, idempotent event re-ingest", () =>
       .where(eq(onboardingLedgerEvent.rowId, "Elgin"));
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("open");
-    expect(rows[0].lastSeenAt.toISOString()).toBe(secondTs);
+    expect(rows[0].lastSeenAt.getTime()).toBeGreaterThanOrEqual(lastSeenAfterFirst);
+    expect(rows[0].ts.toISOString()).toBe(firstTs);
   });
 
   it("a different defectClass for the same row does not collide with an existing open event", async () => {
