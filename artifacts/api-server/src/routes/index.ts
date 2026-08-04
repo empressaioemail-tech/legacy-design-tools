@@ -54,6 +54,7 @@ import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import { countyLedgerRouter } from "./countyLedger";
 import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
+import { onboardingLedgerEventsRouter } from "./onboardingLedgerEvents";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
@@ -108,6 +109,10 @@ router.use("/county-ledger", countyLedgerRouter);
 // Onboarding ledger ingest, OPS-9 S1 write path for hauska-engine's report
 // wrappers. Reachable at POST /api/onboarding-ledger/ingest (pinned contract).
 router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
+// Onboarding ledger events read, OPS-9 S1 follow-on. Per-rowId findings
+// list backing the CC County Ledger's focusedFixCount. Reachable at
+// GET /api/onboarding-ledger/events (pinned contract; see module header).
+router.use("/onboarding-ledger", onboardingLedgerEventsRouter);
 router.use(packagesRouter);
 router.use(canvaRouter);
 router.use(collateralRouter);
