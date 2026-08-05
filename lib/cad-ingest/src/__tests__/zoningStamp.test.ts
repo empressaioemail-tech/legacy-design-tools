@@ -18,6 +18,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import type { GeoJsonGeometry } from "../txgio/geo";
+import { pointInGeometry } from "../txgio/geo";
 import {
   buildZoningIndex,
   representativePoint,
@@ -109,6 +110,86 @@ describe("representativePoint", () => {
     expect(
       representativePoint({ type: "Point", coordinates: [-97.7, 30.7] }),
     ).toBeNull();
+  });
+
+  // Catastrophic-cancellation regression (2026-08-05, WDLL): the shoelace
+  // centroid formula sums `(x+x')*cross` over the ring. At real WGS84
+  // magnitude (lng ~-97, lat ~30) with a small (~tens-of-meters) irregular
+  // parcel, `cross` is ~1e-7..1e-9 while `(x+x')` is ~-194 — multiplying a
+  // ~200-magnitude term into a ~1e-8 accumulator loses most of the
+  // significant digits before the final divide, so the "centroid" can land
+  // tens of meters outside the parcel. A symmetric square (the test above)
+  // can't expose this: its centroid falls out by construction regardless
+  // of accumulation order. This is the LIVE Bastrop prop_id 31131 ring
+  // (county_fips 48021, feature_index 15372, txgio_parcel geometry as of
+  // 2026-08-05) that reproduced the bug against production data: the
+  // pre-fix formula returned a point ~21m east / ~7m south of the true
+  // centroid, outside both the parcel's own bbox and its own zoning
+  // polygon (Zoned_Parcels/83 SF-1) — which is why the scoped 41-parcel
+  // Bastrop stamp (PR #385) reproduced the exact same miss the unscoped
+  // whole-county run always had; the bug lives in this shared function,
+  // not in scoping.
+  it("stays inside the parcel's own polygon for a real small irregular Bastrop ring (regression: was ~21m outside)", () => {
+    const ring: [number, number][] = [
+      [-97.28584166799999, 30.095365249000054],
+      [-97.28592912299996, 30.095523184000058],
+      [-97.28598028799996, 30.09561558200005],
+      [-97.28556463099994, 30.095633673000066],
+      [-97.28555975499995, 30.095552836000024],
+      [-97.28554800299997, 30.095387860000073],
+      [-97.28554799899996, 30.095387807000066],
+      [-97.28554704599998, 30.09537576500003],
+      [-97.28553842899998, 30.095273444000043],
+      [-97.28562398599996, 30.09528965100003],
+      [-97.28563519099998, 30.095310416000075],
+      [-97.28565021099996, 30.095329270000036],
+      [-97.28566862999998, 30.095345689000055],
+      [-97.28568993299996, 30.09535921500003],
+      [-97.28571352699998, 30.095369470000037],
+      [-97.28573875499995, 30.095376170000065],
+      [-97.28576491199999, 30.095379127000058],
+      [-97.28579127199998, 30.09537825800004],
+      [-97.28581709599996, 30.09537358800003],
+      [-97.28584166799999, 30.095365249000054], // closed
+    ];
+    const geometry: GeoJsonGeometry = { type: "Polygon", coordinates: [ring] };
+    const pt = representativePoint(geometry);
+    expect(pt).not.toBeNull();
+    // Pre-fix (buggy) value was {longitude: -97.28550363594896, latitude:
+    // 30.095421178754524} — outside the ring's own bbox
+    // ([-97.28598029, 30.09527344] to [-97.28553843, 30.09563367]).
+    // Post-fix value (verified against the origin-shifted shoelace
+    // computed independently) is within the ring's bbox and inside the
+    // polygon.
+    expect(pt!.longitude).toBeGreaterThanOrEqual(-97.28598028799996);
+    expect(pt!.longitude).toBeLessThanOrEqual(-97.28553842899998);
+    expect(pt!.latitude).toBeGreaterThanOrEqual(30.095273444000043);
+    expect(pt!.latitude).toBeLessThanOrEqual(30.095633673000066);
+    expect(pointInGeometry(pt!.longitude, pt!.latitude, geometry)).toBe(true);
+  });
+
+  it("gives the same centroid regardless of coordinate magnitude (translation-invariance proof)", () => {
+    // A small irregular triangle, once at real WGS84 magnitude and once
+    // translated near the origin. The TRUE centroid is translation-
+    // invariant, so the two results must differ by exactly the applied
+    // shift — any drift beyond float noise means the accumulation is
+    // still magnitude-sensitive.
+    const shape = (ox: number, oy: number): [number, number][] => [
+      [ox + 0, oy + 0],
+      [ox + 0.0002, oy + 0.00005],
+      [ox + 0.00005, oy + 0.0003],
+      [ox + 0, oy + 0],
+    ];
+    const real = representativePoint({
+      type: "Polygon",
+      coordinates: [shape(-97.28, 30.09)],
+    })!;
+    const nearOrigin = representativePoint({
+      type: "Polygon",
+      coordinates: [shape(0, 0)],
+    })!;
+    expect(real.longitude - -97.28).toBeCloseTo(nearOrigin.longitude, 9);
+    expect(real.latitude - 30.09).toBeCloseTo(nearOrigin.latitude, 9);
   });
 });
 
