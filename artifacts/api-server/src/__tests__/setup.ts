@@ -49,6 +49,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // property-entitlement suite starts from a known-empty state.
   "pe_property_unlocks",
   "pe_chat_message_counts",
+  // WDLL 2026-08-05 item 6 — anonymous claim workbench-state upload target.
+  // No FK chain touches it besides `users`, but listed explicitly per the
+  // "if a route writes to it, it's in this list" invariant.
+  "pe_workbench_state",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",

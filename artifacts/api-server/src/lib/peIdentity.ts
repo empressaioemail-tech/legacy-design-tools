@@ -128,3 +128,97 @@ export async function getPeAccessTier(
     .limit(1);
   return row?.accessTier === "paid" ? "paid" : "free";
 }
+
+export type PeEntitlementRow = {
+  accessTier: "free" | "paid";
+  devRole: boolean;
+  entitlementSource: "stripe_sub" | "stripe_promo" | "stripe_unlock" | "dev" | null;
+  stripeCustomerId: string | null;
+};
+
+/** Full entitlement row read (WDLL 2026-08-05 item 1/4) — dev role + provenance. */
+export async function getPeEntitlementRow(
+  userId: string,
+): Promise<PeEntitlementRow> {
+  const [row] = await db
+    .select({
+      accessTier: peUserEntitlements.accessTier,
+      devRole: peUserEntitlements.devRole,
+      entitlementSource: peUserEntitlements.entitlementSource,
+      stripeCustomerId: peUserEntitlements.stripeCustomerId,
+    })
+    .from(peUserEntitlements)
+    .where(eq(peUserEntitlements.ownerUserId, userId))
+    .limit(1);
+  return {
+    accessTier: row?.accessTier === "paid" ? "paid" : "free",
+    devRole: row?.devRole === true,
+    entitlementSource: row?.entitlementSource ?? null,
+    stripeCustomerId: row?.stripeCustomerId ?? null,
+  };
+}
+
+/** Set (or clear) the operator dev role for a user (WDLL item 4). */
+export async function setPeDevRole(
+  userId: string,
+  devRole: boolean,
+): Promise<void> {
+  await ensurePeEntitlement(userId);
+  await db
+    .update(peUserEntitlements)
+    .set({ devRole, updatedAt: new Date() })
+    .where(eq(peUserEntitlements.ownerUserId, userId));
+}
+
+/** Link a Stripe customer id to a PE user's entitlement row. */
+export async function setPeStripeCustomerId(
+  userId: string,
+  stripeCustomerId: string,
+): Promise<void> {
+  await ensurePeEntitlement(userId);
+  await db
+    .update(peUserEntitlements)
+    .set({ stripeCustomerId, updatedAt: new Date() })
+    .where(eq(peUserEntitlements.ownerUserId, userId));
+}
+
+/**
+ * Resolve an existing PE user's owner id from a Stripe customer id, e.g. to
+ * find the target of a `customer.subscription.*` webhook that carries no
+ * `metadata.pe_user_id` on the subscription object itself.
+ */
+export async function findPeUserIdByStripeCustomerId(
+  stripeCustomerId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ ownerUserId: peUserEntitlements.ownerUserId })
+    .from(peUserEntitlements)
+    .where(eq(peUserEntitlements.stripeCustomerId, stripeCustomerId))
+    .limit(1);
+  return row?.ownerUserId ?? null;
+}
+
+/**
+ * Set a PE user's paid entitlement + provenance in one write (WDLL 2026-08-05
+ * item 2/5 — Stripe checkout/webhook is the sole writer of `access_tier` for
+ * subscription and promo paths).
+ */
+export async function setPeAccessTierFromStripe(input: {
+  userId: string;
+  tier: "free" | "paid";
+  source: "stripe_sub" | "stripe_promo";
+  stripeCustomerId?: string | null;
+}): Promise<void> {
+  await ensurePeEntitlement(input.userId);
+  await db
+    .update(peUserEntitlements)
+    .set({
+      accessTier: input.tier,
+      entitlementSource: input.tier === "paid" ? input.source : null,
+      ...(input.stripeCustomerId
+        ? { stripeCustomerId: input.stripeCustomerId }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(peUserEntitlements.ownerUserId, input.userId));
+}

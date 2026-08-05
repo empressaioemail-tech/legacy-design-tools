@@ -14,6 +14,9 @@ import { eq } from "drizzle-orm";
 import { db, brokerageWallets } from "@workspace/db";
 import { logger } from "./logger";
 import { setSubscriptionEntitlement } from "./brokerageEntitlement";
+import { createPePropertyUnlock } from "./peEntitlement";
+import { setPeAccessTierFromStripe } from "./peIdentity";
+import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
 
 export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
@@ -88,7 +91,8 @@ async function ensureWalletRow(installId: string) {
   return row!;
 }
 
-async function stripePostForm(
+/** Exported so `pePaywallStripe.ts` can reuse the same signed HTTP call. */
+export async function stripePostForm(
   path: string,
   params: Record<string, string>,
 ): Promise<Record<string, unknown>> {
@@ -247,8 +251,44 @@ export async function completeSimulatedCheckout(input: {
 }
 
 export type StripeWebhookHandleResult =
-  | { handled: true; eventType: string; installId?: string }
+  | { handled: true; eventType: string; installId?: string; peUserId?: string }
   | { handled: false; reason: string };
+
+/** `metadata.pe_user_id` / `metadata.checkout_kind` set by `pePaywallStripe.ts`. */
+function peMetadataFromObject(obj: Record<string, unknown>): {
+  peUserId: string | null;
+  checkoutKind: string | null;
+  parcelNodeId: string | null;
+} {
+  const meta = obj.metadata;
+  if (!meta || typeof meta !== "object") {
+    return { peUserId: null, checkoutKind: null, parcelNodeId: null };
+  }
+  const record = meta as Record<string, unknown>;
+  return {
+    peUserId: typeof record.pe_user_id === "string" ? record.pe_user_id : null,
+    checkoutKind:
+      typeof record.checkout_kind === "string" ? record.checkout_kind : null,
+    parcelNodeId:
+      typeof record.parcel_node_id === "string" ? record.parcel_node_id : null,
+  };
+}
+
+/**
+ * Heuristic promo-vs-full-price detection for a completed Checkout Session:
+ * a 100%-off (or partial) promotion code applied at checkout shows up as a
+ * positive `total_details.amount_discount` on the session object the
+ * webhook payload already carries — no extra Stripe API round-trip needed.
+ */
+function checkoutSessionHadDiscount(obj: Record<string, unknown>): boolean {
+  const totalDetails = obj.total_details as
+    | { amount_discount?: number }
+    | undefined;
+  return (
+    typeof totalDetails?.amount_discount === "number" &&
+    totalDetails.amount_discount > 0
+  );
+}
 
 export async function handleStripeWebhook(
   rawBody: Buffer,
@@ -285,6 +325,60 @@ export async function handleStripeWebhook(
     const subscriptionId =
       typeof obj.subscription === "string" ? obj.subscription : null;
     const customerId = typeof obj.customer === "string" ? obj.customer : null;
+    const peMeta = peMetadataFromObject(obj);
+
+    // PE property-unlock (WDLL 2026-08-05 item 4): one-time $15 checkout
+    // opened by `pePaywallStripe.ts`. Writes through the SAME unlock writer
+    // the operator dev-unlock route uses, with `source: "stripe"`.
+    if (peMeta.peUserId && peMeta.checkoutKind === "property_unlock") {
+      if (peMeta.parcelNodeId) {
+        await createPePropertyUnlock({
+          ownerUserId: peMeta.peUserId,
+          parcelNodeId: peMeta.parcelNodeId,
+          source: "stripe",
+        });
+      } else {
+        logger.warn(
+          { peUserId: peMeta.peUserId },
+          "stripe: property_unlock checkout completed with no parcel_node_id metadata",
+        );
+      }
+      if (installId) {
+        await claimInstallHistoryForUser(installId, peMeta.peUserId);
+      }
+      return {
+        handled: true,
+        eventType: "pe_property_unlock",
+        installId,
+        peUserId: peMeta.peUserId,
+      };
+    }
+
+    // PE Pro subscription (WDLL 2026-08-05 items 2, 5): sets the PE
+    // user-scoped entitlement (`pe_user_entitlements.access_tier`), NOT the
+    // install-scoped `brokerage_wallets` row the branch below writes. Promo
+    // vs full-price is recorded in `entitlement_source` for the pinned
+    // `/entitlement` contract's `source` field.
+    if (peMeta.peUserId) {
+      const source = checkoutSessionHadDiscount(obj)
+        ? "stripe_promo"
+        : "stripe_sub";
+      await setPeAccessTierFromStripe({
+        userId: peMeta.peUserId,
+        tier: "paid",
+        source,
+        stripeCustomerId: customerId,
+      });
+      if (installId) {
+        await claimInstallHistoryForUser(installId, peMeta.peUserId);
+      }
+      return {
+        handled: true,
+        eventType: "pe_subscription_active",
+        installId,
+        peUserId: peMeta.peUserId,
+      };
+    }
 
     if (installId) {
       const { tier, periodEnd } = await resolveSubscriptionTierFromStripe(
