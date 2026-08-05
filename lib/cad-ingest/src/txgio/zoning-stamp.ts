@@ -115,18 +115,51 @@ function largestRing(geometry: GeoJsonGeometry): [number, number][] | null {
  * Representative interior point of a parcel geometry: the shoelace
  * area-centroid of its largest ring, with a first-vertex fallback for a
  * degenerate ring. Returns null when the geometry has no usable ring.
+ *
+ * BUG FIX (2026-08-05, WDLL): the shoelace centroid sums `(x+x')*cross`
+ * over the ring, where `cross` is the signed area contributed by one edge
+ * — for a small parcel (~tens of meters across) at real WGS84 magnitude
+ * (longitude ~-97, latitude ~30) `cross` is ~1e-7..1e-9 while `(x+x')` is
+ * ~-194. Multiplying a ~200-magnitude term into a ~1e-8-magnitude
+ * accumulator is catastrophic cancellation: `cx`/`cy` lose most of their
+ * significant digits before the final divide, and the resulting "centroid"
+ * can land TENS OF METERS from the true centroid — confirmed live on
+ * Bastrop prop_id 31131 (verified against the SAME polygon geometry the
+ * parcel's own Zoned_Parcels/83 zoning record carries): the un-shifted
+ * formula put the point ~21m east / ~7m south of the true centroid, clean
+ * outside both the parcel's own bbox and its zoning polygon. This is why
+ * the Bastrop 41-parcel scoped stamp (PR #385) reproduced the identical
+ * miss the whole-county run always had — the bug is in this shared
+ * function, not in scoping. It silently degrades PIP accuracy for EVERY
+ * city's whole-county stamp run, worse as parcels sit farther from
+ * longitude/latitude (0, 0) — i.e. worse the farther a city is from the
+ * prime meridian/equator, which every TX city is.
+ *
+ * Fix: shift the ring to a local origin (its first vertex) before the
+ * shoelace accumulation, then shift the result back. This is the standard
+ * numerically-stable form of the polygon-centroid formula — the summed
+ * terms stay near the parcel's own scale (~1e-4) instead of the raw
+ * coordinate's scale (~1e2), so `cross` and `(x+x')` are both small and
+ * cancellation never eats the significant digits.
  */
 export function representativePoint(
   geometry: GeoJsonGeometry,
 ): { longitude: number; latitude: number } | null {
   const ring = largestRing(geometry);
   if (!ring || ring.length < 3) return null;
+  // Local origin = the ring's own first vertex, so every summed term
+  // during accumulation stays near the parcel's own coordinate scale.
+  const [ox, oy] = ring[0]!;
   let a = 0;
   let cx = 0;
   let cy = 0;
   for (let i = 0; i < ring.length; i++) {
-    const [x0, y0] = ring[i]!;
-    const [x1, y1] = ring[(i + 1) % ring.length]!;
+    const [rx0, ry0] = ring[i]!;
+    const [rx1, ry1] = ring[(i + 1) % ring.length]!;
+    const x0 = rx0 - ox;
+    const y0 = ry0 - oy;
+    const x1 = rx1 - ox;
+    const y1 = ry1 - oy;
     const cross = x0 * y1 - x1 * y0;
     a += cross;
     cx += (x0 + x1) * cross;
@@ -138,7 +171,7 @@ export function representativePoint(
     const [x, y] = ring[0]!;
     return { longitude: x, latitude: y };
   }
-  return { longitude: cx / (6 * a), latitude: cy / (6 * a) };
+  return { longitude: cx / (6 * a) + ox, latitude: cy / (6 * a) + oy };
 }
 
 /**
