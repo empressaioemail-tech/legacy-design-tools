@@ -27,6 +27,7 @@ import {
   loadBakedNodeFacetSnapshot,
 } from "./brokerageNodeFacets";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
+import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
 import {
   createPeSubscriptionCheckoutSession,
@@ -370,6 +371,52 @@ const ClaimLocalStateBodySchema = z.object({
   savedProperties: z.array(ClaimLocalSavedPropertySchema).max(200).optional(),
   workbenchToolState: z.record(z.string(), z.unknown()).optional(),
 });
+
+const ClaimSessionBodySchema = z.object({
+  installId: z.string().min(8).max(256).optional(),
+});
+
+/**
+ * Anonymous claim, first half (WDLL 2026-08-05 item 6): attach this
+ * browser's pre-auth install history to the signed-in PE user. Best-effort —
+ * an install already claimed by another user is a silent no-op (sign-in still
+ * succeeded). Header `X-Hauska-Install-Id` wins over body when both present.
+ */
+router.post(
+  "/property-explorer/v1/claim-session",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = resolvePeOwnerUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = ClaimSessionBodySchema.safeParse(req.body ?? {});
+    const installId =
+      installIdFromRequest(req) ??
+      (parsed.success ? parsed.data.installId?.trim() : undefined) ??
+      null;
+    if (!installId) {
+      res.json({ ok: true, claimed: false, reason: "no_install_id" });
+      return;
+    }
+    const claim = await claimInstallHistoryForUser(installId, userId);
+    if (!claim.ok) {
+      res.json({
+        ok: true,
+        claimed: false,
+        reason: "install_already_claimed",
+        claimedBy: claim.claimedBy,
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      claimed: claim.claimed,
+      installId,
+    });
+  },
+);
 
 /**
  * Anonymous claim, second half (WDLL 2026-08-05 item 6): the client uploads
@@ -790,7 +837,11 @@ const PePropertyUnlockCheckoutBodySchema = z.object({
  * (`source: "stripe"`); this route only opens the Checkout Session.
  */
 router.post(
-  "/property-explorer/v1/billing/property-unlock/checkout",
+  [
+    "/property-explorer/v1/billing/property-unlock/checkout",
+    // WA2 client contract alias (PR #152 billingClient.ts).
+    "/property-explorer/v1/entitlement/checkout",
+  ],
   requirePeAuthenticated,
   async (req: Request, res: Response) => {
     const userId = resolvePeOwnerUserId(req);

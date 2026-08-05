@@ -1093,10 +1093,10 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
     owner_user_id text NOT NULL,
     tenant_id text DEFAULT 'default'::text NOT NULL,
     access_tier text DEFAULT 'free'::text NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     dev_role boolean DEFAULT false NOT NULL,
     entitlement_source text,
-    stripe_customer_id text
+    stripe_customer_id text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
