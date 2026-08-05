@@ -15,7 +15,7 @@
  * Usage:
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- \
  *     --city=georgetown-tx \
- *     [--limit=N] [--dry-run]
+ *     [--limit=N] [--dry-run] [--prop-ids-file=<path>]
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- --list
  *
  * DATABASE_URL must point at the target Postgres unless --dry-run. The new
@@ -27,18 +27,80 @@
  * zoning layer + stamps + prints a summary, then exits (0 on success, 1 on
  * fatal error or an empty zoning layer).
  *
+ * `--prop-ids-file=<path>` (scoped mode): restricts the parcel READ (and
+ * therefore the UPDATE, which only ever targets rows produced by that
+ * read) to exactly the prop ids listed in the file — one per line, either
+ * a raw CAD prop id ("31131") or a full parcelNodeId ("48021:31131"; the
+ * county-fips prefix is stripped and ignored, the flag's own --city still
+ * governs which county/layer is queried). Ids are normalized the same way
+ * `parcelNodeId.ts` normalizes CAD prop ids (leading zeros stripped) and
+ * deduped before use. WITHOUT this flag the CLI is byte-identical to the
+ * whole-county path other cities depend on — this flag only ever narrows.
+ * The resolved summary reports listSize / matched / stamped /
+ * notFoundInParcelStore / noZoningPolygonHit, every count named, so a
+ * mismatch between the requested list and what's actually in the store is
+ * visible before (dry-run) or after (live) any write.
+ *
  * Egress: the zoning fetch is a plain HTTPS GET to the city's ArcGIS host.
  * Some public ArcGIS TLS setups have an unreachable OCSP/CRL endpoint from
  * a sandboxed runner; run the CLI with the sandbox relaxed for the fetch.
  */
 
 import { parseArgs } from "node:util";
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { ZONING_LAYERS, resolveZoningLayer } from "./zoning-layers";
 import { fetchZoningFeatures } from "./zoning-service";
 import { buildZoningIndex } from "./zoning-stamp";
 import { stampCountyZoning } from "./zoning-stamp-db";
+
+/**
+ * Normalize a raw prop id (leading zeros stripped from an all-digit id,
+ * left untouched otherwise). Mirrors `normalizeCadPropId` in
+ * `artifacts/api-server/src/lib/parcelNodeId.ts` — duplicated here (not
+ * imported) so `cad-ingest` stays dependency-free of `api-server`.
+ */
+export function normalizePropId(propId: string): string {
+  const t = propId.trim();
+  if (!/^\d+$/.test(t)) return t;
+  return t.replace(/^0+(?=\d)/, "");
+}
+
+/**
+ * Parse a `--prop-ids-file`: one id per line, blank lines and `#`-prefixed
+ * comment lines ignored. Each line may be a raw prop id ("31131") or a
+ * full `county:propId` parcelNodeId ("48021:31131") — the county prefix
+ * (if present) is stripped since --city already selects the county. Every
+ * surviving id must be non-empty; throws loud on an empty file, a file
+ * with zero usable ids, or any unparseable line (never silently drops a
+ * malformed entry).
+ */
+export function parsePropIdsFile(raw: string): Set<string> {
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"));
+  if (lines.length === 0) {
+    throw new Error("--prop-ids-file is empty (no usable lines)");
+  }
+  const ids = new Set<string>();
+  for (const line of lines) {
+    const afterColon = line.includes(":") ? line.split(":").pop()! : line;
+    const trimmed = afterColon.trim();
+    if (!trimmed) {
+      throw new Error(`--prop-ids-file: unparseable line "${line}"`);
+    }
+    if (!/^\d+$/.test(trimmed)) {
+      throw new Error(
+        `--prop-ids-file: line "${line}" is not a positive integer prop id`,
+      );
+    }
+    ids.add(normalizePropId(trimmed));
+  }
+  return ids;
+}
 
 const { Pool } = pg;
 
@@ -60,6 +122,7 @@ async function main(): Promise<void> {
       limit: { type: "string" },
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
+      "prop-ids-file": { type: "string" },
     },
   });
 
@@ -78,7 +141,7 @@ async function main(): Promise<void> {
   if (!values.city) {
     fail(
       "usage: zoning-stamp --city=<key|name|countyFips> [--limit=N] " +
-        "[--dry-run] | zoning-stamp --list",
+        "[--dry-run] [--prop-ids-file=<path>] | zoning-stamp --list",
     );
   }
   const cfg = resolveZoningLayer(values.city);
@@ -97,6 +160,26 @@ async function main(): Promise<void> {
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
   if (limit !== undefined && !Number.isInteger(limit)) {
     fail(`--limit must be an integer, got "${values.limit}"`);
+  }
+
+  let propIds: Set<string> | undefined;
+  if (values["prop-ids-file"] !== undefined) {
+    let raw: string;
+    try {
+      raw = readFileSync(values["prop-ids-file"], "utf8");
+    } catch (err) {
+      fail(
+        `--prop-ids-file could not be read: ${values["prop-ids-file"]} (${(err as Error).message})`,
+      );
+    }
+    try {
+      propIds = parsePropIdsFile(raw);
+    } catch (err) {
+      fail(`--prop-ids-file: ${(err as Error).message}`);
+    }
+    log(
+      `scoped mode: --prop-ids-file=${values["prop-ids-file"]} (${propIds.size} distinct prop ids requested)`,
+    );
   }
 
   const startedAt = Date.now();
@@ -143,6 +226,7 @@ async function main(): Promise<void> {
       index,
       dryRun,
       limit,
+      propIds,
       onProgress: (done, matched) =>
         log(`  stamped ${done} parcels (${matched} matched)...`),
     });
@@ -164,6 +248,31 @@ async function main(): Promise<void> {
   log(`district histogram (${hist.length} codes):`);
   for (const [code, n] of hist) log(`  ${code.padEnd(8)} ${n}`);
   log(`duration:         ${seconds}s`);
+
+  if (propIds !== undefined) {
+    log("---- scoped mode (--prop-ids-file) ----");
+    log(`listSize:              ${summary.listSize}`);
+    log(`matched (in store):    ${summary.matched}`);
+    log(`stamped:               ${dryRun ? "0 (dry-run)" : summary.parcelsMatched}`);
+    log(`notFoundInParcelStore: ${summary.notFoundInParcelStore?.length ?? 0}`);
+    if (summary.notFoundInParcelStore && summary.notFoundInParcelStore.length > 0) {
+      log(`  ids: ${summary.notFoundInParcelStore.join(", ")}`);
+    }
+    log(`noZoningPolygonHit:    ${summary.noZoningPolygonHit?.length ?? 0}`);
+    if (summary.noZoningPolygonHit && summary.noZoningPolygonHit.length > 0) {
+      log(`  ids: ${summary.noZoningPolygonHit.join(", ")}`);
+    }
+    if (summary.perParcel && summary.perParcel.length > 0) {
+      log(`${dryRun ? "would-stamp" : "stamped"} per-parcel table:`);
+      log(`  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} district`);
+      for (const row of summary.perParcel) {
+        log(
+          `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ${row.district ?? "(none)"}`,
+        );
+      }
+    }
+  }
+
   if (summary.parcelsRead === 0) {
     fail(
       `no parcels found for county ${cfg.countyFips} — is the county's ` +
@@ -172,7 +281,17 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("[zoning-stamp] FATAL:", err);
-  process.exit(1);
-});
+// Direct-execution guard: only run when this file is the entrypoint (`tsx
+// src/txgio/zoning-cli.ts` / the `zoning-stamp` npm script), not when it is
+// imported for its exported helpers (`normalizePropId`, `parsePropIdsFile`)
+// by a test. `pathToFileURL` normalizes Windows drive-letter/slash-style
+// differences between `import.meta.url` and `process.argv[1]`.
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error("[zoning-stamp] FATAL:", err);
+    process.exit(1);
+  });
+}
