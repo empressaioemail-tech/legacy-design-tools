@@ -35,6 +35,7 @@ import {
   reduceZoningFeature,
 } from "../txgio/zoning-service";
 import { resolveZoningLayer } from "../txgio/zoning-layers";
+import { normalizePropId, parsePropIdsFile } from "../txgio/zoning-cli";
 
 /** A unit square [lo,hi]^2 as a GeoJSON Polygon carrying a district code. */
 function squareFeature(
@@ -439,12 +440,19 @@ interface FakeParcelRow {
   geometry: GeoJsonGeometry;
   zoningDistrict: string | null;
   zoningJurisdiction: string | null;
+  /** CAD prop id, text column — undefined/omitted in older fixtures. */
+  propId?: string | null;
 }
 
 /**
  * A fake `ZoningStampDb` over an in-memory `txgio_parcel`. `selectDistinctOn`
  * returns one row per feature_index (geometry identical across a feature's
- * cells). `execute` compiles the batched-UPDATE SQL, pulls the (feature_index,
+ * cells), applying the REAL compiled `where` clause (county_fips [+ prop_id
+ * = ANY(...) in scoped mode]) the same way `execute` interprets the batched
+ * UPDATE — by compiling the drizzle SQL and reading bound params back out —
+ * so a scoped-mode test proves the actual `AND prop_id = ANY(...)` SQL
+ * shape is applied, not just that the function returns the right JS shape.
+ * `execute` compiles the batched-UPDATE SQL, pulls the (feature_index,
  * code) pairs + the county param back out of the compiled params, and applies
  * them to EVERY matching physical row — the real Postgres join behavior — so
  * the returned `rowCount` sums per-cell dupes exactly as prod would.
@@ -453,11 +461,14 @@ interface FakeDb {
   db: ZoningStampDb;
   rows: FakeParcelRow[];
   readonly executeCalls: number;
+  /** Compiled SQL text of the most recent `.where(...)` clause (for assertions). */
+  readonly lastWhereSql: string | undefined;
 }
 
 function makeFakeDb(rows: FakeParcelRow[]): FakeDb {
   const table = rows.map((r) => ({ ...r }));
   let calls = 0;
+  let lastWhereSql: string | undefined;
 
   const db = {
     selectDistinctOn(_on: unknown, _cols: unknown) {
@@ -466,19 +477,44 @@ function makeFakeDb(rows: FakeParcelRow[]): FakeDb {
         from() {
           return chain;
         },
-        where() {
-          return chain;
-        },
-        orderBy() {
-          const seen = new Set<number>();
-          const out: { featureIndex: number; geometry: GeoJsonGeometry }[] = [];
-          for (const r of table) {
-            if (seen.has(r.featureIndex)) continue;
-            seen.add(r.featureIndex);
-            out.push({ featureIndex: r.featureIndex, geometry: r.geometry });
-          }
-          out.sort((a, b) => a.featureIndex - b.featureIndex);
-          return Promise.resolve(out);
+        where(whereClause: SQL) {
+          const { sql: sqlText, params } = dialect.sqlToQuery(whereClause);
+          lastWhereSql = sqlText;
+          // Bound params in emission order: county_fips first, then (in
+          // scoped mode) drizzle's `inArray` expands to one placeholder
+          // PER value ("... in ($2, $3, $4)"), not a single array param —
+          // so every param after index 0 is one prop id.
+          const county = params[0] as string;
+          const propIdList =
+            params.length > 1 ? (params.slice(1) as string[]) : undefined;
+          const filtered = table.filter((r) => {
+            if (r.countyFips !== county) return false;
+            if (propIdList !== undefined) {
+              return r.propId != null && propIdList.includes(r.propId);
+            }
+            return true;
+          });
+          return {
+            orderBy() {
+              const seen = new Set<number>();
+              const out: {
+                featureIndex: number;
+                geometry: GeoJsonGeometry;
+                propId: string | null;
+              }[] = [];
+              for (const r of filtered) {
+                if (seen.has(r.featureIndex)) continue;
+                seen.add(r.featureIndex);
+                out.push({
+                  featureIndex: r.featureIndex,
+                  geometry: r.geometry,
+                  propId: r.propId ?? null,
+                });
+              }
+              out.sort((a, b) => a.featureIndex - b.featureIndex);
+              return Promise.resolve(out);
+            },
+          };
         },
       };
       return chain;
@@ -518,6 +554,9 @@ function makeFakeDb(rows: FakeParcelRow[]): FakeDb {
     rows: table,
     get executeCalls() {
       return calls;
+    },
+    get lastWhereSql() {
+      return lastWhereSql;
     },
   };
 }
@@ -725,5 +764,243 @@ describe("stampCountyZoning (batched write)", () => {
     expect(fake.executeCalls).toBe(2);
     // And every seeded feature got stamped RS.
     expect(fake.rows.every((r) => r.zoningDistrict === "RS")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --prop-ids-file scoped mode (Bastrop 41 stamp-gap fix)
+//
+// `parsePropIdsFile`/`normalizePropId` (CLI file parsing) and
+// `stampCountyZoning`'s `propIds` param (DB scoping) each get direct
+// coverage. The whole-county path's own regression coverage above already
+// proves byte-identical behavior when `propIds` is omitted — every one of
+// those tests still passes unchanged with this file's edits.
+// ---------------------------------------------------------------------------
+
+describe("parsePropIdsFile", () => {
+  it("parses one raw prop id per line, dedupes, ignores blank lines and comments", () => {
+    const ids = parsePropIdsFile(
+      "31131\n32634\n\n# a comment\n35793\n31131\n",
+    );
+    expect([...ids].sort()).toEqual(["31131", "32634", "35793"]);
+  });
+
+  it("accepts a full parcelNodeId and strips the county-fips prefix", () => {
+    const ids = parsePropIdsFile("48021:31131\n48021:32634\n");
+    expect([...ids].sort()).toEqual(["31131", "32634"]);
+  });
+
+  it("normalizes leading zeros the same as normalizeCadPropId", () => {
+    const ids = parsePropIdsFile("0031131\n48021:0032634\n");
+    expect([...ids].sort()).toEqual(["31131", "32634"]);
+  });
+
+  it("fails loud on an empty file (no usable lines)", () => {
+    expect(() => parsePropIdsFile("")).toThrow(/empty/i);
+    expect(() => parsePropIdsFile("\n\n  \n")).toThrow(/empty/i);
+    expect(() => parsePropIdsFile("# only a comment\n")).toThrow(/empty/i);
+  });
+
+  it("fails loud on an unparseable (non-numeric) line", () => {
+    expect(() => parsePropIdsFile("31131\nnot-a-prop-id\n")).toThrow(
+      /not a positive integer/i,
+    );
+  });
+
+  it("fails loud on a line that is only a colon (empty id after strip)", () => {
+    expect(() => parsePropIdsFile("48021:\n")).toThrow();
+  });
+});
+
+describe("normalizePropId", () => {
+  it("strips leading zeros from an all-digit id", () => {
+    expect(normalizePropId("0031131")).toBe("31131");
+    expect(normalizePropId("31131")).toBe("31131");
+  });
+
+  it("leaves a non-numeric id untouched", () => {
+    expect(normalizePropId("R-580706")).toBe("R-580706");
+  });
+
+  it("trims whitespace", () => {
+    expect(normalizePropId("  31131  ")).toBe("31131");
+  });
+});
+
+describe("stampCountyZoning (propIds scoped mode)", () => {
+  // Same Georgetown-shaped index as the batched-write tests: RS block +
+  // MF-2 block, plus a "no coverage" gap.
+  const index = buildZoningIndex([
+    squareFeature("RS", -97.72, 30.715, 0.01),
+    squareFeature("MF-2", -97.70, 30.715, 0.01),
+  ]);
+  const COUNTY = "48021";
+  const CITY = "bastrop-city-tx";
+
+  function seedScopedRows(): FakeParcelRow[] {
+    const rsGeom = parcelSquare(-97.715, 30.72); // -> RS
+    const mfGeom = parcelSquare(-97.695, 30.72); // -> MF-2
+    const outGeom = parcelSquare(-97.5, 30.5); // -> null (no polygon)
+    return [
+      // Target parcel 1 (RS), two grid cells (per-cell dupe).
+      {
+        countyFips: COUNTY,
+        featureIndex: 100,
+        tileKey: "c1",
+        propId: "31131",
+        geometry: rsGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+      {
+        countyFips: COUNTY,
+        featureIndex: 100,
+        tileKey: "c2",
+        propId: "31131",
+        geometry: rsGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+      // Target parcel 2 (MF-2), single cell.
+      {
+        countyFips: COUNTY,
+        featureIndex: 101,
+        tileKey: "c1",
+        propId: "34529",
+        geometry: mfGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+      // Target parcel 3, resolves in the store but centroid hits no polygon.
+      {
+        countyFips: COUNTY,
+        featureIndex: 102,
+        tileKey: "c1",
+        propId: "51847",
+        geometry: outGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+      // NON-target parcel in the SAME county, inside the RS block — must
+      // NOT be read or stamped by a scoped run (the whole point of #8's
+      // fix: a bastrop-city-tx run today touches every county_fips=48021
+      // row; scoped mode must not).
+      {
+        countyFips: COUNTY,
+        featureIndex: 999,
+        tileKey: "c1",
+        propId: "99999999",
+        geometry: rsGeom,
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+    ];
+  }
+
+  it("restricts the read to exactly the requested prop ids (SQL carries prop_id IN (...))", async () => {
+    const fake = makeFakeDb(seedScopedRows());
+    const propIds = new Set(["31131", "34529", "51847"]);
+    await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+      propIds,
+    });
+    expect(fake.lastWhereSql).toContain("county_fips");
+    expect(fake.lastWhereSql).toMatch(/prop_id.*in/i);
+  });
+
+  it("stamps only the 3 requested parcels, leaving the non-target row in the same county untouched", async () => {
+    const fake = makeFakeDb(seedScopedRows());
+    const propIds = new Set(["31131", "34529", "51847"]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+      propIds,
+    });
+
+    expect(summary.parcelsRead).toBe(3); // NOT 4 -- the non-target row is excluded
+    expect(summary.parcelsMatched).toBe(2); // RS + MF-2
+    expect(summary.parcelsUnmatched).toBe(1); // the no-coverage one
+
+    // Named scoped-mode counts, every one explicit.
+    expect(summary.listSize).toBe(3);
+    expect(summary.matched).toBe(3); // all 3 requested ids resolved to a row
+    expect(summary.notFoundInParcelStore).toEqual([]);
+    expect(summary.noZoningPolygonHit).toEqual(["51847"]);
+
+    // The non-target parcel (feature 999, same county, inside the RS
+    // polygon) must remain completely unstamped.
+    const untouched = fake.rows.find((r) => r.featureIndex === 999)!;
+    expect(untouched.zoningDistrict).toBeNull();
+    expect(untouched.zoningJurisdiction).toBeNull();
+
+    // The 2 matched target parcels ARE stamped.
+    expect(
+      fake.rows.filter((r) => r.featureIndex === 100).every((r) => r.zoningDistrict === "RS"),
+    ).toBe(true);
+    expect(fake.rows.find((r) => r.featureIndex === 101)!.zoningDistrict).toBe("MF-2");
+    // The no-coverage target stays NULL (never guessed).
+    expect(fake.rows.find((r) => r.featureIndex === 102)!.zoningDistrict).toBeNull();
+  });
+
+  it("reports notFoundInParcelStore for requested ids absent from the store", async () => {
+    const fake = makeFakeDb(seedScopedRows());
+    const propIds = new Set(["31131", "does-not-exist-99999"]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+      propIds,
+    });
+    expect(summary.listSize).toBe(2);
+    expect(summary.matched).toBe(1);
+    expect(summary.notFoundInParcelStore).toEqual(["does-not-exist-99999"]);
+  });
+
+  it("dry-run scoped mode: PIP computed, per-parcel table populated, zero writes", async () => {
+    const fake = makeFakeDb(seedScopedRows());
+    const propIds = new Set(["31131", "34529", "51847"]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+      propIds,
+      dryRun: true,
+    });
+    expect(summary.rowsUpdated).toBe(0);
+    expect(fake.executeCalls).toBe(0);
+    expect(fake.rows.every((r) => r.zoningDistrict === null)).toBe(true);
+
+    // The would-stamp per-parcel table is still populated (dry-run predicts
+    // apply for exactly the 3 requested parcels).
+    expect(summary.perParcel).toHaveLength(3);
+    const byPropId = new Map(summary.perParcel!.map((r) => [r.propId, r.district]));
+    expect(byPropId.get("31131")).toBe("RS");
+    expect(byPropId.get("34529")).toBe("MF-2");
+    expect(byPropId.get("51847")).toBeNull();
+  });
+
+  it("UNSCOPED mode (no propIds) omits every scoped-mode field (whole-county path unaffected)", async () => {
+    const fake = makeFakeDb(seedScopedRows());
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index,
+    });
+    // The unscoped run reads ALL 5 rows in the county (including the
+    // "non-target" one -- proving whole-county behavior is untouched).
+    expect(summary.parcelsRead).toBe(4); // 4 distinct feature_index values
+    expect(summary.listSize).toBeUndefined();
+    expect(summary.matched).toBeUndefined();
+    expect(summary.notFoundInParcelStore).toBeUndefined();
+    expect(summary.noZoningPolygonHit).toBeUndefined();
+    expect(summary.perParcel).toBeUndefined();
   });
 });

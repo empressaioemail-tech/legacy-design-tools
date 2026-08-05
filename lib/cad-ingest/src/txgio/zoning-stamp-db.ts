@@ -23,7 +23,7 @@
  * as `ingest.ts`.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { txgioParcel } from "@workspace/db/schema";
 import type { GeoJsonGeometry } from "./geo";
@@ -51,11 +51,43 @@ export interface ZoningStampSummary {
   codeHistogram: Record<string, number>;
   /** Total txgio_parcel ROWS updated (>= parcelsMatched; per-cell dupes). */
   rowsUpdated: number;
+  /**
+   * Scoped runs only (`propIds` supplied): size of the requested prop-id
+   * list (post-dedupe). Undefined on an unscoped (whole-county) run.
+   */
+  listSize?: number;
+  /**
+   * Scoped runs only: how many of `listSize` resolved to at least one
+   * `txgio_parcel` row for this county (i.e. `parcelsRead` in scoped mode).
+   * Named separately from `parcelsRead` so a caller reading the summary
+   * does not have to infer "matched the list" from the generic field.
+   */
+  matched?: number;
+  /**
+   * Scoped runs only: requested prop ids with ZERO rows in `txgio_parcel`
+   * for this county (never guessed, never silently dropped).
+   */
+  notFoundInParcelStore?: string[];
+  /**
+   * Scoped runs only: requested prop ids that resolved to a parcel row but
+   * whose centroid matched no zoning polygon (subset semantics identical
+   * to the whole-county `parcelsUnmatched`, but named for the scoped
+   * caller so nothing is silent).
+   */
+  noZoningPolygonHit?: string[];
+  /**
+   * Scoped runs only: one row per resolved parcel with its PIP outcome —
+   * the per-parcel would-stamp table (dry-run) or applied table (live).
+   * `district` is null when the centroid matched no zoning polygon.
+   */
+  perParcel?: { propId: string; featureIndex: number; district: string | null }[];
 }
 
 interface DistinctParcelRow {
   featureIndex: number;
   geometry: unknown;
+  /** Only selected in scoped mode (propIds supplied); undefined otherwise. */
+  propId?: string | null;
 }
 
 /** One matched parcel's stamp, collected during PIP, flushed in batches. */
@@ -129,24 +161,49 @@ export async function stampCountyZoning(opts: {
   index: ZoningPolygon[];
   dryRun?: boolean;
   limit?: number;
+  /**
+   * Scoped mode: when supplied, the parcel READ is restricted to rows
+   * whose `prop_id` is in this set (`WHERE county_fips = ... AND prop_id =
+   * ANY(...)`), the PIP/stamp logic runs unchanged over exactly those
+   * rows, and the UPDATE naturally stays scoped because it only ever
+   * targets `(county_fips, feature_index)` pairs produced by the filtered
+   * read. Values must already be normalized (leading-zero-stripped) — the
+   * caller (CLI) owns normalization so this function stays a pure DB/PIP
+   * layer. Composes with `dryRun`; ignored together with `limit` is
+   * pointless but not rejected (limit still applies on top of the
+   * filtered set, in read order).
+   */
+  propIds?: Set<string>;
   onProgress?: (done: number, matched: number) => void;
   progressEvery?: number;
 }): Promise<ZoningStampSummary> {
-  const { db, countyFips, cityKey, index, dryRun, limit } = opts;
+  const { db, countyFips, cityKey, index, dryRun, limit, propIds } = opts;
   const progressEvery = opts.progressEvery ?? 5000;
   if (!cityKey.trim()) {
     throw new Error("stampCountyZoning requires cityKey (ZONING_LAYERS key)");
   }
 
+  const scoped = propIds !== undefined && propIds.size > 0;
+
   // Distinct features for the county (geometry identical across a feature's
-  // per-cell duplicate rows), keyed by feature_index.
+  // per-cell duplicate rows), keyed by feature_index. Scoped mode adds a
+  // prop_id = ANY(...) filter on the same read and also selects prop_id so
+  // we can report which requested ids resolved to a row.
+  const whereClause = scoped
+    ? and(
+        eq(txgioParcel.countyFips, countyFips),
+        inArray(txgioParcel.propId, [...propIds]),
+      )
+    : eq(txgioParcel.countyFips, countyFips);
+
   const parcels = (await db
     .selectDistinctOn([txgioParcel.featureIndex], {
       featureIndex: txgioParcel.featureIndex,
       geometry: txgioParcel.geometry,
+      propId: txgioParcel.propId,
     })
     .from(txgioParcel)
-    .where(eq(txgioParcel.countyFips, countyFips))
+    .where(whereClause)
     .orderBy(txgioParcel.featureIndex)) as DistinctParcelRow[];
 
   const summary: ZoningStampSummary = {
@@ -157,6 +214,10 @@ export async function stampCountyZoning(opts: {
     rowsUpdated: 0,
   };
 
+  const noZoningPolygonHit: string[] = [];
+  const foundPropIds = new Set<string>();
+  const perParcel: { propId: string; featureIndex: number; district: string | null }[] = [];
+
   // PIP loop: collect matched pairs and flush in batches as we go so a
   // long county run (Bexar ~700k parcels / ~400k matches) cannot lose the
   // entire stamp if the process dies after PIP but before a single end-of-
@@ -166,14 +227,22 @@ export async function stampCountyZoning(opts: {
   for (const p of parcels) {
     if (limit !== undefined && summary.parcelsRead >= limit) break;
     summary.parcelsRead += 1;
+    if (scoped && p.propId) foundPropIds.add(p.propId);
     const hit = stampParcelZoning(index, p.geometry as GeoJsonGeometry);
     if (!hit) {
       summary.parcelsUnmatched += 1;
+      if (scoped && p.propId) {
+        noZoningPolygonHit.push(p.propId);
+        perParcel.push({ propId: p.propId, featureIndex: p.featureIndex, district: null });
+      }
     } else {
       summary.parcelsMatched += 1;
       summary.codeHistogram[hit.code] =
         (summary.codeHistogram[hit.code] ?? 0) + 1;
       matches.push({ featureIndex: p.featureIndex, code: hit.code });
+      if (scoped && p.propId) {
+        perParcel.push({ propId: p.propId, featureIndex: p.featureIndex, district: hit.code });
+      }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
         rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
         matches.length = 0;
@@ -188,6 +257,16 @@ export async function stampCountyZoning(opts: {
     rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
   }
   summary.rowsUpdated = rowsUpdated;
+
+  if (scoped) {
+    summary.listSize = propIds!.size;
+    summary.matched = foundPropIds.size;
+    summary.notFoundInParcelStore = [...propIds!].filter(
+      (id) => !foundPropIds.has(id),
+    );
+    summary.noZoningPolygonHit = noZoningPolygonHit;
+    summary.perParcel = perParcel;
+  }
 
   return summary;
 }
