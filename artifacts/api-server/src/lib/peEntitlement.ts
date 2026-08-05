@@ -6,11 +6,11 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { and, eq, sql } from "drizzle-orm";
 import {
   db,
-  peUserIdentities,
+  peUserEntitlements,
   pePropertyUnlocks,
   peChatMessageCounts,
 } from "@workspace/db";
-import { getPeAccessTier } from "./peIdentity";
+import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
@@ -22,6 +22,15 @@ export type PeEntitlementSnapshot = {
   tenantId: string;
   userId: string | null;
   authenticated: boolean;
+  /** Operator-grantable dev role (WDLL 2026-08-05 item 4). Always present. */
+  devRole: boolean;
+  /** Why the user is paid, or `null` for free/unset. `"dev"` when devRole elevates tier. */
+  entitlementSource:
+    | "stripe_sub"
+    | "stripe_promo"
+    | "stripe_unlock"
+    | "dev"
+    | null;
 };
 
 export function resolvePeOwnerUserId(req: Request): string | null {
@@ -47,14 +56,24 @@ export async function resolvePeEntitlement(
       tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
       userId: null,
       authenticated: false,
+      devRole: false,
+      entitlementSource: null,
     };
   }
-  const tier = await getPeAccessTier(userId);
+  const row = await getPeEntitlementRow(userId);
+  // Dev role elevates tier the same way a paid entitlement does (WDLL
+  // 2026-08-05 item 5: /entitlement is the single, authoritative source —
+  // the PE BFF gates strictly off `tier`, so a dev-role user must read
+  // "paid" here, not just clear the separate route-level bypass).
+  const tier: "free" | "paid" =
+    row.accessTier === "paid" || row.devRole ? "paid" : "free";
   return {
     tier,
     tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
     userId,
     authenticated: true,
+    devRole: row.devRole,
+    entitlementSource: row.devRole ? "dev" : row.entitlementSource,
   };
 }
 
@@ -261,38 +280,23 @@ export function requirePePaidOrPropertyUnlocked(
   };
 }
 
-function allowlistEnv(name: "PE_DEV_PAID_EMAILS" | "PE_DEV_PAID_SUBJECTS"): Set<string> {
-  return new Set(
-    (process.env[name] ?? "")
-      .split(",")
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
 /**
- * Temporary operator-only paid bypass for deep routes. It is deliberately
- * identity-bound (not a request header) and inert unless an allowlist env is
- * configured. Billing remains the source of truth for every other user.
+ * Operator-only paid bypass for deep routes (WDLL 2026-08-05 item 4).
+ *
+ * Reads `pe_user_entitlements.dev_role` directly — replaces the retired
+ * `PE_DEV_PAID_EMAILS` / `PE_DEV_PAID_SUBJECTS` env allowlists (migration
+ * 0064). Grantable/revocable via the internal service-key route
+ * (`POST /internal/dev-role`) with no deploy, and closes within one
+ * entitlement refresh since every gate re-reads this on each request.
+ * Billing remains the source of truth for every other user.
  */
 export async function hasPeDevPaidBypass(userId: string): Promise<boolean> {
-  const emails = allowlistEnv("PE_DEV_PAID_EMAILS");
-  const subjects = allowlistEnv("PE_DEV_PAID_SUBJECTS");
-  if (emails.size === 0 && subjects.size === 0) return false;
-
-  const identities = await db
-    .select({
-      email: peUserIdentities.email,
-      subject: peUserIdentities.subject,
-    })
-    .from(peUserIdentities)
-    .where(eq(peUserIdentities.userId, userId));
-
-  return identities.some(
-    (identity) =>
-      (identity.email != null && emails.has(identity.email.trim().toLowerCase())) ||
-      subjects.has(identity.subject.trim().toLowerCase()),
-  );
+  const [row] = await db
+    .select({ devRole: peUserEntitlements.devRole })
+    .from(peUserEntitlements)
+    .where(eq(peUserEntitlements.ownerUserId, userId))
+    .limit(1);
+  return row?.devRole === true;
 }
 
 /** Test fixture: flip a user to paid tier (non-production or test header). */

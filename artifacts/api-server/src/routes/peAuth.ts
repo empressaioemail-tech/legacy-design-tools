@@ -13,6 +13,8 @@ import { z } from "zod/v4";
 import { DEFAULT_TENANT_ID, SESSION_COOKIE } from "../middlewares/session";
 import { mintSessionToken } from "../lib/sessionToken";
 import { upsertPeOidcIdentity, getPeAccessTier } from "../lib/peIdentity";
+import { installIdFromRequest } from "../lib/brokerageInstallId";
+import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -22,6 +24,8 @@ const ExchangeBodySchema = z.object({
   subject: z.string().min(1).max(256),
   email: z.string().email().optional(),
   displayName: z.string().max(256).optional(),
+  /** Anonymous pre-auth install to claim (WDLL 2026-08-05 item 6). Header takes precedence when both present. */
+  installId: z.string().min(8).max(256).optional(),
 });
 
 function exchangeSecret(): string | null {
@@ -85,12 +89,32 @@ router.post("/auth/session-exchange", async (req: Request, res: Response) => {
     const token = mintSessionToken(applicantSession(identity.userId));
     const tier = await getPeAccessTier(identity.userId);
     setSessionCookie(res, token);
+
+    // Anonymous claim (WDLL 2026-08-05 item 6): the header wins over a body
+    // field so the BFF's own install-id plumbing (X-Hauska-Install-Id) is
+    // authoritative when both are present. Claim failures (e.g. the install
+    // was already claimed by a different user) never fail sign-in — this is
+    // best-effort data recovery, not an auth precondition.
+    const installId = installIdFromRequest(req) ?? parsed.data.installId ?? null;
+    let claimedInstallHistory = false;
+    if (installId) {
+      const claim = await claimInstallHistoryForUser(installId, identity.userId);
+      claimedInstallHistory = claim.ok && claim.claimed;
+      if (!claim.ok) {
+        logger.info(
+          { installId, userId: identity.userId, claimedBy: claim.claimedBy },
+          "pe session-exchange: install already claimed by a different user",
+        );
+      }
+    }
+
     res.status(identity.isNewUser ? 201 : 200).json({
       token,
       userId: identity.userId,
       email: identity.email,
       displayName: identity.displayName,
       entitlement: { tier },
+      claimedInstallHistory,
     });
   } catch (err) {
     logger.error({ err }, "pe session-exchange failed");

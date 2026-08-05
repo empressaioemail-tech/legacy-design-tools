@@ -7,7 +7,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
 import { and, desc, eq } from "drizzle-orm";
-import { db, peSavedProperties } from "@workspace/db";
+import { db, peSavedProperties, peWorkbenchState } from "@workspace/db";
 import {
   PE_FREE_CHAT_MESSAGE_LIMIT,
   createPePropertyUnlock,
@@ -19,12 +19,21 @@ import {
   resolvePeEntitlement,
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
+import { setPeDevRole } from "../lib/peIdentity";
 import { requireServiceToken } from "../middlewares/serviceAuth";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
   isValidParcelNodeId,
   loadBakedNodeFacetSnapshot,
 } from "./brokerageNodeFacets";
+import { installIdFromRequest } from "../lib/brokerageInstallId";
+import { isStripeConfigured } from "../lib/brokerageStripe";
+import {
+  createPeSubscriptionCheckoutSession,
+  createPePropertyUnlockCheckoutSession,
+  defaultPeCheckoutCancelUrl,
+  defaultPeCheckoutSuccessUrl,
+} from "../lib/pePaywallStripe";
 
 const router: IRouter = Router();
 
@@ -204,6 +213,8 @@ router.get("/property-explorer/v1/entitlement", async (req: Request, res: Respon
     tier: snap.tier,
     tenantId: snap.tenantId,
     userId: snap.userId,
+    devRole: snap.devRole,
+    entitlementSource: snap.entitlementSource,
   };
   const parcelNodeIdRaw = req.query.parcelNodeId;
   const parcelNodeId = (
@@ -346,6 +357,119 @@ router.delete(
       return;
     }
     res.json({ ok: true });
+  },
+);
+
+const ClaimLocalSavedPropertySchema = z.object({
+  parcelNodeId: z.string().min(1).max(128),
+  label: z.string().max(256).optional(),
+  snapshot: z.record(z.string(), z.unknown()).optional(),
+});
+
+const ClaimLocalStateBodySchema = z.object({
+  savedProperties: z.array(ClaimLocalSavedPropertySchema).max(200).optional(),
+  workbenchToolState: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * Anonymous claim, second half (WDLL 2026-08-05 item 6): the client uploads
+ * whatever it held locally pre-auth (saved-property hints + workbench UI
+ * state) once it has a signed-in session, so nothing orphans on the auth
+ * flip. Saved properties are MERGED, never overwritten or deleted — a
+ * pre-existing server row wins on label/snapshot conflicts, since it is by
+ * definition newer (it was written by an already-authenticated write).
+ * Workbench state is UI convenience, not user content, so it is replaced
+ * wholesale.
+ */
+router.post(
+  "/property-explorer/v1/claim-local-state",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = ClaimLocalStateBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const now = new Date();
+    const claimedParcelNodeIds: string[] = [];
+
+    for (const item of parsed.data.savedProperties ?? []) {
+      const parcelNodeId = item.parcelNodeId.trim();
+      if (!parcelNodeId || !isValidParcelNodeId(parcelNodeId)) continue;
+
+      const [existing] = await db
+        .select({
+          label: peSavedProperties.label,
+          snapshot: peSavedProperties.snapshot,
+        })
+        .from(peSavedProperties)
+        .where(
+          and(
+            eq(peSavedProperties.tenantId, scope.tenantId),
+            eq(peSavedProperties.ownerUserId, scope.ownerUserId),
+            eq(peSavedProperties.parcelNodeId, parcelNodeId),
+          ),
+        )
+        .limit(1);
+
+      if (existing) {
+        const mergedSnapshot = {
+          ...(item.snapshot ?? {}),
+          ...(asRecord(existing.snapshot) ?? {}),
+        };
+        await db
+          .update(peSavedProperties)
+          .set({
+            label: existing.label ?? item.label ?? null,
+            snapshot: mergedSnapshot,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(peSavedProperties.tenantId, scope.tenantId),
+              eq(peSavedProperties.ownerUserId, scope.ownerUserId),
+              eq(peSavedProperties.parcelNodeId, parcelNodeId),
+            ),
+          );
+      } else {
+        await db.insert(peSavedProperties).values({
+          tenantId: scope.tenantId,
+          ownerUserId: scope.ownerUserId,
+          parcelNodeId,
+          label: item.label ?? null,
+          snapshot: item.snapshot ?? {},
+          updatedAt: now,
+        });
+      }
+      claimedParcelNodeIds.push(parcelNodeId);
+    }
+
+    const workbenchToolStateSaved = parsed.data.workbenchToolState != null;
+    if (workbenchToolStateSaved) {
+      await db
+        .insert(peWorkbenchState)
+        .values({
+          ownerUserId: scope.ownerUserId,
+          tenantId: scope.tenantId,
+          state: parsed.data.workbenchToolState!,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: peWorkbenchState.ownerUserId,
+          set: {
+            tenantId: scope.tenantId,
+            state: parsed.data.workbenchToolState!,
+            updatedAt: now,
+          },
+        });
+    }
+
+    res.json({ ok: true, claimedParcelNodeIds, workbenchToolStateSaved });
   },
 );
 
@@ -598,6 +722,143 @@ router.post(
       ok: true,
       unlock: { ownerUserId, parcelNodeId, source: "dev" },
     });
+  },
+);
+
+const PeCheckoutBodySchema = z.object({
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+});
+
+/**
+ * User-authenticated Pro subscription checkout (WDLL 2026-08-05 items 2, 3).
+ * Distinct from the install-scoped `propertyExplorerBillingRouter` seam:
+ * this is the signed-in PE user's own checkout, carries `pe_user_id` in
+ * Stripe metadata so the webhook can flip THIS user's
+ * `pe_user_entitlements.access_tier`, and allows Stripe promotion codes at
+ * checkout so a tester can apply a 100%-off code and land in the same paid
+ * path as a real payment.
+ */
+router.post(
+  "/property-explorer/v1/billing/checkout",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = resolvePeOwnerUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = PeCheckoutBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_request" });
+      return;
+    }
+    try {
+      const session = await createPeSubscriptionCheckoutSession({
+        userId,
+        installId: installIdFromRequest(req),
+        successUrl: parsed.data.successUrl ?? defaultPeCheckoutSuccessUrl(),
+        cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
+      });
+      res.json({
+        ...session,
+        stripeConfigured: isStripeConfigured(),
+        honestNote: isStripeConfigured()
+          ? undefined
+          : "Stripe credentials not configured on cortex — simulated checkout only",
+      });
+    } catch (err) {
+      res.status(502).json({
+        error: "checkout_failed",
+        message: String((err as Error).message || err),
+        stripeConfigured: isStripeConfigured(),
+      });
+    }
+  },
+);
+
+const PePropertyUnlockCheckoutBodySchema = z.object({
+  parcelNodeId: z.string().min(1).max(128),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+});
+
+/**
+ * $15 one-time per-property unlock checkout (WDLL 2026-08-05 item 4 of the
+ * dispatch build spec — the $15 unlock). Webhook writes the
+ * `pe_property_unlocks` row on completion via `createPePropertyUnlock`
+ * (`source: "stripe"`); this route only opens the Checkout Session.
+ */
+router.post(
+  "/property-explorer/v1/billing/property-unlock/checkout",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = resolvePeOwnerUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = PePropertyUnlockCheckoutBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_request" });
+      return;
+    }
+    const parcelNodeId = parsed.data.parcelNodeId.trim();
+    if (!isValidParcelNodeId(parcelNodeId)) {
+      res.status(400).json({ error: "invalid_parcel_node_id" });
+      return;
+    }
+    try {
+      const session = await createPePropertyUnlockCheckoutSession({
+        userId,
+        parcelNodeId,
+        installId: installIdFromRequest(req),
+        successUrl: parsed.data.successUrl ?? defaultPeCheckoutSuccessUrl(),
+        cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
+      });
+      res.json({
+        ...session,
+        parcelNodeId,
+        stripeConfigured: isStripeConfigured(),
+        honestNote: isStripeConfigured()
+          ? undefined
+          : "Stripe credentials or STRIPE_PE_UNLOCK_PRICE_ID not configured — simulated checkout only",
+      });
+    } catch (err) {
+      res.status(502).json({
+        error: "checkout_failed",
+        message: String((err as Error).message || err),
+        stripeConfigured: isStripeConfigured(),
+      });
+    }
+  },
+);
+
+const DevRoleBodySchema = z.object({
+  userId: z.string().min(1).max(128),
+  devRole: z.boolean(),
+});
+
+/**
+ * Internal service-key route (WDLL 2026-08-05 item 4): operator grant/revoke
+ * of the server-side dev role, no deploy required. Service-token guarded
+ * ({@link requireServiceToken}) — not reachable from a browser session, so
+ * this is an operator/ops-tooling call, not a self-service one. Revocation
+ * closes every gate on the very next entitlement read since
+ * {@link hasPeDevPaidBypass} and `/entitlement` both read the row live.
+ */
+router.post(
+  "/property-explorer/v1/internal/dev-role",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const parsed = DevRoleBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const { userId, devRole } = parsed.data;
+    await setPeDevRole(userId, devRole);
+    res.json({ ok: true, userId, devRole });
   },
 );
 

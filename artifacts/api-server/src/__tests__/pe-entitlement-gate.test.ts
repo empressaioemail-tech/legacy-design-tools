@@ -5,11 +5,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
+import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import {
   db,
   peUserEntitlements,
-  peUserIdentities,
   placeLayerSnapshots,
   users,
 } from "@workspace/db";
@@ -112,31 +112,21 @@ describe("PE entitlement gate", () => {
     expect(res.body.error).toBe("upgrade_required");
   });
 
-  it("allows an identity on the dev paid email allowlist through deep routes", async () => {
-    await db.insert(peUserIdentities).values({
-      id: "pei_google_dev-operator",
-      userId: USER_FREE,
-      provider: "google",
-      subject: "dev-operator",
-      email: "nick@example.com",
-    });
-    const prior = process.env.PE_DEV_PAID_EMAILS;
-    process.env.PE_DEV_PAID_EMAILS = "nick@example.com";
-    try {
-      const res = await asUser(
-        request(getApp())
-          .post("/api/property-explorer/v1/research/brief")
-          .send({ parcelNodeId: BAKED_NODE_ID }),
-        USER_FREE,
-      );
-      // The identity bypass clears the 402 gate. The honest 404 is expected
-      // because this test has not seeded a snapshot in this case.
-      expect(res.status).toBe(404);
-      expect(res.body.error).toBe("baked_snapshot_not_found");
-    } finally {
-      if (prior === undefined) delete process.env.PE_DEV_PAID_EMAILS;
-      else process.env.PE_DEV_PAID_EMAILS = prior;
-    }
+  it("allows a DB dev_role user through deep routes (env allowlist retired)", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({ devRole: true })
+      .where(eq(peUserEntitlements.ownerUserId, USER_FREE));
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: BAKED_NODE_ID }),
+      USER_FREE,
+    );
+    // The dev-role bypass clears the 402 gate. The honest 404 is expected
+    // because this test has not seeded a snapshot in this case.
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("baked_snapshot_not_found");
   });
 
   it("authed paid user receives a cited baked R1 brief and manifest", async () => {

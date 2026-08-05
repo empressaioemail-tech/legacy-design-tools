@@ -22,7 +22,6 @@ import {
   peChatMessageCounts,
   pePropertyUnlocks,
   peUserEntitlements,
-  peUserIdentities,
   users,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
@@ -76,6 +75,9 @@ const {
   consumePeFreeChatMessage,
   PE_FREE_CHAT_MESSAGE_LIMIT,
 } = await import("../lib/peEntitlement");
+const { __resetServiceApiKeyCacheForTests } = await import(
+  "../lib/serviceToken"
+);
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -88,6 +90,7 @@ const USER_UNLOCKED = "user-pp-unlocked";
 const PARCEL = "48055:10068";
 const OTHER_PARCEL = "48055:20099";
 const EXT_KEY = "pe-property-entitlement-ext-key";
+const SERVICE_TOKEN = "pe-property-entitlement-service-token";
 
 function asUser(req: Test, userId: string): Test {
   return req.set("x-audience", "user").set("x-requestor", `user:${userId}`);
@@ -132,6 +135,8 @@ async function chatCountFor(userId: string, parcelNodeId: string) {
 beforeEach(async () => {
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
   resetBrokerageApiKeysForTests();
+  process.env.SERVICE_API_KEY = SERVICE_TOKEN;
+  __resetServiceApiKeyCacheForTests();
   retrieveAtomsForQuestionMock.mockResolvedValue([]);
   completeChatMock.mockResolvedValue(
     JSON.stringify({ answer: "Setbacks come from the zoning district." }),
@@ -343,43 +348,33 @@ describe("dev-unlock stub writer", () => {
     expect(res.body.error).toBe("dev_bypass_required");
   });
 
-  it("bypass-listed operator writes an unlock through the shared writer", async () => {
-    await db.insert(peUserIdentities).values({
-      id: "pei_google_pp-operator",
-      userId: USER_FREE,
-      provider: "google",
-      subject: "pp-operator",
-      email: "operator@example.com",
+  it("DB dev_role operator writes an unlock through the shared writer (env allowlist retired)", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({ devRole: true })
+      .where(eq(peUserEntitlements.ownerUserId, USER_FREE));
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/internal/dev-unlock")
+        .send({ parcelNodeId: OTHER_PARCEL, ownerUserId: USER_UNLOCKED }),
+      USER_FREE,
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.unlock).toEqual({
+      ownerUserId: USER_UNLOCKED,
+      parcelNodeId: OTHER_PARCEL,
+      source: "dev",
     });
-    const prior = process.env.PE_DEV_PAID_EMAILS;
-    process.env.PE_DEV_PAID_EMAILS = "operator@example.com";
-    try {
-      const res = await asUser(
-        request(getApp())
-          .post("/api/property-explorer/v1/internal/dev-unlock")
-          .send({ parcelNodeId: OTHER_PARCEL, ownerUserId: USER_UNLOCKED }),
-        USER_FREE,
+    const [row] = await db
+      .select()
+      .from(pePropertyUnlocks)
+      .where(
+        and(
+          eq(pePropertyUnlocks.ownerUserId, USER_UNLOCKED),
+          eq(pePropertyUnlocks.parcelNodeId, OTHER_PARCEL),
+        ),
       );
-      expect(res.status).toBe(201);
-      expect(res.body.unlock).toEqual({
-        ownerUserId: USER_UNLOCKED,
-        parcelNodeId: OTHER_PARCEL,
-        source: "dev",
-      });
-      const [row] = await db
-        .select()
-        .from(pePropertyUnlocks)
-        .where(
-          and(
-            eq(pePropertyUnlocks.ownerUserId, USER_UNLOCKED),
-            eq(pePropertyUnlocks.parcelNodeId, OTHER_PARCEL),
-          ),
-        );
-      expect(row?.source).toBe("dev");
-    } finally {
-      if (prior === undefined) delete process.env.PE_DEV_PAID_EMAILS;
-      else process.env.PE_DEV_PAID_EMAILS = prior;
-    }
+    expect(row?.source).toBe("dev");
   });
 });
 
@@ -477,6 +472,105 @@ describe("research/chat PE-session free counter", () => {
       .send(chatBody());
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("install_id_required");
+  });
+});
+
+describe("internal dev-role route (WDLL 2026-08-05 item 4)", () => {
+  const ROUTE = "/api/property-explorer/v1/internal/dev-role";
+
+  it("rejects callers without the service token", async () => {
+    const res = await request(getApp())
+      .post(ROUTE)
+      .send({ userId: USER_FREE, devRole: true });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a session-only caller (service token required, not a user session)", async () => {
+    const res = await asUser(
+      request(getApp()).post(ROUTE).send({ userId: USER_FREE, devRole: true }),
+      USER_FREE,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("grants dev role and it flows through /entitlement + the paid gate", async () => {
+    const grant = await request(getApp())
+      .post(ROUTE)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ userId: USER_FREE, devRole: true });
+    expect(grant.status).toBe(200);
+    expect(grant.body).toEqual({ ok: true, userId: USER_FREE, devRole: true });
+
+    const [row] = await db
+      .select({ devRole: peUserEntitlements.devRole })
+      .from(peUserEntitlements)
+      .where(eq(peUserEntitlements.ownerUserId, USER_FREE));
+    expect(row?.devRole).toBe(true);
+
+    const entitlement = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_FREE,
+    );
+    expect(entitlement.body).toMatchObject({
+      tier: "paid",
+      devRole: true,
+      entitlementSource: "dev",
+    });
+
+    const brief = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: OTHER_PARCEL }),
+      USER_FREE,
+    );
+    expect(brief.status).toBe(404);
+    expect(brief.body.error).toBe("baked_snapshot_not_found");
+  });
+
+  it("revoking dev role closes the gate on the very next read", async () => {
+    await request(getApp())
+      .post(ROUTE)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ userId: USER_FREE, devRole: true });
+
+    const revoke = await request(getApp())
+      .post(ROUTE)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ userId: USER_FREE, devRole: false });
+    expect(revoke.status).toBe(200);
+    expect(revoke.body.devRole).toBe(false);
+
+    const entitlement = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_FREE,
+    );
+    expect(entitlement.body.tier).toBe("free");
+    expect(entitlement.body.devRole).toBe(false);
+    expect(entitlement.body.entitlementSource).toBeNull();
+
+    const brief = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: OTHER_PARCEL }),
+      USER_FREE,
+    );
+    expect(brief.status).toBe(402);
+  });
+
+  it("grants dev role for a user with no existing entitlement row (first grant before any sign-in)", async () => {
+    const brandNewUser = "user-pp-brand-new";
+    await db.insert(users).values({ id: brandNewUser, displayName: "Brand New" });
+    const grant = await request(getApp())
+      .post(ROUTE)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ userId: brandNewUser, devRole: true });
+    expect(grant.status).toBe(200);
+    const entitlement = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      brandNewUser,
+    );
+    expect(entitlement.body.tier).toBe("paid");
+    expect(entitlement.body.devRole).toBe(true);
   });
 });
 

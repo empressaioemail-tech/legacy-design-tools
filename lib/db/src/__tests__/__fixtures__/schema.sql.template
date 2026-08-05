@@ -1093,6 +1093,21 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
     owner_user_id text NOT NULL,
     tenant_id text DEFAULT 'default'::text NOT NULL,
     access_tier text DEFAULT 'free'::text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    dev_role boolean DEFAULT false NOT NULL,
+    entitlement_source text,
+    stripe_customer_id text
+);
+
+
+--
+-- Name: pe_workbench_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.pe_workbench_state (
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    state jsonb DEFAULT '{}'::jsonb NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -2160,6 +2175,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_identities
     ADD CONSTRAINT pe_user_identities_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_workbench_state pe_workbench_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_workbench_state
+    ADD CONSTRAINT pe_workbench_state_pkey PRIMARY KEY (owner_user_id);
 
 
 -- Name: permit_counters permit_counters_tenant_id_year_pk; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3427,6 +3448,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_identities
     ADD CONSTRAINT pe_user_identities_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_workbench_state pe_workbench_state_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_workbench_state
+    ADD CONSTRAINT pe_workbench_state_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: plan_set_piece_classifications plan_set_piece_classifications_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
