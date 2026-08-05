@@ -1100,18 +1100,6 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
 );
 
 
---
--- Name: pe_workbench_state; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE @@SCHEMA@@.pe_workbench_state (
-    owner_user_id text NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    state jsonb DEFAULT '{}'::jsonb NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 -- Name: pe_user_identities; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_user_identities (
@@ -1121,6 +1109,18 @@ CREATE TABLE @@SCHEMA@@.pe_user_identities (
     subject text NOT NULL,
     email text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: pe_workbench_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.pe_workbench_state (
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    state jsonb DEFAULT '{}'::jsonb NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
