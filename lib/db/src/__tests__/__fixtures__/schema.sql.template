@@ -1113,9 +1113,7 @@ CREATE TABLE @@SCHEMA@@.pe_user_identities (
 );
 
 
---
 -- Name: pe_workbench_state; Type: TABLE; Schema: public; Owner: -
---
 
 CREATE TABLE @@SCHEMA@@.pe_workbench_state (
     owner_user_id text NOT NULL,
