@@ -211,16 +211,23 @@ export function stampParcelZoning(
   parcelGeometry: GeoJsonGeometry,
 ): { code: string; description?: string | null } | null {
   const centroid = representativePoint(parcelGeometry);
-  if (!centroid) return null;
-  const hit = zoningCodeAtPoint(index, centroid.longitude, centroid.latitude);
-  if (hit) return hit;
-  // Centroid landed outside every zoning polygon — retry from a vertex ON
-  // the parcel boundary (handles a concave parcel whose centroid sits in a
-  // notch outside the parcel, so outside its zoning polygon too).
+  if (centroid) {
+    const hit = zoningCodeAtPoint(index, centroid.longitude, centroid.latitude);
+    if (hit) return hit;
+  }
+  // Centroid missed — sweep ring vertices (partial-geometry / flag-lot class:
+  // centroid on null fragment but zoned sub-ring has district on record).
   const ring = largestRing(parcelGeometry);
   if (ring && ring.length > 0) {
-    const [vx, vy] = ring[0]!;
-    return zoningCodeAtPoint(index, vx, vy);
+    const seen = new Set<string>();
+    for (const coord of ring) {
+      if (!coord || coord.length < 2) continue;
+      const key = `${coord[0]!.toFixed(8)},${coord[1]!.toFixed(8)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const hit = zoningCodeAtPoint(index, coord[0]!, coord[1]!);
+      if (hit) return hit;
+    }
   }
   return null;
 }
