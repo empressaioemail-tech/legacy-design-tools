@@ -56,6 +56,17 @@
  *   pnpm --filter @artifacts/api-server node-facet-bake-tier1 -- \
  *     --county=48055 [--limit=500] [--dry-run] [--page-size=5000] \
  *     [--adapter-key=node-facets:tier1]   # override for a test key
+ *     [--prop-ids-file=<path>]            # scoped: listed prop ids only
+ *
+ * `--prop-ids-file=<path>` (scoped mode): restricts the parcel READ (and
+ * therefore promote) to exactly the prop ids listed in the file — one per
+ * line, either a raw CAD prop id ("31131") or a full parcelNodeId
+ * ("48021:31131"; the county-fips prefix is stripped; --county still
+ * governs which county table is queried). Ids are normalized the same way
+ * `parcelNodeId.ts` normalizes CAD prop ids (leading zeros stripped) and
+ * deduped before use. WITHOUT this flag the CLI is the whole-county path;
+ * this flag only ever narrows. Summary reports listSize / matched /
+ * notFoundInParcelStore so roster mismatches are visible before any write.
  *
  *   or directly:
  *   tsx artifacts/api-server/src/nodeFacetBakeTier1Cli.ts --county=48055 --dry-run
@@ -80,7 +91,7 @@ import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import pg from "pg";
 
 import { parcelNodeId, normalizeCadPropId } from "./lib/parcelNodeId";
@@ -145,6 +156,39 @@ function log(msg: string): void {
 function fail(msg: string): never {
   console.error(`[node-facet-bake-t1] ERROR: ${msg}`);
   process.exit(1);
+}
+
+/**
+ * Parse a `--prop-ids-file`: one id per line, blank lines and `#`-prefixed
+ * comment lines ignored. Each line may be a raw prop id ("31131") or a full
+ * `county:propId` parcelNodeId ("48021:31131") — the county prefix (if
+ * present) is stripped since --county already selects the county. Every
+ * surviving id must be non-empty; throws loud on an empty file or any
+ * unparseable line.
+ */
+export function parsePropIdsFile(raw: string): Set<string> {
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"));
+  if (lines.length === 0) {
+    throw new Error("--prop-ids-file is empty (no usable lines)");
+  }
+  const ids = new Set<string>();
+  for (const line of lines) {
+    const afterColon = line.includes(":") ? line.split(":").pop()! : line;
+    const trimmed = afterColon.trim();
+    if (!trimmed) {
+      throw new Error(`--prop-ids-file: unparseable line "${line}"`);
+    }
+    if (!/^\d+$/.test(trimmed)) {
+      throw new Error(
+        `--prop-ids-file: line "${line}" is not a positive integer prop id`,
+      );
+    }
+    ids.add(normalizeCadPropId(trimmed));
+  }
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,6 +1240,12 @@ interface CountyStats {
     envelopeDerived: number;
     envelopeOk: number;
   };
+  /** Scoped runs only (`--prop-ids-file`). */
+  scoped?: {
+    listSize: number;
+    matched: number;
+    notFoundInParcelStore: string[];
+  };
 }
 
 async function bakeCounty(args: {
@@ -1209,10 +1259,11 @@ async function bakeCounty(args: {
   dryRun: boolean;
   blockedFips: ReadonlySet<string>;
   sampleSink: (p: Tier1FacetPayload) => void;
+  propIds?: Set<string>;
 }): Promise<CountyStats> {
   const { pool, county, landUse, addressLandUse, adapterKey, pageSize, limit, dryRun } =
     args;
-  const { blockedFips } = args;
+  const { blockedFips, propIds } = args;
   // The address-recovery join needs the TxGIO owner to gate each match. Select
   // it ONLY for a blocked county (the only counties that run the recovery);
   // never for a normal county, and never into the payload.
@@ -1239,55 +1290,31 @@ async function bakeCounty(args: {
   };
   const nowIso = new Date().toISOString();
   let after = -1;
+  const scoped = propIds !== undefined && propIds.size > 0;
+  const foundPropIds = new Set<string>();
 
-  for (;;) {
-    const remaining =
-      limit !== undefined ? Math.max(0, limit - stats.parcelsSeen) : pageSize;
-    if (remaining === 0) break;
-    const pageLimit = Math.min(pageSize, remaining);
-    // OWNER: selected as `txgio_owner_for_gate` ONLY for a blocked county, and
-    // ONLY to gate the address-recovery join per match. It is NEVER copied into
-    // the payload (the main() owner-leak guard asserts this). For a non-blocked
-    // county it is not even selected (NULL). `zoning_district` is selected only
-    // when the table has it (prod does; staging does not) — else NULL, honest
-    // zoning-absence.
-    const zoningSelect = county.hasZoning
-      ? "zoning_district"
-      : "NULL::text AS zoning_district";
-    const zoningJurisdictionSelect = county.hasZoningJurisdiction
-      ? "zoning_jurisdiction"
-      : "NULL::text AS zoning_jurisdiction";
-    const ownerSelect = needsOwnerForGate
-      ? "owner_name AS txgio_owner_for_gate"
-      : "NULL::text AS txgio_owner_for_gate";
-    const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
-      `SELECT DISTINCT ON (feature_index)
-              feature_index, prop_id, situs_address, situs_city, situs_state,
-              ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
-              source_vintage, geometry
-         FROM ${county.table}
-        WHERE county_fips = $1
-          AND feature_index > $2
-        ORDER BY feature_index
-        LIMIT $3`,
-      [county.fips, after, pageLimit],
-    );
-    if (r.rows.length === 0) break;
+  const zoningSelect = county.hasZoning
+    ? "zoning_district"
+    : "NULL::text AS zoning_district";
+  const zoningJurisdictionSelect = county.hasZoningJurisdiction
+    ? "zoning_jurisdiction"
+    : "NULL::text AS zoning_jurisdiction";
+  const ownerSelect = needsOwnerForGate
+    ? "owner_name AS txgio_owner_for_gate"
+    : "NULL::text AS txgio_owner_for_gate";
 
-    // ---- PHASE 1 (COMPUTE) ----------------------------------------------
-    // Iterate the page's rows exactly as the per-node loop did: advance the
-    // keyset cursor, count parcelsSeen, skip no-nodeId / no-geom, do the
-    // facet-hit accounting and sampleSink, and collect the bakeable nodes for
-    // the batched prior-read + write. NONE of the accounting here differs from
-    // the per-node version — it just no longer interleaves a DB round-trip.
+  /** Process one fetched page of parcel rows (shared by county-wide + scoped). */
+  async function processParcelPage(
+    rows: (ParcelRow & { txgio_owner_for_gate: string | null })[],
+  ): Promise<void> {
     const computed: ComputedNode[] = [];
 
-    for (const row of r.rows) {
-      after = row.feature_index;
+    for (const row of rows) {
+      if (scoped && row.prop_id) {
+        foundPropIds.add(normalizeCadPropId(row.prop_id));
+      }
       stats.parcelsSeen += 1;
 
-      // Carry the gate-only owner onto the row for the address-recovery match.
-      // Not persisted — buildTier1Payload uses it only inside the owner gate.
       row.txgioOwnerForGate =
         (row as ParcelRow & { txgio_owner_for_gate?: string | null })
           .txgio_owner_for_gate ?? null;
@@ -1310,7 +1337,6 @@ async function bakeCounty(args: {
         stats.skippedNoGeom += 1;
       }
 
-      // Facet-hit accounting (over PARCELS with a node id, i.e. bakeable).
       if (payload.facetCoverage.landUse) stats.facetHits.landUse += 1;
       if (payload.provenance.landUseAddressRecovered) {
         stats.facetHits.landUseAddressRecovered += 1;
@@ -1327,21 +1353,12 @@ async function bakeCounty(args: {
       computed.push({ placeKey, payload, centroid });
     }
 
-    // ---- PHASE 2 (BATCH-READ PRIORS) ------------------------------------
-    // ONE query fetches priors for every bakeable placeKey in the page. Runs
-    // in dry-run too, so the dry-run monotonic decision reflects the DB state.
     const priors = await readSnapshotsBatch(
       pool,
       adapterKey,
       computed.map((c) => c.placeKey),
     );
 
-    // ---- PHASE 3 (DECIDE + BATCH-WRITE) ---------------------------------
-    // Apply the UNCHANGED shouldPromote per node, in page order, partitioning
-    // into promote vs keptPriorMonotonic. Counts land byte-for-byte the same
-    // as the per-node loop (kept / new / upgrade / baked). Promoted nodes are
-    // upserted in one batched statement (chunked); dry-run skips only the
-    // write, keeping every count intact.
     const decision = decidePagePromotions(computed, priors);
     stats.promotedNew += decision.promotedNew;
     stats.promotedUpgrade += decision.promotedUpgrade;
@@ -1351,6 +1368,60 @@ async function bakeCounty(args: {
     if (!dryRun) {
       await writeSnapshotsBatch(pool, adapterKey, decision.toWrite);
     }
+  }
+
+  if (scoped) {
+    const idList = [...propIds!];
+    for (const chunk of chunkItems(idList, pageSize)) {
+      if (limit !== undefined && stats.parcelsSeen >= limit) break;
+      const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
+        `SELECT DISTINCT ON (feature_index)
+                feature_index, prop_id, situs_address, situs_city, situs_state,
+                ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
+                source_vintage, geometry
+           FROM ${county.table}
+          WHERE county_fips = $1
+            AND prop_id = ANY($2::text[])
+          ORDER BY feature_index`,
+        [county.fips, chunk],
+      );
+      if (r.rows.length === 0) continue;
+      const remaining =
+        limit !== undefined ? Math.max(0, limit - stats.parcelsSeen) : r.rows.length;
+      await processParcelPage(r.rows.slice(0, remaining));
+      if (limit !== undefined && stats.parcelsSeen >= limit) break;
+    }
+    stats.scoped = {
+      listSize: propIds!.size,
+      matched: foundPropIds.size,
+      notFoundInParcelStore: [...propIds!].filter((id) => !foundPropIds.has(id)),
+    };
+    return stats;
+  }
+
+  for (;;) {
+    const remaining =
+      limit !== undefined ? Math.max(0, limit - stats.parcelsSeen) : pageSize;
+    if (remaining === 0) break;
+    const pageLimit = Math.min(pageSize, remaining);
+    const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
+      `SELECT DISTINCT ON (feature_index)
+              feature_index, prop_id, situs_address, situs_city, situs_state,
+              ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
+              source_vintage, geometry
+         FROM ${county.table}
+        WHERE county_fips = $1
+          AND feature_index > $2
+        ORDER BY feature_index
+        LIMIT $3`,
+      [county.fips, after, pageLimit],
+    );
+    if (r.rows.length === 0) break;
+
+    for (const row of r.rows) {
+      after = row.feature_index;
+    }
+    await processParcelPage(r.rows);
 
     if (r.rows.length < pageLimit) break;
   }
@@ -1373,6 +1444,7 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       "adapter-key": { type: "string" },
       "sample-count": { type: "string" },
+      "prop-ids-file": { type: "string" },
     },
   });
 
@@ -1391,6 +1463,26 @@ async function main(): Promise<void> {
   const dryRun = values["dry-run"] ?? false;
   const sampleCount =
     values["sample-count"] !== undefined ? Number(values["sample-count"]) : 3;
+
+  let propIds: Set<string> | undefined;
+  if (values["prop-ids-file"] !== undefined) {
+    let raw: string;
+    try {
+      raw = readFileSync(values["prop-ids-file"], "utf8");
+    } catch (err) {
+      fail(
+        `--prop-ids-file could not be read: ${values["prop-ids-file"]} (${(err as Error).message})`,
+      );
+    }
+    try {
+      propIds = parsePropIdsFile(raw);
+    } catch (err) {
+      fail(`--prop-ids-file: ${(err as Error).message}`);
+    }
+    log(
+      `scoped mode: --prop-ids-file=${values["prop-ids-file"]} (${propIds.size} distinct prop ids requested)`,
+    );
+  }
 
   const startedAt = Date.now();
   const databaseUrl = resolveDatabaseUrl();
@@ -1416,7 +1508,7 @@ async function main(): Promise<void> {
     log(
       `${dryRun ? "DRY-RUN " : ""}baking Tier-1 node facets for ` +
         `${county.fips}/${county.name} from ${county.table} ` +
-        `(${county.parcelCount} parcels)` +
+        `(${propIds ? propIds.size + " scoped prop ids" : county.parcelCount + " parcels"})` +
         (limit !== undefined ? `, limit ${limit}` : "") +
         `, adapter_key=${adapterKey}`,
     );
@@ -1475,6 +1567,7 @@ async function main(): Promise<void> {
       dryRun,
       blockedFips,
       sampleSink,
+      propIds,
     });
   } finally {
     await pool.end();
@@ -1506,6 +1599,16 @@ async function main(): Promise<void> {
   log(`  envelope derived:  ${stats.facetHits.envelopeDerived} (${pct(stats.facetHits.envelopeDerived)})`);
   log(`  envelope ok:       ${stats.facetHits.envelopeOk} (${pct(stats.facetHits.envelopeOk)})`);
   log(`duration:            ${seconds}s`);
+
+  if (stats.scoped) {
+    log("---- scoped mode (--prop-ids-file) ----");
+    log(`listSize:              ${stats.scoped.listSize}`);
+    log(`matched (in store):    ${stats.scoped.matched}`);
+    log(`notFoundInParcelStore: ${stats.scoped.notFoundInParcelStore.length}`);
+    if (stats.scoped.notFoundInParcelStore.length > 0) {
+      log(`  ids: ${stats.scoped.notFoundInParcelStore.join(", ")}`);
+    }
+  }
 
   if (samples.length) {
     log(`---- sample owner-free payloads (${samples.length}) ----`);

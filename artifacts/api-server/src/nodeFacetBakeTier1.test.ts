@@ -26,6 +26,7 @@ import {
   decidePagePromotions,
   chunkItems,
   BATCH_WRITE_CHUNK,
+  parsePropIdsFile,
   type Tier1FacetPayload,
   type ComputedNode,
 } from "./nodeFacetBakeTier1Cli";
@@ -1243,5 +1244,40 @@ describe("effective block set = ledger ∪ seed (Williamson live-bug regression)
     expect(bastrop.provenance.landUseGateBlocked).toBe(false);
     expect(bastrop.baseFacts.landUse).not.toBeNull();
     expect(bastrop.baseFacts.landUse!.code).toBe("A1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --prop-ids-file scoped mode (T1 WS3 propagation path)
+// ---------------------------------------------------------------------------
+
+describe("parsePropIdsFile (node-facet-bake-tier1)", () => {
+  it("parses one raw prop id per line, dedupes, ignores blank lines and comments", () => {
+    const ids = parsePropIdsFile(
+      "31131\n32634\n\n# a comment\n35793\n31131\n",
+    );
+    expect([...ids].sort()).toEqual(["31131", "32634", "35793"]);
+  });
+
+  it("accepts a full parcelNodeId and strips the county-fips prefix", () => {
+    const ids = parsePropIdsFile("48021:31131\n48021:32634\n");
+    expect([...ids].sort()).toEqual(["31131", "32634"]);
+  });
+
+  it("normalizes leading zeros the same as normalizeCadPropId", () => {
+    const ids = parsePropIdsFile("0031131\n48021:0032634\n");
+    expect([...ids].sort()).toEqual(["31131", "32634"]);
+  });
+
+  it("fails loud on an empty file (no usable lines)", () => {
+    expect(() => parsePropIdsFile("")).toThrow(/empty/i);
+    expect(() => parsePropIdsFile("\n\n  \n")).toThrow(/empty/i);
+    expect(() => parsePropIdsFile("# only a comment\n")).toThrow(/empty/i);
+  });
+
+  it("fails loud on an unparseable (non-numeric) line", () => {
+    expect(() => parsePropIdsFile("31131\nnot-a-prop-id\n")).toThrow(
+      /not a positive integer/i,
+    );
   });
 });
