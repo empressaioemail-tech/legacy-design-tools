@@ -176,7 +176,7 @@ export function requireCotalityAppCredentials(
   throw new AdapterRunError(
     "no-coverage",
     fallbackMessage ??
-      `${CRED_ENV[app].label} is not configured on this deployment. Regrid remains the active national parcel/zoning provider.`,
+      `${CRED_ENV[app].label} is not configured on this deployment. Cotality is dormant on this deployment (2026-07-13 public-record migration); live parcel/zoning coverage runs on county-GIS (ArcGIS) services with a TxGIO/StratMap self-hosted store fallback, not this adapter.`,
   );
 }
 
