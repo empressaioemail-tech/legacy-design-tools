@@ -22,10 +22,23 @@ import {
 import {
   assertTexasWgs84Bbox,
   assertWgs84Prj,
+  classifyPrj,
   normalizeTxgioFeature,
   TxgioProjectionError,
   TXGIO_ENTRY_FILTER,
 } from "../txgio/parse";
+import {
+  reprojectGeometry,
+  webMercatorToWgs84,
+  wgs84ToWebMercator,
+  TxgioReprojectionError,
+  WEB_MERCATOR_MAX_M,
+  WEB_MERCATOR_RADIUS_M,
+} from "../txgio/reproject";
+import {
+  vintageWithProvenance,
+  REPROJECTED_VINTAGE_SUFFIX,
+} from "../txgio/ingest";
 import {
   normalizeStatLandUse,
   normalizeStratMapLandUse,
@@ -46,10 +59,13 @@ import {
   HAYS_PARCEL_12310_INSIDE,
   HAYS_PARCEL_12310_OUTSIDE,
   HAYS_PRJ_WGS84,
+  KING_48269_REPROJECTED_BBOX,
   KING_48269_WEB_MERCATOR_BBOX,
   KING_48269_WEB_MERCATOR_PARCEL,
+  TEXAS_ROUND_TRIP_POINTS,
   TX_STATE_PLANE_PRJ,
   TXGIO_202505_WEB_MERCATOR_PRJ,
+  WEB_MERCATOR_REFERENCE_PAIRS,
 } from "./__fixtures__/txgioHaysParcel";
 
 const HAYS_GEOMETRY = HAYS_PARCEL_12310.geometry as unknown as GeoJsonGeometry;
@@ -552,6 +568,301 @@ describe("normalizeTxgioFeature — projection fail-closed", () => {
         counters,
       ),
     ).toThrow(/county 48269 feature 417/);
+  });
+});
+
+describe("EPSG:3857 -> EPSG:4326 reprojection (webMercatorToWgs84)", () => {
+  it("recovers the PUBLISHED EPSG:3857 extent constants exactly", () => {
+    // Independent corroboration: these degree values are the CRS's own
+    // published limits, not something this codebase derived. A wrong
+    // sphere radius or an ellipsoidal inverse misses the latitude limit.
+    for (const p of WEB_MERCATOR_REFERENCE_PAIRS) {
+      const [lng, lat] = webMercatorToWgs84(p.x, p.y);
+      expect(lng, `${p.label} lng`).toBeCloseTo(p.longitude, 9);
+      expect(lat, `${p.label} lat`).toBeCloseTo(p.latitude, 9);
+    }
+  });
+
+  it("uses the SPHERE radius EPSG:3857 defines, not an ellipsoidal inverse", () => {
+    expect(WEB_MERCATOR_RADIUS_M).toBe(6378137.0);
+    expect(WEB_MERCATOR_MAX_M).toBeCloseTo(20037508.342789244, 6);
+    // The defining consequence of the spherical definition: y = pi*R is
+    // exactly 85.05112877980659 deg. An ellipsoidal Mercator inverse
+    // would put it near 85.084, ~3.7 km away — the exact class of bug
+    // this assertion exists to catch.
+    const [, lat] = webMercatorToWgs84(0, WEB_MERCATOR_MAX_M);
+    expect(lat).toBeCloseTo(85.05112877980659, 9);
+    expect(lat).not.toBeCloseTo(85.084, 2);
+  });
+
+  it("round-trips Texas points to sub-nanodegree closure", () => {
+    // Achieved precision: every component below closes to <1e-9 degrees
+    // (~0.1 mm at this latitude) and the metre-space round trip to
+    // <1e-6 m. Far tighter than the ~1 m the source data is authored to.
+    for (const p of TEXAS_ROUND_TRIP_POINTS) {
+      const [x, y] = wgs84ToWebMercator(p.longitude, p.latitude);
+      const [lng, lat] = webMercatorToWgs84(x, y);
+      expect(Math.abs(lng - p.longitude), `${p.label} lng`).toBeLessThan(1e-9);
+      expect(Math.abs(lat - p.latitude), `${p.label} lat`).toBeLessThan(1e-9);
+      // ...and the reverse direction closes in metre space too.
+      const [x2, y2] = wgs84ToWebMercator(lng, lat);
+      expect(Math.abs(x2 - x), `${p.label} x`).toBeLessThan(1e-6);
+      expect(Math.abs(y2 - y), `${p.label} y`).toBeLessThan(1e-6);
+    }
+  });
+
+  it("GROUND TRUTH: the real King 48269 header bbox reprojects onto King County", () => {
+    // The source bbox is the REAL 202505 .shp header (metres). The
+    // expected degrees are King County's true extent per the US Census
+    // county boundary — so this asserts the conversion against the
+    // physical world, not against its own arithmetic.
+    const [westLng, southLat] = webMercatorToWgs84(
+      KING_48269_WEB_MERCATOR_BBOX.westLng,
+      KING_48269_WEB_MERCATOR_BBOX.southLat,
+    );
+    const [eastLng, northLat] = webMercatorToWgs84(
+      KING_48269_WEB_MERCATOR_BBOX.eastLng,
+      KING_48269_WEB_MERCATOR_BBOX.northLat,
+    );
+    expect(westLng).toBeCloseTo(KING_48269_REPROJECTED_BBOX.westLng, 9);
+    expect(southLat).toBeCloseTo(KING_48269_REPROJECTED_BBOX.southLat, 9);
+    expect(eastLng).toBeCloseTo(KING_48269_REPROJECTED_BBOX.eastLng, 9);
+    expect(northLat).toBeCloseTo(KING_48269_REPROJECTED_BBOX.northLat, 9);
+    // King County, Texas: roughly lng -100.52..-100.00, lat 33.39..33.84.
+    expect(westLng).toBeGreaterThan(-100.53);
+    expect(eastLng).toBeLessThan(-99.96);
+    expect(southLat).toBeGreaterThan(33.39);
+    expect(northLat).toBeLessThan(33.84);
+    // ...and the converted bbox now PASSES the guard that rejects the raw one.
+    expect(isPlausibleTexasWgs84Bbox(KING_48269_REPROJECTED_BBOX)).toBe(true);
+    expect(isPlausibleTexasWgs84Bbox(KING_48269_WEB_MERCATOR_BBOX)).toBe(false);
+  });
+
+  it("preserves geometry nesting, rings and holes", () => {
+    const [x, y] = wgs84ToWebMercator(-97.7431, 30.2672);
+    const geom = {
+      type: "MultiPolygon",
+      coordinates: [
+        [
+          // outer ring
+          [
+            [x, y],
+            [x + 50, y],
+            [x + 50, y + 50],
+            [x, y + 50],
+            [x, y],
+          ],
+          // hole
+          [
+            [x + 10, y + 10],
+            [x + 20, y + 10],
+            [x + 20, y + 20],
+            [x + 10, y + 10],
+          ],
+        ],
+      ],
+    };
+    const out = reprojectGeometry(geom) as {
+      type: string;
+      coordinates: number[][][][];
+    };
+    expect(out.type).toBe("MultiPolygon");
+    expect(out.coordinates).toHaveLength(1);
+    expect(out.coordinates[0]).toHaveLength(2); // outer + hole preserved
+    expect(out.coordinates[0][0]).toHaveLength(5);
+    expect(out.coordinates[0][1]).toHaveLength(4);
+    expect(out.coordinates[0][0][0][0]).toBeCloseTo(-97.7431, 9);
+    expect(out.coordinates[0][0][0][1]).toBeCloseTo(30.2672, 9);
+    // Input is not mutated — a caller may keep the source coordinates.
+    expect(geom.coordinates[0][0][0][0]).toBe(x);
+  });
+
+  it("keeps a Z component untouched", () => {
+    const out = reprojectGeometry({
+      type: "Polygon",
+      coordinates: [[[0, 0, 412.5]]],
+    }) as { coordinates: number[][][] };
+    expect(out.coordinates[0][0]).toEqual([0, 0, 412.5]);
+  });
+
+  it("refuses a source CRS it has no inverse for", () => {
+    expect(() =>
+      reprojectGeometry({ type: "Polygon", coordinates: [] }, "EPSG:2277" as never),
+    ).toThrow(TxgioReprojectionError);
+  });
+
+  it("refuses coordinates outside the EPSG:3857 extent", () => {
+    expect(() =>
+      reprojectGeometry({
+        type: "Polygon",
+        coordinates: [[[WEB_MERCATOR_MAX_M * 2, 0]]],
+      }),
+    ).toThrow(/outside the EPSG:3857 valid extent/);
+  });
+});
+
+describe("classifyPrj — detect, so the CLI can offer the opt-in", () => {
+  it("classifies the real 202505 Web Mercator .prj as convertible", () => {
+    expect(classifyPrj(TXGIO_202505_WEB_MERCATOR_PRJ)).toBe("web-mercator");
+  });
+
+  it("classifies the real geographic .prj as already ingestible", () => {
+    expect(classifyPrj(HAYS_PRJ_WGS84)).toBe("wgs84-geographic");
+  });
+
+  it("does NOT classify state plane as convertible — the flag cannot launder it", () => {
+    // The --reproject=3857 flag authorizes converting Web Mercator
+    // specifically. A projection we have no inverse for stays
+    // unsupported and still routes to the strict assertWgs84Prj throw.
+    expect(classifyPrj(TX_STATE_PLANE_PRJ)).toBe("unsupported");
+    expect(() => assertWgs84Prj(TX_STATE_PLANE_PRJ, "bad.prj")).toThrow();
+  });
+
+  it("does not sweep in a Mercator on the wrong datum", () => {
+    expect(
+      classifyPrj(
+        'PROJCS["Mercator_Auxiliary_Sphere_NAD83",GEOGCS["GCS_North_American_1983",' +
+          'DATUM["D_North_American_1983"]],PROJECTION["Mercator_Auxiliary_Sphere"],UNIT["Meter",1.0]]',
+      ),
+    ).toBe("unsupported");
+  });
+
+  it("does not sweep in a non-metre projected CRS", () => {
+    expect(
+      classifyPrj(
+        'PROJCS["WGS_1984_Web_Mercator_Auxiliary_Sphere",GEOGCS["GCS_WGS_1984",' +
+          'DATUM["D_WGS_1984"]],PROJECTION["Mercator_Auxiliary_Sphere"],UNIT["Foot_US",0.3048006096012192]]',
+      ),
+    ).toBe("unsupported");
+  });
+});
+
+describe("normalizeTxgioFeature with --reproject=3857", () => {
+  it("loads the 202505-shaped feature that fails closed without the opt-in", () => {
+    const counters = newCounters();
+    // Same fixture the fail-closed test above proves is REFUSED by
+    // default. With the explicit opt-in it converts and loads.
+    const rec = normalizeTxgioFeature(
+      "48269",
+      0,
+      KING_48269_WEB_MERCATOR_PARCEL as never,
+      counters,
+      { reprojectFrom: "EPSG:3857" },
+    );
+    expect(rec).not.toBeNull();
+    expect(counters.rowsSkipped).toBe(0);
+    // Lands in King County, in degrees, in one grid cell.
+    expect(rec!.bbox.westLng).toBeCloseTo(-100.52050395900791, 8);
+    expect(rec!.bbox.southLat).toBeCloseTo(33.39353987451293, 8);
+    expect(isPlausibleTexasWgs84Bbox(rec!.bbox)).toBe(true);
+    // A real parcel's worth of cells (this one's west edge at
+    // -100.520504 sits just past the -100.52 cell boundary, so it spans
+    // two) — not the ~9.1e12 the unconverted metre coordinates produced.
+    expect(rec!.tileKeys).toEqual([
+      "g0.02:-100.54000,33.38000",
+      "g0.02:-100.52000,33.38000",
+    ]);
+    // Stored geometry is the CONVERTED geometry, not the source metres.
+    const stored = rec!.geometry as unknown as { coordinates: number[][][] };
+    expect(stored.coordinates[0][0][0]).toBeCloseTo(-100.5205, 4);
+    // Attributes are untouched by the conversion.
+    expect(rec!.propId).toBe("5001");
+    expect(rec!.ownerName).toBe("KING RANCH TEST");
+  });
+
+  it("is OPT-IN: the identical feature still fails closed with no option", () => {
+    const counters = newCounters();
+    expect(() =>
+      normalizeTxgioFeature(
+        "48269",
+        0,
+        KING_48269_WEB_MERCATOR_PARCEL as never,
+        counters,
+      ),
+    ).toThrow(TxgioProjectionError);
+  });
+
+  it("THE GUARD STAYS ARMED: a conversion landing outside Texas still throws", () => {
+    // Real EPSG:3857 metres for a point in KANSAS (lng -98.0, lat
+    // 38.5) — a perfectly valid Web Mercator conversion whose RESULT is
+    // not in Texas. Proves the envelope assertion runs AFTER the
+    // reprojection rather than being bypassed by it.
+    const [x, y] = wgs84ToWebMercator(-98.0, 38.5);
+    const counters = newCounters();
+    expect(() =>
+      normalizeTxgioFeature(
+        "48269",
+        7,
+        {
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [x, y],
+                [x + 60, y],
+                [x + 60, y + 45],
+                [x, y + 45],
+                [x, y],
+              ],
+            ],
+          },
+          properties: { Prop_ID: "9001" },
+        } as never,
+        counters,
+        { reprojectFrom: "EPSG:3857" },
+      ),
+    ).toThrow(TxgioProjectionError);
+    expect(() =>
+      normalizeTxgioFeature(
+        "48269",
+        7,
+        {
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[x, y], [x + 60, y], [x + 60, y + 45], [x, y]]],
+          },
+          properties: {},
+        } as never,
+        counters,
+        { reprojectFrom: "EPSG:3857" },
+      ),
+    ).toThrow(/outside the plausible Texas WGS84 envelope/);
+    // Never absorbed into the per-feature skip counter.
+    expect(counters.rowsSkipped).toBe(0);
+  });
+
+  it("does not corrupt an already-geographic feature when the flag is absent", () => {
+    const counters = newCounters();
+    const rec = normalizeTxgioFeature(
+      "48209",
+      0,
+      HAYS_PARCEL_12310 as never,
+      counters,
+    );
+    expect(rec).not.toBeNull();
+    expect(rec!.bbox.westLng).toBeCloseTo(-97.91313552599996, 10);
+  });
+});
+
+describe("reprojection provenance on the row", () => {
+  it("stamps the vintage so a converted county is self-describing", () => {
+    expect(
+      vintageWithProvenance(
+        "stratmap25-landparcels_48269_king_202505",
+        "EPSG:3857",
+      ),
+    ).toBe(
+      `stratmap25-landparcels_48269_king_202505${REPROJECTED_VINTAGE_SUFFIX}`,
+    );
+    expect(REPROJECTED_VINTAGE_SUFFIX).toBe("+reprojected-from-epsg3857");
+  });
+
+  it("leaves an unconverted county's vintage byte-identical", () => {
+    // No marker on a county that was already in degrees — the absence of
+    // the suffix is itself the claim that nothing was converted.
+    expect(
+      vintageWithProvenance("stratmap25-landparcels_48209_hays_202503"),
+    ).toBe("stratmap25-landparcels_48209_hays_202503");
   });
 });
 

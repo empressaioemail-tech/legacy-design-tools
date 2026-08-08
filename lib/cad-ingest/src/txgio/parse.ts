@@ -32,6 +32,7 @@ import {
   type GeoBbox,
   type GeoJsonGeometry,
 } from "./geo";
+import { reprojectGeometry, type SupportedSourceCrs } from "./reproject";
 
 /** A normalized parcel feature bound for `txgio_parcel` (pre-bucketing). */
 export interface TxgioParcelRecord {
@@ -98,6 +99,56 @@ export function assertWgs84Prj(prjText: string, prjPath: string): void {
         `coordinates without a reprojection step. .prj: ${prjText.slice(0, 200)}`,
     );
   }
+}
+
+/**
+ * What a `.prj` declares, as far as this ingest is concerned.
+ *
+ * `wgs84-geographic`  degrees, ingestible as-is.
+ * `web-mercator`      EPSG:3857 metres — ingestible ONLY with an
+ *                     explicit `--reproject=3857`.
+ * `unsupported`       anything else (state plane, NAD83, a projection
+ *                     we have no inverse for). Never ingestible.
+ */
+export type TxgioPrjKind =
+  | "wgs84-geographic"
+  | "web-mercator"
+  | "unsupported";
+
+/**
+ * CLASSIFY a `.prj` rather than merely accepting or refusing it, so the
+ * CLI can tell "this county is projected and I know how to convert it"
+ * apart from "this county is projected and I do not".
+ *
+ * `assertWgs84Prj` above is unchanged and still the strict gate: a
+ * caller that has not been given explicit operator permission to
+ * reproject calls IT, and a PROJCS still throws. This function exists
+ * only so that the `--reproject=3857` path can recognize the ONE
+ * projection we can invert, and so that a DIFFERENT projection — a
+ * state-plane county, say — still fails closed even when the operator
+ * passed the flag. The flag authorizes converting Web Mercator; it does
+ * not authorize converting whatever happens to show up.
+ *
+ * The detection is deliberately narrow: `Mercator_Auxiliary_Sphere`
+ * with a WGS84 datum and metre units, which is exactly what the 202505
+ * StratMap vintage ships. A Mercator on a different sphere or datum is
+ * NOT this, and must not be silently swept in.
+ */
+export function classifyPrj(prjText: string): TxgioPrjKind {
+  const t = prjText.toUpperCase();
+  const isProjected = t.trimStart().startsWith("PROJCS");
+  const isWgs84Datum =
+    t.includes("GCS_WGS_1984") || t.includes('GEOGCS["WGS 84"');
+  if (!isProjected) {
+    return isWgs84Datum ? "wgs84-geographic" : "unsupported";
+  }
+  const isAuxSphereMercator =
+    t.includes("MERCATOR_AUXILIARY_SPHERE") ||
+    t.includes("WGS_1984_WEB_MERCATOR") ||
+    t.includes("PSEUDO-MERCATOR");
+  const isMetres = t.includes('UNIT["METER"') || t.includes('UNIT["METRE"');
+  if (isAuxSphereMercator && isWgs84Datum && isMetres) return "web-mercator";
+  return "unsupported";
 }
 
 /** Thrown when a feature's coordinates are not plausible Texas degrees. */
@@ -168,28 +219,56 @@ export interface TxgioFeature {
   properties?: Record<string, unknown> | null;
 }
 
+/** Per-run parse options. */
+export interface TxgioNormalizeOptions {
+  /**
+   * Source CRS to convert FROM before the Texas envelope assertion.
+   * Undefined (the default) means NO conversion: coordinates are taken
+   * as WGS84 degrees and a projected county fails closed, exactly as
+   * before. This is opt-in by construction — there is no detection
+   * inside the parser that can turn it on.
+   */
+  reprojectFrom?: SupportedSourceCrs;
+}
+
 /**
  * Normalize one shapefile feature. Returns null (and counts a skip)
  * when the feature carries no usable polygon geometry — an
  * attribute-only row cannot serve either read path.
+ *
+ * REPROJECTION ORDERING. When `opts.reprojectFrom` is set, coordinates
+ * are converted FIRST and every downstream step — bbox, the Texas
+ * envelope assertion, cell bucketing, the stored geometry — sees only
+ * degrees. The assertion therefore still runs, on the CONVERTED
+ * coordinates, and a county that reprojects to somewhere other than
+ * Texas fails closed exactly as an unconverted projected county does.
+ * Reprojection is a step before the guard, never a way around it.
  */
 export function normalizeTxgioFeature(
   countyFips: string,
   featureIndex: number,
   feature: TxgioFeature,
   counters: ParseCounters,
+  opts: TxgioNormalizeOptions = {},
 ): TxgioParcelRecord | null {
-  const geometry = feature.geometry;
+  const sourceGeometry = feature.geometry;
   if (
-    !geometry ||
-    (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon")
+    !sourceGeometry ||
+    (sourceGeometry.type !== "Polygon" &&
+      sourceGeometry.type !== "MultiPolygon")
   ) {
     recordSkip(
       counters,
-      `feature ${featureIndex}: no polygon geometry (${geometry?.type ?? "null"})`,
+      `feature ${featureIndex}: no polygon geometry (${sourceGeometry?.type ?? "null"})`,
     );
     return null;
   }
+  // Convert BEFORE the guard, never instead of it (see the note above).
+  // A throw here is a whole-county property like a projection error, so
+  // it propagates rather than counting a skip.
+  const geometry = opts.reprojectFrom
+    ? reprojectGeometry(sourceGeometry, opts.reprojectFrom)
+    : sourceGeometry;
   const bbox = bboxOfGeometry(geometry);
   if (!bbox) {
     recordSkip(counters, `feature ${featureIndex}: empty geometry`);

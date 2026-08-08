@@ -16,6 +16,7 @@
  *     [--vintage=<label>]      # default: shapefile basename, e.g.
  *                              #   stratmap25-landparcels_48209_hays_202503
  *     [--batch-size=250] [--limit=N] [--dry-run]
+ *     [--reproject=3857]       # convert EPSG:3857 metres -> WGS84
  *   pnpm --filter @workspace/cad-ingest txgio-ingest -- --list
  *
  * DATABASE_URL must point at the target Postgres unless --dry-run.
@@ -31,12 +32,34 @@
  * PROJECTION. Most stratmap25 shapefiles ship GCS_WGS_1984, but the
  * 202505 vintage ships Web Mercator METERS under a
  * `PROJCS["WGS_1984_Web_Mercator_Auxiliary_Sphere", GEOGCS["GCS_WGS_1984",...]]`
- * whose nested GEOGCS satisfied the old substring guard. The CLI now
+ * whose nested GEOGCS satisfied the old substring guard. The CLI
  * rejects a PROJCS `.prj` outright, AND every feature's coordinates are
  * range-asserted against the Texas WGS84 envelope in `parse.ts` — which
  * is the guard that actually holds, because it also covers the
  * no-`.prj` case, axis swaps, and any future source change. A county
  * that is not in degrees fails the run instead of loading garbage.
+ *
+ * REPROJECTION (`--reproject=3857`, operator ruling 2026-08-08). 57 of
+ * the 235 unloaded counties are on the 202505 vintage, so failing them
+ * all closed blocked the statewide acquisition — six of the ten
+ * SMALLEST counties are 202505, meaning the natural first wave was
+ * exactly the blocked wave. The CLI now DETECTS EPSG:3857 and, when the
+ * operator passes `--reproject=3857`, converts every feature to WGS84
+ * degrees at parse time (`reproject.ts`, closed-form inverse Mercator).
+ *
+ * Three properties make this safe rather than a loosening:
+ *   1. OPT-IN. Detection alone converts nothing. Without the flag a
+ *      projected county still fails closed — it just now names the flag
+ *      in the error instead of leaving the operator to read WKT.
+ *   2. THE GUARD STILL RUNS, on the CONVERTED coordinates. Reprojection
+ *      is a step BEFORE `assertTexasWgs84Bbox`, never a bypass of it, so
+ *      a bad conversion fails exactly as an unconverted county does.
+ *   3. PROVENANCE ON THE ROW. Every converted row's `source_vintage`
+ *      carries `+reprojected-from-epsg3857`, which rides all the way out
+ *      to the served parcel feature. No silent conversion exists.
+ * The flag authorizes converting Web Mercator specifically; an
+ * unsupported projection (state plane, NAD83) is still refused WITH the
+ * flag passed.
  *
  * DRY RUN PREDICTS THE APPLY. `--dry-run` parses the real archive and
  * reports the rows an apply WOULD delete and insert, so a dry/apply
@@ -62,13 +85,17 @@ import {
 import type { TxgioParcelRecord } from "./parse";
 import {
   assertWgs84Prj,
+  classifyPrj,
   normalizeTxgioFeature,
   TXGIO_ENTRY_FILTER,
   type TxgioFeature,
+  type TxgioPrjKind,
 } from "./parse";
+import type { SupportedSourceCrs } from "./reproject";
 import {
   countCountyParcels,
   replaceCountyParcels,
+  vintageWithProvenance,
   TXGIO_DEFAULT_BATCH_SIZE,
   type TxgioTransactionalDb,
 } from "./ingest";
@@ -123,6 +150,7 @@ async function* readTxgioFeatures(
   dbfFile: string,
   counters: ParseCounters,
   limit?: number,
+  reprojectFrom?: SupportedSourceCrs,
 ): AsyncGenerator<TxgioParcelRecord> {
   // The TxGIO shapefiles ship a UTF-8 .cpg; pass the encoding through.
   const source = await shapefile.open(shpFile, dbfFile, { encoding: "utf8" });
@@ -137,6 +165,7 @@ async function* readTxgioFeatures(
       featureIndex,
       result.value as TxgioFeature,
       counters,
+      { reprojectFrom },
     );
     featureIndex += 1;
     if (record) {
@@ -158,8 +187,26 @@ async function main(): Promise<void> {
       limit: { type: "string" },
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
+      reproject: { type: "string" },
     },
   });
+
+  // --reproject=3857 is the ONLY accepted value. Anything else is a
+  // typo or an unsupported projection, and both must fail before any
+  // network or DB work rather than silently degrading to no conversion.
+  let reprojectRequested: SupportedSourceCrs | undefined;
+  if (values.reproject !== undefined) {
+    const v = values.reproject.trim().toLowerCase().replace(/^epsg:/, "");
+    if (v !== "3857") {
+      fail(
+        `--reproject=${values.reproject} is not supported — the only ` +
+          "convertible source CRS is 3857 (EPSG:3857 Web Mercator metres, " +
+          "which the 202505 StratMap vintage ships). A county in any other " +
+          "projection must be reprojected upstream before ingest.",
+      );
+    }
+    reprojectRequested = "EPSG:3857";
+  }
 
   // --list: print every Texas county with its load state and exit
   // (no network, no DB).
@@ -184,7 +231,8 @@ async function main(): Promise<void> {
   if (!values.county) {
     fail(
       "usage: txgio-ingest --county=<fips|name> [--file=<path-or-url>] " +
-        "[--vintage=label] [--limit=N] [--dry-run] | txgio-ingest --list",
+        "[--vintage=label] [--limit=N] [--reproject=3857] [--dry-run] | " +
+        "txgio-ingest --list",
     );
   }
   const county = resolveTxgioCounty(values.county);
@@ -238,21 +286,88 @@ async function main(): Promise<void> {
   }
   const { shpFile, dbfFile, prjFile } = await discoverShapefile(files);
 
-  // 2. SR guard — WGS84 GEOGRAPHIC or refuse. This is the declaration
-  //    check; the binding guard is the per-feature coordinate-range
-  //    assertion in parse.ts, which also covers the no-.prj branch.
+  // 2. SR handling — DETECT, then require an EXPLICIT opt-in to convert.
+  //
+  //    The default path is unchanged and still fails closed: a projected
+  //    county with no --reproject is refused by `assertWgs84Prj` before
+  //    a single feature is read. Detection alone never converts
+  //    anything. What detection buys is the ERROR MESSAGE — a blocked
+  //    202505 county now names the exact flag that unblocks it instead
+  //    of leaving the operator to diagnose WKT.
+  //
+  //    Why opt-in rather than automatic: storing coordinates in a CRS
+  //    other than the one the source declared is a decision about data
+  //    provenance, and the ingest's posture is that such a decision is
+  //    made by an operator per run, not inferred by a parser. The flag
+  //    IS the decision, the log lines below are the record of it, and
+  //    `+reprojected-from-epsg3857` on every row is the durable marker.
+  let reprojectFrom: SupportedSourceCrs | undefined;
+  let prjKind: TxgioPrjKind | "absent" = "absent";
   if (prjFile && (await pathKind(prjFile)) === "file") {
-    assertWgs84Prj(await readFile(prjFile, "utf8"), prjFile);
-    log(`projection: GCS_WGS_1984 geographic (${basename(prjFile)})`);
+    const prjText = await readFile(prjFile, "utf8");
+    prjKind = classifyPrj(prjText);
+    if (prjKind === "web-mercator") {
+      if (!reprojectRequested) {
+        // Fail closed, but name the remedy.
+        fail(
+          `${basename(prjFile)} declares EPSG:3857 Web Mercator (metres), ` +
+            "not WGS84 degrees — this is the 202505 StratMap vintage that " +
+            `57 of 254 counties ship. Refusing to store projected ` +
+            "coordinates without an explicit decision. Re-run with " +
+            "--reproject=3857 to convert to WGS84 at parse time (every row " +
+            "is then stamped +reprojected-from-epsg3857, and the Texas " +
+            "coordinate-range assertion still runs on the CONVERTED " +
+            "coordinates).",
+        );
+      }
+      reprojectFrom = "EPSG:3857";
+      log(
+        "!! REPROJECTING: source declares EPSG:3857 Web Mercator (metres) " +
+          `in ${basename(prjFile)}; --reproject=3857 given, so every ` +
+          "feature is converted to WGS84 degrees BEFORE the Texas " +
+          "coordinate-range assertion, and every row's source_vintage is " +
+          "stamped +reprojected-from-epsg3857",
+      );
+    } else {
+      // Geographic, or a projection we have no inverse for. The strict
+      // guard decides, exactly as before — and note this branch runs
+      // even when --reproject=3857 was passed, so the flag can never
+      // launder an unsupported CRS (state plane, NAD83) into the store.
+      assertWgs84Prj(prjText, prjFile);
+      log(`projection: GCS_WGS_1984 geographic (${basename(prjFile)})`);
+      if (reprojectRequested) {
+        log(
+          "note: --reproject=3857 given but the source is already WGS84 " +
+            "geographic — no conversion applied, nothing stamped",
+        );
+      }
+    }
   } else {
     log(
       "WARNING: no .prj found — the per-feature Texas WGS84 coordinate-range " +
         "assertion is the only projection guard for this run",
     );
+    if (reprojectRequested) {
+      // No declaration to corroborate the operator's claim. Trust the
+      // flag (the operator inspected the file), but the envelope
+      // assertion still has to pass on the converted coordinates.
+      reprojectFrom = "EPSG:3857";
+      log(
+        "!! REPROJECTING from EPSG:3857 on the strength of --reproject=3857 " +
+          "alone (no .prj to corroborate) — the Texas coordinate-range " +
+          "assertion on the CONVERTED coordinates is the only check that " +
+          "this was the right call",
+      );
+    }
   }
 
-  const vintage =
+  const baseVintage =
     values.vintage ?? basename(shpFile, extname(shpFile)).toLowerCase();
+  // Provenance travels on the row, not just in this log.
+  const vintage = vintageWithProvenance(
+    baseVintage,
+    reprojectFrom,
+  );
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
 
   log(`county=${county.fips} (${county.name}) source=${sourceLabel}`);
@@ -267,6 +382,7 @@ async function main(): Promise<void> {
     dbfFile,
     counters,
     limit,
+    reprojectFrom,
   );
 
   const batchSize =
@@ -338,6 +454,11 @@ async function main(): Promise<void> {
   log(`loaded before:    ${isTxgioCountyLoaded(county.fips) ? "yes" : "no"}`);
   log(`source file:      ${sourceFile}`);
   log(`source vintage:   ${vintage}`);
+  log(
+    `source CRS:       ${
+      prjKind === "absent" ? "undeclared (no .prj)" : prjKind
+    }${reprojectFrom ? ` -> REPROJECTED to WGS84 from ${reprojectFrom}` : ""}`,
+  );
   log(`features read:    ${counters.rowsRead}`);
   log(`features parsed:  ${counters.rowsParsed}`);
   log(`features ${wouldOrDid}load: ${featuresLoaded}`);
