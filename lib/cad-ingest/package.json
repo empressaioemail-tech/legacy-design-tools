@@ -17,7 +17,8 @@
     "stratmap-landuse": "tsx src/txgio/landuse-cli.ts",
     "zoning-stamp": "tsx src/txgio/zoning-cli.ts",
     "permits-ingest": "tsx src/permits/cli.ts",
-    "address-ingest": "tsx src/address/cli.ts"
+    "address-ingest": "tsx src/address/cli.ts",
+    "boundary-ingest": "tsx src/boundary/cli.ts"
   },
   "dependencies": {
     "@workspace/adapters": "workspace:*",

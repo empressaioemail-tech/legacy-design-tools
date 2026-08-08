@@ -74,6 +74,8 @@ export * from "./cadProperty";
 export * from "./countyFacetCoverage";
 export * from "./txgioParcel";
 export * from "./txgioAddress";
+export * from "./txCityBoundary";
+export * from "./txCountyBoundary";
 export * from "./reportRun";
 export * from "./permitRecord";
 export * from "./terrainGenerationJobs";
