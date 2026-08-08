@@ -220,8 +220,27 @@ async function readManifestGrid(): Promise<ManifestCell[]> {
   }));
 }
 
-/** A cell counts toward the Texas rollup only when SATISFIED (ruling 3): satisfied-present at/above threshold (not PARTIAL), or satisfied-absent. PARTIAL contributes zero. */
+/**
+ * Doctrine-sourced cells are never SATISFIED for the rollup, defense-in-
+ * depth (fix/manifest-doctrine-honesty, 2026-08-08). `zoning-regime-
+ * doctrine` is one repeated string in the roster
+ * ("PASS — county unincorporated = honest absence") applied identically
+ * to all 254 counties; it is a true, scope-qualified finding about
+ * unincorporated territory only, never a per-county measurement, and it
+ * must never be able to count as a resolved rail for a county's
+ * incorporated cities — regardless of what `rail_state` a future seed or
+ * backfill happens to write for it. The seed CLI (`countyManifestSeedCli
+ * .ts`) now writes these rows as `not-yet`, not `satisfied-absent`, so
+ * this check is a belt-and-suspenders guard against the seed CLI's
+ * discipline lapsing again, not the primary fix.
+ */
+const DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP = new Set(["zoning-regime-doctrine"]);
+
+/** A cell counts toward the Texas rollup only when SATISFIED (ruling 3): satisfied-present at/above threshold (not PARTIAL), or satisfied-absent. PARTIAL contributes zero. Doctrine-sourced cells never count — see DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP. */
 function isSatisfiedCell(cell: ManifestCell): boolean {
+  if (cell.source && DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP.has(cell.source)) {
+    return false;
+  }
   return (
     (cell.displayState === "satisfied-present" && !cell.isPartial) ||
     cell.displayState === "satisfied-absent"

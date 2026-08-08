@@ -24,19 +24,26 @@
  *     and always reflects the latest roster load (the manifest is a
  *     load, not a live sync — every re-seed is a new roster snapshot).
  *
- *  2. `county_facet_coverage` zoning cells — 254 `satisfied-absent` rows,
- *     ONE PER COUNTY, from `zoning_regime.doctrine` on every
- *     unincorporated-county roster row. This is the ONLY rail the roster
- *     can honestly pre-seed without a live scorer run (spec section 7):
- *     `cad` has no atom family (renders no-atom regardless); `envelope`
- *     has no unconditional roster field; `landuse`/`footprint`/`easement`
- *     are all gated on atom-family state the roster does not carry. This
- *     is a COUNTY-LEVEL UNINCORPORATED-ABSENCE finding only — it does
- *     NOT cover incorporated cities, which are a separate, unseeded
- *     question (spec section 8, deferred). `ON CONFLICT (county_fips,
- *     facet) DO NOTHING` so this NEVER overwrites a scorer-written row
- *     (the live 19-county real zoning scores from countyCoverageScoreCli
- *     must survive untouched).
+ *  2. `county_facet_coverage` zoning cells — 254 `not-yet` rows, ONE PER
+ *     COUNTY, from `zoning_regime.doctrine` on every unincorporated-county
+ *     roster row. This is the ONLY rail the roster can honestly pre-seed
+ *     without a live scorer run (spec section 7): `cad` has no atom
+ *     family (renders no-atom regardless); `envelope` has no unconditional
+ *     roster field; `landuse`/`footprint`/`easement` are all gated on
+ *     atom-family state the roster does not carry. This is a COUNTY-LEVEL
+ *     UNINCORPORATED-ABSENCE finding only — it does NOT cover incorporated
+ *     cities, which are a separate, unseeded question (spec section 8,
+ *     deferred). Seeded as `not-yet`, NOT `satisfied-absent` (fixed
+ *     2026-08-08, fix/manifest-doctrine-honesty): a county-wide zoning
+ *     rail cannot be scored SATISFIED off a finding that only speaks to
+ *     unincorporated territory — the original satisfied-absent seeding let
+ *     one repeated doctrine string drive 99.2 percent of the reported
+ *     Texas completeness percentage from a definition, not a measurement.
+ *     The doctrine citation survives in `absence_basis`, scope-qualified,
+ *     so it is not erased, only correctly excluded from the completeness
+ *     rollup. `ON CONFLICT (county_fips, facet) DO NOTHING` so this NEVER
+ *     overwrites a scorer-written row (the live 19-county real zoning
+ *     scores from countyCoverageScoreCli must survive untouched).
  *
  * Usage (from repo root):
  *   tsx artifacts/api-server/src/countyManifestSeedCli.ts [--out=<path>]
@@ -183,6 +190,26 @@ export function buildManifestRow(
  * roster doctrine does not read as an honest absence finding (defensive —
  * every county row inspected in the spec's live read carried the literal
  * doctrine string, but a future roster refresh could vary this).
+ *
+ * FIX 2026-08-08 (fix/manifest-doctrine-honesty, see doc_repo
+ * `_inbox/2026-08-08_SPRINT1_manifest_schema_spec.md` section 7-8): this
+ * row is emitted as `rail_state = 'not-yet'`, NOT `satisfied-absent`. The
+ * roster doctrine is a single literal string
+ * ("PASS — county unincorporated = honest absence") repeated identically
+ * across all 254 counties, self-reporting `verification: "verified"" when
+ * no per-county verification ever happened — it is a scope-qualified,
+ * true finding (unincorporated territory is unzoned by definition) but it
+ * is NOT a county-wide zoning completeness finding: Texas has 1,223
+ * incorporated cities carrying the actual zoning, and this doctrine says
+ * nothing about them. The original `satisfied-absent` emission let this
+ * one repeated doctrine string count as "done" for the zoning rail on all
+ * 254 counties, driving 4.723 of the reported 4.759 percent statewide
+ * completeness (99.2 percent of the headline number) from a definition,
+ * not a measurement — see the `fix/manifest-doctrine-honesty` PR. The
+ * finding is preserved as a citation in `absence_basis` (scope-qualified,
+ * explicit about what it does and does not cover) so it is not erased,
+ * only correctly excluded from the completeness rollup until incorporated
+ * -area zoning is actually assessed (spec section 8, still deferred).
  */
 export function buildZoningAbsenceRow(
   county: RosterCounty,
@@ -190,6 +217,13 @@ export function buildZoningAbsenceRow(
 ): string | null {
   const doctrine = county.zoning_regime?.doctrine;
   if (!doctrine || !/PASS/i.test(doctrine)) return null;
+  const scopedAbsenceBasis =
+    `SCOPE-LIMITED — roster doctrine "${doctrine}" establishes unincorporated ` +
+    `territory is unzoned by definition, not by per-county measurement. Does ` +
+    `NOT resolve the zoning rail for this county's incorporated cities (Texas ` +
+    `has 1,223 incorporated cities carrying actual zoning). Seeded as not-yet, ` +
+    `not satisfied-absent, because county-wide zoning completeness cannot be ` +
+    `claimed until incorporated-area zoning is assessed.`;
   const fields = [
     sqlString(county.fips), // county_fips
     sqlString("zoning"), // facet
@@ -200,9 +234,9 @@ export function buildZoningAbsenceRow(
     sqlString(null), // source_vintage
     sqlNumber(0), // sampled
     sqlString("real-at-ceiling"), // classification (an honest, provable absence is not a gap)
-    sqlString("satisfied-absent"), // rail_state
+    sqlString("not-yet"), // rail_state — NOT satisfied-absent; see function doc above
     sqlNumber(thresholdPct), // threshold_pct
-    sqlString(doctrine), // absence_basis
+    sqlString(scopedAbsenceBasis), // absence_basis — scope-qualified, not the bare doctrine string
     sqlString("roster-load"), // verified_by_instrument
     sqlString("roster-load"), // verification_method
     sqlString(
@@ -246,9 +280,12 @@ export function buildSeedArtifact(roster: RosterFile): SeedArtifactResult {
 --
 -- Two statement groups:
 --   1. county_manifest      — ${manifestRows.length} rows, one per Texas county.
---   2. county_facet_coverage — ${zoningRows.length} zoning satisfied-absent rows
---      (county-level unincorporated-absence only; does NOT cover
---      incorporated cities — spec section 8, deferred).
+--   2. county_facet_coverage — ${zoningRows.length} zoning not-yet rows,
+--      scope-qualified by a county-level unincorporated-absence doctrine
+--      citation in absence_basis (does NOT cover incorporated cities —
+--      spec section 8, deferred; NOT satisfied-absent, see fix/manifest-
+--      doctrine-honesty — a doctrine finding about unincorporated
+--      territory cannot satisfy county-wide zoning completeness).
 --
 -- This artifact makes NO database connection when generated and is NOT
 -- applied by countyManifestSeedCli.ts. Applying it against a target
