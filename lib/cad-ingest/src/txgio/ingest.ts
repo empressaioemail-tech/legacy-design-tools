@@ -74,10 +74,50 @@ export async function countCountyParcels(
   return typeof n === "number" ? n : Number(n ?? 0);
 }
 
+/**
+ * Provenance suffix appended to `source_vintage` on every row whose
+ * geometry was converted from a projected source CRS.
+ *
+ * `source_vintage` is a free-text program label carried opaquely all the
+ * way out to the parcel feature the map serves
+ * (`artifacts/api-server/src/lib/txgioParcelStore.ts` copies it into
+ * `properties.sourceVintage`; nothing anywhere parses or pattern-matches
+ * it). That makes it the natural home for this marker and means NO
+ * MIGRATION is required: a reprojected King county row reads
+ * `stratmap25-landparcels_48269_king_202505+reprojected-from-epsg3857`,
+ * which is self-describing at every layer including the served feature,
+ * and is queryable with a LIKE if we ever need to find or re-run the
+ * converted counties.
+ *
+ * A dedicated `source_crs` column would be tidier in the abstract, and
+ * if a future need arises to filter on it in bulk that is the right
+ * shape — but it is a schema migration plus a backfill for a fact that
+ * the existing free-text provenance field already carries losslessly, so
+ * it is not justified today.
+ */
+export const REPROJECTED_VINTAGE_SUFFIX = "+reprojected-from-epsg3857";
+
+/**
+ * Vintage label for a run, carrying the reprojection marker when the
+ * geometry was converted. Pure, so the CLI summary and the stored rows
+ * cannot disagree about what was recorded.
+ */
+export function vintageWithProvenance(
+  vintage: string,
+  reprojectedFrom?: string,
+): string {
+  if (!reprojectedFrom) return vintage;
+  return `${vintage}${REPROJECTED_VINTAGE_SUFFIX}`;
+}
+
 export interface TxgioUpsertOptions {
   /** Basename recorded on every row. */
   sourceFile: string;
-  /** Program vintage label recorded on every row. */
+  /**
+   * Program vintage label recorded on every row. Callers that
+   * reprojected must pass the label through `vintageWithProvenance` so
+   * the conversion is recorded on the row.
+   */
   sourceVintage: string;
   batchSize?: number;
   /** Progress callback, called after each batch. */

@@ -57,16 +57,33 @@ export type { TxgioCounty } from "./txgio/counties";
 export {
   assertTexasWgs84Bbox,
   assertWgs84Prj,
+  classifyPrj,
   normalizeTxgioFeature,
   TxgioProjectionError,
   TXGIO_ENTRY_FILTER,
 } from "./txgio/parse";
-export type { TxgioParcelRecord, TxgioFeature } from "./txgio/parse";
+export type {
+  TxgioParcelRecord,
+  TxgioFeature,
+  TxgioNormalizeOptions,
+  TxgioPrjKind,
+} from "./txgio/parse";
+export {
+  reprojectGeometry,
+  webMercatorToWgs84,
+  wgs84ToWebMercator,
+  TxgioReprojectionError,
+  WEB_MERCATOR_MAX_M,
+  WEB_MERCATOR_RADIUS_M,
+} from "./txgio/reproject";
+export type { SupportedSourceCrs } from "./txgio/reproject";
 export {
   countCountyParcels,
   deleteCountyParcels,
   replaceCountyParcels,
   upsertTxgioParcels,
+  vintageWithProvenance,
+  REPROJECTED_VINTAGE_SUFFIX,
   TXGIO_DEFAULT_BATCH_SIZE,
 } from "./txgio/ingest";
 export type {

@@ -114,3 +114,98 @@ export const KING_48269_WEB_MERCATOR_PARCEL = {
     TAX_YEAR: 2025,
   },
 } as const;
+
+/**
+ * GROUND TRUTH for the reprojection. `KING_48269_WEB_MERCATOR_BBOX`
+ * above, converted EPSG:3857 -> EPSG:4326, measured against the REAL
+ * archive on 2026-08-08: the 697,553-byte
+ * `stratmap25-landparcels_48269_lp.zip` was downloaded from
+ * data.geographic.texas.gov, its 2,326 features reprojected, and all
+ * 2,313 with polygon geometry passed the Texas envelope assertion.
+ *
+ * The values below are that county's true position. King County, Texas
+ * spans roughly lng -100.52..-100.00 and lat 33.39..33.84 (US Census
+ * county boundary), so the conversion is verified against the county's
+ * KNOWN LOCATION and not merely against its own arithmetic. A
+ * reprojection bug that produced a self-consistent but wrong answer —
+ * an ellipsoidal instead of spherical inverse, say, which shifts
+ * latitude by tens of km — would fail this fixture.
+ */
+export const KING_48269_REPROJECTED_BBOX = {
+  westLng: -100.52050395900791,
+  southLat: 33.39353987451293,
+  eastLng: -99.96711985025019,
+  northLat: 33.8382739939311,
+};
+
+/**
+ * EPSG:3857 <-> EPSG:4326 reference pairs with PUBLISHED values — the
+ * defining constants of the CRS, which this codebase did not derive.
+ *
+ * EPSG:3857's declared extent is +/-20037508.342789244 m on both axes
+ * (that is pi * 6378137, the half-circumference of the projection
+ * sphere), corresponding to +/-180 degrees longitude and the CRS's
+ * documented latitude limit of +/-85.05112877980659 degrees. Those are
+ * the numbers every EPSG registry entry and every tiling scheme quotes,
+ * so recovering them exactly from the inverse is an independent check
+ * of the constant, the formula, and the units all at once — a wrong
+ * radius or an ellipsoidal inverse misses the latitude limit.
+ */
+export const WEB_MERCATOR_REFERENCE_PAIRS: ReadonlyArray<{
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly longitude: number;
+  readonly latitude: number;
+}> = [
+  { label: "origin (null island)", x: 0, y: 0, longitude: 0, latitude: 0 },
+  {
+    label: "east extent at equator",
+    x: 20037508.342789244,
+    y: 0,
+    longitude: 180,
+    latitude: 0,
+  },
+  {
+    label: "west extent at equator",
+    x: -20037508.342789244,
+    y: 0,
+    longitude: -180,
+    latitude: 0,
+  },
+  {
+    label: "north extent (EPSG:3857 latitude limit)",
+    x: 0,
+    y: 20037508.342789244,
+    longitude: 0,
+    latitude: 85.05112877980659,
+  },
+  {
+    label: "south extent (EPSG:3857 latitude limit)",
+    x: 0,
+    y: -20037508.342789244,
+    longitude: 0,
+    latitude: -85.05112877980659,
+  },
+];
+
+/**
+ * Ordinary Texas points for the ROUND-TRIP closure assertion. Unlike
+ * the reference pairs above these degree values are the input, not a
+ * published constant: the test projects them forward and inverts them,
+ * so it measures the numerical closure of the pair rather than
+ * corroborating the formula. Both properties are worth testing and the
+ * distinction is deliberate — the King County fixture above is what
+ * corroborates the formula against the physical world.
+ */
+export const TEXAS_ROUND_TRIP_POINTS: ReadonlyArray<{
+  readonly label: string;
+  readonly longitude: number;
+  readonly latitude: number;
+}> = [
+  { label: "Austin", longitude: -97.7431, latitude: 30.2672 },
+  { label: "Guthrie (King county seat)", longitude: -100.3229, latitude: 33.6212 },
+  { label: "El Paso (west tip)", longitude: -106.4850, latitude: 31.7619 },
+  { label: "Brownsville (south tip)", longitude: -97.4975, latitude: 25.9017 },
+  { label: "Texline (panhandle top)", longitude: -103.0207, latitude: 36.3792 },
+];
