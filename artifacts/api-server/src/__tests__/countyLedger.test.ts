@@ -17,13 +17,27 @@
  *
  * Uses the real-PG route harness (withTestSchema via setup.ts). Requires
  * TEST_DATABASE_URL / DATABASE_URL, CI-authoritative when unset.
+ *
+ * CI fix 2026-08-08 (feat/county-manifest-sprint1, per
+ * doc_repo _decisions/2026-08-08_county_shape_thirteen_rails_and_geometry_first.md):
+ * `county_facet_coverage` / `county_manifest` / `county_rail` are NOT in
+ * setup.ts's global TRUNCATE_TABLES (that table predates this change and is
+ * out of its scope — see the "pre-existing gap" comment further down this
+ * file). Sprint 1 added tests to this same file that insert into all three
+ * tables. Without a local reset, rows seeded by one test (e.g. fips 48021
+ * in the "groups facet rows" test below) leaked into later tests in this
+ * file that asserted a from-empty state, most visibly the last describe
+ * block's "manifestCells is additive" test. Fixed at the root here with a
+ * file-local afterEach truncation of the three tables this file writes to,
+ * rather than loosening any assertion.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
 import { db, countyFacetCoverage, countyManifest, countyRail } from "@workspace/db";
+import { truncateAll } from "@workspace/db/testing";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -57,6 +71,21 @@ beforeEach(() => {
   __resetServiceApiKeyCacheForTests();
 });
 
+// county_facet_coverage / county_manifest / county_rail are not in setup.ts's
+// global TRUNCATE_TABLES (county_facet_coverage predates this file and is out
+// of scope for a global list change; county_manifest/county_rail are new,
+// Sprint-1-only tables). Reset all three locally after every test in this
+// file so a row seeded in one test (e.g. fips 48021 below) never leaks into
+// a later test that asserts a from-empty state. See the file header comment.
+afterEach(async () => {
+  if (!ctx.schema) return;
+  await truncateAll(ctx.schema.pool, [
+    "county_facet_coverage",
+    "county_manifest",
+    "county_rail",
+  ]);
+});
+
 const LEDGER_PATH = "/api/county-ledger";
 
 describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
@@ -64,11 +93,24 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
     const res = await request(getApp()).get(LEDGER_PATH);
     expect(res.status).toBe(200);
     expect(res.body.counties).toEqual([]);
+    // County Manifest Sprint 1 (feat/county-manifest-sprint1) added four
+    // additive summary fields (totalRails, totalCells, satisfiedCells,
+    // texasCompletenessPct) alongside the four pre-existing ones — see
+    // countyLedger.ts's res.json() and doc_repo
+    // _inbox/2026-08-08_SPRINT1_manifest_schema_spec.md section 5/9. The
+    // four original fields are unchanged and still zero here; totalRails is
+    // 13 unconditionally (a hardcoded rail-dimension constant, not derived
+    // from any seeded row), and the remaining three are zero because
+    // manifestCells is empty when county_manifest/county_rail are unseeded.
     expect(res.body.summary).toEqual({
       onboardedCount: 0,
       totalCounties: 0,
       staleCount: 0,
       rewarmUnsafeCount: 0,
+      totalRails: 13,
+      totalCells: 0,
+      satisfiedCells: 0,
+      texasCompletenessPct: 0,
     });
   });
 
@@ -145,15 +187,14 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
   });
 
   it("creates a county entry from a registry mirror row even with no county_facet_coverage rows yet", async () => {
-    // Deliberately a DIFFERENT fips than every other test in this file
-    // (48021 carries a county_facet_coverage row seeded by the
-    // "pre-existing facet-scorecard shape" describe block above, and that
-    // table is NOT in setup.ts's TRUNCATE_TABLES, so it persists across
-    // this file's tests, see setup.ts's TRUNCATE_TABLES comment for the
-    // "if a route writes to it, it's in this list" invariant, which
-    // county_facet_coverage predates and is out of this change's scope).
-    // Using an untouched fips is what actually proves the "no coverage
-    // rows yet" case, independent of that pre-existing gap.
+    // Deliberately a DIFFERENT fips than the "attaches countyName..." test
+    // above (which also uses 48021), purely so this test's assertions read
+    // unambiguously against its own county rather than one shared with a
+    // sibling test. Cross-test leakage of county_facet_coverage rows is no
+    // longer possible: this file's afterEach (added 2026-08-08, see file
+    // header) truncates county_facet_coverage/county_manifest/county_rail
+    // after every test, since none of the three are in setup.ts's global
+    // TRUNCATE_TABLES.
     await request(getApp())
       .post("/api/onboarding-ledger/ingest")
       .set(serviceAuth)
