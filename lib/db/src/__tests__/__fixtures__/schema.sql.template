@@ -1012,7 +1012,7 @@ CREATE TABLE @@SCHEMA@@.knowledge_atoms (
 CREATE TABLE @@SCHEMA@@.manifest_jurisdiction_cost (
     county_fips text NOT NULL,
     commitment_cost_usd numeric(10,2),
-    lifetime_cost_usd numeric(10,2) DEFAULT 0 NOT NULL,
+    lifetime_cost_usd numeric(10,2) DEFAULT '0'::numeric NOT NULL,
     first_acquisition_run_id uuid,
     first_acquisition_recorded_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
@@ -2328,12 +2328,6 @@ ALTER TABLE ONLY @@SCHEMA@@.knowledge_atoms
     ADD CONSTRAINT knowledge_atoms_pkey PRIMARY KEY (id);
 
 
--- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
-    ADD CONSTRAINT materializable_elements_pkey PRIMARY KEY (id);
-
-
 -- Name: manifest_jurisdiction_cost manifest_jurisdiction_cost_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.manifest_jurisdiction_cost
@@ -2356,6 +2350,12 @@ ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_queue
 
 ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_reservation
     ADD CONSTRAINT manifest_slot_reservation_pkey PRIMARY KEY (id);
+
+
+-- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_pkey PRIMARY KEY (id);
 
 
 -- Name: onboarding_ledger_event onboarding_ledger_event_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3118,17 +3118,17 @@ CREATE UNIQUE INDEX manifest_run_active_heavy_slot_uniq ON @@SCHEMA@@.manifest_r
 
 -- Name: manifest_run_lane_started_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX manifest_run_lane_started_idx ON @@SCHEMA@@.manifest_run USING btree (lane, started_at DESC);
+CREATE INDEX manifest_run_lane_started_idx ON @@SCHEMA@@.manifest_run USING btree (lane, started_at);
 
 
 -- Name: manifest_run_status_heartbeat_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX manifest_run_status_heartbeat_idx ON @@SCHEMA@@.manifest_run USING btree (status, heartbeat_at DESC);
+CREATE INDEX manifest_run_status_heartbeat_idx ON @@SCHEMA@@.manifest_run USING btree (status, heartbeat_at);
 
 
 -- Name: manifest_run_target_fips_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX manifest_run_target_fips_idx ON @@SCHEMA@@.manifest_run USING btree (target_fips) WHERE (target_fips IS NOT NULL);
+CREATE INDEX manifest_run_target_fips_idx ON @@SCHEMA@@.manifest_run USING btree (target_fips);
 
 
 -- Name: manifest_slot_queue_active_position_uniq; Type: INDEX; Schema: public; Owner: -
@@ -3143,7 +3143,7 @@ CREATE UNIQUE INDEX manifest_slot_queue_active_run_uniq ON @@SCHEMA@@.manifest_s
 
 -- Name: manifest_slot_queue_resource_enqueued_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX manifest_slot_queue_resource_enqueued_idx ON @@SCHEMA@@.manifest_slot_queue USING btree (resource_key, enqueued_at) WHERE (dequeued_at IS NULL);
+CREATE INDEX manifest_slot_queue_resource_enqueued_idx ON @@SCHEMA@@.manifest_slot_queue USING btree (resource_key, enqueued_at);
 
 
 -- Name: manifest_slot_reservation_active_uniq; Type: INDEX; Schema: public; Owner: -
@@ -3298,7 +3298,7 @@ CREATE INDEX qa_triage_items_status_idx ON @@SCHEMA@@.qa_triage_items USING btre
 
 -- Name: rail_state_history_cell_recorded_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX rail_state_history_cell_recorded_idx ON @@SCHEMA@@.rail_state_history USING btree (county_fips, rail_key, recorded_at DESC);
+CREATE INDEX rail_state_history_cell_recorded_idx ON @@SCHEMA@@.rail_state_history USING btree (county_fips, rail_key, recorded_at);
 
 
 -- Name: rail_state_history_recorded_at_idx; Type: INDEX; Schema: public; Owner: -
@@ -3308,12 +3308,12 @@ CREATE INDEX rail_state_history_recorded_at_idx ON @@SCHEMA@@.rail_state_history
 
 -- Name: rail_verification_cell_verified_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX rail_verification_cell_verified_idx ON @@SCHEMA@@.rail_verification USING btree (county_fips, rail_key, verified_at DESC);
+CREATE INDEX rail_verification_cell_verified_idx ON @@SCHEMA@@.rail_verification USING btree (county_fips, rail_key, verified_at);
 
 
 -- Name: rail_verification_run_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX rail_verification_run_idx ON @@SCHEMA@@.rail_verification USING btree (run_id) WHERE (run_id IS NOT NULL);
+CREATE INDEX rail_verification_run_idx ON @@SCHEMA@@.rail_verification USING btree (run_id);
 
 
 -- Name: reasoning_atoms_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
@@ -3727,34 +3727,22 @@ ALTER TABLE ONLY @@SCHEMA@@.findings
     ADD CONSTRAINT findings_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
 
 
--- Name: manifest_jurisdiction_cost manifest_jurisdiction_cost_first_acquisition_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: manifest_jurisdiction_cost manifest_jurisdiction_cost_first_acquisition_run_id_manifest_ru; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.manifest_jurisdiction_cost
-    ADD CONSTRAINT manifest_jurisdiction_cost_first_acquisition_run_id_fk FOREIGN KEY (first_acquisition_run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE SET NULL;
+    ADD CONSTRAINT manifest_jurisdiction_cost_first_acquisition_run_id_manifest_ru FOREIGN KEY (first_acquisition_run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE SET NULL;
 
 
--- Name: manifest_slot_queue manifest_slot_queue_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: manifest_slot_queue manifest_slot_queue_run_id_manifest_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_queue
-    ADD CONSTRAINT manifest_slot_queue_run_id_fk FOREIGN KEY (run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE CASCADE;
+    ADD CONSTRAINT manifest_slot_queue_run_id_manifest_run_id_fk FOREIGN KEY (run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE CASCADE;
 
 
--- Name: manifest_slot_reservation manifest_slot_reservation_holder_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: manifest_slot_reservation manifest_slot_reservation_holder_run_id_manifest_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_reservation
-    ADD CONSTRAINT manifest_slot_reservation_holder_run_id_fk FOREIGN KEY (holder_run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE CASCADE;
-
-
--- Name: rail_state_history rail_state_history_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.rail_state_history
-    ADD CONSTRAINT rail_state_history_run_id_fk FOREIGN KEY (run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE SET NULL;
-
-
--- Name: rail_verification rail_verification_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.rail_verification
-    ADD CONSTRAINT rail_verification_run_id_fk FOREIGN KEY (run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE SET NULL;
+    ADD CONSTRAINT manifest_slot_reservation_holder_run_id_manifest_run_id_fk FOREIGN KEY (holder_run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE CASCADE;
 
 
 -- Name: materializable_elements materializable_elements_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
