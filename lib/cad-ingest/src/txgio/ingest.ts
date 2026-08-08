@@ -1,13 +1,21 @@
 /**
  * Batch load of normalized TxGIO parcel records into `txgio_parcel`.
  *
- * Replace semantics per county: the caller deletes the county's rows
- * first (`deleteCountyParcels`), then streams inserts. Insert batches
- * still carry ON CONFLICT DO UPDATE so a resumed/re-run load after a
- * partial failure is idempotent without a second delete. A feature is
- * inserted once per grid cell its bbox intersects (see `geo.ts`), so
- * `rowsInserted` >= features loaded; `featuresLoaded` counts distinct
- * features.
+ * Replace semantics per county: `replaceCountyParcels` deletes the
+ * county's rows and streams the new ones IN ONE TRANSACTION, so a
+ * mid-county failure — a projection error on feature 900, a dropped
+ * connection, an OOM — can never leave a county deleted with nothing
+ * loaded. Before 2026-08-08 the delete ran outside any transaction and
+ * that window was real; the statewide sweep made mid-county failure a
+ * realistic outcome rather than a hypothetical one, since 57 counties
+ * ship coordinates the parser now (correctly) refuses.
+ *
+ * Insert batches still carry ON CONFLICT DO UPDATE so a resumed load
+ * after a partial failure is idempotent without a second delete, and so
+ * two features sharing a (county, tileKey, featureIndex) key cannot
+ * duplicate. A feature is inserted once per grid cell its bbox
+ * intersects (see `geo.ts`), so `rowsInserted` >= features loaded;
+ * `featuresLoaded` counts distinct features.
  *
  * Callers pass a drizzle handle so the CLI (own pool from
  * DATABASE_URL) and tests (`withTestSchema`) share this code — same
@@ -26,6 +34,15 @@ export type TxgioIngestDb = Pick<
 >;
 
 /**
+ * A handle that can open a transaction. The CLI's pooled drizzle
+ * instance and `withTestSchema`'s test handle both satisfy it; the
+ * callback receives a `TxgioIngestDb`-shaped transaction handle.
+ */
+export interface TxgioTransactionalDb extends TxgioIngestDb {
+  transaction<T>(fn: (tx: TxgioIngestDb) => Promise<T>): Promise<T>;
+}
+
+/**
  * Rows are fat (GeoJSON polygon jsonb), so batches are smaller than
  * the cad_property default of 1000.
  */
@@ -38,6 +55,23 @@ export async function deleteCountyParcels(
   await db
     .delete(txgioParcel)
     .where(sql`${txgioParcel.countyFips} = ${countyFips}`);
+}
+
+/**
+ * Rows currently stored for a county. Used by the dry run to predict
+ * how many rows an apply would DELETE, so a dry/apply pair is
+ * comparable rather than a bare "0 (dry-run)".
+ */
+export async function countCountyParcels(
+  db: TxgioIngestDb,
+  countyFips: string,
+): Promise<number> {
+  const result = (await db.execute(
+    sql`SELECT count(*)::int AS n FROM ${txgioParcel}
+        WHERE ${txgioParcel.countyFips} = ${countyFips}`,
+  )) as unknown as { rows: Array<{ n?: unknown }> };
+  const n = result.rows?.[0]?.n;
+  return typeof n === "number" ? n : Number(n ?? 0);
 }
 
 export interface TxgioUpsertOptions {
@@ -131,4 +165,41 @@ export async function upsertTxgioParcels(
   await flush();
 
   return { featuresLoaded, rowsInserted, batches };
+}
+
+export interface TxgioReplaceSummary extends TxgioUpsertSummary {
+  /** Rows the county held before the replace (all deleted). */
+  rowsDeleted: number;
+}
+
+/**
+ * Replace one county's parcel rows ATOMICALLY: delete the county's
+ * existing rows and stream the new ones inside a single transaction.
+ *
+ * This is the write path the CLI uses, and the transaction is the whole
+ * point. Delete-then-load outside a transaction leaves a window in
+ * which a county is deleted with nothing loaded — a county that dies on
+ * feature 900 of 30,000 ends up EMPTY rather than merely stale, which
+ * is strictly worse than not having run at all. With the transaction, a
+ * throw anywhere in parse or insert rolls the delete back and the
+ * county keeps its previous vintage.
+ *
+ * Note the parse work happens lazily inside the transaction, since
+ * `records` is consumed by `upsertTxgioParcels`. That is deliberate: a
+ * projection error raised by `normalizeTxgioFeature` mid-stream must
+ * roll back the delete, so it has to be inside the transaction
+ * boundary, not before it.
+ */
+export async function replaceCountyParcels(
+  db: TxgioTransactionalDb,
+  countyFips: string,
+  records: AsyncIterable<TxgioParcelRecord> | Iterable<TxgioParcelRecord>,
+  opts: TxgioUpsertOptions,
+): Promise<TxgioReplaceSummary> {
+  return await db.transaction(async (tx) => {
+    const rowsDeleted = await countCountyParcels(tx, countyFips);
+    await deleteCountyParcels(tx, countyFips);
+    const summary = await upsertTxgioParcels(tx, records, opts);
+    return { ...summary, rowsDeleted };
+  });
 }

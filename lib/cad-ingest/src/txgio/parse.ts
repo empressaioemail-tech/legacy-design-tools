@@ -24,7 +24,11 @@ import type { ParseCounters } from "../types";
 import { recordSkip } from "../types";
 import {
   bboxOfGeometry,
+  cellCountForBbox,
   cellKeysForBbox,
+  isPlausibleTexasWgs84Bbox,
+  TEXAS_WGS84_BOUNDS,
+  TXGIO_MAX_FEATURE_CELLS,
   type GeoBbox,
   type GeoJsonGeometry,
 } from "./geo";
@@ -51,19 +55,101 @@ export const TXGIO_ENTRY_FILTER = (name: string): boolean =>
   /\.(shp|dbf|prj)$/i.test(name);
 
 /**
- * WGS84-geographic guard. The land-parcel program publishes
+ * WGS84-GEOGRAPHIC guard. The land-parcel program publishes
  * GCS_WGS_1984 (verified against the real Hays/Comal .prj files);
  * anything else means TxGIO changed the published SR and this ingest
  * must grow a real reprojection step (proj4 with the exact EPSG)
  * before loading that county — never silently store non-WGS84
  * coordinates.
+ *
+ * TWO conditions, and the first one is the fix for the 202505 vintage
+ * defect (`_inbox/2026-08-08_SWEEP_statewide_readiness.md` section 3).
+ *
+ * 1. The CRS must not be PROJECTED. A projected WKT nests its base
+ *    datum, so the real 202505 StratMap file —
+ *    `PROJCS["WGS_1984_Web_Mercator_Auxiliary_Sphere",
+ *     GEOGCS["GCS_WGS_1984", ...]]` — CONTAINS the `GCS_WGS_1984`
+ *    substring and passed the old datum-only test while shipping
+ *    coordinates in METERS (EPSG:3857), not degrees. 12 of 12 sampled
+ *    202505 counties are Web Mercator; 57 of the 235 unloaded counties
+ *    are on that vintage. Projected coordinates are not ingestible
+ *    without a reprojection step this pipeline does not have.
+ * 2. The datum must be WGS84, as before.
+ *
+ * This guard is necessary but NOT sufficient — it can only read a
+ * declaration, and the `.prj` may be absent entirely. The coordinate
+ * range assertion below (`assertTexasWgs84Bbox`, applied per feature in
+ * `normalizeTxgioFeature`) is the durable guard because it tests the
+ * coordinates themselves.
  */
 export function assertWgs84Prj(prjText: string, prjPath: string): void {
   const t = prjText.toUpperCase();
+  if (t.trimStart().startsWith("PROJCS")) {
+    throw new Error(
+      `${prjPath} declares a PROJECTED coordinate system — refusing to ` +
+        `ingest projected coordinates (meters/feet) without a reprojection ` +
+        `step. Only a geographic WGS84 CRS (degrees) is ingestible. ` +
+        `.prj: ${prjText.slice(0, 200)}`,
+    );
+  }
   if (!t.includes("GCS_WGS_1984") && !t.includes('GEOGCS["WGS 84"')) {
     throw new Error(
       `${prjPath} is not GCS_WGS_1984 — refusing to ingest non-WGS84 ` +
         `coordinates without a reprojection step. .prj: ${prjText.slice(0, 200)}`,
+    );
+  }
+}
+
+/** Thrown when a feature's coordinates are not plausible Texas degrees. */
+export class TxgioProjectionError extends Error {
+  readonly bbox: GeoBbox;
+  constructor(message: string, bbox: GeoBbox) {
+    super(message);
+    this.name = "TxgioProjectionError";
+    this.bbox = bbox;
+  }
+}
+
+/**
+ * THE DURABLE PROJECTION GUARD. Asserts a parsed feature's bbox falls
+ * inside the plausible Texas WGS84 degree envelope, and that it buckets
+ * into a sane number of grid cells.
+ *
+ * Unlike `assertWgs84Prj` this depends on no WKT parsing and no sidecar
+ * file, so it catches every way the declaration can be wrong or absent:
+ * a projected CRS (Web Mercator meters land near x=-11,200,000), a
+ * MISSING `.prj` (which the CLI only warns about), a swapped lat/lng
+ * axis order, and any future change to what the StratMap program
+ * publishes. It is fail-closed by construction: a county whose
+ * coordinates are not degrees cannot be loaded at all.
+ *
+ * This throws rather than counting a skip. A projection error is a
+ * WHOLE-COUNTY property, not a per-feature data defect; skipping would
+ * silently load zero or a handful of rows and report success.
+ */
+export function assertTexasWgs84Bbox(
+  bbox: GeoBbox,
+  context: string,
+): void {
+  if (!isPlausibleTexasWgs84Bbox(bbox)) {
+    throw new TxgioProjectionError(
+      `${context}: bbox [${bbox.westLng}, ${bbox.southLat}, ${bbox.eastLng}, ` +
+        `${bbox.northLat}] falls outside the plausible Texas WGS84 envelope ` +
+        `[${TEXAS_WGS84_BOUNDS.westLng}, ${TEXAS_WGS84_BOUNDS.southLat}, ` +
+        `${TEXAS_WGS84_BOUNDS.eastLng}, ${TEXAS_WGS84_BOUNDS.northLat}] — ` +
+        `coordinates are not WGS84 degrees (projected meters? swapped axes?). ` +
+        `Refusing to ingest.`,
+      bbox,
+    );
+  }
+  const cells = cellCountForBbox(bbox);
+  if (!Number.isFinite(cells) || cells > TXGIO_MAX_FEATURE_CELLS) {
+    throw new TxgioProjectionError(
+      `${context}: bbox [${bbox.westLng}, ${bbox.southLat}, ${bbox.eastLng}, ` +
+        `${bbox.northLat}] buckets into ${cells} grid cells, above the ` +
+        `${TXGIO_MAX_FEATURE_CELLS} per-feature ceiling — no real parcel ` +
+        `spans that area. Refusing to ingest.`,
+      bbox,
     );
   }
 }
@@ -109,6 +195,10 @@ export function normalizeTxgioFeature(
     recordSkip(counters, `feature ${featureIndex}: empty geometry`);
     return null;
   }
+  // Fail-closed projection guard — see assertTexasWgs84Bbox. Throws
+  // (does NOT skip): non-degree coordinates are a whole-county
+  // property, so the run must abort rather than load a partial county.
+  assertTexasWgs84Bbox(bbox, `county ${countyFips} feature ${featureIndex}`);
   const tileKeys = cellKeysForBbox(bbox);
   if (tileKeys === null || tileKeys.length === 0) {
     // Unbounded maxCells is never null; empty means a degenerate bbox.

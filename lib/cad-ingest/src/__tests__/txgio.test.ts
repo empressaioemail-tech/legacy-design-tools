@@ -7,24 +7,38 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  TEXAS_WGS84_BOUNDS,
+  TXGIO_MAX_FEATURE_CELLS,
   TXGIO_TILE_GRID_DEG,
   bboxOfGeometry,
   bboxesIntersect,
+  cellCountForBbox,
   cellKeyForPoint,
   cellKeysForBbox,
+  isPlausibleTexasWgs84Bbox,
   pointInGeometry,
   type GeoJsonGeometry,
 } from "../txgio/geo";
 import {
+  assertTexasWgs84Bbox,
   assertWgs84Prj,
   normalizeTxgioFeature,
+  TxgioProjectionError,
   TXGIO_ENTRY_FILTER,
 } from "../txgio/parse";
 import {
   normalizeStatLandUse,
   normalizeStratMapLandUse,
 } from "../txgio/landuse";
-import { resolveTxgioCounty, txgioDownloadUrl } from "../txgio/counties";
+import {
+  isTexasCountyFips,
+  isTxgioCountyLoaded,
+  resolveTxgioCounty,
+  TXGIO_ABSENT_FROM_STRATMAP,
+  TXGIO_COUNTIES,
+  TXGIO_STATEWIDE_COUNTIES,
+  txgioDownloadUrl,
+} from "../txgio/counties";
 import { deriveVintage } from "../download";
 import { newCounters } from "../types";
 import {
@@ -32,7 +46,10 @@ import {
   HAYS_PARCEL_12310_INSIDE,
   HAYS_PARCEL_12310_OUTSIDE,
   HAYS_PRJ_WGS84,
+  KING_48269_WEB_MERCATOR_BBOX,
+  KING_48269_WEB_MERCATOR_PARCEL,
   TX_STATE_PLANE_PRJ,
+  TXGIO_202505_WEB_MERCATOR_PRJ,
 } from "./__fixtures__/txgioHaysParcel";
 
 const HAYS_GEOMETRY = HAYS_PARCEL_12310.geometry as unknown as GeoJsonGeometry;
@@ -385,29 +402,261 @@ describe("normalizeStratMapLandUse -> cad_property row", () => {
 });
 
 describe("WGS84 .prj guard", () => {
-  it("accepts the real stratmap25 .prj", () => {
+  it("accepts the real stratmap25 geographic .prj", () => {
     expect(() => assertWgs84Prj(HAYS_PRJ_WGS84, "hays.prj")).not.toThrow();
   });
 
   it("refuses a state-plane .prj instead of storing non-WGS84 coordinates", () => {
+    // Caught by the PROJCS branch — a projected CRS is refused before
+    // the datum is even considered, which is the correct order.
     expect(() => assertWgs84Prj(TX_STATE_PLANE_PRJ, "bad.prj")).toThrow(
-      /not GCS_WGS_1984/,
+      /PROJECTED coordinate system/,
+    );
+  });
+
+  it("REGRESSION: refuses the real 202505 Web Mercator .prj whose nested GEOGCS says GCS_WGS_1984", () => {
+    // This exact WKT ships on 12 of 12 sampled 202505 counties (57 of
+    // 254 statewide). Its nested GEOGCS contains the `GCS_WGS_1984`
+    // substring, so the pre-2026-08-08 datum-only guard PASSED on
+    // coordinates in meters. It must now be refused.
+    expect(TXGIO_202505_WEB_MERCATOR_PRJ.toUpperCase()).toContain(
+      "GCS_WGS_1984",
+    );
+    expect(() =>
+      assertWgs84Prj(TXGIO_202505_WEB_MERCATOR_PRJ, "king_48269.prj"),
+    ).toThrow(/PROJECTED coordinate system/);
+  });
+
+  it("still refuses a geographic CRS on the wrong datum", () => {
+    expect(() =>
+      assertWgs84Prj(
+        'GEOGCS["GCS_North_American_1983",DATUM["D_North_American_1983"]]',
+        "nad83.prj",
+      ),
+    ).toThrow(/not GCS_WGS_1984/);
+  });
+
+  it("tolerates leading whitespace before PROJCS", () => {
+    expect(() =>
+      assertWgs84Prj(`\n  ${TXGIO_202505_WEB_MERCATOR_PRJ}`, "padded.prj"),
+    ).toThrow(/PROJECTED coordinate system/);
+  });
+});
+
+describe("Texas WGS84 coordinate-range assertion (the durable guard)", () => {
+  it("accepts the real Hays parcel's bbox", () => {
+    const bbox = bboxOfGeometry(HAYS_GEOMETRY)!;
+    expect(isPlausibleTexasWgs84Bbox(bbox)).toBe(true);
+    expect(() => assertTexasWgs84Bbox(bbox, "hays")).not.toThrow();
+  });
+
+  it("REGRESSION: rejects the real King 48269 (202505) Web Mercator header bbox", () => {
+    // Real .shp header bbox, meters. xmin=-11189891.31 where a
+    // legitimate value for that county is about -100.2 degrees.
+    expect(isPlausibleTexasWgs84Bbox(KING_48269_WEB_MERCATOR_BBOX)).toBe(false);
+    expect(() =>
+      assertTexasWgs84Bbox(KING_48269_WEB_MERCATOR_BBOX, "king 48269"),
+    ).toThrow(TxgioProjectionError);
+    expect(() =>
+      assertTexasWgs84Bbox(KING_48269_WEB_MERCATOR_BBOX, "king 48269"),
+    ).toThrow(/outside the plausible Texas WGS84 envelope/);
+  });
+
+  it("catches a swapped lat/lng axis order", () => {
+    // Hays coordinates with the pair transposed: lng 29.9, lat -97.9.
+    expect(() =>
+      assertTexasWgs84Bbox(
+        { westLng: 29.895, southLat: -97.913, eastLng: 29.896, northLat: -97.912 },
+        "swapped",
+      ),
+    ).toThrow(/outside the plausible Texas WGS84 envelope/);
+  });
+
+  it("rejects non-finite coordinates", () => {
+    expect(
+      isPlausibleTexasWgs84Bbox({
+        westLng: NaN,
+        southLat: 30,
+        eastLng: -97,
+        northLat: 31,
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts the true corners of Texas but not a degree past the padded envelope", () => {
+    // El Paso's western tip (~-106.65) and the Panhandle top (~36.50)
+    // are comfortably inside.
+    expect(
+      isPlausibleTexasWgs84Bbox({
+        westLng: -106.65,
+        southLat: 25.84,
+        eastLng: -93.51,
+        northLat: 36.5,
+      }),
+    ).toBe(true);
+    // Just past the padded envelope is out.
+    expect(
+      isPlausibleTexasWgs84Bbox({
+        westLng: TEXAS_WGS84_BOUNDS.westLng - 0.001,
+        southLat: 30,
+        eastLng: -97,
+        northLat: 31,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a bbox that is in-range but spans an implausible number of cells", () => {
+    // Whole-state extent: plausible degrees, but no PARCEL is that big.
+    // (~730 x 600 cells, far above the per-feature ceiling.)
+    const statewide = {
+      westLng: -106,
+      southLat: 26,
+      eastLng: -94,
+      northLat: 36,
+    };
+    expect(isPlausibleTexasWgs84Bbox(statewide)).toBe(true);
+    expect(cellCountForBbox(statewide)).toBeGreaterThan(
+      TXGIO_MAX_FEATURE_CELLS,
+    );
+    expect(() => assertTexasWgs84Bbox(statewide, "statewide")).toThrow(
+      /per-feature ceiling/,
     );
   });
 });
 
+describe("normalizeTxgioFeature — projection fail-closed", () => {
+  it("THROWS (does not skip) on a 202505-shaped Web Mercator feature", () => {
+    const counters = newCounters();
+    // Pre-fix this returned a record whose tileKeys were meter-space
+    // keys, after attempting ~9.1e12 of them.
+    expect(() =>
+      normalizeTxgioFeature(
+        "48269",
+        0,
+        KING_48269_WEB_MERCATOR_PARCEL as never,
+        counters,
+      ),
+    ).toThrow(TxgioProjectionError);
+    // A projection error is a whole-county property, so it must NOT be
+    // absorbed into the per-feature skip counter and reported as success.
+    expect(counters.rowsSkipped).toBe(0);
+  });
+
+  it("names the county and feature index in the failure", () => {
+    const counters = newCounters();
+    expect(() =>
+      normalizeTxgioFeature(
+        "48269",
+        417,
+        KING_48269_WEB_MERCATOR_PARCEL as never,
+        counters,
+      ),
+    ).toThrow(/county 48269 feature 417/);
+  });
+});
+
+describe("cellKeysForBbox hardening", () => {
+  it("throws rather than attempting an absurd key set when uncapped", () => {
+    // The exact pre-fix failure path: ingest calls with maxCells
+    // undefined, so the cap never engaged and the run died on memory.
+    expect(() => cellKeysForBbox(KING_48269_WEB_MERCATOR_BBOX)).toThrow(
+      /hard ceiling/,
+    );
+  });
+
+  it("throws on non-finite coordinates instead of looping forever", () => {
+    expect(() =>
+      cellKeysForBbox({
+        westLng: -Infinity,
+        southLat: 29,
+        eastLng: -97,
+        northLat: 30,
+      }),
+    ).toThrow(/non-finite cell count/);
+  });
+
+  it("leaves the reader's maxCells fallback contract intact", () => {
+    // A large-but-legitimate viewport still returns null (not a throw)
+    // so api-server's bbox-column fallback keeps working.
+    const viewport = {
+      westLng: -98.5,
+      southLat: 29.5,
+      eastLng: -97.5,
+      northLat: 30.5,
+    };
+    expect(cellKeysForBbox(viewport, TXGIO_TILE_GRID_DEG, 256)).toBeNull();
+    expect(cellKeysForBbox(viewport, TXGIO_TILE_GRID_DEG)).not.toBeNull();
+  });
+
+  it("cellCountForBbox agrees with the materialized key count", () => {
+    const bbox = {
+      westLng: -97.93,
+      southLat: 29.89,
+      eastLng: -97.9,
+      northLat: 29.91,
+    };
+    expect(cellCountForBbox(bbox)).toBe(cellKeysForBbox(bbox)!.length);
+  });
+});
+
 describe("TxGIO county registry + zip entry filter", () => {
-  it("resolves by fips and name across all ten Central-TX counties", () => {
+  it("resolves the loaded counties by fips and name, returning the registry object by identity", () => {
     expect(resolveTxgioCounty("48209")?.name).toBe("Hays");
     expect(resolveTxgioCounty("comal")?.fips).toBe("48091");
-    // Wave D2: the metro-5 + gap counties are now bulk-loaded here so
-    // the PMTiles bake has one uniform source. Travis (formerly
-    // live-GIS-only) now resolves.
     expect(resolveTxgioCounty("48453")?.name).toBe("Travis");
     expect(resolveTxgioCounty("mclennan")?.fips).toBe("48309");
     expect(resolveTxgioCounty("48187")?.name).toBe("Guadalupe");
-    // An out-of-scope county still resolves to undefined.
+    // Identity matters: jurisdictions.ts composes these exact objects.
+    expect(resolveTxgioCounty("48209")).toBe(TXGIO_COUNTIES["48209"]);
+    expect(resolveTxgioCounty("travis")).toBe(TXGIO_COUNTIES["48453"]);
+  });
+
+  it("resolves UNLOADED counties too — the 19-county allowlist no longer gates the CLI", () => {
+    // The blocker: these counties could not previously be resolved at
+    // all, so the ingest CLI failed closed before any network call and
+    // an unloaded county could not even be dry-run.
+    const king = resolveTxgioCounty("48269");
+    expect(king?.name).toBe("King");
+    expect(king?.downloadUrl).toBe(txgioDownloadUrl("48269"));
+    expect(resolveTxgioCounty("harris")?.fips).toBe("48201");
+    expect(resolveTxgioCounty("48035")?.name).toBe("Bosque");
+    // ...and they are correctly reported as NOT loaded.
+    expect(isTxgioCountyLoaded("48269")).toBe(false);
+    expect(isTxgioCountyLoaded("48209")).toBe(true);
+  });
+
+  it("carries all 254 Texas counties, and only real ones", () => {
+    expect(Object.keys(TXGIO_STATEWIDE_COUNTIES)).toHaveLength(254);
+    // Texas county codes are the odd numbers 001..507, exactly.
+    for (const fips of Object.keys(TXGIO_STATEWIDE_COUNTIES)) {
+      expect(fips).toMatch(/^48\d{3}$/);
+      const code = Number(fips.slice(2));
+      expect(code % 2).toBe(1);
+      expect(code).toBeGreaterThanOrEqual(1);
+      expect(code).toBeLessThanOrEqual(507);
+    }
+    // Every loaded county is a real one, with a matching name.
+    for (const [fips, entry] of Object.entries(TXGIO_COUNTIES)) {
+      expect(TXGIO_STATEWIDE_COUNTIES[fips]).toBe(entry.name);
+    }
+  });
+
+  it("still fails closed on a typo, a non-county, or an out-of-state FIPS", () => {
+    // 48999 and 48200 are not Texas counties (999 out of range; 200 even).
     expect(resolveTxgioCounty("48999")).toBeUndefined();
+    expect(resolveTxgioCounty("48200")).toBeUndefined();
+    expect(resolveTxgioCounty("49037")).toBeUndefined(); // San Juan, UT
+    expect(resolveTxgioCounty("notacounty")).toBeUndefined();
+    expect(isTexasCountyFips("48999")).toBe(false);
+    expect(isTexasCountyFips("48269")).toBe(true);
+  });
+
+  it("names Donley 48129 as an honest absence rather than pretending it fetches", () => {
+    // Resolvable (it IS a Texas county) but its StratMap archive 404s,
+    // so the CLI refuses with an explanation instead of a stack trace.
+    expect(resolveTxgioCounty("48129")?.name).toBe("Donley");
+    expect(TXGIO_ABSENT_FROM_STRATMAP["48129"]).toMatch(/404/);
+    expect(TXGIO_ABSENT_FROM_STRATMAP["48269"]).toBeUndefined();
   });
 
   it("builds the collection resource URL", () => {

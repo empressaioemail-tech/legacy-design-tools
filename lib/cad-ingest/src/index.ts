@@ -45,24 +45,34 @@ export {
 } from "./zip";
 export * from "./txgio/geo";
 export {
+  TXGIO_ABSENT_FROM_STRATMAP,
   TXGIO_COUNTIES,
+  TXGIO_STATEWIDE_COUNTIES,
+  isTexasCountyFips,
+  isTxgioCountyLoaded,
   resolveTxgioCounty,
   txgioDownloadUrl,
 } from "./txgio/counties";
 export type { TxgioCounty } from "./txgio/counties";
 export {
-  normalizeTxgioFeature,
+  assertTexasWgs84Bbox,
   assertWgs84Prj,
+  normalizeTxgioFeature,
+  TxgioProjectionError,
   TXGIO_ENTRY_FILTER,
 } from "./txgio/parse";
 export type { TxgioParcelRecord, TxgioFeature } from "./txgio/parse";
 export {
+  countCountyParcels,
   deleteCountyParcels,
+  replaceCountyParcels,
   upsertTxgioParcels,
   TXGIO_DEFAULT_BATCH_SIZE,
 } from "./txgio/ingest";
 export type {
   TxgioIngestDb,
+  TxgioReplaceSummary,
+  TxgioTransactionalDb,
   TxgioUpsertOptions,
   TxgioUpsertSummary,
 } from "./txgio/ingest";
