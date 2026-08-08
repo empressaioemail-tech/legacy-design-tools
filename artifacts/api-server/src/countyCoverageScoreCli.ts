@@ -59,8 +59,17 @@ import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./lib/joinNormalize";
 
 const { Pool } = pg;
 
-/** The ten Central-TX counties (same registry the bakes use). */
-const COUNTY_NAMES: Record<string, string> = {
+/**
+ * County Manifest Sprint 1 (feat/county-manifest-sprint1). `--all` reads
+ * its target set from `county_manifest` (254 rows once seeded) instead of
+ * a hardcoded map — this retires the same "worked counties only" anti-
+ * pattern the ledger audit flagged for this exact constant (doc_repo
+ * `_inbox/2026-08-08_LEDGER_schema_audit.md` section 3/6). Falls back to
+ * the original ten-county seed ONLY if the manifest is empty (not yet
+ * seeded), so `--all` never silently does nothing before the seed SQL
+ * from `countyManifestSeedCli.ts` has been applied.
+ */
+const LEGACY_COUNTY_NAMES_FALLBACK: Record<string, string> = {
   "48209": "Hays",
   "48091": "Comal",
   "48453": "Travis",
@@ -72,6 +81,20 @@ const COUNTY_NAMES: Record<string, string> = {
   "48027": "Bell",
   "48309": "McLennan",
 };
+
+/** Read the county target set (fips -> name) from county_manifest; empty map if the table does not exist or has no rows yet. */
+async function loadManifestCountyNames(
+  pool: pg.Pool,
+): Promise<Record<string, string>> {
+  const exists = await tableExists(pool, "county_manifest");
+  if (!exists) return {};
+  const r = await pool.query<{ county_fips: string; county_name: string }>(
+    "SELECT county_fips, county_name FROM county_manifest ORDER BY county_fips",
+  );
+  const out: Record<string, string> = {};
+  for (const row of r.rows) out[row.county_fips] = row.county_name;
+  return out;
+}
 
 const PARCEL_TABLES = ["txgio_parcel", "txgio_parcel_staging"] as const;
 
@@ -258,6 +281,7 @@ interface CountyPresence {
 async function locateCounty(
   pool: pg.Pool,
   fips: string,
+  countyNames: Record<string, string> = LEGACY_COUNTY_NAMES_FALLBACK,
 ): Promise<CountyPresence | null> {
   for (const table of PARCEL_TABLES) {
     if (!(await tableExists(pool, table))) continue;
@@ -272,7 +296,7 @@ async function locateCounty(
       const hasZoning = await columnExists(pool, table, "zoning_district");
       return {
         fips,
-        name: COUNTY_NAMES[fips] ?? fips,
+        name: countyNames[fips] ?? LEGACY_COUNTY_NAMES_FALLBACK[fips] ?? fips,
         table,
         hasZoning,
         parcels,
@@ -695,8 +719,6 @@ async function main(): Promise<void> {
     fail("pass --county=<fips> or --all");
   }
 
-  const targets = all ? Object.keys(COUNTY_NAMES) : [single as string];
-
   const startedAt = Date.now();
   const databaseUrl = resolveDatabaseUrl();
   const pool = new Pool({
@@ -709,9 +731,34 @@ async function main(): Promise<void> {
 
   let wrote = 0;
   let skipped = 0;
+  let targets: string[] = [];
   try {
+    // County Manifest Sprint 1. `--all` reads its target set from
+    // county_manifest (254 rows once seeded) instead of the retired
+    // COUNTY_NAMES hardcoded map — falls back to the legacy ten-county
+    // seed only if the manifest has not been seeded yet (empty table),
+    // so `--all` never silently scores zero counties before the seed SQL
+    // from countyManifestSeedCli.ts has been applied.
+    const manifestCountyNames = await loadManifestCountyNames(pool);
+    const countyNames =
+      Object.keys(manifestCountyNames).length > 0
+        ? manifestCountyNames
+        : LEGACY_COUNTY_NAMES_FALLBACK;
+    if (all) {
+      targets = Object.keys(countyNames);
+      log(
+        `--all target set: ${targets.length} counties from ${
+          Object.keys(manifestCountyNames).length > 0
+            ? "county_manifest"
+            : "legacy fallback (county_manifest not yet seeded)"
+        }`,
+      );
+    } else {
+      targets = [single as string];
+    }
+
     for (const fips of targets) {
-      const county = await locateCounty(pool, fips);
+      const county = await locateCounty(pool, fips, countyNames);
       if (!county) {
         log(`county ${fips} has no parcels in either table — skipping`);
         skipped += 1;

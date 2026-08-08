@@ -258,6 +258,17 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "onboarding_ledger_event",
   "jurisdiction_registry_row_mirror",
   "county_gate_cert_state",
+  // County Manifest Sprint 1 — county_manifest (254-row denominator) and
+  // county_rail (13-row rail dimension) are read by the additive
+  // GET /api/county-ledger manifestCells extension but written directly
+  // by tests (via drizzle) and by countyManifestSeedCli.ts's generated
+  // SQL, not by any route. Listed per the "if a route writes to it, it's
+  // in this list" invariant's spirit — countyLedgerRollup/manifest tests
+  // seed both tables directly and need a clean slate between cases
+  // (county_rail.ordinal carries a UNIQUE constraint, so a second seed
+  // pass without truncation between tests would throw).
+  "county_manifest",
+  "county_rail",
 ];
 
 /**

@@ -9,18 +9,83 @@
  *
  * Read-only. Grouped by county FIPS with per-facet detail so the console can
  * render a county row + expand to facets.
+ *
+ * County Manifest Sprint 1 (feat/county-manifest-sprint1) additive
+ * extension: `manifestCells`, the full 254-county x 13-rail grid (3,302
+ * cells, always), per the operator ruling at doc_repo
+ * `_decisions/2026-08-08_county_shape_thirteen_rails_and_geometry_first.md`
+ * and the build spec at
+ * `_inbox/2026-08-08_SPRINT1_manifest_schema_spec.md` section 5. This is a
+ * NEW top-level response field — the existing `counties[]` shape (built
+ * from the bare `county_facet_coverage` scan below) is UNCHANGED, so the
+ * pre-existing Command Center panel keeps working unmodified while a new
+ * manifest-grid view is built against `manifestCells`.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   db,
   countyFacetCoverage,
+  countyManifest,
   jurisdictionRegistryRowMirror,
   countyGateCertState,
   onboardingLedgerEvent,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
+
+/**
+ * One cell of the 254 x 13 manifest grid. `displayState` resolves per the
+ * ruled precedence (spec section 3): `atomFamilyState != 'present'` =>
+ * `no-atom`, regardless of any stored row; else `hasWriter = false` =>
+ * `no-writer`, regardless of any stored row; else the stored `rail_state`,
+ * or `not-yet` if no `county_facet_coverage` row exists for the cell. This
+ * ordering is load-bearing: a rail with no atom family or no writer must
+ * NEVER render a stray/leftover stored value as if it were real —
+ * no-atom/no-writer dominate.
+ */
+export interface ManifestCell {
+  countyFips: string;
+  railKey: string;
+  displayState:
+    | "no-atom"
+    | "no-writer"
+    | "not-yet"
+    | "satisfied-present"
+    | "satisfied-absent";
+  isPartial: boolean;
+  honestCoveragePct: number | null;
+  thresholdPct: number | null;
+  atomFamilyState: string;
+  hasWriter: boolean;
+  absenceBasis: string | null;
+  source: string | null;
+  sourceVintage: string | null;
+  lastVerifiedAt: string | null;
+  verifiedByInstrument: string | null;
+  verificationMethod: string | null;
+  artifactPath: string | null;
+}
+
+interface ManifestGridQueryRow extends Record<string, unknown> {
+  county_fips: string;
+  rail_key: string;
+  rail_default_threshold: string | number | null;
+  atom_family_state: string;
+  has_writer: boolean;
+  rail_state: string | null;
+  honest_coverage_pct: string | number | null;
+  cell_threshold: string | number | null;
+  absence_basis: string | null;
+  source: string | null;
+  source_vintage: string | null;
+  last_verified_at: Date | string | null;
+  verified_by_instrument: string | null;
+  verification_method: string | null;
+  artifact_path: string | null;
+  display_state: ManifestCell["displayState"];
+  is_partial: boolean;
+}
 
 interface FacetRow {
   facet: string;
@@ -83,6 +148,135 @@ const iso = (v: unknown): string | null =>
   v instanceof Date ? v.toISOString() : v === null || v === undefined ? null : String(v);
 
 /**
+ * The full 254 x 13 manifest grid, County Manifest Sprint 1. Replaces the
+ * bare `db.select().from(countyFacetCoverage)` read for this new field:
+ * `county_manifest CROSS JOIN county_rail LEFT JOIN county_facet_coverage`,
+ * so every one of 254 x 13 = 3,302 cells returns exactly one row, always —
+ * a county with zero coverage rows still returns all 13 cells (derived
+ * no-atom/no-writer/not-yet), and a rail with no atom family renders
+ * `no-atom` for every county regardless of any stray stored row.
+ *
+ * Raw SQL (not the query builder): the precedence CASE is the load-bearing
+ * part of this query and is clearer written once, explicitly, than
+ * composed from partial Drizzle helpers. See spec section 3/5 for the
+ * exact precedence rule and doc_repo
+ * `_inbox/2026-08-08_SPRINT1_manifest_schema_spec.md`.
+ */
+async function readManifestGrid(): Promise<ManifestCell[]> {
+  const { rows } = await db.execute<ManifestGridQueryRow>(sql`
+    SELECT
+      m.county_fips,
+      r.rail_key,
+      r.threshold_pct AS rail_default_threshold,
+      r.atom_family_state,
+      r.has_writer,
+      c.rail_state,
+      c.honest_coverage_pct,
+      c.threshold_pct AS cell_threshold,
+      c.absence_basis,
+      c.source,
+      c.source_vintage,
+      c.last_verified_at,
+      c.verified_by_instrument,
+      c.verification_method,
+      c.artifact_path,
+      CASE
+        WHEN r.atom_family_state <> 'present' THEN 'no-atom'
+        WHEN r.has_writer = false THEN 'no-writer'
+        WHEN c.rail_state IS NULL THEN 'not-yet'
+        ELSE c.rail_state
+      END AS display_state,
+      CASE
+        WHEN r.atom_family_state = 'present'
+         AND r.has_writer = true
+         AND c.rail_state = 'satisfied-present'
+         AND c.honest_coverage_pct < COALESCE(c.threshold_pct, r.threshold_pct)
+        THEN true
+        ELSE false
+      END AS is_partial
+    FROM county_manifest m
+    CROSS JOIN county_rail r
+    LEFT JOIN county_facet_coverage c
+      ON c.county_fips = m.county_fips
+     AND c.facet = r.rail_key
+    ORDER BY m.county_fips, r.ordinal
+  `);
+  return rows.map((row) => ({
+    countyFips: row.county_fips,
+    railKey: row.rail_key,
+    displayState: row.display_state,
+    isPartial: Boolean(row.is_partial),
+    honestCoveragePct: num(row.honest_coverage_pct),
+    thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
+    atomFamilyState: row.atom_family_state,
+    hasWriter: Boolean(row.has_writer),
+    absenceBasis: row.absence_basis ?? null,
+    source: row.source ?? null,
+    sourceVintage: row.source_vintage ?? null,
+    lastVerifiedAt: iso(row.last_verified_at),
+    verifiedByInstrument: row.verified_by_instrument ?? null,
+    verificationMethod: row.verification_method ?? null,
+    artifactPath: row.artifact_path ?? null,
+  }));
+}
+
+/** A cell counts toward the Texas rollup only when SATISFIED (ruling 3): satisfied-present at/above threshold (not PARTIAL), or satisfied-absent. PARTIAL contributes zero. */
+function isSatisfiedCell(cell: ManifestCell): boolean {
+  return (
+    (cell.displayState === "satisfied-present" && !cell.isPartial) ||
+    cell.displayState === "satisfied-absent"
+  );
+}
+
+export interface RollupResult {
+  texasPct: number;
+  totalParcelWeight: number;
+}
+
+/**
+ * Parcel-weighted Texas completeness rollup, per ruling 3 and spec
+ * section 6: `100 * SUM(parcel_count_est * satisfied_count) /
+ * (SUM(parcel_count_est) * 13)`. PARTIAL contributes zero. A county with
+ * a NULL `parcelCountEst` (e.g. Donley, no-stratmap) contributes zero
+ * weight to both numerator and denominator — it does not silently
+ * inflate or deflate the statewide number, and it still appears in the
+ * grid with its own cells for the per-county view.
+ *
+ * PURE — takes the manifest cells + a fips->parcelCountEst map, no I/O.
+ * `railCount` defaults to 13 (the ruled rail count) but is a parameter so
+ * the small-fixture unit tests do not need to fabricate all 13 rails.
+ */
+export function computeTexasRollup(
+  cells: ManifestCell[],
+  parcelCountByFips: Map<string, number | null>,
+  railCount = 13,
+): RollupResult {
+  const satisfiedCountByFips = new Map<string, number>();
+  for (const cell of cells) {
+    if (!isSatisfiedCell(cell)) continue;
+    satisfiedCountByFips.set(
+      cell.countyFips,
+      (satisfiedCountByFips.get(cell.countyFips) ?? 0) + 1,
+    );
+  }
+
+  let numerator = 0;
+  let denominator = 0;
+  for (const [fips, parcelCountEst] of parcelCountByFips) {
+    const weight = parcelCountEst ?? 0;
+    const satisfiedCount = satisfiedCountByFips.get(fips) ?? 0;
+    numerator += weight * satisfiedCount;
+    denominator += weight;
+  }
+
+  const totalDenominator = denominator * railCount;
+  return {
+    texasPct: totalDenominator > 0 ? (100 * numerator) / totalDenominator : 0,
+    totalParcelWeight: denominator,
+  };
+}
+
+/**
  * GET /, the full county ledger, grouped by FIPS. The CC console renders this
  * as the county-ledger panel (sortable/filterable performance surface).
  */
@@ -92,14 +286,24 @@ router.get("/", async (_req: Request, res: Response) => {
     // OPS-9 S1, additive join: registry-row mirror + gate/cert state +
     // open ledger events, keyed by fips / rowId. Read-only; never mutates
     // county_facet_coverage.
-    const [mirrorRows, gateCertRows, openEvents] = await Promise.all([
-      db.select().from(jurisdictionRegistryRowMirror),
-      db.select().from(countyGateCertState),
-      db
-        .select()
-        .from(onboardingLedgerEvent)
-        .where(eq(onboardingLedgerEvent.status, "open")),
-    ]);
+    //
+    // County Manifest Sprint 1, additive: the full manifest grid (3,302
+    // cells always) + the manifest rows (254, for identity/name/
+    // parcel_count_est and the rollup denominator). Independent of the
+    // facet-scorecard scan above; failure here must not break the
+    // pre-existing `counties[]` response, so this is fetched alongside,
+    // not instead of, the existing reads.
+    const [mirrorRows, gateCertRows, openEvents, manifestCells, manifestRows] =
+      await Promise.all([
+        db.select().from(jurisdictionRegistryRowMirror),
+        db.select().from(countyGateCertState),
+        db
+          .select()
+          .from(onboardingLedgerEvent)
+          .where(eq(onboardingLedgerEvent.status, "open")),
+        readManifestGrid(),
+        db.select().from(countyManifest),
+      ]);
 
     const gateCertByRowId = new Map(gateCertRows.map((g) => [g.rowId, g]));
     const openEventsByRowId = new Map<string, typeof openEvents>();
@@ -213,13 +417,36 @@ router.get("/", async (_req: Request, res: Response) => {
       a.countyFips.localeCompare(b.countyFips),
     );
 
+    // County Manifest Sprint 1. totalCounties is now the real denominator —
+    // the manifest's row count (254 by construction once seeded), NOT
+    // counties.length (the count of fips that happen to have a
+    // county_facet_coverage or registry-mirror row, i.e. an accident of
+    // what was worked; see doc_repo
+    // `_inbox/2026-08-08_LEDGER_schema_audit.md` section 3). Falls back to
+    // counties.length only if the manifest has not been seeded yet, so the
+    // pre-seed response does not silently claim a bogus "0 of 254".
+    const totalCounties = manifestRows.length || counties.length;
+    const satisfiedCells = manifestCells.filter(isSatisfiedCell).length;
+    const parcelCountByFips = new Map(
+      manifestRows.map((m) => [m.countyFips, num(m.parcelCountEst)]),
+    );
+    const rollup = computeTexasRollup(manifestCells, parcelCountByFips);
+
     res.json({
       counties,
+      // County Manifest Sprint 1, NEW field: the full 254 x 13 grid
+      // (3,302 cells, always). Additive — does not replace `counties[]`.
+      manifestCells,
       summary: {
         onboardedCount: counties.filter((c) => c.onboarded).length,
-        totalCounties: counties.length,
+        totalCounties,
         staleCount: counties.filter((c) => c.hasStale).length,
         rewarmUnsafeCount: counties.filter((c) => c.rewarmUnsafe).length,
+        // County Manifest Sprint 1, NEW summary fields.
+        totalRails: 13,
+        totalCells: manifestCells.length,
+        satisfiedCells,
+        texasCompletenessPct: rollup.texasPct,
       },
     });
   } catch (err) {
