@@ -606,9 +606,19 @@ CREATE TABLE @@SCHEMA@@.county_facet_coverage (
     rewarm_unsafe boolean DEFAULT false NOT NULL,
     cost_usd numeric(10,2),
     onboarded boolean DEFAULT false NOT NULL,
+    rail_state text,
+    threshold_pct numeric(5,2),
+    absence_basis text,
+    last_verified_at timestamp with time zone,
+    verified_by_instrument text,
+    verification_method text,
+    artifact_path text,
+    CONSTRAINT county_facet_coverage_absence_basis_required_check CHECK (((rail_state IS DISTINCT FROM 'satisfied-absent'::text) OR (absence_basis IS NOT NULL))),
     CONSTRAINT county_facet_coverage_cert_state_check CHECK (((cert_state IS NULL) OR (cert_state = ANY (ARRAY['uncerted'::text, 'mechanical-pass'::text, 'r6-pass'::text, 'certified'::text])))),
     CONSTRAINT county_facet_coverage_classification_check CHECK ((classification = ANY (ARRAY['real-at-ceiling'::text, 'needs-crosswalk'::text, 'true-source-gap'::text, 'fabricated-blocked'::text]))),
-    CONSTRAINT county_facet_coverage_integrity_verdict_check CHECK ((integrity_verdict = ANY (ARRAY['pass'::text, 'block'::text, 'insufficient-sample'::text, 'n/a'::text])))
+    CONSTRAINT county_facet_coverage_integrity_verdict_check CHECK ((integrity_verdict = ANY (ARRAY['pass'::text, 'block'::text, 'insufficient-sample'::text, 'n/a'::text]))),
+    CONSTRAINT county_facet_coverage_rail_state_check CHECK (((rail_state IS NULL) OR (rail_state = ANY (ARRAY['satisfied-present'::text, 'satisfied-absent'::text, 'not-yet'::text])))),
+    CONSTRAINT county_facet_coverage_verification_method_check CHECK (((verification_method IS NULL) OR (verification_method = ANY (ARRAY['sweep'::text, 'sample'::text, 'roster-load'::text, 'unverified'::text]))))
 );
 
 
@@ -625,6 +635,55 @@ CREATE TABLE @@SCHEMA@@.county_gate_cert_state (
     cert_scope_annotations jsonb,
     cert_graded_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: county_manifest; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.county_manifest (
+    county_fips text NOT NULL,
+    county_name text NOT NULL,
+    parcel_count_est integer,
+    population_est integer,
+    population_status text DEFAULT 'unverified'::text NOT NULL,
+    in_stratmap boolean DEFAULT false NOT NULL,
+    stratmap_vintage text,
+    cad_verification text,
+    cad_vendor_pattern text,
+    join_key_kind text DEFAULT 'prop_id'::text NOT NULL,
+    prop_id_bad_rate numeric(6,4),
+    owner_match_gate_required boolean DEFAULT true NOT NULL,
+    risk_class text[] DEFAULT '{}'::text[] NOT NULL,
+    cost_estimate_usd numeric(10,2),
+    cost_estimate_method text,
+    roster_schema_version text NOT NULL,
+    roster_generated_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT county_manifest_cad_verification_check CHECK (((cad_verification IS NULL) OR (cad_verification = ANY (ARRAY['verified'::text, 'partial'::text, 'honestly_absent'::text, 'pending'::text])))),
+    CONSTRAINT county_manifest_join_key_kind_check CHECK ((join_key_kind = ANY (ARRAY['prop_id'::text, 'geo_id_or_address_crosswalk'::text]))),
+    CONSTRAINT county_manifest_population_status_check CHECK ((population_status = ANY (ARRAY['verified'::text, 'unverified'::text])))
+);
+
+
+-- Name: county_rail; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.county_rail (
+    rail_key text NOT NULL,
+    display_name text NOT NULL,
+    ordinal smallint NOT NULL,
+    rail_letter text,
+    kind text NOT NULL,
+    threshold_pct numeric(5,2) NOT NULL,
+    atom_family_state text NOT NULL,
+    atom_family_ref text,
+    has_writer boolean DEFAULT false NOT NULL,
+    writer_ref text,
+    declared_source text NOT NULL,
+    notes text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT county_rail_atom_family_state_check CHECK ((atom_family_state = ANY (ARRAY['present'::text, 'missing'::text, 'partial'::text, 'unpublished'::text]))),
+    CONSTRAINT county_rail_kind_check CHECK ((kind = ANY (ARRAY['spine'::text, 'derived'::text])))
 );
 
 
@@ -2001,6 +2060,24 @@ ALTER TABLE ONLY @@SCHEMA@@.county_gate_cert_state
     ADD CONSTRAINT county_gate_cert_state_pkey PRIMARY KEY (row_id);
 
 
+-- Name: county_manifest county_manifest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_manifest
+    ADD CONSTRAINT county_manifest_pkey PRIMARY KEY (county_fips);
+
+
+-- Name: county_rail county_rail_ordinal_unique; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_rail
+    ADD CONSTRAINT county_rail_ordinal_unique UNIQUE (ordinal);
+
+
+-- Name: county_rail county_rail_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_rail
+    ADD CONSTRAINT county_rail_pkey PRIMARY KEY (rail_key);
+
+
 -- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
@@ -2679,9 +2756,24 @@ CREATE UNIQUE INDEX cotality_spatial_tile_cache_uniq ON @@SCHEMA@@.cotality_spat
 CREATE INDEX county_facet_coverage_classification_idx ON @@SCHEMA@@.county_facet_coverage USING btree (classification);
 
 
+-- Name: county_facet_coverage_rail_state_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX county_facet_coverage_rail_state_idx ON @@SCHEMA@@.county_facet_coverage USING btree (rail_state);
+
+
 -- Name: county_facet_coverage_verdict_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX county_facet_coverage_verdict_idx ON @@SCHEMA@@.county_facet_coverage USING btree (integrity_verdict);
+
+
+-- Name: county_manifest_in_stratmap_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX county_manifest_in_stratmap_idx ON @@SCHEMA@@.county_manifest USING btree (in_stratmap);
+
+
+-- Name: county_manifest_parcel_count_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX county_manifest_parcel_count_idx ON @@SCHEMA@@.county_manifest USING btree (parcel_count_est DESC NULLS LAST);
 
 
 -- Name: coverage_requests_engagement_idx; Type: INDEX; Schema: public; Owner: -

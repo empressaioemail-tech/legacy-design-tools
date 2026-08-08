@@ -132,6 +132,13 @@ describe("lib/db schema integration", () => {
         // gate + cert-grade state. Sorts after `county_facet_coverage`
         // (`_f` < `_g`) per `ORDER BY tablename`.
         "county_gate_cert_state",
+        // Sprint 1 county manifest: `county_manifest` is the 254-row
+        // denominator (every Texas county has a row whether or not it has
+        // been worked) and `county_rail` is the 13-rail dimension. Sort
+        // after `county_gate_cert_state` (`_g` < `_m` < `_r`) per
+        // `ORDER BY tablename`.
+        "county_manifest",
+        "county_rail",
         "coverage_requests",
         // Phase 2 Dataroom/Files tile — document->atom association.
         // One row per engine-ingested extracted atom, pointing back to the

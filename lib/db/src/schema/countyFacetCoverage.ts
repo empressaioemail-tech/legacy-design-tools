@@ -128,6 +128,62 @@ export const countyFacetCoverage = pgTable(
      * onboarded but not yet certified). Defaults false.
      */
     onboarded: boolean("onboarded").notNull().default(false),
+    /**
+     * County Manifest Sprint 1 (feat/county-manifest-sprint1). The
+     * three-state acquisition axis: `satisfied-present` | `satisfied-absent`
+     * | `not-yet`. Deliberately independent of `integrityVerdict` /
+     * `classification` above, which encode JOIN INTEGRITY (is this row's
+     * data provably real), not ACQUISITION (do we have / need this rail at
+     * all) — see doc_repo
+     * `_decisions/2026-08-08_county_shape_thirteen_rails_and_geometry_first.md`
+     * ruling 2. `no-atom` / `no-writer` are NOT stored here; they are
+     * derived at query time from `county_rail` (see `countyLedger.ts`).
+     * NULL for rows written before this axis existed.
+     */
+    railState: text("rail_state"),
+    /**
+     * County Manifest Sprint 1. SATISFIED-vs-PARTIAL comparison point for
+     * this cell (ruling 3), copied from `county_rail.threshold_pct` at
+     * write time. A separate column (not only on `county_rail`) so a
+     * future county-specific threshold override does not require a schema
+     * change.
+     */
+    thresholdPct: numeric("threshold_pct", { precision: 5, scale: 2 }),
+    /**
+     * County Manifest Sprint 1. The public-record citation for a
+     * `satisfied-absent` verdict (e.g. the roster's `zoning_regime.doctrine`
+     * string). REQUIRED whenever `railState = 'satisfied-absent'`, enforced
+     * by the check constraint below — ruling 2 makes absence a finding, and
+     * a finding needs its citation or the state is unfalsifiable.
+     */
+    absenceBasis: text("absence_basis"),
+    /**
+     * County Manifest Sprint 1. Per-cell trust: when THIS cell was last
+     * verified, distinct from `checkedAt` (when the scorer last WROTE this
+     * row — they can diverge if a sweep confirms an existing value without
+     * a rewrite).
+     */
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    /**
+     * County Manifest Sprint 1. Free-text identifier of what did the
+     * verifying (a CLI name, a sweep job id, `roster-load` for cells seeded
+     * from the roster with no independent instrument run).
+     */
+    verifiedByInstrument: text("verified_by_instrument"),
+    /**
+     * County Manifest Sprint 1. `sweep` | `sample` | `roster-load` |
+     * `unverified`, per MEMORY.md `area-sweep-not-parcel-sample` — a
+     * sample-verified cell is a materially weaker claim than a
+     * sweep-verified one, and the console must be able to show the
+     * difference.
+     */
+    verificationMethod: text("verification_method"),
+    /**
+     * County Manifest Sprint 1. Evidence drill-through: a pointer to the
+     * artifact (JSON probe file, CAD service response, roster evidence
+     * field) backing this cell.
+     */
+    artifactPath: text("artifact_path"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.countyFips, t.facet] }),
@@ -152,6 +208,24 @@ export const countyFacetCoverage = pgTable(
     certStateCheck: check(
       "county_facet_coverage_cert_state_check",
       sql`${t.certState} IS NULL OR ${t.certState} IN ('uncerted', 'mechanical-pass', 'r6-pass', 'certified')`,
+    ),
+    // County Manifest Sprint 1 — rail_state enum + verification_method enum
+    // + absence_basis-required-when-satisfied-absent. Additive; none of the
+    // three checks above are modified.
+    railStateIdx: index("county_facet_coverage_rail_state_idx").on(
+      t.railState,
+    ),
+    railStateCheck: check(
+      "county_facet_coverage_rail_state_check",
+      sql`${t.railState} IS NULL OR ${t.railState} IN ('satisfied-present', 'satisfied-absent', 'not-yet')`,
+    ),
+    verificationMethodCheck: check(
+      "county_facet_coverage_verification_method_check",
+      sql`${t.verificationMethod} IS NULL OR ${t.verificationMethod} IN ('sweep', 'sample', 'roster-load', 'unverified')`,
+    ),
+    absenceBasisRequiredCheck: check(
+      "county_facet_coverage_absence_basis_required_check",
+      sql`${t.railState} IS DISTINCT FROM 'satisfied-absent' OR ${t.absenceBasis} IS NOT NULL`,
     ),
   }),
 );
