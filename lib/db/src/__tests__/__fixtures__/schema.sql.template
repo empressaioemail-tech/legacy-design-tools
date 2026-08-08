@@ -1681,6 +1681,42 @@ CREATE TABLE @@SCHEMA@@.terrain_generation_jobs (
 );
 
 
+-- Name: tx_city_boundary; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_city_boundary (
+    geo_id text NOT NULL,
+    city_name text NOT NULL,
+    gnis text,
+    geometry jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    source text NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: tx_county_boundary; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_county_boundary (
+    county_fips text NOT NULL,
+    county_name text NOT NULL,
+    state_fips text DEFAULT '48'::text NOT NULL,
+    geometry jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    source text NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: tx_parcel_tile_cache; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
@@ -2436,6 +2472,18 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
 
 ALTER TABLE ONLY @@SCHEMA@@.terrain_generation_jobs
     ADD CONSTRAINT terrain_generation_jobs_pkey PRIMARY KEY (id);
+
+
+-- Name: tx_city_boundary tx_city_boundary_geo_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_city_boundary
+    ADD CONSTRAINT tx_city_boundary_geo_id_pk PRIMARY KEY (geo_id);
+
+
+-- Name: tx_county_boundary tx_county_boundary_county_fips_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_county_boundary
+    ADD CONSTRAINT tx_county_boundary_county_fips_pk PRIMARY KEY (county_fips);
 
 
 -- Name: tx_parcel_tile_cache tx_parcel_tile_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3214,6 +3262,16 @@ CREATE INDEX terrain_generation_jobs_place_key_idx ON @@SCHEMA@@.terrain_generat
 -- Name: terrain_generation_jobs_status_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX terrain_generation_jobs_status_idx ON @@SCHEMA@@.terrain_generation_jobs USING btree (status);
+
+
+-- Name: tx_city_boundary_bbox_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_city_boundary_bbox_idx ON @@SCHEMA@@.tx_city_boundary USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_county_boundary_bbox_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_county_boundary_bbox_idx ON @@SCHEMA@@.tx_county_boundary USING btree (west_lng, south_lat, east_lng, north_lat);
 
 
 -- Name: tx_parcel_tile_cache_expires_idx; Type: INDEX; Schema: public; Owner: -

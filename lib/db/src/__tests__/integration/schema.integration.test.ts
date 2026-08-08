@@ -273,6 +273,16 @@ describe("lib/db schema integration", () => {
         // refresh request path (viewpoint_renders-style: queued row +
         // fire-and-forget worker + status polling + orphan sweep).
         "terrain_generation_jobs",
+        // feat/city-county-boundary-layer (0070) — statewide incorporated-
+        // place polygons from TxGIO City_Boundaries. Sorts after
+        // `terrain_generation_jobs` and before `tx_county_boundary`
+        // (`_city` < `_county`) per `ORDER BY tablename`.
+        "tx_city_boundary",
+        // feat/city-county-boundary-layer (0070) — statewide county polygons
+        // from Census TIGERweb (TxGIO has no county layer). Sorts after
+        // `tx_city_boundary` and before `tx_parcel_tile_cache` (`_county` <
+        // `_parcel`) per `ORDER BY tablename`.
+        "tx_county_boundary",
         // Central TX county-GIS parcels provider (0051) — read-through
         // tile cache keyed (tile_key, county_fips); neutral of (and
         // parallel to) the dormant Cotality spatial-tile cache tables.

@@ -95,3 +95,51 @@ export type {
   AddressUpsertOptions,
   AddressUpsertSummary,
 } from "./address/ingest";
+export {
+  cityLayerUrl,
+  countyLayerUrl,
+  countCityBoundaries,
+  countCountyBoundaries,
+  fetchCityBoundaryFeatures,
+  fetchCountyBoundaryFeatures,
+  CITY_SOURCE_CITATION,
+  COUNTY_SOURCE_CITATION,
+  CITY_DEFAULT_VINTAGE,
+  COUNTY_DEFAULT_VINTAGE,
+} from "./boundary/service";
+export {
+  normalizeCityBoundaryFeature,
+  normalizeCountyBoundaryFeature,
+} from "./boundary/parse";
+export type {
+  TxCityBoundaryRecord,
+  TxCountyBoundaryRecord,
+  BoundaryFeature,
+} from "./boundary/parse";
+export {
+  deleteAllCityBoundaries,
+  deleteAllCountyBoundaries,
+  upsertCityBoundaries,
+  upsertCountyBoundaries,
+  BOUNDARY_DEFAULT_BATCH_SIZE,
+} from "./boundary/ingest";
+export type {
+  BoundaryIngestDb,
+  BoundaryUpsertOptions,
+  BoundaryUpsertSummary,
+} from "./boundary/ingest";
+export {
+  buildCityBoundaryIndex,
+  buildCountyBoundaryIndex,
+  resolveCityContainment,
+  resolveCityContainmentAtPoint,
+  resolveCountyContainment,
+  resolveCountyContainmentAtPoint,
+  representativePoint,
+} from "./boundary/containment";
+export type {
+  CityBoundaryIndexEntry,
+  CountyBoundaryIndexEntry,
+  CityContainmentResult,
+  CountyContainmentResult,
+} from "./boundary/containment";
