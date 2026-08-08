@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 /**
  * TxGIO/StratMap land-parcel ingest CLI — self-hosted parcel geometry
- * for the Central-Texas map store. As of Wave D2 (2026-07-18) this
- * covers all ten Central-TX counties (Hays, Comal, Travis, Williamson,
- * Bexar, Bastrop, Caldwell, Guadalupe, Bell, McLennan); run --list to
- * see the full set.
+ * for the Texas map store. Any of the 254 Texas counties may be
+ * ingested; `--list` shows which are already loaded and which are not.
+ * (Before 2026-08-08 the CLI resolved only against the 19 loaded
+ * counties and failed closed on everything else before any network
+ * call, so an unloaded county could not even be dry-run. That gate
+ * encoded no real constraint — the URL template and DBF schema are
+ * statewide-uniform — and it blocked the statewide acquisition.)
  *
  * Usage:
  *   pnpm --filter @workspace/cad-ingest txgio-ingest -- \
@@ -17,15 +20,29 @@
  *
  * DATABASE_URL must point at the target Postgres unless --dry-run.
  *
- * Replace semantics: the county's existing rows are deleted before
- * the insert pass, so re-runs and fresher vintages are idempotent and
- * never strand stale rows. The run is exit-bounded: download + parse
- * + load + summary, then exit. Exit code 0 on success (even with
- * skipped malformed features), 1 on fatal errors or zero features.
+ * Replace semantics: the county's existing rows are deleted and the
+ * new ones streamed IN ONE TRANSACTION, so re-runs and fresher
+ * vintages are idempotent, never strand stale rows, and — since
+ * 2026-08-08 — can never leave a county deleted-but-not-loaded when a
+ * run dies partway. The run is exit-bounded: download + parse + load +
+ * summary, then exit. Exit code 0 on success (even with skipped
+ * malformed features), 1 on fatal errors or zero features.
  *
- * The stratmap25 shapefiles ship in GCS_WGS_1984 (verified against
- * the real Hays/Comal .prj files); the CLI hard-fails on any other
- * .prj rather than silently storing non-WGS84 coordinates.
+ * PROJECTION. Most stratmap25 shapefiles ship GCS_WGS_1984, but the
+ * 202505 vintage ships Web Mercator METERS under a
+ * `PROJCS["WGS_1984_Web_Mercator_Auxiliary_Sphere", GEOGCS["GCS_WGS_1984",...]]`
+ * whose nested GEOGCS satisfied the old substring guard. The CLI now
+ * rejects a PROJCS `.prj` outright, AND every feature's coordinates are
+ * range-asserted against the Texas WGS84 envelope in `parse.ts` — which
+ * is the guard that actually holds, because it also covers the
+ * no-`.prj` case, axis swaps, and any future source change. A county
+ * that is not in degrees fails the run instead of loading garbage.
+ *
+ * DRY RUN PREDICTS THE APPLY. `--dry-run` parses the real archive and
+ * reports the rows an apply WOULD delete and insert, so a dry/apply
+ * pair is comparable. It opens a read-only DB connection when
+ * DATABASE_URL is present (to count existing rows) and reports the
+ * delete count as unknown when it is not. It never writes.
  */
 
 import { parseArgs } from "node:util";
@@ -35,7 +52,13 @@ import { basename, extname, join } from "node:path";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import shapefile from "shapefile";
-import { resolveTxgioCounty, TXGIO_COUNTIES } from "./counties";
+import {
+  isTxgioCountyLoaded,
+  resolveTxgioCounty,
+  TXGIO_ABSENT_FROM_STRATMAP,
+  TXGIO_COUNTIES,
+  TXGIO_STATEWIDE_COUNTIES,
+} from "./counties";
 import type { TxgioParcelRecord } from "./parse";
 import {
   assertWgs84Prj,
@@ -44,9 +67,10 @@ import {
   type TxgioFeature,
 } from "./parse";
 import {
-  deleteCountyParcels,
-  upsertTxgioParcels,
+  countCountyParcels,
+  replaceCountyParcels,
   TXGIO_DEFAULT_BATCH_SIZE,
+  type TxgioTransactionalDb,
 } from "./ingest";
 import { newCounters, type ParseCounters } from "../types";
 import { downloadToFile, isUrl } from "../download";
@@ -137,13 +161,23 @@ async function main(): Promise<void> {
     },
   });
 
-  // --list: print the recognized counties and exit (no network, no DB).
+  // --list: print every Texas county with its load state and exit
+  // (no network, no DB).
   if (values.list) {
-    log("recognized TxGIO counties (unified into txgio_parcel):");
-    for (const c of Object.values(TXGIO_COUNTIES)) {
-      log(`  ${c.fips}  ${c.name.padEnd(11)} ${c.downloadUrl}`);
+    log("Texas counties (all ingestible; LOADED = already in txgio_parcel):");
+    for (const [fips, name] of Object.entries(TXGIO_STATEWIDE_COUNTIES)) {
+      const state = TXGIO_ABSENT_FROM_STRATMAP[fips]
+        ? "ABSENT"
+        : isTxgioCountyLoaded(fips)
+          ? "LOADED"
+          : "-     ";
+      log(`  ${fips}  ${state}  ${name}`);
     }
-    log(`total: ${Object.keys(TXGIO_COUNTIES).length}`);
+    log(
+      `total: ${Object.keys(TXGIO_STATEWIDE_COUNTIES).length} counties, ` +
+        `${Object.keys(TXGIO_COUNTIES).length} loaded, ` +
+        `${Object.keys(TXGIO_ABSENT_FROM_STRATMAP).length} absent from StratMap`,
+    );
     return;
   }
 
@@ -155,12 +189,22 @@ async function main(): Promise<void> {
   }
   const county = resolveTxgioCounty(values.county);
   if (!county) {
-    const supported = Object.values(TXGIO_COUNTIES)
-      .map((c) => `${c.fips} ${c.name}`)
-      .join(", ");
     fail(
-      `unknown county "${values.county}" — supported: ${supported} ` +
-        "(run --list for the full set)",
+      `"${values.county}" is not a Texas county — expected a 5-digit FIPS ` +
+        `(48001..48507, odd county codes) or a county name. Run --list for ` +
+        "all 254.",
+    );
+  }
+  // Named absence: a county whose StratMap archive is a confirmed 404
+  // fails with an explanation rather than a transport stack trace.
+  // Overridable with --file, which is exactly how such a county gets
+  // loaded from a county CAD/ArcGIS export instead.
+  const absentReason = TXGIO_ABSENT_FROM_STRATMAP[county.fips];
+  if (absentReason && !values.file) {
+    fail(
+      `${county.fips} (${county.name}) is not available from StratMap: ` +
+        `${absentReason}. Acquire it from the county CAD or ArcGIS and pass ` +
+        "--file=<path-or-url>; there is nothing to fetch from the bulk program.",
     );
   }
   const dryRun = values["dry-run"] ?? false;
@@ -194,12 +238,17 @@ async function main(): Promise<void> {
   }
   const { shpFile, dbfFile, prjFile } = await discoverShapefile(files);
 
-  // 2. SR guard — WGS84 geographic or refuse.
+  // 2. SR guard — WGS84 GEOGRAPHIC or refuse. This is the declaration
+  //    check; the binding guard is the per-feature coordinate-range
+  //    assertion in parse.ts, which also covers the no-.prj branch.
   if (prjFile && (await pathKind(prjFile)) === "file") {
     assertWgs84Prj(await readFile(prjFile, "utf8"), prjFile);
-    log(`projection: GCS_WGS_1984 (${basename(prjFile)})`);
+    log(`projection: GCS_WGS_1984 geographic (${basename(prjFile)})`);
   } else {
-    log("WARNING: no .prj found — assuming WGS84 per the TxGIO program spec");
+    log(
+      "WARNING: no .prj found — the per-feature Texas WGS84 coordinate-range " +
+        "assertion is the only projection guard for this run",
+    );
   }
 
   const vintage =
@@ -220,27 +269,54 @@ async function main(): Promise<void> {
     limit,
   );
 
+  const batchSize =
+    values["batch-size"] !== undefined
+      ? Number(values["batch-size"])
+      : TXGIO_DEFAULT_BATCH_SIZE;
+
   let featuresLoaded = 0;
   let rowsInserted = 0;
+  // Rows the county holds now; every one of them an apply would delete.
+  // `null` means the dry run had no DATABASE_URL and could not count.
+  let rowsExisting: number | null = null;
+
   if (dryRun) {
-    for await (const _rec of records) {
-      featuresLoaded += 1;
+    // Parse the real archive and PREDICT the apply: features that would
+    // load, rows that would be inserted (one per intersecting grid
+    // cell, exactly as the loader counts them), and rows the replace
+    // would delete. Read-only — no transaction, no write, and the
+    // connection is opened only to run one count(*).
+    let pool: pg.Pool | undefined;
+    try {
+      if (databaseUrl) {
+        pool = new Pool({ connectionString: databaseUrl });
+        rowsExisting = await countCountyParcels(
+          drizzle(pool) as unknown as TxgioTransactionalDb,
+          county.fips,
+        );
+      }
+      for await (const rec of records) {
+        featuresLoaded += 1;
+        rowsInserted += rec.tileKeys.length;
+      }
+    } finally {
+      await pool?.end();
     }
   } else {
     const pool = new Pool({ connectionString: databaseUrl });
     try {
-      const db = drizzle(pool);
-      log(`replacing existing ${county.fips} rows`);
-      await deleteCountyParcels(db, county.fips);
-      const summary = await upsertTxgioParcels(db, records, {
+      const db = drizzle(pool) as unknown as TxgioTransactionalDb;
+      rowsExisting = await countCountyParcels(db, county.fips);
+      log(
+        `replacing existing ${county.fips} rows (${rowsExisting} present) ` +
+          "— delete + load run in ONE transaction",
+      );
+      const summary = await replaceCountyParcels(db, county.fips, records, {
         sourceFile,
         sourceVintage: vintage,
-        batchSize:
-          values["batch-size"] !== undefined
-            ? Number(values["batch-size"])
-            : TXGIO_DEFAULT_BATCH_SIZE,
+        batchSize,
         onBatch: (total) => {
-          if (total % 25_000 < TXGIO_DEFAULT_BATCH_SIZE) {
+          if (total % 25_000 < batchSize) {
             log(`inserted ${total} rows...`);
           }
         },
@@ -252,16 +328,23 @@ async function main(): Promise<void> {
     }
   }
 
-  // 4. Summary.
+  // 4. Summary. The dry-run and apply lines are the SAME quantities so
+  //    a dry/apply pair can be diffed directly.
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-  log("---- ingest summary ----");
+  const wouldOrDid = dryRun ? "would " : "";
+  const deleteCount = rowsExisting === null ? "unknown (no DATABASE_URL)" : rowsExisting;
+  log(`---- ingest summary${dryRun ? " (DRY RUN — nothing written)" : ""} ----`);
   log(`county:           ${county.fips} (${county.name})`);
+  log(`loaded before:    ${isTxgioCountyLoaded(county.fips) ? "yes" : "no"}`);
   log(`source file:      ${sourceFile}`);
   log(`source vintage:   ${vintage}`);
   log(`features read:    ${counters.rowsRead}`);
   log(`features parsed:  ${counters.rowsParsed}`);
-  log(`features loaded:  ${dryRun ? "0 (dry-run)" : featuresLoaded}`);
-  log(`rows inserted:    ${dryRun ? "0 (dry-run)" : rowsInserted} (one per intersecting grid cell)`);
+  log(`features ${wouldOrDid}load: ${featuresLoaded}`);
+  log(`rows ${wouldOrDid}delete:  ${deleteCount}`);
+  log(
+    `rows ${wouldOrDid}insert:  ${rowsInserted} (one per intersecting grid cell)`,
+  );
   log(`features skipped: ${counters.rowsSkipped} (no polygon geometry)`);
   log(`duration:         ${seconds}s`);
   if (counters.skipSamples.length > 0) {

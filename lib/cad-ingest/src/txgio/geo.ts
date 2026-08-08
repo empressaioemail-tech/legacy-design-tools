@@ -23,11 +23,59 @@
 /** Grid size in degrees — matches #242's DEFAULT_TILE_GRID_DEG (~2.2 km). */
 export const TXGIO_TILE_GRID_DEG = 0.02;
 
+/**
+ * Plausible WGS84 degree envelope for Texas, generously padded past the
+ * true state extent (roughly -106.65..-93.51 lng, 25.84..36.50 lat) so a
+ * legitimate county on the border can never trip it.
+ *
+ * This is the DURABLE projection guard. The `.prj` assertion in
+ * `parse.ts` reads a text declaration; this reads the coordinates
+ * themselves, so it catches every failure mode the WKT parse can miss:
+ * a projected CRS whose WKT nests a WGS84 GEOGCS (the real
+ * `PROJCS["WGS_1984_Web_Mercator_Auxiliary_Sphere", GEOGCS["GCS_WGS_1984",...]]`
+ * case that ships on the 202505 StratMap vintage), a MISSING `.prj`
+ * (which the CLI only warns about), a swapped lat/lng axis order, and
+ * any future source change. Web Mercator meters for Texas land near
+ * x=-11,200,000 / y=3,900,000 — orders of magnitude outside this box.
+ */
+export const TEXAS_WGS84_BOUNDS: GeoBbox = {
+  westLng: -107.5,
+  southLat: 25.0,
+  eastLng: -93.0,
+  northLat: 37.0,
+};
+
+/**
+ * Hard ceiling on the cells one FEATURE may bucket into at ingest time.
+ * A real Texas parcel occupies one or a few 0.02-degree cells; the
+ * largest single ranch parcels stay well under a hundred. A count in
+ * the thousands means the coordinates are not degrees, so the ingest
+ * must fail loudly rather than attempt to materialize the key set.
+ * (Pre-hardening, meter coordinates produced a count on the order of
+ * 9.1e12 and the run died on memory exhaustion instead.)
+ */
+export const TXGIO_MAX_FEATURE_CELLS = 4096;
+
 export interface GeoBbox {
   westLng: number;
   southLat: number;
   eastLng: number;
   northLat: number;
+}
+
+/**
+ * True when every corner of the bbox falls inside the plausible Texas
+ * WGS84 degree envelope. Non-finite coordinates are never plausible.
+ */
+export function isPlausibleTexasWgs84Bbox(bbox: GeoBbox): boolean {
+  const values = [bbox.westLng, bbox.eastLng, bbox.southLat, bbox.northLat];
+  if (!values.every((v) => Number.isFinite(v))) return false;
+  return (
+    bbox.westLng >= TEXAS_WGS84_BOUNDS.westLng &&
+    bbox.eastLng <= TEXAS_WGS84_BOUNDS.eastLng &&
+    bbox.southLat >= TEXAS_WGS84_BOUNDS.southLat &&
+    bbox.northLat <= TEXAS_WGS84_BOUNDS.northLat
+  );
 }
 
 /**
@@ -66,11 +114,41 @@ export function cellKeyForPoint(
 }
 
 /**
+ * Absolute ceiling on an uncapped `cellKeysForBbox` call. Texas spans
+ * roughly 730 x 535 = ~390k cells at 0.02 degrees, so a whole-state
+ * bbox is still comfortably under this; anything above it is a
+ * coordinate-space error, not a query.
+ */
+const CELL_KEY_HARD_CEILING = 4_000_000;
+
+/**
+ * Number of grid cells a bbox covers, without materializing any of
+ * them. Cheap enough to check before allocating. Returns `NaN` when a
+ * coordinate is not finite.
+ */
+export function cellCountForBbox(
+  bbox: GeoBbox,
+  gridDeg: number = TXGIO_TILE_GRID_DEG,
+): number {
+  const wIdx = Math.floor(bbox.westLng / gridDeg);
+  const eIdx = Math.floor(bbox.eastLng / gridDeg);
+  const sIdx = Math.floor(bbox.southLat / gridDeg);
+  const nIdx = Math.floor(bbox.northLat / gridDeg);
+  return (eIdx - wIdx + 1) * (nIdx - sIdx + 1);
+}
+
+/**
  * Every cell key a bbox intersects, iterated by integer cell index so
  * repeated `+= gridDeg` float drift can never skip or duplicate a
  * cell. `maxCells` caps the result (returns `null` when the bbox
  * would cover more) so a zoomed-out viewport can fall back to a
  * bbox-column scan instead of an enormous IN list.
+ *
+ * Callers that pass no `maxCells` are still protected: a non-finite or
+ * absurd cell count THROWS rather than attempting the allocation. That
+ * case is never a legitimate viewport or a legitimate parcel — it means
+ * the bbox is not in degrees — and a loud failure is strictly better
+ * than an out-of-memory kill partway through a county load.
  */
 export function cellKeysForBbox(
   bbox: GeoBbox,
@@ -82,8 +160,23 @@ export function cellKeysForBbox(
   const sIdx = Math.floor(bbox.southLat / gridDeg);
   const nIdx = Math.floor(bbox.northLat / gridDeg);
   const count = (eIdx - wIdx + 1) * (nIdx - sIdx + 1);
+  if (!Number.isFinite(count)) {
+    throw new Error(
+      `cellKeysForBbox: non-finite cell count for bbox ` +
+        `[${bbox.westLng},${bbox.southLat},${bbox.eastLng},${bbox.northLat}] ` +
+        `— coordinates are not usable WGS84 degrees`,
+    );
+  }
   if (count <= 0) return [];
   if (maxCells !== undefined && count > maxCells) return null;
+  if (count > CELL_KEY_HARD_CEILING) {
+    throw new Error(
+      `cellKeysForBbox: bbox covers ${count} cells at grid ${gridDeg}, above ` +
+        `the ${CELL_KEY_HARD_CEILING} hard ceiling — bbox ` +
+        `[${bbox.westLng},${bbox.southLat},${bbox.eastLng},${bbox.northLat}] ` +
+        `is not plausible WGS84 degrees (projected meters?)`,
+    );
+  }
   const keys: string[] = [];
   for (let x = wIdx; x <= eIdx; x++) {
     for (let y = sIdx; y <= nIdx; y++) {
