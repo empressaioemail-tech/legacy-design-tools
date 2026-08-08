@@ -184,6 +184,17 @@ describe("lib/db schema integration", () => {
         // (`j` < `k`) per `ORDER BY tablename`.
         "jurisdiction_registry_row_mirror",
         "knowledge_atoms",
+        // feat/manifest-observability-tables (0072) — dual commitment vs
+        // lifetime cost per county. Sorts after `knowledge_atoms` and before
+        // `manifest_run` (`_j` < `_r`) per `ORDER BY tablename`.
+        "manifest_jurisdiction_cost",
+        // feat/manifest-observability-tables (0072) — factory run row +
+        // slot reservation + queue. Sorts after `manifest_jurisdiction_cost`
+        // and before `materializable_elements` (`manifest_*` < `material_*`)
+        // per `ORDER BY tablename`.
+        "manifest_run",
+        "manifest_slot_queue",
+        "manifest_slot_reservation",
         "materializable_elements",
         // OPS-9 S1 onboarding ledger, one row per pre-flight decline /
         // block13-quarantine parcel / future warden-sweep finding. Sorts
@@ -222,6 +233,12 @@ describe("lib/db schema integration", () => {
         "qa_settings",
         // Task #503 — QA triage queue items (forwarded to planning).
         "qa_triage_items",
+        // feat/manifest-observability-tables (0071) — append-only cell
+        // history + verification audit trail. Sorts after `qa_triage_items`
+        // and before `reasoning_atoms` (`rail_*` < `reason_*`) per
+        // `ORDER BY tablename`.
+        "rail_state_history",
+        "rail_verification",
         // v2 cortex reasoning/citation atoms — deeplinks + capped snippet, not corpus code_atoms.
         "reasoning_atoms",
         // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
