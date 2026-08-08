@@ -27,6 +27,7 @@ function cell(
   railKey: string,
   displayState: ManifestCell["displayState"],
   isPartial = false,
+  source: string | null = null,
 ): ManifestCell {
   return {
     countyFips,
@@ -38,7 +39,7 @@ function cell(
     atomFamilyState: "present",
     hasWriter: true,
     absenceBasis: null,
-    source: null,
+    source,
     sourceVintage: null,
     lastVerifiedAt: null,
     verifiedByInstrument: null,
@@ -100,6 +101,34 @@ describe("computeTexasRollup", () => {
     expect(computeTexasRollup(absentCells, weights, railCount).texasPct).toBe(
       computeTexasRollup(presentCells, weights, railCount).texasPct,
     );
+  });
+
+  it("a doctrine-sourced satisfied-absent cell (source='zoning-regime-doctrine') contributes zero, even though displayState reads satisfied-absent (fix/manifest-doctrine-honesty regression guard)", () => {
+    const railCount = 1;
+    // Same shape as the pre-fix live defect: 254 counties' zoning rail all
+    // stamped satisfied-absent from one repeated roster doctrine string,
+    // which is a true finding about UNINCORPORATED territory only and must
+    // never resolve county-wide zoning completeness. This asserts the
+    // isSatisfiedCell defense-in-depth guard in countyLedger.ts, not just
+    // the seed CLI's discipline — a future seed/backfill that mistakenly
+    // writes satisfied-absent again for this source must still contribute
+    // zero to the rollup.
+    const doctrineCells: ManifestCell[] = [
+      cell("48201", "zoning", "satisfied-absent", false, "zoning-regime-doctrine"),
+    ];
+    const weights = new Map([["48201", 1_000_000]]);
+    const result = computeTexasRollup(doctrineCells, weights, railCount);
+    expect(result.texasPct).toBe(0);
+  });
+
+  it("a non-doctrine-sourced satisfied-absent cell still counts fully (the exclusion is source-specific, not blanket)", () => {
+    const railCount = 1;
+    const cells: ManifestCell[] = [
+      cell("48021", "roads", "satisfied-absent", false, "some-other-source"),
+    ];
+    const weights = new Map([["48021", 100]]);
+    const result = computeTexasRollup(cells, weights, railCount);
+    expect(result.texasPct).toBe(100);
   });
 
   it("parcel-weights across counties (Harris-sized county dominates a Loving-sized one)", () => {
