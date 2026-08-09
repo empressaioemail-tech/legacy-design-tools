@@ -281,8 +281,13 @@ describe("lib/db schema integration", () => {
         // feat/city-county-boundary-layer (0070) — statewide county polygons
         // from Census TIGERweb (TxGIO has no county layer). Sorts after
         // `tx_city_boundary` and before `tx_parcel_tile_cache` (`_county` <
-        // `_parcel`) per `ORDER BY tablename`.
+        // `_fema` < `_parcel`) per `ORDER BY tablename`.
         "tx_county_boundary",
+        // feat/fema-nfhl-statewide-layer (0071) — statewide FEMA NFHL flood-
+        // hazard polygons from NFHL_48 bulk FileGDB S_FLD_HAZ_AR. Sorts after
+        // `tx_county_boundary` and before `tx_parcel_tile_cache` (`_fema` <
+        // `_parcel`) per `ORDER BY tablename`.
+        "tx_fema_nfhl_flood_zone",
         // Central TX county-GIS parcels provider (0051) — read-through
         // tile cache keyed (tile_key, county_fips); neutral of (and
         // parallel to) the dormant Cotality spatial-tile cache tables.
