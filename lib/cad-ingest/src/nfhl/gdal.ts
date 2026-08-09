@@ -6,10 +6,15 @@
  * zip via /vsizip/ so the 1.81 GB archive does not need a full extract.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  spawn,
+  type ChildProcessByStdio,
+} from "node:child_process";
 import { basename, dirname, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import type { NfhlFeature } from "./parse";
+
+type GdalChild = ChildProcessByStdio<null, Readable, Readable>;
 
 export const GDAL_DOCKER_IMAGE = "ghcr.io/osgeo/gdal:ubuntu-full-latest";
 
@@ -43,7 +48,7 @@ export interface StreamGdbLayerOptions {
    * Test seam: override the spawn that produces GeoJSONSeq on stdout.
    * Production path always uses Docker ogr2ogr.
    */
-  spawnProducer?: () => ChildProcessWithoutNullStreams;
+  spawnProducer?: () => GdalChild;
 }
 
 function dockerMountPath(hostPath: string): string {
@@ -285,7 +290,7 @@ export async function* streamGdbLayerGeoJson(
   layerName: string,
   opts: StreamGdbLayerOptions = {},
 ): AsyncGenerator<NfhlFeature> {
-  let child: ChildProcessWithoutNullStreams;
+  let child: GdalChild;
   let spawnError: Error | null = null;
 
   if (opts.spawnProducer) {
@@ -319,7 +324,7 @@ export async function* streamGdbLayerGeoJson(
         ...ogrArgs,
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
-    ) as ChildProcessWithoutNullStreams;
+    );
   }
 
   child.stderr.on("data", () => {
