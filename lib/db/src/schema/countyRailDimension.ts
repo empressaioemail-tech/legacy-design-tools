@@ -111,12 +111,12 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 95,
     atomFamilyState: "present",
     atomFamilyRef: "parcel-node (contract 1.13.0)",
-    hasWriter: false,
-    writerRef: null,
+    hasWriter: true,
+    writerRef: "countyGeometryScoreCli.ts facet geometry",
     declaredSource:
       "TxGIO StratMap bulk zip per FIPS; county ArcGIS override where fresher",
     notes:
-      "Spine rail. parcel-node shipped in contract 1.13.0 and is registered in the engine (hauska-engine PR #282) -- corrected from 'missing' 2026-08-08. Writer still false: nothing writes this atom yet, only the txgio_parcel geometry-truth frame the atom will eventually wrap.",
+      "Spine rail. parcel-node shipped in contract 1.13.0 and is registered in the engine (hauska-engine PR #282) -- corrected from 'missing' 2026-08-08. Writer flipped true 2026-08-09: countyGeometryScoreCli.ts scores parcel-node atom count (ATOMS store) against txgio_parcel DISTINCT feature_index (DEPLOYMENT store) per county and writes county_facet_coverage facet='geometry'. Threshold 95%; below-threshold counties write rail_state='not-yet' with their real honest_coverage_pct, never satisfied-present.",
   },
   {
     railKey: "cad",
