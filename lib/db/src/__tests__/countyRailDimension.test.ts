@@ -58,8 +58,12 @@ describe("COUNTY_RAIL_DECLARATION", () => {
     const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
 
     // geometry: parcel-node shipped in contract 1.13.0 + engine PR #282 -- present now, was 'missing'.
+    // hasWriter flipped true 2026-08-09 -- countyGeometryScoreCli.ts scores
+    // parcel-node atom count (ATOMS store) against txgio_parcel DISTINCT
+    // feature_index (DEPLOYMENT store) and writes county_facet_coverage
+    // facet='geometry'.
     expect(byKey.get("geometry")?.atomFamilyState).toBe("present");
-    expect(byKey.get("geometry")?.hasWriter).toBe(false);
+    expect(byKey.get("geometry")?.hasWriter).toBe(true);
 
     // footprint: building-footprint published 1.12.0 + engine PR #282 -- present now, was 'unpublished'.
     expect(byKey.get("footprint")?.atomFamilyState).toBe("present");

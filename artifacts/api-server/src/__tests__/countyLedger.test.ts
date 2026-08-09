@@ -244,7 +244,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
   /** Seed the real 12-rail dimension, matching COUNTY_RAIL_DECLARATION's shape exactly (kind/atomFamilyState/hasWriter drive the precedence assertions below). Geometry/footprint/easement carry their refreshed (post-2026-08-08) atomFamilyState here, and landuse keeps hasWriter=true off the live CAD scorer, independent of the dead Cotality reference. */
   async function seedThirteenRails(): Promise<void> {
     await db.insert(countyRail).values([
-      { railKey: "geometry", displayName: "Parcel geometry", ordinal: 1, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: false, declaredSource: "TxGIO StratMap" },
+      { railKey: "geometry", displayName: "Parcel geometry", ordinal: 1, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: true, declaredSource: "TxGIO StratMap" },
       { railKey: "cad", displayName: "CAD attributes", ordinal: 2, kind: "spine", thresholdPct: "95", atomFamilyState: "missing", hasWriter: false, declaredSource: "County CAD" },
       { railKey: "zoning", displayName: "Zoning + setback", ordinal: 3, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: true, declaredSource: "Municipal code" },
       { railKey: "roads", displayName: "Roads / frontage", ordinal: 4, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: false, declaredSource: "OSM Overpass" },
