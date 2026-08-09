@@ -79,6 +79,9 @@ export {
 export type { SupportedSourceCrs } from "./txgio/reproject";
 export {
   countCountyParcels,
+  listLoadedCountyFips,
+  storeLoadedLabel,
+  storeListLoadState,
   deleteCountyParcels,
   replaceCountyParcels,
   upsertTxgioParcels,
