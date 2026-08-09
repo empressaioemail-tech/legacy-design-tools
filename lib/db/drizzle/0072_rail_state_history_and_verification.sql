@@ -1,7 +1,7 @@
 -- County Manifest observability (feat/manifest-observability-tables).
 --
 -- Part 1 of 2: append-only rail cell history + verification audit trail.
--- Separated from 0072 (manifest_run / slot / cost) so history + verification
+-- Separated from 0073 (manifest_run / slot / cost) so history + verification
 -- can ship and revert independently of run-state tables, matching the repo's
 -- 0068/0069 split precedent.
 --
