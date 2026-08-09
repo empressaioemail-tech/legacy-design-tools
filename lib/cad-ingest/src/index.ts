@@ -55,12 +55,20 @@ export {
 } from "./txgio/counties";
 export type { TxgioCounty } from "./txgio/counties";
 export {
+  assertDeclineCeiling,
+  assertFinalDeclineCeiling,
   assertTexasWgs84Bbox,
   assertWgs84Prj,
   classifyPrj,
+  isNullPlaceholderFeature,
   normalizeTxgioFeature,
+  TxgioDeclineCeilingError,
   TxgioProjectionError,
+  FRACTION_CEILING_MIN_SAMPLE,
   TXGIO_ENTRY_FILTER,
+  TXGIO_MAX_DECLINED_ABSOLUTE,
+  TXGIO_MAX_DECLINED_FRACTION,
+  TXGIO_MAX_GEOMETRY_ABSENT_FRACTION,
 } from "./txgio/parse";
 export type {
   TxgioParcelRecord,

@@ -20,8 +20,12 @@
  * OWNER_NAME (which the #242 county-GIS map providers also expose).
  */
 
-import type { ParseCounters } from "../types";
-import { recordSkip } from "../types";
+import type {
+  DeclineReason,
+  DeclinedFeature,
+  ParseCounters,
+} from "../types";
+import { recordDecline } from "../types";
 import {
   bboxOfGeometry,
   cellCountForBbox,
@@ -205,6 +209,261 @@ export function assertTexasWgs84Bbox(
   }
 }
 
+/**
+ * HALT CEILING for the COORDINATE defect specifically — how many
+ * out-of-envelope null placeholders a county may decline before the run
+ * aborts. Measured against the real family: the worst observed county
+ * (Henderson 48213, Liberty 48291) declines 2 of 108,484 and 164,178
+ * respectively. Ten is comfortably above every measured case and orders
+ * of magnitude below any plausible whole-county projection failure,
+ * which puts EVERY feature outside the envelope. Paired with the
+ * fraction ceiling below so the rule holds at both ends of the
+ * county-size range.
+ *
+ * SCOPED DELIBERATELY. This ceiling counts only
+ * `out-of-envelope-null-placeholder`, because that is the class this
+ * change introduces and the one that must stay vanishingly rare — an
+ * out-of-envelope coordinate is the signature of the failure the guard
+ * exists to catch. The pre-existing geometry-absence classes are
+ * governed separately below; folding them into one number would let a
+ * county's 1,776 empty-geometry rows mask a genuine coordinate problem,
+ * and would equally make a coordinate ceiling unreachable in practice.
+ */
+export const TXGIO_MAX_DECLINED_ABSOLUTE = 10;
+
+/**
+ * HALT CEILING for GEOMETRY-ABSENCE declinations (no polygon, empty
+ * geometry, degenerate bbox) as a fraction of the county.
+ *
+ * This class is NOT new — it is the path that fired 148 times across 9
+ * landed counties as a bare integer. Measuring it properly for the first
+ * time (probe 2026-08-09) shows it is far larger than the 148 suggested,
+ * because those 9 counties were simply the ones that happened to land:
+ *
+ *   48499 Wood           0 of  44,576
+ *   48213 Henderson  1,776 of 108,484  (1.64%) — none carry identity
+ *   48291 Liberty    1,903 of 164,178  (1.16%) — 1,145 DO carry identity
+ *
+ * Those 1,145 identified Liberty parcels are real records the ingest has
+ * always dropped silently; they are now named in the declined roster,
+ * which is the entire point of this change. They are attribute rows the
+ * publisher shipped without geometry, and this pipeline stores geometry,
+ * so declining them remains correct — but declining them INVISIBLY was
+ * not.
+ *
+ * The ceiling is therefore set to tolerate the measured real world (a
+ * couple of percent) while still catching a county that is largely
+ * geometry-less, which would mean a truncated or wrong download rather
+ * than publisher sloppiness. It is a fraction only: an absolute ceiling
+ * cannot work across a 254-county range from ~1,600 to ~700,000 parcels.
+ *
+ * EVALUATED AT END OF RUN, NOT MID-STREAM, and that distinction is
+ * load-bearing. These features are CLUSTERED in the source: Henderson
+ * ships 473 of its first 1,000 records without geometry (47%) while the
+ * county-wide rate is 1.64%. A mid-stream fraction test reads that
+ * prefix as a 47%-broken county and halts a county that is in fact fine.
+ * Only the whole-county rate is meaningful for this class, so it is
+ * checked once, after the last feature. The COORDINATE class is the
+ * opposite and stays mid-stream: it must abort before loading garbage.
+ */
+export const TXGIO_MAX_GEOMETRY_ABSENT_FRACTION = 0.05;
+
+/**
+ * The same ceiling as a fraction, which is what actually protects a
+ * SMALL county. Loving County ships roughly 1,600 parcels, so a flat
+ * absolute-only ceiling of 10 would let a genuinely broken small county
+ * decline 0.6 percent of itself and still report success. A projection
+ * error is not subtle — it is 100 percent of features — so 0.1 percent
+ * separates the two cases with enormous margin.
+ */
+export const TXGIO_MAX_DECLINED_FRACTION = 0.001;
+
+/**
+ * The fraction ceiling is meaningless on a handful of records — at 1
+ * declination of 1 read it is trivially 100 percent. It therefore only
+ * engages once enough of the county has been read for the ratio to carry
+ * information. Below this, the absolute ceiling is the only rule, which
+ * is the correct posture: 10 declinations in the first 1,000 features is
+ * already over the absolute ceiling and halts anyway.
+ */
+export const FRACTION_CEILING_MIN_SAMPLE = 1_000;
+
+/**
+ * Thrown when declinations breach the ceiling — i.e. when the evidence
+ * says this is not a handful of publisher placeholders but a broken
+ * county. Distinct from `TxgioProjectionError` so a caller can tell
+ * "the source CRS is wrong" from "too much of this county is refused".
+ */
+export class TxgioDeclineCeilingError extends Error {
+  readonly declinedCount: number;
+  readonly featuresRead: number;
+  constructor(message: string, declinedCount: number, featuresRead: number) {
+    super(message);
+    this.name = "TxgioDeclineCeilingError";
+    this.declinedCount = declinedCount;
+    this.featuresRead = featuresRead;
+  }
+}
+
+/**
+ * THE HALT-VERSUS-DECLINE RULE, enforced as the stream advances.
+ *
+ * Declining a feature is only defensible while declinations stay a
+ * bounded anomaly. Past the ceiling the right reading flips: this is not
+ * a publisher emitting a couple of placeholders, it is a county whose
+ * data cannot be trusted, and the run must fail closed exactly as it did
+ * before this path existed.
+ *
+ * Called per declination (cheap, and it must fire mid-stream rather than
+ * at the end — a run that would decline 100,000 features should die on
+ * the eleventh, not after loading a garbage county).
+ *
+ * The absolute term catches large counties, the fraction term catches
+ * small ones, and the fraction is only applied once enough features have
+ * been read for it to mean anything — otherwise the very first
+ * declination, at 1 of 1 read, is trivially 100 percent and every county
+ * with a placeholder in its first records would halt.
+ */
+export function assertDeclineCeiling(
+  counters: ParseCounters,
+  countyFips: string,
+): void {
+  const read = Math.max(counters.rowsRead, 1);
+  const names = (reason: DeclineReason): string =>
+    counters.declined
+      .filter((d) => d.reason === reason)
+      .slice(0, 5)
+      .map((d) => `#${d.featureIndex}(prop_id=${d.propId ?? "-"})`)
+      .join(", ");
+
+  // 1. THE COORDINATE CLASS — must stay vanishingly rare, because an
+  //    out-of-envelope coordinate is the signature of the whole-county
+  //    failure the envelope guard exists to catch.
+  const placeholders = counters.declined.filter(
+    (d) => d.reason === "out-of-envelope-null-placeholder",
+  ).length;
+  const placeholderFraction = placeholders / read;
+  // Both terms guard a different end of the size range: the absolute
+  // ceiling catches large counties, the fraction catches small ones.
+  const overAbsolute = placeholders > TXGIO_MAX_DECLINED_ABSOLUTE;
+  const overFraction =
+    read >= FRACTION_CEILING_MIN_SAMPLE &&
+    placeholderFraction > TXGIO_MAX_DECLINED_FRACTION;
+  if (overAbsolute || overFraction) {
+    throw new TxgioDeclineCeilingError(
+      `county ${countyFips}: ${placeholders} out-of-envelope null-placeholder ` +
+        `features declined out of ${read} read ` +
+        `(${(placeholderFraction * 100).toFixed(3)}%), above the ceiling of ` +
+        `${TXGIO_MAX_DECLINED_ABSOLUTE} absolute / ` +
+        `${(TXGIO_MAX_DECLINED_FRACTION * 100).toFixed(1)}% — this is no ` +
+        `longer a handful of publisher placeholders but a county whose ` +
+        `coordinates cannot be trusted. Refusing to load it; the declined ` +
+        `roster names every refused feature. Declined so far: ` +
+        `${names("out-of-envelope-null-placeholder")}`,
+      placeholders,
+      read,
+    );
+  }
+
+  // The GEOMETRY-ABSENCE class is deliberately NOT checked here — see
+  // `assertFinalDeclineCeiling`, which runs once at end of stream.
+}
+
+/**
+ * END-OF-RUN ceiling for the geometry-absence class.
+ *
+ * Separate from `assertDeclineCeiling` because the two classes need
+ * opposite timing. An out-of-envelope coordinate must abort the run
+ * immediately — loading half a mis-projected county is the failure mode
+ * the guard exists to prevent. Geometry absence is the reverse: it is
+ * clustered in the source (Henderson's first 1,000 records are 47%
+ * empty against a 1.64% county-wide rate), so only the final whole-county
+ * rate carries information, and testing it early halts good counties.
+ */
+export function assertFinalDeclineCeiling(
+  counters: ParseCounters,
+  countyFips: string,
+): void {
+  const read = Math.max(counters.rowsRead, 1);
+  const geometryAbsent = counters.declined.filter(
+    (d) =>
+      d.reason === "no-polygon-geometry" ||
+      d.reason === "empty-geometry" ||
+      d.reason === "degenerate-bbox",
+  ).length;
+  const absentFraction = geometryAbsent / read;
+  if (
+    read >= FRACTION_CEILING_MIN_SAMPLE &&
+    absentFraction > TXGIO_MAX_GEOMETRY_ABSENT_FRACTION
+  ) {
+    throw new TxgioDeclineCeilingError(
+      `county ${countyFips}: ${geometryAbsent} of ${read} features read ` +
+        `(${(absentFraction * 100).toFixed(2)}%) carry no usable geometry, ` +
+        `above the ${(TXGIO_MAX_GEOMETRY_ABSENT_FRACTION * 100).toFixed(0)}% ` +
+        `ceiling — a county this empty means a truncated or wrong download, ` +
+        `not publisher sloppiness. Refusing to load a county that would be ` +
+        `mostly absent. Declined: ${counters.declined
+          .filter((d) => d.reason !== "out-of-envelope-null-placeholder")
+          .slice(0, 5)
+          .map((d) => `#${d.featureIndex}(${d.reason})`)
+          .join(", ")}`,
+      geometryAbsent,
+      read,
+    );
+  }
+}
+
+/**
+ * THE DISCRIMINATOR. True only for a feature that carries NO source
+ * identity at all — the null-placeholder shape that the StratMap 202503
+ * vintage emits.
+ *
+ * MEASURED, not assumed (probe 2026-08-09 over the three halting
+ * counties, reading every record of each live archive):
+ *
+ *   county          records    out-of-envelope   all placeholders?
+ *   48499 Wood       44,576          1                 yes
+ *   48213 Henderson 108,484          2                 yes
+ *   48291 Liberty   164,178          2                 yes
+ *
+ * The identity test alone is NOWHERE NEAR sufficient, and that is the
+ * single most important property of this predicate. The same probe found
+ * placeholder-shaped ATTRIBUTES on features whose geometry is perfectly
+ * valid Texas land:
+ *
+ *   48499 Wood        1,168 placeholder-attribute features INSIDE the envelope
+ *   48213 Henderson   8,026
+ *   48291 Liberty     1,643
+ *
+ * That is 10,837 real, mapped parcels across three counties that an
+ * attributes-only rule would silently destroy — a 1,168-to-1 over-drop
+ * in Wood alone. Those features have geometry the map serves; only their
+ * CAD attribute join is empty. They MUST load.
+ *
+ * So the decline predicate is the CONJUNCTION, and `normalizeTxgioFeature`
+ * applies it only on the out-of-envelope branch: a feature is declined
+ * when its coordinates are impossible AND it has no identity to lose.
+ * Out-of-envelope with a real `Prop_ID` still throws — that is either a
+ * projection failure or a real parcel with broken geometry, and both
+ * must halt rather than quietly vanish.
+ *
+ * Value fields are deliberately NOT part of the test. A zero-value
+ * parcel is ordinary (exempt, or not yet appraised); it is the absence
+ * of every IDENTIFIER that marks a placeholder, and adding a value term
+ * would only narrow the predicate on an irrelevant axis.
+ */
+export function isNullPlaceholderFeature(
+  properties: Record<string, unknown> | null | undefined,
+): boolean {
+  const p = properties ?? {};
+  const propId = (str(p.Prop_ID) ?? "").trim();
+  const geoId = (str(p.GEO_ID) ?? "").trim();
+  // "0" is the publisher's null Prop_ID; a real parcel never carries it.
+  const hasPropId = propId !== "" && propId !== "0";
+  const hasGeoId = geoId !== "";
+  return !hasPropId && !hasGeoId;
+}
+
 function str(v: unknown): string | null {
   if (typeof v !== "string") {
     if (typeof v === "number" && Number.isFinite(v)) return String(v);
@@ -251,15 +510,36 @@ export function normalizeTxgioFeature(
   counters: ParseCounters,
   opts: TxgioNormalizeOptions = {},
 ): TxgioParcelRecord | null {
+  const props = feature.properties ?? {};
+  // Identity is captured UP FRONT so every decline path below can name
+  // the feature it refused. This is the fix for the 148 features that
+  // were dropped across 9 landed counties as a bare integer.
+  const identify = (
+    reason: DeclinedFeature["reason"],
+    detail: string,
+  ): DeclinedFeature => ({
+    countyFips,
+    featureIndex,
+    propId: str(props.Prop_ID),
+    geoId: str(props.GEO_ID),
+    objectId: str(props.OBJECTID_1),
+    ownerName: str(props.OWNER_NAME),
+    reason,
+    detail,
+  });
+
   const sourceGeometry = feature.geometry;
   if (
     !sourceGeometry ||
     (sourceGeometry.type !== "Polygon" &&
       sourceGeometry.type !== "MultiPolygon")
   ) {
-    recordSkip(
+    recordDecline(
       counters,
-      `feature ${featureIndex}: no polygon geometry (${sourceGeometry?.type ?? "null"})`,
+      identify(
+        "no-polygon-geometry",
+        `geometry type ${sourceGeometry?.type ?? "null"}`,
+      ),
     );
     return null;
   }
@@ -271,21 +551,63 @@ export function normalizeTxgioFeature(
     : sourceGeometry;
   const bbox = bboxOfGeometry(geometry);
   if (!bbox) {
-    recordSkip(counters, `feature ${featureIndex}: empty geometry`);
+    recordDecline(counters, identify("empty-geometry", "no bbox derivable"));
     return null;
   }
   // Fail-closed projection guard — see assertTexasWgs84Bbox. Throws
   // (does NOT skip): non-degree coordinates are a whole-county
   // property, so the run must abort rather than load a partial county.
-  assertTexasWgs84Bbox(bbox, `county ${countyFips} feature ${featureIndex}`);
+  //
+  // THE ONE EXCEPTION, and it is deliberately narrow. A feature whose
+  // coordinates are impossible AND which carries no identity whatsoever
+  // is a publisher null placeholder (`isNullPlaceholderFeature` above,
+  // measured across 48499/48213/48291). Refusing THAT feature and
+  // loading the other 44,575 is strictly more honest than refusing the
+  // county: the placeholder is recorded with identity in
+  // `counters.declined`, so it reads as a named absence rather than
+  // either a silent drop or a whole county missing.
+  //
+  // Everything else about the guard is unchanged. The envelope is not
+  // widened, the assertion is not made permissive, and an out-of-envelope
+  // feature WITH a real Prop_ID or GEO_ID still throws — the ceiling
+  // check in `assertDeclineCeiling` then catches the case where enough
+  // features are declined that the county itself must be presumed broken.
+  //
+  // AND NOT WHEN REPROJECTING. Under `--reproject`, an out-of-envelope
+  // result means the CONVERSION is wrong, and a wrong conversion is a
+  // whole-county property that would mis-place every feature — including
+  // the ones that happen to carry identity and so would still throw.
+  // Declining the identity-less subset there would quietly thin a county
+  // whose coordinates are all suspect. Reprojected counties therefore
+  // keep the original, unconditional fail-closed behaviour.
+  try {
+    assertTexasWgs84Bbox(bbox, `county ${countyFips} feature ${featureIndex}`);
+  } catch (err) {
+    if (
+      err instanceof TxgioProjectionError &&
+      !opts.reprojectFrom &&
+      isNullPlaceholderFeature(props)
+    ) {
+      recordDecline(
+        counters,
+        identify(
+          "out-of-envelope-null-placeholder",
+          `bbox [${bbox.westLng}, ${bbox.southLat}, ${bbox.eastLng}, ` +
+            `${bbox.northLat}] outside Texas; no Prop_ID and no GEO_ID`,
+        ),
+      );
+      return null;
+    }
+    throw err;
+  }
   const tileKeys = cellKeysForBbox(bbox);
   if (tileKeys === null || tileKeys.length === 0) {
     // Unbounded maxCells is never null; empty means a degenerate bbox.
-    recordSkip(counters, `feature ${featureIndex}: degenerate bbox`);
+    recordDecline(counters, identify("degenerate-bbox", "zero tile cells"));
     return null;
   }
 
-  const p = feature.properties ?? {};
+  const p = props;
   return {
     countyFips,
     featureIndex,
