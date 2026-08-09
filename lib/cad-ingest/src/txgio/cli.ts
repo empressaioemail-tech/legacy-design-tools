@@ -76,10 +76,8 @@ import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import shapefile from "shapefile";
 import {
-  isTxgioCountyLoaded,
   resolveTxgioCounty,
   TXGIO_ABSENT_FROM_STRATMAP,
-  TXGIO_COUNTIES,
   TXGIO_STATEWIDE_COUNTIES,
 } from "./counties";
 import type { TxgioParcelRecord } from "./parse";
@@ -94,7 +92,10 @@ import {
 import type { SupportedSourceCrs } from "./reproject";
 import {
   countCountyParcels,
+  listLoadedCountyFips,
   replaceCountyParcels,
+  storeListLoadState,
+  storeLoadedLabel,
   vintageWithProvenance,
   TXGIO_DEFAULT_BATCH_SIZE,
   type TxgioTransactionalDb,
@@ -208,21 +209,50 @@ async function main(): Promise<void> {
     reprojectRequested = "EPSG:3857";
   }
 
-  // --list: print every Texas county with its load state and exit
-  // (no network, no DB).
+  // --list: print every Texas county with store-derived load state.
+  // LOADED comes from DISTINCT county_fips in txgio_parcel when
+  // DATABASE_URL is set. Without DATABASE_URL we label UNKNOWN rather
+  // than pretending the hand-maintained TXGIO_COUNTIES map is store truth.
   if (values.list) {
-    log("Texas counties (all ingestible; LOADED = already in txgio_parcel):");
-    for (const [fips, name] of Object.entries(TXGIO_STATEWIDE_COUNTIES)) {
-      const state = TXGIO_ABSENT_FROM_STRATMAP[fips]
-        ? "ABSENT"
-        : isTxgioCountyLoaded(fips)
-          ? "LOADED"
-          : "-     ";
-      log(`  ${fips}  ${state}  ${name}`);
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    let loadedFips: Set<string> | null = null;
+    let pool: pg.Pool | undefined;
+    try {
+      if (databaseUrl) {
+        pool = new Pool({ connectionString: databaseUrl });
+        const fipsList = await listLoadedCountyFips(
+          drizzle(pool) as unknown as TxgioTransactionalDb,
+        );
+        loadedFips = new Set(fipsList);
+      }
+    } finally {
+      await pool?.end();
     }
     log(
+      loadedFips
+        ? "Texas counties (LOADED = DISTINCT county_fips in txgio_parcel):"
+        : "Texas counties (LOADED UNKNOWN — set DATABASE_URL to query txgio_parcel; " +
+            "hand map is not store truth):",
+    );
+    let loadedCount = 0;
+    let unknownCount = 0;
+    for (const [fips, name] of Object.entries(TXGIO_STATEWIDE_COUNTIES)) {
+      const state = storeListLoadState(
+        fips,
+        loadedFips,
+        TXGIO_ABSENT_FROM_STRATMAP[fips] !== undefined,
+      );
+      if (state === "LOADED") loadedCount += 1;
+      if (state === "UNKNOWN") unknownCount += 1;
+      log(`  ${fips}  ${state}  ${name}`);
+    }
+    const loadedSummary =
+      loadedFips === null
+        ? `${unknownCount} UNKNOWN (no DATABASE_URL)`
+        : `${loadedCount} loaded (store)`;
+    log(
       `total: ${Object.keys(TXGIO_STATEWIDE_COUNTIES).length} counties, ` +
-        `${Object.keys(TXGIO_COUNTIES).length} loaded, ` +
+        `${loadedSummary}, ` +
         `${Object.keys(TXGIO_ABSENT_FROM_STRATMAP).length} absent from StratMap`,
     );
     return;
@@ -451,7 +481,10 @@ async function main(): Promise<void> {
   const deleteCount = rowsExisting === null ? "unknown (no DATABASE_URL)" : rowsExisting;
   log(`---- ingest summary${dryRun ? " (DRY RUN — nothing written)" : ""} ----`);
   log(`county:           ${county.fips} (${county.name})`);
-  log(`loaded before:    ${isTxgioCountyLoaded(county.fips) ? "yes" : "no"}`);
+  // Store-derived: yes when rowsExisting > 0, no when 0, unknown when
+  // dry-run had no DATABASE_URL. Do not use isTxgioCountyLoaded /
+  // TXGIO_COUNTIES here — that hand map is for jurisdictions.ts only.
+  log(`loaded before:    ${storeLoadedLabel(rowsExisting)}`);
   log(`source file:      ${sourceFile}`);
   log(`source vintage:   ${vintage}`);
   log(

@@ -75,6 +75,49 @@ export async function countCountyParcels(
 }
 
 /**
+ * Distinct county FIPS that currently have at least one row in
+ * `txgio_parcel`. This is store truth for CLI `--list` LOADED state —
+ * not the hand-maintained `TXGIO_COUNTIES` map (that map remains for
+ * `jurisdictions.ts` geometry composition only).
+ */
+export async function listLoadedCountyFips(
+  db: TxgioIngestDb,
+): Promise<string[]> {
+  const result = (await db.execute(
+    sql`SELECT DISTINCT ${txgioParcel.countyFips} AS fips FROM ${txgioParcel}
+        ORDER BY 1`,
+  )) as unknown as { rows: Array<{ fips?: unknown }> };
+  return (result.rows ?? [])
+    .map((r) => String(r.fips ?? "").trim())
+    .filter((f) => f.length > 0);
+}
+
+/**
+ * Store-derived "loaded before" summary label for the ingest CLI.
+ * `rowsExisting` comes from `countCountyParcels`; `null` means the dry
+ * run had no DATABASE_URL and could not observe the store.
+ */
+export function storeLoadedLabel(rowsExisting: number | null): string {
+  if (rowsExisting === null) return "unknown (no DATABASE_URL)";
+  return rowsExisting > 0 ? "yes" : "no";
+}
+
+/**
+ * Per-county `--list` load state from store observation.
+ * `loadedFips === null` means DATABASE_URL was absent — never pretend
+ * the hand map is store truth; label UNKNOWN instead.
+ */
+export function storeListLoadState(
+  fips: string,
+  loadedFips: ReadonlySet<string> | null,
+  absentFromStratmap: boolean,
+): "ABSENT" | "LOADED" | "UNKNOWN" | "-     " {
+  if (absentFromStratmap) return "ABSENT";
+  if (loadedFips === null) return "UNKNOWN";
+  return loadedFips.has(fips) ? "LOADED" : "-     ";
+}
+
+/**
  * Provenance suffix appended to `source_vintage` on every row whose
  * geometry was converted from a projected source CRS.
  *

@@ -38,6 +38,8 @@ import {
 import {
   vintageWithProvenance,
   REPROJECTED_VINTAGE_SUFFIX,
+  storeLoadedLabel,
+  storeListLoadState,
 } from "../txgio/ingest";
 import {
   normalizeStatLandUse,
@@ -968,6 +970,30 @@ describe("TxGIO county registry + zip entry filter", () => {
     expect(resolveTxgioCounty("48129")?.name).toBe("Donley");
     expect(TXGIO_ABSENT_FROM_STRATMAP["48129"]).toMatch(/404/);
     expect(TXGIO_ABSENT_FROM_STRATMAP["48269"]).toBeUndefined();
+  });
+
+  it("storeLoadedLabel is store-derived, not the hand TXGIO_COUNTIES map", () => {
+    // Kenedy (48261) is NOT on the hand map, but prior wave proof left
+    // rows in the store — CLI "loaded before" must follow row count.
+    expect(isTxgioCountyLoaded("48261")).toBe(false);
+    expect(storeLoadedLabel(2400)).toBe("yes");
+    expect(storeLoadedLabel(1)).toBe("yes");
+    expect(storeLoadedLabel(0)).toBe("no");
+    expect(storeLoadedLabel(null)).toBe("unknown (no DATABASE_URL)");
+    // A hand-map county with zero store rows is still "no".
+    expect(isTxgioCountyLoaded("48209")).toBe(true);
+    expect(storeLoadedLabel(0)).toBe("no");
+  });
+
+  it("storeListLoadState queries store set; UNKNOWN when DATABASE_URL absent", () => {
+    const store = new Set(["48209", "48261"]);
+    expect(storeListLoadState("48261", store, false)).toBe("LOADED");
+    expect(storeListLoadState("48269", store, false)).toBe("-     ");
+    expect(storeListLoadState("48129", store, true)).toBe("ABSENT");
+    // No store observation: never fall back to the hand map.
+    expect(storeListLoadState("48209", null, false)).toBe("UNKNOWN");
+    expect(storeListLoadState("48261", null, false)).toBe("UNKNOWN");
+    expect(storeListLoadState("48129", null, true)).toBe("ABSENT");
   });
 
   it("builds the collection resource URL", () => {
