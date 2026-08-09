@@ -86,6 +86,15 @@ export {
 } from "./txgio/reproject";
 export type { SupportedSourceCrs } from "./txgio/reproject";
 export {
+  discoverAllShapefiles,
+  selectShapefileLayers,
+  multiShapefileVintage,
+} from "./txgio/shapefile-discover";
+export type {
+  MultiShpMode,
+  ResolvedShapefile,
+} from "./txgio/shapefile-discover";
+export {
   countCountyParcels,
   listLoadedCountyFips,
   storeLoadedLabel,
