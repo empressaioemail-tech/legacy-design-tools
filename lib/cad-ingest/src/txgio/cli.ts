@@ -17,6 +17,9 @@
  *                              #   stratmap25-landparcels_48209_hays_202503
  *     [--batch-size=250] [--limit=N] [--dry-run]
  *     [--reproject=3857]       # convert EPSG:3857 metres -> WGS84
+ *     [--multi-shp=concat]     # required when the archive ships N>1 .shp
+ *                              # (Harris 48201 east+west). Fail-closed
+ *                              # otherwise — never silently take the first.
  *     [--declined-out=<path>]  # write the identified declined roster
  *   pnpm --filter @workspace/cad-ingest txgio-ingest -- --list
  *
@@ -107,6 +110,12 @@ import {
   TXGIO_MAX_DECLINED_ABSOLUTE,
   TXGIO_MAX_DECLINED_FRACTION,
 } from "./parse";
+import {
+  multiShapefileVintage,
+  selectShapefileLayers,
+  type MultiShpMode,
+  type ResolvedShapefile,
+} from "./shapefile-discover";
 import { newCounters, summarizeDeclines, type ParseCounters } from "../types";
 
 /**
@@ -139,72 +148,56 @@ async function pathKind(p: string): Promise<"file" | "dir" | "missing"> {
   }
 }
 
-interface ResolvedShapefile {
-  shpFile: string;
-  dbfFile: string;
-  prjFile?: string;
-}
-
-async function discoverShapefile(files: string[]): Promise<ResolvedShapefile> {
-  const shpFile = files.find((f) => /\.shp$/i.test(f));
-  if (!shpFile) {
-    fail(
-      "no .shp found in the input — expected the TxGIO per-county " +
-        "land-parcels zip (shp/ entries) or an extracted shapefile",
-    );
-  }
-  const stem = shpFile.replace(/\.shp$/i, "");
-  const dbfFile = files.find((f) => f.toLowerCase() === `${stem.toLowerCase()}.dbf`);
-  if (!dbfFile) fail(`no .dbf next to ${basename(shpFile)}`);
-  const prjFile = files.find((f) => f.toLowerCase() === `${stem.toLowerCase()}.prj`);
-  return { shpFile, dbfFile, prjFile };
-}
-
 async function* readTxgioFeatures(
   countyFips: string,
-  shpFile: string,
-  dbfFile: string,
+  layers: ResolvedShapefile[],
   counters: ParseCounters,
   limit?: number,
   reprojectFrom?: SupportedSourceCrs,
 ): AsyncGenerator<TxgioParcelRecord> {
-  // The TxGIO shapefiles ship a UTF-8 .cpg; pass the encoding through.
-  const source = await shapefile.open(shpFile, dbfFile, { encoding: "utf8" });
+  // Continuous feature_index across every shapefile part. Harris east
+  // then west must not restart at 0 — the PK is (county_fips, tile_key,
+  // feature_index) and a restart would collide inside shared tiles.
   let featureIndex = 0;
-  for (;;) {
-    if (limit !== undefined && counters.rowsParsed >= limit) return;
-    const result = await source.read();
-    if (result.done) {
-      // END-OF-STREAM ceiling for the geometry-absence class. Raised
-      // from INSIDE the generator so it propagates into
-      // `replaceCountyParcels`'s transaction and rolls the load back —
-      // a county over this ceiling must not commit. Checking it after
-      // the await-loop instead would let the transaction commit first.
-      assertFinalDeclineCeiling(counters, countyFips);
-      return;
-    }
-    counters.rowsRead += 1;
-    const declinedBefore = counters.declined.length;
-    const record = normalizeTxgioFeature(
-      countyFips,
-      featureIndex,
-      result.value as TxgioFeature,
-      counters,
-      { reprojectFrom },
+  for (let part = 0; part < layers.length; part += 1) {
+    const { shpFile, dbfFile } = layers[part]!;
+    log(
+      `reading shapefile part ${part + 1}/${layers.length}: ${basename(shpFile)}`,
     );
-    featureIndex += 1;
-    // Enforce the halt-versus-decline ceiling AS THE STREAM ADVANCES, so
-    // a county that is broadly defective dies early rather than after
-    // loading most of a garbage county. Only checked when a declination
-    // actually happened — the common path pays nothing.
-    if (counters.declined.length !== declinedBefore) {
-      assertDeclineCeiling(counters, countyFips);
-    }
-    if (record) {
-      counters.rowsParsed += 1;
-      yield record;
+    // The TxGIO shapefiles ship a UTF-8 .cpg; pass the encoding through.
+    const source = await shapefile.open(shpFile, dbfFile, { encoding: "utf8" });
+    for (;;) {
+      if (limit !== undefined && counters.rowsParsed >= limit) return;
+      const result = await source.read();
+      if (result.done) break;
+      counters.rowsRead += 1;
+      const declinedBefore = counters.declined.length;
+      const record = normalizeTxgioFeature(
+        countyFips,
+        featureIndex,
+        result.value as TxgioFeature,
+        counters,
+        { reprojectFrom },
+      );
+      featureIndex += 1;
+      // Enforce the halt-versus-decline ceiling AS THE STREAM ADVANCES, so
+      // a county that is broadly defective dies early rather than after
+      // loading most of a garbage county. Only checked when a declination
+      // actually happened — the common path pays nothing.
+      if (counters.declined.length !== declinedBefore) {
+        assertDeclineCeiling(counters, countyFips);
+      }
+      if (record) {
+        counters.rowsParsed += 1;
+        yield record;
+      }
     }
   }
+  // END-OF-STREAM ceiling for the geometry-absence class. Raised from
+  // INSIDE the generator so it propagates into `replaceCountyParcels`'s
+  // transaction and rolls the load back — a county over this ceiling
+  // must not commit. Checked once after ALL parts, not per part.
+  assertFinalDeclineCeiling(counters, countyFips);
 }
 
 async function main(): Promise<void> {
@@ -220,6 +213,7 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       reproject: { type: "string" },
+      "multi-shp": { type: "string" },
       "declined-out": { type: "string" },
     },
   });
@@ -240,6 +234,23 @@ async function main(): Promise<void> {
       );
     }
     reprojectRequested = "EPSG:3857";
+  }
+
+  // --multi-shp=concat is the ONLY accepted value. N>1 archives fail
+  // closed without it (Harris truncation defect). Unknown values fail
+  // before any network or DB work.
+  let multiShp: MultiShpMode | undefined;
+  if (values["multi-shp"] !== undefined) {
+    const v = values["multi-shp"].trim().toLowerCase();
+    if (v !== "concat") {
+      fail(
+        `--multi-shp=${values["multi-shp"]} is not supported — the only ` +
+          "accepted value is concat (concatenate every .shp in the archive " +
+          "under one continuous feature_index stream). Omit the flag when " +
+          "the archive has a single shapefile.",
+      );
+    }
+    multiShp = "concat";
   }
 
   // --list: print every Texas county with store-derived load state.
@@ -347,7 +358,25 @@ async function main(): Promise<void> {
     const stem = input.replace(/\.[^.]+$/, "");
     files = [input, `${stem}.dbf`, `${stem}.prj`];
   }
-  const { shpFile, dbfFile, prjFile } = await discoverShapefile(files);
+  let layers: ResolvedShapefile[];
+  try {
+    ({ layers } = selectShapefileLayers(files, multiShp));
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+  // Honest-absence: every discovered shapefile is named in the log.
+  // A discarded part is a hard fail above; this line is the audit trail
+  // for what WILL be read.
+  log(
+    `shapefiles discovered (${layers.length}): ` +
+      layers.map((l) => basename(l.shpFile)).join(", "),
+  );
+  if (layers.length > 1) {
+    log(
+      `!! MULTI-SHP CONCAT: ${layers.length} shapefile parts will be ` +
+        "streamed under one continuous feature_index (--multi-shp=concat)",
+    );
+  }
 
   // 2. SR handling — DETECT, then require an EXPLICIT opt-in to convert.
   //
@@ -364,68 +393,82 @@ async function main(): Promise<void> {
   //    made by an operator per run, not inferred by a parser. The flag
   //    IS the decision, the log lines below are the record of it, and
   //    `+reprojected-from-epsg3857` on every row is the durable marker.
+  //
+  //    Multi-shp: every part's .prj is classified. Mixed CRS across
+  //    parts fails closed — concatenating degrees with metres would
+  //    invent geography.
   let reprojectFrom: SupportedSourceCrs | undefined;
   let prjKind: TxgioPrjKind | "absent" = "absent";
-  if (prjFile && (await pathKind(prjFile)) === "file") {
-    const prjText = await readFile(prjFile, "utf8");
-    prjKind = classifyPrj(prjText);
-    if (prjKind === "web-mercator") {
-      if (!reprojectRequested) {
-        // Fail closed, but name the remedy.
-        fail(
-          `${basename(prjFile)} declares EPSG:3857 Web Mercator (metres), ` +
-            "not WGS84 degrees — this is the 202505 StratMap vintage that " +
-            `57 of 254 counties ship. Refusing to store projected ` +
-            "coordinates without an explicit decision. Re-run with " +
-            "--reproject=3857 to convert to WGS84 at parse time (every row " +
-            "is then stamped +reprojected-from-epsg3857, and the Texas " +
-            "coordinate-range assertion still runs on the CONVERTED " +
-            "coordinates).",
-        );
-      }
-      reprojectFrom = "EPSG:3857";
-      log(
-        "!! REPROJECTING: source declares EPSG:3857 Web Mercator (metres) " +
-          `in ${basename(prjFile)}; --reproject=3857 given, so every ` +
-          "feature is converted to WGS84 degrees BEFORE the Texas " +
-          "coordinate-range assertion, and every row's source_vintage is " +
-          "stamped +reprojected-from-epsg3857",
-      );
-    } else {
-      // Geographic, or a projection we have no inverse for. The strict
-      // guard decides, exactly as before — and note this branch runs
-      // even when --reproject=3857 was passed, so the flag can never
-      // launder an unsupported CRS (state plane, NAD83) into the store.
-      assertWgs84Prj(prjText, prjFile);
-      log(`projection: GCS_WGS_1984 geographic (${basename(prjFile)})`);
-      if (reprojectRequested) {
+  const prjKindsSeen = new Set<TxgioPrjKind | "absent">();
+  for (const layer of layers) {
+    const prjFile = layer.prjFile;
+    if (prjFile && (await pathKind(prjFile)) === "file") {
+      const prjText = await readFile(prjFile, "utf8");
+      const kind = classifyPrj(prjText);
+      prjKindsSeen.add(kind);
+      if (kind === "web-mercator") {
+        if (!reprojectRequested) {
+          fail(
+            `${basename(prjFile)} declares EPSG:3857 Web Mercator (metres), ` +
+              "not WGS84 degrees — this is the 202505 StratMap vintage that " +
+              `57 of 254 counties ship. Refusing to store projected ` +
+              "coordinates without an explicit decision. Re-run with " +
+              "--reproject=3857 to convert to WGS84 at parse time (every row " +
+              "is then stamped +reprojected-from-epsg3857, and the Texas " +
+              "coordinate-range assertion still runs on the CONVERTED " +
+              "coordinates).",
+          );
+        }
+        reprojectFrom = "EPSG:3857";
         log(
-          "note: --reproject=3857 given but the source is already WGS84 " +
-            "geographic — no conversion applied, nothing stamped",
+          "!! REPROJECTING: source declares EPSG:3857 Web Mercator (metres) " +
+            `in ${basename(prjFile)}; --reproject=3857 given, so every ` +
+            "feature is converted to WGS84 degrees BEFORE the Texas " +
+            "coordinate-range assertion, and every row's source_vintage is " +
+            "stamped +reprojected-from-epsg3857",
         );
+      } else {
+        assertWgs84Prj(prjText, prjFile);
+        log(`projection: GCS_WGS_1984 geographic (${basename(prjFile)})`);
+        if (reprojectRequested) {
+          log(
+            "note: --reproject=3857 given but the source is already WGS84 " +
+              "geographic — no conversion applied, nothing stamped",
+          );
+        }
       }
-    }
-  } else {
-    log(
-      "WARNING: no .prj found — the per-feature Texas WGS84 coordinate-range " +
-        "assertion is the only projection guard for this run",
-    );
-    if (reprojectRequested) {
-      // No declaration to corroborate the operator's claim. Trust the
-      // flag (the operator inspected the file), but the envelope
-      // assertion still has to pass on the converted coordinates.
-      reprojectFrom = "EPSG:3857";
+      prjKind = kind;
+    } else {
+      prjKindsSeen.add("absent");
       log(
-        "!! REPROJECTING from EPSG:3857 on the strength of --reproject=3857 " +
-          "alone (no .prj to corroborate) — the Texas coordinate-range " +
-          "assertion on the CONVERTED coordinates is the only check that " +
-          "this was the right call",
+        `WARNING: no .prj next to ${basename(layer.shpFile)} — the ` +
+          "per-feature Texas WGS84 coordinate-range assertion is the only " +
+          "projection guard for this part",
       );
     }
   }
+  if (prjKindsSeen.size > 1) {
+    fail(
+      `multi-shapefile parts declare mixed CRS kinds (${[...prjKindsSeen].join(", ")}) — ` +
+        "refusing to concatenate. Every part must share one CRS declaration " +
+        "(or all lack a .prj, relying on the Texas envelope assertion).",
+    );
+  }
+  if (prjKindsSeen.has("absent") && reprojectRequested && !reprojectFrom) {
+    reprojectFrom = "EPSG:3857";
+    log(
+      "!! REPROJECTING from EPSG:3857 on the strength of --reproject=3857 " +
+        "alone (no .prj to corroborate) — the Texas coordinate-range " +
+        "assertion on the CONVERTED coordinates is the only check that " +
+        "this was the right call",
+    );
+  }
 
   const baseVintage =
-    values.vintage ?? basename(shpFile, extname(shpFile)).toLowerCase();
+    values.vintage ??
+    (layers.length === 1
+      ? basename(layers[0]!.shpFile, extname(layers[0]!.shpFile)).toLowerCase()
+      : multiShapefileVintage(layers));
   // Provenance travels on the row, not just in this log.
   const vintage = vintageWithProvenance(
     baseVintage,
@@ -434,15 +477,16 @@ async function main(): Promise<void> {
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
 
   log(`county=${county.fips} (${county.name}) source=${sourceLabel}`);
-  log(`shapefile: ${shpFile}`);
+  log(
+    `shapefile: ${layers.map((l) => l.shpFile).join(" + ")}`,
+  );
   log(`vintage=${vintage}`);
 
   // 3. Parse + load (or drain, when --dry-run).
   const counters = newCounters();
   const records = readTxgioFeatures(
     county.fips,
-    shpFile,
-    dbfFile,
+    layers,
     counters,
     limit,
     reprojectFrom,
