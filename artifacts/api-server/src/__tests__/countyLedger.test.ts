@@ -119,6 +119,9 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
       totalRails: 12,
       totalCells: 0,
       satisfiedCells: 0,
+      satisfiedPresentCells: 0,
+      satisfiedPresentPartialCells: 0,
+      satisfiedAbsentCells: 0,
       texasCompletenessPct: 0,
     });
   });
