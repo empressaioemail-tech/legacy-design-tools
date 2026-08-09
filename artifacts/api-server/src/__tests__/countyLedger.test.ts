@@ -9,11 +9,19 @@
  * facet/summary shape.
  *
  * Also covers County Manifest Sprint 1 (feat/county-manifest-sprint1): the
- * additive `manifestCells` field (254 x 13 = 3,302 cells, always), the
- * no-atom/no-writer/not-yet/stored-rail_state precedence resolution, and
- * that `manifestCells` is fully independent of the pre-existing `counties`
- * array — a route with zero county_facet_coverage rows still returns the
- * full manifest grid once county_manifest/county_rail are seeded.
+ * additive `manifestCells` field (254 x N-rail grid, always, N =
+ * COUNTY_RAIL_COUNT), the no-atom/no-writer/not-yet/stored-rail_state
+ * precedence resolution, and that `manifestCells` is fully independent of
+ * the pre-existing `counties` array — a route with zero
+ * county_facet_coverage rows still returns the full manifest grid once
+ * county_manifest/county_rail are seeded.
+ *
+ * Rail count fix 2026-08-08 (fix/county-rail-refresh): N is 12, not 13 —
+ * `join` was ruled out of the rail dimension as a derived metric the same
+ * day the thirteen-rail ruling landed; see
+ * lib/db/src/schema/countyRailDimension.ts for the full rationale and the
+ * county_rail dimension REFRESH fix (the table was seeded once at
+ * migration 0068 and had drifted stale on three rails).
  *
  * Uses the real-PG route harness (withTestSchema via setup.ts). Requires
  * TEST_DATABASE_URL / DATABASE_URL, CI-authoritative when unset.
@@ -99,15 +107,16 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
     // countyLedger.ts's res.json() and doc_repo
     // _inbox/2026-08-08_SPRINT1_manifest_schema_spec.md section 5/9. The
     // four original fields are unchanged and still zero here; totalRails is
-    // 13 unconditionally (a hardcoded rail-dimension constant, not derived
-    // from any seeded row), and the remaining three are zero because
+    // COUNTY_RAIL_COUNT (12 as of the 2026-08-08 fix/county-rail-refresh
+    // rail-count fix — see countyRailDimension.ts) unconditionally, not
+    // derived from any seeded row, and the remaining three are zero because
     // manifestCells is empty when county_manifest/county_rail are unseeded.
     expect(res.body.summary).toEqual({
       onboardedCount: 0,
       totalCounties: 0,
       staleCount: 0,
       rewarmUnsafeCount: 0,
-      totalRails: 13,
+      totalRails: 12,
       totalCells: 0,
       satisfiedCells: 0,
       texasCompletenessPct: 0,
@@ -226,28 +235,31 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
 });
 
 describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", () => {
-  const RAIL_COUNT = 13;
+  // Rail count fix 2026-08-08 (fix/county-rail-refresh): `join` (join
+  // quality) was ruled OUT of the rail dimension as a derived metric, not
+  // a rail with its own provenance/absence — see
+  // lib/db/src/schema/countyRailDimension.ts. 12 rails, not 13.
+  const RAIL_COUNT = 12;
 
-  /** Seed the real 13-rail dimension, matching migration 0068's seed exactly (kind/atomFamilyState/hasWriter drive the precedence assertions below). */
+  /** Seed the real 12-rail dimension, matching COUNTY_RAIL_DECLARATION's shape exactly (kind/atomFamilyState/hasWriter drive the precedence assertions below). Geometry/footprint/easement carry their refreshed (post-2026-08-08) atomFamilyState here, and landuse keeps hasWriter=true off the live CAD scorer, independent of the dead Cotality reference. */
   async function seedThirteenRails(): Promise<void> {
     await db.insert(countyRail).values([
-      { railKey: "geometry", displayName: "Parcel geometry", ordinal: 1, kind: "spine", thresholdPct: "95", atomFamilyState: "missing", hasWriter: false, declaredSource: "TxGIO StratMap" },
+      { railKey: "geometry", displayName: "Parcel geometry", ordinal: 1, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: false, declaredSource: "TxGIO StratMap" },
       { railKey: "cad", displayName: "CAD attributes", ordinal: 2, kind: "spine", thresholdPct: "95", atomFamilyState: "missing", hasWriter: false, declaredSource: "County CAD" },
-      { railKey: "join", displayName: "Join quality", ordinal: 3, kind: "spine", thresholdPct: "95", atomFamilyState: "missing", hasWriter: true, declaredSource: "Derived" },
-      { railKey: "zoning", displayName: "Zoning + setback", ordinal: 4, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: true, declaredSource: "Municipal code" },
-      { railKey: "roads", displayName: "Roads / frontage", ordinal: 5, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: false, declaredSource: "OSM Overpass" },
-      { railKey: "flood", displayName: "Flood / terrain", ordinal: 6, kind: "spine", thresholdPct: "95", atomFamilyState: "partial", hasWriter: false, declaredSource: "FEMA NFHL" },
-      { railKey: "envelope", displayName: "Buildable envelope", ordinal: 7, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: true, declaredSource: "Derived" },
-      { railKey: "landuse", displayName: "Land use", ordinal: 8, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: true, declaredSource: "CAD roll code" },
-      { railKey: "footprint", displayName: "Building footprints", ordinal: 9, kind: "derived", thresholdPct: "90", atomFamilyState: "unpublished", hasWriter: false, declaredSource: "ML-derived" },
-      { railKey: "easement", displayName: "Utility easements", ordinal: 10, kind: "derived", thresholdPct: "90", atomFamilyState: "unpublished", hasWriter: false, declaredSource: "County honest-absence default" },
-      { railKey: "owner", displayName: "Owner facet", ordinal: 11, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "CAD owner_name" },
-      { railKey: "rrc", displayName: "RRC wells / pipelines", ordinal: 12, kind: "derived", thresholdPct: "90", atomFamilyState: "partial", hasWriter: false, declaredSource: "RRC public GIS" },
-      { railKey: "mud", displayName: "MUD / special districts", ordinal: 13, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TX Comptroller registry" },
+      { railKey: "zoning", displayName: "Zoning + setback", ordinal: 3, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: true, declaredSource: "Municipal code" },
+      { railKey: "roads", displayName: "Roads / frontage", ordinal: 4, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: false, declaredSource: "OSM Overpass" },
+      { railKey: "flood", displayName: "Flood / terrain", ordinal: 5, kind: "spine", thresholdPct: "95", atomFamilyState: "partial", hasWriter: false, declaredSource: "FEMA NFHL" },
+      { railKey: "envelope", displayName: "Buildable envelope", ordinal: 6, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: true, declaredSource: "Derived" },
+      { railKey: "landuse", displayName: "Land use", ordinal: 7, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: true, declaredSource: "CAD roll code" },
+      { railKey: "footprint", displayName: "Building footprints", ordinal: 8, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: false, declaredSource: "ML-derived" },
+      { railKey: "easement", displayName: "Utility easements", ordinal: 9, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: false, declaredSource: "County honest-absence default" },
+      { railKey: "owner", displayName: "Owner facet", ordinal: 10, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "CAD owner_name" },
+      { railKey: "rrc", displayName: "RRC wells / pipelines", ordinal: 11, kind: "derived", thresholdPct: "90", atomFamilyState: "partial", hasWriter: false, declaredSource: "RRC public GIS" },
+      { railKey: "mud", displayName: "MUD / special districts", ordinal: 12, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TX Comptroller registry" },
     ]);
   }
 
-  it("returns all 3,302 cells (254 counties x 13 rails) once the manifest is fully seeded", async () => {
+  it("returns all 3,048 cells (254 counties x 12 rails) once the manifest is fully seeded", async () => {
     await seedThirteenRails();
     const rows = Array.from({ length: 254 }, (_, i) => ({
       countyFips: String(50000 + i), // synthetic fips, disjoint from every other test's real fips values
