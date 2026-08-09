@@ -20,12 +20,17 @@ import {
   type GeoJsonGeometry,
 } from "../txgio/geo";
 import {
+  assertDeclineCeiling,
+  assertFinalDeclineCeiling,
   assertTexasWgs84Bbox,
   assertWgs84Prj,
   classifyPrj,
+  isNullPlaceholderFeature,
   normalizeTxgioFeature,
+  TxgioDeclineCeilingError,
   TxgioProjectionError,
   TXGIO_ENTRY_FILTER,
+  TXGIO_MAX_DECLINED_ABSOLUTE,
 } from "../txgio/parse";
 import {
   reprojectGeometry,
@@ -38,6 +43,8 @@ import {
 import {
   vintageWithProvenance,
   REPROJECTED_VINTAGE_SUFFIX,
+  storeLoadedLabel,
+  storeListLoadState,
 } from "../txgio/ingest";
 import {
   normalizeStatLandUse,
@@ -571,6 +578,342 @@ describe("normalizeTxgioFeature — projection fail-closed", () => {
   });
 });
 
+/**
+ * The W3-PLACEHOLDER-FAMILY defect. Every fixture below is the REAL
+ * record measured out of the live StratMap archives on 2026-08-09, not a
+ * hand-invented shape — including the coordinates, which is what makes
+ * the "still throws" cases meaningful.
+ */
+describe("null-placeholder declination (W3-PLACEHOLDER-FAMILY)", () => {
+  // Wood 48499 record index 43504 — verbatim from the archive.
+  const WOOD_PLACEHOLDER = {
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-96.11965573099997, 13.923654807000048],
+          [-96.11837544999997, 13.923623986000052],
+          [-96.11853546299994, 13.919695862000026],
+          [-96.11974769799997, 13.919721825000067],
+          [-96.11968279199999, 13.921726079000052],
+          [-96.11965573099997, 13.923654807000048],
+        ],
+      ],
+    },
+    properties: {
+      Prop_ID: "0",
+      GEO_ID: "",
+      OWNER_NAME: "",
+      LEGAL_DESC: "",
+      SITUS_ADDR: ", ,",
+      MKT_VALUE: 0,
+      LAND_VALUE: 0,
+      OBJECTID_1: 30421,
+      FIPS: "48499",
+    },
+  };
+
+  it("declines the real Wood 48499 placeholder WITH IDENTITY instead of halting", () => {
+    const counters = newCounters();
+    const rec = normalizeTxgioFeature(
+      "48499",
+      43504,
+      WOOD_PLACEHOLDER as never,
+      counters,
+    );
+    expect(rec).toBeNull();
+    expect(counters.declined).toHaveLength(1);
+    const d = counters.declined[0];
+    // IDENTITY — the whole point. A bare count is what we are replacing.
+    expect(d.countyFips).toBe("48499");
+    expect(d.featureIndex).toBe(43504);
+    expect(d.propId).toBe("0");
+    expect(d.objectId).toBe("30421");
+    expect(d.reason).toBe("out-of-envelope-null-placeholder");
+    // The OFFENDING VALUE travels with the record.
+    expect(d.detail).toContain("13.919695862");
+    expect(d.detail).toContain("outside Texas");
+  });
+
+  it("STILL THROWS on an out-of-envelope feature that has a real Prop_ID", () => {
+    // The guard must not be softened: identity present means this is
+    // either a projection failure or a real parcel with broken geometry,
+    // and both must halt rather than vanish.
+    const counters = newCounters();
+    const withIdentity = {
+      ...WOOD_PLACEHOLDER,
+      properties: { ...WOOD_PLACEHOLDER.properties, Prop_ID: "77123" },
+    };
+    expect(() =>
+      normalizeTxgioFeature("48499", 43504, withIdentity as never, counters),
+    ).toThrow(TxgioProjectionError);
+    expect(counters.declined).toHaveLength(0);
+  });
+
+  it("STILL THROWS when only GEO_ID is present (identity is either field)", () => {
+    const counters = newCounters();
+    const withGeoId = {
+      ...WOOD_PLACEHOLDER,
+      properties: { ...WOOD_PLACEHOLDER.properties, GEO_ID: "R12345" },
+    };
+    expect(() =>
+      normalizeTxgioFeature("48499", 43504, withGeoId as never, counters),
+    ).toThrow(TxgioProjectionError);
+    expect(counters.declined).toHaveLength(0);
+  });
+
+  it("does NOT decline a placeholder whose geometry is valid Texas land", () => {
+    // THE REGRESSION THAT MATTERS MOST. The probe measured 10,837
+    // placeholder-ATTRIBUTE features sitting inside the envelope across
+    // the three counties (Wood 1,168 / Henderson 8,026 / Liberty 1,643).
+    // An attributes-only predicate would destroy every one of them.
+    const counters = newCounters();
+    const rec = normalizeTxgioFeature(
+      "48499",
+      43072,
+      {
+        geometry: HAYS_PARCEL_12310.geometry,
+        properties: { Prop_ID: "0", GEO_ID: "", OWNER_NAME: "" },
+      } as never,
+      counters,
+    );
+    expect(rec).not.toBeNull();
+    expect(counters.declined).toHaveLength(0);
+  });
+
+  it("leaves a clean county completely unaffected", () => {
+    const counters = newCounters();
+    const rec = normalizeTxgioFeature(
+      "48209",
+      1,
+      HAYS_PARCEL_12310 as never,
+      counters,
+    );
+    expect(rec).not.toBeNull();
+    expect(counters.declined).toHaveLength(0);
+    expect(counters.rowsSkipped).toBe(0);
+  });
+
+  it("does NOT decline under --reproject: a bad conversion is whole-county", () => {
+    // Under reprojection an out-of-envelope result means the CONVERSION
+    // is wrong, which mis-places every feature. Declining the
+    // identity-less subset would quietly thin a county whose coordinates
+    // are all suspect, so reprojected runs keep the unconditional halt.
+    const counters = newCounters();
+    expect(() =>
+      normalizeTxgioFeature(
+        "48499",
+        43504,
+        {
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [0, 0],
+                [60, 0],
+                [60, 45],
+                [0, 45],
+                [0, 0],
+              ],
+            ],
+          },
+          properties: { Prop_ID: "0", GEO_ID: "" },
+        } as never,
+        counters,
+        { reprojectFrom: "EPSG:3857" },
+      ),
+    ).toThrow(TxgioProjectionError);
+    expect(counters.declined).toHaveLength(0);
+  });
+
+  it("round-trips the decline record through JSON (the artifact shape)", () => {
+    const counters = newCounters();
+    normalizeTxgioFeature("48499", 43504, WOOD_PLACEHOLDER as never, counters);
+    const roundTripped = JSON.parse(JSON.stringify(counters.declined));
+    expect(roundTripped).toEqual(counters.declined);
+    expect(roundTripped[0].featureIndex).toBe(43504);
+    expect(roundTripped[0].reason).toBe("out-of-envelope-null-placeholder");
+  });
+});
+
+describe("isNullPlaceholderFeature — the discriminator", () => {
+  it("is true only when BOTH identifiers are absent", () => {
+    expect(isNullPlaceholderFeature({ Prop_ID: "0", GEO_ID: "" })).toBe(true);
+    expect(isNullPlaceholderFeature({ Prop_ID: "", GEO_ID: "" })).toBe(true);
+    expect(isNullPlaceholderFeature({})).toBe(true);
+  });
+
+  it("is false when either identifier is real", () => {
+    expect(isNullPlaceholderFeature({ Prop_ID: "12310", GEO_ID: "" })).toBe(
+      false,
+    );
+    expect(isNullPlaceholderFeature({ Prop_ID: "0", GEO_ID: "R99" })).toBe(
+      false,
+    );
+  });
+
+  it("ignores value fields — a zero-value parcel is ordinary, not a placeholder", () => {
+    // Exempt and un-appraised parcels are real and must never be
+    // declined on the strength of a zero value.
+    expect(
+      isNullPlaceholderFeature({ Prop_ID: "12310", MKT_VALUE: 0, LAND_VALUE: 0 }),
+    ).toBe(false);
+  });
+});
+
+describe("every declination carries identity (the 148-skip fix)", () => {
+  it("records identity for a feature with no polygon geometry", () => {
+    // This is the exact path that fired 148 times across 9 landed
+    // counties as a bare integer, leaving nobody able to say which
+    // parcels were dropped or whether any were real.
+    const counters = newCounters();
+    const rec = normalizeTxgioFeature(
+      "48203",
+      7,
+      {
+        geometry: null,
+        properties: { Prop_ID: "9911", GEO_ID: "R9911", OBJECTID_1: 555 },
+      } as never,
+      counters,
+    );
+    expect(rec).toBeNull();
+    expect(counters.declined).toHaveLength(1);
+    expect(counters.declined[0].propId).toBe("9911");
+    expect(counters.declined[0].geoId).toBe("R9911");
+    expect(counters.declined[0].objectId).toBe("555");
+    expect(counters.declined[0].reason).toBe("no-polygon-geometry");
+    // Legacy counters keep working so existing summaries do not shift.
+    expect(counters.rowsSkipped).toBe(1);
+  });
+
+  it("records identity for an empty geometry", () => {
+    const counters = newCounters();
+    normalizeTxgioFeature(
+      "48203",
+      3,
+      {
+        geometry: { type: "Polygon", coordinates: [] },
+        properties: { Prop_ID: "4242" },
+      } as never,
+      counters,
+    );
+    expect(counters.declined).toHaveLength(1);
+    expect(counters.declined[0].reason).toBe("empty-geometry");
+    expect(counters.declined[0].propId).toBe("4242");
+  });
+});
+
+describe("halt-versus-decline ceiling", () => {
+  function declineN(
+    n: number,
+    read: number,
+    reason: "out-of-envelope-null-placeholder" | "empty-geometry" =
+      "out-of-envelope-null-placeholder",
+  ) {
+    const counters = newCounters();
+    counters.rowsRead = read;
+    for (let i = 0; i < n; i += 1) {
+      counters.declined.push({
+        countyFips: "48499",
+        featureIndex: i,
+        propId: null,
+        geoId: null,
+        objectId: null,
+        ownerName: null,
+        reason,
+        detail: "test",
+      });
+    }
+    return counters;
+  }
+
+  it("tolerates the measured real-world geometry-absence rate (Liberty 1.16%)", () => {
+    // 1,903 of 164,178 empty-geometry features is the REAL Liberty
+    // 48291 measurement. This class is pre-existing and must not halt
+    // the county — it must be named instead.
+    expect(() =>
+      assertFinalDeclineCeiling(
+        declineN(1_903, 164_178, "empty-geometry"),
+        "48291",
+      ),
+    ).not.toThrow();
+  });
+
+  it("halts a county that is MOSTLY geometry-less (truncated download)", () => {
+    expect(() =>
+      assertFinalDeclineCeiling(
+        declineN(50_000, 164_178, "empty-geometry"),
+        "48291",
+      ),
+    ).toThrow(TxgioDeclineCeilingError);
+  });
+
+  it("does NOT judge geometry-absence mid-stream on a clustered prefix", () => {
+    // THE REAL HENDERSON TRAP. Its first 1,000 records are 47% empty
+    // while the county-wide rate is 1.64%. The streaming check must
+    // ignore this class entirely or it halts a county that is fine.
+    expect(() =>
+      assertDeclineCeiling(declineN(473, 1_000, "empty-geometry"), "48213"),
+    ).not.toThrow();
+  });
+
+  it("does not let geometry-absence volume mask a coordinate defect", () => {
+    // The two classes are counted separately on purpose: 1,903 empty
+    // geometries must not raise the bar for out-of-envelope coordinates.
+    const counters = declineN(1_903, 164_178, "empty-geometry");
+    for (let i = 0; i < 11; i += 1) {
+      counters.declined.push({
+        countyFips: "48291",
+        featureIndex: 900_000 + i,
+        propId: null,
+        geoId: null,
+        objectId: null,
+        ownerName: null,
+        reason: "out-of-envelope-null-placeholder",
+        detail: "test",
+      });
+    }
+    expect(() => assertDeclineCeiling(counters, "48291")).toThrow(
+      /out-of-envelope null-placeholder/,
+    );
+  });
+
+  it("permits the real measured worst case (2 of 164,178)", () => {
+    expect(() =>
+      assertDeclineCeiling(declineN(2, 164_178), "48291"),
+    ).not.toThrow();
+  });
+
+  it("halts past the absolute ceiling", () => {
+    expect(() =>
+      assertDeclineCeiling(
+        declineN(TXGIO_MAX_DECLINED_ABSOLUTE + 1, 500_000),
+        "48499",
+      ),
+    ).toThrow(TxgioDeclineCeilingError);
+  });
+
+  it("halts a SMALL county on the fraction even under the absolute ceiling", () => {
+    // 5 of 1,600 is 0.31% — under 10 absolute, but far past 0.1%. A flat
+    // absolute-only ceiling would let a broken small county bleed.
+    expect(() => assertDeclineCeiling(declineN(5, 1_600), "48301")).toThrow(
+      TxgioDeclineCeilingError,
+    );
+  });
+
+  it("does not apply the fraction on a tiny sample (1 of 1 is not 100% broken)", () => {
+    expect(() => assertDeclineCeiling(declineN(1, 1), "48499")).not.toThrow();
+  });
+
+  it("explains itself with counts and named features", () => {
+    expect(() =>
+      assertDeclineCeiling(declineN(50, 100_000), "48499"),
+    ).toThrow(
+      /50 out-of-envelope null-placeholder features declined out of 100000 read/,
+    );
+  });
+});
+
 describe("EPSG:3857 -> EPSG:4326 reprojection (webMercatorToWgs84)", () => {
   it("recovers the PUBLISHED EPSG:3857 extent constants exactly", () => {
     // Independent corroboration: these degree values are the CRS's own
@@ -968,6 +1311,30 @@ describe("TxGIO county registry + zip entry filter", () => {
     expect(resolveTxgioCounty("48129")?.name).toBe("Donley");
     expect(TXGIO_ABSENT_FROM_STRATMAP["48129"]).toMatch(/404/);
     expect(TXGIO_ABSENT_FROM_STRATMAP["48269"]).toBeUndefined();
+  });
+
+  it("storeLoadedLabel is store-derived, not the hand TXGIO_COUNTIES map", () => {
+    // Kenedy (48261) is NOT on the hand map, but prior wave proof left
+    // rows in the store — CLI "loaded before" must follow row count.
+    expect(isTxgioCountyLoaded("48261")).toBe(false);
+    expect(storeLoadedLabel(2400)).toBe("yes");
+    expect(storeLoadedLabel(1)).toBe("yes");
+    expect(storeLoadedLabel(0)).toBe("no");
+    expect(storeLoadedLabel(null)).toBe("unknown (no DATABASE_URL)");
+    // A hand-map county with zero store rows is still "no".
+    expect(isTxgioCountyLoaded("48209")).toBe(true);
+    expect(storeLoadedLabel(0)).toBe("no");
+  });
+
+  it("storeListLoadState queries store set; UNKNOWN when DATABASE_URL absent", () => {
+    const store = new Set(["48209", "48261"]);
+    expect(storeListLoadState("48261", store, false)).toBe("LOADED");
+    expect(storeListLoadState("48269", store, false)).toBe("-     ");
+    expect(storeListLoadState("48129", store, true)).toBe("ABSENT");
+    // No store observation: never fall back to the hand map.
+    expect(storeListLoadState("48209", null, false)).toBe("UNKNOWN");
+    expect(storeListLoadState("48261", null, false)).toBe("UNKNOWN");
+    expect(storeListLoadState("48129", null, true)).toBe("ABSENT");
   });
 
   it("builds the collection resource URL", () => {

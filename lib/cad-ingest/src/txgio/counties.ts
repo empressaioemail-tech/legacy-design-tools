@@ -42,19 +42,22 @@
  * be dry-run until someone hand-added a line here. That coupling
  * encoded no real constraint — `txgioDownloadUrl` was already general
  * and the schema is statewide-uniform — and it blocked the 235-county
- * statewide acquisition. The two concerns are now separate:
+ * statewide acquisition. The concerns are now separate:
  *
  *   TXGIO_STATEWIDE_COUNTIES  all 254 real TX counties (fips -> name),
  *                             generated from `texas_roster_v1.json`.
  *                             This is what the CLI resolves against.
- *   TXGIO_COUNTIES            the counties whose geometry is LOADED into
- *                             `txgio_parcel`. Still hand-maintained,
- *                             because it is a claim about the store's
- *                             contents, and `jurisdictions.ts` composes
- *                             it into `getJurisdictionConfig().geometry`
- *                             — ballooning it to 254 would assert
- *                             geometry we do not have. Add a county here
- *                             when its load lands, not before.
+ *   TXGIO_COUNTIES            hand-maintained roster for
+ *                             `jurisdictions.ts` geometry composition
+ *                             (`getJurisdictionConfig().geometry`).
+ *                             NOT store truth for wave ingest ops —
+ *                             the ingest CLI derives "loaded before"
+ *                             and `--list` LOADED from `txgio_parcel`
+ *                             via `countCountyParcels` /
+ *                             `listLoadedCountyFips`. Keep maintaining
+ *                             this map when product surfaces need a
+ *                             jurisdiction geometry claim; do not use
+ *                             it as the ingest loaded-record.
  *
  * Land-use: StratMap ships geometry + owner/situs, but the choropleth
  * paint reads land-use from the CAD appraisal roll (`cad_property`), a
@@ -378,18 +381,18 @@ export const TXGIO_STATEWIDE_COUNTIES: Record<string, string> = {
 };
 
 /**
- * The counties whose parcel geometry is LOADED into `txgio_parcel`.
+ * Hand-maintained geometry roster for `jurisdictions.ts` composition.
  *
- * This is a claim about what the store CONTAINS, not about what the
- * ingest may fetch — `resolveTxgioCounty` resolves all 254. It stays
- * hand-maintained because `jurisdictions.ts` composes it into
- * `getJurisdictionConfig().geometry`, where presence means "this county
- * has parcel geometry available"; asserting that for a county with no
- * rows would be a fabricated capability.
+ * SPLIT (2026-08-08 Wave 0): this map is NOT the ingest CLI's loaded
+ * record. Wave ops observe `txgio_parcel` via `countCountyParcels` /
+ * `listLoadedCountyFips`. Presence here means product config claims
+ * parcel geometry for the jurisdiction; the CLI must not depend on
+ * hand-maintaining this map for dry-run/apply "loaded before" or
+ * `--list` LOADED state.
  *
  * Order: original v1 pair, then the metro-5 (formerly live-only), then
- * the three gap counties, then the DFW fan. Add a county when its load
- * lands.
+ * the three gap counties, then the DFW fan. Add a county when product
+ * surfaces need the geometry claim.
  */
 export const TXGIO_COUNTIES: Record<string, TxgioCounty> = {
   // v1 (had no live county GIS)
@@ -422,7 +425,11 @@ export function isTexasCountyFips(fips: string): boolean {
   return TXGIO_STATEWIDE_COUNTIES[fips.trim()] !== undefined;
 }
 
-/** True when the county's geometry is already loaded into `txgio_parcel`. */
+/**
+ * True when `fips` is present on the hand-maintained `TXGIO_COUNTIES`
+ * geometry roster (jurisdictions composition). Not store truth — the
+ * ingest CLI uses `storeLoadedLabel` / `listLoadedCountyFips` instead.
+ */
 export function isTxgioCountyLoaded(fips: string): boolean {
   return TXGIO_COUNTIES[fips.trim()] !== undefined;
 }

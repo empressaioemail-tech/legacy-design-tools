@@ -55,12 +55,20 @@ export {
 } from "./txgio/counties";
 export type { TxgioCounty } from "./txgio/counties";
 export {
+  assertDeclineCeiling,
+  assertFinalDeclineCeiling,
   assertTexasWgs84Bbox,
   assertWgs84Prj,
   classifyPrj,
+  isNullPlaceholderFeature,
   normalizeTxgioFeature,
+  TxgioDeclineCeilingError,
   TxgioProjectionError,
+  FRACTION_CEILING_MIN_SAMPLE,
   TXGIO_ENTRY_FILTER,
+  TXGIO_MAX_DECLINED_ABSOLUTE,
+  TXGIO_MAX_DECLINED_FRACTION,
+  TXGIO_MAX_GEOMETRY_ABSENT_FRACTION,
 } from "./txgio/parse";
 export type {
   TxgioParcelRecord,
@@ -79,6 +87,9 @@ export {
 export type { SupportedSourceCrs } from "./txgio/reproject";
 export {
   countCountyParcels,
+  listLoadedCountyFips,
+  storeLoadedLabel,
+  storeListLoadState,
   deleteCountyParcels,
   replaceCountyParcels,
   upsertTxgioParcels,
@@ -170,3 +181,28 @@ export type {
   CityContainmentResult,
   CountyContainmentResult,
 } from "./boundary/containment";
+export {
+  NFHL_DEFAULT_SOURCE,
+  NFHL_DEFAULT_VINTAGE,
+  NFHL_FLOOD_LAYER,
+  NFHL_SOURCE_CITATION,
+  nfhlBulkDownloadUrl,
+} from "./nfhl/service";
+export { normalizeNfhlFeature, assertNfhlGeographicCoordinates } from "./nfhl/parse";
+export type { TxFemaNfhlFloodZoneRecord, NfhlFeature } from "./nfhl/parse";
+export {
+  deleteAllNfhlFloodZones,
+  countAllNfhlFloodZones,
+  upsertNfhlFloodZones,
+  NFHL_DEFAULT_BATCH_SIZE,
+} from "./nfhl/ingest";
+export type { NfhlIngestDb, NfhlUpsertOptions, NfhlUpsertSummary } from "./nfhl/ingest";
+export {
+  buildNfhlZoneIndex,
+  resolveParcelFloodZones,
+} from "./nfhl/evaluation";
+export type {
+  NfhlZoneIndexEntry,
+  ParcelFloodZoneHit,
+  ParcelFloodZoneResult,
+} from "./nfhl/evaluation";
