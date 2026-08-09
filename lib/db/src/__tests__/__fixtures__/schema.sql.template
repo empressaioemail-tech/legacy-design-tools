@@ -1007,6 +1007,75 @@ CREATE TABLE @@SCHEMA@@.knowledge_atoms (
 );
 
 
+-- Name: manifest_jurisdiction_cost; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.manifest_jurisdiction_cost (
+    county_fips text NOT NULL,
+    commitment_cost_usd numeric(10,2),
+    lifetime_cost_usd numeric(10,2) DEFAULT '0'::numeric NOT NULL,
+    first_acquisition_run_id uuid,
+    first_acquisition_recorded_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: manifest_run; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.manifest_run (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    lane text NOT NULL,
+    job text NOT NULL,
+    target_fips text,
+    target_city text,
+    cohort text,
+    scope_label text,
+    stage text NOT NULL,
+    status text DEFAULT 'running'::text NOT NULL,
+    outcome text,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    heartbeat_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    items_done integer,
+    items_total integer,
+    holds_heavy_slot boolean DEFAULT false NOT NULL,
+    artifact_path text,
+    compute_seconds numeric(12,3),
+    db_seconds numeric(12,3),
+    egress_bytes bigint,
+    external_api_calls integer,
+    human_minutes numeric(8,2),
+    cost_usd numeric(10,2),
+    run_class text DEFAULT 'other'::text NOT NULL,
+    counts_toward_commitment boolean DEFAULT false NOT NULL,
+    notes text,
+    CONSTRAINT manifest_run_run_class_check CHECK ((run_class = ANY (ARRAY['acquisition'::text, 'rewarm'::text, 'verify'::text, 'score'::text, 'other'::text]))),
+    CONSTRAINT manifest_run_status_check CHECK ((status = ANY (ARRAY['running'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])))
+);
+
+
+-- Name: manifest_slot_queue; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.manifest_slot_queue (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    resource_key text NOT NULL,
+    run_id uuid NOT NULL,
+    queue_position integer NOT NULL,
+    enqueued_at timestamp with time zone DEFAULT now() NOT NULL,
+    dequeued_at timestamp with time zone
+);
+
+
+-- Name: manifest_slot_reservation; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.manifest_slot_reservation (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    resource_key text NOT NULL,
+    holder_run_id uuid NOT NULL,
+    acquired_at timestamp with time zone DEFAULT now() NOT NULL,
+    released_at timestamp with time zone
+);
+
+
 -- Name: materializable_elements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.materializable_elements (
@@ -1324,6 +1393,43 @@ CREATE TABLE @@SCHEMA@@.qa_triage_items (
     CONSTRAINT qa_triage_items_severity_check CHECK ((severity = ANY (ARRAY['info'::text, 'warning'::text, 'error'::text]))),
     CONSTRAINT qa_triage_items_source_kind_check CHECK ((source_kind = ANY (ARRAY['autopilot_finding'::text, 'run'::text, 'suite_failure'::text, 'checklist_item'::text]))),
     CONSTRAINT qa_triage_items_status_check CHECK ((status = ANY (ARRAY['open'::text, 'sent'::text, 'done'::text])))
+);
+
+
+-- Name: rail_state_history; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.rail_state_history (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    county_fips text NOT NULL,
+    rail_key text NOT NULL,
+    rail_state text,
+    honest_coverage_pct numeric(5,2),
+    threshold_pct numeric(5,2),
+    verified_at timestamp with time zone,
+    run_id uuid,
+    snapshot_reason text NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rail_state_history_rail_state_check CHECK (((rail_state IS NULL) OR (rail_state = ANY (ARRAY['satisfied-present'::text, 'satisfied-absent'::text, 'not-yet'::text])))),
+    CONSTRAINT rail_state_history_snapshot_reason_check CHECK ((snapshot_reason = ANY (ARRAY['cell-change'::text, 'nightly'::text, 'manual'::text])))
+);
+
+
+-- Name: rail_verification; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.rail_verification (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    county_fips text NOT NULL,
+    rail_key text NOT NULL,
+    verified_at timestamp with time zone NOT NULL,
+    verified_by_instrument text NOT NULL,
+    verification_method text NOT NULL,
+    verification_outcome text NOT NULL,
+    artifact_path text,
+    run_id uuid,
+    notes text,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rail_verification_method_check CHECK ((verification_method = ANY (ARRAY['sweep'::text, 'sample'::text, 'probe'::text, 'derived'::text, 'roster-load'::text, 'unverified'::text]))),
+    CONSTRAINT rail_verification_outcome_check CHECK ((verification_outcome = ANY (ARRAY['confirmed-present'::text, 'confirmed-absent'::text, 'inconclusive'::text, 'method-only'::text])))
 );
 
 
@@ -2245,6 +2351,30 @@ ALTER TABLE ONLY @@SCHEMA@@.knowledge_atoms
     ADD CONSTRAINT knowledge_atoms_pkey PRIMARY KEY (id);
 
 
+-- Name: manifest_jurisdiction_cost manifest_jurisdiction_cost_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_jurisdiction_cost
+    ADD CONSTRAINT manifest_jurisdiction_cost_pkey PRIMARY KEY (county_fips);
+
+
+-- Name: manifest_run manifest_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_run
+    ADD CONSTRAINT manifest_run_pkey PRIMARY KEY (id);
+
+
+-- Name: manifest_slot_queue manifest_slot_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_queue
+    ADD CONSTRAINT manifest_slot_queue_pkey PRIMARY KEY (id);
+
+
+-- Name: manifest_slot_reservation manifest_slot_reservation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_reservation
+    ADD CONSTRAINT manifest_slot_reservation_pkey PRIMARY KEY (id);
+
+
 -- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
@@ -2369,6 +2499,18 @@ ALTER TABLE ONLY @@SCHEMA@@.qa_settings
 
 ALTER TABLE ONLY @@SCHEMA@@.qa_triage_items
     ADD CONSTRAINT qa_triage_items_pkey PRIMARY KEY (id);
+
+
+-- Name: rail_state_history rail_state_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.rail_state_history
+    ADD CONSTRAINT rail_state_history_pkey PRIMARY KEY (id);
+
+
+-- Name: rail_verification rail_verification_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.rail_verification
+    ADD CONSTRAINT rail_verification_pkey PRIMARY KEY (id);
 
 
 -- Name: reasoning_atoms reasoning_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2998,6 +3140,51 @@ CREATE INDEX knowledge_atoms_knowledge_at_idx ON @@SCHEMA@@.knowledge_atoms USIN
 CREATE INDEX knowledge_atoms_subject_claim_idx ON @@SCHEMA@@.knowledge_atoms USING btree (subject_id, claim_type);
 
 
+-- Name: manifest_run_active_heavy_slot_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX manifest_run_active_heavy_slot_uniq ON @@SCHEMA@@.manifest_run USING btree (holds_heavy_slot) WHERE ((holds_heavy_slot = true) AND (status = 'running'::text));
+
+
+-- Name: manifest_run_lane_started_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX manifest_run_lane_started_idx ON @@SCHEMA@@.manifest_run USING btree (lane, started_at);
+
+
+-- Name: manifest_run_status_heartbeat_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX manifest_run_status_heartbeat_idx ON @@SCHEMA@@.manifest_run USING btree (status, heartbeat_at);
+
+
+-- Name: manifest_run_target_fips_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX manifest_run_target_fips_idx ON @@SCHEMA@@.manifest_run USING btree (target_fips);
+
+
+-- Name: manifest_slot_queue_active_position_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX manifest_slot_queue_active_position_uniq ON @@SCHEMA@@.manifest_slot_queue USING btree (resource_key, queue_position) WHERE (dequeued_at IS NULL);
+
+
+-- Name: manifest_slot_queue_active_run_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX manifest_slot_queue_active_run_uniq ON @@SCHEMA@@.manifest_slot_queue USING btree (resource_key, run_id) WHERE (dequeued_at IS NULL);
+
+
+-- Name: manifest_slot_queue_resource_enqueued_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX manifest_slot_queue_resource_enqueued_idx ON @@SCHEMA@@.manifest_slot_queue USING btree (resource_key, enqueued_at);
+
+
+-- Name: manifest_slot_reservation_active_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX manifest_slot_reservation_active_uniq ON @@SCHEMA@@.manifest_slot_reservation USING btree (resource_key) WHERE (released_at IS NULL);
+
+
+-- Name: manifest_slot_reservation_holder_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX manifest_slot_reservation_holder_idx ON @@SCHEMA@@.manifest_slot_reservation USING btree (holder_run_id);
+
+
 -- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX materializable_elements_active_ifc_identity_uniq ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id, ifc_global_id) WHERE ((superseded_at IS NULL) AND (source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])));
@@ -3136,6 +3323,26 @@ CREATE INDEX qa_triage_items_source_idx ON @@SCHEMA@@.qa_triage_items USING btre
 -- Name: qa_triage_items_status_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX qa_triage_items_status_idx ON @@SCHEMA@@.qa_triage_items USING btree (status, created_at);
+
+
+-- Name: rail_state_history_cell_recorded_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX rail_state_history_cell_recorded_idx ON @@SCHEMA@@.rail_state_history USING btree (county_fips, rail_key, recorded_at);
+
+
+-- Name: rail_state_history_recorded_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX rail_state_history_recorded_at_idx ON @@SCHEMA@@.rail_state_history USING btree (recorded_at);
+
+
+-- Name: rail_verification_cell_verified_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX rail_verification_cell_verified_idx ON @@SCHEMA@@.rail_verification USING btree (county_fips, rail_key, verified_at);
+
+
+-- Name: rail_verification_run_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX rail_verification_run_idx ON @@SCHEMA@@.rail_verification USING btree (run_id);
 
 
 -- Name: reasoning_atoms_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
@@ -3557,6 +3764,24 @@ ALTER TABLE ONLY @@SCHEMA@@.findings
 
 ALTER TABLE ONLY @@SCHEMA@@.findings
     ADD CONSTRAINT findings_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+
+
+-- Name: manifest_jurisdiction_cost manifest_jurisdiction_cost_first_acquisition_run_id_manifest_ru; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_jurisdiction_cost
+    ADD CONSTRAINT manifest_jurisdiction_cost_first_acquisition_run_id_manifest_ru FOREIGN KEY (first_acquisition_run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE SET NULL;
+
+
+-- Name: manifest_slot_queue manifest_slot_queue_run_id_manifest_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_queue
+    ADD CONSTRAINT manifest_slot_queue_run_id_manifest_run_id_fk FOREIGN KEY (run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE CASCADE;
+
+
+-- Name: manifest_slot_reservation manifest_slot_reservation_holder_run_id_manifest_run_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.manifest_slot_reservation
+    ADD CONSTRAINT manifest_slot_reservation_holder_run_id_manifest_run_id_fk FOREIGN KEY (holder_run_id) REFERENCES @@SCHEMA@@.manifest_run(id) ON DELETE CASCADE;
 
 
 -- Name: materializable_elements materializable_elements_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

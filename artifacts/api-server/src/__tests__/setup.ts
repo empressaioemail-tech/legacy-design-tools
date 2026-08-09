@@ -269,6 +269,15 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // pass without truncation between tests would throw).
   "county_manifest",
   "county_rail",
+  // feat/manifest-observability-tables — writers in manifestObservability.ts
+  // and future county-factory CLIs. FK order: queue/reservation -> run;
+  // history/verification optionally reference run.
+  "rail_verification",
+  "rail_state_history",
+  "manifest_slot_queue",
+  "manifest_slot_reservation",
+  "manifest_jurisdiction_cost",
+  "manifest_run",
 ];
 
 /**
