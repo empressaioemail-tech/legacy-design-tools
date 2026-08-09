@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { eq, and } from "drizzle-orm";
 import {
+  db,
   railStateHistory,
   manifestRun,
   manifestSlotReservation,
@@ -29,7 +30,6 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
-const { db } = await import("@workspace/db");
 const { setupRouteTests } = await import("./setup");
 setupRouteTests();
 
