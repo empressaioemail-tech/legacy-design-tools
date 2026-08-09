@@ -3,6 +3,7 @@
  * fixtures, projection guard, idempotency contract, and parcel evaluation.
  */
 
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
   assertNfhlGeographicCoordinates,
@@ -12,6 +13,7 @@ import {
   buildNfhlZoneIndex,
   resolveParcelFloodZones,
 } from "../nfhl/evaluation";
+import { streamGeoJsonSeqWithBackpressure } from "../nfhl/gdal";
 import { pointInGeometry } from "../txgio/geo";
 import {
   countAllNfhlFloodZones,
@@ -127,6 +129,95 @@ describe("parcel flood-zone evaluation helper", () => {
       expect(result.basis).toContain("honest absence");
       expect(result.zones).toHaveLength(0);
     }
+  });
+});
+
+describe("streamGeoJsonSeqWithBackpressure", () => {
+  function featureLine(id: number): string {
+    return JSON.stringify({
+      type: "Feature",
+      properties: { OBJECTID: id },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.8, 30.1],
+            [-97.79, 30.1],
+            [-97.79, 30.11],
+            [-97.8, 30.11],
+            [-97.8, 30.1],
+          ],
+        ],
+      },
+    });
+  }
+
+  /**
+   * Fast producer that only advances while the Readable is flowing.
+   * Without pause/resume it dumps the full payload into the consumer queue
+   * (the statewide OOM shape). With pause/resume, queue depth stays O(highWater).
+   */
+  function makeGatedProducer(total: number): Readable {
+    let nextId = 0;
+    const stream = new Readable({
+      read() {
+        while (nextId < total && !this.isPaused()) {
+          const ok = this.push(featureLine(nextId++) + "\n");
+          if (!ok) break;
+        }
+        if (nextId >= total) {
+          this.push(null);
+        }
+      },
+    });
+    return stream;
+  }
+
+  it("keeps queue depth near highWaterMark under a slow consumer", async () => {
+    const highWater = 4;
+    const lowWater = 1;
+    const total = 60;
+    const stream = makeGatedProducer(total);
+    let yielded = 0;
+    let peakDepth = 0;
+    let pauseCalls = 0;
+    const origPause = stream.pause.bind(stream);
+    stream.pause = ((...args: []) => {
+      pauseCalls += 1;
+      return origPause(...args);
+    }) as typeof stream.pause;
+
+    for await (const _ of streamGeoJsonSeqWithBackpressure(stream, {
+      highWaterMark: highWater,
+      lowWaterMark: lowWater,
+      onQueueDepth: (d) => {
+        if (d > peakDepth) peakDepth = d;
+      },
+    })) {
+      yielded += 1;
+      // Slow consumer — without backpressure peakDepth approaches `total`.
+      await new Promise((r) => setTimeout(r, 2));
+    }
+
+    expect(yielded).toBe(total);
+    expect(pauseCalls).toBeGreaterThan(0);
+    // Old unbounded bridge never pauses; peakDepth ≈ total.
+    // Fixed bridge pauses at highWater (± one push race).
+    expect(peakDepth).toBeLessThanOrEqual(highWater + 1);
+    expect(peakDepth).toBeLessThan(total / 2);
+  });
+
+  it("delivers every feature and drains after end", async () => {
+    const lines = Array.from({ length: 7 }, (_, i) => featureLine(i)).join("\n") + "\n";
+    const stream = Readable.from([lines]);
+    const ids: number[] = [];
+    for await (const f of streamGeoJsonSeqWithBackpressure(stream, {
+      highWaterMark: 2,
+      lowWaterMark: 0,
+    })) {
+      ids.push(Number((f.properties as { OBJECTID: number }).OBJECTID));
+    }
+    expect(ids).toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 });
 
