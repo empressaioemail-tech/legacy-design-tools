@@ -71,10 +71,12 @@ describe("COUNTY_RAIL_DECLARATION", () => {
     // easement: utility-easement published 1.12.0 + engine PR #282 -- present now, was 'unpublished'.
     expect(byKey.get("easement")?.atomFamilyState).toBe("present");
 
-    // landuse: atomFamilyState stays 'missing' (no land-use atom exists anywhere).
-    // hasWriter stays true -- backed by the live CAD-roll scorer
-    // (countyCoverageScoreCli.ts), NOT the dead Cotality land_use_code path.
-    expect(byKey.get("landuse")?.atomFamilyState).toBe("missing");
+    // cad / flood / landuse: engine PR #291 atom writers shipped 2026-08-09.
+    expect(byKey.get("cad")?.atomFamilyState).toBe("present");
+    expect(byKey.get("cad")?.hasWriter).toBe(true);
+    expect(byKey.get("flood")?.atomFamilyState).toBe("present");
+    expect(byKey.get("flood")?.hasWriter).toBe(true);
+    expect(byKey.get("landuse")?.atomFamilyState).toBe("present");
     expect(byKey.get("landuse")?.hasWriter).toBe(true);
   });
 });

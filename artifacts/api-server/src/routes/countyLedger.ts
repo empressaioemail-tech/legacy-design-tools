@@ -461,6 +461,15 @@ router.get("/", async (_req: Request, res: Response) => {
     // pre-seed response does not silently claim a bogus "0 of 254".
     const totalCounties = manifestRows.length || counties.length;
     const satisfiedCells = manifestCells.filter(isSatisfiedCell).length;
+    const satisfiedPresentCells = manifestCells.filter(
+      (c) => c.displayState === "satisfied-present",
+    ).length;
+    const satisfiedPresentPartialCells = manifestCells.filter(
+      (c) => c.displayState === "satisfied-present" && c.isPartial,
+    ).length;
+    const satisfiedAbsentCells = manifestCells.filter(
+      (c) => c.displayState === "satisfied-absent",
+    ).length;
     const parcelCountByFips = new Map(
       manifestRows.map((m) => [m.countyFips, num(m.parcelCountEst)]),
     );
@@ -482,7 +491,13 @@ router.get("/", async (_req: Request, res: Response) => {
         // 2026-08-08 (`join` removed; see countyRailRefreshCli.ts header).
         totalRails: COUNTY_RAIL_COUNT,
         totalCells: manifestCells.length,
+        // Rollup gate (ruling 3): non-partial satisfied-present + satisfied-absent.
+        // PARTIAL cells (displayState satisfied-present, isPartial true) are
+        // visible on manifestCells but excluded here — see isSatisfiedCell().
         satisfiedCells,
+        satisfiedPresentCells,
+        satisfiedPresentPartialCells,
+        satisfiedAbsentCells,
         texasCompletenessPct: rollup.texasPct,
       },
     });
