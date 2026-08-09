@@ -17,6 +17,7 @@
  *                              #   stratmap25-landparcels_48209_hays_202503
  *     [--batch-size=250] [--limit=N] [--dry-run]
  *     [--reproject=3857]       # convert EPSG:3857 metres -> WGS84
+ *     [--declined-out=<path>]  # write the identified declined roster
  *   pnpm --filter @workspace/cad-ingest txgio-ingest -- --list
  *
  * DATABASE_URL must point at the target Postgres unless --dry-run.
@@ -69,7 +70,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 import pg from "pg";
@@ -82,6 +83,8 @@ import {
 } from "./counties";
 import type { TxgioParcelRecord } from "./parse";
 import {
+  assertDeclineCeiling,
+  assertFinalDeclineCeiling,
   assertWgs84Prj,
   classifyPrj,
   normalizeTxgioFeature,
@@ -100,7 +103,19 @@ import {
   TXGIO_DEFAULT_BATCH_SIZE,
   type TxgioTransactionalDb,
 } from "./ingest";
-import { newCounters, type ParseCounters } from "../types";
+import {
+  TXGIO_MAX_DECLINED_ABSOLUTE,
+  TXGIO_MAX_DECLINED_FRACTION,
+} from "./parse";
+import { newCounters, summarizeDeclines, type ParseCounters } from "../types";
+
+/**
+ * How many declined features to print inline. The full roster always
+ * goes to `--declined-out` uncapped; this only keeps a pathological run
+ * from flooding the terminal. Above the halt ceiling the run dies
+ * anyway, so in practice this cap is never reached on a landing county.
+ */
+const DECLINE_LOG_CAP = 25;
 import { downloadToFile, isUrl } from "../download";
 import { extractZipEntries } from "../zip";
 
@@ -159,8 +174,17 @@ async function* readTxgioFeatures(
   for (;;) {
     if (limit !== undefined && counters.rowsParsed >= limit) return;
     const result = await source.read();
-    if (result.done) return;
+    if (result.done) {
+      // END-OF-STREAM ceiling for the geometry-absence class. Raised
+      // from INSIDE the generator so it propagates into
+      // `replaceCountyParcels`'s transaction and rolls the load back —
+      // a county over this ceiling must not commit. Checking it after
+      // the await-loop instead would let the transaction commit first.
+      assertFinalDeclineCeiling(counters, countyFips);
+      return;
+    }
     counters.rowsRead += 1;
+    const declinedBefore = counters.declined.length;
     const record = normalizeTxgioFeature(
       countyFips,
       featureIndex,
@@ -169,6 +193,13 @@ async function* readTxgioFeatures(
       { reprojectFrom },
     );
     featureIndex += 1;
+    // Enforce the halt-versus-decline ceiling AS THE STREAM ADVANCES, so
+    // a county that is broadly defective dies early rather than after
+    // loading most of a garbage county. Only checked when a declination
+    // actually happened — the common path pays nothing.
+    if (counters.declined.length !== declinedBefore) {
+      assertDeclineCeiling(counters, countyFips);
+    }
     if (record) {
       counters.rowsParsed += 1;
       yield record;
@@ -189,8 +220,10 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       reproject: { type: "string" },
+      "declined-out": { type: "string" },
     },
   });
+  const declinedOut = values["declined-out"];
 
   // --reproject=3857 is the ONLY accepted value. Anything else is a
   // typo or an unsupported projection, and both must fail before any
@@ -499,10 +532,62 @@ async function main(): Promise<void> {
   log(
     `rows ${wouldOrDid}insert:  ${rowsInserted} (one per intersecting grid cell)`,
   );
-  log(`features skipped: ${counters.rowsSkipped} (no polygon geometry)`);
+  // DECLINED FEATURES, BY CAUSE AND BY NAME. The old line reported a
+  // single integer labelled "(no polygon geometry)", which was wrong for
+  // two of the three paths feeding it and carried no identity at all —
+  // that is how 148 features were dropped across 9 counties with nobody
+  // able to say which. Every declination is now named.
+  const byReason = summarizeDeclines(counters.declined);
+  const reasonSummary = Object.entries(byReason)
+    .map(([r, n]) => `${r}=${n}`)
+    .join(", ");
+  log(
+    `features declined: ${counters.declined.length}` +
+      (reasonSummary ? ` (${reasonSummary})` : ""),
+  );
+  for (const d of counters.declined.slice(0, DECLINE_LOG_CAP)) {
+    log(
+      `  DECLINED feature ${d.featureIndex} prop_id=${d.propId ?? "-"} ` +
+        `geo_id=${d.geoId ?? "-"} objectid=${d.objectId ?? "-"} ` +
+        `reason=${d.reason} :: ${d.detail}`,
+    );
+  }
+  if (counters.declined.length > DECLINE_LOG_CAP) {
+    log(
+      `  ... ${counters.declined.length - DECLINE_LOG_CAP} more (full roster ` +
+        `only in --declined-out)`,
+    );
+  }
   log(`duration:         ${seconds}s`);
-  if (counters.skipSamples.length > 0) {
-    log(`skip samples:     ${counters.skipSamples.join(" | ")}`);
+  // The durable artifact: the full identified roster on disk, so a
+  // declined parcel is answerable long after the run's stdout is gone.
+  if (declinedOut) {
+    await writeFile(
+      declinedOut,
+      JSON.stringify(
+        {
+          generated: new Date().toISOString(),
+          county: county.fips,
+          countyName: county.name,
+          sourceFile,
+          sourceVintage: vintage,
+          dryRun,
+          featuresRead: counters.rowsRead,
+          featuresParsed: counters.rowsParsed,
+          declinedCount: counters.declined.length,
+          declinedByReason: byReason,
+          ceiling: {
+            absolute: TXGIO_MAX_DECLINED_ABSOLUTE,
+            fraction: TXGIO_MAX_DECLINED_FRACTION,
+          },
+          declined: counters.declined,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    log(`declined roster:  ${declinedOut}`);
   }
   if (counters.rowsParsed === 0) {
     fail("zero features parsed — wrong file or schema drift; nothing ingested");
