@@ -18,7 +18,8 @@
     "zoning-stamp": "tsx src/txgio/zoning-cli.ts",
     "permits-ingest": "tsx src/permits/cli.ts",
     "address-ingest": "tsx src/address/cli.ts",
-    "boundary-ingest": "tsx src/boundary/cli.ts"
+    "boundary-ingest": "tsx src/boundary/cli.ts",
+    "nfhl-ingest": "tsx src/nfhl/cli.ts"
   },
   "dependencies": {
     "@workspace/adapters": "workspace:*",

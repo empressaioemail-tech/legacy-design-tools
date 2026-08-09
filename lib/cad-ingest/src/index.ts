@@ -170,3 +170,28 @@ export type {
   CityContainmentResult,
   CountyContainmentResult,
 } from "./boundary/containment";
+export {
+  NFHL_DEFAULT_SOURCE,
+  NFHL_DEFAULT_VINTAGE,
+  NFHL_FLOOD_LAYER,
+  NFHL_SOURCE_CITATION,
+  nfhlBulkDownloadUrl,
+} from "./nfhl/service";
+export { normalizeNfhlFeature, assertNfhlGeographicCoordinates } from "./nfhl/parse";
+export type { TxFemaNfhlFloodZoneRecord, NfhlFeature } from "./nfhl/parse";
+export {
+  deleteAllNfhlFloodZones,
+  countAllNfhlFloodZones,
+  upsertNfhlFloodZones,
+  NFHL_DEFAULT_BATCH_SIZE,
+} from "./nfhl/ingest";
+export type { NfhlIngestDb, NfhlUpsertOptions, NfhlUpsertSummary } from "./nfhl/ingest";
+export {
+  buildNfhlZoneIndex,
+  resolveParcelFloodZones,
+} from "./nfhl/evaluation";
+export type {
+  NfhlZoneIndexEntry,
+  ParcelFloodZoneHit,
+  ParcelFloodZoneResult,
+} from "./nfhl/evaluation";
