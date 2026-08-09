@@ -328,13 +328,39 @@ async function main(): Promise<void> {
     if (apply && diffs.length > 0) {
       await pool.query("BEGIN");
       try {
+        // Deletes first: frees any ordinal a delete's row was occupying
+        // (e.g. `join` at ordinal 3) before any update tries to claim it.
         for (const d of diffs) {
-          if (d.kind === "delete") {
-            await pool.query("DELETE FROM county_rail WHERE rail_key = $1", [
-              d.railKey,
-            ]);
-            continue;
-          }
+          if (d.kind !== "delete") continue;
+          await pool.query("DELETE FROM county_rail WHERE rail_key = $1", [
+            d.railKey,
+          ]);
+        }
+
+        // Ordinal updates two-phase: `ordinal` carries a UNIQUE constraint
+        // that was not declared DEFERRABLE (and this script does not alter
+        // schema), so a direct single-pass UPDATE can collide mid-
+        // transaction when rows are renumbered into ordinals other rows
+        // still hold (exactly what happened re-numbering 13 rails down to
+        // 12 after removing `join` at ordinal 3 -- zoning 4->3 collided
+        // with join's not-yet-vacated 3 in a naive single pass). Phase 1
+        // moves every row whose ordinal is changing to a guaranteed-free
+        // negative value; phase 2 sets final ordinals. Two passes, always
+        // collision-free regardless of the remap shape.
+        const ordinalUpdates = diffs.filter(
+          (d) =>
+            d.kind === "update" &&
+            d.fields.some((f) => f.column === "ordinal"),
+        );
+        for (let i = 0; i < ordinalUpdates.length; i++) {
+          await pool.query(
+            "UPDATE county_rail SET ordinal = $2 WHERE rail_key = $1",
+            [ordinalUpdates[i].railKey, -(i + 1)],
+          );
+        }
+
+        for (const d of diffs) {
+          if (d.kind === "delete") continue;
           const decl = COUNTY_RAIL_DECLARATION.find(
             (x) => x.railKey === d.railKey,
           );
@@ -364,6 +390,9 @@ async function main(): Promise<void> {
             continue;
           }
           // update: only touch columns that actually diffed, plus updated_at.
+          // `ordinal` (if present) already landed its final value in phase
+          // 2 above via the negative-staging pass; re-setting it here to
+          // the same declared value is redundant but harmless.
           const setCols = d.fields.map((f) => columnToSnakeCase(f.column));
           const setSql = setCols
             .map((col, i) => `${col} = $${i + 2}`)
