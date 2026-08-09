@@ -11,8 +11,8 @@
  * render a county row + expand to facets.
  *
  * County Manifest Sprint 1 (feat/county-manifest-sprint1) additive
- * extension: `manifestCells`, the full 254-county x 13-rail grid (3,302
- * cells, always), per the operator ruling at doc_repo
+ * extension: `manifestCells`, the full 254-county x N-rail grid, per the
+ * operator ruling at doc_repo
  * `_decisions/2026-08-08_county_shape_thirteen_rails_and_geometry_first.md`
  * and the build spec at
  * `_inbox/2026-08-08_SPRINT1_manifest_schema_spec.md` section 5. This is a
@@ -20,6 +20,18 @@
  * from the bare `county_facet_coverage` scan below) is UNCHANGED, so the
  * pre-existing Command Center panel keeps working unmodified while a new
  * manifest-grid view is built against `manifestCells`.
+ *
+ * Rail count fix 2026-08-08 (fix/county-rail-refresh): the ruling named
+ * thirteen rails, but `join` (join quality) was ruled OUT of the rail
+ * dimension the same day in a follow-up session — it is a DERIVED METRIC
+ * of fit between two acquired rails, not a rail with its own
+ * provenance/absence. The grid is 254 x `COUNTY_RAIL_COUNT` (12, from
+ * `lib/db/src/schema/countyRailDimension.ts`), not a route-local literal.
+ * That file also documents the `county_rail` dimension REFRESH fix: the
+ * table was seeded once at migration 0068 and never updated, so three
+ * atomFamilyState values (geometry/footprint/easement) had drifted stale-
+ * optimistic-false; `countyRailRefreshCli.ts` re-syncs live rows against
+ * the checked-in declaration on demand.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
@@ -29,6 +41,7 @@ import {
   jurisdictionRegistryRowMirror,
   countyGateCertState,
   onboardingLedgerEvent,
+  COUNTY_RAIL_COUNT,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 
@@ -262,13 +275,15 @@ export interface RollupResult {
  * grid with its own cells for the per-county view.
  *
  * PURE — takes the manifest cells + a fips->parcelCountEst map, no I/O.
- * `railCount` defaults to 13 (the ruled rail count) but is a parameter so
- * the small-fixture unit tests do not need to fabricate all 13 rails.
+ * `railCount` defaults to `COUNTY_RAIL_COUNT` (the ruled rail count,
+ * derived from `COUNTY_RAIL_DECLARATION` — 12 as of 2026-08-08, `join`
+ * removed) but is a parameter so the small-fixture unit tests do not need
+ * to fabricate every rail.
  */
 export function computeTexasRollup(
   cells: ManifestCell[],
   parcelCountByFips: Map<string, number | null>,
-  railCount = 13,
+  railCount = COUNTY_RAIL_COUNT,
 ): RollupResult {
   const satisfiedCountByFips = new Map<string, number>();
   for (const cell of cells) {
@@ -446,6 +461,15 @@ router.get("/", async (_req: Request, res: Response) => {
     // pre-seed response does not silently claim a bogus "0 of 254".
     const totalCounties = manifestRows.length || counties.length;
     const satisfiedCells = manifestCells.filter(isSatisfiedCell).length;
+    const satisfiedPresentCells = manifestCells.filter(
+      (c) => c.displayState === "satisfied-present",
+    ).length;
+    const satisfiedPresentPartialCells = manifestCells.filter(
+      (c) => c.displayState === "satisfied-present" && c.isPartial,
+    ).length;
+    const satisfiedAbsentCells = manifestCells.filter(
+      (c) => c.displayState === "satisfied-absent",
+    ).length;
     const parcelCountByFips = new Map(
       manifestRows.map((m) => [m.countyFips, num(m.parcelCountEst)]),
     );
@@ -461,10 +485,19 @@ router.get("/", async (_req: Request, res: Response) => {
         totalCounties,
         staleCount: counties.filter((c) => c.hasStale).length,
         rewarmUnsafeCount: counties.filter((c) => c.rewarmUnsafe).length,
-        // County Manifest Sprint 1, NEW summary fields.
-        totalRails: 13,
+        // County Manifest Sprint 1, NEW summary fields. totalRails derives
+        // from COUNTY_RAIL_DECLARATION (lib/db/src/schema/
+        // countyRailDimension.ts), not a route-local literal — 12 as of
+        // 2026-08-08 (`join` removed; see countyRailRefreshCli.ts header).
+        totalRails: COUNTY_RAIL_COUNT,
         totalCells: manifestCells.length,
+        // Rollup gate (ruling 3): non-partial satisfied-present + satisfied-absent.
+        // PARTIAL cells (displayState satisfied-present, isPartial true) are
+        // visible on manifestCells but excluded here — see isSatisfiedCell().
         satisfiedCells,
+        satisfiedPresentCells,
+        satisfiedPresentPartialCells,
+        satisfiedAbsentCells,
         texasCompletenessPct: rollup.texasPct,
       },
     });

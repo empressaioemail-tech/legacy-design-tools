@@ -45,24 +45,71 @@ export {
 } from "./zip";
 export * from "./txgio/geo";
 export {
+  TXGIO_ABSENT_FROM_STRATMAP,
   TXGIO_COUNTIES,
+  TXGIO_STATEWIDE_COUNTIES,
+  isTexasCountyFips,
+  isTxgioCountyLoaded,
   resolveTxgioCounty,
   txgioDownloadUrl,
 } from "./txgio/counties";
 export type { TxgioCounty } from "./txgio/counties";
 export {
-  normalizeTxgioFeature,
+  assertDeclineCeiling,
+  assertFinalDeclineCeiling,
+  assertTexasWgs84Bbox,
   assertWgs84Prj,
+  classifyPrj,
+  isNullPlaceholderFeature,
+  normalizeTxgioFeature,
+  TxgioDeclineCeilingError,
+  TxgioProjectionError,
+  FRACTION_CEILING_MIN_SAMPLE,
   TXGIO_ENTRY_FILTER,
+  TXGIO_MAX_DECLINED_ABSOLUTE,
+  TXGIO_MAX_DECLINED_FRACTION,
+  TXGIO_MAX_GEOMETRY_ABSENT_FRACTION,
 } from "./txgio/parse";
-export type { TxgioParcelRecord, TxgioFeature } from "./txgio/parse";
+export type {
+  TxgioParcelRecord,
+  TxgioFeature,
+  TxgioNormalizeOptions,
+  TxgioPrjKind,
+} from "./txgio/parse";
 export {
+  reprojectGeometry,
+  webMercatorToWgs84,
+  wgs84ToWebMercator,
+  TxgioReprojectionError,
+  WEB_MERCATOR_MAX_M,
+  WEB_MERCATOR_RADIUS_M,
+} from "./txgio/reproject";
+export type { SupportedSourceCrs } from "./txgio/reproject";
+export {
+  discoverAllShapefiles,
+  selectShapefileLayers,
+  multiShapefileVintage,
+} from "./txgio/shapefile-discover";
+export type {
+  MultiShpMode,
+  ResolvedShapefile,
+} from "./txgio/shapefile-discover";
+export {
+  countCountyParcels,
+  listLoadedCountyFips,
+  storeLoadedLabel,
+  storeListLoadState,
   deleteCountyParcels,
+  replaceCountyParcels,
   upsertTxgioParcels,
+  vintageWithProvenance,
+  REPROJECTED_VINTAGE_SUFFIX,
   TXGIO_DEFAULT_BATCH_SIZE,
 } from "./txgio/ingest";
 export type {
   TxgioIngestDb,
+  TxgioReplaceSummary,
+  TxgioTransactionalDb,
   TxgioUpsertOptions,
   TxgioUpsertSummary,
 } from "./txgio/ingest";
@@ -143,3 +190,28 @@ export type {
   CityContainmentResult,
   CountyContainmentResult,
 } from "./boundary/containment";
+export {
+  NFHL_DEFAULT_SOURCE,
+  NFHL_DEFAULT_VINTAGE,
+  NFHL_FLOOD_LAYER,
+  NFHL_SOURCE_CITATION,
+  nfhlBulkDownloadUrl,
+} from "./nfhl/service";
+export { normalizeNfhlFeature, assertNfhlGeographicCoordinates } from "./nfhl/parse";
+export type { TxFemaNfhlFloodZoneRecord, NfhlFeature } from "./nfhl/parse";
+export {
+  deleteAllNfhlFloodZones,
+  countAllNfhlFloodZones,
+  upsertNfhlFloodZones,
+  NFHL_DEFAULT_BATCH_SIZE,
+} from "./nfhl/ingest";
+export type { NfhlIngestDb, NfhlUpsertOptions, NfhlUpsertSummary } from "./nfhl/ingest";
+export {
+  buildNfhlZoneIndex,
+  resolveParcelFloodZones,
+} from "./nfhl/evaluation";
+export type {
+  NfhlZoneIndexEntry,
+  ParcelFloodZoneHit,
+  ParcelFloodZoneResult,
+} from "./nfhl/evaluation";

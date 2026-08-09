@@ -1823,6 +1823,29 @@ CREATE TABLE @@SCHEMA@@.tx_county_boundary (
 );
 
 
+-- Name: tx_fema_nfhl_flood_zone; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_fema_nfhl_flood_zone (
+    zone_row_id text NOT NULL,
+    dfirm_id text NOT NULL,
+    fld_ar_id text NOT NULL,
+    fld_zone text,
+    zone_subty text,
+    sfha_tf text,
+    static_bfe double precision,
+    fema_object_id bigint,
+    geometry jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    source text NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: tx_parcel_tile_cache; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
@@ -2626,6 +2649,12 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_city_boundary
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_county_boundary
     ADD CONSTRAINT tx_county_boundary_county_fips_pk PRIMARY KEY (county_fips);
+
+
+-- Name: tx_fema_nfhl_flood_zone tx_fema_nfhl_flood_zone_zone_row_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_fema_nfhl_flood_zone
+    ADD CONSTRAINT tx_fema_nfhl_flood_zone_zone_row_id_pk PRIMARY KEY (zone_row_id);
 
 
 -- Name: tx_parcel_tile_cache tx_parcel_tile_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3479,6 +3508,16 @@ CREATE INDEX tx_city_boundary_bbox_idx ON @@SCHEMA@@.tx_city_boundary USING btre
 -- Name: tx_county_boundary_bbox_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX tx_county_boundary_bbox_idx ON @@SCHEMA@@.tx_county_boundary USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_fema_nfhl_flood_zone_bbox_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_fema_nfhl_flood_zone_bbox_idx ON @@SCHEMA@@.tx_fema_nfhl_flood_zone USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_fema_nfhl_flood_zone_dfirm_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_fema_nfhl_flood_zone_dfirm_idx ON @@SCHEMA@@.tx_fema_nfhl_flood_zone USING btree (dfirm_id);
 
 
 -- Name: tx_parcel_tile_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
