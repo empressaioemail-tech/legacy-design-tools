@@ -16,12 +16,14 @@
  * county_facet_coverage rows still returns the full manifest grid once
  * county_manifest/county_rail are seeded.
  *
- * Rail count fix 2026-08-08 (fix/county-rail-refresh): N is 12, not 13 —
- * `join` was ruled out of the rail dimension as a derived metric the same
- * day the thirteen-rail ruling landed; see
- * lib/db/src/schema/countyRailDimension.ts for the full rationale and the
- * county_rail dimension REFRESH fix (the table was seeded once at
- * migration 0068 and had drifted stale on three rails).
+ * N IS NEVER A LITERAL IN THIS FILE. It reads COUNTY_RAIL_COUNT from the
+ * declaration, because the rail count has now moved twice: 2026-08-08
+ * removed `join` (13 -> 12), and 2026-08-09 split `rrc` into wells +
+ * pipelines and added `rail-corridor` (12 -> 14, operator ruling R1, see
+ * doc_repo 90_operations/OPS-15). Both times a hardcoded literal here
+ * failed CI after the fact instead of following the ruling. See
+ * lib/db/src/schema/countyRailDimension.ts for the split rule and the
+ * county_rail REFRESH mechanism.
  *
  * Uses the real-PG route harness (withTestSchema via setup.ts). Requires
  * TEST_DATABASE_URL / DATABASE_URL, CI-authoritative when unset.
@@ -44,7 +46,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
-import { db, countyFacetCoverage, countyManifest, countyRail } from "@workspace/db";
+import {
+  db,
+  countyFacetCoverage,
+  countyManifest,
+  countyRail,
+  COUNTY_RAIL_COUNT,
+} from "@workspace/db";
 import { truncateAll } from "@workspace/db/testing";
 
 vi.mock("@workspace/db", async () => {
@@ -107,8 +115,8 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
     // countyLedger.ts's res.json() and doc_repo
     // _inbox/2026-08-08_SPRINT1_manifest_schema_spec.md section 5/9. The
     // four original fields are unchanged and still zero here; totalRails is
-    // COUNTY_RAIL_COUNT (12 as of the 2026-08-08 fix/county-rail-refresh
-    // rail-count fix — see countyRailDimension.ts) unconditionally, not
+    // COUNTY_RAIL_COUNT (14 as of the 2026-08-09 rail split — see
+    // countyRailDimension.ts) unconditionally, not
     // derived from any seeded row, and the remaining three are zero because
     // manifestCells is empty when county_manifest/county_rail are unseeded.
     expect(res.body.summary).toEqual({
@@ -116,7 +124,7 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
       totalCounties: 0,
       staleCount: 0,
       rewarmUnsafeCount: 0,
-      totalRails: 12,
+      totalRails: COUNTY_RAIL_COUNT,
       totalCells: 0,
       satisfiedCells: 0,
       satisfiedPresentCells: 0,
@@ -238,14 +246,16 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
 });
 
 describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", () => {
-  // Rail count fix 2026-08-08 (fix/county-rail-refresh): `join` (join
-  // quality) was ruled OUT of the rail dimension as a derived metric, not
-  // a rail with its own provenance/absence — see
-  // lib/db/src/schema/countyRailDimension.ts. 12 rails, not 13.
-  const RAIL_COUNT = 12;
+  // DERIVED, never a literal. This was hardcoded `12` and silently
+  // encoded a denominator that two separate rulings have now moved:
+  // 2026-08-08 removed `join` (13 -> 12) and 2026-08-09 split `rrc` into
+  // wells + pipelines and added `rail-corridor` (12 -> 14). Reading the
+  // declaration means the next ruling updates this test by construction
+  // instead of failing it in CI.
+  const RAIL_COUNT = COUNTY_RAIL_COUNT;
 
-  /** Seed the real 12-rail dimension, matching COUNTY_RAIL_DECLARATION's shape exactly (kind/atomFamilyState/hasWriter drive the precedence assertions below). Geometry/footprint/easement carry their refreshed (post-2026-08-08) atomFamilyState here, and landuse keeps hasWriter=true off the live CAD scorer, independent of the dead Cotality reference. */
-  async function seedThirteenRails(): Promise<void> {
+  /** Seed the real rail dimension (14 as of 2026-08-09), matching COUNTY_RAIL_DECLARATION's shape exactly (kind/atomFamilyState/hasWriter drive the precedence assertions below). Geometry/footprint/easement carry their refreshed (post-2026-08-08) atomFamilyState here, and landuse keeps hasWriter=true off the live CAD scorer, independent of the dead Cotality reference. */
+  async function seedAllRails(): Promise<void> {
     await db.insert(countyRail).values([
       { railKey: "geometry", displayName: "Parcel geometry", ordinal: 1, kind: "spine", thresholdPct: "95", atomFamilyState: "present", hasWriter: true, declaredSource: "TxGIO StratMap" },
       { railKey: "cad", displayName: "CAD attributes", ordinal: 2, kind: "spine", thresholdPct: "95", atomFamilyState: "missing", hasWriter: false, declaredSource: "County CAD" },
@@ -256,14 +266,16 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       { railKey: "landuse", displayName: "Land use", ordinal: 7, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: true, declaredSource: "CAD roll code" },
       { railKey: "footprint", displayName: "Building footprints", ordinal: 8, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: false, declaredSource: "ML-derived" },
       { railKey: "easement", displayName: "Utility easements", ordinal: 9, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: false, declaredSource: "County honest-absence default" },
-      { railKey: "owner", displayName: "Owner facet", ordinal: 10, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "CAD owner_name" },
-      { railKey: "rrc", displayName: "RRC wells / pipelines", ordinal: 11, kind: "derived", thresholdPct: "90", atomFamilyState: "partial", hasWriter: false, declaredSource: "RRC public GIS" },
-      { railKey: "mud", displayName: "MUD / special districts", ordinal: 12, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TX Comptroller registry" },
+      { railKey: "owner", displayName: "Owner facet", ordinal: 10, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: true, declaredSource: "CAD owner_name" },
+      { railKey: "rrc-wells", displayName: "RRC wells", ordinal: 11, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "RRC public GIS wells" },
+      { railKey: "rrc-pipelines", displayName: "RRC pipelines", ordinal: 12, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "RRC public GIS pipelines" },
+      { railKey: "rail-corridor", displayName: "Rail corridors", ordinal: 13, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TxDOT / FRA / NTAD" },
+      { railKey: "mud", displayName: "MUD / special districts", ordinal: 14, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TX Comptroller registry" },
     ]);
   }
 
-  it("returns all 3,048 cells (254 counties x 12 rails) once the manifest is fully seeded", async () => {
-    await seedThirteenRails();
+  it("returns 254 x COUNTY_RAIL_COUNT cells once the manifest is fully seeded", async () => {
+    await seedAllRails();
     const rows = Array.from({ length: 254 }, (_, i) => ({
       countyFips: String(50000 + i), // synthetic fips, disjoint from every other test's real fips values
       countyName: `Synthetic County ${i}`,
@@ -281,7 +293,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
   });
 
   it("a county with zero county_facet_coverage rows still returns all 13 cells", async () => {
-    await seedThirteenRails();
+    await seedAllRails();
     await db.insert(countyManifest).values({
       countyFips: "50900",
       countyName: "No-Coverage County",
@@ -303,7 +315,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
   });
 
   it("precedence: no-atom dominates even when a stray county_facet_coverage row exists for a no-atom rail", async () => {
-    await seedThirteenRails();
+    await seedAllRails();
     await db.insert(countyManifest).values({
       countyFips: "50901",
       countyName: "Stray-Row County",
@@ -338,7 +350,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
   });
 
   it("precedence: a rail with an atom but no writer renders no-writer, never the stored row", async () => {
-    await seedThirteenRails();
+    await seedAllRails();
     await db.insert(countyManifest).values({
       countyFips: "50902",
       countyName: "No-Writer County",
@@ -357,7 +369,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
   });
 
   it("precedence: a satisfied-present cell below threshold surfaces as PARTIAL and does not count toward satisfiedCells", async () => {
-    await seedThirteenRails();
+    await seedAllRails();
     await db.insert(countyManifest).values({
       countyFips: "50903",
       countyName: "Partial County",
