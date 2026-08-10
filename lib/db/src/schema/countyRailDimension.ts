@@ -71,6 +71,27 @@
  *     between two acquired rails, not a rail with its own provenance/
  *     absence. Twelve rails, ordinals renumbered 1-12 with no gap.
  *
+ * RAIL SPLIT 2026-08-09 (operator ruling R1, doc_repo `90_operations/
+ * OPS-15_owner_and_rrc_rail_gap_analysis.md`). Twelve rails become
+ * FOURTEEN: the single `rrc` rail splits into `rrc-wells` (point) and
+ * `rrc-pipelines` (line), and `rail-corridor` is added.
+ *
+ * THE SPLIT RULE, so the next person extends this list the same way:
+ * SPLIT where the SOURCE and GEOMETRY differ; SUBCATEGORIZE (atom body
+ * fields) where only the attribute differs. Wells are points from one
+ * endpoint and pipelines are lines from another, so one coverage number
+ * could never honestly describe both — which is exactly why the merged
+ * cell could only ever render HALF. Producing-vs-plugged is an attribute,
+ * so it stays inside the cell.
+ *
+ * THIS MOVES THE DENOMINATOR: 254 x 12 = 3,048 cells becomes 254 x 14 =
+ * 3,556, so every completeness percentage quoted before this change is
+ * against a smaller denominator (89 satisfied cells read 0.897% at 3,048
+ * and ~0.78% at 3,556). Nothing got worse; the grid simply stopped
+ * hiding two layers we always owed. Do not "fix" the drop by reverting
+ * the split — a launch gate that closes because the gap was never named
+ * is the failure this manifest exists to prevent.
+ *
  * `atomFamilyState` / `hasWriter` remain DECLARED FACTS, not enforcement —
  * editing this file does not create an atom or wire a writer, per the
  * class doc in `./countyRail.ts`.
@@ -244,31 +265,66 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     railLetter: null,
     kind: "derived",
     thresholdPct: 90,
-    atomFamilyState: "missing",
-    atomFamilyRef: null,
-    hasWriter: false,
-    writerRef: null,
-    declaredSource: "CAD owner_name + mailing, authenticated paid facet",
-    notes: "Ruled public-paid at the atom level; no owner atom exists to carry the policy.",
+    atomFamilyState: "present",
+    atomFamilyRef: "owner-fact (contract 1.16.0)",
+    hasWriter: true,
+    writerRef:
+      "hauska-engine packages/engine-core/scripts/write-owner-fact-county.mjs (PR #297)",
+    declaredSource: "CAD owner_name + owner_mailing_address (cad_property)",
+    notes:
+      "OWN LANE BUILT 2026-08-09 (doc_repo OPS-15): contract type published 1.16.0 (PR #15), engine registration + writer seam (PR #296), county writer CLI (PR #297). Corrected from 'missing'/false -- the earlier note read 'ruled public-paid at the atom level; no owner atom exists to carry the policy', i.e. the POLICY was ruled and the CARRIER was never built, which is why this column read NO ATOM over a store already holding owner_name on 4,525,073 of 4,599,477 cad_property rows (98.4%, 15 counties). THE ONLY public-paid ENTRY IN THIS DECLARATION: the contract schema pins accessPolicy public-paid and rejects anything else, the writer fail-closes before any write, and verifyStoredOwnerFactAtom re-checks the STORED bytes -- three layers, so owner identity cannot land on the free tier. Exemption codes are reduced to four booleans inside the writer seam and never reach an atom (homestead/over-65 codes imply occupancy). Coverage stays 0 until the apply runs; the apply needs the atoms bulk-writer slot.",
   },
   {
-    railKey: "rrc",
-    displayName: "RRC wells / pipelines",
+    railKey: "rrc-wells",
+    displayName: "RRC wells",
     ordinal: 11,
     railLetter: null,
     kind: "derived",
     thresholdPct: 90,
-    atomFamilyState: "partial",
-    atomFamilyRef: "12 O&G types (wells only; no parcelNodeId edge; pipelines missing)",
+    atomFamilyState: "missing",
+    atomFamilyRef: null,
     hasWriter: false,
     writerRef: null,
-    declaredSource: "RRC public GIS (W-1, H-10, PDQ)",
-    notes: "W3 HELD per 2026-08-01 scale ruling.",
+    declaredSource:
+      "RRC public GIS wells (TXRRC/Wells MapServer/0) — already wired in lib/adapters/src/federal/texas-rrc.ts",
+    notes:
+      "Split from the former single `rrc` rail 2026-08-09 (operator ruling R1, doc_repo OPS-15). atomFamilyState corrected 'partial' -> 'missing': the ADR-025 O&G types ARE published (@empressaio/atom-contract exports ./og) but the PROPERTY SPINE holds ZERO of them -- live `SELECT entity_type, count(*) FROM atoms` returns 15 types, none O&G. 'partial' was stale-optimistic against this store, the same drift class this file was written to prevent. The og-twin repo is a separate universe from the county manifest; do not read its progress as this rail's state. Point geometry (surface hole). The missing piece is the parcelNodeId EDGE -- a well atom with no parcel join cannot answer 'is there a well on this property'. Subcategorize WITHIN this rail via atom body fields (status producing/permitted/dry/plugged-abandoned; type oil/gas/injection/disposal; orphaned flag), never by adding more rails. W3 HELD per 2026-08-01 scale ruling.",
+  },
+  {
+    railKey: "rrc-pipelines",
+    displayName: "RRC pipelines",
+    ordinal: 12,
+    railLetter: null,
+    kind: "derived",
+    thresholdPct: 90,
+    atomFamilyState: "missing",
+    atomFamilyRef: null,
+    hasWriter: false,
+    writerRef: null,
+    declaredSource:
+      "RRC public GIS pipelines (TXRRC/Pipelines MapServer/0) — separate endpoint from the wells layer",
+    notes:
+      "Split from the former single `rrc` rail 2026-08-09 (operator ruling R1). SEPARATE from rrc-wells because the source endpoint and the GEOMETRY differ (line, not point) -- one coverage number cannot honestly describe both, which is why the merged cell could only ever render HALF. R2 RESOLVED 2026-08-09 FROM LIVE CODE, not from a guess: `lib/adapters/src/federal/texas-rrc.ts` already fetches TWO DISTINCT ArcGIS endpoints (TEXAS_RRC_WELLS_LAYER and TEXAS_RRC_PIPELINES_LAYER) and `brokerageGisFederalLayers.ts` already tags every feature `rrcAsset: 'well' | 'pipeline'` -- the data ALREADY arrives split, so the rail split matches the source shape rather than imposing on it. Scope is RRC public GIS (a Harris County mirror carrying statewide coverage); PHMSA NPMS is NOT wired and is not needed for v1 -- it restricts precise alignment for security reasons, so prefer the RRC layer. Pipeline fields already pulled: P5_NUM, OPER_NM, SYS_NM, COM_CARRIE. Buyer question is easements/setbacks and proximity, which OVERLAPS the easement rail; reconcile at read time, do not duplicate the linework. Subcategorize via body fields (carrier gas/hazardous-liquid/gathering; status active/abandoned; diameter class).",
+  },
+  {
+    railKey: "rail-corridor",
+    displayName: "Rail corridors",
+    ordinal: 13,
+    railLetter: null,
+    kind: "derived",
+    thresholdPct: 90,
+    atomFamilyState: "missing",
+    atomFamilyRef: null,
+    hasWriter: false,
+    writerRef: null,
+    declaredSource: "TxDOT rail inventory / FRA / NTAD (national, statewide-uniform)",
+    notes:
+      "NEW rail 2026-08-09 (operator ruling R1). RAILROAD TRACKS, NOT THE RAILROAD COMMISSION -- the `rrc-*` rails above are the Texas Railroad COMMISSION (oil and gas regulator); this one is track infrastructure. The name collision is the entire reason this note exists: a future agent reading 'RRC' and 'rail' in adjacent rows will conflate them otherwise. Different domain, source, geometry, and buyer question (proximity, at-grade crossing exposure, ROW encumbrance, quiet-zone/horn-noise disclosure). Classifies as statewide-UNIFORM under the 2026-08-01 scale ruling (single national source, no per-jurisdiction assembly), so it rides the cheap parallel track -- the OZ pattern, not the zoning pattern. Subcategorize via body fields (status active/abandoned/rail-trail; class mainline/spur/yard; at-grade crossing points).",
   },
   {
     railKey: "mud",
     displayName: "MUD / special districts",
-    ordinal: 12,
+    ordinal: 14,
     railLetter: null,
     kind: "derived",
     thresholdPct: 90,
