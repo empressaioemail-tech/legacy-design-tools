@@ -19,9 +19,9 @@ import {
  * lands.
  */
 describe("COUNTY_RAIL_DECLARATION", () => {
-  it("has exactly 12 rails (join quality removed 2026-08-08)", () => {
-    expect(COUNTY_RAIL_DECLARATION).toHaveLength(12);
-    expect(COUNTY_RAIL_COUNT).toBe(12);
+  it("has exactly 14 rails (join removed 2026-08-08; rrc split + rail-corridor added 2026-08-09)", () => {
+    expect(COUNTY_RAIL_DECLARATION).toHaveLength(14);
+    expect(COUNTY_RAIL_COUNT).toBe(14);
   });
 
   it("does not contain a 'join' rail", () => {
@@ -38,7 +38,36 @@ describe("COUNTY_RAIL_DECLARATION", () => {
     const ordinals = COUNTY_RAIL_DECLARATION.map((r) => r.ordinal).sort(
       (a, b) => a - b,
     );
-    expect(ordinals).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(ordinals).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  });
+
+  it("pins owner as PRESENT with a writer (OWN lane, contract 1.16.0)", () => {
+    const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
+    // The policy was ruled long before the carrier existed; both now exist.
+    expect(byKey.get("owner")?.atomFamilyState).toBe("present");
+    expect(byKey.get("owner")?.hasWriter).toBe(true);
+  });
+
+  it("splits RRC by source+geometry and keeps the tracks/Commission distinction", () => {
+    const keys = COUNTY_RAIL_DECLARATION.map((r) => r.railKey);
+    // The merged rail is gone: one cell could not honestly score a point
+    // layer and a line layer from two different endpoints.
+    expect(keys).not.toContain("rrc");
+    expect(keys).toContain("rrc-wells");
+    expect(keys).toContain("rrc-pipelines");
+    // Railroad TRACKS, not the Railroad COMMISSION. Separate domain.
+    expect(keys).toContain("rail-corridor");
+
+    const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
+    // Corrected from the stale-optimistic 'partial': the property spine
+    // holds zero ADR-025 O&G atoms, whatever og-twin has published.
+    expect(byKey.get("rrc-wells")?.atomFamilyState).toBe("missing");
+    expect(byKey.get("rrc-pipelines")?.atomFamilyState).toBe("missing");
+    expect(byKey.get("rail-corridor")?.atomFamilyState).toBe("missing");
+    // None has a writer yet — the new cells must read honestly as gaps.
+    expect(byKey.get("rrc-wells")?.hasWriter).toBe(false);
+    expect(byKey.get("rrc-pipelines")?.hasWriter).toBe(false);
+    expect(byKey.get("rail-corridor")?.hasWriter).toBe(false);
   });
 
   it("every atomFamilyState is one of the four the county_rail CHECK constraint allows", () => {
