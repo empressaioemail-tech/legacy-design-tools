@@ -20,5 +20,7 @@ describe("probeRailCapabilities", () => {
     expect(byKey["rrc-wells"]?.maxCountiesReachable).toBe(1);
     expect(byKey.footprint?.maxCountiesReachable).toBe(TEXAS_COUNTY_COUNT);
     expect(byKey.owner?.maxCountiesReachable).toBe(15);
+    expect(byKey.mud?.maxCountiesReachable).toBe(15);
+    expect(byKey.mud?.sourceBasis).toMatch(/tx_special_district/i);
   });
 });

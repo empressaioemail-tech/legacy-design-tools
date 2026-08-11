@@ -164,14 +164,16 @@ export const COUNTY_RAIL_STATIC_DECLARATION: ReadonlyArray<CountyRailStaticMetad
   },
   {
     railKey: "mud",
-    displayName: "MUD / special districts",
+    displayName: "Special districts",
     ordinal: 14,
     railLetter: null,
     kind: "derived",
     thresholdPct: 90,
     coverageClass: "statewide-uniform",
-    declaredSource: "TX Comptroller special-district registry",
-    notes: "write-special-district-fact-county.mjs.",
+    declaredSource:
+      "TCEQ WaterDistricts (tx_special_district); Comptroller SPDPID optional tax-rate enrich",
+    notes:
+      "special-district-fact on TCEQ polygon PIP; MUD/WCID/MMD/etc. subcategorized via districtType body field (R1). write-special-district-fact-county.mjs.",
   },
 ];
 

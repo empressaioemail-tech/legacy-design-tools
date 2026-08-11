@@ -140,13 +140,18 @@ export async function probeRailCapabilities(
     }
 
     if (railKey === "mud") {
+      const districtCountyCount = await countDistinctCountyFips(
+        db,
+        "tx_special_district",
+      );
       capabilities.push({
         railKey,
-        maxCountiesReachable: null,
-        reachPct: null,
-        sourceBasis: "TX Comptroller tx-special-districts.json registry",
+        maxCountiesReachable: districtCountyCount,
+        reachPct: reachPct(districtCountyCount),
+        sourceBasis:
+          "tx_special_district DISTINCT county_fips (TCEQ WaterDistricts ingest)",
         limitation:
-          "County FIPS coverage not indexed in DB — probe tx-special-districts.json offline",
+          districtCountyCount === null ? "probe returned null" : undefined,
       });
       continue;
     }

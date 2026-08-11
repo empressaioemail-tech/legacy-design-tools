@@ -42,6 +42,7 @@ import {
   countyGateCertState,
   onboardingLedgerEvent,
   COUNTY_RAIL_COUNT,
+  COVERAGE_CLASS_BY_RAIL_KEY,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 
@@ -161,6 +162,28 @@ const iso = (v: unknown): string | null =>
   v instanceof Date ? v.toISOString() : v === null || v === undefined ? null : String(v);
 
 /**
+ * P1.1 depth-rail satisfaction predicate (OPS-14). Jurisdiction-depth rails
+ * must not render satisfied-present when honestCoveragePct is NULL or below
+ * threshold — the stored rail_state alone is not sufficient. Statewide-uniform
+ * rails keep SQL-derived display (satisfied-present + isPartial when below
+ * threshold). satisfied-absent is never overridden here.
+ */
+export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
+  if (COVERAGE_CLASS_BY_RAIL_KEY[cell.railKey] !== "jurisdiction-depth") {
+    return cell;
+  }
+  if (cell.displayState !== "satisfied-present") {
+    return cell;
+  }
+  const threshold = cell.thresholdPct;
+  const coverage = cell.honestCoveragePct;
+  if (coverage === null || threshold === null || coverage < threshold) {
+    return { ...cell, displayState: "not-yet", isPartial: false };
+  }
+  return cell;
+}
+
+/**
  * The full 254 x 13 manifest grid, County Manifest Sprint 1. Replaces the
  * bare `db.select().from(countyFacetCoverage)` read for this new field:
  * `county_manifest CROSS JOIN county_rail LEFT JOIN county_facet_coverage`,
@@ -214,23 +237,25 @@ async function readManifestGrid(): Promise<ManifestCell[]> {
      AND c.facet = r.rail_key
     ORDER BY m.county_fips, r.ordinal
   `);
-  return rows.map((row) => ({
-    countyFips: row.county_fips,
-    railKey: row.rail_key,
-    displayState: row.display_state,
-    isPartial: Boolean(row.is_partial),
-    honestCoveragePct: num(row.honest_coverage_pct),
-    thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
-    atomFamilyState: row.atom_family_state,
-    hasWriter: Boolean(row.has_writer),
-    absenceBasis: row.absence_basis ?? null,
-    source: row.source ?? null,
-    sourceVintage: row.source_vintage ?? null,
-    lastVerifiedAt: iso(row.last_verified_at),
-    verifiedByInstrument: row.verified_by_instrument ?? null,
-    verificationMethod: row.verification_method ?? null,
-    artifactPath: row.artifact_path ?? null,
-  }));
+  return rows.map((row) =>
+    applyDepthRailDisplayGate({
+      countyFips: row.county_fips,
+      railKey: row.rail_key,
+      displayState: row.display_state,
+      isPartial: Boolean(row.is_partial),
+      honestCoveragePct: num(row.honest_coverage_pct),
+      thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
+      atomFamilyState: row.atom_family_state,
+      hasWriter: Boolean(row.has_writer),
+      absenceBasis: row.absence_basis ?? null,
+      source: row.source ?? null,
+      sourceVintage: row.source_vintage ?? null,
+      lastVerifiedAt: iso(row.last_verified_at),
+      verifiedByInstrument: row.verified_by_instrument ?? null,
+      verificationMethod: row.verification_method ?? null,
+      artifactPath: row.artifact_path ?? null,
+    }),
+  );
 }
 
 /**
@@ -327,7 +352,7 @@ router.get("/", async (_req: Request, res: Response) => {
     // facet-scorecard scan above; failure here must not break the
     // pre-existing `counties[]` response, so this is fetched alongside,
     // not instead of, the existing reads.
-    const [mirrorRows, gateCertRows, openEvents, manifestCells, manifestRows] =
+    const [mirrorRows, gateCertRows, openEvents, manifestCells, manifestRows, capabilityOutcome] =
       await Promise.all([
         db.select().from(jurisdictionRegistryRowMirror),
         db.select().from(countyGateCertState),
@@ -337,6 +362,7 @@ router.get("/", async (_req: Request, res: Response) => {
           .where(eq(onboardingLedgerEvent.status, "open")),
         readManifestGrid(),
         db.select().from(countyManifest),
+        probeRailCapabilities(db),
       ]);
 
     const gateCertByRowId = new Map(gateCertRows.map((g) => [g.rowId, g]));
