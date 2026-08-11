@@ -270,7 +270,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       { railKey: "rrc-wells", displayName: "RRC wells", ordinal: 11, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "RRC public GIS wells" },
       { railKey: "rrc-pipelines", displayName: "RRC pipelines", ordinal: 12, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "RRC public GIS pipelines" },
       { railKey: "rail-corridor", displayName: "Rail corridors", ordinal: 13, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TxDOT / FRA / NTAD" },
-      { railKey: "mud", displayName: "MUD / special districts", ordinal: 14, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TX Comptroller registry" },
+      { railKey: "mud", displayName: "Special districts", ordinal: 14, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: true, declaredSource: "TCEQ WaterDistricts (tx_special_district)" },
     ]);
   }
 
@@ -290,6 +290,9 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(res.body.summary.totalCounties).toBe(254);
     expect(res.body.summary.totalRails).toBe(RAIL_COUNT);
     expect(res.body.summary.totalCells).toBe(254 * RAIL_COUNT);
+    expect(res.body.summary.totalCells).toBe(
+      res.body.summary.totalCounties * res.body.summary.totalRails,
+    );
   });
 
   it("a county with zero county_facet_coverage rows still returns all 13 cells", async () => {

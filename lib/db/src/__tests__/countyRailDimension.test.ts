@@ -132,8 +132,10 @@ describe("COUNTY_RAIL_DECLARATION", () => {
     expect(Object.keys(COVERAGE_CLASS_BY_RAIL_KEY)).toHaveLength(COUNTY_RAIL_COUNT);
   });
 
-  it("pins mud rail metadata after P1-4 (special-district-fact)", () => {
+  it("pins mud rail as present with writer after P1-4 (special-district-fact)", () => {
     const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
+    expect(byKey.get("mud")?.atomFamilyState).toBe("present");
+    expect(byKey.get("mud")?.hasWriter).toBe(true);
     expect(byKey.get("mud")?.declaredSource).toMatch(/TCEQ WaterDistricts/i);
     expect(byKey.get("mud")?.displayName).toBe("Special districts");
   });
