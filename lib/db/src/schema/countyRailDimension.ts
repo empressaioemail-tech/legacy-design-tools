@@ -339,18 +339,20 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
   },
   {
     railKey: "mud",
-    displayName: "MUD / special districts",
+    displayName: "Special districts",
     ordinal: 14,
     railLetter: null,
     kind: "derived",
     coverageClass: "statewide-uniform",
     thresholdPct: 90,
-    atomFamilyState: "missing",
-    atomFamilyRef: null,
-    hasWriter: false,
-    writerRef: null,
-    declaredSource: "TX Comptroller special-district registry",
-    notes: "W4 HELD per 2026-08-01 scale ruling.",
+    atomFamilyState: "present",
+    atomFamilyRef: "special-district-fact (contract 1.19.0)",
+    hasWriter: true,
+    writerRef: "hauska-engine write-special-district-fact-county.mjs",
+    declaredSource:
+      "TCEQ WaterDistricts (tx_special_district); Comptroller SPDPID optional tax-rate enrich",
+    notes:
+      "P1-4 2026-08-11: Corrected from missing/Comptroller-only. special-district-fact built on TCEQ polygon PIP (hauska-engine PR #301, 2775 polygons loaded). MUD/WCID/MMD/FWSD/SUD/etc. are districtType body fields per R1 subcategorize rule, not separate rails. Comptroller registry enriches tax rates where join succeeds; ESD/PID/non-water types have no TCEQ geometry (758 Comptroller entities) and remain phase-4 expansion within the same atom family.",
   },
 ];
 

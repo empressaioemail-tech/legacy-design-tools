@@ -43,6 +43,7 @@ import {
   onboardingLedgerEvent,
   COUNTY_RAIL_COUNT,
   COVERAGE_CLASS_BY_RAIL_KEY,
+  probeRailCapabilities,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 
@@ -342,7 +343,7 @@ router.get("/", async (_req: Request, res: Response) => {
     // facet-scorecard scan above; failure here must not break the
     // pre-existing `counties[]` response, so this is fetched alongside,
     // not instead of, the existing reads.
-    const [mirrorRows, gateCertRows, openEvents, manifestCells, manifestRows] =
+    const [mirrorRows, gateCertRows, openEvents, manifestCells, manifestRows, capabilityOutcome] =
       await Promise.all([
         db.select().from(jurisdictionRegistryRowMirror),
         db.select().from(countyGateCertState),
@@ -352,6 +353,7 @@ router.get("/", async (_req: Request, res: Response) => {
           .where(eq(onboardingLedgerEvent.status, "open")),
         readManifestGrid(),
         db.select().from(countyManifest),
+        probeRailCapabilities(db),
       ]);
 
     const gateCertByRowId = new Map(gateCertRows.map((g) => [g.rowId, g]));
@@ -495,6 +497,10 @@ router.get("/", async (_req: Request, res: Response) => {
       // County Manifest Sprint 1, NEW field: the full 254 x 13 grid
       // (3,302 cells, always). Additive — does not replace `counties[]`.
       manifestCells,
+      railCapabilities: capabilityOutcome.railCapabilities,
+      ...(capabilityOutcome.railCapabilities === null
+        ? { railCapabilitiesProbeReason: capabilityOutcome.reason }
+        : {}),
       summary: {
         onboardedCount: counties.filter((c) => c.onboarded).length,
         totalCounties,

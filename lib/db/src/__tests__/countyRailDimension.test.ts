@@ -116,10 +116,25 @@ describe("COUNTY_RAIL_DECLARATION", () => {
       expect(byKey.get(key)?.coverageClass).toBe("jurisdiction-depth");
       expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("jurisdiction-depth");
     }
-    for (const key of ["geometry", "roads", "flood", "footprint", "rrc-wells", "rrc-pipelines", "rail-corridor", "mud"]) {
+    for (const key of [
+      "geometry",
+      "roads",
+      "flood",
+      "footprint",
+      "rrc-wells",
+      "rrc-pipelines",
+      "rail-corridor",
+      "mud",
+    ]) {
       expect(byKey.get(key)?.coverageClass).toBe("statewide-uniform");
       expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("statewide-uniform");
     }
     expect(Object.keys(COVERAGE_CLASS_BY_RAIL_KEY)).toHaveLength(COUNTY_RAIL_COUNT);
+  });
+
+  it("pins mud rail metadata after P1-4 (special-district-fact)", () => {
+    const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
+    expect(byKey.get("mud")?.declaredSource).toMatch(/TCEQ WaterDistricts/i);
+    expect(byKey.get("mud")?.displayName).toBe("Special districts");
   });
 });
