@@ -52,10 +52,8 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pg from "pg";
 
-import {
-  buildEffectiveCountyRailDeclaration,
-  type CountyRailDeclaration,
-} from "@workspace/db";
+import { type CountyRailDeclaration } from "@workspace/db";
+import { buildEffectiveCountyRailDeclaration } from "@workspace/db/manifest";
 
 const { Pool } = pg;
 

@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import pg from "pg";
 
-import { probeRailCapabilities, type CapabilityDbHandle } from "@workspace/db";
+import { probeRailCapabilities, type CapabilityDbHandle } from "@workspace/db/manifest";
 
 const { Pool } = pg;
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { diffRails } from "../countyRailRefreshCli";
-import { buildEffectiveCountyRailDeclaration } from "@workspace/db";
+import { buildEffectiveCountyRailDeclaration } from "@workspace/db/manifest";
 
 function liveRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {

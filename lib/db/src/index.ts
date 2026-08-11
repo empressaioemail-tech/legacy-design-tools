@@ -15,24 +15,6 @@ export const db = drizzle(pool, { schema });
 
 export * from "./schema";
 export {
-  buildEffectiveCountyRailDeclaration,
-  deriveAtomFamilyState,
-  deriveHasWriter,
-  deriveRailDeclarationFields,
-  computeCp1CellMoveExpectations,
-  resolveEngineRoot,
-  resolveLdtRoot,
-  type DerivationProbeOptions,
-  type DerivedRailFields,
-} from "./railManifestDerivation";
-export {
-  probeRailCapabilities,
-  TEXAS_COUNTY_COUNT,
-  type RailCapability,
-  type RailCapabilityOutcome,
-  type CapabilityDbHandle,
-} from "./railCoverageCapability";
-export {
   withClusterSweepLock,
   type ClusterLockDbHandle,
   type ClusterLockTxHandle,

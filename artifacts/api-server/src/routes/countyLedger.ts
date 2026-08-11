@@ -43,8 +43,8 @@ import {
   onboardingLedgerEvent,
   COUNTY_RAIL_COUNT,
   COVERAGE_CLASS_BY_RAIL_KEY,
-  probeRailCapabilities,
 } from "@workspace/db";
+import { probeRailCapabilities } from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
