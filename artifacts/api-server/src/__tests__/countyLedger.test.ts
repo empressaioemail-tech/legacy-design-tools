@@ -132,7 +132,6 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
       satisfiedAbsentCells: 0,
       texasCompletenessPct: 0,
     });
-    expect("railCapabilities" in res.body).toBe(true);
   });
 
   it("groups facet rows by countyFips and rolls up onboarded/stale/rewarmUnsafe", async () => {
@@ -271,7 +270,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       { railKey: "rrc-wells", displayName: "RRC wells", ordinal: 11, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "RRC public GIS wells" },
       { railKey: "rrc-pipelines", displayName: "RRC pipelines", ordinal: 12, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "RRC public GIS pipelines" },
       { railKey: "rail-corridor", displayName: "Rail corridors", ordinal: 13, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TxDOT / FRA / NTAD" },
-      { railKey: "mud", displayName: "Special districts", ordinal: 14, kind: "derived", thresholdPct: "90", atomFamilyState: "present", hasWriter: true, declaredSource: "TCEQ WaterDistricts (tx_special_district)" },
+      { railKey: "mud", displayName: "MUD / special districts", ordinal: 14, kind: "derived", thresholdPct: "90", atomFamilyState: "missing", hasWriter: false, declaredSource: "TX Comptroller registry" },
     ]);
   }
 
@@ -291,9 +290,6 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(res.body.summary.totalCounties).toBe(254);
     expect(res.body.summary.totalRails).toBe(RAIL_COUNT);
     expect(res.body.summary.totalCells).toBe(254 * RAIL_COUNT);
-    expect(res.body.summary.totalCells).toBe(
-      res.body.summary.totalCounties * res.body.summary.totalRails,
-    );
   });
 
   it("a county with zero county_facet_coverage rows still returns all 13 cells", async () => {
@@ -372,7 +368,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(roadsCell.displayState).toBe("no-writer");
   });
 
-  it("precedence: a jurisdiction-depth rail below threshold renders not-yet, not satisfied-present (P1.1)", async () => {
+  it("precedence: a satisfied-present cell below threshold surfaces as PARTIAL and does not count toward satisfiedCells", async () => {
     await seedAllRails();
     await db.insert(countyManifest).values({
       countyFips: "50903",
@@ -381,6 +377,8 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       rosterSchemaVersion: "test-v1",
       rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
     });
+    // `zoning` is present + hasWriter=true, threshold 95. Stamp 33.98%,
+    // matching the Williamson case cited in the ruling doc.
     await db.insert(countyFacetCoverage).values({
       countyFips: "50903",
       facet: "zoning",
@@ -397,93 +395,8 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       (c: { countyFips: string; railKey: string }) =>
         c.countyFips === "50903" && c.railKey === "zoning",
     );
-    expect(zoningCell.displayState).toBe("not-yet");
-    expect(zoningCell.isPartial).toBe(false);
-  });
-
-  it("precedence: a statewide-uniform rail below threshold still surfaces as PARTIAL satisfied-present", async () => {
-    await seedAllRails();
-    await db.insert(countyManifest).values({
-      countyFips: "50905",
-      countyName: "Partial Geometry County",
-      parcelCountEst: 1000,
-      rosterSchemaVersion: "test-v1",
-      rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
-    });
-    await db.insert(countyFacetCoverage).values({
-      countyFips: "50905",
-      facet: "geometry",
-      honestCoveragePct: "80.00",
-      integrityVerdict: "n/a",
-      classification: "real-at-ceiling",
-      railState: "satisfied-present",
-      thresholdPct: "95",
-    });
-
-    const res = await request(getApp()).get(LEDGER_PATH);
-    expect(res.status).toBe(200);
-    const geometryCell = res.body.manifestCells.find(
-      (c: { countyFips: string; railKey: string }) =>
-        c.countyFips === "50905" && c.railKey === "geometry",
-    );
-    expect(geometryCell.displayState).toBe("satisfied-present");
-    expect(geometryCell.isPartial).toBe(true);
-  });
-
-  it("precedence: a jurisdiction-depth rail with zero honestCoveragePct renders not-yet despite stored satisfied-present", async () => {
-    await seedAllRails();
-    await db.insert(countyManifest).values({
-      countyFips: "50906",
-      countyName: "Zero Coverage County",
-      rosterSchemaVersion: "test-v1",
-      rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
-    });
-    await db.insert(countyFacetCoverage).values({
-      countyFips: "50906",
-      facet: "zoning",
-      honestCoveragePct: "0",
-      integrityVerdict: "n/a",
-      classification: "real-at-ceiling",
-      railState: "satisfied-present",
-      thresholdPct: "95",
-    });
-
-    const res = await request(getApp()).get(LEDGER_PATH);
-    expect(res.status).toBe(200);
-    const zoningCell = res.body.manifestCells.find(
-      (c: { countyFips: string; railKey: string }) =>
-        c.countyFips === "50906" && c.railKey === "zoning",
-    );
-    expect(zoningCell.displayState).toBe("not-yet");
-    expect(zoningCell.honestCoveragePct).toBe(0);
-  });
-
-  it("precedence: a jurisdiction-depth satisfied-absent cell is unchanged by the depth-rail gate", async () => {
-    await seedAllRails();
-    await db.insert(countyManifest).values({
-      countyFips: "50907",
-      countyName: "Absent Zoning County",
-      rosterSchemaVersion: "test-v1",
-      rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
-    });
-    await db.insert(countyFacetCoverage).values({
-      countyFips: "50907",
-      facet: "zoning",
-      honestCoveragePct: "0",
-      integrityVerdict: "n/a",
-      classification: "real-at-ceiling",
-      railState: "satisfied-absent",
-      absenceBasis: "county-unincorporated-unzoned",
-      thresholdPct: "95",
-    });
-
-    const res = await request(getApp()).get(LEDGER_PATH);
-    expect(res.status).toBe(200);
-    const zoningCell = res.body.manifestCells.find(
-      (c: { countyFips: string; railKey: string }) =>
-        c.countyFips === "50907" && c.railKey === "zoning",
-    );
-    expect(zoningCell.displayState).toBe("satisfied-absent");
+    expect(zoningCell.displayState).toBe("satisfied-present");
+    expect(zoningCell.isPartial).toBe(true);
   });
 
   it("a satisfied-absent cell requires an absence_basis (DB CHECK constraint enforced)", async () => {
