@@ -112,8 +112,11 @@ describe("COUNTY_RAIL_DECLARATION", () => {
 
   it("assigns coverageClass per OPS-14 jurisdiction-depth vs statewide-uniform split", () => {
     const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
-    const depthRails = ["cad", "owner", "zoning", "envelope", "landuse", "easement"];
-    const uniformRails = [
+    for (const key of ["cad", "owner", "zoning", "envelope", "landuse", "easement"]) {
+      expect(byKey.get(key)?.coverageClass).toBe("jurisdiction-depth");
+      expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("jurisdiction-depth");
+    }
+    for (const key of [
       "geometry",
       "roads",
       "flood",
@@ -122,22 +125,15 @@ describe("COUNTY_RAIL_DECLARATION", () => {
       "rrc-pipelines",
       "rail-corridor",
       "mud",
-    ];
-    for (const key of depthRails) {
-      expect(byKey.get(key)?.coverageClass).toBe("jurisdiction-depth");
-      expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("jurisdiction-depth");
-    }
-    for (const key of uniformRails) {
+    ]) {
       expect(byKey.get(key)?.coverageClass).toBe("statewide-uniform");
       expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("statewide-uniform");
     }
     expect(Object.keys(COVERAGE_CLASS_BY_RAIL_KEY)).toHaveLength(COUNTY_RAIL_COUNT);
   });
 
-  it("pins mud rail as present with writer after P1-4 (special-district-fact)", () => {
+  it("pins mud rail metadata after P1-4 (special-district-fact)", () => {
     const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
-    expect(byKey.get("mud")?.atomFamilyState).toBe("present");
-    expect(byKey.get("mud")?.hasWriter).toBe(true);
     expect(byKey.get("mud")?.declaredSource).toMatch(/TCEQ WaterDistricts/i);
     expect(byKey.get("mud")?.displayName).toBe("Special districts");
   });

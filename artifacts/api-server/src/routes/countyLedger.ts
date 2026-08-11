@@ -42,6 +42,7 @@ import {
   countyGateCertState,
   onboardingLedgerEvent,
   COUNTY_RAIL_COUNT,
+  COVERAGE_CLASS_BY_RAIL_KEY,
   probeRailCapabilities,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
@@ -161,6 +162,18 @@ const num = (v: unknown): number | null =>
 const iso = (v: unknown): string | null =>
   v instanceof Date ? v.toISOString() : v === null || v === undefined ? null : String(v);
 
+/** P1.1: jurisdiction-depth rails gate display on coverage threshold (OPS-14). */
+export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
+  if (COVERAGE_CLASS_BY_RAIL_KEY[cell.railKey] !== "jurisdiction-depth") return cell;
+  if (cell.displayState !== "satisfied-present") return cell;
+  const threshold = cell.thresholdPct;
+  const coverage = cell.honestCoveragePct;
+  if (coverage === null || threshold === null || coverage < threshold) {
+    return { ...cell, displayState: "not-yet", isPartial: false };
+  }
+  return cell;
+}
+
 /**
  * The full 254 x 13 manifest grid, County Manifest Sprint 1. Replaces the
  * bare `db.select().from(countyFacetCoverage)` read for this new field:
@@ -215,23 +228,25 @@ async function readManifestGrid(): Promise<ManifestCell[]> {
      AND c.facet = r.rail_key
     ORDER BY m.county_fips, r.ordinal
   `);
-  return rows.map((row) => ({
-    countyFips: row.county_fips,
-    railKey: row.rail_key,
-    displayState: row.display_state,
-    isPartial: Boolean(row.is_partial),
-    honestCoveragePct: num(row.honest_coverage_pct),
-    thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
-    atomFamilyState: row.atom_family_state,
-    hasWriter: Boolean(row.has_writer),
-    absenceBasis: row.absence_basis ?? null,
-    source: row.source ?? null,
-    sourceVintage: row.source_vintage ?? null,
-    lastVerifiedAt: iso(row.last_verified_at),
-    verifiedByInstrument: row.verified_by_instrument ?? null,
-    verificationMethod: row.verification_method ?? null,
-    artifactPath: row.artifact_path ?? null,
-  }));
+  return rows.map((row) =>
+    applyDepthRailDisplayGate({
+      countyFips: row.county_fips,
+      railKey: row.rail_key,
+      displayState: row.display_state,
+      isPartial: Boolean(row.is_partial),
+      honestCoveragePct: num(row.honest_coverage_pct),
+      thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
+      atomFamilyState: row.atom_family_state,
+      hasWriter: Boolean(row.has_writer),
+      absenceBasis: row.absence_basis ?? null,
+      source: row.source ?? null,
+      sourceVintage: row.source_vintage ?? null,
+      lastVerifiedAt: iso(row.last_verified_at),
+      verifiedByInstrument: row.verified_by_instrument ?? null,
+      verificationMethod: row.verification_method ?? null,
+      artifactPath: row.artifact_path ?? null,
+    }),
+  );
 }
 
 /**
