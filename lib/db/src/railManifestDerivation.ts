@@ -2,6 +2,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import {
+  CONTRACT_PROPERTY_TYPES_SNAPSHOT,
+  contractTypeSet,
+  type ContractPropertyTypesSnapshot,
+} from "./schema/contractPropertyTypesSnapshot";
+import {
   ENGINE_PROPERTY_TYPES_SNAPSHOT,
   snapshotTypeSet,
   type EnginePropertyTypesSnapshot,
@@ -22,6 +27,7 @@ export type FileExistsFn = (filePath: string) => boolean;
 
 export interface DerivationProbeOptions {
   snapshot?: EnginePropertyTypesSnapshot;
+  contractSnapshot?: ContractPropertyTypesSnapshot;
   engineRoot?: string;
   ldtRoot?: string;
   fileExists?: FileExistsFn;
@@ -56,12 +62,21 @@ export function deriveAtomFamilyState(
   railKey: string,
   snapshot: EnginePropertyTypesSnapshot = ENGINE_PROPERTY_TYPES_SNAPSHOT,
   binding: RailEngineBinding | undefined = bindingFor(railKey),
+  contractSnapshot: ContractPropertyTypesSnapshot = CONTRACT_PROPERTY_TYPES_SNAPSHOT,
 ): AtomFamilyState {
   if (!binding) return "missing";
   if (binding.atomEntityTypes.length === 0) return "missing";
   const registered = snapshotTypeSet(snapshot);
-  const allPresent = binding.atomEntityTypes.every((t) => registered.has(t));
-  return allPresent ? "present" : "missing";
+  const allInEngine = binding.atomEntityTypes.every((t) => registered.has(t));
+  if (allInEngine) return "present";
+  if (binding.allowContractOnlyRegistration) {
+    const contractRegistered = contractTypeSet(contractSnapshot);
+    const allInContract = binding.atomEntityTypes.every((t) =>
+      contractRegistered.has(t),
+    );
+    if (allInContract) return "present";
+  }
+  return "missing";
 }
 
 function writerPathsExist(

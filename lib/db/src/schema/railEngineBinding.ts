@@ -7,6 +7,11 @@ export interface RailEngineBinding {
   railKey: string;
   /** All listed types must appear in the engine snapshot for `present`. */
   atomEntityTypes: readonly string[];
+  /**
+   * When true, types missing from the engine snapshot may still read `present`
+   * if every type appears in the contract property snapshot (e.g. `road-node`).
+   */
+  allowContractOnlyRegistration?: boolean;
   /** Relative to `{engineRoot}/packages/engine-core/scripts/`. */
   engineWriterScript?: string;
   /** Relative to `{ldtRoot}/artifacts/api-server/src/`. */
@@ -40,7 +45,8 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "roads",
     atomEntityTypes: ["road-node"],
-    atomFamilyRefLabel: "road-node (contract; not in engine snapshot)",
+    allowContractOnlyRegistration: true,
+    atomFamilyRefLabel: "road-node (contract; engine registration pending)",
   },
   {
     railKey: "flood",

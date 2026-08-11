@@ -88,14 +88,25 @@ describe("railManifestDerivation CP1", () => {
     expect(moves.cellsMovedOutOfNoWriter).toBe(254);
   });
 
-  it("fail-closes atomFamilyState to missing for unregistered types", () => {
+  it("fail-closes atomFamilyState to missing for unregistered types without contract fallback", () => {
+    expect(
+      deriveAtomFamilyState(
+        "rrc-pipelines",
+        ENGINE_PROPERTY_TYPES_SNAPSHOT,
+        RAIL_ENGINE_BINDING_BY_KEY["rrc-pipelines"],
+      ),
+    ).toBe("missing");
+  });
+
+  it("keeps roads present via contract snapshot when engine lacks road-node registration", () => {
     expect(
       deriveAtomFamilyState(
         "roads",
         ENGINE_PROPERTY_TYPES_SNAPSHOT,
         RAIL_ENGINE_BINDING_BY_KEY.roads,
       ),
-    ).toBe("missing");
+    ).toBe("present");
+    expect(byKey.get("roads")?.hasWriter).toBe(false);
   });
 
   it("fail-closes hasWriter when no writer file exists", () => {

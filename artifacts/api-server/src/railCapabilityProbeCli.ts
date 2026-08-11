@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import pg from "pg";
 
-import { probeRailCapabilities } from "@workspace/db";
+import { probeRailCapabilities, type CapabilityDbHandle } from "@workspace/db";
 
 const { Pool } = pg;
 
@@ -52,7 +52,13 @@ async function main(): Promise<void> {
     max: 2,
   });
   try {
-    const outcome = await probeRailCapabilities(pool);
+    const db: CapabilityDbHandle = {
+      execute: async (query) => {
+        const { rows } = await pool.query(String(query));
+        return { rows: rows as Record<string, unknown>[] };
+      },
+    };
+    const outcome = await probeRailCapabilities(db);
     console.log(JSON.stringify(outcome, null, 2));
     if (outcome.railCapabilities === null) {
       process.exit(1);
