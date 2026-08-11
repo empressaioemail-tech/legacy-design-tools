@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   COUNTY_RAIL_DECLARATION,
   COUNTY_RAIL_COUNT,
+  COVERAGE_CLASS_BY_RAIL_KEY,
 } from "../schema/countyRailDimension";
 
 /**
@@ -107,5 +108,18 @@ describe("COUNTY_RAIL_DECLARATION", () => {
     expect(byKey.get("flood")?.hasWriter).toBe(true);
     expect(byKey.get("landuse")?.atomFamilyState).toBe("present");
     expect(byKey.get("landuse")?.hasWriter).toBe(true);
+  });
+
+  it("assigns coverageClass per OPS-14 jurisdiction-depth vs statewide-uniform split", () => {
+    const byKey = new Map(COUNTY_RAIL_DECLARATION.map((r) => [r.railKey, r]));
+    for (const key of ["cad", "owner", "zoning", "envelope", "landuse", "easement"]) {
+      expect(byKey.get(key)?.coverageClass).toBe("jurisdiction-depth");
+      expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("jurisdiction-depth");
+    }
+    for (const key of ["geometry", "roads", "flood", "footprint", "rrc-wells", "rrc-pipelines", "rail-corridor", "mud"]) {
+      expect(byKey.get(key)?.coverageClass).toBe("statewide-uniform");
+      expect(COVERAGE_CLASS_BY_RAIL_KEY[key]).toBe("statewide-uniform");
+    }
+    expect(Object.keys(COVERAGE_CLASS_BY_RAIL_KEY)).toHaveLength(COUNTY_RAIL_COUNT);
   });
 });
