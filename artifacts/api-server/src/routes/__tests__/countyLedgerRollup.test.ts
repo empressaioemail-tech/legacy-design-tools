@@ -19,8 +19,13 @@
  * contributes zero. `no-atom` / `no-writer` / `not-yet` all contribute
  * zero (only the two satisfied states count).
  */
-import { describe, it, expect } from "vitest";
-import { computeTexasRollup, type ManifestCell } from "../countyLedger";
+import { describe, it, expect, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.DATABASE_URL ??= "postgres://unused:unused@localhost:5432/unused";
+});
+
+import { computeTexasRollup, applyDepthRailDisplayGate, type ManifestCell } from "../countyLedger";
 
 function cell(
   countyFips: string,
@@ -175,5 +180,43 @@ describe("computeTexasRollup", () => {
     expect(result.texasPct).toBe(0);
     // Total parcel weight excludes the NULL county entirely.
     expect(result.totalParcelWeight).toBe(500);
+  });
+});
+
+describe("applyDepthRailDisplayGate", () => {
+  function baseCell(overrides: Partial<ManifestCell> = {}): ManifestCell {
+    return {
+      countyFips: "48021", railKey: "zoning", displayState: "satisfied-present",
+      isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95,
+      atomFamilyState: "present", hasWriter: true, absenceBasis: null,
+      source: null, sourceVintage: null, lastVerifiedAt: null,
+      verifiedByInstrument: null, verificationMethod: null, artifactPath: null,
+      ...overrides,
+    };
+  }
+
+  it("downgrades jurisdiction-depth satisfied-present below threshold to not-yet", () => {
+    const result = applyDepthRailDisplayGate(baseCell());
+    expect(result.displayState).toBe("not-yet");
+    expect(result.isPartial).toBe(false);
+  });
+
+  it("leaves jurisdiction-depth satisfied-present at/above threshold unchanged", () => {
+    const result = applyDepthRailDisplayGate(baseCell({ honestCoveragePct: 99.77, isPartial: false }));
+    expect(result.displayState).toBe("satisfied-present");
+  });
+
+  it("downgrades jurisdiction-depth satisfied-present with NULL coverage to not-yet", () => {
+    expect(applyDepthRailDisplayGate(baseCell({ honestCoveragePct: null, isPartial: false })).displayState).toBe("not-yet");
+  });
+
+  it("does not override satisfied-absent on jurisdiction-depth rails", () => {
+    expect(applyDepthRailDisplayGate(baseCell({ displayState: "satisfied-absent", honestCoveragePct: 0 })).displayState).toBe("satisfied-absent");
+  });
+
+  it("does not change statewide-uniform rails below threshold", () => {
+    const result = applyDepthRailDisplayGate(baseCell({ railKey: "geometry", honestCoveragePct: 80, isPartial: true }));
+    expect(result.displayState).toBe("satisfied-present");
+    expect(result.isPartial).toBe(true);
   });
 });

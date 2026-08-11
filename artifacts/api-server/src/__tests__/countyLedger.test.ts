@@ -368,35 +368,42 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(roadsCell.displayState).toBe("no-writer");
   });
 
-  it("precedence: a satisfied-present cell below threshold surfaces as PARTIAL and does not count toward satisfiedCells", async () => {
+  it("precedence: jurisdiction-depth below threshold renders not-yet (P1.1)", async () => {
     await seedAllRails();
-    await db.insert(countyManifest).values({
-      countyFips: "50903",
-      countyName: "Partial County",
-      parcelCountEst: 1000,
-      rosterSchemaVersion: "test-v1",
-      rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
-    });
-    // `zoning` is present + hasWriter=true, threshold 95. Stamp 33.98%,
-    // matching the Williamson case cited in the ruling doc.
-    await db.insert(countyFacetCoverage).values({
-      countyFips: "50903",
-      facet: "zoning",
-      honestCoveragePct: "33.98",
-      integrityVerdict: "n/a",
-      classification: "real-at-ceiling",
-      railState: "satisfied-present",
-      thresholdPct: "95",
-    });
-
+    await db.insert(countyManifest).values({ countyFips: "50903", countyName: "Partial County", parcelCountEst: 1000, rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
+    await db.insert(countyFacetCoverage).values({ countyFips: "50903", facet: "zoning", honestCoveragePct: "33.98", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
     const res = await request(getApp()).get(LEDGER_PATH);
-    expect(res.status).toBe(200);
-    const zoningCell = res.body.manifestCells.find(
-      (c: { countyFips: string; railKey: string }) =>
-        c.countyFips === "50903" && c.railKey === "zoning",
-    );
-    expect(zoningCell.displayState).toBe("satisfied-present");
-    expect(zoningCell.isPartial).toBe(true);
+    const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50903" && c.railKey === "zoning");
+    expect(cell.displayState).toBe("not-yet");
+    expect(cell.isPartial).toBe(false);
+  });
+
+  it("precedence: statewide-uniform below threshold stays PARTIAL satisfied-present", async () => {
+    await seedAllRails();
+    await db.insert(countyManifest).values({ countyFips: "50905", countyName: "Partial Geometry", parcelCountEst: 1000, rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
+    await db.insert(countyFacetCoverage).values({ countyFips: "50905", facet: "geometry", honestCoveragePct: "80.00", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
+    const res = await request(getApp()).get(LEDGER_PATH);
+    const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50905" && c.railKey === "geometry");
+    expect(cell.displayState).toBe("satisfied-present");
+    expect(cell.isPartial).toBe(true);
+  });
+
+  it("precedence: jurisdiction-depth zero coverage renders not-yet", async () => {
+    await seedAllRails();
+    await db.insert(countyManifest).values({ countyFips: "50906", countyName: "Zero Coverage", rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
+    await db.insert(countyFacetCoverage).values({ countyFips: "50906", facet: "zoning", honestCoveragePct: "0", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
+    const res = await request(getApp()).get(LEDGER_PATH);
+    const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50906" && c.railKey === "zoning");
+    expect(cell.displayState).toBe("not-yet");
+  });
+
+  it("precedence: jurisdiction-depth satisfied-absent unchanged by gate", async () => {
+    await seedAllRails();
+    await db.insert(countyManifest).values({ countyFips: "50907", countyName: "Absent Zoning", rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
+    await db.insert(countyFacetCoverage).values({ countyFips: "50907", facet: "zoning", honestCoveragePct: "0", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-absent", absenceBasis: "county-unincorporated-unzoned", thresholdPct: "95" });
+    const res = await request(getApp()).get(LEDGER_PATH);
+    const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50907" && c.railKey === "zoning");
+    expect(cell.displayState).toBe("satisfied-absent");
   });
 
   it("a satisfied-absent cell requires an absence_basis (DB CHECK constraint enforced)", async () => {
