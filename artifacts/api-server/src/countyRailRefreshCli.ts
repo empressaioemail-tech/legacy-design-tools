@@ -53,7 +53,7 @@ import { realpathSync } from "node:fs";
 import pg from "pg";
 
 import {
-  COUNTY_RAIL_DECLARATION,
+  buildEffectiveCountyRailDeclaration,
   type CountyRailDeclaration,
 } from "@workspace/db";
 
@@ -303,6 +303,8 @@ async function main(): Promise<void> {
   });
   const apply = values.apply ?? false;
 
+  const effectiveDeclaration = buildEffectiveCountyRailDeclaration();
+
   const startedAt = Date.now();
   const databaseUrl = resolveDatabaseUrl();
   const pool = new Pool({
@@ -318,10 +320,10 @@ async function main(): Promise<void> {
     const { rows } = await pool.query<LiveRailRow>(
       "SELECT rail_key, display_name, ordinal, rail_letter, kind, threshold_pct, atom_family_state, atom_family_ref, has_writer, writer_ref, declared_source, notes FROM county_rail ORDER BY ordinal",
     );
-    diffs = diffRails(rows, COUNTY_RAIL_DECLARATION);
+    diffs = diffRails(rows, effectiveDeclaration);
 
     log(`live rows:        ${rows.length}`);
-    log(`declared rows:    ${COUNTY_RAIL_DECLARATION.length}`);
+    log(`declared rows:    ${effectiveDeclaration.length}`);
     log(`diffs found:      ${diffs.length}`);
     for (const d of diffs) reportDiff(d);
 
@@ -361,7 +363,7 @@ async function main(): Promise<void> {
 
         for (const d of diffs) {
           if (d.kind === "delete") continue;
-          const decl = COUNTY_RAIL_DECLARATION.find(
+          const decl = effectiveDeclaration.find(
             (x) => x.railKey === d.railKey,
           );
           if (!decl) continue; // unreachable for update/insert diffs
