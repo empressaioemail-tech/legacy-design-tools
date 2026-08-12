@@ -8,6 +8,7 @@ export {
   computeCp1CellMoveExpectations,
   hasIndeterminateDerivations,
   isRailDerivationIndeterminate,
+  manifestReadProbeOptions,
   resolveEngineRoot,
   resolveLdtRoot,
   type DerivationProbeOptions,

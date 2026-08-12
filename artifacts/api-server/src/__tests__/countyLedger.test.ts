@@ -55,6 +55,23 @@ import {
 } from "@workspace/db";
 import { truncateAll } from "@workspace/db/testing";
 
+vi.mock("@workspace/db/manifest", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/db/manifest")>(
+      "@workspace/db/manifest",
+    );
+  return {
+    ...actual,
+    buildEffectiveCountyRailDeclaration: (
+      opts?: Parameters<typeof actual.buildEffectiveCountyRailDeclaration>[0],
+    ) =>
+      actual.buildEffectiveCountyRailDeclaration({
+        ...actual.manifestReadProbeOptions(),
+        ...opts,
+      }),
+  };
+});
+
 vi.mock("@workspace/db", async () => {
   const actual =
     await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
@@ -72,6 +89,9 @@ vi.mock("@workspace/db", async () => {
 const { setupRouteTests } = await import("./setup");
 const { __resetServiceApiKeyCacheForTests } = await import(
   "../lib/serviceToken"
+);
+const { applyDerivationIndeterminateOverlay } = await import(
+  "../routes/countyLedger"
 );
 
 const TEST_SERVICE_TOKEN = "test-county-ledger-service-token-xyz";
@@ -423,6 +443,29 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
         // added in migration 0069.
       }),
     ).rejects.toThrow();
+  });
+
+  it("derivation-indeterminate overlay takes precedence over stored rail_state", () => {
+    const cell = {
+      countyFips: "48001",
+      railKey: "zoning",
+      displayState: "satisfied-present" as const,
+      isPartial: false,
+      honestCoveragePct: 99,
+      thresholdPct: 95,
+      atomFamilyState: "present",
+      hasWriter: true,
+      absenceBasis: null,
+      source: null,
+      sourceVintage: null,
+      lastVerifiedAt: null,
+      verifiedByInstrument: null,
+      verificationMethod: null,
+      artifactPath: null,
+    };
+    const [overlaid] = applyDerivationIndeterminateOverlay([cell], new Set(["zoning"]));
+    expect(overlaid.displayState).toBe("derivation-indeterminate");
+    expect(overlaid.isPartial).toBe(false);
   });
 
   it("manifestCells is additive: the pre-existing counties[]/summary shape is unaffected when the manifest is unseeded", async () => {

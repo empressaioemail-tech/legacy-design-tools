@@ -456,6 +456,18 @@ export function hasIndeterminateDerivations(
   );
 }
 
+/** Read-path probe: LDT scorers checked on disk; engine scripts trusted when not colocated. */
+export function manifestReadProbeOptions(): DerivationProbeOptions {
+  return {
+    requireEngineRoot: false,
+    fileExists: (filePath: string) => {
+      const normalized = filePath.replace(/\\/g, "/");
+      if (normalized.includes("/hauska-engine/")) return true;
+      return existsSync(filePath);
+    },
+  };
+}
+
 /** CP1 self-check: expected manifest cell moves when derived declaration replaces stale hand-edited values. */
 export function computeCp1CellMoveExpectations(
   beforeByKey: Readonly<Record<string, { atomFamilyState: AtomFamilyState; hasWriter: boolean }>>,

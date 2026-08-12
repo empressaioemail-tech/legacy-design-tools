@@ -47,6 +47,7 @@ import {
 import {
   buildEffectiveCountyRailDeclaration,
   isRailDerivationIndeterminate,
+  manifestReadProbeOptions,
   probeRailCapabilities,
 } from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
@@ -198,7 +199,7 @@ export function applyDerivationIndeterminateOverlay(
 }
 
 function indeterminateRailKeysFromEffectiveDeclaration(): Set<string> {
-  const effective = buildEffectiveCountyRailDeclaration();
+  const effective = buildEffectiveCountyRailDeclaration(manifestReadProbeOptions());
   return new Set(
     effective
       .filter(isRailDerivationIndeterminate)
