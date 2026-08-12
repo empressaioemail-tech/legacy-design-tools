@@ -26,6 +26,15 @@ export const PACS_ENTRY_FILTER: EntryFilter = (name) =>
 export const ORION_ENTRY_FILTER: EntryFilter = (name) =>
   /\.(zip|txt|csv)$/i.test(name);
 
+/** TAD PropertyData(Delimited) zip: single pipe-delimited .txt entry. */
+export const TAD_ENTRY_FILTER: EntryFilter = (name) => /\.txt$/i.test(name);
+
+/** DCAD certified zip: comma-delimited CSV roll files. */
+export const DCAD_ENTRY_FILTER: EntryFilter = (name) =>
+  /^(ACCOUNT_INFO|RES_DETAIL|ACCOUNT_APPRL_YEAR|LAND)\.CSV$/i.test(
+    basename(name),
+  );
+
 /**
  * Extract entries matching `filter` from `zipPath` into `destDir`
  * (flattened to basenames). Returns extracted file paths.

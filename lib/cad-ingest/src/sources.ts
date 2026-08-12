@@ -3,27 +3,12 @@
  * acquisition rail (Rail B).
  *
  * Given a county, this says WHERE its free bulk appraisal roll lives
- * and HOW it is fetched. Two access modes:
+ * and HOW it is fetched. Access modes:
  *
- *  - `open-fetch`: the CAD serves its bulk export over plain HTTP(S)
- *    GET (no form, no session, no login). The CLI can pull the whole
- *    drop from `--county=<fips>` with no `--file`. WCAD's Socrata Open
- *    Data portal (data.wcad.org) is the reference case: four datasets
- *    (Property / Owner / Land / ImpSegment) each at a stable
- *    `rows.csv?accessType=DOWNLOAD` endpoint, verified 200 live.
- *
- *  - `manual-download`: the bulk drop sits behind a WAF / portal /
- *    session-gated link (the WordPress data-downloads pages 403 a
- *    programmatic GET). The operator downloads the ZIP by hand and
- *    hands the local path to the CLI via `--file=<zip|dir>`. Hays is
- *    this case: hayscad.com/data-downloads/ is WAF-fronted and its
- *    export ZIP is not an open GET. We flag it as an operator-supplied
- *    input rather than faking a fetch.
- *
- * Adding the next CAD (El Paso, Tarrant, ...) is a new entry here plus
- * (if its file shape differs) a new parser — never a rewrite of the
- * ingest pipeline. This registry is source-resolution only; format is
- * still carried by CAD_COUNTIES.format in ./counties.ts.
+ *  - `open-fetch`: Orion-style multi-dataset Socrata GET (WCAD).
+ *  - `open-fetch-zip`: single zip URL; CLI extracts format-specific
+ *    entries (TAD PropertyData, DCAD certified).
+ *  - `manual-download`: WAF/session-gated; operator supplies --file.
  *
  * Texas non-disclosure note: NO Texas CAD publishes sale PRICE in its
  * bulk roll (Property Tax Code is a non-disclosure state). Sales price
@@ -47,6 +32,14 @@ export interface OpenFetchSource {
   datasets: BulkDataset[];
 }
 
+/** Single zip open-GET (TAD PropertyData, DCAD certified). */
+export interface OpenFetchZipSource {
+  mode: "open-fetch-zip";
+  url: string;
+  /** Human label for logs and source_vintage drop basename. */
+  label: string;
+}
+
 export interface ManualDownloadSource {
   mode: "manual-download";
   /** Human page where the operator obtains the drop. */
@@ -58,7 +51,10 @@ export interface ManualDownloadSource {
   instructions: string;
 }
 
-export type CadBulkSource = OpenFetchSource | ManualDownloadSource;
+export type CadBulkSource =
+  | OpenFetchSource
+  | OpenFetchZipSource
+  | ManualDownloadSource;
 
 /**
  * WCAD Socrata Open Data dataset ids (data.wcad.org). Each is a stable
@@ -76,6 +72,10 @@ function wcadSocrataUrl(viewId: string): string {
   return `https://data.wcad.org/api/views/${viewId}/rows.csv?accessType=DOWNLOAD`;
 }
 
+/** DCAD ViewPDFs proxy for the certified comma-delimited drop. */
+export const DCAD_CERTIFIED_OPEN_FETCH_URL =
+  "https://www.dallascad.org/ViewPDFs.aspx?type=3&id=%5C%5CDCAD.ORG%5CWEB%5CWEBDATA%5CWEBFORMS%5CDATA%20PRODUCTS%5CDCAD2026_CERTIFIED_07232026.zip";
+
 export const CAD_BULK_SOURCES: Record<string, CadBulkSource> = {
   // Williamson / WCAD — open Socrata portal, fully automatable.
   "48491": {
@@ -89,7 +89,6 @@ export const CAD_BULK_SOURCES: Record<string, CadBulkSource> = {
   },
 
   // Hays / Hays CAD — WAF-fronted WordPress portal, session-gated ZIP.
-  // Operator-supplied input, not an open GET.
   "48209": {
     mode: "manual-download",
     page: "https://hayscad.com/data-downloads/",
@@ -100,6 +99,21 @@ export const CAD_BULK_SOURCES: Record<string, CadBulkSource> = {
       "run:  cad-ingest --county=48209 --file=<local .zip|dir> " +
       "--tax-year=<roll year>. The ZIP holds the Property/Owner/Land/" +
       "ImpSegment .txt files, which the CLI classifies by header.",
+  },
+
+  // Tarrant / TAD — open-fetch residential slice (~50MB).
+  // Full county (~97MB): PropertyData(Delimited).ZIP — announce before load.
+  "48439": {
+    mode: "open-fetch-zip",
+    url: "https://www.tad.org/content/data-download/PropertyData(Delimited)_R.ZIP",
+    label: "PropertyData(Delimited)_R.ZIP",
+  },
+
+  // Dallas / DCAD — open-fetch certified comma-delimited zip (~193MB).
+  "48113": {
+    mode: "open-fetch-zip",
+    url: DCAD_CERTIFIED_OPEN_FETCH_URL,
+    label: "DCAD2026_CERTIFIED_07232026.zip",
   },
 };
 
