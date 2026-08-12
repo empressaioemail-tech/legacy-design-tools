@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   CONTRACT_PROPERTY_TYPES_SNAPSHOT,
@@ -35,19 +36,45 @@ export interface DerivationProbeOptions {
   requireEngineRoot?: boolean;
 }
 
-const DEFAULT_ENGINE_ROOT =
-  process.env.HAUSKA_ENGINE_ROOT?.trim() ||
-  path.resolve(process.cwd(), "..", "hauska-engine");
+/** Walk up from this module until the LDT repo marker file is found. */
+function findLdtRepoRoot(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 8; i++) {
+    const marker = path.join(
+      dir,
+      "artifacts",
+      "api-server",
+      "src",
+      "countyGeometryScoreCli.ts",
+    );
+    if (existsSync(marker)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.resolve(dir, "..", "..", "..");
+}
 
-const DEFAULT_LDT_ROOT =
-  process.env.LEGACY_DESIGN_TOOLS_ROOT?.trim() || process.cwd();
+const MODULE_ANCHORED_LDT_ROOT = findLdtRepoRoot();
+
+const MODULE_ANCHORED_ENGINE_ROOT = path.resolve(
+  MODULE_ANCHORED_LDT_ROOT,
+  "..",
+  "hauska-engine",
+);
 
 export function resolveEngineRoot(override?: string): string {
-  return path.resolve(override ?? DEFAULT_ENGINE_ROOT);
+  if (override) return path.resolve(override);
+  const fromEnv = process.env.HAUSKA_ENGINE_ROOT?.trim();
+  if (fromEnv) return path.resolve(fromEnv);
+  return MODULE_ANCHORED_ENGINE_ROOT;
 }
 
 export function resolveLdtRoot(override?: string): string {
-  return path.resolve(override ?? DEFAULT_LDT_ROOT);
+  if (override) return path.resolve(override);
+  const fromEnv = process.env.LEGACY_DESIGN_TOOLS_ROOT?.trim();
+  if (fromEnv) return path.resolve(fromEnv);
+  return MODULE_ANCHORED_LDT_ROOT;
 }
 
 function bindingFor(railKey: string): RailEngineBinding | undefined {
@@ -84,25 +111,37 @@ function writerPathsExist(
   engineRoot: string,
   ldtRoot: string,
   fileExists: FileExistsFn,
-): { enginePath: string | null; ldtPath: string | null } {
+): {
+  enginePath: string | null;
+  ldtPath: string | null;
+  engineProbePath: string | null;
+  ldtProbePath: string | null;
+} {
   let enginePath: string | null = null;
   let ldtPath: string | null = null;
+  let engineProbePath: string | null = null;
+  let ldtProbePath: string | null = null;
   if (binding.engineWriterScript) {
-    enginePath = path.join(
+    engineProbePath = path.join(
       engineRoot,
       "packages",
       "engine-core",
       "scripts",
       binding.engineWriterScript,
     );
+    if (fileExists(engineProbePath)) enginePath = engineProbePath;
   }
   if (binding.ldtScorerPath) {
-    ldtPath = path.join(ldtRoot, "artifacts", "api-server", "src", binding.ldtScorerPath);
+    ldtProbePath = path.join(
+      ldtRoot,
+      "artifacts",
+      "api-server",
+      "src",
+      binding.ldtScorerPath,
+    );
+    if (fileExists(ldtProbePath)) ldtPath = ldtProbePath;
   }
-  return {
-    enginePath: enginePath && fileExists(enginePath) ? enginePath : null,
-    ldtPath: ldtPath && fileExists(ldtPath) ? ldtPath : null,
-  };
+  return { enginePath, ldtPath, engineProbePath, ldtProbePath };
 }
 
 /**
@@ -157,15 +196,23 @@ export function deriveRailDeclarationFields(
   const requireEngineRoot = options.requireEngineRoot ?? true;
 
   const atomFamilyState = deriveAtomFamilyState(railKey, snapshot, binding);
-  const hasWriter = deriveHasWriter(
-    railKey,
-    snapshot,
-    binding,
-    engineRoot,
-    ldtRoot,
-    fileExists,
-    requireEngineRoot,
-  );
+  const needsEngineProbe = Boolean(binding?.engineWriterScript);
+
+  const probe =
+    binding && atomFamilyState === "present"
+      ? writerPathsExist(binding, engineRoot, ldtRoot, fileExists)
+      : {
+          enginePath: null,
+          ldtPath: null,
+          engineProbePath: null,
+          ldtProbePath: null,
+        };
+
+  const hasWriter =
+    atomFamilyState === "present" &&
+    Boolean(binding) &&
+    Boolean(probe.enginePath || probe.ldtPath) &&
+    !(needsEngineProbe && requireEngineRoot && !fileExists(engineRoot));
 
   const reasons: string[] = [];
   if (!binding) {
@@ -183,11 +230,30 @@ export function deriveRailDeclarationFields(
     }
   }
 
+  const hasBoundWriterProbe =
+    Boolean(binding?.engineWriterScript) || Boolean(binding?.ldtScorerPath);
+
   if (atomFamilyState === "present") {
     if (hasWriter) {
       reasons.push("writer/scorer file found on disk");
+    } else if (!hasBoundWriterProbe) {
+      reasons.push("no writer/scorer bound for rail (confirmed absent)");
     } else {
-      reasons.push("no writer/scorer file on disk");
+      const missing: string[] = [];
+      if (probe.engineProbePath && !probe.enginePath) {
+        missing.push(`engine script missing at ${probe.engineProbePath}`);
+      }
+      if (probe.ldtProbePath && !probe.ldtPath) {
+        missing.push(`ldt scorer missing at ${probe.ldtProbePath}`);
+      }
+      if (needsEngineProbe && requireEngineRoot && !fileExists(engineRoot)) {
+        missing.push(`engine root missing at ${engineRoot}`);
+      }
+      reasons.push(
+        missing.length > 0
+          ? `writer probe failed: ${missing.join("; ")}`
+          : "writer probe failed: bound paths not found",
+      );
     }
   }
 
