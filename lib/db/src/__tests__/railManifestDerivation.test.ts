@@ -39,7 +39,8 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("write-land-use-fact-county.mjs") ||
       normalized.endsWith("write-road-node-county.mjs") ||
       normalized.endsWith("write-parcel-node-county.mjs") ||
-      normalized.endsWith("write-utility-easement-county.mjs")
+      normalized.endsWith("write-utility-easement-county.mjs") ||
+      normalized.endsWith("write-rrc-pipeline-fact-county.mjs")
     );
   }
   if (normalized.includes("artifacts/api-server/src/")) {
@@ -74,9 +75,12 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("footprint")?.hasWriter).toBe(true);
   });
 
-  it("keeps rrc-pipelines missing without writer", () => {
-    expect(byKey.get("rrc-pipelines")?.atomFamilyState).toBe("missing");
-    expect(byKey.get("rrc-pipelines")?.hasWriter).toBe(false);
+  it("derives rrc-pipelines present with writer (engine PR #314)", () => {
+    expect(byKey.get("rrc-pipelines")?.atomFamilyState).toBe("present");
+    expect(byKey.get("rrc-pipelines")?.hasWriter).toBe(true);
+    expect(byKey.get("rrc-pipelines")?.writerRef).toContain(
+      "write-rrc-pipeline-fact-county",
+    );
   });
 
   it("derives easement present with writer (E1: engine PR #295 merged)", () => {
@@ -89,20 +93,24 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("owner")?.hasWriter).toBe(true);
   });
 
-  it("matches CP1 cell move expectations (762 no-atom, 762 no-writer)", () => {
+  it("matches CP1 cell move expectations (1016 no-atom, 762 no-writer)", () => {
     const moves = computeCp1CellMoveExpectations(CP1_BEFORE_BY_KEY, effective);
-    expect(moves.cellsMovedOutOfNoAtom).toBe(762);
-    // 508 + easement 254: E1 merged the utility-easement county writer
-    // (engine PR #295), so easement's 254 cells leave no-writer for not-yet.
+    // 762 + rrc-pipelines 254: engine PR #314 registered rrc-pipeline-fact
+    // and bound write-rrc-pipeline-fact-county.mjs (no-atom → not-yet).
+    expect(moves.cellsMovedOutOfNoAtom).toBe(1016);
+    // no-writer moves unchanged: rrc-pipelines left no-atom, not no-writer.
     expect(moves.cellsMovedOutOfNoWriter).toBe(762);
   });
 
   it("fail-closes atomFamilyState to missing for unregistered types without contract fallback", () => {
     expect(
       deriveAtomFamilyState(
-        "rrc-pipelines",
+        "unknown-unbound-rail",
         ENGINE_PROPERTY_TYPES_SNAPSHOT,
-        RAIL_ENGINE_BINDING_BY_KEY["rrc-pipelines"],
+        {
+          railKey: "unknown-unbound-rail",
+          atomEntityTypes: ["not-a-registered-entity-type"],
+        },
       ),
     ).toBe("missing");
   });

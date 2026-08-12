@@ -5,7 +5,7 @@
  * not yet in the engine registration list.
  */
 export const CONTRACT_PROPERTY_TYPES_SNAPSHOT = {
-  contractVersion: "1.19.0",
+  contractVersion: "1.20.0",
   sourcePath: "@empressaio/atom-contract/property exports",
   types: [
     "parcel-node",
@@ -23,6 +23,7 @@ export const CONTRACT_PROPERTY_TYPES_SNAPSHOT = {
     "rail-corridor-fact",
     "well-fact",
     "special-district-fact",
+    "rrc-pipeline-fact",
   ],
 } as const;
 
