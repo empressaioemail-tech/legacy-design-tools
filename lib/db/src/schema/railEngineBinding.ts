@@ -24,9 +24,11 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "geometry",
     atomEntityTypes: ["parcel-node"],
+    engineWriterScript: "write-parcel-node-county.mjs",
     ldtScorerPath: "countyGeometryScoreCli.ts",
     atomFamilyRefLabel: "parcel-node (engine PROPERTY_ENTITY_TYPES)",
-    writerRefLabel: "countyGeometryScoreCli.ts facet geometry",
+    writerRefLabel:
+      "hauska-engine write-parcel-node-county.mjs; countyGeometryScoreCli.ts facet geometry",
   },
   {
     railKey: "cad",

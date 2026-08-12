@@ -1,4 +1,5 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 
 import {
@@ -6,6 +7,8 @@ import {
   computeCp1CellMoveExpectations,
   deriveAtomFamilyState,
   deriveHasWriter,
+  deriveRailDeclarationFields,
+  resolveLdtRoot,
 } from "../railManifestDerivation";
 import { ENGINE_PROPERTY_TYPES_SNAPSHOT } from "../schema/enginePropertyTypesSnapshot";
 import { RAIL_ENGINE_BINDING_BY_KEY } from "../schema/railEngineBinding";
@@ -34,7 +37,8 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("write-cad-parcel-roll-county.mjs") ||
       normalized.endsWith("write-flood-hazard-fact-county.mjs") ||
       normalized.endsWith("write-land-use-fact-county.mjs") ||
-      normalized.endsWith("write-road-node-county.mjs")
+      normalized.endsWith("write-road-node-county.mjs") ||
+      normalized.endsWith("write-parcel-node-county.mjs")
     );
   }
   if (normalized.includes("artifacts/api-server/src/")) {
@@ -118,5 +122,43 @@ describe("railManifestDerivation CP1", () => {
         false,
       ),
     ).toBe(false);
+  });
+
+  it("derives geometry/zoning/envelope present with writer (D3 regression guard)", () => {
+    for (const key of ["geometry", "zoning", "envelope"] as const) {
+      expect(byKey.get(key)?.atomFamilyState).toBe("present");
+      expect(byKey.get(key)?.hasWriter).toBe(true);
+    }
+    expect(byKey.get("geometry")?.writerRef).toContain("write-parcel-node-county");
+  });
+
+  it("module-anchored ldtRoot finds scorers without cwd override (D3 cwd trap)", () => {
+    const repoRoot = resolveLdtRoot();
+    const wrongCwdRoot = path.join(repoRoot, "artifacts", "api-server");
+    const derivedWrong = deriveRailDeclarationFields("zoning", {
+      ldtRoot: wrongCwdRoot,
+      engineRoot: probeOptions.engineRoot,
+      fileExists: existsSync,
+      requireEngineRoot: false,
+    });
+    expect(derivedWrong.hasWriter).toBe(false);
+    expect(derivedWrong.derivationReason).toContain("writer probe failed");
+
+    const derivedAnchored = deriveRailDeclarationFields("zoning", {
+      fileExists: existsSync,
+      requireEngineRoot: false,
+    });
+    expect(derivedAnchored.hasWriter).toBe(true);
+    expect(
+      existsSync(
+        path.join(
+          repoRoot,
+          "artifacts",
+          "api-server",
+          "src",
+          "countyCoverageScoreCli.ts",
+        ),
+      ),
+    ).toBe(true);
   });
 });
