@@ -111,7 +111,16 @@ jobs:
         # checked-in fixture will be stale and integration tests would
         # silently miss new columns/tables. Fail the PR loudly instead.
         run: pnpm --filter @workspace/db run test:fixture:drift
+      - name: Checkout hauska-engine (writer disk probe)
+        uses: actions/checkout@v4
+        with:
+          repository: empressaioemail-tech/hauska-engine
+          path: hauska-engine-checkout
+          sparse-checkout: |
+            packages/engine-core/scripts
       - name: Run tests
+        env:
+          HAUSKA_ENGINE_ROOT: ${{ github.workspace }}/hauska-engine-checkout
         run: pnpm test
   l5-sf30-cotality-grep:
     name: L5 SF-30 Cotality warm grep
@@ -150,3 +159,25 @@ jobs:
             exit 1
           fi
           echo "ci-coverage-clamp: clean"
+  l5-silent-fallback-greps:
+    name: L5 silent-fallback greps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-fake-engine-exists
+        run: |
+          if rg -n 'includes\(["'"'"']/hauska-engine/["'"'"']\)\)\s*return true' lib/db/src/railManifestDerivation.ts; then
+            echo "FAIL ci-fake-engine-exists: read-path must not pretend engine writers exist"
+            exit 1
+          fi
+          echo "ci-fake-engine-exists: clean"
+      - name: ci-mock-allowlist-hauska-engine
+        run: |
+          if rg -n --glob '**/__tests__/**' 'includes\(["'"'"']hauska-engine["'"'"']\)'; then
+            echo "FAIL ci-mock-allowlist-hauska-engine: tests must not substring-match hauska-engine paths as existing"
+            exit 1
+          fi
+          echo "ci-mock-allowlist-hauska-engine: clean"

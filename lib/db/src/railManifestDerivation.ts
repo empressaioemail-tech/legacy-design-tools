@@ -207,8 +207,11 @@ function writerPathsExist(
 }
 
 /**
- * Tri-state writer probe. `false` only when family absent or writer
- * confirmed absent; `indeterminate` when bound probe paths miss on disk.
+ * Tri-state writer probe. `true` only when a bound writer/scorer file
+ * exists on disk. Missing engine script → false (or indeterminate when
+ * `requireEngineRoot` and the engine root itself is missing) — never a
+ * fake true. Residual vs merged origin/main: local/sibling filesystem
+ * only (SF-20).
  */
 export function deriveHasWriter(
   railKey: string,
@@ -456,15 +459,24 @@ export function hasIndeterminateDerivations(
   );
 }
 
-/** Read-path probe: LDT scorers checked on disk; engine scripts trusted when not colocated. */
+/**
+ * Read-path probe for the county-ledger overlay.
+ *
+ * LDT scorers are checked with real existsSync. Engine writer scripts are
+ * NOT trusted absent — a missing `/hauska-engine/` path must not return
+ * true (SF-21). `requireEngineRoot` stays false so Cloud Run (no sibling
+ * engine tree) yields confirmed-false rather than indeterminate overlay
+ * that would blank the live grid; live `has_writer` remains the last
+ * refresh write.
+ *
+ * SF-20 residual: this is still a filesystem probe of the local/sibling
+ * tree, not proof the script exists on merged origin/main. Do not add a
+ * git-ls-remote here.
+ */
 export function manifestReadProbeOptions(): DerivationProbeOptions {
   return {
     requireEngineRoot: false,
-    fileExists: (filePath: string) => {
-      const normalized = filePath.replace(/\\/g, "/");
-      if (normalized.includes("/hauska-engine/")) return true;
-      return existsSync(filePath);
-    },
+    fileExists: existsSync,
   };
 }
 
