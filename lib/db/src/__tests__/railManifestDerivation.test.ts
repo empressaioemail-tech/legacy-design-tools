@@ -16,6 +16,7 @@ const CP1_BEFORE_BY_KEY = {
   "rrc-wells": { atomFamilyState: "missing" as const, hasWriter: false },
   mud: { atomFamilyState: "missing" as const, hasWriter: false },
   footprint: { atomFamilyState: "present" as const, hasWriter: false },
+  roads: { atomFamilyState: "present" as const, hasWriter: false },
   "rrc-pipelines": { atomFamilyState: "missing" as const, hasWriter: false },
   easement: { atomFamilyState: "present" as const, hasWriter: false },
   owner: { atomFamilyState: "present" as const, hasWriter: true },
@@ -32,7 +33,8 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("write-owner-fact-county.mjs") ||
       normalized.endsWith("write-cad-parcel-roll-county.mjs") ||
       normalized.endsWith("write-flood-hazard-fact-county.mjs") ||
-      normalized.endsWith("write-land-use-fact-county.mjs")
+      normalized.endsWith("write-land-use-fact-county.mjs") ||
+      normalized.endsWith("write-road-node-county.mjs")
     );
   }
   if (normalized.includes("artifacts/api-server/src/")) {
@@ -82,10 +84,10 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("owner")?.hasWriter).toBe(true);
   });
 
-  it("matches CP1 cell move expectations (762 no-atom, 254 no-writer)", () => {
+  it("matches CP1 cell move expectations (762 no-atom, 508 no-writer)", () => {
     const moves = computeCp1CellMoveExpectations(CP1_BEFORE_BY_KEY, effective);
     expect(moves.cellsMovedOutOfNoAtom).toBe(762);
-    expect(moves.cellsMovedOutOfNoWriter).toBe(254);
+    expect(moves.cellsMovedOutOfNoWriter).toBe(508);
   });
 
   it("fail-closes atomFamilyState to missing for unregistered types without contract fallback", () => {
@@ -98,15 +100,10 @@ describe("railManifestDerivation CP1", () => {
     ).toBe("missing");
   });
 
-  it("keeps roads present via contract snapshot when engine lacks road-node registration", () => {
-    expect(
-      deriveAtomFamilyState(
-        "roads",
-        ENGINE_PROPERTY_TYPES_SNAPSHOT,
-        RAIL_ENGINE_BINDING_BY_KEY.roads,
-      ),
-    ).toBe("present");
-    expect(byKey.get("roads")?.hasWriter).toBe(false);
+  it("derives roads present with writer when engine snapshot and script exist", () => {
+    expect(byKey.get("roads")?.atomFamilyState).toBe("present");
+    expect(byKey.get("roads")?.hasWriter).toBe(true);
+    expect(byKey.get("roads")?.writerRef).toContain("write-road-node-county");
   });
 
   it("fail-closes hasWriter when no writer file exists", () => {
