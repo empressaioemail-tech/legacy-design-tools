@@ -46,6 +46,8 @@ import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import shapefile from "shapefile";
 import { resolveTxgioCounty, TXGIO_COUNTIES } from "./counties";
+import { resolveCadRollRoute } from "../routing";
+import { formatSourceVintage } from "../tier";
 import { normalizeStratMapLandUse, type StratMapProperties } from "./landuse";
 import { TXGIO_ENTRY_FILTER } from "./parse";
 import { upsertCadProperties, DEFAULT_BATCH_SIZE } from "../ingest";
@@ -138,6 +140,7 @@ async function main(): Promise<void> {
       limit: { type: "string" },
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
+      "allow-stratmap-fallback": { type: "boolean", default: false },
     },
   });
 
@@ -163,6 +166,18 @@ async function main(): Promise<void> {
       .map((c) => `${c.fips} ${c.name}`)
       .join(", ");
     fail(`unknown county "${values.county}" - supported: ${supported}`);
+  }
+
+  const route = resolveCadRollRoute(county.fips);
+  const allowFallback = values["allow-stratmap-fallback"] ?? false;
+  if (route.bulkPrimary && !allowFallback) {
+    fail(
+      `${county.name} (${county.fips}) is bulk_primary — cad-export is the ` +
+        "required source tier for structural fields (living_area_sqft, " +
+        "year_built, land_acres). Load the CAD bulk export via cad-ingest " +
+        "instead. To ingest StratMap land-use anyway (identity/value only), " +
+        "pass --allow-stratmap-fallback explicitly.",
+    );
   }
   const dryRun = values["dry-run"] ?? false;
   const databaseUrl = process.env.DATABASE_URL;
@@ -205,7 +220,14 @@ async function main(): Promise<void> {
   if ((await pathKind(dbfFile)) !== "file") fail(`.dbf not found: ${dbfFile}`);
 
   const vintage =
-    values.vintage ?? basename(dbfFile, extname(dbfFile)).toLowerCase();
+    values.vintage ??
+    (route.bulkPrimary && allowFallback
+      ? formatSourceVintage({
+          tier: "stratmap-roll",
+          adapter: "stratmap",
+          drop: basename(dbfFile, extname(dbfFile)).toLowerCase(),
+        })
+      : basename(dbfFile, extname(dbfFile)).toLowerCase());
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
 
   log(`county=${county.fips} (${county.name}) source=${sourceLabel}`);
