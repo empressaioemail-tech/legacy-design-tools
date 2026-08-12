@@ -1,6 +1,6 @@
 /**
  * County Manifest rail dimension — CHECKED-IN DECLARATION, the single place
- * to update `atomFamilyState` / `hasWriter` / `atomFamilyRef` when the atom
+ * to update `atomFamilyState` / `atomFamilyRef` when the atom
  * contract or the engine's property-entity registration changes.
  *
  * BACKGROUND. `county_rail` (see `./countyRail.ts`) was seeded once by
@@ -92,9 +92,9 @@
  * the split — a launch gate that closes because the gap was never named
  * is the failure this manifest exists to prevent.
  *
- * `atomFamilyState` / `hasWriter` remain DECLARED FACTS, not enforcement —
- * editing this file does not create an atom or wire a writer, per the
- * class doc in `./countyRail.ts`.
+ * `atomFamilyState` remains a DECLARED FACT; `hasWriter` is derived by
+ * `buildEffectiveCountyRailDeclaration` (SF-26) — editing this file does
+ * not create an atom or wire a writer, per the class doc in `./countyRail.ts`.
  */
 
 export type AtomFamilyState = "present" | "missing" | "partial" | "unpublished";
@@ -112,7 +112,11 @@ export interface CountyRailDeclaration {
   coverageClass: CoverageClass;
   atomFamilyState: AtomFamilyState;
   atomFamilyRef: string | null;
-  hasWriter: boolean;
+  /**
+   * Derived by `buildEffectiveCountyRailDeclaration` / refresh CLI.
+   * Must not be hand-set on COUNTY_RAIL_DECLARATION (SF-26).
+   */
+  hasWriter?: boolean;
   writerRef: string | null;
   declaredSource: string;
   notes: string | null;
@@ -136,7 +140,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 95,
     atomFamilyState: "present",
     atomFamilyRef: "parcel-node (contract 1.13.0)",
-    hasWriter: true,
     writerRef: "countyGeometryScoreCli.ts facet geometry",
     declaredSource:
       "TxGIO StratMap bulk zip per FIPS; county ArcGIS override where fresher",
@@ -153,7 +156,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 95,
     atomFamilyState: "present",
     atomFamilyRef: "cad-parcel-roll (contract 1.14.0)",
-    hasWriter: true,
     writerRef: "hauska-engine write-cad-parcel-roll-county.mjs",
     declaredSource: "County CAD (BIS/PACS/Orion/HCAD), joined to Rail C geometry",
     notes:
@@ -169,7 +171,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 95,
     atomFamilyState: "present",
     atomFamilyRef: "zoning-fact, setback-rule (contract)",
-    hasWriter: true,
     writerRef: "countyCoverageScoreCli.ts facet land-use/:538 no -- zoning:591",
     declaredSource: "Municipal code per incorporated city; unincorporated county is unzoned",
     notes: "Typed absence discriminant; satisfied-absent is first-class here.",
@@ -184,7 +185,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 95,
     atomFamilyState: "present",
     atomFamilyRef: "road-node (contract + engine)",
-    hasWriter: false,
     writerRef: null,
     declaredSource: "OSM Overpass plus county roadway layers",
     notes: "Atom exists, no scorer emits it, and no roster block backs it.",
@@ -199,7 +199,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 95,
     atomFamilyState: "present",
     atomFamilyRef: "flood-hazard-fact (contract 1.14.0)",
-    hasWriter: true,
     writerRef: "hauska-engine write-flood-hazard-fact-county.mjs",
     declaredSource: "FEMA NFHL, USGS 3DEP, USDA SSURGO",
     notes:
@@ -215,7 +214,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "present",
     atomFamilyRef: "buildable-envelope (contract)",
-    hasWriter: true,
     writerRef: "countyCoverageScoreCli.ts:602",
     declaredSource: "Derived from parcel geometry + zoning/setback + roads",
     notes:
@@ -231,7 +229,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "present",
     atomFamilyRef: "land-use-fact (contract 1.14.0)",
-    hasWriter: true,
     writerRef:
       "hauska-engine write-land-use-fact-county.mjs; countyCoverageScoreCli.ts facet land-use (CAD roll scorer, pre-atom)",
     declaredSource: "CAD roll code (cad_property.property_use_code)",
@@ -248,7 +245,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "present",
     atomFamilyRef: "building-footprint (contract 1.12.0)",
-    hasWriter: false,
     writerRef: null,
     declaredSource: "ML-derived default statewide (Microsoft/Overture/USA Structures)",
     notes:
@@ -264,7 +260,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "present",
     atomFamilyRef: "utility-easement (contract 1.12.0)",
-    hasWriter: false,
     writerRef: null,
     declaredSource: "County honest-absence default; CAD exception where published",
     notes:
@@ -280,7 +275,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "present",
     atomFamilyRef: "owner-fact (contract 1.16.0)",
-    hasWriter: true,
     writerRef:
       "hauska-engine packages/engine-core/scripts/write-owner-fact-county.mjs (PR #297)",
     declaredSource: "CAD owner_name + owner_mailing_address (cad_property)",
@@ -297,7 +291,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "missing",
     atomFamilyRef: null,
-    hasWriter: false,
     writerRef: null,
     declaredSource:
       "RRC public GIS wells (TXRRC/Wells MapServer/0) — already wired in lib/adapters/src/federal/texas-rrc.ts",
@@ -314,7 +307,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "missing",
     atomFamilyRef: null,
-    hasWriter: false,
     writerRef: null,
     declaredSource:
       "RRC public GIS pipelines (TXRRC/Pipelines MapServer/0) — separate endpoint from the wells layer",
@@ -331,7 +323,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "missing",
     atomFamilyRef: null,
-    hasWriter: false,
     writerRef: null,
     declaredSource: "TxDOT rail inventory / FRA / NTAD (national, statewide-uniform)",
     notes:
@@ -347,7 +338,6 @@ export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
     thresholdPct: 90,
     atomFamilyState: "present",
     atomFamilyRef: "special-district-fact (contract 1.19.0)",
-    hasWriter: true,
     writerRef: "hauska-engine write-special-district-fact-county.mjs",
     declaredSource:
       "TCEQ WaterDistricts (tx_special_district); Comptroller SPDPID optional tax-rate enrich",

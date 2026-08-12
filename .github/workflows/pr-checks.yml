@@ -181,3 +181,18 @@ jobs:
             exit 1
           fi
           echo "ci-mock-allowlist-hauska-engine: clean"
+  l5-sf26-hand-hasWriter-grep:
+    name: L5 SF-26 hand hasWriter grep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-hand-hasWriter-in-declaration
+        run: |
+          if rg -n 'hasWriter:\s*(true|false)' lib/db/src/schema/countyRailDimension.ts; then
+            echo "FAIL ci-hand-hasWriter-in-declaration: hasWriter must be derived, not hand-declared"
+            exit 1
+          fi
+          echo "ci-hand-hasWriter-in-declaration: clean"
