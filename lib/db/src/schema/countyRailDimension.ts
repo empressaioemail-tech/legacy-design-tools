@@ -112,11 +112,8 @@ export interface CountyRailDeclaration {
   coverageClass: CoverageClass;
   atomFamilyState: AtomFamilyState;
   atomFamilyRef: string | null;
-  /**
-   * Derived by `buildEffectiveCountyRailDeclaration` / refresh CLI.
-   * Must not be hand-set on COUNTY_RAIL_DECLARATION (SF-26).
-   */
-  hasWriter?: boolean;
+  /** Derived at refresh — never hand-set on COUNTY_RAIL_DECLARATION (SF-26). */
+  hasWriter: boolean;
   writerRef: string | null;
   declaredSource: string;
   notes: string | null;
@@ -129,7 +126,9 @@ export interface CountyRailDeclaration {
  * mismatch, plus DELETEs any row whose `railKey` no longer appears here
  * (currently: `join`).
  */
-export const COUNTY_RAIL_DECLARATION: ReadonlyArray<CountyRailDeclaration> = [
+export const COUNTY_RAIL_DECLARATION: ReadonlyArray<
+  Omit<CountyRailDeclaration, "hasWriter">
+> = [
   {
     railKey: "geometry",
     displayName: "Parcel geometry",
