@@ -214,15 +214,34 @@ export function countyFipsFromAtomRow(row: {
   return null;
 }
 
-/** parcel-node atom counts by county fips, from the ATOMS store. */
+/**
+ * parcel-node atom counts by county fips, from the ATOMS store.
+ * Key on left(entity_id, 5) (flood scorer pattern). body->>'countyFips'
+ * is null for some counties (e.g. Harris 48201); entity_id prefix is the
+ * durable county key for parcel-node atoms.
+ *
+ * When `onlyFips` is set, count that county alone (prefix range on
+ * entity_id) — avoids a full 11M-row GROUP BY on single-county applies.
+ */
 async function readAtomCountsByCounty(
   atomsPool: pg.Pool,
+  onlyFips?: string,
 ): Promise<Map<string, number>> {
-  // Key on left(entity_id, 5) (flood scorer pattern). body->>'countyFips'
-  // is null for some counties (e.g. Harris 48201); entity_id prefix is the
-  // durable county key for parcel-node atoms.
+  if (onlyFips) {
+    const { rows } = await atomsPool.query<{ n: string }>(
+      `SELECT count(*)::text AS n
+         FROM atoms
+        WHERE entity_type = 'parcel-node'
+          AND entity_id >= $1
+          AND entity_id < $2`,
+      [onlyFips, `${onlyFips}\uffff`],
+    );
+    const out = new Map<string, number>();
+    out.set(onlyFips, Number(rows[0]?.n ?? 0));
+    return out;
+  }
   const { rows } = await atomsPool.query<{ fips: string | null; n: string }>(
-    `SELECT left(entity_id, 5) AS fips, count(DISTINCT entity_id) AS n
+    `SELECT left(entity_id, 5) AS fips, count(*) AS n
        FROM atoms
       WHERE entity_type = 'parcel-node'
         AND entity_id ~ '^[0-9]{5}'
@@ -519,11 +538,9 @@ async function main(): Promise<void> {
   let skippedNoFeatures = 0;
   const scores: GeometryCountyScore[] = [];
   try {
-    const atomCounts = await readAtomCountsByCounty(atomsPool);
-    log(`atoms store: ${atomCounts.size} counties carry parcel-node atoms`);
-
     const manifestCounties = await readManifestCounties(deployPool);
     let targets: string[];
+    let atomCounts: Map<string, number>;
     if (all) {
       // Score every county that HAS atoms (the task's "47 counties that
       // have atoms" scope) — scoring a county with zero atoms would only
@@ -533,10 +550,16 @@ async function main(): Promise<void> {
       // ledger signal and is skipped to keep `--all` scoped to real work.
       // Honest-absent writes are opt-in via --county + --honest-absent only
       // (fail-closed: never auto-absent under --all).
+      atomCounts = await readAtomCountsByCounty(atomsPool);
+      log(`atoms store: ${atomCounts.size} counties carry parcel-node atoms`);
       targets = Array.from(atomCounts.keys()).sort();
       log(`--all target set: ${targets.length} counties with parcel-node atoms`);
     } else {
       targets = [single as string];
+      atomCounts = await readAtomCountsByCounty(atomsPool, single);
+      log(
+        `atoms store: county ${single} parcel-node count=${atomCounts.get(single as string) ?? 0}`,
+      );
     }
 
     for (const fips of targets) {
