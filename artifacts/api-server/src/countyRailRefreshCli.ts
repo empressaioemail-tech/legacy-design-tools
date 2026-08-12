@@ -52,8 +52,20 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pg from "pg";
 
-import { type CountyRailDeclaration } from "@workspace/db";
-import { buildEffectiveCountyRailDeclaration } from "@workspace/db/manifest";
+import {
+  COUNTY_RAIL_COUNT,
+  type CountyRailDeclaration,
+} from "@workspace/db/schema";
+import {
+  buildEffectiveCountyRailDeclaration,
+  isRailDerivationIndeterminate,
+  type EffectiveCountyRailDeclaration,
+  assertManifestReconciliation,
+  ManifestReconciliationError,
+  readCountyManifestRowCount,
+  readCountyRailHasWriterMap,
+  readManifestGridFromPool,
+} from "@workspace/db/manifest";
 
 const { Pool } = pg;
 
@@ -176,7 +188,9 @@ export interface RailDiff {
 /** Diff the live county_rail rows against the declaration. PURE — no I/O. */
 export function diffRails(
   live: LiveRailRow[],
-  declaration: ReadonlyArray<CountyRailDeclaration>,
+  declaration: ReadonlyArray<
+    CountyRailDeclaration | EffectiveCountyRailDeclaration
+  >,
 ): RailDiff[] {
   const liveByKey = new Map(live.map((r) => [r.rail_key, r]));
   const declByKey = new Map(declaration.map((d) => [d.railKey, d]));
@@ -303,6 +317,25 @@ async function main(): Promise<void> {
 
   const effectiveDeclaration = buildEffectiveCountyRailDeclaration();
 
+  const indeterminateRails = effectiveDeclaration.filter(
+    isRailDerivationIndeterminate,
+  );
+  if (indeterminateRails.length > 0) {
+    log(
+      `INDETERMINATE derivation for ${indeterminateRails.length} rail(s) — cannot write confident hasWriter/atomFamilyState`,
+    );
+    for (const rail of indeterminateRails) {
+      log(
+        `    ${rail.railKey}: hasWriterDerivation=${JSON.stringify(rail.hasWriterDerivation)}, atomFamilyStateDerivation=${JSON.stringify(rail.atomFamilyStateDerivation)} (${rail.derivationReason})`,
+      );
+    }
+    if (apply) {
+      fail(
+        "refusing --apply while derivation is indeterminate — fix probe environment or snapshot first",
+      );
+    }
+  }
+
   const startedAt = Date.now();
   const databaseUrl = resolveDatabaseUrl();
   const pool = new Pool({
@@ -408,6 +441,32 @@ async function main(): Promise<void> {
         await pool.query("ROLLBACK");
         throw err;
       }
+    }
+
+    log("running manifest reconciliation gate (fail-closed)...");
+    try {
+      const [cells, totalCounties, railHasWriterByKey] = await Promise.all([
+        readManifestGridFromPool(pool),
+        readCountyManifestRowCount(pool),
+        readCountyRailHasWriterMap(pool),
+      ]);
+      assertManifestReconciliation({
+        cells,
+        totalCounties,
+        totalRails: COUNTY_RAIL_COUNT,
+        railHasWriterByKey,
+      });
+      log("reconciliation gate: PASS");
+    } catch (err) {
+      if (err instanceof ManifestReconciliationError) {
+        for (const f of err.failures) {
+          log(`reconciliation gate FAIL [${f.assertion}]: ${f.detail}`);
+        }
+        fail(
+          `manifest reconciliation gate failed (${err.failures.length} assertion(s))`,
+        );
+      }
+      throw err;
     }
   } finally {
     await pool.end();

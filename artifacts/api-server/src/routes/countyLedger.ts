@@ -44,7 +44,12 @@ import {
   COUNTY_RAIL_COUNT,
   COVERAGE_CLASS_BY_RAIL_KEY,
 } from "@workspace/db";
-import { probeRailCapabilities } from "@workspace/db/manifest";
+import {
+  buildEffectiveCountyRailDeclaration,
+  isRailDerivationIndeterminate,
+  manifestReadProbeOptions,
+  probeRailCapabilities,
+} from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -63,6 +68,7 @@ export interface ManifestCell {
   countyFips: string;
   railKey: string;
   displayState:
+    | "derivation-indeterminate"
     | "no-atom"
     | "no-writer"
     | "not-yet"
@@ -164,6 +170,7 @@ const iso = (v: unknown): string | null =>
 
 /** P1.1: jurisdiction-depth rails gate display on coverage threshold (OPS-14). */
 export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
+  if (cell.displayState === "derivation-indeterminate") return cell;
   if (COVERAGE_CLASS_BY_RAIL_KEY[cell.railKey] !== "jurisdiction-depth") return cell;
   if (cell.displayState !== "satisfied-present") return cell;
   const threshold = cell.thresholdPct;
@@ -172,6 +179,32 @@ export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
     return { ...cell, displayState: "not-yet", isPartial: false };
   }
   return cell;
+}
+
+/**
+ * Read-time derivation overlay: when live tri-state derivation is
+ * indeterminate for a rail, every cell for that rail renders as a visible
+ * defect — never silently as no-writer/no-atom/stored rail_state.
+ */
+export function applyDerivationIndeterminateOverlay(
+  cells: ManifestCell[],
+  indeterminateRailKeys: ReadonlySet<string>,
+): ManifestCell[] {
+  if (indeterminateRailKeys.size === 0) return cells;
+  return cells.map((cell) =>
+    indeterminateRailKeys.has(cell.railKey)
+      ? { ...cell, displayState: "derivation-indeterminate", isPartial: false }
+      : cell,
+  );
+}
+
+function indeterminateRailKeysFromEffectiveDeclaration(): Set<string> {
+  const effective = buildEffectiveCountyRailDeclaration(manifestReadProbeOptions());
+  return new Set(
+    effective
+      .filter(isRailDerivationIndeterminate)
+      .map((decl) => decl.railKey),
+  );
 }
 
 /**
@@ -228,24 +261,28 @@ async function readManifestGrid(): Promise<ManifestCell[]> {
      AND c.facet = r.rail_key
     ORDER BY m.county_fips, r.ordinal
   `);
-  return rows.map((row) =>
-    applyDepthRailDisplayGate({
-      countyFips: row.county_fips,
-      railKey: row.rail_key,
-      displayState: row.display_state,
-      isPartial: Boolean(row.is_partial),
-      honestCoveragePct: num(row.honest_coverage_pct),
-      thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
-      atomFamilyState: row.atom_family_state,
-      hasWriter: Boolean(row.has_writer),
-      absenceBasis: row.absence_basis ?? null,
-      source: row.source ?? null,
-      sourceVintage: row.source_vintage ?? null,
-      lastVerifiedAt: iso(row.last_verified_at),
-      verifiedByInstrument: row.verified_by_instrument ?? null,
-      verificationMethod: row.verification_method ?? null,
-      artifactPath: row.artifact_path ?? null,
-    }),
+  const indeterminateRails = indeterminateRailKeysFromEffectiveDeclaration();
+  return applyDerivationIndeterminateOverlay(
+    rows.map((row) =>
+      applyDepthRailDisplayGate({
+        countyFips: row.county_fips,
+        railKey: row.rail_key,
+        displayState: row.display_state,
+        isPartial: Boolean(row.is_partial),
+        honestCoveragePct: num(row.honest_coverage_pct),
+        thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
+        atomFamilyState: row.atom_family_state,
+        hasWriter: Boolean(row.has_writer),
+        absenceBasis: row.absence_basis ?? null,
+        source: row.source ?? null,
+        sourceVintage: row.source_vintage ?? null,
+        lastVerifiedAt: iso(row.last_verified_at),
+        verifiedByInstrument: row.verified_by_instrument ?? null,
+        verificationMethod: row.verification_method ?? null,
+        artifactPath: row.artifact_path ?? null,
+      }),
+    ),
+    indeterminateRails,
   );
 }
 
@@ -267,6 +304,7 @@ const DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP = new Set(["zoning-regime-doctrine"]
 
 /** A cell counts toward the Texas rollup only when SATISFIED (ruling 3): satisfied-present at/above threshold (not PARTIAL), or satisfied-absent. PARTIAL contributes zero. Doctrine-sourced cells never count — see DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP. */
 function isSatisfiedCell(cell: ManifestCell): boolean {
+  if (cell.displayState === "derivation-indeterminate") return false;
   if (cell.source && DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP.has(cell.source)) {
     return false;
   }

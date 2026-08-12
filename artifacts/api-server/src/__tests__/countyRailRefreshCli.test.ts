@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { diffRails } from "../countyRailRefreshCli";
-import { buildEffectiveCountyRailDeclaration } from "@workspace/db/manifest";
+import {
+  buildEffectiveCountyRailDeclaration,
+  runManifestReconciliationGate,
+} from "@workspace/db/manifest";
 
 function liveRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -108,5 +111,30 @@ describe("diffRails", () => {
     const diffs = diffRails([] as any, [decl]);
     expect(diffs[0].kind).toBe("insert");
     expect(diffs[0].railKey).toBe("footprint");
+  });
+});
+
+describe("manifest reconciliation gate (CLI import path)", () => {
+  it("rejects coverage_without_writer via shared gate module", () => {
+    const failures = runManifestReconciliationGate({
+      cells: [
+        {
+          countyFips: "48001",
+          railKey: "geometry",
+          displayState: "no-writer",
+          isPartial: false,
+          honestCoveragePct: 10,
+          thresholdPct: 95,
+          hasWriter: false,
+          verifiedByInstrument: null,
+        },
+      ],
+      totalCounties: 1,
+      totalRails: 1,
+      railHasWriterByKey: new Map([["geometry", false]]),
+    });
+    expect(failures.some((f) => f.assertion.includes("coverage_without_writer"))).toBe(
+      true,
+    );
   });
 });
