@@ -23,11 +23,26 @@ import {
   type AtomFamilyState,
   type CountyRailDeclaration,
 } from "./schema/countyRailDimension";
+import {
+  type DerivedTriState,
+  hasWriterBooleanForStorage,
+  isIndeterminate,
+  triStateToConfirmedBoolean,
+} from "./schema/derivedTriState";
+
+export type { DerivedTriState } from "./schema/derivedTriState";
+export {
+  isConfirmedFalse,
+  isConfirmedTrue,
+  isIndeterminate,
+  triStateToConfirmedBoolean,
+} from "./schema/derivedTriState";
 
 export type FileExistsFn = (filePath: string) => boolean;
 
 export interface DerivationProbeOptions {
-  snapshot?: EnginePropertyTypesSnapshot;
+  /** When explicitly `null`, snapshot lookup failed → atom-family derivation is indeterminate. */
+  snapshot?: EnginePropertyTypesSnapshot | null;
   contractSnapshot?: ContractPropertyTypesSnapshot;
   engineRoot?: string;
   ldtRoot?: string;
@@ -81,28 +96,75 @@ function bindingFor(railKey: string): RailEngineBinding | undefined {
   return RAIL_ENGINE_BINDING_BY_KEY[railKey];
 }
 
+function resolveSnapshot(
+  options: DerivationProbeOptions,
+): EnginePropertyTypesSnapshot | null {
+  if (options.snapshot === null) return null;
+  return options.snapshot ?? ENGINE_PROPERTY_TYPES_SNAPSHOT;
+}
+
+/**
+ * Tri-state: is the atom family present in the engine/contract snapshot?
+ * `false` = confirmed missing; `indeterminate` = snapshot lookup failed or engine root probe failed.
+ */
+export function deriveAtomFamilyPresent(
+  railKey: string,
+  snapshot: EnginePropertyTypesSnapshot | null = ENGINE_PROPERTY_TYPES_SNAPSHOT,
+  binding: RailEngineBinding | undefined = bindingFor(railKey),
+  contractSnapshot: ContractPropertyTypesSnapshot = CONTRACT_PROPERTY_TYPES_SNAPSHOT,
+  engineRoot: string = resolveEngineRoot(),
+  fileExists: FileExistsFn = existsSync,
+  requireEngineRoot = true,
+): DerivedTriState {
+  if (snapshot === null) return "indeterminate";
+  if (!binding) return false;
+  if (binding.atomEntityTypes.length === 0) return false;
+
+  const needsEngineRoot =
+    requireEngineRoot && Boolean(binding.engineWriterScript);
+  if (needsEngineRoot && !fileExists(engineRoot)) {
+    return "indeterminate";
+  }
+
+  const registered = snapshotTypeSet(snapshot);
+  const allInEngine = binding.atomEntityTypes.every((t) => registered.has(t));
+  if (allInEngine) return true;
+
+  if (binding.allowContractOnlyRegistration) {
+    const contractRegistered = contractTypeSet(contractSnapshot);
+    const allInContract = binding.atomEntityTypes.every((t) =>
+      contractRegistered.has(t),
+    );
+    if (allInContract) return true;
+  }
+
+  return false;
+}
+
 /**
  * Fail closed: unregistered or unknown rail → `missing`.
  * All bound atom entity types must appear in the engine snapshot.
  */
 export function deriveAtomFamilyState(
   railKey: string,
-  snapshot: EnginePropertyTypesSnapshot = ENGINE_PROPERTY_TYPES_SNAPSHOT,
+  snapshot: EnginePropertyTypesSnapshot | null = ENGINE_PROPERTY_TYPES_SNAPSHOT,
   binding: RailEngineBinding | undefined = bindingFor(railKey),
   contractSnapshot: ContractPropertyTypesSnapshot = CONTRACT_PROPERTY_TYPES_SNAPSHOT,
+  engineRoot: string = resolveEngineRoot(),
+  fileExists: FileExistsFn = existsSync,
+  requireEngineRoot = true,
 ): AtomFamilyState {
-  if (!binding) return "missing";
-  if (binding.atomEntityTypes.length === 0) return "missing";
-  const registered = snapshotTypeSet(snapshot);
-  const allInEngine = binding.atomEntityTypes.every((t) => registered.has(t));
-  if (allInEngine) return "present";
-  if (binding.allowContractOnlyRegistration) {
-    const contractRegistered = contractTypeSet(contractSnapshot);
-    const allInContract = binding.atomEntityTypes.every((t) =>
-      contractRegistered.has(t),
-    );
-    if (allInContract) return "present";
-  }
+  const present = deriveAtomFamilyPresent(
+    railKey,
+    snapshot,
+    binding,
+    contractSnapshot,
+    engineRoot,
+    fileExists,
+    requireEngineRoot,
+  );
+  if (present === true) return "present";
+  if (present === "indeterminate") return "partial";
   return "missing";
 }
 
@@ -145,40 +207,75 @@ function writerPathsExist(
 }
 
 /**
- * True ONLY when atom family is `present` AND at least one writer/scorer
- * file exists on disk. Fail closed when engine root is required but missing.
+ * Tri-state writer probe. `false` only when family absent or writer
+ * confirmed absent; `indeterminate` when bound probe paths miss on disk.
  */
 export function deriveHasWriter(
   railKey: string,
-  snapshot: EnginePropertyTypesSnapshot = ENGINE_PROPERTY_TYPES_SNAPSHOT,
+  snapshot: EnginePropertyTypesSnapshot | null = ENGINE_PROPERTY_TYPES_SNAPSHOT,
   binding: RailEngineBinding | undefined = bindingFor(railKey),
   engineRoot: string = resolveEngineRoot(),
   ldtRoot: string = resolveLdtRoot(),
   fileExists: FileExistsFn = existsSync,
   requireEngineRoot = true,
-): boolean {
-  if (deriveAtomFamilyState(railKey, snapshot, binding) !== "present") {
+): DerivedTriState {
+  const familyPresent = deriveAtomFamilyPresent(
+    railKey,
+    snapshot,
+    binding,
+    CONTRACT_PROPERTY_TYPES_SNAPSHOT,
+    engineRoot,
+    fileExists,
+    requireEngineRoot,
+  );
+  if (familyPresent === false) return false;
+  if (familyPresent === "indeterminate") return "indeterminate";
+  if (!binding) return false;
+
+  const hasBoundWriterProbe =
+    Boolean(binding.engineWriterScript) || Boolean(binding.ldtScorerPath);
+  if (!hasBoundWriterProbe) {
     return false;
   }
-  if (!binding) return false;
 
   const needsEngineProbe = Boolean(binding.engineWriterScript);
   if (needsEngineProbe && requireEngineRoot && !fileExists(engineRoot)) {
-    return false;
+    return "indeterminate";
   }
 
-  const { enginePath, ldtPath } = writerPathsExist(
-    binding,
-    engineRoot,
-    ldtRoot,
-    fileExists,
-  );
-  return Boolean(enginePath || ldtPath);
+  const { enginePath, ldtPath, engineProbePath, ldtProbePath } =
+    writerPathsExist(binding, engineRoot, ldtRoot, fileExists);
+
+  if (enginePath || ldtPath) return true;
+
+  if (
+    ldtProbePath &&
+    !ldtPath &&
+    ldtRoot !== MODULE_ANCHORED_LDT_ROOT
+  ) {
+    const canonicalPath = path.join(
+      MODULE_ANCHORED_LDT_ROOT,
+      "artifacts",
+      "api-server",
+      "src",
+      binding.ldtScorerPath!,
+    );
+    if (fileExists(canonicalPath)) return "indeterminate";
+  }
+
+  if (needsEngineProbe && requireEngineRoot && !fileExists(engineRoot)) {
+    return "indeterminate";
+  }
+
+  return false;
 }
 
 export interface DerivedRailFields {
   atomFamilyState: AtomFamilyState;
-  hasWriter: boolean;
+  atomFamilyPresent: DerivedTriState;
+  /** Tri-state alias for atom family derivation (refresh CLI / tests). */
+  atomFamilyStateDerivation: DerivedTriState;
+  hasWriter: DerivedTriState;
   atomFamilyRef: string | null;
   writerRef: string | null;
   derivationReason: string;
@@ -188,18 +285,43 @@ export function deriveRailDeclarationFields(
   railKey: string,
   options: DerivationProbeOptions = {},
 ): DerivedRailFields {
-  const snapshot = options.snapshot ?? ENGINE_PROPERTY_TYPES_SNAPSHOT;
+  const snapshot = resolveSnapshot(options);
   const binding = bindingFor(railKey);
   const engineRoot = resolveEngineRoot(options.engineRoot);
   const ldtRoot = resolveLdtRoot(options.ldtRoot);
   const fileExists = options.fileExists ?? existsSync;
   const requireEngineRoot = options.requireEngineRoot ?? true;
 
-  const atomFamilyState = deriveAtomFamilyState(railKey, snapshot, binding);
-  const needsEngineProbe = Boolean(binding?.engineWriterScript);
+  const atomFamilyPresent = deriveAtomFamilyPresent(
+    railKey,
+    snapshot,
+    binding,
+    options.contractSnapshot,
+    engineRoot,
+    fileExists,
+    requireEngineRoot,
+  );
+  const atomFamilyState = deriveAtomFamilyState(
+    railKey,
+    snapshot,
+    binding,
+    options.contractSnapshot,
+    engineRoot,
+    fileExists,
+    requireEngineRoot,
+  );
+  const hasWriter = deriveHasWriter(
+    railKey,
+    snapshot,
+    binding,
+    engineRoot,
+    ldtRoot,
+    fileExists,
+    requireEngineRoot,
+  );
 
   const probe =
-    binding && atomFamilyState === "present"
+    binding && atomFamilyPresent === true
       ? writerPathsExist(binding, engineRoot, ldtRoot, fileExists)
       : {
           enginePath: null,
@@ -208,22 +330,20 @@ export function deriveRailDeclarationFields(
           ldtProbePath: null,
         };
 
-  const hasWriter =
-    atomFamilyState === "present" &&
-    Boolean(binding) &&
-    Boolean(probe.enginePath || probe.ldtPath) &&
-    !(needsEngineProbe && requireEngineRoot && !fileExists(engineRoot));
-
   const reasons: string[] = [];
   if (!binding) {
     reasons.push("no binding");
   } else if (binding.atomEntityTypes.length === 0) {
     reasons.push("no atom entity types bound");
+  } else if (snapshot === null) {
+    reasons.push("engine snapshot lookup failed");
+  } else if (atomFamilyPresent === "indeterminate") {
+    reasons.push("atom family probe indeterminate (engine root or snapshot)");
   } else {
     const missingTypes = binding.atomEntityTypes.filter(
       (t) => !snapshotTypeSet(snapshot).has(t),
     );
-    if (missingTypes.length > 0) {
+    if (missingTypes.length > 0 && atomFamilyPresent === false) {
       reasons.push(`types not in engine snapshot: ${missingTypes.join(", ")}`);
     } else {
       reasons.push(`types in engine snapshot (${snapshot.engineMainSha})`);
@@ -233,12 +353,15 @@ export function deriveRailDeclarationFields(
   const hasBoundWriterProbe =
     Boolean(binding?.engineWriterScript) || Boolean(binding?.ldtScorerPath);
 
-  if (atomFamilyState === "present") {
-    if (hasWriter) {
+  if (atomFamilyPresent === true) {
+    if (hasWriter === true) {
       reasons.push("writer/scorer file found on disk");
     } else if (!hasBoundWriterProbe) {
-      reasons.push("no writer/scorer bound for rail (confirmed absent)");
-    } else {
+      reasons.push(
+        binding?.noWriterReason ??
+          "no writer/scorer bound for rail (confirmed absent)",
+      );
+    } else if (hasWriter === "indeterminate") {
       const missing: string[] = [];
       if (probe.engineProbePath && !probe.enginePath) {
         missing.push(`engine script missing at ${probe.engineProbePath}`);
@@ -246,41 +369,91 @@ export function deriveRailDeclarationFields(
       if (probe.ldtProbePath && !probe.ldtPath) {
         missing.push(`ldt scorer missing at ${probe.ldtProbePath}`);
       }
-      if (needsEngineProbe && requireEngineRoot && !fileExists(engineRoot)) {
+      if (needsEngineRoot(requireEngineRoot, binding) && !fileExists(engineRoot)) {
         missing.push(`engine root missing at ${engineRoot}`);
       }
       reasons.push(
         missing.length > 0
-          ? `writer probe failed: ${missing.join("; ")}`
-          : "writer probe failed: bound paths not found",
+          ? `writer probe indeterminate: ${missing.join("; ")}`
+          : "writer probe indeterminate: bound paths not found",
       );
+    } else {
+      reasons.push("no writer/scorer bound for rail (confirmed absent)");
     }
   }
 
+  const confirmedWriter = triStateToConfirmedBoolean(hasWriter);
+
   return {
     atomFamilyState,
+    atomFamilyPresent,
+    atomFamilyStateDerivation: atomFamilyPresent,
     hasWriter,
     atomFamilyRef:
-      atomFamilyState === "present" ? (binding?.atomFamilyRefLabel ?? null) : null,
-    writerRef: hasWriter ? (binding?.writerRefLabel ?? null) : null,
+      atomFamilyPresent === true ? (binding?.atomFamilyRefLabel ?? null) : null,
+    writerRef: confirmedWriter === true ? (binding?.writerRefLabel ?? null) : null,
     derivationReason: reasons.join("; "),
   };
+}
+
+function needsEngineRoot(
+  requireEngineRoot: boolean,
+  binding: RailEngineBinding | undefined,
+): boolean {
+  return Boolean(requireEngineRoot && binding?.engineWriterScript);
+}
+
+/** Effective declaration with tri-state derivation fields exposed. */
+export interface EffectiveCountyRailDeclaration extends CountyRailDeclaration {
+  atomFamilyPresent: DerivedTriState;
+  /** Tri-state alias used by refresh CLI logging. */
+  atomFamilyStateDerivation: DerivedTriState;
+  hasWriterDerivation: DerivedTriState;
+  derivationReason: string;
+}
+
+export function isRailDerivationIndeterminate(
+  decl: Pick<
+    EffectiveCountyRailDeclaration,
+    "hasWriterDerivation" | "atomFamilyPresent" | "atomFamilyStateDerivation"
+  >,
+): boolean {
+  return (
+    isIndeterminate(decl.hasWriterDerivation) ||
+    isIndeterminate(decl.atomFamilyPresent) ||
+    isIndeterminate(decl.atomFamilyStateDerivation)
+  );
 }
 
 /** Merge static rail metadata with engine-derived atom/writer fields. */
 export function buildEffectiveCountyRailDeclaration(
   options: DerivationProbeOptions = {},
-): ReadonlyArray<CountyRailDeclaration> {
+): ReadonlyArray<EffectiveCountyRailDeclaration> {
   return COUNTY_RAIL_STATIC_DECLARATION.map((meta) => {
     const derived = deriveRailDeclarationFields(meta.railKey, options);
     return {
       ...meta,
       atomFamilyState: derived.atomFamilyState,
       atomFamilyRef: derived.atomFamilyRef,
-      hasWriter: derived.hasWriter,
+      hasWriter: hasWriterBooleanForStorage(derived.hasWriter),
       writerRef: derived.writerRef,
+      atomFamilyPresent: derived.atomFamilyPresent,
+      atomFamilyStateDerivation: derived.atomFamilyPresent,
+      hasWriterDerivation: derived.hasWriter,
+      derivationReason: derived.derivationReason,
     };
   });
+}
+
+/** True when any rail has an indeterminate derived signal — refresh must fail closed. */
+export function hasIndeterminateDerivations(
+  declarations: ReadonlyArray<EffectiveCountyRailDeclaration>,
+): boolean {
+  return declarations.some(
+    (d) =>
+      isIndeterminate(d.hasWriterDerivation) ||
+      isIndeterminate(d.atomFamilyPresent),
+  );
 }
 
 /** CP1 self-check: expected manifest cell moves when derived declaration replaces stale hand-edited values. */

@@ -16,6 +16,8 @@ export interface RailEngineBinding {
   engineWriterScript?: string;
   /** Relative to `{ldtRoot}/artifacts/api-server/src/`. */
   ldtScorerPath?: string;
+  /** When no writer/scorer is bound but atom family is present — CI requires this. */
+  noWriterReason?: string;
   atomFamilyRefLabel?: string;
   writerRefLabel?: string;
 }
@@ -84,6 +86,8 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "easement",
     atomEntityTypes: ["utility-easement"],
+    noWriterReason:
+      "No bulk writer or LDT scorer bound — honest no-writer until easement ingest ships",
     atomFamilyRefLabel: "utility-easement (engine PROPERTY_ENTITY_TYPES)",
   },
   {
@@ -103,6 +107,8 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "rrc-pipelines",
     atomEntityTypes: [],
+    noWriterReason:
+      "Atom family not registered in engine PROPERTY_ENTITY_TYPES — no writer until pipeline atom ships",
   },
   {
     railKey: "rail-corridor",

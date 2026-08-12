@@ -124,6 +124,29 @@ describe("railManifestDerivation CP1", () => {
     ).toBe(false);
   });
 
+  it("tri-state: snapshot lookup failure yields indeterminate atom family derivation", () => {
+    const derived = deriveRailDeclarationFields("zoning", {
+      snapshot: null,
+    });
+    expect(derived.atomFamilyPresent).toBe("indeterminate");
+    expect(derived.hasWriter).toBe("indeterminate");
+    expect(derived.derivationReason).toContain("engine snapshot lookup failed");
+  });
+
+  it("tri-state: confirmed missing binding yields false not indeterminate", () => {
+    const derived = deriveRailDeclarationFields("unknown-rail-key", {});
+    expect(derived.atomFamilyPresent).toBe(false);
+    expect(derived.hasWriter).toBe(false);
+    expect(derived.derivationReason).toContain("no binding");
+  });
+
+  it("effective declaration carries hasWriterDerivation alongside boolean hasWriter", () => {
+    const rail = effective.find((r) => r.railKey === "easement");
+    expect(rail?.hasWriterDerivation).toBe(false);
+    expect(rail?.hasWriter).toBe(false);
+    expect(rail?.atomFamilyPresent).toBe(true);
+  });
+
   it("derives geometry/zoning/envelope present with writer (D3 regression guard)", () => {
     for (const key of ["geometry", "zoning", "envelope"] as const) {
       expect(byKey.get(key)?.atomFamilyState).toBe("present");
@@ -141,24 +164,13 @@ describe("railManifestDerivation CP1", () => {
       fileExists: existsSync,
       requireEngineRoot: false,
     });
-    expect(derivedWrong.hasWriter).toBe(false);
-    expect(derivedWrong.derivationReason).toContain("writer probe failed");
+    expect(derivedWrong.hasWriter).toBe("indeterminate");
+    expect(derivedWrong.derivationReason).toContain("writer probe indeterminate");
 
     const derivedAnchored = deriveRailDeclarationFields("zoning", {
       fileExists: existsSync,
       requireEngineRoot: false,
     });
     expect(derivedAnchored.hasWriter).toBe(true);
-    expect(
-      existsSync(
-        path.join(
-          repoRoot,
-          "artifacts",
-          "api-server",
-          "src",
-          "countyCoverageScoreCli.ts",
-        ),
-      ),
-    ).toBe(true);
   });
 });
