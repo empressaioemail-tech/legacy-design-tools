@@ -86,9 +86,9 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "easement",
     atomEntityTypes: ["utility-easement"],
-    noWriterReason:
-      "No bulk writer or LDT scorer bound — honest no-writer until easement ingest ships",
+    engineWriterScript: "write-utility-easement-county.mjs",
     atomFamilyRefLabel: "utility-easement (engine PROPERTY_ENTITY_TYPES)",
+    writerRefLabel: "hauska-engine write-utility-easement-county.mjs",
   },
   {
     railKey: "owner",

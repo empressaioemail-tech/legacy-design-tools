@@ -82,10 +82,20 @@ describe("railEngineBindingCoverage (CI)", () => {
     }
   });
 
-  it("easement passes with explicit noWriterReason", () => {
+  it("easement binds the merged engine writer, not a noWriterReason", () => {
+    // E1: engine PR #295 merged write-utility-easement-county.mjs
+    // (hauska-engine main 09e5ea8), so easement is no longer an honest
+    // no-writer rail and must NOT carry a noWriterReason.
     const easement = RAIL_ENGINE_BINDING_BY_KEY.easement;
-    expect(easement?.noWriterReason).toMatch(/no-writer/i);
-    expect(easement?.engineWriterScript).toBeUndefined();
-    expect(easement?.ldtScorerPath).toBeUndefined();
+    expect(easement?.engineWriterScript).toBe(
+      "write-utility-easement-county.mjs",
+    );
+    expect(easement?.noWriterReason).toBeUndefined();
+  });
+
+  it("rrc-pipelines is the remaining rail with an explicit noWriterReason", () => {
+    const pipelines = RAIL_ENGINE_BINDING_BY_KEY["rrc-pipelines"];
+    expect(pipelines?.noWriterReason).toMatch(/no writer|not registered/i);
+    expect(pipelines?.engineWriterScript).toBeUndefined();
   });
 });
