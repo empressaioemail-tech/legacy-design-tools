@@ -1,7 +1,10 @@
 /**
  * W1/W4/W5 — warming-and-QA harness scaffold (Calibrated Spine End-state B).
  *
- * W4: Cotality parcel fields come ONLY from place_layer_snapshots — no live call.
+ * W4: Cotality is extinguished — do not gate warm on cotality:* snapshots
+ * (never rotate; re-route). Coverage of leftover Cotality snapshot keys is
+ * still reported for observability. Warm proceeds on a non-empty placeKey;
+ * free federal live layers run in the cascade.
  * W5: warming reads tagged synthetic (excluded from query-frequency / M1).
  */
 
@@ -13,8 +16,11 @@ import { geocodeAddress } from "@workspace/site-context/server";
 import { keyFromEngagement } from "@workspace/codes";
 import { fetchBrokerageSiteContext } from "./brokerageSiteContext";
 import { isMeteredAdapter } from "./brokerageTierGate";
+import { deriveCanWarm } from "./warmingCanWarm";
 
-/** Cotality adapter keys that MUST be snapshot-backed during warming. */
+export { deriveCanWarm } from "./warmingCanWarm";
+
+/** Leftover Cotality adapter keys still reported in snapshot coverage (observability only; not a warm gate). */
 export const WARMING_COTALITY_ADAPTER_KEYS = [
   "cotality:parcels",
   "cotality:zoning",
@@ -85,12 +91,12 @@ export async function verifySnapshotCoverage(
   const coverageRate =
     required.length === 0 ? 1 : presentKeys.length / required.length;
 
-  const canWarm = present.has("cotality:parcels");
+  const canWarm = deriveCanWarm(present, placeKey);
   const message = canWarm
     ? missingKeys.length === 0
-      ? "Full Cotality snapshot coverage"
-      : `Partial snapshot coverage (${presentKeys.length}/${required.length}); parcel spine present`
-    : "BLOCKED: no cotality:parcels snapshot — warming cannot proceed (W4)";
+      ? "Warm unblocked (Cotality extinguished; public-record cascade proceeds)"
+      : `Warm unblocked without Cotality; optional snapshot coverage ${presentKeys.length}/${required.length}`
+    : "BLOCKED: empty placeKey — warming cannot proceed";
 
   return {
     placeKey,
