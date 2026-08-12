@@ -57,8 +57,10 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
     railKey: "flood",
     atomEntityTypes: ["flood-hazard-fact"],
     engineWriterScript: "write-flood-hazard-fact-county.mjs",
+    ldtScorerPath: "countyFloodScoreCli.ts",
     atomFamilyRefLabel: "flood-hazard-fact (engine PROPERTY_ENTITY_TYPES)",
-    writerRefLabel: "hauska-engine write-flood-hazard-fact-county.mjs",
+    writerRefLabel:
+      "hauska-engine write-flood-hazard-fact-county.mjs; countyFloodScoreCli.ts facet flood",
   },
   {
     railKey: "envelope",
