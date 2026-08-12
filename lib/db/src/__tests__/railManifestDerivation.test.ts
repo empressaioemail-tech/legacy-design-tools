@@ -8,6 +8,7 @@ import {
   deriveAtomFamilyState,
   deriveHasWriter,
   deriveRailDeclarationFields,
+  manifestReadProbeOptions,
   resolveLdtRoot,
 } from "../railManifestDerivation";
 import { ENGINE_PROPERTY_TYPES_SNAPSHOT } from "../schema/enginePropertyTypesSnapshot";
@@ -49,7 +50,7 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("countyCoverageScoreCli.ts")
     );
   }
-  return normalized.includes("hauska-engine");
+  return false;
 }
 
 describe("railManifestDerivation CP1", () => {
@@ -166,6 +167,28 @@ describe("railManifestDerivation CP1", () => {
       expect(byKey.get(key)?.hasWriter).toBe(true);
     }
     expect(byKey.get("geometry")?.writerRef).toContain("write-parcel-node-county");
+  });
+
+  it("read-path probe does not pretend a missing hauska-engine writer exists (SF-21)", () => {
+    const opts = manifestReadProbeOptions();
+    const trap =
+      "/nonexistent/hauska-engine/packages/engine-core/scripts/write-owner-fact-county.mjs";
+    expect(opts.fileExists).toBeTypeOf("function");
+    expect(opts.fileExists!(trap)).toBe(false);
+  });
+
+  it("read-path derivation does not report hasWriter true for a missing engine script (SF-20/SF-21)", () => {
+    const opts = manifestReadProbeOptions();
+    const derived = deriveHasWriter(
+      "owner",
+      ENGINE_PROPERTY_TYPES_SNAPSHOT,
+      RAIL_ENGINE_BINDING_BY_KEY.owner,
+      "/nonexistent/hauska-engine",
+      resolveLdtRoot(),
+      opts.fileExists ?? existsSync,
+      false,
+    );
+    expect(derived).not.toBe(true);
   });
 
   it("module-anchored ldtRoot finds scorers without cwd override (D3 cwd trap)", () => {

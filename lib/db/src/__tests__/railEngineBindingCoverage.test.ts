@@ -59,28 +59,30 @@ describe("railEngineBindingCoverage (CI)", () => {
     }
   });
 
-  it("engine writer scripts exist on disk when declared (requires hauska-engine checkout)", () => {
-    if (!engineRootOnDisk) {
-      expect(
-        engineRoot,
-        "CI without sibling hauska-engine: structural binding checks only; disk probe skipped",
-      ).toBeTruthy();
-      return;
-    }
-    for (const binding of RAIL_ENGINE_BINDINGS) {
-      if (!binding.engineWriterScript) continue;
-      const p = path.join(
-        engineRoot,
-        "packages",
-        "engine-core",
-        "scripts",
-        binding.engineWriterScript,
-      );
-      expect(existsSync(p), `missing engine writer for ${binding.railKey}: ${p}`).toBe(
-        true,
-      );
-    }
-  });
+  it.skipIf(!engineRootOnDisk && !process.env.CI)(
+    "engine writer scripts exist on disk when declared (CI fail-closed)",
+    () => {
+      if (!engineRootOnDisk) {
+        throw new Error(
+          `CI fail-closed: hauska-engine not on disk at ${engineRoot}. Check out empressaioemail-tech/hauska-engine or set HAUSKA_ENGINE_ROOT.`,
+        );
+      }
+      for (const binding of RAIL_ENGINE_BINDINGS) {
+        if (!binding.engineWriterScript) continue;
+        const p = path.join(
+          engineRoot,
+          "packages",
+          "engine-core",
+          "scripts",
+          binding.engineWriterScript,
+        );
+        expect(
+          existsSync(p),
+          `missing engine writer for ${binding.railKey}: ${p}`,
+        ).toBe(true);
+      }
+    },
+  );
 
   it("easement binds the merged engine writer, not a noWriterReason", () => {
     // E1: engine PR #295 merged write-utility-easement-county.mjs

@@ -103,13 +103,13 @@ describe("manifestReconciliationGate", () => {
         cell({
           countyFips: "48021",
           railKey: "easement",
-          hasWriter: false,
-          displayState: "no-writer",
+          hasWriter: true,
+          displayState: "not-yet",
         }),
       ],
       totalCounties: 1,
       totalRails: 1,
-      railHasWriterByKey: new Map([["easement", false]]),
+      railHasWriterByKey: new Map([["easement", true]]),
     });
     expect(failures).toHaveLength(0);
   });
