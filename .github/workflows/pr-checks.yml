@@ -128,3 +128,25 @@ jobs:
             exit 1
           fi
           echo "ci-cotality-warm-gate: clean"
+  l5-sf24-sf25-score-greps:
+    name: L5 SF-24/SF-25 score greps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-stamp-as-sourcePresent
+        run: |
+          if rg -n 'sourcePresent:\s*cov\.\w+Pct\s*>\s*0' artifacts/api-server/src/countyCoverageScoreCli.ts; then
+            echo "FAIL ci-stamp-as-sourcePresent: stamp rate must not manufacture sourcePresent"
+            exit 1
+          fi
+          echo "ci-stamp-as-sourcePresent: clean"
+      - name: ci-coverage-clamp
+        run: |
+          if rg -n 'Math\.min\(\s*100\s*,\s*\(atomCount' artifacts/api-server/src/countyGeometryScoreCli.ts; then
+            echo "FAIL ci-coverage-clamp: overcount must not clamp to 100% satisfied-present"
+            exit 1
+          fi
+          echo "ci-coverage-clamp: clean"

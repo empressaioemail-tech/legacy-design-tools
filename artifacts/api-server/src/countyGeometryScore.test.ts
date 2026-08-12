@@ -84,15 +84,15 @@ describe("scoreGeometry", () => {
     expect(r.railState).toBe("not-yet");
   });
 
-  it("atom count exceeding feature count (stale/duplicate atoms) clamps coverage at 100%, still satisfied-present", () => {
+  it("atom count exceeding feature count fail-closes: does not clamp to 100% satisfied-present (SF-25)", () => {
     const r = scoreGeometry({
       fips: "48997",
       name: "Overcount",
       atomCount: 600,
       featureCount: 538,
     });
-    expect(r.facet.honestCoveragePct).toBe(100);
-    expect(r.railState).toBe("satisfied-present");
+    expect(r.facet.honestCoveragePct).toBeGreaterThan(100);
+    expect(r.railState).toBe("not-yet");
   });
 
   it("has no owner-match oracle: verdict is always n/a, ownerMatchRate always null", () => {

@@ -193,7 +193,7 @@ async function readAtomCountsByCounty(
   atomsPool: pg.Pool,
 ): Promise<Map<string, number>> {
   const { rows } = await atomsPool.query<{ fips: string | null; n: string }>(
-    `SELECT body->>'countyFips' AS fips, count(*) AS n
+    `SELECT body->>'countyFips' AS fips, count(DISTINCT entity_id) AS n
        FROM atoms
       WHERE entity_type = 'parcel-node'
       GROUP BY 1`,
@@ -268,8 +268,10 @@ export function scoreGeometry(input: {
 }): GeometryCountyScore {
   const { fips, name, atomCount, featureCount } = input;
   const sourcePresent = featureCount != null && featureCount > 0;
+  const overcount =
+    sourcePresent && atomCount > (featureCount as number);
   const rawCoveragePct = sourcePresent
-    ? Math.min(100, (atomCount / (featureCount as number)) * 100)
+    ? (atomCount / (featureCount as number)) * 100
     : 0;
 
   const facet = classifyFacet({
@@ -283,15 +285,16 @@ export function scoreGeometry(input: {
     sampled: 0,
   });
 
-  // Threshold gate (task item 6 / standing ruling): only >=95% writes
-  // satisfied-present. Below threshold writes not-yet with the REAL
-  // honest_coverage_pct stored (never satisfied-present), so it renders
-  // PARTIAL-equivalent (its true number) and contributes zero to the
-  // rollup without depending on the query-time isPartial flag.
+  // Threshold gate: only >=95% writes satisfied-present. Overcount
+  // (atomCount > featureCount: duplicates/stale rows) fail-closes to
+  // not-yet with the honest unclamped ratio — never Math.min(100,...)
+  // shipping satisfied-present (SF-25).
   const railState: "satisfied-present" | "not-yet" =
-    facet.honestCoveragePct >= GEOMETRY_THRESHOLD_PCT
-      ? "satisfied-present"
-      : "not-yet";
+    overcount
+      ? "not-yet"
+      : facet.honestCoveragePct >= GEOMETRY_THRESHOLD_PCT
+        ? "satisfied-present"
+        : "not-yet";
 
   return {
     fips,

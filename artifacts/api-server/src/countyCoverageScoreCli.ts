@@ -149,6 +149,17 @@ export interface ClassifyInput {
 }
 
 /**
+ * Zoning/envelope source presence is the SOURCE COLUMN, not a positive stamp
+ * rate. `stampedPct > 0` manufacturing is SF-24.
+ */
+export function sourcePresentForStampFacet(
+  hasSourceColumn: boolean,
+  _stampedPct: number,
+): boolean {
+  return hasSourceColumn;
+}
+
+/**
  * Classify a facet from its raw coverage + gate verdict + source presence.
  * PURE. This is the load-bearing decision the ledger records, so it is
  * separated from all I/O and unit-tested directly.
@@ -614,10 +625,10 @@ async function scoreCounty(
   const zoning = classifyFacet({
     facet: "zoning",
     rawCoveragePct: cov.zoningStampedPct,
-    sourcePresent: cov.zoningStampedPct > 0,
+    sourcePresent: sourcePresentForStampFacet(county.hasZoning, cov.zoningStampedPct),
     verdict: null, // no owner oracle for zoning
     ownerMatchRate: null,
-    source: cov.zoningStampedPct > 0 ? "zoning-stamp" : null,
+    source: county.hasZoning ? "zoning-stamp" : null,
     sourceVintage: null,
     sampled: 0,
   });
@@ -625,10 +636,10 @@ async function scoreCounty(
   const envelope = classifyFacet({
     facet: "envelope",
     rawCoveragePct: cov.envelopeDerivablePct,
-    sourcePresent: cov.envelopeDerivablePct > 0,
+    sourcePresent: sourcePresentForStampFacet(county.hasZoning, cov.envelopeDerivablePct),
     verdict: null, // deterministic; no owner oracle
     ownerMatchRate: null,
-    source: cov.envelopeDerivablePct > 0 ? "deterministic" : null,
+    source: county.hasZoning ? "deterministic" : null,
     sourceVintage: null,
     sampled: 0,
   });

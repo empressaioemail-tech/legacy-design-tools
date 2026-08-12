@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { classifyFacet } from "./countyCoverageScoreCli";
+import { classifyFacet, sourcePresentForStampFacet } from "./countyCoverageScoreCli";
 
 describe("classifyFacet", () => {
   it("a gate-BLOCKED land-use join -> fabricated-blocked, honest coverage 0", () => {
@@ -83,7 +83,7 @@ describe("classifyFacet", () => {
     const r = classifyFacet({
       facet: "zoning",
       rawCoveragePct: 62.5,
-      sourcePresent: true,
+      sourcePresent: sourcePresentForStampFacet(true, 62.5),
       verdict: null, // no owner oracle
       ownerMatchRate: null,
       source: "zoning-stamp",
@@ -94,6 +94,23 @@ describe("classifyFacet", () => {
     expect(r.integrityVerdict).toBe("n/a");
     expect(r.honestCoveragePct).toBeCloseTo(62.5, 5);
     expect(r.ownerMatchRate).toBeNull();
+  });
+
+  it("does not manufacture sourcePresent from stamp rate > 0 (SF-24)", () => {
+    expect(sourcePresentForStampFacet(true, 0)).toBe(true);
+    expect(sourcePresentForStampFacet(false, 62.5)).toBe(false);
+    const zeroStampColumnPresent = classifyFacet({
+      facet: "zoning",
+      rawCoveragePct: 0,
+      sourcePresent: sourcePresentForStampFacet(true, 0),
+      verdict: null,
+      ownerMatchRate: null,
+      source: "zoning-stamp",
+      sourceVintage: null,
+      sampled: 0,
+    });
+    expect(zeroStampColumnPresent.classification).toBe("real-at-ceiling");
+    expect(zeroStampColumnPresent.honestCoveragePct).toBe(0);
   });
 
   it("an n/a-oracle facet with zero coverage -> true-source-gap", () => {
