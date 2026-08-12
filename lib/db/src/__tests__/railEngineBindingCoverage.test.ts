@@ -93,9 +93,15 @@ describe("railEngineBindingCoverage (CI)", () => {
     expect(easement?.noWriterReason).toBeUndefined();
   });
 
-  it("rrc-pipelines is the remaining rail with an explicit noWriterReason", () => {
+  it("rrc-pipelines binds the engine writer, not a noWriterReason", () => {
+    // Engine PR #314 merged write-rrc-pipeline-fact-county.mjs
+    // (hauska-engine main 89d4c08), so rrc-pipelines is no longer an honest
+    // no-writer / no-atom rail and must NOT carry a noWriterReason.
     const pipelines = RAIL_ENGINE_BINDING_BY_KEY["rrc-pipelines"];
-    expect(pipelines?.noWriterReason).toMatch(/no writer|not registered/i);
-    expect(pipelines?.engineWriterScript).toBeUndefined();
+    expect(pipelines?.atomEntityTypes).toEqual(["rrc-pipeline-fact"]);
+    expect(pipelines?.engineWriterScript).toBe(
+      "write-rrc-pipeline-fact-county.mjs",
+    );
+    expect(pipelines?.noWriterReason).toBeUndefined();
   });
 });

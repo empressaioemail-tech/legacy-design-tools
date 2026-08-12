@@ -106,9 +106,10 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   },
   {
     railKey: "rrc-pipelines",
-    atomEntityTypes: [],
-    noWriterReason:
-      "Atom family not registered in engine PROPERTY_ENTITY_TYPES — no writer until pipeline atom ships",
+    atomEntityTypes: ["rrc-pipeline-fact"],
+    engineWriterScript: "write-rrc-pipeline-fact-county.mjs",
+    atomFamilyRefLabel: "rrc-pipeline-fact (engine PROPERTY_ENTITY_TYPES)",
+    writerRefLabel: "hauska-engine write-rrc-pipeline-fact-county.mjs",
   },
   {
     railKey: "rail-corridor",
