@@ -7,7 +7,7 @@
  * is the CI-fail-closed bridge for `deriveAtomFamilyState`.
  */
 export const ENGINE_PROPERTY_TYPES_SNAPSHOT = {
-  engineMainSha: "34c94ff",
+  engineMainSha: "6ccfe8c",
   sourcePath: "packages/atoms/src/property-instances.ts",
   types: [
     "parcel-node",
@@ -24,6 +24,7 @@ export const ENGINE_PROPERTY_TYPES_SNAPSHOT = {
     "rail-corridor-fact",
     "well-fact",
     "special-district-fact",
+    "road-node",
   ],
 } as const;
 

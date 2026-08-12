@@ -45,8 +45,9 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "roads",
     atomEntityTypes: ["road-node"],
-    allowContractOnlyRegistration: true,
-    atomFamilyRefLabel: "road-node (contract; engine registration pending)",
+    engineWriterScript: "write-road-node-county.mjs",
+    atomFamilyRefLabel: "road-node (engine PROPERTY_ENTITY_TYPES)",
+    writerRefLabel: "hauska-engine write-road-node-county.mjs",
   },
   {
     railKey: "flood",
