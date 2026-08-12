@@ -62,6 +62,12 @@
  * direct way to express the same standing ruling and avoids depending on a
  * query-time flag this write-side script cannot see.
  *
+ * HONEST ABSENCE (L7). When a county has no txgio_parcel denominator,
+ * `satisfied-absent` is writable ONLY with an explicit positive determination
+ * (`absenceBasis` + `verifiedByInstrument`). Missing or incomplete evidence
+ * fail-closes to `not-yet` — never invent absence from a null feature count
+ * alone. CLI: `--honest-absent=BASIS --artifact=PATH --county=FIPS`.
+ *
  * `countyCoverageScoreCli.ts`'s own upsertLedger does NOT write
  * `rail_state`/`threshold_pct` (verified 2026-08-09: live `land-use`/
  * `envelope` rows have NULL rail_state; the 19 `satisfied-present` `zoning`
@@ -79,6 +85,8 @@
  * Usage (from repo root):
  *   tsx artifacts/api-server/src/countyGeometryScoreCli.ts --county=48261 [--dry-run]
  *   tsx artifacts/api-server/src/countyGeometryScoreCli.ts --all [--dry-run]
+ *   tsx artifacts/api-server/src/countyGeometryScoreCli.ts \
+ *     --county=48129 --honest-absent='BASIS' --artifact=path/to/evidence.md [--dry-run]
  *
  * DATABASE_URL must point at the ATOMS Postgres (falls back to loading the
  * DATABASE_URL secret via gcloud from GCP_ATOMS_PROJECT, default
@@ -104,6 +112,7 @@ import { classifyFacet, type FacetScore } from "./countyCoverageScoreCli";
 const { Pool } = pg;
 
 const GEOMETRY_THRESHOLD_PCT = 95;
+const GEOMETRY_INSTRUMENT = "countyGeometryScoreCli.ts";
 
 function log(msg: string): void {
   console.log(`[geometry-score] ${msg}`);
@@ -188,14 +197,54 @@ function makePool(connectionString: string, max: number): pg.Pool {
 // Reads.
 // ---------------------------------------------------------------------------
 
-/** parcel-node atom counts by county fips, from the ATOMS store. */
+/**
+ * County FIPS keying for parcel-node atoms.
+ * Prefer left(entity_id, 5) — Harris 48201 (and others) may have null
+ * body.countyFips. body->>'countyFips' is fallback only.
+ * SQL counterpart in readAtomCountsByCounty groups by left(entity_id, 5).
+ */
+export function countyFipsFromAtomRow(row: {
+  entity_id: string;
+  body?: { countyFips?: string | null } | null;
+}): string | null {
+  const fromId = row.entity_id?.match(/^([0-9]{5})/)?.[1] ?? null;
+  if (fromId) return fromId;
+  const fromBody = row.body?.countyFips?.trim();
+  if (fromBody && /^[0-9]{5}$/.test(fromBody)) return fromBody;
+  return null;
+}
+
+/**
+ * parcel-node atom counts by county fips, from the ATOMS store.
+ * Key on left(entity_id, 5) (flood scorer pattern). body->>'countyFips'
+ * is null for some counties (e.g. Harris 48201); entity_id prefix is the
+ * durable county key for parcel-node atoms.
+ *
+ * When `onlyFips` is set, count that county alone (prefix range on
+ * entity_id) — avoids a full 11M-row GROUP BY on single-county applies.
+ */
 async function readAtomCountsByCounty(
   atomsPool: pg.Pool,
+  onlyFips?: string,
 ): Promise<Map<string, number>> {
+  if (onlyFips) {
+    const { rows } = await atomsPool.query<{ n: string }>(
+      `SELECT count(*)::text AS n
+         FROM atoms
+        WHERE entity_type = 'parcel-node'
+          AND entity_id >= $1
+          AND entity_id < $2`,
+      [onlyFips, `${onlyFips}\uffff`],
+    );
+    const out = new Map<string, number>();
+    out.set(onlyFips, Number(rows[0]?.n ?? 0));
+    return out;
+  }
   const { rows } = await atomsPool.query<{ fips: string | null; n: string }>(
-    `SELECT body->>'countyFips' AS fips, count(DISTINCT entity_id) AS n
+    `SELECT left(entity_id, 5) AS fips, count(*) AS n
        FROM atoms
       WHERE entity_type = 'parcel-node'
+        AND entity_id ~ '^[0-9]{5}'
       GROUP BY 1`,
   );
   const out = new Map<string, number>();
@@ -244,6 +293,13 @@ async function readManifestCounties(
 // Score one county: measure -> classify -> derive rail_state.
 // ---------------------------------------------------------------------------
 
+export interface AbsenceDetermination {
+  absenceBasis: string;
+  verifiedByInstrument: string;
+  artifactPath?: string;
+  source?: string;
+}
+
 export interface GeometryCountyScore {
   fips: string;
   name: string;
@@ -251,7 +307,22 @@ export interface GeometryCountyScore {
   featureCount: number | null;
   featureTable: string | null;
   facet: FacetScore;
-  railState: "satisfied-present" | "not-yet";
+  railState: "satisfied-present" | "satisfied-absent" | "not-yet";
+  absenceBasis: string | null;
+  verifiedByInstrument: string;
+  artifactPath: string | null;
+}
+
+function isCompleteAbsenceDetermination(
+  d: AbsenceDetermination | null | undefined,
+): d is AbsenceDetermination {
+  return (
+    d != null &&
+    typeof d.absenceBasis === "string" &&
+    d.absenceBasis.trim().length > 0 &&
+    typeof d.verifiedByInstrument === "string" &&
+    d.verifiedByInstrument.trim().length > 0
+  );
 }
 
 /**
@@ -259,20 +330,69 @@ export interface GeometryCountyScore {
  * rail_state. No I/O — unit-testable directly. Mirrors `classifyFacet`'s
  * contract from `countyCoverageScoreCli.ts`; the geometry facet has no
  * owner-match oracle (verdict is always `n/a`), matching zoning/envelope.
+ *
+ * Absence path is FAIL-CLOSED: `satisfied-absent` only when featureCount
+ * is null/0 AND caller supplies a complete absenceDetermination
+ * (non-null absenceBasis AND verifiedByInstrument). Incomplete or missing
+ * evidence yields `not-yet` — never invent absence from a null denominator.
  */
 export function scoreGeometry(input: {
   fips: string;
   name: string;
   atomCount: number;
   featureCount: number | null;
+  absenceDetermination?: AbsenceDetermination | null;
 }): GeometryCountyScore {
-  const { fips, name, atomCount, featureCount } = input;
-  const sourcePresent = featureCount != null && featureCount > 0;
-  const overcount =
-    sourcePresent && atomCount > (featureCount as number);
-  const rawCoveragePct = sourcePresent
-    ? (atomCount / (featureCount as number)) * 100
-    : 0;
+  const { fips, name, atomCount, featureCount, absenceDetermination } = input;
+  const noFeatures = featureCount == null || featureCount === 0;
+  const determinationOk = isCompleteAbsenceDetermination(absenceDetermination);
+
+  if (noFeatures) {
+    const facet = classifyFacet({
+      facet: "geometry",
+      rawCoveragePct: 0,
+      sourcePresent: false,
+      verdict: null,
+      ownerMatchRate: null,
+      source: determinationOk
+        ? (absenceDetermination.source ?? "honest-absence-determination")
+        : null,
+      sourceVintage: null,
+      sampled: 0,
+    });
+
+    if (determinationOk) {
+      return {
+        fips,
+        name,
+        atomCount,
+        featureCount,
+        featureTable: null,
+        facet,
+        railState: "satisfied-absent",
+        absenceBasis: absenceDetermination.absenceBasis.trim(),
+        verifiedByInstrument: absenceDetermination.verifiedByInstrument.trim(),
+        artifactPath: absenceDetermination.artifactPath?.trim() || null,
+      };
+    }
+
+    return {
+      fips,
+      name,
+      atomCount,
+      featureCount,
+      featureTable: null,
+      facet,
+      railState: "not-yet",
+      absenceBasis: null,
+      verifiedByInstrument: GEOMETRY_INSTRUMENT,
+      artifactPath: null,
+    };
+  }
+
+  const sourcePresent = true;
+  const overcount = atomCount > (featureCount as number);
+  const rawCoveragePct = (atomCount / (featureCount as number)) * 100;
 
   const facet = classifyFacet({
     facet: "geometry",
@@ -280,7 +400,7 @@ export function scoreGeometry(input: {
     sourcePresent,
     verdict: null, // no owner oracle for geometry, same as zoning/envelope
     ownerMatchRate: null,
-    source: sourcePresent ? "parcel-node-atom-count" : null,
+    source: "parcel-node-atom-count",
     sourceVintage: null,
     sampled: 0,
   });
@@ -288,13 +408,13 @@ export function scoreGeometry(input: {
   // Threshold gate: only >=95% writes satisfied-present. Overcount
   // (atomCount > featureCount: duplicates/stale rows) fail-closes to
   // not-yet with the honest unclamped ratio — never Math.min(100,...)
-  // shipping satisfied-present (SF-25).
-  const railState: "satisfied-present" | "not-yet" =
-    overcount
-      ? "not-yet"
-      : facet.honestCoveragePct >= GEOMETRY_THRESHOLD_PCT
-        ? "satisfied-present"
-        : "not-yet";
+  // shipping satisfied-present (SF-25). Never satisfied-absent from
+  // coverage alone.
+  const railState: "satisfied-present" | "not-yet" = overcount
+    ? "not-yet"
+    : facet.honestCoveragePct >= GEOMETRY_THRESHOLD_PCT
+      ? "satisfied-present"
+      : "not-yet";
 
   return {
     fips,
@@ -304,6 +424,9 @@ export function scoreGeometry(input: {
     featureTable: null, // filled by caller (I/O-derived, not part of the pure core)
     facet,
     railState,
+    absenceBasis: null,
+    verifiedByInstrument: GEOMETRY_INSTRUMENT,
+    artifactPath: `atoms:entity_type=parcel-node,countyFips=${fips}`,
   };
 }
 
@@ -313,13 +436,15 @@ async function upsertLedger(
   score: GeometryCountyScore,
 ): Promise<void> {
   const f = score.facet;
+  // absence_basis MUST be written for satisfied-absent (DB CHECK) and MUST
+  // clear to NULL on non-absent states so a prior absence does not stick.
   await deployPool.query(
     `INSERT INTO county_facet_coverage
        (county_fips, facet, honest_coverage_pct, integrity_verdict,
         owner_match_rate, source, source_vintage, sampled, classification,
-        rail_state, threshold_pct, verification_method, verified_by_instrument,
-        artifact_path, checked_at, last_verified_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
+        rail_state, threshold_pct, absence_basis, verification_method,
+        verified_by_instrument, artifact_path, checked_at, last_verified_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now(), now())
      ON CONFLICT (county_fips, facet) DO UPDATE SET
        honest_coverage_pct    = EXCLUDED.honest_coverage_pct,
        integrity_verdict      = EXCLUDED.integrity_verdict,
@@ -330,6 +455,7 @@ async function upsertLedger(
        classification         = EXCLUDED.classification,
        rail_state             = EXCLUDED.rail_state,
        threshold_pct          = EXCLUDED.threshold_pct,
+       absence_basis          = EXCLUDED.absence_basis,
        verification_method    = EXCLUDED.verification_method,
        verified_by_instrument = EXCLUDED.verified_by_instrument,
        artifact_path          = EXCLUDED.artifact_path,
@@ -347,20 +473,25 @@ async function upsertLedger(
       f.classification,
       score.railState,
       GEOMETRY_THRESHOLD_PCT.toFixed(2),
+      score.railState === "satisfied-absent" ? score.absenceBasis : null,
       "sweep", // every county in the target set is measured, not sampled
-      "countyGeometryScoreCli.ts",
-      `atoms:entity_type=parcel-node,countyFips=${score.fips}`,
+      score.verifiedByInstrument,
+      score.artifactPath,
     ],
   );
 }
 
 function reportCounty(score: GeometryCountyScore, dryRun: boolean): void {
   const f = score.facet;
+  const absenceNote =
+    score.railState === "satisfied-absent"
+      ? ` absence_basis=${score.absenceBasis ?? "n/a"}`
+      : "";
   log(
     `${dryRun ? "DRY-RUN " : ""}${score.fips}/${score.name}: ` +
       `atoms=${score.atomCount} features=${score.featureCount ?? "n/a"} ` +
       `(${score.featureTable ?? "no source table"}) ` +
-      `coverage=${f.honestCoveragePct.toFixed(2)}% -> ${f.classification} -> rail_state=${score.railState}`,
+      `coverage=${f.honestCoveragePct.toFixed(2)}% -> ${f.classification} -> rail_state=${score.railState}${absenceNote}`,
   );
 }
 
@@ -376,15 +507,27 @@ async function main(): Promise<void> {
       county: { type: "string" },
       all: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      "honest-absent": { type: "string" },
+      artifact: { type: "string" },
     },
   });
 
   const dryRun = values["dry-run"] ?? false;
   const all = values.all ?? false;
   const single = values.county?.trim();
+  const honestAbsentBasis = values["honest-absent"]?.trim();
+  const artifactPath = values.artifact?.trim();
 
   if (!all && !single) {
     fail("pass --county=<fips> or --all");
+  }
+  if (honestAbsentBasis) {
+    if (!single || all) {
+      fail("--honest-absent requires --county=<fips> (not --all)");
+    }
+    if (!artifactPath) {
+      fail("--honest-absent requires --artifact=<path> (decision/outreach evidence)");
+    }
   }
 
   const startedAt = Date.now();
@@ -395,11 +538,9 @@ async function main(): Promise<void> {
   let skippedNoFeatures = 0;
   const scores: GeometryCountyScore[] = [];
   try {
-    const atomCounts = await readAtomCountsByCounty(atomsPool);
-    log(`atoms store: ${atomCounts.size} counties carry parcel-node atoms`);
-
     const manifestCounties = await readManifestCounties(deployPool);
     let targets: string[];
+    let atomCounts: Map<string, number>;
     if (all) {
       // Score every county that HAS atoms (the task's "47 counties that
       // have atoms" scope) — scoring a county with zero atoms would only
@@ -407,30 +548,63 @@ async function main(): Promise<void> {
       // manifest already renders correctly via no-atom/no-writer fallback
       // for counties that were never atom-written, so it is not useful
       // ledger signal and is skipped to keep `--all` scoped to real work.
+      // Honest-absent writes are opt-in via --county + --honest-absent only
+      // (fail-closed: never auto-absent under --all).
+      atomCounts = await readAtomCountsByCounty(atomsPool);
+      log(`atoms store: ${atomCounts.size} counties carry parcel-node atoms`);
       targets = Array.from(atomCounts.keys()).sort();
       log(`--all target set: ${targets.length} counties with parcel-node atoms`);
     } else {
       targets = [single as string];
+      atomCounts = await readAtomCountsByCounty(atomsPool, single);
+      log(
+        `atoms store: county ${single} parcel-node count=${atomCounts.get(single as string) ?? 0}`,
+      );
     }
 
     for (const fips of targets) {
       const atomCount = atomCounts.get(fips) ?? 0;
       const name = manifestCounties.get(fips) ?? fips;
       const featureInfo = await readFeatureCount(deployPool, fips);
-      if (!featureInfo) {
+      const noDenominator = !featureInfo;
+
+      if (noDenominator && !single && !honestAbsentBasis) {
+        // --all path: skip silent (no auto-absent). Explicit --county
+        // continues below and scores not-yet or satisfied-absent.
         log(
           `county ${fips}/${name} has ${atomCount} parcel-node atoms but NO txgio_parcel/txgio_parcel_staging rows — skipping (no denominator)`,
         );
         skippedNoFeatures += 1;
         continue;
       }
+
+      if (honestAbsentBasis && !noDenominator) {
+        fail(
+          `--honest-absent requires featureCount null/0; county ${fips} has ${featureInfo!.features} features in ${featureInfo!.table}`,
+        );
+      }
+
+      const absenceDetermination: AbsenceDetermination | null =
+        honestAbsentBasis && artifactPath
+          ? {
+              absenceBasis: honestAbsentBasis,
+              verifiedByInstrument: GEOMETRY_INSTRUMENT,
+              artifactPath,
+              source: "honest-absence-determination",
+            }
+          : null;
+
       const score = scoreGeometry({
         fips,
         name,
         atomCount,
-        featureCount: featureInfo.features,
+        featureCount: featureInfo?.features ?? null,
+        absenceDetermination,
       });
-      score.featureTable = featureInfo.table;
+      score.featureTable = featureInfo?.table ?? null;
+      if (absenceDetermination && score.railState === "satisfied-absent") {
+        score.artifactPath = artifactPath ?? score.artifactPath;
+      }
       reportCounty(score, dryRun);
       scores.push(score);
       if (!dryRun) {
@@ -444,13 +618,20 @@ async function main(): Promise<void> {
   }
 
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-  const satisfied = scores.filter((s) => s.railState === "satisfied-present").length;
+  const satisfiedPresent = scores.filter(
+    (s) => s.railState === "satisfied-present",
+  ).length;
+  const satisfiedAbsent = scores.filter(
+    (s) => s.railState === "satisfied-absent",
+  ).length;
+  const notYet = scores.filter((s) => s.railState === "not-yet").length;
   log("---- geometry-score summary ----");
   log(`mode:                ${dryRun ? "DRY-RUN (no ledger writes)" : "WRITE"}`);
   log(`counties scored:     ${scores.length}`);
   log(`counties skipped:    ${skippedNoFeatures} (no txgio_parcel denominator)`);
-  log(`satisfied-present:   ${satisfied}`);
-  log(`not-yet (below 95%): ${scores.length - satisfied}`);
+  log(`satisfied-present:   ${satisfiedPresent}`);
+  log(`satisfied-absent:    ${satisfiedAbsent}`);
+  log(`not-yet:             ${notYet}`);
   log(`ledger writes:       ${dryRun ? 0 : wrote}`);
   log(`duration:            ${seconds}s`);
 }
