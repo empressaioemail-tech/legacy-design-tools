@@ -38,7 +38,8 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("write-flood-hazard-fact-county.mjs") ||
       normalized.endsWith("write-land-use-fact-county.mjs") ||
       normalized.endsWith("write-road-node-county.mjs") ||
-      normalized.endsWith("write-parcel-node-county.mjs")
+      normalized.endsWith("write-parcel-node-county.mjs") ||
+      normalized.endsWith("write-utility-easement-county.mjs")
     );
   }
   if (normalized.includes("artifacts/api-server/src/")) {
@@ -78,9 +79,9 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("rrc-pipelines")?.hasWriter).toBe(false);
   });
 
-  it("keeps easement present without writer", () => {
+  it("derives easement present with writer (E1: engine PR #295 merged)", () => {
     expect(byKey.get("easement")?.atomFamilyState).toBe("present");
-    expect(byKey.get("easement")?.hasWriter).toBe(false);
+    expect(byKey.get("easement")?.hasWriter).toBe(true);
   });
 
   it("keeps owner present with writer", () => {
@@ -88,10 +89,12 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("owner")?.hasWriter).toBe(true);
   });
 
-  it("matches CP1 cell move expectations (762 no-atom, 508 no-writer)", () => {
+  it("matches CP1 cell move expectations (762 no-atom, 762 no-writer)", () => {
     const moves = computeCp1CellMoveExpectations(CP1_BEFORE_BY_KEY, effective);
     expect(moves.cellsMovedOutOfNoAtom).toBe(762);
-    expect(moves.cellsMovedOutOfNoWriter).toBe(508);
+    // 508 + easement 254: E1 merged the utility-easement county writer
+    // (engine PR #295), so easement's 254 cells leave no-writer for not-yet.
+    expect(moves.cellsMovedOutOfNoWriter).toBe(762);
   });
 
   it("fail-closes atomFamilyState to missing for unregistered types without contract fallback", () => {
@@ -141,9 +144,11 @@ describe("railManifestDerivation CP1", () => {
   });
 
   it("effective declaration carries hasWriterDerivation alongside boolean hasWriter", () => {
+    // E1: easement now binds the merged utility-easement county writer, so
+    // both the tri-state derivation and the boolean resolve true.
     const rail = effective.find((r) => r.railKey === "easement");
-    expect(rail?.hasWriterDerivation).toBe(false);
-    expect(rail?.hasWriter).toBe(false);
+    expect(rail?.hasWriterDerivation).toBe(true);
+    expect(rail?.hasWriter).toBe(true);
     expect(rail?.atomFamilyPresent).toBe(true);
   });
 
