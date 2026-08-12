@@ -113,3 +113,18 @@ jobs:
         run: pnpm --filter @workspace/db run test:fixture:drift
       - name: Run tests
         run: pnpm test
+  l5-sf30-cotality-grep:
+    name: L5 SF-30 Cotality warm grep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-cotality-warm-gate
+        run: |
+          if rg -n 'canWarm\s*=\s*present\.has\(["'"'"']cotality:' artifacts/api-server/src/lib/warmingHarness.ts; then
+            echo "FAIL ci-cotality-warm-gate: Cotality is extinguished; do not gate warm on cotality:*"
+            exit 1
+          fi
+          echo "ci-cotality-warm-gate: clean"
