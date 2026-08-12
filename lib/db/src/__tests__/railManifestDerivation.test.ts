@@ -133,7 +133,7 @@ describe("railManifestDerivation CP1", () => {
   });
 
   it("module-anchored ldtRoot finds scorers without cwd override (D3 cwd trap)", () => {
-    const repoRoot = path.resolve("P:/legacy-design-tools");
+    const repoRoot = resolveLdtRoot();
     const wrongCwdRoot = path.join(repoRoot, "artifacts", "api-server");
     const derivedWrong = deriveRailDeclarationFields("zoning", {
       ldtRoot: wrongCwdRoot,
@@ -144,13 +144,21 @@ describe("railManifestDerivation CP1", () => {
     expect(derivedWrong.hasWriter).toBe(false);
     expect(derivedWrong.derivationReason).toContain("writer probe failed");
 
-    expect(resolveLdtRoot().replace(/\\/g, "/")).toBe(
-      repoRoot.replace(/\\/g, "/"),
-    );
     const derivedAnchored = deriveRailDeclarationFields("zoning", {
       fileExists: existsSync,
       requireEngineRoot: false,
     });
     expect(derivedAnchored.hasWriter).toBe(true);
+    expect(
+      existsSync(
+        path.join(
+          repoRoot,
+          "artifacts",
+          "api-server",
+          "src",
+          "countyCoverageScoreCli.ts",
+        ),
+      ),
+    ).toBe(true);
   });
 });
