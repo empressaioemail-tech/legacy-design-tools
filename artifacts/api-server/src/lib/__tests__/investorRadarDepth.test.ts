@@ -22,8 +22,8 @@ describe("investor radar depth helpers", () => {
     expect(result.disclaimer).toMatch(/not an appraisal/i);
   });
 
-  it("lookupOpportunityZone hits Austin fixture tract", () => {
-    const oz = lookupOpportunityZone({ latitude: 30.25, longitude: -97.77 });
+  it("lookupOpportunityZone hits a real Travis OZ tract (48453001712)", () => {
+    const oz = lookupOpportunityZone({ latitude: 30.22205, longitude: -97.79682 });
     expect(oz.inOpportunityZone).toBe(true);
     expect(oz.tractListVersion).toBe("oz-1.0");
   });
