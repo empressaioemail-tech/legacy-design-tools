@@ -6,6 +6,11 @@
  * vintage. No silent cross-vintage fallback. A miss at the declared
  * year when another year has the prop is `vintage-gap`, not a coin-flip.
  *
+ * L21 additive: when the declared-year key misses, readers MAY resolve
+ * at most one deterministic row from `cad_property_vintage_crosswalk`
+ * via {@link resolveCrosswalkPropId}. That is key mapping inside this
+ * seam, not a second resolver and not a cross-vintage year fallback.
+ *
  * Declared values live in `_catalog/tx_cad_source_registry.json`
  * (`current_tax_year` + `current_tier`) and are mirrored here so
  * runtime readers do not parse the whole registry. Flip ONLY at load
@@ -110,4 +115,44 @@ export function classifyCadPropertyMiss(opts: {
   if (opts.declaredYearHit) return "hit";
   if (opts.otherVintageHit) return VINTAGE_GAP_ABSENCE_BASIS;
   return "not-found";
+}
+
+/** Normalize GIS_Link-style keys: trim, collapse whitespace, uppercase. */
+export function normalizeCadGisLinkKey(propId: string): string {
+  return propId.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/** @deprecated use normalizeCadGisLinkKey — kept as alias for clarity in older notes. */
+export function collapseCadPropIdWhitespace(propId: string): string {
+  return normalizeCadGisLinkKey(propId);
+}
+
+export type CadPropIdResolution =
+  | { kind: "exact"; propId: string }
+  | { kind: "crosswalk"; propId: string; fromPropId: string; method: string }
+  | { kind: "miss"; propId: string };
+
+/**
+ * Pure decision helper for tests: given an exact declared-year hit and
+ * an optional single crosswalk target, choose the prop id to read.
+ * Ambiguous (>1) crosswalk inputs are a programmer error — callers must
+ * enforce uniqueness before calling.
+ */
+export function chooseCadPropIdResolution(opts: {
+  requestedPropId: string;
+  exactDeclaredHit: boolean;
+  crosswalk?: { toPropId: string; method: string } | null;
+}): CadPropIdResolution {
+  if (opts.exactDeclaredHit) {
+    return { kind: "exact", propId: opts.requestedPropId };
+  }
+  if (opts.crosswalk && opts.crosswalk.toPropId.length > 0) {
+    return {
+      kind: "crosswalk",
+      propId: opts.crosswalk.toPropId,
+      fromPropId: opts.requestedPropId,
+      method: opts.crosswalk.method,
+    };
+  }
+  return { kind: "miss", propId: opts.requestedPropId };
 }

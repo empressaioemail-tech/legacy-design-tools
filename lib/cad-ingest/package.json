@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cad-ingest": "tsx src/cli.ts",
+    "cad-vintage-crosswalk": "tsx src/vintage-crosswalk-cli.ts",
     "txgio-ingest": "tsx src/txgio/cli.ts",
     "stratmap-landuse": "tsx src/txgio/landuse-cli.ts",
     "zoning-stamp": "tsx src/txgio/zoning-cli.ts",

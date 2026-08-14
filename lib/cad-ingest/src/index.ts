@@ -40,10 +40,22 @@ export {
   DECLARED_CAD_VINTAGES,
   VINTAGE_GAP_ABSENCE_BASIS,
   classifyCadPropertyMiss,
+  collapseCadPropIdWhitespace,
+  chooseCadPropIdResolution,
+  normalizeCadGisLinkKey,
   resolveDeclaredCadVintage,
   tryResolveDeclaredCadVintage,
 } from "./vintage";
-export type { DeclaredCadVintage, CadVintageMissClass } from "./vintage";
+export type {
+  DeclaredCadVintage,
+  CadVintageMissClass,
+  CadPropIdResolution,
+} from "./vintage";
+export { upsertCadVintageCrosswalk } from "./vintage-crosswalk";
+export type {
+  CadCrosswalkDb,
+  CadCrosswalkRecord,
+} from "./vintage-crosswalk";
 export { downloadToFile, isUrl, BROWSER_UA } from "./download";
 export {
   extractCadDrop,
