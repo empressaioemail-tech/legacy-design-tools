@@ -16,14 +16,14 @@ import {
 } from "../vintage";
 
 describe("resolveDeclaredCadVintage", () => {
-  it("returns store-truth seed for Tarrant (2025, not the 2026 pilot)", () => {
+  it("returns ruled Tarrant declaration after named fallback lands", () => {
     const v = resolveDeclaredCadVintage("48439");
     expect(v).toEqual({
       countyFips: "48439",
-      taxYear: 2025,
-      tier: "stratmap-roll",
+      taxYear: 2026,
+      tier: "cad-export",
     });
-    expect(DECLARED_CAD_VINTAGES["48439"]?.taxYear).toBe(2025);
+    expect(DECLARED_CAD_VINTAGES["48439"]?.taxYear).toBe(2026);
   });
 
   it("fails closed on unknown county", () => {
@@ -79,7 +79,16 @@ describe("L21 crosswalk resolution (declared-year key mapping)", () => {
       chooseCadPropIdResolution({
         requestedPropId: "A 9-3B",
         exactDeclaredHit: true,
-        crosswalk: { toPropId: "A   9-3B", method: "gis-link-whitespace-collapse" },
+        crosswalk: {
+          toPropId: "A   9-3B",
+          method: "gis-link-whitespace-collapse",
+        },
+        namedFallback: {
+          fallbackPropId: "A 9-3B",
+          fallbackTaxYear: 2025,
+          method: "named-fallback-2025",
+          evidenceClass: "real-parcel-geometry-verified",
+        },
       }),
     ).toEqual({ kind: "exact", propId: "A 9-3B" });
   });
@@ -89,7 +98,16 @@ describe("L21 crosswalk resolution (declared-year key mapping)", () => {
       chooseCadPropIdResolution({
         requestedPropId: "A 9-3B",
         exactDeclaredHit: false,
-        crosswalk: { toPropId: "A   9-3B", method: "gis-link-whitespace-collapse" },
+        crosswalk: {
+          toPropId: "A   9-3B",
+          method: "gis-link-whitespace-collapse",
+        },
+        namedFallback: {
+          fallbackPropId: "A 9-3B",
+          fallbackTaxYear: 2025,
+          method: "named-fallback-2025",
+          evidenceClass: "real-parcel-geometry-verified",
+        },
       }),
     ).toEqual({
       kind: "crosswalk",
@@ -99,12 +117,36 @@ describe("L21 crosswalk resolution (declared-year key mapping)", () => {
     });
   });
 
+  it("uses a named prior-vintage fallback after exact and crosswalk miss", () => {
+    expect(
+      chooseCadPropIdResolution({
+        requestedPropId: "1000-13-15",
+        exactDeclaredHit: false,
+        crosswalk: null,
+        namedFallback: {
+          fallbackPropId: "1000-13-15",
+          fallbackTaxYear: 2025,
+          method: "named-fallback-2025",
+          evidenceClass: "real-parcel-geometry-verified-absent-2026-gis-link",
+        },
+      }),
+    ).toEqual({
+      kind: "named-fallback",
+      propId: "1000-13-15",
+      taxYear: 2025,
+      fromPropId: "1000-13-15",
+      method: "named-fallback-2025",
+      evidenceClass: "real-parcel-geometry-verified-absent-2026-gis-link",
+    });
+  });
+
   it("misses closed when no exact and no crosswalk", () => {
     expect(
       chooseCadPropIdResolution({
         requestedPropId: "10-1-1A",
         exactDeclaredHit: false,
         crosswalk: null,
+        namedFallback: null,
       }),
     ).toEqual({ kind: "miss", propId: "10-1-1A" });
   });

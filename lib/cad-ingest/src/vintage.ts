@@ -3,8 +3,8 @@
  * `cad_property` reader (L17 / P-25 / L9 vintage-read spec).
  *
  * INVARIANT: every reader filters to the county's single DECLARED
- * vintage. No silent cross-vintage fallback. A miss at the declared
- * year when another year has the prop is `vintage-gap`, not a coin-flip.
+ * vintage unless an explicit, evidence-classed named fallback entry
+ * sanctions one prior-vintage row. No silent cross-vintage fallback.
  *
  * L21 additive: when the declared-year key misses, readers MAY resolve
  * at most one deterministic row from `cad_property_vintage_crosswalk`
@@ -39,7 +39,8 @@ export interface DeclaredCadVintage {
 /**
  * Store-truth seed 2026-08-13 (cortex-prod cad_property). Counting rule
  * in `_inbox/2026-08-14_l17_cp1.json` + `P:/tmp/l17_cad_vintage_20260814/declared_seed.json`.
- * Tarrant stays 2025 despite the 5k 2026 pilot — flip only at full-load completion.
+ * Tarrant flipped to 2026 after the full C-inclusive load and the named
+ * 2025 fallback ruling (L21 follow-up 3).
  */
 export const DECLARED_CAD_VINTAGES: Readonly<
   Record<string, Readonly<{ taxYear: number; tier: CadSourceTier }>>
@@ -56,7 +57,7 @@ export const DECLARED_CAD_VINTAGES: Readonly<
   "48209": { taxYear: 2026, tier: "cad-export" },
   "48257": { taxYear: 2025, tier: "stratmap-roll" },
   "48309": { taxYear: 2025, tier: "stratmap-roll" },
-  "48439": { taxYear: 2025, tier: "stratmap-roll" },
+  "48439": { taxYear: 2026, tier: "cad-export" },
   "48453": { taxYear: 2026, tier: "cad-export" },
   "48491": { taxYear: 2026, tier: "cad-export" },
 });
@@ -91,7 +92,9 @@ export function tryResolveDeclaredCadVintage(
  * Prefer this in writers / apply paths. Serve paths may use
  * {@link tryResolveDeclaredCadVintage} and return empty on null.
  */
-export function resolveDeclaredCadVintage(countyFips: string): DeclaredCadVintage {
+export function resolveDeclaredCadVintage(
+  countyFips: string,
+): DeclaredCadVintage {
   const resolved = tryResolveDeclaredCadVintage(countyFips);
   if (!resolved) {
     throw new Error(
@@ -130,11 +133,21 @@ export function collapseCadPropIdWhitespace(propId: string): string {
 export type CadPropIdResolution =
   | { kind: "exact"; propId: string }
   | { kind: "crosswalk"; propId: string; fromPropId: string; method: string }
+  | {
+      kind: "named-fallback";
+      propId: string;
+      taxYear: number;
+      fromPropId: string;
+      method: string;
+      evidenceClass: string;
+    }
   | { kind: "miss"; propId: string };
 
 /**
  * Pure decision helper for tests: given an exact declared-year hit and
- * an optional single crosswalk target, choose the prop id to read.
+ * an optional single crosswalk target and named fallback, choose the
+ * prop id/year to read. Order is exact -> crosswalk -> named fallback
+ * -> miss.
  * Ambiguous (>1) crosswalk inputs are a programmer error — callers must
  * enforce uniqueness before calling.
  */
@@ -142,6 +155,12 @@ export function chooseCadPropIdResolution(opts: {
   requestedPropId: string;
   exactDeclaredHit: boolean;
   crosswalk?: { toPropId: string; method: string } | null;
+  namedFallback?: {
+    fallbackPropId: string;
+    fallbackTaxYear: number;
+    method: string;
+    evidenceClass: string;
+  } | null;
 }): CadPropIdResolution {
   if (opts.exactDeclaredHit) {
     return { kind: "exact", propId: opts.requestedPropId };
@@ -152,6 +171,20 @@ export function chooseCadPropIdResolution(opts: {
       propId: opts.crosswalk.toPropId,
       fromPropId: opts.requestedPropId,
       method: opts.crosswalk.method,
+    };
+  }
+  if (
+    opts.namedFallback &&
+    opts.namedFallback.fallbackPropId.length > 0 &&
+    Number.isInteger(opts.namedFallback.fallbackTaxYear)
+  ) {
+    return {
+      kind: "named-fallback",
+      propId: opts.namedFallback.fallbackPropId,
+      taxYear: opts.namedFallback.fallbackTaxYear,
+      fromPropId: opts.requestedPropId,
+      method: opts.namedFallback.method,
+      evidenceClass: opts.namedFallback.evidenceClass,
     };
   }
   return { kind: "miss", propId: opts.requestedPropId };

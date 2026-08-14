@@ -43,7 +43,8 @@ async function expectPgError(p: Promise<unknown>, code: string): Promise<void> {
   }
   expect(err, "expected the promise to reject").toBeDefined();
   // Drizzle: { cause: pgError }. Direct pg: pgError. Defensively try both.
-  const pgErr = (err as { cause?: { code?: string }; code?: string }).cause ??
+  const pgErr =
+    (err as { cause?: { code?: string }; code?: string }).cause ??
     (err as { code?: string });
   expect(pgErr.code).toBe(code);
 }
@@ -113,6 +114,8 @@ describe("lib/db schema integration", () => {
         // L21 / P-25 — deterministic cross-vintage CAD prop_id
         // crosswalk used by the blessed declared-vintage resolver.
         "cad_property_vintage_crosswalk",
+        // L21 follow-up 3 / P-25 — explicit prior-vintage fallback list.
+        "cad_property_vintage_fallback",
         // PLR-10 — tenant-scoped canned-finding library curated by
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.

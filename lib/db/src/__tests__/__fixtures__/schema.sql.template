@@ -373,6 +373,23 @@ CREATE TABLE @@SCHEMA@@.cad_property_vintage_crosswalk (
 );
 
 
+-- Name: cad_property_vintage_fallback; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cad_property_vintage_fallback (
+    county_fips text NOT NULL,
+    requested_prop_id text NOT NULL,
+    declared_tax_year integer NOT NULL,
+    fallback_prop_id text NOT NULL,
+    fallback_tax_year integer NOT NULL,
+    method text NOT NULL,
+    evidence_class text NOT NULL,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cad_property_vintage_fallback_distinct_years CHECK ((declared_tax_year <> fallback_tax_year))
+);
+
+
 -- Name: canned_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.canned_findings (
@@ -2155,6 +2172,12 @@ ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_crosswalk
     ADD CONSTRAINT cad_property_vintage_crosswalk_unique_target UNIQUE (county_fips, to_tax_year, to_prop_id, from_tax_year);
 
 
+-- Name: cad_property_vintage_fallback cad_property_vintage_fallback_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_fallback
+    ADD CONSTRAINT cad_property_vintage_fallback_pk PRIMARY KEY (county_fips, requested_prop_id, declared_tax_year);
+
+
 -- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.canned_findings
@@ -2907,6 +2930,11 @@ CREATE INDEX brokerage_workspaces_owner_user_id_idx ON @@SCHEMA@@.brokerage_work
 -- Name: cad_property_vintage_crosswalk_to_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX cad_property_vintage_crosswalk_to_idx ON @@SCHEMA@@.cad_property_vintage_crosswalk USING btree (county_fips, to_tax_year, to_prop_id);
+
+
+-- Name: cad_property_vintage_fallback_lookup_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cad_property_vintage_fallback_lookup_idx ON @@SCHEMA@@.cad_property_vintage_fallback USING btree (county_fips, fallback_tax_year, fallback_prop_id);
 
 
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -

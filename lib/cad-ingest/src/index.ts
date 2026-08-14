@@ -52,10 +52,9 @@ export type {
   CadPropIdResolution,
 } from "./vintage";
 export { upsertCadVintageCrosswalk } from "./vintage-crosswalk";
-export type {
-  CadCrosswalkDb,
-  CadCrosswalkRecord,
-} from "./vintage-crosswalk";
+export type { CadCrosswalkDb, CadCrosswalkRecord } from "./vintage-crosswalk";
+export { upsertCadVintageFallback } from "./vintage-fallback";
+export type { CadFallbackDb, CadFallbackRecord } from "./vintage-fallback";
 export { downloadToFile, isUrl, BROWSER_UA } from "./download";
 export {
   extractCadDrop,
@@ -217,7 +216,10 @@ export {
   NFHL_SOURCE_CITATION,
   nfhlBulkDownloadUrl,
 } from "./nfhl/service";
-export { normalizeNfhlFeature, assertNfhlGeographicCoordinates } from "./nfhl/parse";
+export {
+  normalizeNfhlFeature,
+  assertNfhlGeographicCoordinates,
+} from "./nfhl/parse";
 export type { TxFemaNfhlFloodZoneRecord, NfhlFeature } from "./nfhl/parse";
 export {
   deleteAllNfhlFloodZones,
@@ -225,11 +227,12 @@ export {
   upsertNfhlFloodZones,
   NFHL_DEFAULT_BATCH_SIZE,
 } from "./nfhl/ingest";
-export type { NfhlIngestDb, NfhlUpsertOptions, NfhlUpsertSummary } from "./nfhl/ingest";
-export {
-  buildNfhlZoneIndex,
-  resolveParcelFloodZones,
-} from "./nfhl/evaluation";
+export type {
+  NfhlIngestDb,
+  NfhlUpsertOptions,
+  NfhlUpsertSummary,
+} from "./nfhl/ingest";
+export { buildNfhlZoneIndex, resolveParcelFloodZones } from "./nfhl/evaluation";
 export type {
   NfhlZoneIndexEntry,
   ParcelFloodZoneHit,

@@ -25,6 +25,7 @@ import {
   db as defaultDb,
   cadProperty,
   cadPropertyVintageCrosswalk,
+  cadPropertyVintageFallback,
 } from "@workspace/db";
 import type { CadPropertyLookup } from "@workspace/adapters";
 import {
@@ -58,7 +59,8 @@ export type CadLookupDb = Pick<
  * If the declared year has no row but another year does, returns null
  * (vintage-gap — never the other vintage's row). Undeclared counties
  * return null (honest empty). Crosswalk may remap the prop id inside
- * the declared year only.
+ * the declared year only. A named fallback may then return one explicitly
+ * sanctioned prior-year row with a visible vintageResolution marker.
  */
 export function makeCadPropertyLookup(
   database: CadLookupDb = defaultDb,
@@ -100,12 +102,31 @@ export function makeCadPropertyLookup(
       // Unique constraint should prevent this; fail closed if violated.
       return null;
     }
-    const decision = chooseCadPropIdResolution({
+    const fallback = await database
+      .select({
+        fallbackPropId: cadPropertyVintageFallback.fallbackPropId,
+        fallbackTaxYear: cadPropertyVintageFallback.fallbackTaxYear,
+        method: cadPropertyVintageFallback.method,
+        evidenceClass: cadPropertyVintageFallback.evidenceClass,
+      })
+      .from(cadPropertyVintageFallback)
+      .where(
+        and(
+          eq(cadPropertyVintageFallback.countyFips, declared.countyFips),
+          eq(cadPropertyVintageFallback.requestedPropId, prop),
+          eq(cadPropertyVintageFallback.declaredTaxYear, declared.taxYear),
+        ),
+      )
+      .limit(2);
+    if (fallback.length > 1) return null;
+
+    let decision = chooseCadPropIdResolution({
       requestedPropId: prop,
       exactDeclaredHit: false,
       crosswalk: mapped[0]
         ? { toPropId: mapped[0].toPropId, method: mapped[0].method }
         : null,
+      namedFallback: fallback[0] ?? null,
     });
     if (decision.kind === "crosswalk") {
       const rows = await database
@@ -120,6 +141,42 @@ export function makeCadPropertyLookup(
         )
         .limit(1);
       if (rows[0]) return rows[0];
+
+      // A stale/missing crosswalk target is not a license to invent a hit.
+      // Continue to the separately named fallback, if one exists.
+      decision = chooseCadPropIdResolution({
+        requestedPropId: prop,
+        exactDeclaredHit: false,
+        crosswalk: null,
+        namedFallback: fallback[0] ?? null,
+      });
+    }
+
+    if (decision.kind === "named-fallback") {
+      const rows = await database
+        .select()
+        .from(cadProperty)
+        .where(
+          and(
+            eq(cadProperty.countyFips, declared.countyFips),
+            eq(cadProperty.propId, decision.propId),
+            eq(cadProperty.taxYear, decision.taxYear),
+          ),
+        )
+        .limit(1);
+      if (rows[0]) {
+        return {
+          ...rows[0],
+          vintageResolution: {
+            kind: "named-fallback",
+            requestedPropId: decision.fromPropId,
+            declaredTaxYear: declared.taxYear,
+            servedTaxYear: decision.taxYear,
+            method: decision.method,
+            evidenceClass: decision.evidenceClass,
+          },
+        };
+      }
     }
 
     // Fail-closed vintage-gap probe: does another year have this prop

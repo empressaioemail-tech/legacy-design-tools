@@ -129,6 +129,18 @@ export interface CadPropertyLookupRow {
   propertyUseCode: string | null;
   /** Export drop label, e.g. `2026-preliminary-supp0`. */
   sourceVintage: string;
+  /**
+   * Present only when the county's named fallback list authorized a
+   * prior-vintage row. Consumers must carry this marker with the value.
+   */
+  vintageResolution?: {
+    kind: "named-fallback";
+    requestedPropId: string;
+    declaredTaxYear: number;
+    servedTaxYear: number;
+    method: string;
+    evidenceClass: string;
+  };
 }
 
 /**
