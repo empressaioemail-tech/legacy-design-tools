@@ -357,6 +357,22 @@ CREATE TABLE @@SCHEMA@@.cad_property (
 );
 
 
+-- Name: cad_property_vintage_crosswalk; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cad_property_vintage_crosswalk (
+    county_fips text NOT NULL,
+    from_tax_year integer NOT NULL,
+    from_prop_id text NOT NULL,
+    to_tax_year integer NOT NULL,
+    to_prop_id text NOT NULL,
+    method text NOT NULL,
+    evidence_class text NOT NULL,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: canned_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.canned_findings (
@@ -2125,6 +2141,18 @@ ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspaces
 
 ALTER TABLE ONLY @@SCHEMA@@.cad_property
     ADD CONSTRAINT cad_property_county_fips_prop_id_tax_year_pk PRIMARY KEY (county_fips, prop_id, tax_year);
+
+
+-- Name: cad_property_vintage_crosswalk cad_property_vintage_crosswalk_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_crosswalk
+    ADD CONSTRAINT cad_property_vintage_crosswalk_pk PRIMARY KEY (county_fips, from_tax_year, from_prop_id, to_tax_year);
+
+
+-- Name: cad_property_vintage_crosswalk cad_property_vintage_crosswalk_unique_target; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_crosswalk
+    ADD CONSTRAINT cad_property_vintage_crosswalk_unique_target UNIQUE (county_fips, to_tax_year, to_prop_id, from_tax_year);
 
 
 -- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
