@@ -35,6 +35,7 @@ export const cadPropertyVintageCrosswalk = pgTable(
   },
   (t) => ({
     pk: primaryKey({
+      name: "cad_property_vintage_crosswalk_pk",
       columns: [t.countyFips, t.fromTaxYear, t.fromPropId, t.toTaxYear],
     }),
     uniqueTarget: unique("cad_property_vintage_crosswalk_unique_target").on(
