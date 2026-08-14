@@ -72,6 +72,7 @@ export * from "./savedWorkspaceSpaces";
 export * from "./dataroomDocumentAtoms";
 export * from "./cadProperty";
 export * from "./cadPropertyVintageCrosswalk";
+export * from "./cadPropertyVintageFallback";
 export * from "./countyFacetCoverage";
 export * from "./txgioParcel";
 export * from "./txgioAddress";

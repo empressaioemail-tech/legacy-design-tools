@@ -234,6 +234,8 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // "if a route writes to it, it's in this list" invariant so future
   // adapter-route suites start from a known-empty state.
   "cad_property",
+  "cad_property_vintage_crosswalk",
+  "cad_property_vintage_fallback",
   // feat/txgio-parcel-geometry — self-hosted TxGIO/StratMap parcel
   // geometry store (Hays/Comal). No FK to anything (loaded by the
   // @workspace/cad-ingest txgio-ingest CLI, read by the parcels

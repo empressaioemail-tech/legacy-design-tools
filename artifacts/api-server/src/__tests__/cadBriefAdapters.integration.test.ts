@@ -12,10 +12,16 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { withTestSchema } from "@workspace/db/testing";
-import { cadProperty } from "@workspace/db/schema";
+import { cadProperty, cadPropertyVintageFallback } from "@workspace/db/schema";
 import { runAdapters } from "@workspace/adapters";
-import { CAD_ADAPTERS, summarizeCadPayload } from "@workspace/adapters/local/cad";
-import { makeCadPropertyLookup, normalizeCadPropId } from "../lib/cadPropertyLookup";
+import {
+  CAD_ADAPTERS,
+  summarizeCadPayload,
+} from "@workspace/adapters/local/cad";
+import {
+  makeCadPropertyLookup,
+  normalizeCadPropId,
+} from "../lib/cadPropertyLookup";
 
 const hasDb =
   process.env.TEST_DATABASE_URL !== undefined ||
@@ -87,7 +93,9 @@ describe.skipIf(!hasDb)("cad:* adapters over a real cad_property store", () => {
         if (url.includes("Caldwell_CAD_Parcel_Map")) {
           return new Response(
             // Zero-padded PACS-style id — exercises normalizeCadPropId.
-            JSON.stringify({ features: [{ attributes: { Prop_ID: "000010001" } }] }),
+            JSON.stringify({
+              features: [{ attributes: { Prop_ID: "000010001" } }],
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
@@ -113,7 +121,10 @@ describe.skipIf(!hasDb)("cad:* adapters over a real cad_property store", () => {
       }
 
       // Latest tax year (2026) wins over the seeded 2025 row.
-      const property = byKey["cad:property"].result?.payload as Record<string, unknown>;
+      const property = byKey["cad:property"].result?.payload as Record<
+        string,
+        unknown
+      >;
       expect(property.taxYear).toBe(2026);
       expect(property.ownerName).toBe("HERNANDEZ-SOLIS J JESUS &");
       expect(property.marketValue).toBe(397260);
@@ -124,7 +135,10 @@ describe.skipIf(!hasDb)("cad:* adapters over a real cad_property store", () => {
       expect(tax.assessedValue).toBe(397260);
       expect(tax.exemptions).toEqual([{ code: "HS", label: "Homestead" }]);
 
-      const occ = byKey["cad:owner-occupancy"].result?.payload as Record<string, unknown>;
+      const occ = byKey["cad:owner-occupancy"].result?.payload as Record<
+        string,
+        unknown
+      >;
       expect(occ.signal).toBe("likely-owner-occupied");
       expect(occ.homesteadExemption).toBe(true);
 
@@ -144,7 +158,9 @@ describe.skipIf(!hasDb)("cad:* adapters over a real cad_property store", () => {
       const fetchImpl = vi.fn(
         async () =>
           new Response(
-            JSON.stringify({ features: [{ attributes: { Prop_ID: "99999" } }] }),
+            JSON.stringify({
+              features: [{ attributes: { Prop_ID: "99999" } }],
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
       );
@@ -161,6 +177,86 @@ describe.skipIf(!hasDb)("cad:* adapters over a real cad_property store", () => {
         expect(o.status).toBe("no-coverage");
         expect(o.error?.message).toMatch(/roll row ingested/);
       }
+    });
+  });
+
+  it("returns a named 2025 fallback with a visible marker after the Tarrant 2026 flip", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(cadProperty).values({
+        countyFips: "48439",
+        propId: "1000-13-15",
+        taxYear: 2025,
+        ownerName: "RAMIREZ, JAVIER",
+        situsAddress: "1305 BIGGS TERR",
+        sourceFile: "stratmap25-landparcels_48439_lp.zip",
+        sourceVintage: "tier:stratmap-roll;drop:2025",
+      });
+      await db.insert(cadPropertyVintageFallback).values({
+        countyFips: "48439",
+        requestedPropId: "1000-13-15",
+        declaredTaxYear: 2026,
+        fallbackPropId: "1000-13-15",
+        fallbackTaxYear: 2025,
+        method: "named-fallback-2025",
+        evidenceClass: "real-parcel-geometry-verified-absent-2026-gis-link",
+        sourceFile: "l21_tarrant_named_fallback.csv",
+        sourceVintage: "l21-followup3",
+      });
+
+      const row = await makeCadPropertyLookup(db)("48439", "1000-13-15");
+      expect(row?.taxYear).toBe(2025);
+      expect(row?.ownerName).toBe("RAMIREZ, JAVIER");
+      expect(row?.vintageResolution).toEqual({
+        kind: "named-fallback",
+        requestedPropId: "1000-13-15",
+        declaredTaxYear: 2026,
+        servedTaxYear: 2025,
+        method: "named-fallback-2025",
+        evidenceClass: "real-parcel-geometry-verified-absent-2026-gis-link",
+      });
+    });
+  });
+
+  it("prefers exact 2026 Tarrant structural data over a named fallback", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.insert(cadProperty).values([
+        {
+          countyFips: "48439",
+          propId: "10-1-1A",
+          taxYear: 2025,
+          ownerName: "PRIOR OWNER",
+          sourceFile: "stratmap25-landparcels_48439_lp.zip",
+          sourceVintage: "tier:stratmap-roll;drop:2025",
+        },
+        {
+          countyFips: "48439",
+          propId: "10-1-1A",
+          taxYear: 2026,
+          ownerName: "CURRENT OWNER",
+          propertyUseCode: "C1",
+          livingAreaSqft: 2400,
+          sourceFile: "PropertyData(Delimited).txt",
+          sourceVintage: "tier:cad-export;drop:2026",
+        },
+      ]);
+      await db.insert(cadPropertyVintageFallback).values({
+        countyFips: "48439",
+        requestedPropId: "10-1-1A",
+        declaredTaxYear: 2026,
+        fallbackPropId: "10-1-1A",
+        fallbackTaxYear: 2025,
+        method: "named-fallback-2025",
+        evidenceClass: "test-should-not-win",
+        sourceFile: "test.csv",
+        sourceVintage: "test",
+      });
+
+      const row = await makeCadPropertyLookup(db)("48439", "10-1-1A");
+      expect(row?.taxYear).toBe(2026);
+      expect(row?.ownerName).toBe("CURRENT OWNER");
+      expect(row?.propertyUseCode).toBe("C1");
+      expect(row?.livingAreaSqft).toBe(2400);
+      expect(row?.vintageResolution).toBeUndefined();
     });
   });
 

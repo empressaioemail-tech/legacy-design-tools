@@ -58,7 +58,8 @@ import {
 import { isRecord } from "../_payloadSummaryHelpers";
 
 /** Static provider label (archived-snapshot fallback). Live results carry the specific CAD name. */
-const CAD_STATIC_PROVIDER = "County Appraisal District (Central TX public roll)";
+const CAD_STATIC_PROVIDER =
+  "County Appraisal District (Central TX public roll)";
 
 /**
  * Disclosed derivation method for the owner-occupancy signal — verbatim
@@ -403,6 +404,9 @@ function provenanceFields(resolved: ResolvedCadRow): Record<string, unknown> {
      * engineHonesty.dataVintage).
      */
     sourceVintage: row.sourceVintage,
+    ...(row.vintageResolution
+      ? { vintageResolution: row.vintageResolution }
+      : {}),
     parcelResolution: {
       provider: resolved.resolutionProvider,
       sourceUrl: resolved.gisSourceUrl,
@@ -543,7 +547,9 @@ export const CAD_ADAPTERS: ReadonlyArray<Adapter> = [
 const USD = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 function usd(v: unknown): string | null {
-  return typeof v === "number" && Number.isFinite(v) ? `$${USD.format(v)}` : null;
+  return typeof v === "number" && Number.isFinite(v)
+    ? `$${USD.format(v)}`
+    : null;
 }
 
 function str(v: unknown): string | null {
@@ -586,8 +592,7 @@ function summarizeCadProperty(payload: Record<string, unknown>): string {
   if (market) {
     const land = usd(payload.landValue);
     const impr = usd(payload.improvementValue);
-    const split =
-      land && impr ? ` (land ${land} + improvements ${impr})` : "";
+    const split = land && impr ? ` (land ${land} + improvements ${impr})` : "";
     parts.push(`CAD market value (assessed): ${market}${split}`);
   }
   parts.push(sourceSuffix(payload));
@@ -617,7 +622,9 @@ function summarizeCadTax(payload: Record<string, unknown>): string {
         .filter(Boolean)
     : [];
   parts.push(
-    exemptions.length ? `Exemptions: ${exemptions.join(", ")}` : "No exemptions on roll",
+    exemptions.length
+      ? `Exemptions: ${exemptions.join(", ")}`
+      : "No exemptions on roll",
   );
   parts.push(
     `County assessed figure, not a market estimate or tax bill — ${sourceSuffix(payload)}`,
@@ -657,7 +664,9 @@ export function summarizeCadPayload(
   if (!isRecord(payload)) return null;
   switch (layerKind) {
     case "cad-property":
-      return payload.kind === "cad-property" ? summarizeCadProperty(payload) : null;
+      return payload.kind === "cad-property"
+        ? summarizeCadProperty(payload)
+        : null;
     case "cad-tax":
       return payload.kind === "cad-tax" ? summarizeCadTax(payload) : null;
     case "cad-owner-occupancy":
