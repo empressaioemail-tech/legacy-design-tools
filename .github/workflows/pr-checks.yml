@@ -196,3 +196,43 @@ jobs:
             exit 1
           fi
           echo "ci-hand-hasWriter-in-declaration: clean"
+  l17-ci-vintage-predicate:
+    name: L17 ci-vintage-predicate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-vintage-predicate
+        run: |
+          # Fail if production files mention cad_property/cadProperty FROM/from(
+          # without importing resolveDeclaredCadVintage/tryResolveDeclaredCadVintage
+          # AND without CAD_PROPERTY_MULTI_YEAR_INVENTORY marker.
+          # Allowlist: lib/cad-ingest/src/ingest.ts, lib/cad-ingest/src/vintage.ts,
+          # lib/cad-ingest/src/txgio/landuse*.ts, lib/db/src/schema/cadProperty.ts,
+          # **/__tests__/**
+          set -euo pipefail
+          mapfile -t hits < <(rg -l \
+            -e 'FROM[[:space:]]+cad_property' \
+            -e 'from\(cadProperty\)' \
+            -e '\.from\(cadProperty\)' \
+            --glob '!**/__tests__/**' \
+            --glob '!lib/cad-ingest/src/ingest.ts' \
+            --glob '!lib/cad-ingest/src/vintage.ts' \
+            --glob '!lib/cad-ingest/src/txgio/landuse*.ts' \
+            --glob '!lib/db/src/schema/cadProperty.ts' \
+            . || true)
+          failed=0
+          for f in "${hits[@]+"${hits[@]}"}"; do
+            [ -z "${f:-}" ] && continue
+            if rg -q 'resolveDeclaredCadVintage|tryResolveDeclaredCadVintage|CAD_PROPERTY_MULTI_YEAR_INVENTORY' "$f"; then
+              continue
+            fi
+            echo "FAIL ci-vintage-predicate: $f queries cad_property without declared-vintage import or CAD_PROPERTY_MULTI_YEAR_INVENTORY marker"
+            failed=1
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "ci-vintage-predicate: clean (${#hits[@]} candidate file(s) checked)"

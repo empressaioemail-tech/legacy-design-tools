@@ -281,7 +281,7 @@ const HAYS_CAD_ROWS = [
 ];
 
 describe.skipIf(!hasDb)("txgio_parcel CAD land-use enrichment", () => {
-  it("merges landUseCode from the latest CAD row onto the joined parcel", async () => {
+  it("merges landUseCode from the DECLARED CAD vintage onto the joined parcel", async () => {
     await withTestSchema(async ({ db }) => {
       await db.insert(txgioParcel).values(HAYS_LANDUSE_SEED);
       await db.insert(cadProperty).values(HAYS_CAD_ROWS);
@@ -298,7 +298,7 @@ describe.skipIf(!hasDb)("txgio_parcel CAD land-use enrichment", () => {
 
       const f12310 = features.find((f) => f.properties.apn === "12310")!;
       expect(f12310.properties).toMatchObject({
-        landUseCode: "A1", // 2026 wins over the 2025 prior-year row
+        landUseCode: "A1", // declared 48209 vintage is 2026 (not prior-year 2025)
         // Mapped description — this is what the paint expression's
         // keyword matching actually colors by (PTAD codes never hit
         // the exact-code branches).

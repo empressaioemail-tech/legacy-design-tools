@@ -36,6 +36,14 @@ export {
 } from "./orion/parser";
 export { upsertCadProperties, DEFAULT_BATCH_SIZE } from "./ingest";
 export type { CadIngestDb, UpsertOptions } from "./ingest";
+export {
+  DECLARED_CAD_VINTAGES,
+  VINTAGE_GAP_ABSENCE_BASIS,
+  classifyCadPropertyMiss,
+  resolveDeclaredCadVintage,
+  tryResolveDeclaredCadVintage,
+} from "./vintage";
+export type { DeclaredCadVintage, CadVintageMissClass } from "./vintage";
 export { downloadToFile, isUrl, BROWSER_UA } from "./download";
 export {
   extractCadDrop,

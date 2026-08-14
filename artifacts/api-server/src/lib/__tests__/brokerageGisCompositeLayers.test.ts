@@ -574,8 +574,9 @@ function fakeParcelsResult(
 
 /**
  * A fake injectable CAD-roll db. `rows` are matched against the terminal await
- * of `select(...).from(cadProperty).where(...).orderBy(...)`. The reader awaits
- * the orderBy() result, so the chain object must be thenable.
+ * of `select(...).from(cadProperty).where(...)`. The reader awaits the where()
+ * result (declared-vintage filter; no orderBy), so the chain object must be
+ * thenable at where().
  */
 function fakeSignalDb(
   rows: Array<{
@@ -593,9 +594,6 @@ function fakeSignalDb(
       return this;
     },
     where() {
-      return this;
-    },
-    orderBy() {
       return Promise.resolve(rows);
     },
   };

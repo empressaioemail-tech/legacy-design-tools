@@ -41,6 +41,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { normalizeForJoin } from "./joinNormalize";
 
 // ---------------------------------------------------------------------------
@@ -432,9 +433,9 @@ async function tableExists(
  * stores its `prop_id` in, and the two are matched within the SAME
  * `county_fips`. Because the bake reads
  * `DISTINCT ON (feature_index)` from the parcel table and
- * `DISTINCT ON (prop_id)` (latest coded tax year) from cad_property, we sample
- * the same shape: distinct TxGIO parcels (by feature_index) joined to the
- * latest-year cad_property row on the normalized key.
+ * declared-vintage rows from cad_property, we sample the same shape: distinct
+ * TxGIO parcels (by feature_index) joined to the declared-year cad_property
+ * row on the normalized key.
  *
  * The normalization is applied IN SQL so the sampled join is byte-for-byte the
  * bake's join, not an approximation:
@@ -456,6 +457,8 @@ export async function sampleJoinPairs(
   countyFips: string,
   limit = 2000,
 ): Promise<OwnerPair[]> {
+  const declared = tryResolveDeclaredCadVintage(countyFips);
+  if (!declared) return [];
   if (!(await tableExists(pool, "cad_property"))) return [];
 
   // The `normalizeForJoin` normalizer, expressed in SQL, so the sampled join
@@ -504,19 +507,18 @@ export async function sampleJoinPairs(
           ORDER BY feature_index
        ),
        cad AS (
-         SELECT DISTINCT ON (prop_id)
-                prop_id AS join_key,
+         SELECT prop_id AS join_key,
                 owner_name AS cad_owner
            FROM cad_property
           WHERE county_fips = $1
+            AND tax_year = $2
             AND property_use_code IS NOT NULL
-          ORDER BY prop_id, tax_year DESC
        )
        SELECT p.txgio_owner, c.cad_owner
          FROM parcels p
          JOIN cad c ON c.join_key = p.join_key
-        LIMIT $2`,
-      [countyFips, remaining],
+        LIMIT $3`,
+      [declared.countyFips, declared.taxYear, remaining],
     );
 
     if (r.rows.length > 0) seenSource.add(countyFips);
@@ -539,9 +541,9 @@ export async function sampleJoinPairs(
  * The address key is `normalizeSitusAddress` expressed in SQL on BOTH sides:
  * `upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g'))`, so the
  * sampled join is byte-for-byte the bake's address join. The CAD side is
- * DISTINCT ON (normalized address), latest coded tax year — the same lookup the
- * bake builds. A blank situs on either side simply does not match (empty key is
- * excluded), never a false pair.
+ * DISTINCT ON (normalized address) at the DECLARED vintage — the same lookup
+ * the bake builds. A blank situs on either side simply does not match (empty
+ * key is excluded), never a false pair. Undeclared counties return empty.
  *
  * READ-ONLY. Owner names are used FOR THE GATE ONLY and never persisted.
  */
@@ -550,6 +552,8 @@ export async function sampleAddressJoinPairs(
   countyFips: string,
   limit = 2000,
 ): Promise<OwnerPair[]> {
+  const declared = tryResolveDeclaredCadVintage(countyFips);
+  if (!declared) return [];
   if (!(await tableExists(pool, "cad_property"))) return [];
 
   // `normalizeSitusAddress` in SQL: upper + strip every non-alphanumeric char.
@@ -589,17 +593,18 @@ export async function sampleAddressJoinPairs(
                 owner_name AS cad_owner
            FROM cad_property
           WHERE county_fips = $1
+            AND tax_year = $2
             AND property_use_code IS NOT NULL
             AND situs_address IS NOT NULL
             AND situs_address <> ''
-          ORDER BY ${ADDR_NORM("situs_address")}, tax_year DESC
+          ORDER BY ${ADDR_NORM("situs_address")}, prop_id
        )
        SELECT p.txgio_owner, c.cad_owner
          FROM parcels p
          JOIN cad c ON c.addr_key = p.addr_key
         WHERE p.addr_key <> ''
-        LIMIT $2`,
-      [countyFips, remaining],
+        LIMIT $3`,
+      [declared.countyFips, declared.taxYear, remaining],
     );
 
     if (r.rows.length > 0) seenSource.add(countyFips);

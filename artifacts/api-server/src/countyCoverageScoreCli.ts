@@ -48,6 +48,7 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pg from "pg";
 
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import {
   sampleJoinPairs,
   sampleAddressJoinPairs,
@@ -353,7 +354,9 @@ async function measureCoverage(
   const cadPresent = await tableExists(pool, "cad_property");
   let cadCountyRows = 0;
   let landUseVintage: string | null = null;
-  if (cadPresent) {
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (cadPresent && declared) {
+    // CAD_PROPERTY_MULTI_YEAR_INVENTORY — intentional; not a single-vintage derivation
     const r = await pool.query<{ n: string; vintage: string | null }>(
       `SELECT count(*) AS n, max(source_vintage) AS vintage
          FROM cad_property
@@ -376,7 +379,7 @@ async function measureCoverage(
       ELSE trim(prop_id)
     END`;
   let landUseRawPct = 0;
-  if (landUseSourcePresent) {
+  if (landUseSourcePresent && declared) {
     const r = await pool.query<{ matched: string; total: string }>(
       `WITH parcels AS (
          SELECT DISTINCT ON (feature_index)
@@ -387,17 +390,18 @@ async function measureCoverage(
           ORDER BY feature_index
        ),
        cad AS (
-         SELECT DISTINCT ON (prop_id) prop_id AS join_key
+         SELECT prop_id AS join_key
            FROM cad_property
-          WHERE county_fips = $1 AND property_use_code IS NOT NULL
-          ORDER BY prop_id, tax_year DESC
+          WHERE county_fips = $1
+            AND tax_year = $2
+            AND property_use_code IS NOT NULL
        )
        SELECT
          count(*) FILTER (WHERE c.join_key IS NOT NULL) AS matched,
          count(*) AS total
        FROM parcels p
        LEFT JOIN cad c ON c.join_key = p.join_key`,
-      [fips],
+      [declared.countyFips, declared.taxYear],
     );
     const matched = Number(r.rows[0]?.matched ?? 0);
     const total = Number(r.rows[0]?.total ?? 0);
@@ -414,7 +418,7 @@ async function measureCoverage(
   // join the bake runs. Owner names are read for the gate ONLY (aggregate rate);
   // no owner leaves this measurement.
   let landUseAddressRecoveredPct: number | null = null;
-  if (measureAddressRecovery && landUseSourcePresent) {
+  if (measureAddressRecovery && landUseSourcePresent && declared) {
     const ADDR_NORM = (col: string): string =>
       `upper(regexp_replace(${col}, '[^A-Za-z0-9]', '', 'g'))`;
     // Leading owner token, in SQL: reorder "LAST, FIRST" so surname leads, map
@@ -461,9 +465,10 @@ async function measureCoverage(
                 ${OWNER_LEAD("owner_name")} AS owner_lead
            FROM cad_property
           WHERE county_fips = $1
+            AND tax_year = $2
             AND property_use_code IS NOT NULL
             AND situs_address IS NOT NULL AND situs_address <> ''
-          ORDER BY ${ADDR_NORM("situs_address")}, tax_year DESC
+          ORDER BY ${ADDR_NORM("situs_address")}, prop_id
        )
        SELECT
          count(*) FILTER (
@@ -479,7 +484,7 @@ async function measureCoverage(
          count(*) AS total
        FROM parcels p
        LEFT JOIN cad c ON c.addr_key = p.addr_key AND p.addr_key <> ''`,
-      [fips],
+      [declared.countyFips, declared.taxYear],
     );
     const accepted = Number(r.rows[0]?.accepted ?? 0);
     const total = Number(r.rows[0]?.total ?? 0);
