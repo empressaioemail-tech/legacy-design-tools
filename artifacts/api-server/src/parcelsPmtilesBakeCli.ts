@@ -102,6 +102,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import pg from "pg";
 
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { parcelNodeId } from "./lib/parcelNodeId";
 import {
   landUseJoinKey,
@@ -247,8 +248,9 @@ async function discoverCounties(pool: pg.Pool): Promise<CountySource[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Land-use join — one query per county, latest coded tax-year row per parcel.
+// Land-use join — one query per county at the DECLARED CAD vintage (L17).
 // Keyed by normalizeCadPropId(prop_id), matching the store readers.
+// Undeclared counties return empty (honest), never max-year fallback.
 // ---------------------------------------------------------------------------
 
 interface LandUse {
@@ -261,22 +263,23 @@ async function fetchCountyLandUse(
   fips: string,
 ): Promise<Map<string, LandUse>> {
   const out = new Map<string, LandUse>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
   if (!(await tableExists(pool, "cad_property"))) return out;
-  // DISTINCT ON latest tax year, coded rows only. prop_id in cad_property is
-  // already stored CAD-normalized (see cadPropertyLookup), so the join key is
-  // prop_id verbatim on that side.
+  // Declared vintage only; prop_id in cad_property is already stored
+  // CAD-normalized (see cadPropertyLookup), so the join key is prop_id
+  // verbatim on that side.
   const r = await pool.query<{
     prop_id: string;
     property_use_code: string;
     source_vintage: string;
   }>(
-    `SELECT DISTINCT ON (prop_id)
-            prop_id, property_use_code, source_vintage
+    `SELECT prop_id, property_use_code, source_vintage
        FROM cad_property
       WHERE county_fips = $1
-        AND property_use_code IS NOT NULL
-      ORDER BY prop_id, tax_year DESC`,
-    [fips],
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL`,
+    [declared.countyFips, declared.taxYear],
   );
   for (const row of r.rows) {
     out.set(row.prop_id, {
@@ -289,10 +292,12 @@ async function fetchCountyLandUse(
 
 // ---------------------------------------------------------------------------
 // SITUS-ADDRESS land-use lookup — RECOVERY source for prop_id-gate-blocked
-// counties (Williamson/Hays). Keyed by normalized situs address, DISTINCT ON
-// (normalized address) latest coded tax year, carrying the CAD owner_name so
-// the per-match owner gate can verify each match. The owner is used ONLY to
-// gate; it is never emitted to the public PMTiles archive. READ-ONLY.
+// counties (Williamson/Hays). Keyed by normalized situs address at the
+// DECLARED vintage. DISTINCT ON collapses address collisions within that
+// year only (deterministic prop_id tie-break; never tax_year DESC).
+// Carries the CAD owner_name so the per-match owner gate can verify each
+// match. The owner is used ONLY to gate; it is never emitted to the public
+// PMTiles archive. READ-ONLY.
 // ---------------------------------------------------------------------------
 
 async function fetchCountyLandUseByAddress(
@@ -300,6 +305,8 @@ async function fetchCountyLandUseByAddress(
   fips: string,
 ): Promise<Map<string, AddressLandUseEntry>> {
   const out = new Map<string, AddressLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
   if (!(await tableExists(pool, "cad_property"))) return out;
   const r = await pool.query<{
     naddr: string;
@@ -312,12 +319,13 @@ async function fetchCountyLandUseByAddress(
             property_use_code, source_vintage, owner_name
        FROM cad_property
       WHERE county_fips = $1
+        AND tax_year = $2
         AND property_use_code IS NOT NULL
         AND situs_address IS NOT NULL
         AND situs_address <> ''
       ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
-               tax_year DESC`,
-    [fips],
+               prop_id`,
+    [declared.countyFips, declared.taxYear],
   );
   for (const row of r.rows) {
     if (!row.naddr) continue;

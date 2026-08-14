@@ -38,9 +38,10 @@
  * address does not support it.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db as defaultDb, cadProperty } from "@workspace/db";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { normalizeCadPropId } from "./cadPropertyLookup";
 
 /** Narrow db surface, mirroring `CadLookupDb` — injectable for tests. */
@@ -197,6 +198,9 @@ export async function fetchAbsenteeSignalsForTile(
     const ids = [...idSet];
     if (ids.length === 0) continue;
 
+    const declared = tryResolveDeclaredCadVintage(county);
+    if (!declared) continue;
+
     const rows = (await database
       .select({
         propId: cadProperty.propId,
@@ -210,11 +214,11 @@ export async function fetchAbsenteeSignalsForTile(
       .from(cadProperty)
       .where(
         and(
-          eq(cadProperty.countyFips, county),
+          eq(cadProperty.countyFips, declared.countyFips),
+          eq(cadProperty.taxYear, declared.taxYear),
           inArray(cadProperty.propId, ids),
         ),
-      )
-      .orderBy(desc(cadProperty.taxYear))) as Array<{
+      )) as Array<{
       propId: string;
       taxYear: number;
       ownerMailingAddress: string | null;
@@ -224,11 +228,7 @@ export async function fetchAbsenteeSignalsForTile(
       sourceVintage: string;
     }>;
 
-    // Latest tax-year row wins per parcel (rows come pre-sorted desc).
-    const seen = new Set<string>();
     for (const row of rows) {
-      if (seen.has(row.propId)) continue;
-      seen.add(row.propId);
       const key = `${county}:${row.propId}`;
       const decision = decideAbsentee({
         ownerMailingAddress: row.ownerMailingAddress,

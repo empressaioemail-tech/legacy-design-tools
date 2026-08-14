@@ -69,6 +69,7 @@ import {
   type GeoBbox,
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { normalizeCadPropId } from "./cadPropertyLookup";
 import { parcelNodeId } from "./parcelNodeId";
 import { ptadLandUseDescription } from "./ptadLandUse";
@@ -278,13 +279,13 @@ interface CadLandUse {
  * Batch-fetch CAD land-use for the parcel ids in a served tile — ONE
  * query for the whole tile, not one per feature. Joins on the same key
  * the `cad:*` brief adapters use: `(county_fips, normalizeCadPropId(
- * prop_id))`, backed by the `cad_property` primary key. Multiple
- * `tax_year` rows can exist per parcel; the latest wins (matching
- * `makeCadPropertyLookup`). Rows whose `property_use_code` is null (e.g.
- * Hays today — the Orion property export does not carry a state/use
- * code) are dropped so a parcel is enriched only when there is a real
- * code to color on. A county with no CAD roll (Comal) yields an empty
- * `ARRAY[]` predicate -> zero rows -> an empty map -> honest neutral.
+ * prop_id))`, backed by the `cad_property` primary key, filtered to the
+ * county's DECLARED vintage (L17 / P-25 — no "latest tax_year wins").
+ * Rows whose `property_use_code` is null (e.g. Hays today — the Orion
+ * property export does not carry a state/use code) are dropped so a
+ * parcel is enriched only when there is a real code to color on. A
+ * county with no declared vintage or no CAD roll yields an empty map
+ * -> honest neutral (never max-year fallback).
  */
 async function fetchCadLandUseForTile(
   database: TxgioStoreDb,
@@ -292,6 +293,9 @@ async function fetchCadLandUseForTile(
   rows: TxgioCandidateRow[],
 ): Promise<Map<string, CadLandUse>> {
   const out = new Map<string, CadLandUse>();
+  const declared = tryResolveDeclaredCadVintage(countyFips);
+  if (!declared) return out;
+
   // Distinct CAD-normalized prop ids present in this tile.
   const propIds = new Set<string>();
   for (const row of rows) {
@@ -302,30 +306,24 @@ async function fetchCadLandUseForTile(
   const cadRows = (await database
     .select({
       propId: cadProperty.propId,
-      taxYear: cadProperty.taxYear,
       propertyUseCode: cadProperty.propertyUseCode,
       sourceVintage: cadProperty.sourceVintage,
     })
     .from(cadProperty)
     .where(
       and(
-        eq(cadProperty.countyFips, countyFips),
+        eq(cadProperty.countyFips, declared.countyFips),
+        eq(cadProperty.taxYear, declared.taxYear),
         inArray(cadProperty.propId, [...propIds]),
       ),
     )) as {
     propId: string;
-    taxYear: number;
     propertyUseCode: string | null;
     sourceVintage: string;
   }[];
 
-  // Latest tax-year row wins per parcel; keep only rows with a real code.
-  const latestYear = new Map<string, number>();
   for (const cad of cadRows) {
     if (!cad.propertyUseCode) continue;
-    const prev = latestYear.get(cad.propId);
-    if (prev !== undefined && prev >= cad.taxYear) continue;
-    latestYear.set(cad.propId, cad.taxYear);
     out.set(cad.propId, {
       landUseCode: cad.propertyUseCode,
       landUseSource: "cad-roll",

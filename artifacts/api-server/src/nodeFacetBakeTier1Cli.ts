@@ -94,6 +94,7 @@ import { fileURLToPath } from "node:url";
 import { readFileSync, realpathSync } from "node:fs";
 import pg from "pg";
 
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { parcelNodeId, normalizeCadPropId } from "./lib/parcelNodeId";
 import {
   landUseJoinKey,
@@ -308,11 +309,12 @@ async function discoverCounty(
 }
 
 // ---------------------------------------------------------------------------
-// Land-use join — one query per county, latest coded tax-year row per parcel.
+// Land-use join — one query per county at the DECLARED CAD vintage (L17).
 // Looked up via landUseJoinKey(countyFips, prop_id), which normalizes the key
 // AND enforces the per-county data-integrity gate (Williamson 48491 / Hays
-// 48209 return null -> land-use-absent). Comal (no roll) yields an empty map
-// -> every node bakes land-use-absent, honestly.
+// 48209 return null -> land-use-absent). Undeclared counties return empty
+// (honest), never max-year fallback. Comal (no roll / undeclared) yields an
+// empty map -> every node bakes land-use-absent, honestly.
 // ---------------------------------------------------------------------------
 
 interface LandUse {
@@ -325,19 +327,20 @@ async function fetchCountyLandUse(
   fips: string,
 ): Promise<Map<string, LandUse>> {
   const out = new Map<string, LandUse>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
   if (!(await tableExists(pool, "cad_property"))) return out;
   const r = await pool.query<{
     prop_id: string;
     property_use_code: string;
     source_vintage: string;
   }>(
-    `SELECT DISTINCT ON (prop_id)
-            prop_id, property_use_code, source_vintage
+    `SELECT prop_id, property_use_code, source_vintage
        FROM cad_property
       WHERE county_fips = $1
-        AND property_use_code IS NOT NULL
-      ORDER BY prop_id, tax_year DESC`,
-    [fips],
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL`,
+    [declared.countyFips, declared.taxYear],
   );
   for (const row of r.rows) {
     out.set(row.prop_id, {
@@ -350,10 +353,12 @@ async function fetchCountyLandUse(
 
 // ---------------------------------------------------------------------------
 // SITUS-ADDRESS land-use lookup — the RECOVERY source for prop_id-gate-blocked
-// counties (Williamson/Hays). Keyed by normalized situs address, DISTINCT ON
-// (normalized address) latest coded tax year. Carries the CAD owner_name so the
-// per-match owner gate (`resolveAddressLandUse`) can verify each match; the
-// owner is used ONLY for gating and never enters the baked payload. READ-ONLY.
+// counties (Williamson/Hays). Keyed by normalized situs address at the
+// DECLARED vintage. DISTINCT ON collapses address collisions within that year
+// only (deterministic prop_id tie-break; never tax_year DESC). Carries the CAD
+// owner_name so the per-match owner gate (`resolveAddressLandUse`) can verify
+// each match; the owner is used ONLY for gating and never enters the baked
+// payload. READ-ONLY.
 // ---------------------------------------------------------------------------
 
 async function fetchCountyLandUseByAddress(
@@ -361,6 +366,8 @@ async function fetchCountyLandUseByAddress(
   fips: string,
 ): Promise<Map<string, AddressLandUseEntry>> {
   const out = new Map<string, AddressLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
   if (!(await tableExists(pool, "cad_property"))) return out;
   // `normalizeSitusAddress` in SQL: upper + strip non-alphanumeric. Matches the
   // TS `normalizeSitusAddress` the parcel side keys on.
@@ -375,12 +382,13 @@ async function fetchCountyLandUseByAddress(
             property_use_code, source_vintage, owner_name
        FROM cad_property
       WHERE county_fips = $1
+        AND tax_year = $2
         AND property_use_code IS NOT NULL
         AND situs_address IS NOT NULL
         AND situs_address <> ''
       ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
-               tax_year DESC`,
-    [fips],
+               prop_id`,
+    [declared.countyFips, declared.taxYear],
   );
   for (const row of r.rows) {
     if (!row.naddr) continue;
