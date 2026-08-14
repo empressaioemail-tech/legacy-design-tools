@@ -2904,6 +2904,11 @@ CREATE INDEX brokerage_workspaces_install_opened_idx ON @@SCHEMA@@.brokerage_wor
 CREATE INDEX brokerage_workspaces_owner_user_id_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (owner_user_id, opened_at);
 
 
+-- Name: cad_property_vintage_crosswalk_to_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cad_property_vintage_crosswalk_to_idx ON @@SCHEMA@@.cad_property_vintage_crosswalk USING btree (county_fips, to_tax_year, to_prop_id);
+
+
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX canned_findings_tenant_discipline_idx ON @@SCHEMA@@.canned_findings USING btree (tenant_id, discipline);
