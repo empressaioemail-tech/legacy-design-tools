@@ -40,7 +40,8 @@ export interface DeclaredCadVintage {
  * Store-truth seed 2026-08-13 (cortex-prod cad_property). Counting rule
  * in `_inbox/2026-08-14_l17_cp1.json` + `P:/tmp/l17_cad_vintage_20260814/declared_seed.json`.
  * Tarrant flipped to 2026 after the full C-inclusive load and the named
- * 2025 fallback ruling (L21 follow-up 3).
+ * 2025 fallback ruling (L21 follow-up 3). Dallas flipped to 2026 after the
+ * named 2025-fallback residual ruling (L21 follow-up 5).
  */
 export const DECLARED_CAD_VINTAGES: Readonly<
   Record<string, Readonly<{ taxYear: number; tier: CadSourceTier }>>
@@ -51,7 +52,7 @@ export const DECLARED_CAD_VINTAGES: Readonly<
   "48055": { taxYear: 2026, tier: "cad-export" },
   "48085": { taxYear: 2025, tier: "stratmap-roll" },
   "48091": { taxYear: 2025, tier: "stratmap-roll" },
-  "48113": { taxYear: 2025, tier: "stratmap-roll" },
+  "48113": { taxYear: 2026, tier: "cad-export" },
   "48121": { taxYear: 2025, tier: "stratmap-roll" },
   "48187": { taxYear: 2025, tier: "stratmap-roll" },
   "48209": { taxYear: 2026, tier: "cad-export" },
