@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   if (!file) throw new Error("FAIL CLOSED: --file=path.csv is required");
 
   const sourceVintage =
-    argValue("source-vintage") ?? "l21-tarrant-named-fallback";
+    argValue("source-vintage") ?? "l21-named-fallback";
   const raw = parseCsv(readFileSync(resolve(file), "utf8"));
   const rows: CadFallbackRecord[] = raw.map((r) => ({
     countyFips: r.county_fips ?? "",

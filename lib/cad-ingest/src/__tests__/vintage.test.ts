@@ -26,6 +26,16 @@ describe("resolveDeclaredCadVintage", () => {
     expect(DECLARED_CAD_VINTAGES["48439"]?.taxYear).toBe(2026);
   });
 
+  it("returns ruled Dallas declaration after named fallback lands", () => {
+    const v = resolveDeclaredCadVintage("48113");
+    expect(v).toEqual({
+      countyFips: "48113",
+      taxYear: 2026,
+      tier: "cad-export",
+    });
+    expect(DECLARED_CAD_VINTAGES["48113"]?.taxYear).toBe(2026);
+  });
+
   it("fails closed on unknown county", () => {
     expect(() => resolveDeclaredCadVintage("48999")).toThrow(/FAIL CLOSED/);
   });
