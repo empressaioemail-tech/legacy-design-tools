@@ -9,6 +9,10 @@
  * `(county_fips, prop_id)` pair out of the `cad_property` store
  * (L17 / P-25 vintage-read discipline — replaces "latest tax_year wins").
  *
+ * L21: on declared-year miss, consult `cad_property_vintage_crosswalk`
+ * for at most one mapped key at the declared year (still no year
+ * fallback).
+ *
  * propId normalization mirrors `@workspace/cad-ingest`'s
  * `stripLeadingZeros`: the store keys prop ids as decimal strings with
  * leading zeros stripped, while county GIS layers sometimes return
@@ -17,9 +21,14 @@
 
 import { and, eq, ne } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { db as defaultDb, cadProperty } from "@workspace/db";
+import {
+  db as defaultDb,
+  cadProperty,
+  cadPropertyVintageCrosswalk,
+} from "@workspace/db";
 import type { CadPropertyLookup } from "@workspace/adapters";
 import {
+  chooseCadPropIdResolution,
   classifyCadPropertyMiss,
   tryResolveDeclaredCadVintage,
 } from "@workspace/cad-ingest";
@@ -48,7 +57,8 @@ export type CadLookupDb = Pick<
  * Vintage discipline: filters to `resolveDeclaredCadVintage` tax year.
  * If the declared year has no row but another year does, returns null
  * (vintage-gap — never the other vintage's row). Undeclared counties
- * return null (honest empty).
+ * return null (honest empty). Crosswalk may remap the prop id inside
+ * the declared year only.
  */
 export function makeCadPropertyLookup(
   database: CadLookupDb = defaultDb,
@@ -58,7 +68,7 @@ export function makeCadPropertyLookup(
     if (!declared) return null;
 
     const prop = normalizeCadPropId(propId);
-    const rows = await database
+    const exact = await database
       .select()
       .from(cadProperty)
       .where(
@@ -69,9 +79,51 @@ export function makeCadPropertyLookup(
         ),
       )
       .limit(1);
-    if (rows[0]) return rows[0];
+    if (exact[0]) return exact[0];
 
-    // Fail-closed vintage-gap probe: does another year have this prop?
+    // L21: deterministic declared-year key mapping (not year fallback).
+    const mapped = await database
+      .select({
+        toPropId: cadPropertyVintageCrosswalk.toPropId,
+        method: cadPropertyVintageCrosswalk.method,
+      })
+      .from(cadPropertyVintageCrosswalk)
+      .where(
+        and(
+          eq(cadPropertyVintageCrosswalk.countyFips, declared.countyFips),
+          eq(cadPropertyVintageCrosswalk.fromPropId, prop),
+          eq(cadPropertyVintageCrosswalk.toTaxYear, declared.taxYear),
+        ),
+      )
+      .limit(2);
+    if (mapped.length > 1) {
+      // Unique constraint should prevent this; fail closed if violated.
+      return null;
+    }
+    const decision = chooseCadPropIdResolution({
+      requestedPropId: prop,
+      exactDeclaredHit: false,
+      crosswalk: mapped[0]
+        ? { toPropId: mapped[0].toPropId, method: mapped[0].method }
+        : null,
+    });
+    if (decision.kind === "crosswalk") {
+      const rows = await database
+        .select()
+        .from(cadProperty)
+        .where(
+          and(
+            eq(cadProperty.countyFips, declared.countyFips),
+            eq(cadProperty.propId, decision.propId),
+            eq(cadProperty.taxYear, declared.taxYear),
+          ),
+        )
+        .limit(1);
+      if (rows[0]) return rows[0];
+    }
+
+    // Fail-closed vintage-gap probe: does another year have this prop
+    // (requested key OR mapped key)?
     const other = await database
       .select({ taxYear: cadProperty.taxYear })
       .from(cadProperty)

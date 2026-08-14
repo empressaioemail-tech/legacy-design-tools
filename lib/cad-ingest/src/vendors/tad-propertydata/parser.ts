@@ -7,8 +7,11 @@
  *
  * Field-mapping decisions:
  *  - prop_id: GIS_Link (matches StratMap/parcel store shape, e.g.
- *    "14437-29-32"). Account_Num is the numeric TAD account, not the
- *    store join key.
+ *    "14437-29-32"), with internal whitespace collapsed. Account_Num is
+ *    the numeric TAD account, not the store join key.
+ *  - RP filter: R (residential) and C (commercial) land parcels are
+ *    kept; other RP classes are named-skipped (counted). Silent drops
+ *    of C were the L21 Tarrant load defect.
  *  - tax_year: Appraisal_Year (in-row).
  *  - living_area_sqft: Living_Area, rounded; 0 -> null.
  *  - year_built: Year_Built; 0 -> null.
@@ -86,11 +89,26 @@ export function parseTadPropertyLine(
   counters: ParseCounters,
 ): CadPropertyRecord | null {
   const recordType = header.get(row, "rp").trim() || row[0]?.trim() || "";
-  if (recordType.length > 0 && recordType !== "R") {
+  // L21: non-R rows are real accounts (C=commercial, P=personal). The
+  // prior silent `return null` dropped ~49k parcel-linked 2025 GIS_Link
+  // keys that exist in the 2026 source. Count them; do not invent keys.
+  // Residential+commercial land parcels (R,C) enter cad_property. Personal
+  // property (P) is named-skipped (not a parcel-read entity by itself).
+  if (recordType.length > 0 && recordType !== "R" && recordType !== "C") {
+    recordSkip(
+      counters,
+      `non-parcel RP class dropped (rp=${JSON.stringify(recordType)})`,
+    );
     return null;
   }
 
-  const propId = textOrNull(header.get(row, "gis_link"));
+  const rawGis = textOrNull(header.get(row, "gis_link"));
+  // Normalize GIS_Link: collapse whitespace + uppercase so StratMap and
+  // TAD land on the same prop_id (L21 measured case/space divergence).
+  const propId =
+    rawGis === null
+      ? null
+      : rawGis.trim().replace(/\s+/g, " ").toUpperCase() || null;
   const taxYear = wholeNumberOrNull(header.get(row, "appraisal_year"));
   if (propId === null || taxYear === null || taxYear < 1900) {
     recordSkip(

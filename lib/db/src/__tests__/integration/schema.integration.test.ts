@@ -110,6 +110,9 @@ describe("lib/db schema integration", () => {
         // (county_fips, prop_id, tax_year); loaded by the
         // @workspace/cad-ingest batch CLI from free CAD bulk exports.
         "cad_property",
+        // L21 / P-25 — deterministic cross-vintage CAD prop_id
+        // crosswalk used by the blessed declared-vintage resolver.
+        "cad_property_vintage_crosswalk",
         // PLR-10 — tenant-scoped canned-finding library curated by
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.
