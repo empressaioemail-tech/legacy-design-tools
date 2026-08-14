@@ -51,6 +51,7 @@ import {
   countyFacetCoverage,
   countyManifest,
   countyRail,
+  countyLedgerSnapshot,
   COUNTY_RAIL_COUNT,
 } from "@workspace/db";
 import { truncateAll } from "@workspace/db/testing";
@@ -119,14 +120,17 @@ afterEach(async () => {
     "county_facet_coverage",
     "county_manifest",
     "county_rail",
+    "county_ledger_snapshot",
   ]);
 });
 
 const LEDGER_PATH = "/api/county-ledger";
+/** L18: live compute is audit-only. Existing contract tests pin the compute path. */
+const LIVE_LEDGER_PATH = `${LEDGER_PATH}?compute=live`;
 
 describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
   it("returns an empty ledger with zeroed summary when nothing has been scored", async () => {
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     expect(res.body.counties).toEqual([]);
     // County Manifest Sprint 1 (feat/county-manifest-sprint1) added four
@@ -139,7 +143,7 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
     // countyRailDimension.ts) unconditionally, not
     // derived from any seeded row, and the remaining three are zero because
     // manifestCells is empty when county_manifest/county_rail are unseeded.
-    expect(res.body.summary).toEqual({
+    expect(res.body.summary).toMatchObject({
       onboardedCount: 0,
       totalCounties: 0,
       staleCount: 0,
@@ -152,6 +156,9 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
       satisfiedAbsentCells: 0,
       texasCompletenessPct: 0,
     });
+    expect(res.body.summary.computedAt).toEqual(expect.any(String));
+    expect(res.body.summary.servedAt).toEqual(expect.any(String));
+    expect(res.body.summary.materializationAgeMs).toEqual(expect.any(Number));
   });
 
   it("groups facet rows by countyFips and rolls up onboarded/stale/rewarmUnsafe", async () => {
@@ -166,7 +173,7 @@ describe("GET /api/county-ledger, pre-existing facet-scorecard shape", () => {
       rewarmUnsafe: false,
     });
 
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     expect(res.body.counties).toHaveLength(1);
     const county = res.body.counties[0];
@@ -213,7 +220,7 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
         },
       });
 
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     const county = res.body.counties.find((c: { countyFips: string }) => c.countyFips === "48021");
     expect(county).toBeDefined();
@@ -252,7 +259,7 @@ describe("GET /api/county-ledger, OPS-9 S1 additive extension", () => {
         events: [],
       });
 
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     const county = res.body.counties.find(
       (c: { countyFips: string; rows: Array<{ rowId: string }> }) =>
@@ -304,7 +311,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     }));
     await db.insert(countyManifest).values(rows);
 
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     expect(res.body.manifestCells).toHaveLength(254 * RAIL_COUNT);
     expect(res.body.summary.totalCounties).toBe(254);
@@ -324,7 +331,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
     });
 
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     const cellsForCounty = res.body.manifestCells.filter(
       (c: { countyFips: string }) => c.countyFips === "50900",
@@ -359,7 +366,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       railState: "satisfied-present",
     });
 
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     const landuseCell = res.body.manifestCells.find(
       (c: { countyFips: string; railKey: string }) =>
@@ -381,7 +388,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
     });
     // `roads` is seeded atomFamilyState='present', hasWriter=false above.
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     const roadsCell = res.body.manifestCells.find(
       (c: { countyFips: string; railKey: string }) =>
@@ -395,7 +402,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     await seedAllRails();
     await db.insert(countyManifest).values({ countyFips: "50903", countyName: "Partial County", parcelCountEst: 1000, rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
     await db.insert(countyFacetCoverage).values({ countyFips: "50903", facet: "zoning", honestCoveragePct: "33.98", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50903" && c.railKey === "zoning");
     expect(cell.displayState).toBe("not-yet");
     expect(cell.isPartial).toBe(false);
@@ -405,7 +412,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     await seedAllRails();
     await db.insert(countyManifest).values({ countyFips: "50905", countyName: "Partial Geometry", parcelCountEst: 1000, rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
     await db.insert(countyFacetCoverage).values({ countyFips: "50905", facet: "geometry", honestCoveragePct: "80.00", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50905" && c.railKey === "geometry");
     expect(cell.displayState).toBe("satisfied-present");
     expect(cell.isPartial).toBe(true);
@@ -415,7 +422,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     await seedAllRails();
     await db.insert(countyManifest).values({ countyFips: "50906", countyName: "Zero Coverage", rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
     await db.insert(countyFacetCoverage).values({ countyFips: "50906", facet: "zoning", honestCoveragePct: "0", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50906" && c.railKey === "zoning");
     expect(cell.displayState).toBe("not-yet");
   });
@@ -424,7 +431,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     await seedAllRails();
     await db.insert(countyManifest).values({ countyFips: "50907", countyName: "Absent Zoning", rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
     await db.insert(countyFacetCoverage).values({ countyFips: "50907", facet: "zoning", honestCoveragePct: "0", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-absent", absenceBasis: "county-unincorporated-unzoned", thresholdPct: "95" });
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50907" && c.railKey === "zoning");
     expect(cell.displayState).toBe("satisfied-absent");
   });
@@ -470,7 +477,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
 
   it("manifestCells is additive: the pre-existing counties[]/summary shape is unaffected when the manifest is unseeded", async () => {
     // No county_manifest / county_rail rows seeded in this case at all.
-    const res = await request(getApp()).get(LEDGER_PATH);
+    const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     expect(res.status).toBe(200);
     expect(res.body.manifestCells).toEqual([]);
     expect(res.body.counties).toEqual([]);
@@ -482,5 +489,126 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(res.body.summary.totalCounties).toBe(0);
     expect(res.body.summary.staleCount).toBe(0);
     expect(res.body.summary.rewarmUnsafeCount).toBe(0);
+  });
+});
+
+describe("GET /api/county-ledger, L18 materialized snapshot (default)", () => {
+  it("returns 503 county_ledger_not_materialized when no snapshot exists", async () => {
+    const res = await request(getApp()).get(LEDGER_PATH);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("county_ledger_not_materialized");
+    expect(res.body.servedAt).toEqual(expect.any(String));
+  });
+
+  it("serves the snapshot in constant time with computedAt + servedAt", async () => {
+    const computedAt = new Date("2026-08-12T00:00:00.000Z");
+    const payload = {
+      counties: [],
+      manifestCells: [
+        {
+          countyFips: "48021",
+          railKey: "geometry",
+          displayState: "satisfied-present",
+          isPartial: false,
+          honestCoveragePct: 100,
+          thresholdPct: 95,
+          atomFamilyState: "present",
+          hasWriter: true,
+          absenceBasis: null,
+          source: "txgio",
+          sourceVintage: null,
+          lastVerifiedAt: null,
+          verifiedByInstrument: null,
+          verificationMethod: null,
+          artifactPath: null,
+        },
+      ],
+      railCapabilities: [],
+      summary: {
+        onboardedCount: 0,
+        totalCounties: 1,
+        staleCount: 0,
+        rewarmUnsafeCount: 0,
+        totalRails: COUNTY_RAIL_COUNT,
+        totalCells: 1,
+        satisfiedCells: 1,
+        satisfiedPresentCells: 1,
+        satisfiedPresentPartialCells: 0,
+        satisfiedAbsentCells: 0,
+        texasCompletenessPct: 1,
+      },
+    };
+    await db.insert(countyLedgerSnapshot).values({
+      id: "current",
+      computedAt,
+      payload,
+    });
+
+    const before = Date.now();
+    const res = await request(getApp()).get(LEDGER_PATH);
+    const elapsed = Date.now() - before;
+    expect(res.status).toBe(200);
+    expect(elapsed).toBeLessThan(2000);
+    expect(res.body.summary.computedAt).toBe(computedAt.toISOString());
+    expect(res.body.summary.servedAt).toEqual(expect.any(String));
+    expect(res.body.summary.materializationAgeMs).toBeGreaterThan(0);
+    expect(res.body.manifestCells).toHaveLength(1);
+    expect(res.body.manifestCells[0].displayState).toBe("satisfied-present");
+    // Deliberately-stale snapshot is still served — stamp exposes it.
+    expect(new Date(res.body.summary.computedAt).getTime()).toBeLessThan(
+      new Date(res.body.summary.servedAt).getTime(),
+    );
+  });
+
+  it("parity: materialized cells match ?compute=live cells on the same DB state", async () => {
+    await db.insert(countyRail).values({
+      railKey: "geometry",
+      displayName: "Parcel geometry",
+      ordinal: 1,
+      kind: "spine",
+      thresholdPct: "95",
+      atomFamilyState: "present",
+      hasWriter: true,
+      declaredSource: "TxGIO StratMap",
+    });
+    await db.insert(countyManifest).values({
+      countyFips: "48021",
+      countyName: "Bastrop",
+      parcelCountEst: 1000,
+      rosterSchemaVersion: "test-v1",
+      rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z"),
+    });
+    await db.insert(countyFacetCoverage).values({
+      countyFips: "48021",
+      facet: "geometry",
+      honestCoveragePct: "100",
+      integrityVerdict: "n/a",
+      classification: "real-at-ceiling",
+      railState: "satisfied-present",
+      thresholdPct: "95",
+    });
+
+    const live = await request(getApp()).get(LIVE_LEDGER_PATH);
+    expect(live.status).toBe(200);
+    const { computedAt: _c, servedAt: _s, materializationAgeMs: _a, ...liveSummaryRest } =
+      live.body.summary;
+
+    await db.insert(countyLedgerSnapshot).values({
+      id: "current",
+      computedAt: new Date(),
+      payload: {
+        counties: live.body.counties,
+        manifestCells: live.body.manifestCells,
+        railCapabilities: live.body.railCapabilities,
+        ...(live.body.railCapabilitiesProbeReason
+          ? { railCapabilitiesProbeReason: live.body.railCapabilitiesProbeReason }
+          : {}),
+        summary: liveSummaryRest,
+      },
+    });
+
+    const snap = await request(getApp()).get(LEDGER_PATH);
+    expect(snap.status).toBe(200);
+    expect(snap.body.manifestCells).toEqual(live.body.manifestCells);
   });
 });

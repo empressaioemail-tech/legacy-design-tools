@@ -132,6 +132,10 @@ describe("lib/db schema integration", () => {
         // gate + cert-grade state. Sorts after `county_facet_coverage`
         // (`_f` < `_g`) per `ORDER BY tablename`.
         "county_gate_cert_state",
+        // L18 / P-14: singleton materialized GET /api/county-ledger payload.
+        // Sorts after `county_gate_cert_state` (`_g` < `_l`) and before
+        // `county_manifest` (`_l` < `_m`) per `ORDER BY tablename`.
+        "county_ledger_snapshot",
         // Sprint 1 county manifest: `county_manifest` is the 254-row
         // denominator (every Texas county has a row whether or not it has
         // been worked) and `county_rail` is the 13-rail dimension. Sort

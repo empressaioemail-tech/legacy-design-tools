@@ -638,6 +638,16 @@ CREATE TABLE @@SCHEMA@@.county_gate_cert_state (
 );
 
 
+-- Name: county_ledger_snapshot; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.county_ledger_snapshot (
+    id text NOT NULL,
+    computed_at timestamp with time zone NOT NULL,
+    payload jsonb NOT NULL,
+    CONSTRAINT county_ledger_snapshot_id_check CHECK ((id = 'current'::text))
+);
+
+
 -- Name: county_manifest; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.county_manifest (
@@ -2223,6 +2233,12 @@ ALTER TABLE ONLY @@SCHEMA@@.county_facet_coverage
 
 ALTER TABLE ONLY @@SCHEMA@@.county_gate_cert_state
     ADD CONSTRAINT county_gate_cert_state_pkey PRIMARY KEY (row_id);
+
+
+-- Name: county_ledger_snapshot county_ledger_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_ledger_snapshot
+    ADD CONSTRAINT county_ledger_snapshot_pkey PRIMARY KEY (id);
 
 
 -- Name: county_manifest county_manifest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
