@@ -1,13 +1,17 @@
 /**
  * Failing-first: declared vintage miss + other-vintage hit → vintage-gap.
  * Never silently return the other vintage's row.
+ * L21: crosswalk remaps keys inside the declared year only.
  */
 
 import { describe, expect, it } from "vitest";
 import {
   DECLARED_CAD_VINTAGES,
   VINTAGE_GAP_ABSENCE_BASIS,
+  chooseCadPropIdResolution,
   classifyCadPropertyMiss,
+  collapseCadPropIdWhitespace,
+  normalizeCadGisLinkKey,
   resolveDeclaredCadVintage,
 } from "../vintage";
 
@@ -59,5 +63,49 @@ describe("classifyCadPropertyMiss (failing-first vintage-gap)", () => {
         otherVintageHit: true,
       }),
     ).toBe("hit");
+  });
+});
+
+describe("L21 crosswalk resolution (declared-year key mapping)", () => {
+  it("normalizes GIS_Link whitespace and case without changing other chars", () => {
+    expect(normalizeCadGisLinkKey("A   9-3B")).toBe("A 9-3B");
+    expect(normalizeCadGisLinkKey("10-1-1A")).toBe("10-1-1A");
+    expect(normalizeCadGisLinkKey("23245-7-4r")).toBe("23245-7-4R");
+    expect(collapseCadPropIdWhitespace("A   9-3B")).toBe("A 9-3B");
+  });
+
+  it("prefers exact declared-year hit over crosswalk", () => {
+    expect(
+      chooseCadPropIdResolution({
+        requestedPropId: "A 9-3B",
+        exactDeclaredHit: true,
+        crosswalk: { toPropId: "A   9-3B", method: "gis-link-whitespace-collapse" },
+      }),
+    ).toEqual({ kind: "exact", propId: "A 9-3B" });
+  });
+
+  it("uses deterministic crosswalk only when exact miss", () => {
+    expect(
+      chooseCadPropIdResolution({
+        requestedPropId: "A 9-3B",
+        exactDeclaredHit: false,
+        crosswalk: { toPropId: "A   9-3B", method: "gis-link-whitespace-collapse" },
+      }),
+    ).toEqual({
+      kind: "crosswalk",
+      propId: "A   9-3B",
+      fromPropId: "A 9-3B",
+      method: "gis-link-whitespace-collapse",
+    });
+  });
+
+  it("misses closed when no exact and no crosswalk", () => {
+    expect(
+      chooseCadPropIdResolution({
+        requestedPropId: "10-1-1A",
+        exactDeclaredHit: false,
+        crosswalk: null,
+      }),
+    ).toEqual({ kind: "miss", propId: "10-1-1A" });
   });
 });

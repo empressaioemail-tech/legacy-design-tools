@@ -210,7 +210,8 @@ jobs:
           # without importing resolveDeclaredCadVintage/tryResolveDeclaredCadVintage
           # AND without CAD_PROPERTY_MULTI_YEAR_INVENTORY marker.
           # Allowlist: lib/cad-ingest/src/ingest.ts, lib/cad-ingest/src/vintage.ts,
-          # lib/cad-ingest/src/txgio/landuse*.ts, lib/db/src/schema/cadProperty.ts,
+          # lib/cad-ingest/src/vintage-crosswalk.ts, lib/cad-ingest/src/txgio/landuse*.ts,
+          # lib/db/src/schema/cadProperty.ts, lib/db/src/schema/cadPropertyVintageCrosswalk.ts,
           # **/__tests__/**
           set -euo pipefail
           mapfile -t hits < <(rg -l \
@@ -220,8 +221,10 @@ jobs:
             --glob '!**/__tests__/**' \
             --glob '!lib/cad-ingest/src/ingest.ts' \
             --glob '!lib/cad-ingest/src/vintage.ts' \
+            --glob '!lib/cad-ingest/src/vintage-crosswalk.ts' \
             --glob '!lib/cad-ingest/src/txgio/landuse*.ts' \
             --glob '!lib/db/src/schema/cadProperty.ts' \
+            --glob '!lib/db/src/schema/cadPropertyVintageCrosswalk.ts' \
             . || true)
           failed=0
           for f in "${hits[@]+"${hits[@]}"}"; do
