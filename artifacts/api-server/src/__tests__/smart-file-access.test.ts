@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  accessSubjectFromRequest,
   canReadSmartFilePolicy,
   type SmartFileAccessSubject,
 } from "../lib/smartFileAccess";
@@ -41,5 +42,22 @@ describe("smartFileAccess", () => {
     expect(
       canReadSmartFilePolicy(tenantUser, "tenant-private", "bastrop-tx"),
     ).toBe(true);
+  });
+
+  it("treats a validated service token as the operator (CC proxy / MCP)", () => {
+    const subject = accessSubjectFromRequest({
+      serviceAuth: {
+        platformInternal: false,
+        jurisdictionTenant: null,
+      },
+    });
+    expect(subject.platformInternal).toBe(true);
+    expect(canReadSmartFilePolicy(subject, "platform-internal")).toBe(true);
+  });
+
+  it("denies platform-internal when no serviceAuth is attached", () => {
+    const subject = accessSubjectFromRequest({});
+    expect(subject.platformInternal).toBe(false);
+    expect(canReadSmartFilePolicy(subject, "platform-internal")).toBe(false);
   });
 });
