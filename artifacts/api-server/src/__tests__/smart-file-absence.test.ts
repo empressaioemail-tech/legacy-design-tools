@@ -25,12 +25,14 @@ import {
   type SmartFileReadResult,
 } from "../atoms/smart-file.contract";
 
-const ENTITY_ID = "smartfile:48021:str-ordinance";
+const ENTITY_ID = "smartfile:jurisdiction:48021:str-ordinance";
 
 function absence(over: Partial<SmartFileAbsence> = {}): SmartFileAbsence {
   return {
     status: "absent-verified",
     entityId: ENTITY_ID,
+    scopeType: "jurisdiction",
+    scopeId: "48021",
     jurisdictionFips: "48021",
     docSlug: "str-ordinance",
     absence: {
@@ -100,6 +102,17 @@ describe("typed absence — the type cannot express a bare null", () => {
 });
 
 describe("every absence carries its BASIS", () => {
+  it("accepts tenant absence with null jurisdictionFips", () => {
+    const a = absence({
+      entityId: "smartfile:tenant:mox:unit-turn-sop",
+      scopeType: "tenant",
+      scopeId: "mox",
+      jurisdictionFips: null,
+      docSlug: "unit-turn-sop",
+    });
+    expect(() => validateSmartFileAbsence(a)).not.toThrow();
+  });
+
   it("accepts a fully-cited absence", () => {
     expect(() => validateSmartFileAbsence(absence())).not.toThrow();
   });

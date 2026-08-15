@@ -82,8 +82,8 @@ export const SMART_FILE_ACCESS_POLICY_SCHEMA = z.enum(
  * ------------------------------------------------------------------ */
 
 /**
- * The city-file node class entityId shape (OPS-17 G-10 / S-6, the half A-012
- * left open: A-012 ruled the family placement but states no shape).
+ * The Smart Files node class entityId shape (OPS-17 G-10 / S-6; decision
+ * `_decisions/2026-08-15_smart_files_module_identity.md`).
  *
  * Constraint 6 and AGENT_CONTRACT 5 both say entityId shapes are NOT uniform
  * across writers and must never be reconstructed from parts — a wrong
@@ -91,20 +91,19 @@ export const SMART_FILE_ACCESS_POLICY_SCHEMA = z.enum(
  * So the shape is DECLARED here, in one place, with one builder and one parser,
  * and storage persists exactly what the builder returns.
  *
- * A document twin is NOT the parcel-keyed shape. A city file is scoped to a
- * JURISDICTION, not to a parcel: most city documents (an ordinance, a council
- * packet, a budget) have no parcel at all. Parcel-scoped documents express that
- * as a PLACEMENT, never by keying the document itself.
+ * A document twin is NOT the parcel-keyed shape. Parcel association is a
+ * PLACEMENT, never identity. A site document may key by an existing parcel-node
+ * id inside `scopeId`, which may itself contain colons.
  *
- *   smartfile:<jurisdictionFips>:<docSlug>
+ *   smartfile:<scopeType>:<scopeId>:<docSlug>
  *
- * `jurisdictionFips` — the jurisdiction the document belongs to, as the FIPS
- * string storage persists (e.g. `48021` for Bastrop County). Not a name: names
- * are unstable and collide.
- * `docSlug` — a stable, caller-supplied identifier for the document WITHIN that
- * jurisdiction. It identifies the DOCUMENT, not a version and not a placement:
- * revisions share it (that is what makes revise-once work) and placements
- * reference it.
+ * `scopeType` — closed set: jurisdiction, tenant, site.
+ * `scopeId` — the scope the document belongs to (FIPS for jurisdiction; tenant
+ * id; site id which may contain colons).
+ * `docSlug` — stable identifier for the document WITHIN that scope.
+ *
+ * The superseded three-segment form `smartfile:<fips>:<slug>` returns null.
+ * Never alias it.
  *
  * Deliberately NOT the content CID. A CID identifies BYTES, so it necessarily
  * changes on every revision; keying the document by CID would make revision
@@ -113,8 +112,17 @@ export const SMART_FILE_ACCESS_POLICY_SCHEMA = z.enum(
  */
 export const SMART_FILE_ENTITY_ID_PREFIX = "smartfile" as const;
 
+export const SMART_FILE_SCOPE_TYPES = [
+  "jurisdiction",
+  "tenant",
+  "site",
+] as const;
+
+export type SmartFileScopeType = (typeof SMART_FILE_SCOPE_TYPES)[number];
+
 export interface SmartFileEntityIdParts {
-  jurisdictionFips: string;
+  scopeType: SmartFileScopeType;
+  scopeId: string;
   docSlug: string;
 }
 
@@ -123,10 +131,18 @@ const DOC_SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/;
 
 /** Build the declared entityId. The ONLY sanctioned way to produce one. */
 export function buildSmartFileEntityId(parts: SmartFileEntityIdParts): string {
-  const { jurisdictionFips, docSlug } = parts;
-  if (!JURISDICTION_FIPS_RE.test(jurisdictionFips)) {
+  const { scopeType, scopeId, docSlug } = parts;
+  if (!(SMART_FILE_SCOPE_TYPES as readonly string[]).includes(scopeType)) {
     throw new Error(
-      `smart-file entityId: jurisdictionFips must be numeric FIPS, got ${JSON.stringify(jurisdictionFips)}`,
+      `smart-file entityId: scopeType must be one of ${SMART_FILE_SCOPE_TYPES.join(", ")}, got ${JSON.stringify(scopeType)}`,
+    );
+  }
+  if (scopeId.length === 0) {
+    throw new Error("smart-file entityId: scopeId must be non-empty");
+  }
+  if (scopeType === "jurisdiction" && !JURISDICTION_FIPS_RE.test(scopeId)) {
+    throw new Error(
+      `smart-file entityId: jurisdiction scopeId must be numeric FIPS, got ${JSON.stringify(scopeId)}`,
     );
   }
   if (!DOC_SLUG_RE.test(docSlug)) {
@@ -134,12 +150,13 @@ export function buildSmartFileEntityId(parts: SmartFileEntityIdParts): string {
       `smart-file entityId: docSlug must match ${DOC_SLUG_RE}, got ${JSON.stringify(docSlug)}`,
     );
   }
-  return `${SMART_FILE_ENTITY_ID_PREFIX}:${jurisdictionFips}:${docSlug}`;
+  return `${SMART_FILE_ENTITY_ID_PREFIX}:${scopeType}:${scopeId}:${docSlug}`;
 }
 
 /**
  * Parse a declared entityId back to its parts, or return null.
  *
+ * Last-segment-is-slug: `scopeId = segments.slice(2, -1).join(':')`.
  * Returns null rather than throwing, and returns null rather than
  * best-effort-guessing a malformed value: a silent partial parse is the
  * reconstruction failure this declaration exists to prevent. Callers that need
@@ -149,12 +166,32 @@ export function parseSmartFileEntityId(
   entityId: string,
 ): SmartFileEntityIdParts | null {
   const segments = entityId.split(":");
-  if (segments.length !== 3) return null;
-  const [prefix, jurisdictionFips, docSlug] = segments;
+  if (segments.length < 4) return null;
+  const prefix = segments[0];
+  const scopeType = segments[1];
+  const docSlug = segments[segments.length - 1];
   if (prefix !== SMART_FILE_ENTITY_ID_PREFIX) return null;
-  if (!JURISDICTION_FIPS_RE.test(jurisdictionFips)) return null;
+  if (!(SMART_FILE_SCOPE_TYPES as readonly string[]).includes(scopeType)) {
+    return null;
+  }
   if (!DOC_SLUG_RE.test(docSlug)) return null;
-  return { jurisdictionFips, docSlug };
+  const scopeId = segments.slice(2, -1).join(":");
+  if (scopeId.length === 0) return null;
+  if (scopeType === "jurisdiction" && !JURISDICTION_FIPS_RE.test(scopeId)) {
+    return null;
+  }
+  return {
+    scopeType: scopeType as SmartFileScopeType,
+    scopeId,
+    docSlug,
+  };
+}
+
+/** Denormalized FIPS when scopeType is jurisdiction; null otherwise. */
+export function jurisdictionFipsFromEntityParts(
+  parts: SmartFileEntityIdParts,
+): string | null {
+  return parts.scopeType === "jurisdiction" ? parts.scopeId : null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -315,7 +352,10 @@ export interface SmartFileDocument {
   entityType: "smart-file-document";
   /** The declared entityId. Built by `buildSmartFileEntityId`, never by hand. */
   entityId: string;
-  jurisdictionFips: string;
+  scopeType: SmartFileScopeType;
+  scopeId: string;
+  /** Populated only when scopeType is jurisdiction (value equals scopeId). */
+  jurisdictionFips: string | null;
   docSlug: string;
   title: string;
   /** Resolved at READ time, per ADR-017. */
@@ -329,7 +369,9 @@ export interface SmartFileDocument {
 export const SMART_FILE_DOCUMENT_SCHEMA = z.object({
   entityType: z.literal("smart-file-document"),
   entityId: z.string().min(1),
-  jurisdictionFips: z.string().min(1),
+  scopeType: z.enum(SMART_FILE_SCOPE_TYPES),
+  scopeId: z.string().min(1),
+  jurisdictionFips: z.string().min(1).nullable(),
   docSlug: z.string().min(1),
   title: z.string().min(1),
   accessPolicy: SMART_FILE_ACCESS_POLICY_SCHEMA,
@@ -576,8 +618,11 @@ export interface SmartFileAbsence {
   status: SmartFileAbsentStatus;
   /** The entityId asked for, echoed so a caller never re-derives it. */
   entityId: string;
-  jurisdictionFips: string;
-  docSlug: string;
+  scopeType: SmartFileScopeType | null;
+  scopeId: string | null;
+  /** Populated only when scopeType is jurisdiction. Null for tenant/site. */
+  jurisdictionFips: string | null;
+  docSlug: string | null;
   /** WHY this is not being served. */
   absence: SmartFileAbsenceBasis;
   /**
@@ -603,8 +648,10 @@ export interface SmartFileAbsence {
 export const SMART_FILE_ABSENCE_SCHEMA = z.object({
   status: z.enum(["absent-verified", "not-sought", "lookup-failed", "held-version-absent"]),
   entityId: z.string().min(1),
-  jurisdictionFips: z.string().min(1),
-  docSlug: z.string().min(1),
+  scopeType: z.enum(SMART_FILE_SCOPE_TYPES).nullable(),
+  scopeId: z.string().min(1).nullable(),
+  jurisdictionFips: z.string().min(1).nullable(),
+  docSlug: z.string().min(1).nullable(),
   absence: SMART_FILE_ABSENCE_BASIS_SCHEMA,
   freshness: SMART_FILE_FRESHNESS_SCHEMA.nullable(),
   heldDocument: z

@@ -56,6 +56,14 @@ import { sql, relations } from "drizzle-orm";
  * closes.
  */
 
+/** Closed scope types for Smart Files identity (decision 2026-08-15). */
+export const SMART_FILE_SCOPE_TYPES = [
+  "jurisdiction",
+  "tenant",
+  "site",
+] as const;
+export type SmartFileScopeTypeValue = (typeof SMART_FILE_SCOPE_TYPES)[number];
+
 /** WHERE a document can appear. Closed set; mirrors the contract type. */
 export const SMART_FILE_PLACEMENT_TARGET_TYPES = [
   "folder",
@@ -101,14 +109,21 @@ export const smartFileDocuments = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     /**
-     * The DECLARED entityId (`smartfile:<jurisdictionFips>:<docSlug>`), stored
+     * The DECLARED entityId (`smartfile:<scopeType>:<scopeId>:<docSlug>`), stored
      * exactly as `buildSmartFileEntityId` produced it. Never reconstructed by a
      * reader (AGENT_CONTRACT 5, constraint 6): storage persists the value, and
      * consumers match on it verbatim.
      */
     entityId: text("entity_id").notNull(),
-    /** Jurisdiction FIPS. The document's scope — a city file is not parcel-keyed. */
-    jurisdictionFips: text("jurisdiction_fips").notNull(),
+    scopeType: text("scope_type")
+      .notNull()
+      .$type<SmartFileScopeTypeValue>(),
+    scopeId: text("scope_id").notNull(),
+    /**
+     * Denormalized FIPS when scopeType is jurisdiction (value equals scopeId).
+     * Null for tenant and site scopes.
+     */
+    jurisdictionFips: text("jurisdiction_fips"),
     /** Stable document identifier within the jurisdiction. Shared across revisions. */
     docSlug: text("doc_slug").notNull(),
     title: text("title").notNull(),
@@ -146,12 +161,26 @@ export const smartFileDocuments = pgTable(
     entityIdUniq: uniqueIndex("smart_file_documents_entity_id_uniq").on(
       t.entityId,
     ),
+    scopeIdentityUniq: uniqueIndex("smart_file_documents_scope_identity_uniq").on(
+      t.scopeType,
+      t.scopeId,
+      t.docSlug,
+    ),
     jurisdictionIdx: index("smart_file_documents_jurisdiction_idx").on(
       t.jurisdictionFips,
       t.docSlug,
     ),
+    scopeIdx: index("smart_file_documents_scope_idx").on(
+      t.scopeType,
+      t.scopeId,
+      t.docSlug,
+    ),
     accessPolicyIdx: index("smart_file_documents_access_policy_idx").on(
       t.accessPolicy,
+    ),
+    scopeTypeCheck: check(
+      "smart_file_documents_scope_type_check",
+      sql`${t.scopeType} IN ('jurisdiction', 'tenant', 'site')`,
     ),
     /** Closed-set enforcement at the DB layer. Keep literal, in lock-step with SMART_FILE_ACCESS_POLICIES. */
     accessPolicyCheck: check(
