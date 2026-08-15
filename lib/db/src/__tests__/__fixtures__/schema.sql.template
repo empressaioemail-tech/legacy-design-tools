@@ -4237,10 +4237,10 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
 
 
--- Name: smart_file_folder_records smart_file_folder_records_folder_id_smart_file_folders_folder_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: smart_file_folder_records smart_file_folder_records_folder_id_smart_file_folders_folder_i; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.smart_file_folder_records
-    ADD CONSTRAINT smart_file_folder_records_folder_id_smart_file_folders_folder_id_fk FOREIGN KEY (folder_id) REFERENCES @@SCHEMA@@.smart_file_folders(folder_id) ON DELETE CASCADE;
+    ADD CONSTRAINT smart_file_folder_records_folder_id_smart_file_folders_folder_i FOREIGN KEY (folder_id) REFERENCES @@SCHEMA@@.smart_file_folders(folder_id) ON DELETE CASCADE;
 
 
 -- Name: smart_file_placements smart_file_placements_document_id_smart_file_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
