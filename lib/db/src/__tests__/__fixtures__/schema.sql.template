@@ -1753,6 +1753,35 @@ CREATE TABLE @@SCHEMA@@.smart_file_documents (
 );
 
 
+-- Name: smart_file_folder_records; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_folder_records (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    folder_id text NOT NULL,
+    record_entity_id text NOT NULL,
+    entity_type text NOT NULL,
+    payload jsonb NOT NULL,
+    access_policy text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_folder_records_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text])))
+);
+
+
+-- Name: smart_file_folders; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_folders (
+    folder_id text NOT NULL,
+    scope_type text NOT NULL,
+    scope_id text NOT NULL,
+    label text NOT NULL,
+    access_policy text NOT NULL,
+    parent_folder_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_folders_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
+    CONSTRAINT smart_file_folders_scope_type_check CHECK ((scope_type = ANY (ARRAY['jurisdiction'::text, 'tenant'::text, 'site'::text])))
+);
+
+
 -- Name: smart_file_placements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.smart_file_placements (
@@ -2738,6 +2767,18 @@ ALTER TABLE ONLY @@SCHEMA@@.smart_file_documents
     ADD CONSTRAINT smart_file_documents_pkey PRIMARY KEY (id);
 
 
+-- Name: smart_file_folder_records smart_file_folder_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_folder_records
+    ADD CONSTRAINT smart_file_folder_records_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_folders smart_file_folders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_folders
+    ADD CONSTRAINT smart_file_folders_pkey PRIMARY KEY (folder_id);
+
+
 -- Name: smart_file_placements smart_file_placements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.smart_file_placements
@@ -3650,6 +3691,16 @@ CREATE INDEX smart_file_documents_jurisdiction_idx ON @@SCHEMA@@.smart_file_docu
 CREATE UNIQUE INDEX smart_file_documents_scope_identity_uniq ON @@SCHEMA@@.smart_file_documents USING btree (scope_type, scope_id, doc_slug);
 
 
+-- Name: smart_file_folder_records_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_folder_records_uniq ON @@SCHEMA@@.smart_file_folder_records USING btree (folder_id, record_entity_id);
+
+
+-- Name: smart_file_folders_scope_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_folders_scope_idx ON @@SCHEMA@@.smart_file_folders USING btree (scope_type, scope_id);
+
+
 -- Name: smart_file_placements_document_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX smart_file_placements_document_idx ON @@SCHEMA@@.smart_file_placements USING btree (document_id);
@@ -4184,6 +4235,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
+-- Name: smart_file_folder_records smart_file_folder_records_folder_id_smart_file_folders_folder_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_folder_records
+    ADD CONSTRAINT smart_file_folder_records_folder_id_smart_file_folders_folder_id_fk FOREIGN KEY (folder_id) REFERENCES @@SCHEMA@@.smart_file_folders(folder_id) ON DELETE CASCADE;
 
 
 -- Name: smart_file_placements smart_file_placements_document_id_smart_file_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
