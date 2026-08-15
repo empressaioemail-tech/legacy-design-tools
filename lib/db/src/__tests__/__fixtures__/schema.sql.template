@@ -1711,6 +1711,28 @@ CREATE TABLE @@SCHEMA@@.sheets (
 );
 
 
+-- Name: smart_file_absence_determinations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_absence_determinations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_id text NOT NULL,
+    jurisdiction_fips text NOT NULL,
+    doc_slug text NOT NULL,
+    verdict text NOT NULL,
+    basis text NOT NULL,
+    determined_at timestamp with time zone DEFAULT now() NOT NULL,
+    determined_by text NOT NULL,
+    source_uri text,
+    access_policy text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_absence_determinations_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
+    CONSTRAINT smart_file_absence_determinations_basis_check CHECK ((length(btrim(basis)) > 0)),
+    CONSTRAINT smart_file_absence_determinations_determined_by_check CHECK ((length(btrim(determined_by)) > 0)),
+    CONSTRAINT smart_file_absence_determinations_verdict_check CHECK ((verdict = ANY (ARRAY['absent-verified'::text, 'lookup-failed'::text])))
+);
+
+
 -- Name: smart_file_documents; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.smart_file_documents (
@@ -2701,6 +2723,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_pkey PRIMARY KEY (id);
 
 
+-- Name: smart_file_absence_determinations smart_file_absence_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_absence_determinations
+    ADD CONSTRAINT smart_file_absence_determinations_pkey PRIMARY KEY (id);
+
+
 -- Name: smart_file_documents smart_file_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.smart_file_documents
@@ -3582,6 +3610,21 @@ CREATE UNIQUE INDEX sheets_snapshot_number_unique ON @@SCHEMA@@.sheets USING btr
 -- Name: sheets_snapshot_sort_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX sheets_snapshot_sort_idx ON @@SCHEMA@@.sheets USING btree (snapshot_id, sort_order);
+
+
+-- Name: smart_file_absence_determinations_entity_id_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_absence_determinations_entity_id_uniq ON @@SCHEMA@@.smart_file_absence_determinations USING btree (entity_id);
+
+
+-- Name: smart_file_absence_determinations_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_absence_determinations_jurisdiction_idx ON @@SCHEMA@@.smart_file_absence_determinations USING btree (jurisdiction_fips, doc_slug);
+
+
+-- Name: smart_file_absence_determinations_verdict_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_absence_determinations_verdict_idx ON @@SCHEMA@@.smart_file_absence_determinations USING btree (verdict);
 
 
 -- Name: smart_file_documents_access_policy_idx; Type: INDEX; Schema: public; Owner: -

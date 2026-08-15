@@ -80,6 +80,17 @@ export type SmartFileAccessPolicyValue =
   (typeof SMART_FILE_ACCESS_POLICIES)[number];
 
 /**
+ * The two recordable determination verdicts (G-34). `not-sought` is NOT here:
+ * never having looked is the ABSENCE of a determination row, not a verdict.
+ */
+export const SMART_FILE_ABSENCE_VERDICTS = [
+  "absent-verified",
+  "lookup-failed",
+] as const;
+export type SmartFileAbsenceVerdict =
+  (typeof SMART_FILE_ABSENCE_VERDICTS)[number];
+
+/**
  * The DOCUMENT — identity, deliberately carrying no content.
  *
  * This is the "lives once" half. A document in five places is ONE row here plus
@@ -282,6 +293,150 @@ export const smartFilePlacements = pgTable(
   }),
 );
 
+/**
+ * An ABSENCE DETERMINATION — the record that we LOOKED for a document and what
+ * we concluded (OPS-17 PLAN-ROW G-34).
+ *
+ * WHY THIS IS A TABLE AND NOT A COMPUTED VERDICT. The inherited spine
+ * constraint is that ONLY A POSITIVE DETERMINATION WRITES AN ABSENCE; an empty
+ * or failed lookup re-enters the queue and does not become a recorded absence.
+ * That rule is unenforceable if the read path can synthesize "absent" from a
+ * zero-row query, because then every never-attempted lookup silently becomes a
+ * verified absence. So the verdict lives in a row that something DELIBERATELY
+ * WROTE, and the read path reports the never-looked state when no row is here.
+ * Absence is a FINDING, not the failure to find.
+ *
+ * WHY THE BASIS IS NOT NULL AND CHECK-CONSTRAINED. "Not found" is not a basis;
+ * WHY it is not found is. An absence without its citation is unfalsifiable, so
+ * a later reader cannot tell a real determination from a placeholder. This
+ * mirrors `county_facet_coverage.absence_basis`, which is required by check
+ * constraint whenever `rail_state = 'satisfied-absent'` for exactly this
+ * reason. The pattern is REUSED here, not reinvented; the county table itself
+ * is not extendable for this because it is keyed (county, rail) and has no
+ * document axis at all.
+ *
+ * WHY IT CARRIES `determined_at` RATHER THAN LEANING ON `created_at`. A
+ * verified absence DECAYS exactly like a verified presence: "we checked in 2019
+ * and Bastrop had no short-term-rental ordinance" is not evidence about today.
+ * `determined_at` is the absence path's `computed_at` and feeds the SAME
+ * freshness evaluator the present path uses, so one proven indicator covers
+ * both paths rather than two indicators drifting apart.
+ *
+ * This table does NOT reference `smart_file_documents`. A determination is
+ * about an entityId for which, in the absent case, no document row exists by
+ * definition — an FK would make the common case unrepresentable.
+ */
+export const smartFileAbsenceDeterminations = pgTable(
+  "smart_file_absence_determinations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /**
+     * The DECLARED entityId this determination is about, stored exactly as
+     * `buildSmartFileEntityId` produced it. Never reconstructed by a reader
+     * (AGENT_CONTRACT 5, constraint 6): a reconstructed shape matches zero rows
+     * and then reads as an honest absence, which is the precise failure this
+     * whole family is built to prevent.
+     */
+    entityId: text("entity_id").notNull(),
+    /** Denormalized from the entityId for jurisdiction-scoped queries. */
+    jurisdictionFips: text("jurisdiction_fips").notNull(),
+    docSlug: text("doc_slug").notNull(),
+    /**
+     * The VERDICT. Exactly two values, and the pair is the point:
+     *   `absent-verified` — we looked and it is genuinely not there. A real
+     *                       answer, renderable as one.
+     *   `lookup-failed`   — we tried and the ATTEMPT failed. We know nothing
+     *                       about whether the document exists.
+     * Collapsing these is how a probe failure wears the costume of a data gap.
+     * `not-sought` is deliberately NOT a value here: never having looked is the
+     * ABSENCE of a row, and writing a row to say "we did nothing" would make
+     * the table lie about what a determination is.
+     */
+    verdict: text("verdict").notNull().$type<SmartFileAbsenceVerdict>(),
+    /**
+     * WHY. Required, and required at the DATABASE rather than in application
+     * code — a guardrail that does not survive a clone is not a guardrail. For
+     * `absent-verified` this is the public-record citation (the index searched,
+     * the clerk response, the ordinance list consulted). For `lookup-failed`
+     * it is what failed.
+     */
+    basis: text("basis").notNull(),
+    /**
+     * WHEN the determination was made — the absence path's `computed_at`.
+     * Feeds the same freshness evaluator as a present read.
+     */
+    determinedAt: timestamp("determined_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    /**
+     * WHAT did the determining (a CLI name, a sweep id, an operator handle),
+     * so a determination is attributable. Mirrors the spine
+     * `verified_by_instrument` column.
+     */
+    determinedBy: text("determined_by").notNull(),
+    /**
+     * Where the looking happened, when there is a URL for it. NULL is a
+     * positive "the determination has no single source URL" (e.g. a phone call
+     * to a clerk), not "unknown" — DEV_PROCESS 4.3.
+     */
+    sourceUri: text("source_uri"),
+    /**
+     * ADR-017 five-value union, resolved at READ time like any other record.
+     * Present as a COLUMN; per-tenant ENFORCEMENT stays gated on G-11 / S-1 and
+     * is not claimed here.
+     */
+    accessPolicy: text("access_policy")
+      .notNull()
+      .$type<SmartFileAccessPolicyValue>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    /**
+     * One CURRENT determination per entityId. A re-determination UPDATES this
+     * row (moving `determined_at` forward), so the freshness stamp reflects the
+     * latest looking rather than the first.
+     */
+    entityIdUniq: uniqueIndex(
+      "smart_file_absence_determinations_entity_id_uniq",
+    ).on(t.entityId),
+    jurisdictionIdx: index(
+      "smart_file_absence_determinations_jurisdiction_idx",
+    ).on(t.jurisdictionFips, t.docSlug),
+    verdictIdx: index("smart_file_absence_determinations_verdict_idx").on(
+      t.verdict,
+    ),
+    /** Closed-set enforcement at the DB. Keep in lock-step with SMART_FILE_ABSENCE_VERDICTS. */
+    verdictCheck: check(
+      "smart_file_absence_determinations_verdict_check",
+      sql`${t.verdict} IN ('absent-verified', 'lookup-failed')`,
+    ),
+    /**
+     * THE BASIS RULE, ENFORCED BY THE DATABASE. A determination with a blank or
+     * whitespace-only basis is rejected by the engine itself, so no caller,
+     * script, or future lane can record an uncited absence — including one
+     * writing raw SQL. This is the mechanism that makes "an absence carries its
+     * basis" true rather than merely documented.
+     */
+    basisNonEmpty: check(
+      "smart_file_absence_determinations_basis_check",
+      sql`length(btrim(${t.basis})) > 0`,
+    ),
+    instrumentNonEmpty: check(
+      "smart_file_absence_determinations_determined_by_check",
+      sql`length(btrim(${t.determinedBy})) > 0`,
+    ),
+    accessPolicyCheck: check(
+      "smart_file_absence_determinations_access_policy_check",
+      sql`${t.accessPolicy} IN ('public-free', 'public-paid', 'platform-internal', 'tenant-private', 'tenant-shared')`,
+    ),
+  }),
+);
+
 export const smartFileDocumentsRelations = relations(
   smartFileDocuments,
   ({ many }) => ({
@@ -314,5 +469,9 @@ export type SmartFileDocumentRow = typeof smartFileDocuments.$inferSelect;
 export type NewSmartFileDocumentRow = typeof smartFileDocuments.$inferInsert;
 export type SmartFileVersionRow = typeof smartFileVersions.$inferSelect;
 export type NewSmartFileVersionRow = typeof smartFileVersions.$inferInsert;
+export type SmartFileAbsenceDeterminationRow =
+  typeof smartFileAbsenceDeterminations.$inferSelect;
+export type NewSmartFileAbsenceDeterminationRow =
+  typeof smartFileAbsenceDeterminations.$inferInsert;
 export type SmartFilePlacementRow = typeof smartFilePlacements.$inferSelect;
 export type NewSmartFilePlacementRow = typeof smartFilePlacements.$inferInsert;
