@@ -30,7 +30,7 @@ const PG_UNIQUE_VIOLATION = "23505";
 const PG_CHECK_VIOLATION = "23514";
 const PG_NOT_NULL_VIOLATION = "23502";
 
-const ENTITY_ID = "smartfile:48021:str-ordinance";
+const ENTITY_ID = "smartfile:jurisdiction:48021:str-ordinance";
 const REAL_BASIS =
   "Searched the Bastrop County ordinance index 1998-2026 and the clerk record " +
   "series; no short-term-rental ordinance has been adopted.";
@@ -84,7 +84,7 @@ describe.skipIf(!HAS_DB)(
 
     it("distinguishes NEVER-LOOKED from VERIFIED-ABSENT by row existence alone", async () => {
       await withTestSchema(async ({ pool, schemaName }) => {
-        const neverLooked = "smartfile:48021:never-sought-doc";
+        const neverLooked = "smartfile:jurisdiction:48021:never-sought-doc";
 
         await recordDetermination(pool, schemaName);
 
@@ -116,11 +116,11 @@ describe.skipIf(!HAS_DB)(
     it("keeps `lookup-failed` distinct from `absent-verified` in storage", async () => {
       await withTestSchema(async ({ pool, schemaName }) => {
         await recordDetermination(pool, schemaName, {
-          entityId: "smartfile:48021:doc-a",
+          entityId: "smartfile:jurisdiction:48021:doc-a",
           verdict: "absent-verified",
         });
         await recordDetermination(pool, schemaName, {
-          entityId: "smartfile:48021:doc-b",
+          entityId: "smartfile:jurisdiction:48021:doc-b",
           verdict: "lookup-failed",
           basis: "The county portal returned HTTP 503 on three attempts.",
         });

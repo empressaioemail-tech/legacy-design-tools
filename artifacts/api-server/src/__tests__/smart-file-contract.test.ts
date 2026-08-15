@@ -15,55 +15,134 @@ import {
   SMART_FILE_ACCESS_POLICY_VALUES,
   SMART_FILE_DEFAULT_STALENESS_SECONDS,
   SMART_FILE_PLACEMENT_TARGET_TYPES,
+  SMART_FILE_SCOPE_TYPES,
   buildSmartFileEntityId,
   evaluateSmartFileFreshness,
+  jurisdictionFipsFromEntityParts,
   parseSmartFileEntityId,
   validateSmartFileRead,
 } from "../atoms/smart-file.contract";
 
 describe("smart-file entityId — declared, not reconstructed", () => {
-  it("builds the declared shape", () => {
+  it("builds the declared scope-keyed shape for jurisdiction", () => {
     expect(
       buildSmartFileEntityId({
-        jurisdictionFips: "48021",
+        scopeType: "jurisdiction",
+        scopeId: "48021",
         docSlug: "udc-2024",
       }),
-    ).toBe("smartfile:48021:udc-2024");
+    ).toBe("smartfile:jurisdiction:48021:udc-2024");
   });
 
-  it("round-trips build -> parse", () => {
-    const parts = { jurisdictionFips: "48021", docSlug: "council.packet-01" };
-    const parsed = parseSmartFileEntityId(buildSmartFileEntityId(parts));
-    expect(parsed).toEqual(parts);
+  it("builds tenant and site scopes", () => {
+    expect(
+      buildSmartFileEntityId({
+        scopeType: "tenant",
+        scopeId: "mox",
+        docSlug: "unit-turn-sop",
+      }),
+    ).toBe("smartfile:tenant:mox:unit-turn-sop");
+    expect(
+      buildSmartFileEntityId({
+        scopeType: "site",
+        scopeId: "parcel:48021:R12345",
+        docSlug: "geotech",
+      }),
+    ).toBe("smartfile:site:parcel:48021:R12345:geotech");
   });
 
-  it("refuses a non-FIPS jurisdiction rather than coercing it", () => {
+  it("round-trips build -> parse on all three scope types", () => {
+    const cases = [
+      { scopeType: "jurisdiction" as const, scopeId: "48021", docSlug: "council.packet-01" },
+      { scopeType: "tenant" as const, scopeId: "mox", docSlug: "unit-turn-sop" },
+      {
+        scopeType: "site" as const,
+        scopeId: "parcel:48021:R12345",
+        docSlug: "geotech",
+      },
+    ];
+    for (const parts of cases) {
+      const parsed = parseSmartFileEntityId(buildSmartFileEntityId(parts));
+      expect(parsed).toEqual(parts);
+    }
+  });
+
+  it("derives jurisdictionFips only for jurisdiction scope", () => {
+    const j = {
+      scopeType: "jurisdiction" as const,
+      scopeId: "48021",
+      docSlug: "udc",
+    };
+    expect(jurisdictionFipsFromEntityParts(j)).toBe("48021");
+    expect(
+      jurisdictionFipsFromEntityParts({
+        scopeType: "tenant",
+        scopeId: "mox",
+        docSlug: "sop",
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a non-FIPS jurisdiction scopeId rather than coercing it", () => {
     expect(() =>
       buildSmartFileEntityId({
-        jurisdictionFips: "bastrop",
+        scopeType: "jurisdiction",
+        scopeId: "bastrop",
         docSlug: "udc-2024",
       }),
-    ).toThrow(/jurisdictionFips/);
+    ).toThrow(/scopeId must be numeric FIPS/);
+  });
+
+  it("refuses an unknown scopeType", () => {
+    expect(() =>
+      buildSmartFileEntityId({
+        scopeType: "workspace" as "jurisdiction",
+        scopeId: "w1",
+        docSlug: "udc",
+      }),
+    ).toThrow(/scopeType/);
+  });
+
+  it("refuses an empty scopeId", () => {
+    expect(() =>
+      buildSmartFileEntityId({
+        scopeType: "tenant",
+        scopeId: "",
+        docSlug: "udc",
+      }),
+    ).toThrow(/scopeId must be non-empty/);
   });
 
   it("refuses an uppercase or space-bearing slug", () => {
     expect(() =>
-      buildSmartFileEntityId({ jurisdictionFips: "48021", docSlug: "UDC 2024" }),
+      buildSmartFileEntityId({
+        scopeType: "jurisdiction",
+        scopeId: "48021",
+        docSlug: "UDC 2024",
+      }),
     ).toThrow(/docSlug/);
+  });
+
+  it("declares the closed scopeType set", () => {
+    expect(SMART_FILE_SCOPE_TYPES).toEqual(["jurisdiction", "tenant", "site"]);
   });
 
   /**
    * The reconstruction trap this declaration exists to prevent: a malformed or
-   * foreign-shaped id must return null, NEVER a best-effort partial parse. A
-   * silent partial parse is what makes a wrong shape match zero rows and read
-   * as an honest absence (DEV_PROCESS 4.3).
+   * foreign-shaped id must return null, NEVER a best-effort partial parse.
    */
   it.each([
     ["wrong prefix (the parcel-keyed shape)", "parcel:48021:R12345"],
+    ["old three-segment FIPS form", "smartfile:48021:udc"],
     ["too few segments", "smartfile:48021"],
-    ["too many segments", "smartfile:48021:udc:2024"],
+    ["too many segments without scopeType", "smartfile:48021:udc:2024"],
     ["empty", ""],
-    ["non-numeric fips", "smartfile:travis:udc-2024"],
+    ["non-numeric jurisdiction scopeId", "smartfile:jurisdiction:travis:udc-2024"],
+    ["unknown scopeType", "smartfile:workspace:foo:bar"],
+    ["wrong prefix", "not-smartfile:jurisdiction:48021:udc"],
+    ["empty scopeId", "smartfile:jurisdiction::udc"],
+    ["empty slug", "smartfile:jurisdiction:48021:"],
+    ["CID-looking key", "smartfile:bafybeigdyrzt5sfp7udm7uh3cdgr2xywfrz5mfc3i3k5q4x5q4x5q4x5q4:udc"],
   ])("returns null for %s", (_label, raw) => {
     expect(parseSmartFileEntityId(raw)).toBeNull();
   });
@@ -169,7 +248,8 @@ describe("access policy — imported, not re-literalled (A-CP1-F3)", () => {
 
 describe("read shape — content cannot travel without a stamp", () => {
   const entityId = buildSmartFileEntityId({
-    jurisdictionFips: "48021",
+    scopeType: "jurisdiction",
+    scopeId: "48021",
     docSlug: "udc-2024",
   });
 
@@ -184,6 +264,8 @@ describe("read shape — content cannot travel without a stamp", () => {
     document: {
       entityType: "smart-file-document" as const,
       entityId,
+      scopeType: "jurisdiction" as const,
+      scopeId: "48021",
       jurisdictionFips: "48021",
       docSlug: "udc-2024",
       title: "Unified Development Code (2024)",

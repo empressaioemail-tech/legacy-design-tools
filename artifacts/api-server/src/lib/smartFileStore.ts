@@ -57,16 +57,19 @@ import {
 import {
   buildSmartFileEntityId,
   evaluateSmartFileFreshness,
+  jurisdictionFipsFromEntityParts,
   parseSmartFileEntityId,
   type SmartFileAbsence,
   type SmartFileFreshness,
   type SmartFileProvenance,
   type SmartFileReadResult,
+  type SmartFileScopeType,
   SMART_FILE_PROVENANCE_SCHEMA,
 } from "../atoms/smart-file.contract";
 
 export interface CreateSmartFileInput {
-  jurisdictionFips: string;
+  scopeType: SmartFileScopeType;
+  scopeId: string;
   docSlug: string;
   title: string;
   accessPolicy: SmartFileAccessPolicyValue;
@@ -106,7 +109,9 @@ export interface SmartFileVersionView {
 
 export interface SmartFileReadView {
   entityId: string;
-  jurisdictionFips: string;
+  scopeType: SmartFileScopeType;
+  scopeId: string;
+  jurisdictionFips: string | null;
   docSlug: string;
   title: string;
   accessPolicy: SmartFileAccessPolicyValue;
@@ -138,7 +143,13 @@ export async function createDocument(
   input: CreateSmartFileInput,
 ): Promise<{ entityId: string; created: boolean }> {
   const entityId = buildSmartFileEntityId({
-    jurisdictionFips: input.jurisdictionFips,
+    scopeType: input.scopeType,
+    scopeId: input.scopeId,
+    docSlug: input.docSlug,
+  });
+  const jurisdictionFips = jurisdictionFipsFromEntityParts({
+    scopeType: input.scopeType,
+    scopeId: input.scopeId,
     docSlug: input.docSlug,
   });
   // Validate before any write: an unsourced document must never land.
@@ -160,7 +171,9 @@ export async function createDocument(
       .insert(smartFileDocuments)
       .values({
         entityId,
-        jurisdictionFips: input.jurisdictionFips,
+        scopeType: input.scopeType,
+        scopeId: input.scopeId,
+        jurisdictionFips,
         docSlug: input.docSlug,
         title: input.title,
         accessPolicy: input.accessPolicy,
@@ -315,7 +328,8 @@ export async function reviseDocument(
  * cannot record an uncited absence.
  */
 export async function recordAbsenceDetermination(input: {
-  jurisdictionFips: string;
+  scopeType: SmartFileScopeType;
+  scopeId: string;
   docSlug: string;
   verdict: SmartFileAbsenceVerdict;
   /** WHY. Never "not found" — that is the question, not the answer. */
@@ -327,9 +341,12 @@ export async function recordAbsenceDetermination(input: {
   determinedAt?: Date;
 }): Promise<{ entityId: string; recorded: true }> {
   const entityId = buildSmartFileEntityId({
-    jurisdictionFips: input.jurisdictionFips,
+    scopeType: input.scopeType,
+    scopeId: input.scopeId,
     docSlug: input.docSlug,
   });
+  const jurisdictionFips =
+    input.scopeType === "jurisdiction" ? input.scopeId : null;
 
   // Fail loudly BEFORE the write rather than letting the DB check constraint
   // surface as an opaque driver error. Both layers hold; this one explains.
@@ -352,7 +369,7 @@ export async function recordAbsenceDetermination(input: {
     .insert(smartFileAbsenceDeterminations)
     .values({
       entityId,
-      jurisdictionFips: input.jurisdictionFips,
+      jurisdictionFips,
       docSlug: input.docSlug,
       verdict: input.verdict,
       basis: input.basis,
@@ -387,14 +404,15 @@ export async function recordAbsenceDetermination(input: {
  */
 function buildNotSoughtAbsence(
   entityId: string,
-  jurisdictionFips: string,
-  docSlug: string,
+  parts: NonNullable<ReturnType<typeof parseSmartFileEntityId>>,
 ): SmartFileAbsence {
   return {
     status: "not-sought",
     entityId,
-    jurisdictionFips,
-    docSlug,
+    scopeType: parts.scopeType,
+    scopeId: parts.scopeId,
+    jurisdictionFips: jurisdictionFipsFromEntityParts(parts),
+    docSlug: parts.docSlug,
     absence: {
       basis:
         "No document is held for this entityId and no absence determination has " +
@@ -474,12 +492,14 @@ export async function readDocument(input: {
         return {
           status: "lookup-failed",
           entityId: input.entityId,
-          jurisdictionFips: "",
-          docSlug: "",
+          scopeType: null,
+          scopeId: null,
+          jurisdictionFips: null,
+          docSlug: null,
           absence: {
             basis:
               `The entityId ${JSON.stringify(input.entityId)} does not match the ` +
-              `declared shape smartfile:<jurisdictionFips>:<docSlug>, so no lookup ` +
+              `declared shape smartfile:<scopeType>:<scopeId>:<docSlug>, so no lookup ` +
               `was possible. This is a malformed request, NOT evidence that the ` +
               `document is absent.`,
             determinedBy: "smartFileStore.readDocument",
@@ -494,22 +514,23 @@ export async function readDocument(input: {
           heldDocument: null,
         };
       }
-      return buildNotSoughtAbsence(
-        input.entityId,
-        parts.jurisdictionFips,
-        parts.docSlug,
-      );
+      return buildNotSoughtAbsence(input.entityId, parts);
     }
 
     // A determination EXISTS. Its verdict is reported as recorded — this
     // function never upgrades or downgrades a verdict, it reports one.
+    const detParts = parseSmartFileEntityId(determination.entityId);
     return {
       status: determination.verdict === "absent-verified"
         ? "absent-verified"
         : "lookup-failed",
       entityId: determination.entityId,
-      jurisdictionFips: determination.jurisdictionFips,
-      docSlug: determination.docSlug,
+      scopeType: detParts?.scopeType ?? null,
+      scopeId: detParts?.scopeId ?? null,
+      jurisdictionFips: detParts
+        ? jurisdictionFipsFromEntityParts(detParts)
+        : null,
+      docSlug: detParts?.docSlug ?? null,
       absence: {
         basis: determination.basis,
         determinedBy: determination.determinedBy,
@@ -548,6 +569,8 @@ export async function readDocument(input: {
     return {
       status: "held-version-absent",
       entityId: doc.entityId,
+      scopeType: doc.scopeType,
+      scopeId: doc.scopeId,
       jurisdictionFips: doc.jurisdictionFips,
       docSlug: doc.docSlug,
       absence: {
@@ -594,6 +617,8 @@ export async function readDocument(input: {
     document: {
       entityType: "smart-file-document",
       entityId: doc.entityId,
+      scopeType: doc.scopeType,
+      scopeId: doc.scopeId,
       jurisdictionFips: doc.jurisdictionFips,
       docSlug: doc.docSlug,
       title: doc.title,
