@@ -502,3 +502,67 @@ export type NewSmartFileAbsenceDeterminationRow =
   typeof smartFileAbsenceDeterminations.$inferInsert;
 export type SmartFilePlacementRow = typeof smartFilePlacements.$inferSelect;
 export type NewSmartFilePlacementRow = typeof smartFilePlacements.$inferInsert;
+
+/** Folder registry for the data-room serve layer (G-56). Twin-node folders. */
+export const smartFileFolders = pgTable(
+  "smart_file_folders",
+  {
+    folderId: text("folder_id").primaryKey(),
+    scopeType: text("scope_type")
+      .notNull()
+      .$type<SmartFileScopeTypeValue>(),
+    scopeId: text("scope_id").notNull(),
+    label: text("label").notNull(),
+    accessPolicy: text("access_policy")
+      .notNull()
+      .$type<SmartFileAccessPolicyValue>(),
+    parentFolderId: text("parent_folder_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    scopeIdx: index("smart_file_folders_scope_idx").on(t.scopeType, t.scopeId),
+    scopeTypeCheck: check(
+      "smart_file_folders_scope_type_check",
+      sql`${t.scopeType} IN ('jurisdiction', 'tenant', 'site')`,
+    ),
+    accessPolicyCheck: check(
+      "smart_file_folders_access_policy_check",
+      sql`${t.accessPolicy} IN ('public-free', 'public-paid', 'platform-internal', 'tenant-private', 'tenant-shared')`,
+    ),
+  }),
+);
+
+/** Non-file atoms on a folder node (record pane only; never file list). */
+export const smartFileFolderRecords = pgTable(
+  "smart_file_folder_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    folderId: text("folder_id")
+      .notNull()
+      .references(() => smartFileFolders.folderId, { onDelete: "cascade" }),
+    recordEntityId: text("record_entity_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    accessPolicy: text("access_policy")
+      .notNull()
+      .$type<SmartFileAccessPolicyValue>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    folderRecordUniq: uniqueIndex("smart_file_folder_records_uniq").on(
+      t.folderId,
+      t.recordEntityId,
+    ),
+    accessPolicyCheck: check(
+      "smart_file_folder_records_access_policy_check",
+      sql`${t.accessPolicy} IN ('public-free', 'public-paid', 'platform-internal', 'tenant-private', 'tenant-shared')`,
+    ),
+  }),
+);
+
+export type SmartFileFolderRow = typeof smartFileFolders.$inferSelect;
+export type SmartFileFolderRecordRow = typeof smartFileFolderRecords.$inferSelect;

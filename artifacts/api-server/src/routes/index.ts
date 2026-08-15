@@ -62,6 +62,7 @@ import peAuthRouter from "./peAuth";
 import propertyExplorerRouter from "./propertyExplorer";
 import planReviewBffRouter from "./planReviewBff";
 import { internalQaRunStateRouter } from "./operatorRunState";
+import { smartFilesRouter } from "./smartFiles";
 
 const router: IRouter = Router();
 
@@ -113,6 +114,8 @@ router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
 // list backing the CC County Ledger's focusedFixCount. Reachable at
 // GET /api/onboarding-ledger/events (pinned contract; see module header).
 router.use("/onboarding-ledger", onboardingLedgerEventsRouter);
+// Smart Files data room (G-56). Bearer service token; accessPolicy on every read.
+router.use("/smart-files", smartFilesRouter);
 router.use(packagesRouter);
 router.use(canvaRouter);
 router.use(collateralRouter);
