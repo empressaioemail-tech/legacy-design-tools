@@ -170,11 +170,6 @@ export const smartFileDocuments = pgTable(
       t.jurisdictionFips,
       t.docSlug,
     ),
-    scopeIdx: index("smart_file_documents_scope_idx").on(
-      t.scopeType,
-      t.scopeId,
-      t.docSlug,
-    ),
     accessPolicyIdx: index("smart_file_documents_access_policy_idx").on(
       t.accessPolicy,
     ),
@@ -367,8 +362,11 @@ export const smartFileAbsenceDeterminations = pgTable(
      * whole family is built to prevent.
      */
     entityId: text("entity_id").notNull(),
-    /** Denormalized from the entityId for jurisdiction-scoped queries. */
-    jurisdictionFips: text("jurisdiction_fips").notNull(),
+    /**
+     * Denormalized FIPS when scope is jurisdiction (value equals scopeId from
+     * parsed entityId). Null for tenant and site scopes.
+     */
+    jurisdictionFips: text("jurisdiction_fips"),
     docSlug: text("doc_slug").notNull(),
     /**
      * The VERDICT. Exactly two values, and the pair is the point:

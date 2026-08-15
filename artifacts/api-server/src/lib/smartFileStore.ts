@@ -346,7 +346,7 @@ export async function recordAbsenceDetermination(input: {
     docSlug: input.docSlug,
   });
   const jurisdictionFips =
-    input.scopeType === "jurisdiction" ? input.scopeId : "";
+    input.scopeType === "jurisdiction" ? input.scopeId : null;
 
   // Fail loudly BEFORE the write rather than letting the DB check constraint
   // surface as an opaque driver error. Both layers hold; this one explains.

@@ -1716,7 +1716,7 @@ CREATE TABLE @@SCHEMA@@.sheets (
 CREATE TABLE @@SCHEMA@@.smart_file_absence_determinations (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     entity_id text NOT NULL,
-    jurisdiction_fips text NOT NULL,
+    jurisdiction_fips text,
     doc_slug text NOT NULL,
     verdict text NOT NULL,
     basis text NOT NULL,
@@ -3648,11 +3648,6 @@ CREATE INDEX smart_file_documents_jurisdiction_idx ON @@SCHEMA@@.smart_file_docu
 -- Name: smart_file_documents_scope_identity_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX smart_file_documents_scope_identity_uniq ON @@SCHEMA@@.smart_file_documents USING btree (scope_type, scope_id, doc_slug);
-
-
--- Name: smart_file_documents_scope_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX smart_file_documents_scope_idx ON @@SCHEMA@@.smart_file_documents USING btree (scope_type, scope_id, doc_slug);
 
 
 -- Name: smart_file_placements_document_idx; Type: INDEX; Schema: public; Owner: -
