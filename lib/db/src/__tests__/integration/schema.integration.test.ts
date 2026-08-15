@@ -299,6 +299,9 @@ describe("lib/db schema integration", () => {
         // absence either.
         "smart_file_absence_determinations",
         "smart_file_documents",
+        // G-56 / 0081 seed-only folder registry (not the graph).
+        "smart_file_folder_records",
+        "smart_file_folders",
         "smart_file_placements",
         "smart_file_versions",
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
