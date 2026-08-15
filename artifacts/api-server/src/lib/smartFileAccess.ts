@@ -36,11 +36,21 @@ export function canReadSmartFilePolicy(
   }
 }
 
+/**
+ * Command Center and MCP call cortex-api with the service bearer
+ * (CORTEX_SERVICE_API_KEY / SERVICE_API_KEY). requireServiceToken attaches
+ * serviceAuth on success. That credential is the operator path (WDLL G-56
+ * item 7): it reads platform-internal. Gate-front may also set
+ * platformInternal via signed context or x-hauska-platform-internal; either
+ * signal is enough. A missing serviceAuth is anonymous and cannot read
+ * platform-internal (the route middleware 401s first).
+ */
 export function accessSubjectFromRequest(req: {
   serviceAuth?: { platformInternal?: boolean; jurisdictionTenant?: string | null };
 }): SmartFileAccessSubject {
+  const authedService = req.serviceAuth !== undefined;
   return {
-    platformInternal: req.serviceAuth?.platformInternal ?? false,
+    platformInternal: authedService || req.serviceAuth?.platformInternal === true,
     jurisdictionTenant: req.serviceAuth?.jurisdictionTenant ?? null,
     paidTier: false,
   };
