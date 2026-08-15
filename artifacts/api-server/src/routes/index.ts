@@ -62,8 +62,6 @@ import peAuthRouter from "./peAuth";
 import propertyExplorerRouter from "./propertyExplorer";
 import planReviewBffRouter from "./planReviewBff";
 import { internalQaRunStateRouter } from "./operatorRunState";
-import { smartFilesRouter } from "./smartFiles";
-
 const router: IRouter = Router();
 
 router.use(healthRouter);
@@ -114,8 +112,14 @@ router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
 // list backing the CC County Ledger's focusedFixCount. Reachable at
 // GET /api/onboarding-ledger/events (pinned contract; see module header).
 router.use("/onboarding-ledger", onboardingLedgerEventsRouter);
-// Smart Files data room (G-56). Bearer service token; accessPolicy on every read.
-router.use("/smart-files", smartFilesRouter);
+// G-58: Smart Files is unmounted from cortex-api. A tombstone is required
+// because unmatched /api/* falls through to the SPA catch-all (HTML 200).
+router.use("/smart-files", (_req, res) => {
+  res.status(404).json({
+    error: "unmounted",
+    message: "Smart Files is not served by cortex-api.",
+  });
+});
 router.use(packagesRouter);
 router.use(canvaRouter);
 router.use(collateralRouter);
