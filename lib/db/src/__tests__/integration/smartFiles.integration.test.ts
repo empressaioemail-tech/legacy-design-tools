@@ -35,8 +35,8 @@ const PROVENANCE = JSON.stringify({
 });
 
 const JURISDICTION_ENTITY_ID = "smartfile:jurisdiction:48021:udc-2024";
-const TENANT_JURISDICTION_ENTITY_ID = "smartfile:tenant:mox:unit-turn-sop";
-const SITE_JURISDICTION_ENTITY_ID = "smartfile:site:parcel:48021:R12345:geotech";
+const TENANT_ENTITY_ID = "smartfile:tenant:mox:unit-turn-sop";
+const SITE_ENTITY_ID = "smartfile:site:parcel:48021:R12345:geotech";
 
 interface SeedDocOptions {
   entityId: string;
