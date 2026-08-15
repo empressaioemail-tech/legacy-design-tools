@@ -289,6 +289,15 @@ describe("lib/db schema integration", () => {
         // inserts and supersedes; nothing is overwritten, so history survives),
         // placements hold location many-to-many (placing again adds a row here,
         // never a copy of the document).
+        // G-34 typed absence (0079). The record that we LOOKED for a document
+        // and what we concluded. It exists as a TABLE because "only a positive
+        // determination writes an absence" is unenforceable if the read path
+        // can synthesize "absent" from a zero-row query — so the verdict must
+        // be a row something deliberately wrote, and a read with no row here
+        // reports `not-sought` instead. `basis` is NOT NULL and check-
+        // constrained non-empty at the DB, so raw SQL cannot record an uncited
+        // absence either.
+        "smart_file_absence_determinations",
         "smart_file_documents",
         "smart_file_placements",
         "smart_file_versions",

@@ -31,6 +31,12 @@
  *   consumer needs it before then, that forces promotion early and is a
  *   FINDING, not a violation. Record it; do not quietly copy this file.
  *
+ *   G-34 HAS NOW LANDED and it DID reshape the shape, exactly as predicted:
+ *   the read path's return type changed from `SmartFileReadView | null` to a
+ *   discriminated union with no null member. The promotion VERDICT for this
+ *   row is recorded in `_inbox/2026-08-15_a2_close.json`; the promotion itself
+ *   is deliberately NOT performed here.
+ *
  * The five-value access-policy union is IMPORTED, never re-declared here
  * (finding A-CP1-F3: `ACCESS_POLICY_SCHEMA` is already re-literalled in three
  * subtrees of the contract source with no divergence test — DEV_PROCESS 2.4).
@@ -436,6 +442,233 @@ export const SMART_FILE_READ_SCHEMA = z.object({
   freshness: SMART_FILE_FRESHNESS_SCHEMA,
   placements: z.array(SMART_FILE_PLACEMENT_SCHEMA).readonly(),
 });
+
+/* ------------------------------------------------------------------ *
+ * TYPED ABSENCE (OPS-17 PLAN-ROW G-34)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The status set for a Smart Files read.
+ *
+ * DERIVED for the document layer, not copied from the spine. The spine carries
+ * six `displayState` values plus an `isPartial` boolean
+ * (`countyLedgerCompute.ts:38-46`), of which only three are STORED
+ * (`countyFacetCoverage.ts:133-141`). Those are jurisdiction-layer states over
+ * a population of parcels; a document is a single thing, so the axes differ.
+ *
+ * The five, and why each exists:
+ *
+ *   `held`
+ *     The document is held and the requested version resolved. Carries content
+ *     plus the full stamp. (Spine analogue: `satisfied-present`.)
+ *
+ *   `absent-verified`
+ *     We LOOKED and positively determined the document does not exist. A REAL
+ *     ANSWER, renderable as one — "Bastrop has no short-term-rental ordinance"
+ *     is a finding, not a coverage hole. Producible ONLY from a recorded
+ *     determination row, never from an empty query.
+ *     (Spine analogue: `satisfied-absent`.)
+ *
+ *   `not-sought`
+ *     We have never looked. An honest statement about OUR COVERAGE, making no
+ *     claim about the world either way. This is where an empty lookup lands,
+ *     which is precisely what keeps an empty lookup from becoming an absence.
+ *     (Spine analogue: `not-yet`.)
+ *
+ *   `lookup-failed`
+ *     We tried to look and the ATTEMPT failed. We know nothing about whether
+ *     the document exists. Distinct from `absent-verified` because a probe
+ *     failure wearing the costume of a data gap is the exact defect the spine
+ *     taxonomy was built to kill. (Spine analogue: `derivation-indeterminate`.)
+ *
+ *   `held-version-absent`
+ *     The document IS held; the specific version requested is not. NO SPINE
+ *     ANALOGUE — the spine has no version axis. This exists because the G-14
+ *     store returned the identical `null` from two different sites
+ *     (`smartFileStore.ts:307` document-missing and `:322` version-missing),
+ *     conflating "we do not have this document" with "we have it but not that
+ *     revision". The second is not an absence at all.
+ *
+ * DELIBERATELY NOT CARRIED from the spine, each because nothing at this layer
+ * could ever produce it — and a status nobody can produce is dead weight:
+ *   `no-atom`   — "does an atom family exist for this subject": a registry
+ *                 question about the writer fleet. Smart Files is one declared
+ *                 family; there is no per-document family-existence axis.
+ *   `no-writer` — "the family exists but nothing produces coverage for this
+ *                 cell": a capture-pipeline question (G-44), invisible from
+ *                 the store, and permanently unset if carried here.
+ *   `isPartial` — a RATIO over a population against a coverage threshold. A
+ *                 single document is not partially held: the version row is
+ *                 there or it is not. Corpus-level partiality is G-20, and it
+ *                 belongs on a corpus, never on a single read.
+ */
+export const SMART_FILE_READ_STATUSES = [
+  "held",
+  "absent-verified",
+  "not-sought",
+  "lookup-failed",
+  "held-version-absent",
+] as const;
+
+export type SmartFileReadStatus = (typeof SMART_FILE_READ_STATUSES)[number];
+
+/**
+ * The statuses that represent an ABSENCE of servable content. Exhaustive by
+ * construction: it is every status except `held`, derived rather than
+ * hand-listed, so adding a sixth status cannot silently omit it here.
+ */
+export type SmartFileAbsentStatus = Exclude<SmartFileReadStatus, "held">;
+
+/**
+ * WHY a document is not being served. Carried by every absence.
+ *
+ * `basis` is REQUIRED and is a non-empty string. "Not found" is not a basis;
+ * WHY it is not found is. An absence without its citation is unfalsifiable —
+ * a later reader cannot distinguish a real determination from a placeholder.
+ *
+ * For `absent-verified` and `lookup-failed` this is copied from the recorded
+ * determination row, whose own `basis` column is NOT NULL and check-constrained
+ * non-empty at the DATABASE, so the requirement survives a caller that bypasses
+ * this type entirely.
+ */
+export interface SmartFileAbsenceBasis {
+  /** WHY, in words a reader can act on. Never "not found". */
+  basis: string;
+  /**
+   * What established this — a CLI name, a sweep id, an operator handle. Null
+   * ONLY for `not-sought`, where by definition no instrument has run.
+   */
+  determinedBy: string | null;
+  /**
+   * When the determination was made. Null ONLY for `not-sought`: never having
+   * looked has no timestamp, and inventing one would fabricate a freshness
+   * claim about a lookup that did not happen.
+   */
+  determinedAt: string | null;
+  /**
+   * The source consulted, when there is a URL for it. Null is a POSITIVE "no
+   * single source URL" (e.g. a phone call to a clerk), not "unknown".
+   */
+  sourceUri: string | null;
+}
+
+export const SMART_FILE_ABSENCE_BASIS_SCHEMA = z.object({
+  basis: z.string().min(1),
+  determinedBy: z.string().min(1).nullable(),
+  determinedAt: z.string().min(1).nullable(),
+  sourceUri: z.string().min(1).nullable(),
+});
+
+/**
+ * A typed, provenanced absence.
+ *
+ * Note what is NOT optional: `status`, `basis`, and `freshness`. An absence
+ * carries a freshness stamp for the same reason a presence does — a VERIFIED
+ * ABSENCE DECAYS. "We checked in 2019 and there was no STR ordinance" is not
+ * evidence about today, and an absence served without a stamp invites exactly
+ * that misreading.
+ *
+ * For `not-sought` the freshness stamp is deliberately ABSENT (null) rather
+ * than synthesized: there is no determination event to age. A stamp there would
+ * be a fabricated measurement, which is worse than none.
+ */
+export interface SmartFileAbsence {
+  status: SmartFileAbsentStatus;
+  /** The entityId asked for, echoed so a caller never re-derives it. */
+  entityId: string;
+  jurisdictionFips: string;
+  docSlug: string;
+  /** WHY this is not being served. */
+  absence: SmartFileAbsenceBasis;
+  /**
+   * Freshness of the DETERMINATION. Null for `not-sought` only (nothing to
+   * age). Non-null for every other absence status, so a stale determination is
+   * visibly stale rather than quietly authoritative.
+   */
+  freshness: SmartFileFreshness | null;
+  /**
+   * For `held-version-absent` only: the document IS held, so its identity and
+   * the versions that DO exist travel with the absence — a caller asking for
+   * version 7 of a 3-version document should learn it can have 1, 2 or 3.
+   * Null for every other status.
+   */
+  heldDocument: {
+    title: string;
+    accessPolicy: SmartFileAccessPolicy;
+    currentVersion: number;
+    requestedVersion: number;
+  } | null;
+}
+
+export const SMART_FILE_ABSENCE_SCHEMA = z.object({
+  status: z.enum(["absent-verified", "not-sought", "lookup-failed", "held-version-absent"]),
+  entityId: z.string().min(1),
+  jurisdictionFips: z.string().min(1),
+  docSlug: z.string().min(1),
+  absence: SMART_FILE_ABSENCE_BASIS_SCHEMA,
+  freshness: SMART_FILE_FRESHNESS_SCHEMA.nullable(),
+  heldDocument: z
+    .object({
+      title: z.string().min(1),
+      accessPolicy: SMART_FILE_ACCESS_POLICY_SCHEMA,
+      currentVersion: z.number().int().positive(),
+      requestedVersion: z.number().int().positive(),
+    })
+    .nullable(),
+});
+
+/**
+ * A PRESENT read — the `held` arm of the union.
+ *
+ * Structurally identical to `SmartFileRead` plus the discriminant. The
+ * discriminant is what lets a caller narrow with `if (r.status === "held")`
+ * instead of a truthiness check that a null could pass.
+ */
+export interface SmartFilePresent extends SmartFileRead {
+  status: "held";
+}
+
+/**
+ * THE READ RESULT — a discriminated union with NO null member.
+ *
+ * This is the G-34 deliverable in one line. The G-14 read path returned
+ * `SmartFileReadView | null`, and "do not render that null as a data gap" was a
+ * DOC COMMENT — a rule a caller in another file never sees. DEV_PROCESS: a
+ * guardrail that does not survive a clone is not a guardrail.
+ *
+ * Because `null` and `undefined` are not members of this union, a read path
+ * that tries to return a bare null is a COMPILE ERROR, and a caller cannot
+ * reach content without first narrowing on `status`. The rule moved from
+ * reminder to mechanism.
+ */
+export type SmartFileReadResult = SmartFilePresent | SmartFileAbsence;
+
+/** Narrowing helper. `result.status === "held"` inline works identically. */
+export function isSmartFileHeld(
+  result: SmartFileReadResult,
+): result is SmartFilePresent {
+  return result.status === "held";
+}
+
+/**
+ * True when this absence is a REAL ANSWER about the world rather than a
+ * statement about our own coverage.
+ *
+ * The distinction a surface needs: `absent-verified` renders as "there is no
+ * such document, and here is how we know", while `not-sought` and
+ * `lookup-failed` render as "we cannot tell you". Getting this backwards in
+ * either direction is a customer-visible lie, which is why it is a named
+ * function rather than left to each caller to re-derive.
+ */
+export function isSmartFileVerifiedAbsent(
+  result: SmartFileReadResult,
+): boolean {
+  return result.status === "absent-verified";
+}
+
+export function validateSmartFileAbsence(input: unknown): SmartFileAbsence {
+  return SMART_FILE_ABSENCE_SCHEMA.parse(input) as SmartFileAbsence;
+}
 
 export const SMART_FILE_ENTITY_TYPES = [
   "smart-file-document",
