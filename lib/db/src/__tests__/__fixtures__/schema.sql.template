@@ -1711,6 +1711,55 @@ CREATE TABLE @@SCHEMA@@.sheets (
 );
 
 
+-- Name: smart_file_documents; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_documents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_id text NOT NULL,
+    jurisdiction_fips text NOT NULL,
+    doc_slug text NOT NULL,
+    title text NOT NULL,
+    access_policy text NOT NULL,
+    current_version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_documents_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
+    CONSTRAINT smart_file_documents_current_version_check CHECK ((current_version >= 1))
+);
+
+
+-- Name: smart_file_placements; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_placements (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    document_id uuid NOT NULL,
+    document_entity_id text NOT NULL,
+    target_type text NOT NULL,
+    target_id text NOT NULL,
+    placed_at timestamp with time zone DEFAULT now() NOT NULL,
+    placed_by text,
+    CONSTRAINT smart_file_placements_target_type_check CHECK ((target_type = ANY (ARRAY['folder'::text, 'parcel'::text, 'project'::text, 'asset'::text, 'permit'::text, 'meeting'::text])))
+);
+
+
+-- Name: smart_file_versions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_versions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    document_id uuid NOT NULL,
+    document_entity_id text NOT NULL,
+    version integer NOT NULL,
+    content_cid text NOT NULL,
+    content_type text NOT NULL,
+    byte_size bigint NOT NULL,
+    provenance jsonb NOT NULL,
+    computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    superseded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_versions_version_check CHECK ((version >= 1))
+);
+
+
 -- Name: snapshot_ifc_files; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.snapshot_ifc_files (
@@ -2652,6 +2701,24 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_pkey PRIMARY KEY (id);
 
 
+-- Name: smart_file_documents smart_file_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_documents
+    ADD CONSTRAINT smart_file_documents_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_placements smart_file_placements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_placements
+    ADD CONSTRAINT smart_file_placements_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_versions smart_file_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_versions
+    ADD CONSTRAINT smart_file_versions_pkey PRIMARY KEY (id);
+
+
 -- Name: snapshot_ifc_files snapshot_ifc_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshot_ifc_files
@@ -3517,6 +3584,51 @@ CREATE UNIQUE INDEX sheets_snapshot_number_unique ON @@SCHEMA@@.sheets USING btr
 CREATE INDEX sheets_snapshot_sort_idx ON @@SCHEMA@@.sheets USING btree (snapshot_id, sort_order);
 
 
+-- Name: smart_file_documents_access_policy_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_documents_access_policy_idx ON @@SCHEMA@@.smart_file_documents USING btree (access_policy);
+
+
+-- Name: smart_file_documents_entity_id_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_documents_entity_id_uniq ON @@SCHEMA@@.smart_file_documents USING btree (entity_id);
+
+
+-- Name: smart_file_documents_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_documents_jurisdiction_idx ON @@SCHEMA@@.smart_file_documents USING btree (jurisdiction_fips, doc_slug);
+
+
+-- Name: smart_file_placements_document_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_placements_document_idx ON @@SCHEMA@@.smart_file_placements USING btree (document_id);
+
+
+-- Name: smart_file_placements_target_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_placements_target_idx ON @@SCHEMA@@.smart_file_placements USING btree (target_type, target_id);
+
+
+-- Name: smart_file_placements_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_placements_uniq ON @@SCHEMA@@.smart_file_placements USING btree (document_id, target_type, target_id);
+
+
+-- Name: smart_file_versions_content_cid_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_versions_content_cid_idx ON @@SCHEMA@@.smart_file_versions USING btree (content_cid);
+
+
+-- Name: smart_file_versions_doc_version_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_versions_doc_version_uniq ON @@SCHEMA@@.smart_file_versions USING btree (document_id, version);
+
+
+-- Name: smart_file_versions_document_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_versions_document_idx ON @@SCHEMA@@.smart_file_versions USING btree (document_id, version);
+
+
 -- Name: snapshot_ifc_files_parsed_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX snapshot_ifc_files_parsed_at_idx ON @@SCHEMA@@.snapshot_ifc_files USING btree (parsed_at);
@@ -4021,6 +4133,18 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
+-- Name: smart_file_placements smart_file_placements_document_id_smart_file_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_placements
+    ADD CONSTRAINT smart_file_placements_document_id_smart_file_documents_id_fk FOREIGN KEY (document_id) REFERENCES @@SCHEMA@@.smart_file_documents(id) ON DELETE CASCADE;
+
+
+-- Name: smart_file_versions smart_file_versions_document_id_smart_file_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_versions
+    ADD CONSTRAINT smart_file_versions_document_id_smart_file_documents_id_fk FOREIGN KEY (document_id) REFERENCES @@SCHEMA@@.smart_file_documents(id) ON DELETE CASCADE;
 
 
 -- Name: snapshot_ifc_files snapshot_ifc_files_snapshot_id_snapshots_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
