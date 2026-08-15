@@ -281,6 +281,17 @@ describe("lib/db schema integration", () => {
         // extraction atoms (OCR segments + annotations).
         "sheet_content_extractions",
         "sheets",
+        // OPS-17 G-14 — Smart Files, the city-file-system artifact family
+        // (0078). A NEW family per amendment A-012; it does NOT extend
+        // `brokerage_workspaces`. Split three ways because the promise forces
+        // it: documents hold identity (one row per declared entityId, however
+        // many places it appears), versions hold content append-only (revision
+        // inserts and supersedes; nothing is overwritten, so history survives),
+        // placements hold location many-to-many (placing again adds a row here,
+        // never a copy of the document).
+        "smart_file_documents",
+        "smart_file_placements",
+        "smart_file_versions",
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",
         "snapshots",
