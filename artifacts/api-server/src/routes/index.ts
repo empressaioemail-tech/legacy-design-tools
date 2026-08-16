@@ -60,7 +60,7 @@ import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
 import peAuthRouter from "./peAuth";
 import propertyExplorerRouter from "./propertyExplorer";
-import planReviewBffRouter from "./planReviewBff";
+import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
 const router: IRouter = Router();
 
@@ -68,7 +68,9 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use(peAuthRouter);
 router.use(propertyExplorerRouter);
-router.use("/plan-review", planReviewBffRouter);
+// G-60: plan-review BFF lives on plan-review Cloud Run. This mount is a
+// proxy, not a second implementation and not a 404 (unlike Smart Files).
+router.use("/plan-review", planReviewProxyRouter);
 // Hauska Property Brief Chrome extension — API-key auth + extension CORS.
 router.use(brokerageBriefRouter);
 // /engagements/match must register BEFORE /engagements/:id otherwise Express
