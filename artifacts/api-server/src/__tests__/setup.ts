@@ -310,11 +310,30 @@ export async function buildTestApp(): Promise<Express> {
 }
 
 /**
+ * G-60: the live `/api/plan-review` mount is a proxy. BFF behavior tests
+ * still mount planReviewBff directly so they do not require Cloud Run env.
+ */
+export async function buildPlanReviewBffTestApp(): Promise<Express> {
+  const { default: planReviewBffRouter } = await import(
+    "../routes/planReviewBff"
+  );
+  const app = express();
+  app.use(cookieParser());
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use(sessionMiddleware);
+  app.use(userRateLimitMiddleware);
+  app.use("/api/plan-review", planReviewBffRouter);
+  return app;
+}
+
+/**
  * Wire up beforeAll/afterEach/afterAll for a route test file. Pass a callback
  * that receives the live `Express` app (rebuilt once after the schema opens).
  */
 export function setupRouteTests(
   onReady: (getApp: () => Express) => void = () => {},
+  buildApp: () => Promise<Express> = buildTestApp,
 ): void {
   let app: Express | null = null;
 
@@ -323,7 +342,7 @@ export function setupRouteTests(
       process.env.PRIVATE_OBJECT_DIR = "/test-bucket/private";
     }
     ctx.schema = await createTestSchema();
-    app = await buildTestApp();
+    app = await buildApp();
     onReady(() => {
       if (!app) throw new Error("setupRouteTests: app not built");
       return app;

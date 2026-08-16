@@ -74,7 +74,8 @@ describe("GET /api/plan-review/queue", () => {
     expect(res.headers["x-plan-review-proxied"]).toBe("1");
     expect(res.body).toEqual({ total: 2, Submitted: 2 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = call;
     expect(url).toBe(
       "https://plan-review-ozx33wafia-ue.a.run.app/api/plan-review/queue",
     );
