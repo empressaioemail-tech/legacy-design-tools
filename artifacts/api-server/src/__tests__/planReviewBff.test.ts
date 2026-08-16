@@ -78,12 +78,12 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
-const { setupRouteTests } = await import("./setup");
+const { setupRouteTests, buildPlanReviewBffTestApp } = await import("./setup");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
-});
+}, buildPlanReviewBffTestApp);
 
 describe("plan-review BFF reviewer reads", () => {
   beforeEach(async () => {

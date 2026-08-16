@@ -48,12 +48,12 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
-const { setupRouteTests } = await import("./setup");
+const { setupRouteTests, buildPlanReviewBffTestApp } = await import("./setup");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
-});
+}, buildPlanReviewBffTestApp);
 
 /**
  * Every report type the tiles poll. Each falls past the early running-row
