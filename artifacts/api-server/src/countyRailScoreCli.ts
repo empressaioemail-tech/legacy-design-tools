@@ -132,9 +132,18 @@ function makePool(connectionString: string, max: number): pg.Pool {
   });
 }
 
+/**
+ * `--list` reads a checked-in declaration and touches no database, so it must
+ * not need a connection string. It imports `./lib/railScoring/registry`
+ * DIRECTLY rather than the barrel: the barrel re-exports the engine, which
+ * imports classifyFacet from countyCoverageScoreCli.ts, which reaches
+ * @workspace/db and throws without DATABASE_URL. Caught by running the
+ * cheapest command in the tool, which had become the one command that could
+ * not run.
+ */
 async function printRegistry(): Promise<void> {
   const { RAIL_SCORING_DECLARATION, scoreableRailKeys, unspecifiedRails } =
-    await loadRailScoring();
+    await import("./lib/railScoring/registry");
   log("--- rail scoring registry ---");
   for (const rule of RAIL_SCORING_DECLARATION) {
     if (rule.kind === "unspecified") {

@@ -9,6 +9,9 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 import {
   RAIL_SCORING_DECLARATION,
@@ -152,5 +155,41 @@ describe("absence probe reach", () => {
 
   it("an UNKNOWN reach covers nothing — it can never establish an absence", () => {
     expect(absenceProbeCoversCounty(unknownReach, "48021")).toBe(false);
+  });
+});
+
+describe("the registry is DB-free by construction", () => {
+  // `--list` reads a checked-in declaration and touches no database, so it
+  // must not need a connection string. It did: the barrel re-exports the
+  // engine, which imports classifyFacet from countyCoverageScoreCli.ts, which
+  // reaches @workspace/db, whose module body throws without DATABASE_URL. The
+  // cheapest command in the tool had become the one command that could not
+  // run. This pins the import boundary so the barrel cannot creep back in.
+  const source = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "./registry.ts"),
+    "utf8",
+  );
+
+  it("can read its own source (a missing file must FAIL, not skip)", () => {
+    expect(source).toContain("RAIL_SCORING_DECLARATION");
+  });
+
+  it("imports @workspace/db/schema, never the @workspace/db client entrypoint", () => {
+    // The `/schema` export path is a plain declaration module; the bare `.`
+    // export is the pg Pool singleton with the DATABASE_URL guard.
+    expect(source).toMatch(/from\s+"@workspace\/db\/schema"/);
+    expect(source).not.toMatch(/from\s+"@workspace\/db"/);
+  });
+
+  it("imports nothing from the engine, the measurers, the barrel, or a CLI", () => {
+    for (const forbidden of [
+      "./engine",
+      "./measure",
+      "./run",
+      "./index",
+      "countyCoverageScoreCli",
+    ]) {
+      expect(source, forbidden).not.toContain(`from "${forbidden}"`);
+    }
   });
 });
