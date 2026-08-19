@@ -95,10 +95,36 @@ export interface IncorporatedStampCounts {
 }
 
 /**
- * Features, and features that can actually be located. Read BEFORE the spatial
- * join, because a county with no locatable parcel must be refused rather than
- * measured — and because the join is the expensive step and there is no reason
- * to pay for it to learn there was nothing to join.
+ * Is ANY parcel in this county locatable? The refusal only needs the boolean.
+ *
+ * COST, and it is the reason this is a separate function from the count below.
+ * The refusal path runs for EVERY county in the target set — 245 of 254 on the
+ * zoning rail — and the first version asked it with
+ * `count(DISTINCT feature_index) FILTER (WHERE geom IS NOT NULL)`, a full
+ * per-county scan, before deciding whether the county was measurable at all.
+ * That made the CHEAP path expensive and contradicted this module's own claim
+ * that measurability is settled before any spatial work. `EXISTS` short-
+ * circuits on the first row. The exact count is still reported, but only for a
+ * county that survived the refusal and is going to be measured anyway.
+ */
+export async function countyHasAnyGeometry(
+  q: RailScoreQueryable,
+  parcelTable: string,
+  countyFips: string,
+): Promise<boolean> {
+  const r = await q.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM ${parcelTable} WHERE county_fips = $1 AND geom IS NOT NULL
+     ) AS present`,
+    [countyFips],
+  );
+  return Boolean(r.rows[0]?.present);
+}
+
+/**
+ * Features, and features that can actually be located, MEASURED rather than
+ * inferred (DEV_PROCESS 1.3). Called only on the measured path, because it is
+ * a full per-county scan and a refused county has no use for it.
  */
 export async function readLocatableFeatureCounts(
   q: RailScoreQueryable,
@@ -143,17 +169,33 @@ export function incorporatedDenominatorBasis(column: string): string {
  * neither may be scored as coverage — an empty result is not an absence
  * (DEV_PROCESS 4.3).
  */
+const BOUNDARY_AVAILABILITY_MEMO = new WeakMap<
+  object,
+  Promise<{ present: boolean; rows: number }>
+>();
+
 export async function readCityBoundaryAvailability(
   q: RailScoreQueryable,
 ): Promise<{ present: boolean; rows: number }> {
-  const t = await q.query<{ r: string | null }>("SELECT to_regclass($1) AS r", [
-    CITY_BOUNDARY_TABLE,
-  ]);
-  if (t.rows[0]?.r == null) return { present: false, rows: 0 };
-  const c = await q.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM ${CITY_BOUNDARY_TABLE}`,
-  );
-  return { present: true, rows: Number(c.rows[0]?.n ?? 0) };
+  // ONE ANSWER PER DATABASE, not one per county. The first version asked this
+  // 254 times in a statewide run for a fact that cannot vary between counties.
+  // Keyed on the handle rather than module-global, so a run against a
+  // different store is never served another store's answer, and a WeakMap so a
+  // closed pool is not retained.
+  const cached = BOUNDARY_AVAILABILITY_MEMO.get(q as object);
+  if (cached) return await cached;
+  const pending = (async () => {
+    const t = await q.query<{ r: string | null }>("SELECT to_regclass($1) AS r", [
+      CITY_BOUNDARY_TABLE,
+    ]);
+    if (t.rows[0]?.r == null) return { present: false, rows: 0 };
+    const c = await q.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM ${CITY_BOUNDARY_TABLE}`,
+    );
+    return { present: true, rows: Number(c.rows[0]?.n ?? 0) };
+  })();
+  BOUNDARY_AVAILABILITY_MEMO.set(q as object, pending);
+  return await pending;
 }
 
 /**

@@ -32,6 +32,7 @@ import {
 } from "./registry";
 import { wiredZoningCityKeys } from "@workspace/cad-ingest";
 import {
+  countyHasAnyGeometry,
   incorporatedStampDetail,
   measureIncorporatedStampCounts,
   readCityBoundaryAvailability,
@@ -281,18 +282,24 @@ async function measureIncorporatedColumnStamp(
   countyFips: string,
   column: string,
 ): Promise<RailCellMeasurement> {
+  // EVERY QUERY HERE IS CHEAP, and that is deliberate: this path runs for the
+  // whole target set, and 245 of 254 counties never get past the refusal. The
+  // first version ran a full per-county `count(DISTINCT ...) FILTER` scan
+  // before deciding measurability, which made the refusal path cost the same
+  // as the measured one for the 244 counties it was built to spare.
   const den = await readParcelFeatureCount(ctx, countyFips);
   const table = den?.table ?? null;
   const boundary = await readCityBoundaryAvailability(ctx.deployment);
-  const locatable =
-    table === null
-      ? { features: 0, featuresWithGeom: 0 }
-      : await readLocatableFeatureCounts(ctx.deployment, table, countyFips);
   const hasStampColumn =
     table === null ? false : await columnExists(ctx.deployment, table, column);
-  const anyStamped = hasStampColumn && table !== null
-    ? await anyStampPresent(ctx.deployment, table, column, countyFips)
-    : false;
+  const anyStamped =
+    hasStampColumn && table !== null
+      ? await anyStampPresent(ctx.deployment, table, column, countyFips)
+      : false;
+  const anyGeometry =
+    table === null
+      ? false
+      : await countyHasAnyGeometry(ctx.deployment, table, countyFips);
 
   const measurability: CountyMeasurability = resolveStampCellMeasurability({
     table,
@@ -301,7 +308,7 @@ async function measureIncorporatedColumnStamp(
     anyStamped,
     cityBoundaryRows: boundary.rows,
     needsCityBoundary: true,
-    featuresWithGeom: locatable.featuresWithGeom,
+    featuresWithGeom: anyGeometry ? 1 : 0,
   });
   if (!measurability.measurable) {
     throw new CountyNotMeasurableError(
@@ -314,6 +321,13 @@ async function measureIncorporatedColumnStamp(
 
   // Non-null by construction: every null-table path is refused above.
   const parcelTable = table as string;
+  // The exact geom count is provenance, not a gate, so it is read only now
+  // that the county is known to be measurable.
+  const locatable = await readLocatableFeatureCounts(
+    ctx.deployment,
+    parcelTable,
+    countyFips,
+  );
   const counts = await measureIncorporatedStampCounts(
     ctx.deployment,
     parcelTable,

@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  countyHasAnyGeometry,
   incorporatedDenominatorBasis,
   incorporatedStampDetail,
   measureIncorporatedStampCounts,
@@ -122,6 +123,20 @@ describe("incorporated-city denominator: the counting rule", () => {
         rows: 0,
       });
     })();
+  });
+
+  it("the refusal probe is an EXISTS, not a full count — the refusal path must stay cheap", async () => {
+    // 245 of 254 counties never get past the refusal on the zoning rail. The
+    // first version ran a full `count(DISTINCT ...) FILTER` scan before
+    // deciding measurability, so the cheap path cost the same as the expensive
+    // one for exactly the counties it was built to spare.
+    const q = fakeQ([{ present: false }]);
+    expect(await countyHasAnyGeometry(q, "txgio_parcel", "48055")).toBe(false);
+    const sql = q.seen[0] ?? "";
+    expect(sql).toContain("EXISTS");
+    expect(sql).not.toContain("count(");
+    expect(sql).toContain("$1");
+    expect(sql).not.toContain("48055");
   });
 
   it("counts locatable features separately from features — measured, never subtracted", async () => {

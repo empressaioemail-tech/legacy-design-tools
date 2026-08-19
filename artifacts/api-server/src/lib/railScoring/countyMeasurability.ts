@@ -71,9 +71,11 @@ export interface StampCellMeasurabilityInput {
   /** True when the declared denominator needs the municipal boundary table. */
   needsCityBoundary: boolean;
   /**
-   * Features carrying a non-null PostGIS `geom`. Only consulted for a spatial
-   * denominator: a parcel with no geometry cannot be located against a
+   * How many features carry a non-null PostGIS `geom`. Only its ZERO-ness is
+   * consulted, so a caller may pass an `EXISTS` probe's 0-or-1 rather than a
+   * full count: a parcel with no geometry cannot be located against a
    * boundary, so a county with none of them has no spatial denominator at all.
+   * Only meaningful for a spatial denominator.
    */
   featuresWithGeom: number;
 }
