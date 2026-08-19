@@ -3,6 +3,11 @@
  */
 import type pg from "pg";
 import { COVERAGE_CLASS_BY_RAIL_KEY } from "./schema/countyRailDimension";
+import {
+  DEPTH_GATE_DEMOTION_STATE,
+  MANIFEST_DISPLAY_STATE_SQL,
+  MANIFEST_IS_PARTIAL_SQL,
+} from "./manifestDisplayState";
 import type { ReconciliationManifestCell } from "./manifestReconciliationGate";
 
 interface ManifestGridQueryRow extends Record<string, unknown> {
@@ -32,7 +37,7 @@ function applyDepthRailDisplayGate(
   const threshold = cell.thresholdPct;
   const coverage = cell.honestCoveragePct;
   if (coverage === null || threshold === null || coverage < threshold) {
-    return { ...cell, displayState: "not-yet", isPartial: false };
+    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE, isPartial: false };
   }
   return cell;
 }
@@ -51,20 +56,8 @@ export async function readManifestGridFromPool(
       c.honest_coverage_pct,
       c.threshold_pct AS cell_threshold,
       c.verified_by_instrument,
-      CASE
-        WHEN r.atom_family_state <> 'present' THEN 'no-atom'
-        WHEN r.has_writer = false THEN 'no-writer'
-        WHEN c.rail_state IS NULL THEN 'not-yet'
-        ELSE c.rail_state
-      END AS display_state,
-      CASE
-        WHEN r.atom_family_state = 'present'
-         AND r.has_writer = true
-         AND c.rail_state = 'satisfied-present'
-         AND c.honest_coverage_pct < COALESCE(c.threshold_pct, r.threshold_pct)
-        THEN true
-        ELSE false
-      END AS is_partial
+${MANIFEST_DISPLAY_STATE_SQL},
+${MANIFEST_IS_PARTIAL_SQL}
     FROM county_manifest m
     CROSS JOIN county_rail r
     LEFT JOIN county_facet_coverage c
