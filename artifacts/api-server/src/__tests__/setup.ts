@@ -280,6 +280,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "manifest_slot_reservation",
   "manifest_jurisdiction_cost",
   "manifest_run",
+  // SS-W7 / P-44 — the serving-sweep store. Written by
+  // POST /api/serving-sweep/ingest, no FK to anything, so nothing else's
+  // CASCADE clears it. Listed per the "if a route writes to it, it's in
+  // this list" invariant so the serving-sweep suite starts from a
+  // known-empty state (its 503/404 cases assert an EMPTY store, which a
+  // row leaked from an earlier test would silently turn green).
+  "serving_sweep_county",
 ];
 
 /**

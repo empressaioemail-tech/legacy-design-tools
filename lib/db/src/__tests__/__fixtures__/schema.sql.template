@@ -1672,6 +1672,21 @@ CREATE TABLE @@SCHEMA@@.saved_workspace_spaces (
 );
 
 
+-- Name: serving_sweep_county; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.serving_sweep_county (
+    county_fips text NOT NULL,
+    county_name text NOT NULL,
+    swept_at timestamp with time zone NOT NULL,
+    resolver_version text NOT NULL,
+    parcels_total integer NOT NULL,
+    payload jsonb NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT serving_sweep_county_fips_check CHECK ((county_fips ~ '^[0-9]{5}$'::text)),
+    CONSTRAINT serving_sweep_county_parcels_total_check CHECK ((parcels_total >= 0))
+);
+
+
 -- Name: sheet_content_extractions; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheet_content_extractions (
@@ -2735,6 +2750,12 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
 
 ALTER TABLE ONLY @@SCHEMA@@.saved_workspace_spaces
     ADD CONSTRAINT saved_workspace_spaces_pkey PRIMARY KEY (id);
+
+
+-- Name: serving_sweep_county serving_sweep_county_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.serving_sweep_county
+    ADD CONSTRAINT serving_sweep_county_pkey PRIMARY KEY (county_fips);
 
 
 -- Name: sheet_content_extractions sheet_content_extractions_pkey; Type: CONSTRAINT; Schema: public; Owner: -

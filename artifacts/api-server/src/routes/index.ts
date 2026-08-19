@@ -53,6 +53,7 @@ import encumbrancesRouter from "./encumbrances";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import { countyLedgerRouter } from "./countyLedger";
+import { servingSweepRouter } from "./servingSweep";
 import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
 import { onboardingLedgerEventsRouter } from "./onboardingLedgerEvents";
 import intakeRouter from "./intake";
@@ -107,6 +108,15 @@ router.use(coverageRequestsRouter);
 // County ledger — the CC factory-floor performance layer (R-FND-6, OPS-6).
 // Reachable at /api/county-ledger (mounted under the /api router).
 router.use("/county-ledger", countyLedgerRouter);
+// Statewide serving sweep (SS-W7 / P-44) — what the product SERVES per parcel,
+// the counterpart to the manifest's did-a-writer-run question. Reachable at
+// /api/serving-sweep, /api/serving-sweep/counties and
+// /api/serving-sweep/:countyFips (reads, anonymous like /county-ledger above),
+// plus POST /api/serving-sweep/ingest (service token). A mount is REQUIRED
+// rather than optional: unmatched /api/* GETs fall through to the SPA
+// catch-all and answer HTML 200, which is what made the missing route look
+// like missing data.
+router.use("/serving-sweep", servingSweepRouter);
 // Onboarding ledger ingest, OPS-9 S1 write path for hauska-engine's report
 // wrappers. Reachable at POST /api/onboarding-ledger/ingest (pinned contract).
 router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
