@@ -233,6 +233,187 @@ jobs:
             exit 1
           fi
           echo "ci-hand-hasWriter-in-declaration: clean"
+  ss-w16-tier2-flood-not-served:
+    name: SS-W16 tier2 flood not served
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-tier2-flood-not-served
+        run: |
+          # SS-W16 (2026-08-19, P-45). The baked Tier-2 flood facet is RETIRED
+          # at the node-facets read path: it asked FEMA NFHL once per
+          # 0.005-degree tile at the tile CENTRE, a measured median 227 m from
+          # the parcel it answered for, and was correct in 0 of 5,714
+          # adjudicated cases including 1,995 parcels reported outside a
+          # Special Flood Hazard Area whose centroid is inside one.
+          #
+          # WHAT THIS GATE CLAIMS, exactly and no wider: on the node-facets read
+          # path (ONE named file), the `flood` KEY may only ever be assigned the
+          # literal `null`. It does not claim the store is retired, it does not
+          # claim other flood surfaces are safe, and it deliberately does not
+          # reach the live fema:nfhl-flood-zone map-layer adapter, which queries
+          # FEMA at a real point and is a different instrument sharing a string.
+          # A control whose scope is broader than its claim teaches people to
+          # reach for the bypass, so the scope is pinned to the claim.
+          #
+          # WHAT BYPASSES IT: a NEW read path under a DIFFERENT name serving the
+          # same place_layer_snapshots rows. This gate matches a string in one
+          # file; it does not match a rename or a second route. It is a
+          # regression tripwire. The semantic guarantee is the `flood: null`
+          # TYPE on Tier2Overlay plus the exhaustive producer switch in
+          # disposeTier2Flood, both of which travel with the code.
+          #
+          # THREE OUTCOMES, NOT TWO: clean / violation / DID-NOT-RUN. A check
+          # that cannot run and silently passes is the defect class this whole
+          # programme exists for, so "did not run" is its own loud, greppable
+          # outcome (marker GATE-DID-NOT-RUN, RESULT=did-not-run, exit 2) and
+          # never collapses into either pass or ordinary failure.
+          #
+          # SELF-TEST FIRST, IN BOTH DIRECTIONS. Before any verdict on the real
+          # file is trusted, the predicate is run against a fixture that DOES
+          # violate it and a fixture that does NOT. A predicate that flags
+          # nothing is a starved gate; a predicate that flags everything is a
+          # dead gate, permanently red, which is how this step behaved when
+          # first written (the comment-strip regex assumed rg's multi-file
+          # output format). Either failure reports DID-NOT-RUN rather than a
+          # verdict. This wires in "a check seen only passing has not been seen
+          # working": the gate is observed both failing and passing every run.
+          set -uo pipefail
+
+          FILE=artifacts/api-server/src/routes/brokerageNodeFacets.ts
+
+          did_not_run() {
+            echo "GATE-DID-NOT-RUN ci-tier2-flood-not-served: $1"
+            echo "RESULT=did-not-run"
+            exit 2
+          }
+
+          # Returns 0 when the target is CLEAN, 1 when it VIOLATES, and exits
+          # did_not_run when the instrument itself could not answer. Offenders
+          # are printed on the violation path.
+          #
+          # rg exit codes: 0 = matches, 1 = no matches, >1 = ERROR. The exit code
+          # is captured from rg itself, never from a pipe, so a missing or broken
+          # ripgrep can never read as "no matches" and therefore as clean.
+          #
+          # --with-filename is NOT cosmetic. Given a single file argument rg
+          # omits the filename and prints "LINE:content", so a comment-strip
+          # regex anchored on ":LINE:" (correct for the directory-scanning greps
+          # elsewhere in this workflow) matches nothing.
+          #
+          # COMMENT LINES ARE EXCLUDED and that is not cosmetic either. The
+          # route's own header documents the retirement it implements, so a
+          # naive grep matches its own documentation — the dead-gate failure
+          # mode that ci-coverage-clamp-shared-engine in this same workflow
+          # already records. POSIX classes, not \s: \s in ERE is a GNU extension
+          # and this gate must not depend on which grep the runner ships.
+          scan() {
+            local target="$1"
+            local raw rg_exit offenders
+            raw=$(rg -n --with-filename 'flood\s*:' "$target")
+            rg_exit=$?
+            if [ "$rg_exit" -gt 1 ]; then
+              did_not_run "ripgrep errored (exit $rg_exit) scanning $target"
+            fi
+            offenders=$(printf '%s' "$raw" \
+              | grep -vE '(^|:)[0-9]+:[[:space:]]*(\*|//|/\*)' \
+              | grep -vE 'flood[[:space:]]*:[[:space:]]*null[[:space:]]*[,;]?[[:space:]]*$')
+            if [ -n "$offenders" ]; then
+              printf '%s\n' "$offenders"
+              return 1
+            fi
+            return 0
+          }
+
+          command -v rg >/dev/null 2>&1 || did_not_run "ripgrep is not installed"
+
+          # ---- SELF-TEST A: a known violation MUST be flagged ---------------
+          DIRTY=$(mktemp)
+          cat > "$DIRTY" <<'DIRTY_EOF'
+          export interface Tier2Overlay {
+            flood: null;
+          }
+          export function extractTier2Overlay(p: Record<string, unknown>) {
+            return { flood: p.flood, floodDisposition: null };
+          }
+          DIRTY_EOF
+          if scan "$DIRTY" > /dev/null; then
+            rm -f "$DIRTY"
+            did_not_run "self-test A failed: the predicate did not flag a known violation, so a 'clean' verdict would be meaningless"
+          fi
+          rm -f "$DIRTY"
+
+          # ---- SELF-TEST B: a compliant file MUST NOT be flagged ------------
+          # Mirrors the real route's SHAPE, not just its rule: the same comment
+          # noise (a comment-strip regression is what makes this gate
+          # permanently red) and the same one-assignment-per-line formatting.
+          #
+          # The permitted-assignment pattern is END-ANCHORED, so `flood: null`
+          # must sit on its own line. That is deliberate: an un-anchored pattern
+          # would also swallow a line like `flood: null, legacy: p.flood`, which
+          # smuggles a value past the gate on the tail of a compliant head.
+          # Prettier already formats this object one property per line, so the
+          # constraint costs nothing — but it IS a constraint, and this fixture
+          # is what proves the two agree.
+          CLEAN=$(mktemp)
+          cat > "$CLEAN" <<'CLEAN_EOF'
+          /**
+           * `flood: null` is documented here on purpose. A gate that matches its
+           * own documentation is a dead gate.
+           */
+          export interface Tier2Overlay {
+            flood: null;
+          }
+          export function extractTier2Overlay(p: Record<string, unknown>) {
+            // returns flood: null and a typed refusal instead of a value
+            return {
+              flood: null,
+              floodDisposition: disposeTier2Flood(p.flood),
+            };
+          }
+          CLEAN_EOF
+          if ! scan "$CLEAN" > /dev/null; then
+            rm -f "$CLEAN"
+            did_not_run "self-test B failed: the predicate flagged a compliant file, so this gate is permanently red and enforces nothing"
+          fi
+          rm -f "$CLEAN"
+          echo "ci-tier2-flood-not-served: self-test passed in both directions"
+
+          # ---- VERDICT on the real file -------------------------------------
+          [ -f "$FILE" ] || did_not_run "$FILE is missing; the read path was renamed or removed and this gate no longer covers it"
+
+          if ! scan "$FILE"; then
+            echo "FAIL ci-tier2-flood-not-served: the node-facets read path must not assign a Tier-2 flood value. It is retired (SS-W16); read flood hazard from the flood-hazard-fact atom instead."
+            echo "RESULT=violation"
+            exit 1
+          fi
+
+          # A gate that can pass on its own absence is not a gate. TWO markers
+          # are required and are checked SEPARATELY:
+          #
+          #   flood: null;   the Tier2Overlay TYPE field (the compile-time floor)
+          #   flood: null,   the object-literal ASSIGNMENT in extractTier2Overlay
+          #
+          # A single `flood:\s*null` probe is satisfiable by the type field
+          # alone, so deleting the assignment read as clean when this step was
+          # first written — the sentinel-satisfiable shape, a check passing on a
+          # value that does not carry its meaning.
+          if ! rg -q 'flood[[:space:]]*:[[:space:]]*null;' "$FILE"; then
+            echo "FAIL ci-tier2-flood-not-served: the Tier2Overlay type no longer pins flood to null in $FILE; the compile-time floor was removed"
+            echo "RESULT=violation"
+            exit 1
+          fi
+          if ! rg -q 'flood[[:space:]]*:[[:space:]]*null,' "$FILE"; then
+            echo "FAIL ci-tier2-flood-not-served: extractTier2Overlay no longer assigns flood: null in $FILE; the retirement was removed rather than kept"
+            echo "RESULT=violation"
+            exit 1
+          fi
+
+          echo "ci-tier2-flood-not-served: clean"
+          echo "RESULT=clean"
   l17-ci-vintage-predicate:
     name: L17 ci-vintage-predicate
     runs-on: ubuntu-latest
