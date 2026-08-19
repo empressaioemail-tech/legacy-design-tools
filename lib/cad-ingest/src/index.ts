@@ -132,6 +132,13 @@ export type {
   TxgioUpsertOptions,
   TxgioUpsertSummary,
 } from "./txgio/ingest";
+export {
+  ZONING_LAYERS,
+  resolveZoningLayer,
+  wiredZoningCityKeys,
+  resolveZoningJurisdiction,
+} from "./txgio/zoning-layers";
+export type { ZoningLayerConfig } from "./txgio/zoning-layers";
 export { ADDRESS_COUNTIES, resolveAddressCounty } from "./address/counties";
 export type { AddressCounty } from "./address/counties";
 export {

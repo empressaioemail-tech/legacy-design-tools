@@ -96,6 +96,7 @@ export * from "./servingSweepCounty";
 export * from "./countyManifest";
 export * from "./countyRail";
 export * from "./countyRailDimension";
+export * from "./facetKeyRegistry";
 export * from "./railStateHistory";
 export * from "./railVerification";
 export * from "./manifestRun";
