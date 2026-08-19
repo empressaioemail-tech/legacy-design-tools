@@ -32,7 +32,7 @@
  * Exit-bounded: resolve -> measure -> report -> exit. 0 on success, 1 on
  * fatal error, 2 when a requested rail could not be scored (a NAMED refusal,
  * distinct from success, so a caller can tell "nothing to do" from "would not
- * do it").
+ * do it"), 3 when a peer holds the scoring advisory lock and nothing ran.
  */
 
 import { execFileSync } from "node:child_process";
@@ -260,7 +260,8 @@ async function main(): Promise<void> {
   if (!process.env.DATABASE_URL?.trim()) {
     process.env.DATABASE_URL = deploymentUrl;
   }
-  const { runRailScore, scoreableRailKeys } = await loadRailScoring();
+  const { runRailScore, scoreableRailKeys, withRailScoreLock, RAIL_SCORE_LOCK_NAMESPACE } =
+    await loadRailScoring();
 
   const deploymentPool = makePool(deploymentUrl, 4);
   const atomsPool = atomsUrl ? makePool(atomsUrl, 2) : null;
@@ -275,16 +276,36 @@ async function main(): Promise<void> {
     atoms: atomsPool,
   };
 
+  // ONE scoring run at a time, the same advisory lock the route takes. Without
+  // this the serialization control existed only on the HTTP path, while the
+  // CLI is the path a human runs by hand. A session-scoped lock lives on ONE
+  // connection, so the lock is held on a dedicated client checked out of the
+  // pool for the duration, never on the pool itself.
+  const lockClient = await deploymentPool.connect();
   let report: RailScoreRunReport;
   try {
-    report = await runRailScore(ctx, {
-      railKeys: allScoreable ? scoreableRailKeys() : railKeys,
-      countyFips: values.county ?? undefined,
-      dryRun,
-      includeCells: values.cells ?? false,
-      reassessAbsences: values["reassess-absences"] ?? false,
-    });
+    const outcome = await withRailScoreLock(
+      lockClient as unknown as Parameters<typeof withRailScoreLock>[0],
+      RAIL_SCORE_LOCK_NAMESPACE,
+      async () =>
+        await runRailScore(ctx, {
+          railKeys: allScoreable ? scoreableRailKeys() : railKeys,
+          countyFips: values.county ?? undefined,
+          dryRun,
+          includeCells: values.cells ?? false,
+          reassessAbsences: values["reassess-absences"] ?? false,
+        }),
+    );
+    if (!outcome.acquired) {
+      log(
+        "another rail scoring run holds the cluster advisory lock; at most one runs at a time. Nothing was measured and nothing was written.",
+      );
+      process.exitCode = 3;
+      return;
+    }
+    report = outcome.result;
   } finally {
+    lockClient.release();
     await deploymentPool.end();
     if (atomsPool) await atomsPool.end();
   }

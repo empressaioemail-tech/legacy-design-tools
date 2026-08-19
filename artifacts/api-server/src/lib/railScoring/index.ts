@@ -17,3 +17,4 @@ export * from "./registry";
 export * from "./engine";
 export * from "./measure";
 export * from "./run";
+export * from "./lock";
