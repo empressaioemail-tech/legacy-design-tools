@@ -80,11 +80,24 @@
  * survived four weeks at a wrong 0.00% partly because nothing on the row said
  * who wrote it or what it counted.
  *
- * NOT FIXED HERE, and named so it is not mistaken for done: this CLI does not
- * write `rail_state`, and nothing checked in does, so the field the county
- * ledger display reads has no writer in this repo. A cell can therefore assert
- * `satisfied-present` while these columns say 0.00. Routed to the operator by
- * lane SS-W13 rather than changed under a correctness lane.
+ * RAIL_STATE IS NOW DERIVED AND WRITTEN, matching the sibling scorers.
+ * `countyFloodScoreCli.ts` and `countyGeometryScoreCli.ts` both write
+ * `rail_state` and `threshold_pct` alongside their coverage; this CLI did not,
+ * so for the zoning, envelope and land-use facets the NUMBER and the FIELD THE
+ * DISPLAY READS had different authors with no consistency constraint between
+ * them. That is how Travis 48453 came to hold `rail_state='satisfied-present'`
+ * with `honest_coverage_pct=0.00`: a one-off backfill set the display column,
+ * this CLI set the number, and nothing reconciled them. Three checked-in
+ * scorers, two writing the pair and one writing half of it, is a
+ * paired-control divergence between siblings (DEV_PROCESS 2.4).
+ *
+ * The derivation mirrors `countyGeometryScoreCli.ts`: at or above the rail's
+ * declared threshold writes `satisfied-present`; below writes `not-yet` WITH
+ * the real coverage, never `satisfied-present` on a number that cannot support
+ * it. `satisfied-absent` is deliberately unreachable from here - an absence
+ * needs a positive determination and a basis, and a stamp-rate scorer has
+ * neither. The diagnostic facet writes a NULL rail_state, because it is not a
+ * rail and must never occupy a cell.
  *
  * Usage (from repo root):
  *   tsx artifacts/api-server/src/countyCoverageScoreCli.ts --county=48491 [--dry-run]
@@ -108,7 +121,10 @@ import {
   tryResolveDeclaredCadVintage,
   wiredZoningCityKeys,
 } from "@workspace/cad-ingest";
-import { assertWritableFacetKeys } from "@workspace/db/schema";
+import {
+  assertWritableFacetKeys,
+  COUNTY_RAIL_DECLARATION,
+} from "@workspace/db/schema";
 import {
   sampleJoinPairs,
   sampleAddressJoinPairs,
@@ -216,6 +232,28 @@ function envelopeSourceBasis(county: {
     `denom=distinct-feature_index-in-county;table=${county.table};` +
     `wired-city-layers=${county.wiredZoningLayers}`
   );
+}
+
+/** Declared threshold for a rail key, or null when the facet is not a rail. */
+export function railThresholdPct(facetKey: string): number | null {
+  const rail = COUNTY_RAIL_DECLARATION.find((r) => r.railKey === facetKey);
+  return rail ? rail.thresholdPct : null;
+}
+
+/**
+ * Derive the ledger's display state from the measured coverage. PURE.
+ *
+ * At or above threshold is `satisfied-present`; below threshold is `not-yet`
+ * carrying the REAL coverage. `satisfied-absent` is unreachable from here by
+ * design. A non-rail facet returns null and occupies no cell.
+ */
+export function deriveRailState(
+  facetKey: string,
+  honestCoveragePct: number,
+): "satisfied-present" | "not-yet" | null {
+  const threshold = railThresholdPct(facetKey);
+  if (threshold === null) return null;
+  return honestCoveragePct >= threshold ? "satisfied-present" : "not-yet";
 }
 
 function landUseArtifactPath(fips: string, table: string): string {
@@ -923,13 +961,16 @@ async function upsertLedger(
       f.facet === LANDUSE_JOIN_FACET_KEY
         ? landUseArtifactPath(score.fips, table)
         : stampArtifactPath(score.fips, table);
+    const threshold = railThresholdPct(f.facet);
+    const railState = deriveRailState(f.facet, f.honestCoveragePct);
     await pool.query(
       `INSERT INTO county_facet_coverage
          (county_fips, facet, honest_coverage_pct, integrity_verdict,
           owner_match_rate, source, source_vintage, sampled, classification,
           checked_at, verified_by_instrument, verification_method,
-          artifact_path, last_verified_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, $11, $12, now())
+          artifact_path, last_verified_at, rail_state, threshold_pct)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, $11, $12, now(),
+               $13, $14)
        ON CONFLICT (county_fips, facet) DO UPDATE SET
          honest_coverage_pct    = EXCLUDED.honest_coverage_pct,
          integrity_verdict      = EXCLUDED.integrity_verdict,
@@ -942,7 +983,9 @@ async function upsertLedger(
          verified_by_instrument = EXCLUDED.verified_by_instrument,
          verification_method    = EXCLUDED.verification_method,
          artifact_path          = EXCLUDED.artifact_path,
-         last_verified_at       = now()`,
+         last_verified_at       = now(),
+         rail_state             = EXCLUDED.rail_state,
+         threshold_pct          = EXCLUDED.threshold_pct`,
       [
         score.fips,
         f.facet,
@@ -959,6 +1002,8 @@ async function upsertLedger(
         // and that sample size rides its own `sampled` column.
         "sweep",
         artifactPath,
+        railState,
+        threshold != null ? threshold.toFixed(2) : null,
       ],
     );
   }
@@ -974,11 +1019,13 @@ function reportCounty(score: CountyScore, dryRun: boolean): void {
       f.ownerMatchRate != null
         ? `${(f.ownerMatchRate * 100).toFixed(1)}%`
         : "n/a";
+    const railState = deriveRailState(f.facet, f.honestCoveragePct);
     log(
       `  ${f.facet.padEnd(16)} coverage=${f.honestCoveragePct
         .toFixed(1)
         .padStart(5)}%  verdict=${f.integrityVerdict.padEnd(19)} ` +
-        `owner-match=${omr.padStart(6)}  -> ${f.classification}`,
+        `owner-match=${omr.padStart(6)}  -> ${f.classification}` +
+        `  rail_state=${railState ?? "n/a non-rail"}`,
     );
   }
   // A refusal is printed as loudly as a measurement. A silent skip is the
