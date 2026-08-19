@@ -92,6 +92,7 @@ export * from "./onboardingLedgerEvent";
 export * from "./jurisdictionRegistryRowMirror";
 export * from "./countyGateCertState";
 export * from "./countyLedgerSnapshot";
+export * from "./servingSweepCounty";
 export * from "./countyManifest";
 export * from "./countyRail";
 export * from "./countyRailDimension";

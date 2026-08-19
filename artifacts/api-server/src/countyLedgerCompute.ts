@@ -303,12 +303,34 @@ export function computeTexasRollup(
   };
 }
 
+export interface ComputeCountyLedgerOptions {
+  /**
+   * Run the COUNT DISTINCT rail-capability probes (default true).
+   *
+   * Set false ONLY to keep a recompute inside the 300s Cloud Run request
+   * timeout when the probe is the part that will not finish: the probes scan
+   * cad_property / txgio_parcel / tx_special_district, and everything else in
+   * this compute is small. When false, `railCapabilities` is null and
+   * `railCapabilitiesProbeReason` names the skip — an honest absence carrying
+   * its basis, never a stale value carried forward from a previous snapshot.
+   */
+  probeCapabilities?: boolean;
+}
+
+/** Reason string stamped when the capability probe is skipped by request. */
+export const CAPABILITY_PROBE_SKIPPED_REASON =
+  "capability probe skipped by request (probe=skip) — not measured on this run";
+
 /**
  * Live compute of the county-ledger GET body (no servedAt). This is the
  * expensive path: facet scan + CROSS JOIN grid + COUNT DISTINCT capability
- * probes. Callers: materialize CLI and GET ?compute=live.
+ * probes. Callers: materialize CLI, GET ?compute=live, POST /recompute.
  */
-export async function computeCountyLedgerPayload(db: SelectDb): Promise<CountyLedgerPayload> {
+export async function computeCountyLedgerPayload(
+  db: SelectDb,
+  options: ComputeCountyLedgerOptions = {},
+): Promise<CountyLedgerPayload> {
+  const probeCapabilities = options.probeCapabilities !== false;
   const rows = await db.select().from(countyFacetCoverage);
   const [mirrorRows, gateCertRows, openEvents, manifestCells, manifestRows, capabilityOutcome] =
     await Promise.all([
@@ -317,7 +339,12 @@ export async function computeCountyLedgerPayload(db: SelectDb): Promise<CountyLe
       db.select().from(onboardingLedgerEvent).where(eq(onboardingLedgerEvent.status, "open")),
       readManifestGrid(db),
       db.select().from(countyManifest),
-      probeRailCapabilities(db),
+      probeCapabilities
+        ? probeRailCapabilities(db)
+        : Promise.resolve({
+            railCapabilities: null,
+            reason: CAPABILITY_PROBE_SKIPPED_REASON,
+          } as const),
     ]);
 
   const gateCertByRowId = new Map<string, (typeof gateCertRows)[number]>(
@@ -510,11 +537,118 @@ export async function readCountyLedgerSnapshot(
 export async function materializeCountyLedger(
   db: SelectDb,
   upsert: (computedAt: Date, payload: CountyLedgerPayload) => Promise<void>,
+  options: ComputeCountyLedgerOptions = {},
 ): Promise<{ computedAt: Date; payload: CountyLedgerPayload }> {
   const computedAt = new Date();
-  const payload = await computeCountyLedgerPayload(db);
+  const payload = await computeCountyLedgerPayload(db, options);
   await upsert(computedAt, payload);
   return { computedAt, payload };
+}
+
+/**
+ * What actually MOVED between two ledger payloads.
+ *
+ * A recompute always stamps a fresh `computedAt`, so a moving timestamp is
+ * evidence that a job ran and NOTHING ELSE. The question the operator is
+ * actually asking — did the work that landed since the last materialization
+ * reach the ledger — is answered by this diff, per rail, and by nothing else.
+ *
+ * Cell identity is `countyFips|railKey`. `added` and `removed` are measured
+ * from the two key sets rather than derived by subtracting a total
+ * (DEV_PROCESS 1.3), so a grid that changes shape is visible as a shape
+ * change instead of arriving pre-averaged into `changed`.
+ */
+export interface CountyLedgerPayloadDelta {
+  payloadChanged: boolean;
+  summaryChanges: Array<{ key: string; before: unknown; after: unknown }>;
+  cells: {
+    before: number;
+    after: number;
+    changed: number;
+    added: number;
+    removed: number;
+    /** changed + added + removed, per rail key. Only non-zero rails appear. */
+    byRailKey: Record<string, number>;
+  };
+  countiesBefore: number;
+  countiesAfter: number;
+}
+
+const cellKey = (c: { countyFips: string; railKey: string }): string =>
+  c.countyFips + "|" + c.railKey;
+
+export function diffCountyLedgerPayloads(
+  before: CountyLedgerPayload | null,
+  after: CountyLedgerPayload,
+): CountyLedgerPayloadDelta {
+  const beforeCells = new Map<string, ManifestCell>(
+    (before?.manifestCells ?? []).map((c) => [cellKey(c), c]),
+  );
+  const afterCells = new Map<string, ManifestCell>(
+    after.manifestCells.map((c) => [cellKey(c), c]),
+  );
+
+  const byRailKey: Record<string, number> = {};
+  const bump = (railKey: string): void => {
+    byRailKey[railKey] = (byRailKey[railKey] ?? 0) + 1;
+  };
+
+  let changed = 0;
+  let added = 0;
+  let removed = 0;
+  for (const [key, afterCell] of afterCells) {
+    const beforeCell = beforeCells.get(key);
+    if (!beforeCell) {
+      added += 1;
+      bump(afterCell.railKey);
+      continue;
+    }
+    if (JSON.stringify(beforeCell) !== JSON.stringify(afterCell)) {
+      changed += 1;
+      bump(afterCell.railKey);
+    }
+  }
+  for (const [key, beforeCell] of beforeCells) {
+    if (!afterCells.has(key)) {
+      removed += 1;
+      bump(beforeCell.railKey);
+    }
+  }
+
+  const summaryChanges: CountyLedgerPayloadDelta["summaryChanges"] = [];
+  const summaryKeys = new Set<string>([
+    ...Object.keys((before?.summary ?? {}) as Record<string, unknown>),
+    ...Object.keys(after.summary as unknown as Record<string, unknown>),
+  ]);
+  // computedAt / servedAt / materializationAgeMs are stamped at READ time and
+  // are not part of the stored payload; if a caller ever hands in a stamped
+  // payload they are excluded here so a fresh clock cannot read as a change.
+  for (const key of ["computedAt", "servedAt", "materializationAgeMs"]) {
+    summaryKeys.delete(key);
+  }
+  for (const key of summaryKeys) {
+    const b = (before?.summary as unknown as Record<string, unknown> | undefined)?.[key];
+    const a = (after.summary as unknown as Record<string, unknown>)[key];
+    if (JSON.stringify(b) !== JSON.stringify(a)) {
+      summaryChanges.push({ key, before: b ?? null, after: a ?? null });
+    }
+  }
+
+  return {
+    payloadChanged:
+      changed > 0 || added > 0 || removed > 0 || summaryChanges.length > 0,
+    summaryChanges,
+    cells: {
+      before: beforeCells.size,
+      after: afterCells.size,
+      changed,
+      added,
+      removed,
+      byRailKey,
+    },
+    countiesBefore: before?.counties.length ?? 0,
+    countiesAfter: after.counties.length,
+  };
 }
 
 export { isSatisfiedCell, COUNTY_LEDGER_SNAPSHOT_ID };
