@@ -233,3 +233,183 @@ describe("a county with no parcel denominator", () => {
     expect(report.rails[0]?.byRailState).toEqual({ "not-yet": 1 });
   });
 });
+
+describe("an established absence is not overturned by a scorer that cannot see it", () => {
+  // TRACED TO AN INCIDENT IN THIS LANE. The first version of this runner was
+  // dry-run against the live ledger and DEMOTED Donley 48129's geometry cell
+  // from satisfied-absent (basis: stratmap TxGIO parcel universe 404,
+  // county-confirmed; evidence in a decision doc) to not-yet, purely because
+  // the county has no parcel denominator. The `geometry` rail declares no
+  // absence probe, so it had no instrument capable of contradicting that
+  // finding. It was predicted before the run and confirmed by it.
+  const donleySeed = {
+    "48129|flood": {
+      county_fips: "48129",
+      facet: "flood",
+      honest_coverage_pct: "0.00",
+      integrity_verdict: "n/a",
+      owner_match_rate: null,
+      source: "honest-absence-determination",
+      source_vintage: null,
+      sampled: 0,
+      classification: "true-source-gap",
+      rail_state: "satisfied-absent",
+      threshold_pct: "95.00",
+      absence_basis: "stratmap-txgio-parcel-universe-404-county-confirmed",
+      verification_method: "sweep",
+      verified_by_instrument: "countyGeometryScoreCli.ts",
+      artifact_path: "_decisions/2026-08-12_donley_48129_geometry_honest_absence.md",
+    },
+  };
+
+  it("PRESERVES the absence and reports it, rather than writing not-yet", async () => {
+    const stores = makeFakeStores({
+      counties: ["48129"],
+      features: {},
+      atoms: { "48129": 0 },
+      seed: donleySeed,
+    });
+    const report = await runRailScore(stores.ctx, {
+      railKeys: ["flood"],
+      dryRun: false,
+    });
+    expect(report.rails[0]?.absencesPreserved).toEqual([
+      {
+        countyFips: "48129",
+        basis: "stratmap-txgio-parcel-universe-404-county-confirmed",
+      },
+    ]);
+    expect(report.rails[0]?.byRailState).toEqual({ "satisfied-absent": 1 });
+    expect(report.totals.cellsWritten).toBe(0);
+    // Checked against the STORE: the row was not touched at all.
+    expect(stores.cells.get("48129|flood")?.values.rail_state).toBe(
+      "satisfied-absent",
+    );
+  });
+
+  it("OVERTURNS it when reassessAbsences is passed explicitly — the guard is not stuck", async () => {
+    // The negative case. A control that can never be released is a control
+    // nobody can reason about (DEV_PROCESS 2.2).
+    const stores = makeFakeStores({
+      counties: ["48129"],
+      features: {},
+      atoms: { "48129": 0 },
+      seed: donleySeed,
+    });
+    const report = await runRailScore(stores.ctx, {
+      railKeys: ["flood"],
+      dryRun: false,
+      reassessAbsences: true,
+    });
+    expect(report.rails[0]?.absencesPreserved).toEqual([]);
+    expect(report.rails[0]?.byRailState).toEqual({ "not-yet": 1 });
+    expect(stores.cells.get("48129|flood")?.values.rail_state).toBe("not-yet");
+  });
+
+  it("does NOT preserve when the cell is not an absence — only absences are protected", async () => {
+    const stores = makeFakeStores({ ...BASE, seed: {} });
+    const report = await runRailScore(stores.ctx, {
+      railKeys: ["flood"],
+      dryRun: true,
+    });
+    expect(report.rails[0]?.absencesPreserved).toEqual([]);
+  });
+});
+
+describe("per-cell detail is emitted or its absence is explained", () => {
+  it("includes numerator, denominator and state per cell when asked", async () => {
+    const { ctx } = makeFakeStores(BASE);
+    const report = await runRailScore(ctx, {
+      railKeys: ["flood"],
+      dryRun: true,
+      includeCells: true,
+    });
+    expect(report.rails[0]?.cells).toEqual([
+      {
+        countyFips: "48021",
+        honestCoveragePct: 99,
+        railState: "satisfied-present",
+        numerator: 990,
+        denominator: 1000,
+        changed: true,
+        overcount: false,
+      },
+      {
+        countyFips: "48029",
+        honestCoveragePct: 5,
+        railState: "not-yet",
+        numerator: 100,
+        denominator: 2000,
+        changed: true,
+        overcount: false,
+      },
+    ]);
+  });
+
+  it("omits cells past the cap and SAYS SO rather than returning a summary that looks complete", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => String(48001 + i * 2));
+    const { ctx } = makeFakeStores({
+      counties: many,
+      features: Object.fromEntries(many.map((c) => [c, 100])),
+      atoms: Object.fromEntries(many.map((c) => [c, 99])),
+    });
+    const report = await runRailScore(ctx, {
+      railKeys: ["flood"],
+      dryRun: true,
+      includeCells: true,
+    });
+    expect(report.rails[0]?.cells).toBeUndefined();
+    expect(report.rails[0]?.cellsOmittedReason).toMatch(/at most 25 counties.*targeted 30/);
+  });
+
+  it("omits cells silently only when they were never requested", async () => {
+    const { ctx } = makeFakeStores(BASE);
+    const report = await runRailScore(ctx, { railKeys: ["flood"], dryRun: true });
+    expect(report.rails[0]?.cells).toBeUndefined();
+    expect(report.rails[0]?.cellsOmittedReason).toBeUndefined();
+  });
+});
+
+describe("coverage movement is reported apart from provenance movement", () => {
+  it("a first run under a new instrument changes every cell but moves no coverage", async () => {
+    // Verified live 2026-08-19: the flood rail reproduced all four stored
+    // percentages EXACTLY and still reported 6 of 6 changed, because source,
+    // instrument and artifact_path were all rewritten. Reading cellsChanged
+    // alone would say the scorer moved all of Texas. It moved nothing.
+    const seededWithOldProvenance = {
+      "48021|flood": {
+        county_fips: "48021",
+        facet: "flood",
+        honest_coverage_pct: "99.00",
+        integrity_verdict: "n/a",
+        owner_match_rate: null,
+        source: "flood-hazard-fact-atom-count",
+        source_vintage: null,
+        sampled: 0,
+        classification: "real-at-ceiling",
+        rail_state: "satisfied-present",
+        threshold_pct: "95.00",
+        absence_basis: null,
+        verification_method: "sweep",
+        verified_by_instrument: "countyFloodScoreCli.ts",
+        artifact_path: "atoms:entity_type=flood-hazard-fact,countyFips=48021",
+      },
+    };
+    const { ctx } = makeFakeStores({
+      counties: ["48021"],
+      features: { "48021": 1000 },
+      atoms: { "48021": 990 },
+      seed: seededWithOldProvenance,
+    });
+    const report = await runRailScore(ctx, { railKeys: ["flood"], dryRun: true });
+    expect(report.totals.cellsChanged).toBe(1);
+    expect(report.totals.cellsCoverageMoved).toBe(0);
+  });
+
+  it("a moved percentage counts on BOTH numbers", async () => {
+    const { ctx } = makeFakeStores(BASE);
+    const report = await runRailScore(ctx, { railKeys: ["flood"], dryRun: true });
+    expect(report.totals.cellsChanged).toBe(2);
+    expect(report.totals.cellsCoverageMoved).toBe(2);
+  });
+});

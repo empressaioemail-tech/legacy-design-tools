@@ -20,6 +20,7 @@
 
 import {
   railCellChanged,
+  railCellCoverageMoved,
   scoreRailCell,
   type RailCellScore,
   type RailLedgerValues,
@@ -32,11 +33,13 @@ import {
   type RailScoreQueryable,
 } from "./measure";
 import {
+  absenceProbeCoversCounty,
   railScoringRuleFor,
   scoreableRailKeys,
   thresholdPctForRail,
   type RailScoringRule,
 } from "./registry";
+import { parseRailScoreProvenance } from "./provenance";
 
 export interface RailScoreRunOptions {
   /** Rails to score. Defaults to every rail with a measurement spec. */
@@ -45,8 +48,41 @@ export interface RailScoreRunOptions {
   countyFips?: readonly string[];
   /** Compute and diff, write nothing. */
   dryRun: boolean;
+  /**
+   * Emit per-cell numbers in the report.
+   *
+   * A dry run whose report says "6 cells would change" and not WHICH, to
+   * WHAT, over WHAT denominator, cannot actually be reviewed — it asks to be
+   * trusted. Cells are included when asked for and the target set is small
+   * enough to be readable; otherwise the report says they were omitted and
+   * why, rather than silently returning a summary that looks complete.
+   */
+  includeCells?: boolean;
+  /**
+   * Re-derive cells that currently hold an established `satisfied-absent`.
+   *
+   * OFF by default, and that default is the control. An absence in the ledger
+   * was put there by a positive determination — Donley 48129's geometry cell
+   * cites `_decisions/2026-08-12_donley_48129_geometry_honest_absence.md` —
+   * and a scorer whose rail declares no absence probe has no instrument
+   * capable of confirming or refuting it. Left to its own logic it scores
+   * "no denominator" as `not-yet` and silently overwrites a human finding
+   * with a weaker one. Preservation is the default; overturning is explicit.
+   */
+  reassessAbsences?: boolean;
   /** Called once per county so a long run proves progress rather than existence. */
   onProgress?: (line: string) => void;
+}
+
+/** One cell's numbers, for a report a reviewer can actually check. */
+export interface RailCellReport {
+  countyFips: string;
+  honestCoveragePct: number;
+  railState: string;
+  numerator: number | null;
+  denominator: number | null;
+  changed: boolean;
+  overcount: boolean;
 }
 
 export interface RailRunResult {
@@ -56,12 +92,30 @@ export interface RailRunResult {
   denominator: { kind: string; basis: string };
   instrument: string;
   countiesScored: number;
+  /** Any stored value differs, PROVENANCE INCLUDED. ~100% on a first run under a new instrument. */
   cellsChanged: number;
+  /**
+   * The coverage percentage or the rail state differs. This is the number
+   * that says whether what the ledger CLAIMS about Texas moved; `cellsChanged`
+   * also counts a rewritten source label.
+   */
+  cellsCoverageMoved: number;
   cellsUnchanged: number;
   cellsWritten: number;
   byRailState: Record<string, number>;
   overcountCounties: string[];
   absenceRefusals: Array<{ countyFips: string; reason: string }>;
+  /**
+   * Cells left alone because they hold an established absence this rail has
+   * no instrument to reassess. Reported, never silent — a preserved cell is a
+   * decision, and a decision that leaves no trace is indistinguishable from a
+   * cell the run never reached.
+   */
+  absencesPreserved: Array<{ countyFips: string; basis: string | null }>;
+  /** Per-cell numbers when `includeCells` was set and the target set was small enough. */
+  cells?: RailCellReport[];
+  /** Why cells were omitted, when they were. An honest absence, not a silent one. */
+  cellsOmittedReason?: string;
 }
 
 export interface RailUnavailable {
@@ -80,7 +134,12 @@ export interface RailScoreRunReport {
   rails: RailRunResult[];
   /** Rails that could NOT be scored, each with a named reason. Never silently dropped. */
   railsUnavailable: RailUnavailable[];
-  totals: { cellsChanged: number; cellsUnchanged: number; cellsWritten: number };
+  totals: {
+    cellsChanged: number;
+    cellsCoverageMoved: number;
+    cellsUnchanged: number;
+    cellsWritten: number;
+  };
 }
 
 const LEDGER_COLUMNS = `
@@ -198,10 +257,18 @@ function resolveRules(railKeys: readonly string[] | undefined): {
 
 /** Execute a scoring run. Exit-bounded: it measures, it writes, it returns. */
 export async function runRailScore(
-  ctx: MeasureContext,
+  inputCtx: MeasureContext,
   options: RailScoreRunOptions,
 ): Promise<RailScoreRunReport> {
   const startedAt = new Date();
+  // Every rail shares the parcel-feature denominator, so it is measured once
+  // per county per run rather than once per (rail, county). A fresh cache per
+  // run, never a module-level one: a scoring run must see the store as it is
+  // now, not as a previous run found it.
+  const ctx: MeasureContext = {
+    ...inputCtx,
+    featureCountCache: inputCtx.featureCountCache ?? new Map(),
+  };
   const { rules, unavailable } = resolveRules(options.railKeys);
 
   let counties: string[];
@@ -237,12 +304,26 @@ export async function runRailScore(
       instrument: rule.instrument,
       countiesScored: 0,
       cellsChanged: 0,
+      cellsCoverageMoved: 0,
       cellsUnchanged: 0,
       cellsWritten: 0,
       byRailState: {},
       overcountCounties: [],
       absenceRefusals: [],
+      absencesPreserved: [],
     };
+    // Cells are readable evidence at small target sizes and an unreadable
+    // wall at statewide sizes; the cap is stated rather than guessed at by
+    // the reader.
+    const CELL_DETAIL_MAX_COUNTIES = 25;
+    const cellsIncluded =
+      options.includeCells === true && counties.length <= CELL_DETAIL_MAX_COUNTIES;
+    if (options.includeCells === true && !cellsIncluded) {
+      result.cellsOmittedReason =
+        `per-cell detail is emitted for at most ${CELL_DETAIL_MAX_COUNTIES} counties; ` +
+        `this run targeted ${counties.length}`;
+    }
+    if (cellsIncluded) result.cells = [];
 
     let railFailed = false;
     for (const countyFips of counties) {
@@ -267,9 +348,44 @@ export async function runRailScore(
       }
 
       const before = await readExistingCell(ctx.deployment, countyFips, score.facet);
+
+      // PRESERVE AN ESTABLISHED ABSENCE. A stored `satisfied-absent` was a
+      // positive determination. This rail can only overturn it if it has an
+      // absence probe whose reach covers the county — i.e. an instrument that
+      // could have seen a positive. Without one, scoring it `not-yet` is not a
+      // finding, it is the scorer's own blindness overwriting somebody's
+      // evidence. Verified against the live ledger 2026-08-19: Donley 48129
+      // geometry is exactly this cell, and the first version of this runner
+      // demoted it.
+      const wouldOverturnAbsence =
+        before?.railState === "satisfied-absent" &&
+        score.railState !== "satisfied-absent";
+      const canReassessAbsence =
+        rule.absenceProbe !== undefined &&
+        absenceProbeCoversCounty(rule.absenceProbe, countyFips);
+      if (
+        wouldOverturnAbsence &&
+        !canReassessAbsence &&
+        options.reassessAbsences !== true
+      ) {
+        result.absencesPreserved.push({
+          countyFips,
+          basis: before?.absenceBasis ?? null,
+        });
+        result.countiesScored += 1;
+        result.cellsUnchanged += 1;
+        result.byRailState["satisfied-absent"] =
+          (result.byRailState["satisfied-absent"] ?? 0) + 1;
+        options.onProgress?.(
+          `${rule.railKey} ${countyFips} ABSENCE PRESERVED (no probe can reassess it)`,
+        );
+        continue;
+      }
+
       const changed = railCellChanged(before, score);
       if (changed) result.cellsChanged += 1;
       else result.cellsUnchanged += 1;
+      if (railCellCoverageMoved(before, score)) result.cellsCoverageMoved += 1;
       result.countiesScored += 1;
       result.byRailState[score.railState] =
         (result.byRailState[score.railState] ?? 0) + 1;
@@ -278,6 +394,19 @@ export async function runRailScore(
         result.absenceRefusals.push({
           countyFips,
           reason: score.absenceRefusedReason,
+        });
+      }
+
+      if (result.cells) {
+        const provenance = parseRailScoreProvenance(score.artifactPath);
+        result.cells.push({
+          countyFips,
+          honestCoveragePct: score.honestCoveragePct,
+          railState: score.railState,
+          numerator: provenance?.numerator ?? null,
+          denominator: provenance?.denominator ?? null,
+          changed,
+          overcount: score.overcount,
         });
       }
 
@@ -306,6 +435,7 @@ export async function runRailScore(
     railsUnavailable: unavailable,
     totals: {
       cellsChanged: rails.reduce((a, r) => a + r.cellsChanged, 0),
+      cellsCoverageMoved: rails.reduce((a, r) => a + r.cellsCoverageMoved, 0),
       cellsUnchanged: rails.reduce((a, r) => a + r.cellsUnchanged, 0),
       cellsWritten: rails.reduce((a, r) => a + r.cellsWritten, 0),
     },

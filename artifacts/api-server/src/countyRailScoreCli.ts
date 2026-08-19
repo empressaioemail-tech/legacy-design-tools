@@ -42,16 +42,36 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pg from "pg";
 
-import {
-  RAIL_SCORING_DECLARATION,
-  runRailScore,
-  scoreableRailKeys,
-  unspecifiedRails,
-  type MeasureContext,
-  type RailScoreRunReport,
+import type {
+  MeasureContext,
+  RailScoreRunReport,
 } from "./lib/railScoring";
 
 const { Pool } = pg;
+
+/**
+ * The capability is loaded DYNAMICALLY, after connection strings resolve.
+ *
+ * `lib/railScoring/engine.ts` imports `classifyFacet` from
+ * `countyCoverageScoreCli.ts`, which imports `@workspace/cad-ingest`, which
+ * imports `@workspace/db`, whose module body THROWS unless `DATABASE_URL` is
+ * set. This CLI opens its own pools and never touches that singleton, so a
+ * static import would make it die on a variable it does not use — and on the
+ * one variable name that means the ATOMS store in the sibling scorer CLIs and
+ * the DEPLOYMENT store in api-server.
+ *
+ * Static imports are hoisted above the module body, so defaulting the variable
+ * in `main()` would be too late. A dynamic import after `resolveConnections()`
+ * is the fix. The alternative — moving `classifyFacet` into a leaf module — is
+ * the better fix and is deliberately NOT taken here: that file is owned by an
+ * in-flight lane this week. It is recorded in the close as a follow-on.
+ */
+type RailScoringModule = typeof import("./lib/railScoring");
+let railScoring: RailScoringModule | null = null;
+async function loadRailScoring(): Promise<RailScoringModule> {
+  if (!railScoring) railScoring = await import("./lib/railScoring");
+  return railScoring;
+}
 
 function log(msg: string): void {
   console.log(`[rail-score] ${msg}`);
@@ -112,7 +132,9 @@ function makePool(connectionString: string, max: number): pg.Pool {
   });
 }
 
-function printRegistry(): void {
+async function printRegistry(): Promise<void> {
+  const { RAIL_SCORING_DECLARATION, scoreableRailKeys, unspecifiedRails } =
+    await loadRailScoring();
   log("--- rail scoring registry ---");
   for (const rule of RAIL_SCORING_DECLARATION) {
     if (rule.kind === "unspecified") {
@@ -139,7 +161,7 @@ function printReport(report: RailScoreRunReport): void {
   for (const rail of report.rails) {
     log(
       `  ${rail.railKey.padEnd(14)} scored=${String(rail.countiesScored).padStart(3)} ` +
-        `changed=${String(rail.cellsChanged).padStart(3)} unchanged=${String(rail.cellsUnchanged).padStart(3)} ` +
+        `changed=${String(rail.cellsChanged).padStart(3)} coverageMoved=${String(rail.cellsCoverageMoved).padStart(3)} unchanged=${String(rail.cellsUnchanged).padStart(3)} ` +
         `written=${String(rail.cellsWritten).padStart(3)} states=${JSON.stringify(rail.byRailState)}`,
     );
     // The counting rule travels WITH the number, at the point of use.
@@ -153,12 +175,27 @@ function printReport(report: RailScoreRunReport): void {
     for (const refusal of rail.absenceRefusals) {
       log(`    ABSENCE REFUSED ${refusal.countyFips}: ${refusal.reason}`);
     }
+    for (const kept of rail.absencesPreserved) {
+      log(
+        `    ABSENCE PRESERVED ${kept.countyFips}: this rail has no probe able to ` +
+          `reassess it (basis: ${kept.basis ?? "none recorded"})`,
+      );
+    }
+    if (rail.cellsOmittedReason) log(`    cells omitted: ${rail.cellsOmittedReason}`);
+    for (const cell of rail.cells ?? []) {
+      log(
+        `    ${cell.countyFips} ${String(cell.numerator ?? "na").padStart(8)}/${String(
+          cell.denominator ?? "na",
+        ).padStart(8)} = ${cell.honestCoveragePct.toFixed(2).padStart(7)}%` +
+          ` -> ${cell.railState}${cell.overcount ? " OVERCOUNT" : ""}${cell.changed ? " CHANGED" : ""}`,
+      );
+    }
   }
   for (const u of report.railsUnavailable) {
     log(`  ${u.railKey.padEnd(14)} UNAVAILABLE (${u.reason}): ${u.message}`);
   }
   log(
-    `totals: changed=${report.totals.cellsChanged} unchanged=${report.totals.cellsUnchanged} ` +
+    `totals: changed=${report.totals.cellsChanged} coverageMoved=${report.totals.cellsCoverageMoved} unchanged=${report.totals.cellsUnchanged} ` +
       `written=${report.totals.cellsWritten} duration=${(report.durationMs / 1000).toFixed(1)}s`,
   );
   if (report.dryRun && report.totals.cellsWritten !== 0) {
@@ -180,11 +217,13 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       json: { type: "string" },
+      cells: { type: "boolean", default: false },
+      "reassess-absences": { type: "boolean", default: false },
     },
   });
 
   if (values.list) {
-    printRegistry();
+    await printRegistry();
     return;
   }
 
@@ -213,6 +252,16 @@ async function main(): Promise<void> {
     false,
   );
 
+  // Satisfy `@workspace/db`'s module-body guard BEFORE the dynamic import
+  // below pulls it in transitively. This CLI never uses that singleton; it
+  // opens its own pools. Pointing it at the DEPLOYMENT store is the correct
+  // meaning of `DATABASE_URL` inside api-server, so nothing downstream is
+  // misdirected. `new Pool()` does not connect, so this costs no connection.
+  if (!process.env.DATABASE_URL?.trim()) {
+    process.env.DATABASE_URL = deploymentUrl;
+  }
+  const { runRailScore, scoreableRailKeys } = await loadRailScoring();
+
   const deploymentPool = makePool(deploymentUrl, 4);
   const atomsPool = atomsUrl ? makePool(atomsUrl, 2) : null;
   if (!atomsPool) {
@@ -232,6 +281,8 @@ async function main(): Promise<void> {
       railKeys: allScoreable ? scoreableRailKeys() : railKeys,
       countyFips: values.county ?? undefined,
       dryRun,
+      includeCells: values.cells ?? false,
+      reassessAbsences: values["reassess-absences"] ?? false,
     });
   } finally {
     await deploymentPool.end();

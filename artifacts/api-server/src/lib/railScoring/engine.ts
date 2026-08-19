@@ -300,6 +300,27 @@ export function scoreRailCell(
  * recompute: the thing that proves a job did something is the delta, not the
  * fact that it ran.
  */
+/**
+ * Did the COVERAGE FINDING move, as distinct from the row's paperwork?
+ *
+ * Needed because the first run under a new instrument rewrites `source`,
+ * `verified_by_instrument` and `artifact_path` on every cell it touches, so
+ * `railCellChanged` correctly reports ~100% changed exactly once — and a
+ * reader glancing at that number would conclude the scorer had moved all of
+ * Texas. It had not. This is the number that says whether what we CLAIM about
+ * a county changed.
+ */
+export function railCellCoverageMoved(
+  before: RailLedgerValues | null,
+  after: RailLedgerValues,
+): boolean {
+  if (before === null) return true;
+  return (
+    before.honestCoveragePct.toFixed(2) !== after.honestCoveragePct.toFixed(2) ||
+    before.railState !== after.railState
+  );
+}
+
 export function railCellChanged(
   before: RailLedgerValues | null,
   after: RailLedgerValues,

@@ -47,6 +47,16 @@ export interface MeasureContext {
   deployment: RailScoreQueryable;
   /** ATOMS store. Null when not configured — atom-count rails then fail CLOSED and NAMED. */
   atoms: RailScoreQueryable | null;
+  /**
+   * Per-run memo of the parcel-feature denominator, keyed by county FIPS.
+   *
+   * Every rail shares this denominator, so without the memo a run over N
+   * rails issues N `count(DISTINCT feature_index)` scans per county for one
+   * unchanging number — the cost the per-rail-CLI pattern paid silently
+   * because each CLI only ever knew about its own rail. `runRailScore`
+   * supplies one; a caller may supply its own to share across runs.
+   */
+  featureCountCache?: Map<string, { features: number; table: string } | null>;
 }
 
 /** Why a rail could not be measured at all. Never silently skipped. */
@@ -89,19 +99,26 @@ async function tableExists(
  * divide, a null fails closed to `not-yet`.
  */
 export async function readParcelFeatureCount(
-  deployment: RailScoreQueryable,
+  ctx: MeasureContext,
   countyFips: string,
 ): Promise<{ features: number; table: string } | null> {
+  const cached = ctx.featureCountCache?.get(countyFips);
+  if (cached !== undefined) return cached;
+  let resolved: { features: number; table: string } | null = null;
   for (const table of PARCEL_TABLES) {
-    if (!(await tableExists(deployment, table))) continue;
-    const r = await deployment.query<{ features: string }>(
+    if (!(await tableExists(ctx.deployment, table))) continue;
+    const r = await ctx.deployment.query<{ features: string }>(
       `SELECT count(DISTINCT feature_index) AS features FROM ${table} WHERE county_fips = $1`,
       [countyFips],
     );
     const features = Number(r.rows[0]?.features ?? 0);
-    if (features > 0) return { features, table };
+    if (features > 0) {
+      resolved = { features, table };
+      break;
+    }
   }
-  return null;
+  ctx.featureCountCache?.set(countyFips, resolved);
+  return resolved;
 }
 
 /**
@@ -175,7 +192,7 @@ async function measureAtomCount(
         `(set ATOMS_DATABASE_URL). Refusing to score it rather than reporting zero coverage.`,
     );
   }
-  const den = await readParcelFeatureCount(ctx.deployment, countyFips);
+  const den = await readParcelFeatureCount(ctx, countyFips);
   const num = await readAtomCountForCounty(ctx.atoms, rule.entityType, countyFips);
   const absence = den == null ? await runAbsenceProbe(rule, ctx.deployment, countyFips) : null;
   return {
@@ -195,7 +212,7 @@ async function measureColumnStamp(
   countyFips: string,
 ): Promise<RailCellMeasurement> {
   const column = assertIdentifier("stamp column", rule.column);
-  const den = await readParcelFeatureCount(ctx.deployment, countyFips);
+  const den = await readParcelFeatureCount(ctx, countyFips);
   if (den == null) {
     return {
       countyFips,
@@ -238,7 +255,7 @@ async function measureColumnConjunction(
   countyFips: string,
 ): Promise<RailCellMeasurement> {
   const columns = rule.columns.map((c) => assertIdentifier("conjunction column", c));
-  const den = await readParcelFeatureCount(ctx.deployment, countyFips);
+  const den = await readParcelFeatureCount(ctx, countyFips);
   if (den == null) {
     return {
       countyFips,

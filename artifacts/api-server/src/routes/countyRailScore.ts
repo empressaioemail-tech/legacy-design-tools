@@ -108,6 +108,15 @@ countyRailScoreRouter.get("/score/registry", (_req: Request, res: Response) => {
  *                  `county_manifest`.
  *   dryRun=1       measure and diff, write nothing. The report still names
  *                  every cell a real run would move.
+ *   cells=1        include per-cell numerators, denominators and states, so a
+ *                  dry run can be reviewed rather than trusted. Capped at a
+ *                  small target set; past the cap the report says the cells
+ *                  were omitted and why.
+ *   reassessAbsences=1
+ *                  allow a rail to overturn a stored `satisfied-absent` it has
+ *                  no probe to reassess. OFF by default: an absence in the
+ *                  ledger came from a positive determination, and a scorer
+ *                  that cannot see the source cannot honestly contradict it.
  *
  * Two things this route will never do, both of them named in the response
  * rather than hidden:
@@ -177,6 +186,10 @@ countyRailScoreRouter.post(
             railKeys: railKeys.length > 0 ? railKeys : undefined,
             countyFips: countyFips.length > 0 ? countyFips : undefined,
             dryRun,
+            includeCells: isTruthyFlag(firstQueryValue(req, "cells")),
+            reassessAbsences: isTruthyFlag(
+              firstQueryValue(req, "reassessAbsences"),
+            ),
           });
         },
       );
