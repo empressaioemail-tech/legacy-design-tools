@@ -56,6 +56,7 @@ import { countyLedgerRouter } from "./countyLedger";
 import { servingSweepRouter } from "./servingSweep";
 import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
 import { onboardingLedgerEventsRouter } from "./onboardingLedgerEvents";
+import { countyRailScoreRouter } from "./countyRailScore";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
@@ -124,6 +125,14 @@ router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
 // list backing the CC County Ledger's focusedFixCount. Reachable at
 // GET /api/onboarding-ledger/events (pinned contract; see module header).
 router.use("/onboarding-ledger", onboardingLedgerEventsRouter);
+// Rail scoring (SS-W12, P-47) — the WRITTEN-to-SCORED leg that feeds the
+// county ledger. Mounted at the SAME /county-ledger prefix as the ledger
+// router above (the /onboarding-ledger pair two lines up is the same
+// pattern): POST /api/county-ledger/score and
+// GET /api/county-ledger/score/registry. A separate router rather than a
+// handler inside countyLedger.ts because that file has a lane in flight
+// against it.
+router.use("/county-ledger", countyRailScoreRouter);
 // G-58: Smart Files is unmounted from cortex-api. A tombstone is required
 // because unmatched /api/* falls through to the SPA catch-all (HTML 200).
 router.use("/smart-files", (_req, res) => {

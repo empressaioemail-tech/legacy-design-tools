@@ -159,6 +159,43 @@ jobs:
             exit 1
           fi
           echo "ci-coverage-clamp: clean"
+      - name: ci-coverage-clamp-shared-engine
+        run: |
+          # SF-25 scoped to the RULE, not to the two files the defect was
+          # first found in. Every rail's coverage arithmetic now runs through
+          # lib/railScoring, so a clamp introduced there would reach every
+          # rail at once while both greps above stayed green. Any clamp of a
+          # coverage percentage to 100 in that tree fails: overcount is a real
+          # signal (duplicate or stale atoms) and must fail closed to not-yet
+          # carrying the honest unclamped ratio. Live evidence for why this
+          # matters: Bastrop cad and Caldwell cad both store exactly 100.00
+          # satisfied-present and are really 121.65% and 184.98%.
+          # COMMENT LINES ARE EXCLUDED, and that is not cosmetic. The engine's
+          # own header quotes the defect it exists to prevent, so a naive grep
+          # matches the documentation and the gate is permanently red: a dead
+          # gate, which is DEV_PROCESS 2.0's failure mode and the mirror of
+          # CTRL-3, where a defect report's prose granted the defective row
+          # authority. This grep matches CODE.
+          # rg exit codes: 0 = matches, 1 = no matches, >1 = ERROR. `|| true`
+          # around the whole pipeline would make a missing or broken ripgrep
+          # read as "clean". A gate that passes when its instrument is absent
+          # is worse than no gate. The exit code is captured from rg itself,
+          # never from the pipe (DEV_PROCESS 2.3).
+          set +e
+          RAW=$(rg -n --glob '!*.test.ts' 'Math\.min\(\s*100'             artifacts/api-server/src/lib/railScoring)
+          RG_EXIT=$?
+          set -e
+          if [ "$RG_EXIT" -gt 1 ]; then
+            echo "FAIL ci-coverage-clamp-shared-engine: ripgrep errored (exit $RG_EXIT); the gate did not run"
+            exit 1
+          fi
+          MATCHES=$(printf '%s' "$RAW" | grep -vE ':[0-9]+: *(\*|//|/\*)' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "$MATCHES"
+            echo "FAIL ci-coverage-clamp-shared-engine: the shared rail scorer must never clamp coverage to 100"
+            exit 1
+          fi
+          echo "ci-coverage-clamp-shared-engine: clean"
   l5-silent-fallback-greps:
     name: L5 silent-fallback greps
     runs-on: ubuntu-latest
