@@ -44,6 +44,13 @@ type BriefSection = {
   id: "zoning" | "setbacks-envelope" | "flood" | "land-use";
   title: string;
   data: unknown;
+  /**
+   * Present when the section has no data BECAUSE a source was refused, rather
+   * than because nothing was ever measured. Carries the refusal verbatim so a
+   * reader can tell the two apart (SS-W16: absent, zero and refused are three
+   * different states and must never collapse into one empty section).
+   */
+  refusal?: unknown;
   citations: string[];
 };
 
@@ -135,10 +142,15 @@ function buildR1Brief(facets: unknown, tier2: unknown): {
       citations: urlsFrom(envelope),
     },
     {
+      // The baked Tier-2 flood facet is retired at the read path (SS-W16), so
+      // `tier2.flood` is structurally null. The R1 brief must not render that
+      // as a silent empty section — it carries the refusal instead, so a paid
+      // reader sees "this determination was withdrawn and why", never a blank.
       id: "flood",
       title: "Flood",
-      data: asRecord(tier2)?.flood ?? null,
-      citations: urlsFrom(asRecord(tier2)?.flood),
+      data: null,
+      refusal: asRecord(tier2)?.floodDisposition ?? null,
+      citations: [],
     },
     {
       id: "land-use",
@@ -165,7 +177,11 @@ function manifestLayers(facets: unknown, tier2: unknown): {
 } {
   const envelope = asRecord(facets)?.envelope;
   const envelopeGeojson = asRecord(envelope)?.geojson;
-  const flood = asRecord(tier2)?.flood;
+  // No flood layer is emitted from a baked snapshot any more: the Tier-2 flood
+  // facet is retired at the read path (SS-W16). The disposition is read only to
+  // make the degrade reason name the retirement instead of implying the data
+  // was never there.
+  const floodRefusal = asRecord(asRecord(tier2)?.floodDisposition);
   const layers: Array<Record<string, unknown>> = [];
   if (envelopeGeojson) {
     layers.push({
@@ -175,20 +191,15 @@ function manifestLayers(facets: unknown, tier2: unknown): {
       source: "baked-snapshot",
     });
   }
-  if (flood) {
-    layers.push({
-      id: "flood",
-      kind: "flood-facet",
-      data: flood,
-      source: "baked-snapshot",
-    });
-  }
   return layers.length > 0
     ? { layers, degraded: false }
     : {
         layers,
         degraded: true,
-        reason: "Baked snapshot has no envelope geometry or Tier-2 flood facet.",
+        reason: floodRefusal
+          ? "Baked snapshot has no envelope geometry, and its Tier-2 flood facet is refused: " +
+            String(floodRefusal.reason ?? floodRefusal.code)
+          : "Baked snapshot has no envelope geometry, and no Tier-2 row exists for this node.",
       };
 }
 

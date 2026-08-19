@@ -26,6 +26,12 @@
  * (`facetCoverage`, null facets, envelope.status). The web card renders those
  * as an explicit "not verified in this area" state — a designed trust signal,
  * not an empty cell — so this route passes the absence through verbatim.
+ *
+ * FLOOD IS NOT SERVED HERE (lane SS-W16, 2026-08-19). `tier2.flood` is always
+ * null and carries a typed refusal in `tier2.floodDisposition` instead. The
+ * reasoning, the measured error, and the scope of the retirement are on
+ * {@link disposeTier2Flood} below. Every other facet this route serves is
+ * unchanged — the cut is the flood facet, not the endpoint.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -91,26 +97,203 @@ export function payloadHasOwnerKey(value: unknown): boolean {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Tier-2 FLOOD IS RETIRED AT THE READ PATH (lane SS-W16, 2026-08-19, P-45).
+//
+// WHY. The Tier-2 bake does not ask FEMA about the parcel. It quantises the
+// parcel centroid onto a 0.005-degree tile (`nodeFacetBakeTier2Cli.ts:126`
+// FEMA_TILE_DEG, `:287-291` tileKey, `:666` femaTile) and issues ONE NFHL point
+// query at the TILE CENTRE (`:507-508` `tileCenter(key)` -> `arcgisPointQuery`).
+// The answer is then stamped onto every parcel that fell in that tile. Measured
+// displacement from the parcel it answers for: median 227 m, max 366 m.
+//
+// Lane SS-W11 adjudicated 5,756 disagreements against FEMA NFHL directly: the
+// `flood-hazard-fact` atom was right in 5,714 of 5,714 non-split cases and this
+// instrument in ZERO — including 1,995 parcels told they were OUTSIDE a Special
+// Flood Hazard Area whose centroid is INSIDE one. A wrong flood determination
+// served anonymously is a safety claim, not a completeness number, so the serve
+// stops here rather than waiting on the replacement.
+//
+// `fema:nfhl-flood-zone` is not a second store to retire separately. It is the
+// adapterKey this same bake stamps into its own provenance. Same bake, same
+// quantiser, one instrument — so they retire as a pair, which is what the
+// producer-keyed refusal below implements.
+//
+// SCOPE. This retires the BAKED Tier-2 flood facet on the node-facets read path
+// ONLY. The live `fema:nfhl-flood-zone` map-layer adapter (brokerageGisLayers,
+// engineSpineMapLayers, planReviewLayerRun, warmingHarness) queries FEMA at a
+// real point rather than through the tile quantiser; it is a different
+// instrument that happens to share an adapter-key STRING, and retiring it on
+// the string match would be exactly the syntactic reasoning this cut exists to
+// remove. The Tier-2 BAKE itself is also untouched: its stored rows are the
+// evidence SS-W11 adjudicated against, and retirement sequences consumers-first.
+// ---------------------------------------------------------------------------
+
 /**
- * The Tier-2 overlay the card + the map's "FEMA flood zone" layer consume.
+ * Every instrument that has ever authored the `flood` facet of a
+ * `node-facets:tier2` row, identified by the `provenance.adapterKey` the facet
+ * carries ABOUT ITSELF.
  *
- * The Tier-2 bake (`nodeFacetBakeTier2Cli.ts`) writes a per-node payload under
- * `node-facets:tier2` carrying `flood` (the real FEMA NFHL zone: in-SFHA / X /
- * outside-SFHA / unavailable, with the FEMA vintage) and — once the road-leg
- * infra lands — an upgraded `envelope`. This route composes that overlay onto
- * the Tier-1 base so the SAME anonymous pure-read the card already makes now
- * carries the real per-node flood status. A node with no Tier-2 row (not yet
- * baked) simply gets `tier2: null` — the card renders the Tier-1 base exactly
- * as before, so this is strictly additive and safe to ship ahead of the bake.
+ * This list is the branch input, and that is the whole design. The guard this
+ * replaces asked `if (!p.flood || typeof p.flood !== "object")` — a presence
+ * plus shape test with ONE input, satisfied by any object, including the
+ * tile-quantised one. The guard one repo over in hauska-map
+ * (`apps/property-explorer/src/lib/baked-facets.ts:430`) asks
+ * `base.includes("/property-atoms")` — a SUBSTRING test on a configuration
+ * string deciding which of two semantically different flood answers a caller
+ * receives. Both decide a hazard determination by syntax.
  *
- * Only the two card/layer-facing facets are surfaced (`flood`, `envelope`) plus
- * `bakedAt`; the rest of the Tier-2 payload (schema version, county echo) is
- * internal and stays off the wire. Owner-strip still runs over the composed
- * result defense-in-depth.
+ * This asks a different question: WHICH INSTRUMENT produced this value, by
+ * exact string equality against a closed set, and is every member of that set
+ * accounted for. Adding a producer here without adding its `case` in
+ * {@link disposeTier2Flood} is a TYPECHECK FAILURE at the `never` assignment,
+ * not a silent pass-through.
+ */
+export const TIER2_FLOOD_PRODUCERS = ["fema:nfhl-flood-zone"] as const;
+export type Tier2FloodProducer = (typeof TIER2_FLOOD_PRODUCERS)[number];
+
+/**
+ * Why no flood value is on the wire for this node. Every variant is a REFUSAL:
+ * after the SS-W16 retirement there is no input for which this read path emits
+ * a flood determination, and the type says so rather than the comment saying so.
+ *
+ * This is a distinct state from `tier2: null`, which means "no Tier-2 row exists
+ * for this node at all". Collapsing "refused" into "absent" would hide the
+ * retirement from every consumer, which is the failure mode the enforcement
+ * doctrine names: correct prose over a live store, consumers unable to tell.
+ */
+export type Tier2FloodDisposition =
+  | {
+      state: "refused";
+      code: "retired-instrument";
+      producer: Tier2FloodProducer;
+      retiredOn: string;
+      supersededBy: string;
+      reason: string;
+    }
+  | {
+      state: "refused";
+      code: "unrecognised-producer";
+      producer: string | null;
+      reason: string;
+    }
+  | {
+      state: "refused";
+      code: "no-flood-facet";
+      producer: null;
+      reason: string;
+    };
+
+/** Read the facet's self-declared producer. Never infers one. */
+function readFloodProducer(floodFacet: Record<string, unknown>): string | null {
+  const provenance = floodFacet.provenance;
+  if (!provenance || typeof provenance !== "object") return null;
+  const adapterKey = (provenance as Record<string, unknown>).adapterKey;
+  return typeof adapterKey === "string" && adapterKey.trim()
+    ? adapterKey.trim()
+    : null;
+}
+
+/** Exact membership in the closed producer set. No substring, no prefix. */
+function asRecognisedProducer(raw: string | null): Tier2FloodProducer | null {
+  if (raw === null) return null;
+  return (TIER2_FLOOD_PRODUCERS as readonly string[]).includes(raw)
+    ? (raw as Tier2FloodProducer)
+    : null;
+}
+
+/**
+ * Decide what happens to a stored Tier-2 flood facet. Total and fail-closed:
+ * every input — recognised producer, unrecognised producer, absent provenance,
+ * missing facet, malformed row — resolves to a refusal carrying its basis. No
+ * branch returns a value, and no branch falls through to a default that serves
+ * one.
+ */
+export function disposeTier2Flood(floodFacet: unknown): Tier2FloodDisposition {
+  if (
+    !floodFacet ||
+    typeof floodFacet !== "object" ||
+    Array.isArray(floodFacet)
+  ) {
+    return {
+      state: "refused",
+      code: "no-flood-facet",
+      producer: null,
+      reason:
+        "This Tier-2 row carries no flood facet. Absent is not a determination.",
+    };
+  }
+
+  const raw = readFloodProducer(floodFacet as Record<string, unknown>);
+  const producer = asRecognisedProducer(raw);
+  if (producer === null) {
+    return {
+      state: "refused",
+      code: "unrecognised-producer",
+      producer: raw,
+      reason:
+        "This flood facet declares no recognised producing instrument, so its " +
+        "fitness to answer cannot be established. Refusing rather than " +
+        "defaulting to serve.",
+    };
+  }
+
+  switch (producer) {
+    case "fema:nfhl-flood-zone":
+      return {
+        state: "refused",
+        code: "retired-instrument",
+        producer,
+        retiredOn: "2026-08-19",
+        supersededBy: "flood-hazard-fact",
+        reason:
+          "Retired 2026-08-19 (lane SS-W16, P-45). This instrument queried FEMA " +
+          "NFHL once per 0.005-degree tile at the tile centre, a measured median " +
+          "227 m and maximum 366 m from the parcel it answered for. Adjudicated " +
+          "against FEMA NFHL over 5,756 disagreements it was correct in 0 cases, " +
+          "including 1,995 parcels reported outside a Special Flood Hazard Area " +
+          "whose centroid is inside one. Read flood hazard from the " +
+          "flood-hazard-fact atom instead.",
+      };
+    default: {
+      // Exhaustiveness gate. If TIER2_FLOOD_PRODUCERS grows a member without a
+      // case above, `producer` is that member here rather than `never` and this
+      // line fails `pnpm run typecheck`. A new producer therefore cannot reach
+      // a caller without an explicit ruling on whether it may answer.
+      const unhandled: never = producer;
+      return {
+        state: "refused",
+        code: "unrecognised-producer",
+        producer: String(unhandled),
+        reason:
+          "A recognised producer reached the read path with no disposition " +
+          "ruling. Refusing.",
+      };
+    }
+  }
+}
+
+/**
+ * The Tier-2 overlay composed onto the Tier-1 base.
+ *
+ * `flood` is typed as the literal `null`, not `unknown`. That is a second,
+ * independent mechanism from {@link disposeTier2Flood}: even if the runtime
+ * switch were edited away, assigning a flood value to this field fails
+ * `tsc`. The comment is not the guarantee; the type is.
+ *
+ * `envelope` is likewise always null — anti-zombie (WDLL 3.7): the buildable
+ * envelope comes from the property atom chain, never from a Tier-2 row.
+ *
+ * A node with NO Tier-2 row still gets `tier2: null`. A node WITH a Tier-2 row
+ * gets this overlay carrying `floodDisposition`, so "we hold a row and refuse
+ * its flood facet" is distinguishable on the wire from "nothing is baked here".
+ * The rest of the Tier-2 payload (schema version, county echo) stays internal.
+ * Owner-strip still runs over the composed result defense-in-depth.
  */
 export interface Tier2Overlay {
-  flood: unknown;
-  envelope: unknown;
+  flood: null;
+  floodDisposition: Tier2FloodDisposition;
+  envelope: null;
   bakedAt: unknown;
   snapshotAt: string | null;
 }
@@ -126,16 +309,15 @@ export function extractTier2Overlay(
   payloadJson: unknown,
   snapshotAt: Date | string | null,
 ): Tier2Overlay | null {
+  // The only question this branch answers is whether a Tier-2 ROW exists. It no
+  // longer inspects the flood facet to decide whether to emit an overlay: that
+  // was the presence-shaped guard, and a row's flood facet now determines a
+  // REFUSAL REASON, never whether a caller receives a determination.
   if (!payloadJson || typeof payloadJson !== "object") return null;
   const p = payloadJson as Record<string, unknown>;
-  // A Tier-2 row must carry a flood facet to be meaningful to the card. If it
-  // does not (a malformed/legacy row), treat it as no overlay rather than
-  // surfacing a half-shape the card can't render.
-  if (!p.flood || typeof p.flood !== "object") return null;
   return {
-    flood: p.flood,
-    // Anti-zombie (WDLL 3.7): never overlay zombie Tier-2 envelope as product
-    // truth. Envelope comes from the property atom chain (or null).
+    flood: null,
+    floodDisposition: disposeTier2Flood(p.flood),
     envelope: null,
     bakedAt: p.bakedAt ?? null,
     snapshotAt:
@@ -265,9 +447,10 @@ brokerageNodeFacetsRouter.get(
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
       facets: snapshot.facets,
-      // The FEMA flood overlay the card + the map's "FEMA flood zone" layer
-      // read. `null` when the node has no Tier-2 row yet (renders the Tier-1
-      // base unchanged). `tier2.flood` carries the real zone + FEMA vintage.
+      // `null` when the node has no Tier-2 row at all. When a row exists, the
+      // overlay carries `flood: null` plus a typed `floodDisposition` saying
+      // why — retired instrument, unrecognised producer, or no facet. No flood
+      // determination leaves this route (SS-W16, 2026-08-19).
       tier2: snapshot.tier2,
     });
   },
