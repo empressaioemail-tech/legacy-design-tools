@@ -277,6 +277,13 @@ describe("lib/db schema integration", () => {
         // workspace-layout spaces (tenant-ready). Sorts before
         // `sheet_content_extractions` (`sav` < `she`) per `ORDER BY tablename`.
         "saved_workspace_spaces",
+        // SS-W7 / P-44 (0082) — one ingested CountyServingSweep per county,
+        // the store behind GET /api/serving-sweep. Deliberately NOT a
+        // statewide row: the statewide envelope is assembled at read time so
+        // countiesSwept is measured from the array served. Sorts between
+        // `saved_workspace_spaces` and `sheet_content_extractions`
+        // (`sav` < `ser` < `she`) per `ORDER BY tablename`.
+        "serving_sweep_county",
         // Cortex L2 (Lane C.4 / C.4.2) — structured sheet-content
         // extraction atoms (OCR segments + annotations).
         "sheet_content_extractions",
