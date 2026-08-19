@@ -315,6 +315,24 @@ export interface ComputeCountyLedgerOptions {
    * its basis, never a stale value carried forward from a previous snapshot.
    */
   probeCapabilities?: boolean;
+
+  /**
+   * Handle used ONLY for the rail-capability probes, when it must differ from
+   * the handle used for everything else.
+   *
+   * WHY THIS EXISTS. `probeRailCapabilities` runs raw COUNT DISTINCT queries
+   * and SWALLOWS a failure per rail, returning null with a limitation string.
+   * That is honest on a pooled connection, where a failed statement affects
+   * only itself. Inside a TRANSACTION it is not: the first failing probe
+   * aborts the whole transaction, and every later statement — including the
+   * snapshot write — dies with "current transaction is aborted", carrying no
+   * hint that a swallowed probe error caused it. This is reachable today:
+   * `tx_special_district` is queried by the mud probe and is not part of the
+   * drizzle schema, so it is absent from every test schema and from any fresh
+   * database. Callers running inside a transaction pass a savepoint-guarded
+   * handle here so the swallow stays local to the probe that swallowed.
+   */
+  capabilityDb?: SelectDb;
 }
 
 /** Reason string stamped when the capability probe is skipped by request. */
@@ -340,7 +358,7 @@ export async function computeCountyLedgerPayload(
       readManifestGrid(db),
       db.select().from(countyManifest),
       probeCapabilities
-        ? probeRailCapabilities(db)
+        ? probeRailCapabilities(options.capabilityDb ?? db)
         : Promise.resolve({
             railCapabilities: null,
             reason: CAPABILITY_PROBE_SKIPPED_REASON,
@@ -577,6 +595,29 @@ export interface CountyLedgerPayloadDelta {
 const cellKey = (c: { countyFips: string; railKey: string }): string =>
   c.countyFips + "|" + c.railKey;
 
+/**
+ * Key-order-independent serialization for the diff.
+ *
+ * The BEFORE payload comes back out of a jsonb column and the AFTER payload
+ * is a freshly built JS object. Postgres jsonb does not preserve key order —
+ * it stores object keys sorted by length then bytes — so a plain
+ * JSON.stringify comparison reports EVERY cell as changed on two identical
+ * recomputes. Caught by the "second recompute with nothing changed" test,
+ * which is the whole reason that test asserts a boring result.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]";
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return (
+    "{" +
+    entries.map(([k, v]) => JSON.stringify(k) + ":" + stableStringify(v)).join(",") +
+    "}"
+  );
+}
+
 export function diffCountyLedgerPayloads(
   before: CountyLedgerPayload | null,
   after: CountyLedgerPayload,
@@ -603,7 +644,7 @@ export function diffCountyLedgerPayloads(
       bump(afterCell.railKey);
       continue;
     }
-    if (JSON.stringify(beforeCell) !== JSON.stringify(afterCell)) {
+    if (stableStringify(beforeCell) !== stableStringify(afterCell)) {
       changed += 1;
       bump(afterCell.railKey);
     }
@@ -629,7 +670,7 @@ export function diffCountyLedgerPayloads(
   for (const key of summaryKeys) {
     const b = (before?.summary as unknown as Record<string, unknown> | undefined)?.[key];
     const a = (after.summary as unknown as Record<string, unknown>)[key];
-    if (JSON.stringify(b) !== JSON.stringify(a)) {
+    if (stableStringify(b) !== stableStringify(a)) {
       summaryChanges.push({ key, before: b ?? null, after: a ?? null });
     }
   }

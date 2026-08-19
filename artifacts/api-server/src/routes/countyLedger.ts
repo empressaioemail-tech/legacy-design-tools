@@ -62,6 +62,37 @@ export const COUNTY_LEDGER_RECOMPUTE_LOCK = "county_ledger_recompute";
  */
 export const RECOMPUTE_STATEMENT_TIMEOUT_MS = 240_000;
 
+/**
+ * A handle that runs each capability probe inside its own SAVEPOINT.
+ *
+ * probeRailCapabilities swallows a failed probe and returns null with a
+ * limitation string. On a pooled connection that is local. Inside a
+ * transaction it is not: one failed probe aborts the transaction and every
+ * later statement, including the snapshot write, dies with "current
+ * transaction is aborted" and no trace of the probe that caused it. The
+ * savepoint keeps the swallow local, which is what the swallow already
+ * claimed to be. Reachable today: the mud probe reads tx_special_district,
+ * which is not in the drizzle schema and so exists in no test schema.
+ */
+function savepointGuardedCapabilityHandle(tx: SelectDb): SelectDb {
+  let counter = 0;
+  return {
+    execute: async (query: unknown) => {
+      counter += 1;
+      const name = "cap_probe_" + String(counter);
+      await tx.execute(sql.raw("SAVEPOINT " + name));
+      try {
+        const result = await tx.execute(query);
+        await tx.execute(sql.raw("RELEASE SAVEPOINT " + name));
+        return result;
+      } catch (err) {
+        await tx.execute(sql.raw("ROLLBACK TO SAVEPOINT " + name));
+        throw err;
+      }
+    },
+  } as unknown as SelectDb;
+}
+
 function isLiveCompute(req: Request): boolean {
   const q = req.query.compute;
   const v = Array.isArray(q) ? q[0] : q;
@@ -179,6 +210,7 @@ router.post(
           const computedAt = new Date();
           const payload = await computeCountyLedgerPayload(txHandle, {
             probeCapabilities,
+            capabilityDb: savepointGuardedCapabilityHandle(txHandle),
           });
           if (!dryRun) {
             await tx.execute(sql`
