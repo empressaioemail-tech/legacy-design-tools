@@ -171,7 +171,8 @@ function printReport(report: RailScoreRunReport): void {
     log(
       `  ${rail.railKey.padEnd(14)} scored=${String(rail.countiesScored).padStart(3)} ` +
         `changed=${String(rail.cellsChanged).padStart(3)} coverageMoved=${String(rail.cellsCoverageMoved).padStart(3)} unchanged=${String(rail.cellsUnchanged).padStart(3)} ` +
-        `written=${String(rail.cellsWritten).padStart(3)} states=${JSON.stringify(rail.byRailState)}`,
+        `written=${String(rail.cellsWritten).padStart(3)} refused=${String(rail.countiesRefused.length).padStart(3)} ` +
+        `states=${JSON.stringify(rail.byRailState)}`,
     );
     // The counting rule travels WITH the number, at the point of use.
     log(`    denominator (${rail.denominator.kind}): ${rail.denominator.basis}`);
@@ -190,6 +191,24 @@ function printReport(report: RailScoreRunReport): void {
           `reassess it (basis: ${kept.basis ?? "none recorded"})`,
       );
     }
+    // NOT MEASURED is a first-class result, printed with its counts and one
+    // worked example per code. On the zoning rail this is most of Texas: 23
+    // city zoning layers are wired across 10 counties against 1,222
+    // incorporated municipalities. A summary that showed only `scored=` would
+    // let a reader believe the other 244 counties had been looked at.
+    if (rail.countiesRefused.length > 0) {
+      log(
+        `    NOT MEASURED: ${rail.countiesRefused.length} of ${
+          rail.countiesRefused.length + rail.countiesScored
+        } counties. No row is written for these; the console shows them as ` +
+          `not-measured, distinct from measured-below-bar.`,
+      );
+      for (const [code, n] of Object.entries(rail.refusalCounts).sort()) {
+        const example = rail.countiesRefused.find((r) => r.refusal === code);
+        log(`      ${code.padEnd(24)} ${String(n).padStart(4)}  e.g. ${example?.countyFips ?? "?"}`);
+        if (example) log(`        basis: ${example.basis}`);
+      }
+    }
     if (rail.cellsOmittedReason) log(`    cells omitted: ${rail.cellsOmittedReason}`);
     for (const cell of rail.cells ?? []) {
       log(
@@ -205,7 +224,8 @@ function printReport(report: RailScoreRunReport): void {
   }
   log(
     `totals: changed=${report.totals.cellsChanged} coverageMoved=${report.totals.cellsCoverageMoved} unchanged=${report.totals.cellsUnchanged} ` +
-      `written=${report.totals.cellsWritten} duration=${(report.durationMs / 1000).toFixed(1)}s`,
+      `written=${report.totals.cellsWritten} refused=${report.totals.cellsRefused} ` +
+      `duration=${(report.durationMs / 1000).toFixed(1)}s`,
   );
   if (report.dryRun && report.totals.cellsWritten !== 0) {
     fail(

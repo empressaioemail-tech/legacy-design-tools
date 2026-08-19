@@ -111,11 +111,10 @@ describe("resolveStampCellMeasurability", () => {
     expect(r.refusal).toBe("no-zoning-column");
   });
 
-  it("reports the UPSTREAM cause when several refusals apply at once", () => {
-    // ORDER IS PART OF THE RULE. A county with no parcels also has no wired
-    // layer's worth of anything; reporting `no-wired-layer` would be true and
-    // would send the reader to wire a city layer for a county whose parcels
-    // were never loaded.
+  it("reports the BINDING constraint when several refusals apply at once", () => {
+    // A county with no parcels also has no wired layer's worth of anything;
+    // reporting `no-wired-layer` would be true and would send the reader to
+    // wire a city layer for a county whose parcels were never loaded.
     const r = resolveStampCellMeasurability({
       table: null,
       hasStampColumn: false,
@@ -128,6 +127,36 @@ describe("resolveStampCellMeasurability", () => {
     expect(r.refusal).toBe("no-parcels");
   });
 
+  it("REACH beats GEOMETRY: an unwired county with no geom reports no-wired-layer", () => {
+    // THIS ORDER WAS WRONG ONCE AND THE CLI CAUGHT IT. Measured live: 189 of
+    // the 253 counties holding parcels have geom on ZERO of them, and 244 of
+    // 254 have no wired zoning layer. With geometry checked first, Anderson
+    // 48001 reported `no-parcel-geometry` — true, and naming work that would
+    // not make it measurable, for 189 counties at once. The binding constraint
+    // is the wiring.
+    const r = resolveStampCellMeasurability({
+      ...measurable(),
+      wiredZoningLayers: 0,
+      anyStamped: false,
+      featuresWithGeom: 0,
+    });
+    expect(r.refusal).toBe("no-wired-layer");
+    expect(r.refusal).not.toBe("no-parcel-geometry");
+  });
+
+  it("GEOMETRY is reported only where it is the LAST thing missing", () => {
+    // Caldwell 48055: wired (lockhart-tx), 6,527 parcels stamped, and geom on
+    // none of its 26,155 features. Here geometry genuinely is the constraint,
+    // and the reordering above must not have hidden it.
+    const r = resolveStampCellMeasurability({
+      ...measurable(),
+      wiredZoningLayers: 1,
+      anyStamped: true,
+      featuresWithGeom: 0,
+    });
+    expect(r.refusal).toBe("no-parcel-geometry");
+  });
+
   it("every refusal carries a non-empty basis", () => {
     // A refusal a reader cannot act on becomes a shrug, and a shrug is how a
     // gate gets switched off (DEV_PROCESS 2.0).
@@ -135,6 +164,7 @@ describe("resolveStampCellMeasurability", () => {
       { ...measurable(), table: null },
       { ...measurable(), cityBoundaryRows: 0 },
       { ...measurable(), featuresWithGeom: 0 },
+      { ...measurable(), wiredZoningLayers: 0, anyStamped: false, featuresWithGeom: 0 },
       { ...measurable(), wiredZoningLayers: 0 },
       { ...measurable(), anyStamped: false },
       { ...measurable(), table: "txgio_parcel_staging", hasStampColumn: false },

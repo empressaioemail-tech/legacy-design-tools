@@ -85,12 +85,27 @@ export interface StampCellMeasurabilityInput {
  * is provably able to FIRE (DEV_PROCESS 2.2). `countyMeasurability.test.ts`
  * exercises all five.
  *
- * ORDER IS PART OF THE RULE. The county must have parcels, then a table that
- * can carry the stamp, then the boundary table the denominator needs, and only
- * then SS-W13's wiring and rolled-stamp checks. Reordering would report the
- * downstream cause of an upstream problem — "no wired layer" for a county
- * whose parcels were never loaded is a true sentence that sends the reader to
- * the wrong place.
+ * ORDER IS PART OF THE RULE, AND IT WAS WRONG ONCE. Every refusal below can be
+ * simultaneously true for the same county, so the one that gets reported is
+ * the one somebody acts on. The rule is: report the constraint that BINDS.
+ *
+ *   1. `no-parcels`      nothing was acquired. Everything else is downstream.
+ *   2. SS-W13's three    the INSTRUMENT's reach: no stamp column, no wired
+ *                        city layer, stamp never rolled. `no-wired-layer` is
+ *                        the binding constraint for 244 of 254 counties and
+ *                        must dominate.
+ *   3. boundary table    the denominator's own source is missing.
+ *   4. `no-parcel-geometry`  the county is wired and stamped, and its parcels
+ *                        still cannot be located.
+ *
+ * MEASURED, which is why this order and not the first one written: 189 of the
+ * 253 counties holding parcels have a PostGIS `geom` on ZERO of them. With the
+ * geometry check ahead of the reach checks, 189 counties reported
+ * `no-parcel-geometry` — a true sentence naming work that would not make any
+ * of them measurable, because they have no wired zoning layer either. It also
+ * buried the one county where geometry IS the binding constraint. Caught by
+ * running the CLI against Anderson 48001 and reading what it said, not by
+ * reading the code.
  */
 export function resolveStampCellMeasurability(
   input: StampCellMeasurabilityInput,
@@ -103,6 +118,20 @@ export function resolveStampCellMeasurability(
         "neither txgio_parcel nor txgio_parcel_staging holds any parcel for this county, " +
         "so there is no denominator to measure against. A zero here would be a claim " +
         "about the county produced by an empty acquisition.",
+    };
+  }
+  // SS-W13's three refusals, called rather than copied.
+  const stamp = resolveStampFacetMeasurability({
+    table: input.table,
+    hasZoningColumn: input.hasStampColumn,
+    wiredZoningLayers: input.wiredZoningLayers,
+    stampedPct: input.anyStamped ? 1 : 0,
+  });
+  if (!stamp.measurable) {
+    return {
+      measurable: false,
+      refusal: stamp.refusal as CountyMeasurabilityRefusal,
+      basis: stamp.basis,
     };
   }
   if (input.needsCityBoundary && input.cityBoundaryRows <= 0) {
@@ -121,26 +150,13 @@ export function resolveStampCellMeasurability(
       measurable: false,
       refusal: "no-parcel-geometry",
       basis:
-        "no parcel in this county carries a PostGIS geom, so no parcel can be located " +
-        "inside or outside a municipal boundary and the spatial denominator does not " +
+        "this county is wired and stamped, but no parcel carries a PostGIS geom, so no " +
+        "parcel can be located inside or outside a municipal boundary and the spatial " +
+        "denominator does not " +
         "exist. FOUND LIVE: Caldwell 48055 holds 26,155 parcel features with geom on " +
         "zero of them, while every other wired county is at 100.00%; its jsonb geometry " +
         "and its bbox columns are both populated, so only the PostGIS column was never " +
         "backfilled. The fix is that backfill, not a fallback to the county-wide count.",
-    };
-  }
-  // SS-W13's three refusals, called rather than copied.
-  const stamp = resolveStampFacetMeasurability({
-    table: input.table,
-    hasZoningColumn: input.hasStampColumn,
-    wiredZoningLayers: input.wiredZoningLayers,
-    stampedPct: input.anyStamped ? 1 : 0,
-  });
-  if (!stamp.measurable) {
-    return {
-      measurable: false,
-      refusal: stamp.refusal as CountyMeasurabilityRefusal,
-      basis: stamp.basis,
     };
   }
   return MEASURABLE;
