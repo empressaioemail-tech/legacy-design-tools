@@ -47,8 +47,29 @@ import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 export type DenominatorKind =
   /** DISTINCT feature_index in txgio_parcel for the county — the real-world parcel count. */
   | "txgio-parcel-distinct-feature-index"
-  /** No denominator: the rail could not be measured for this county. */
-  | "none";
+  /**
+   * No measurement spec yet. The rail has never been measured; there is no
+   * counting rule to recover. This is the unspecified-never-measured state
+   * (roads, footprint, easement, …). It is NOT the state for live ledger
+   * rows whose denominator was lost — that is `retired-unknown-denominator`.
+   */
+  | "none"
+  /**
+   * Live ledger rows exist, but the denominator they were computed against
+   * is not reconstructible from checked-in source. Distinct from `none`:
+   * retired-rows-with-unknown-denominator is not unspecified-never-measured.
+   * A new scorer (a different card) must land before this rail is scored.
+   */
+  | "retired-unknown-denominator";
+
+/** Machine names of denominators a measurer can actually execute today. */
+const LIVE_COUNTING_DENOMINATOR_KINDS: ReadonlySet<DenominatorKind> = new Set([
+  "txgio-parcel-distinct-feature-index",
+]);
+
+export function isLiveCountingDenominatorKind(kind: DenominatorKind): boolean {
+  return LIVE_COUNTING_DENOMINATOR_KINDS.has(kind);
+}
 
 export interface DenominatorSpec {
   kind: DenominatorKind;
@@ -192,9 +213,13 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     entityType: "parcel-node",
     instrument: "countyRailScoreCli.ts:geometry",
     verificationMethod: "sweep",
-    denominator: PARCEL_FEATURE_DENOMINATOR,
+    denominator: {
+      kind: "retired-unknown-denominator",
+      basis:
+        "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an 'accounted features' denominator by B2_cp2_geometry_scorer_apply.mjs, which is not in this repo. The reconstructible parcel-feature count is a different rule and is not claimed here. Re-scoring waits on a new scorer (S-21); until then this rail is unscored.",
+    },
     notes:
-      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here.",
+      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here. RETIRED 2026-08-20 (S-22): the machine-readable denominator is no longer PARCEL_FEATURE_DENOMINATOR. Live geometry rows are 254 over 254 distinct county FIPS, not 253 (253 was a different rail's figure; source _inbox/2026-08-20_db_probe_five_answers.md Q2). Until a new scorer lands (S-21), this rail is unscored rather than re-derived against a different denominator.",
   },
   {
     railKey: "cad",
@@ -361,7 +386,15 @@ export function thresholdPctForRail(railKey: string): number {
 export function isScoreableRule(
   rule: RailScoringRule,
 ): rule is Exclude<RailScoringRule, UnspecifiedRule> {
-  return rule.kind !== "unspecified";
+  // A measurement kind without an executable denominator is not scoreable.
+  // Geometry keeps kind `atom-count-over-parcel-features` (the numerator
+  // shape is still parcel-node atom count) but its denominator is retired,
+  // so substituting the reconstructible parcel-feature count would rescore
+  // live rows against a different rule. Unspecified rails use kind `none`.
+  return (
+    rule.kind !== "unspecified" &&
+    isLiveCountingDenominatorKind(rule.denominator.kind)
+  );
 }
 
 /** Rails this capability can measure today. */
@@ -381,6 +414,25 @@ export function unspecifiedRails(): Array<{
     railKey,
     unspecifiedReason,
     specOwner,
+  }));
+}
+
+/**
+ * Rails whose live ledger rows were computed against a denominator that is
+ * not reconstructible from checked-in source. Distinct from `unspecifiedRails`
+ * (never measured) and from `scoreableRailKeys` (executable denominator).
+ */
+export function retiredDenominatorRails(): Array<{
+  railKey: string;
+  denominatorKind: DenominatorKind;
+  basis: string;
+}> {
+  return RAIL_SCORING_DECLARATION.filter(
+    (r) => r.denominator.kind === "retired-unknown-denominator",
+  ).map((r) => ({
+    railKey: r.railKey,
+    denominatorKind: r.denominator.kind,
+    basis: r.denominator.basis,
   }));
 }
 

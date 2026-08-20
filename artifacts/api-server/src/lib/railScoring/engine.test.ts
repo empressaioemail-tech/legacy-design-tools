@@ -195,6 +195,24 @@ describe("an unspecified rail is refused, never scored as zero", () => {
   });
 });
 
+describe("a rail with a retired denominator is refused, not rescored", () => {
+  it("throws rather than substituting a reconstructible denominator", () => {
+    const retiredGeometry: AtomCountRule = {
+      ...atomRule,
+      railKey: "geometry",
+      entityType: "parcel-node",
+      denominator: {
+        kind: "retired-unknown-denominator",
+        basis:
+          "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an accounted-features denominator that is not in this repo.",
+      },
+    };
+    expect(() => scoreRailCell(retiredGeometry, 95, measurement())).toThrow(
+      /retired denominator/,
+    );
+  });
+});
+
 describe("facet equals rail key by construction", () => {
   it("takes the facet from the rule, so a hand-typed key cannot orphan a row", () => {
     // countyCoverageScoreCli.ts writes facet 'land-use' while the rail is

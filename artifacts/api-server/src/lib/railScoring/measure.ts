@@ -97,7 +97,15 @@ async function tableExists(
  * Returns null when NEITHER parcel table holds the county — a null
  * denominator, not a zero. The distinction is load-bearing: a zero would
  * divide, a null fails closed to `not-yet`.
+ *
+ * The machine name of what this function computes. Any rail measured through
+ * this function must declare `denominator.kind` equal to this string, or the
+ * declaration has drifted from the query (S-22). Keep this identifier next
+ * to the SQL; do not relocate it to the registry.
  */
+export const EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND =
+  "txgio-parcel-distinct-feature-index" as const;
+
 export async function readParcelFeatureCount(
   ctx: MeasureContext,
   countyFips: string,
@@ -297,6 +305,21 @@ export async function measureRailCell(
   ctx: MeasureContext,
   countyFips: string,
 ): Promise<RailCellMeasurement> {
+  // FAIL CLOSED. A retired denominator means live rows were computed against
+  // a lost counting rule. Executing readParcelFeatureCount would substitute
+  // a reconstructible denominator and silently rewrite those rows. The guard
+  // sits BEFORE the kind switch so a still-typed atom-count rule cannot
+  // reach the measurer.
+  if (rule.denominator.kind === "retired-unknown-denominator") {
+    throw new RailNotMeasurableError(
+      rule.railKey,
+      "denominator_retired",
+      `rail '${rule.railKey}' declares a retired denominator; live ledger rows were ` +
+        `computed against a counting rule that is not reconstructible from checked-in ` +
+        `source. Refusing to score rather than substituting ` +
+        `${EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND}. Re-scoring is a different card (S-21).`,
+    );
+  }
   switch (rule.kind) {
     case "atom-count-over-parcel-features":
       return await measureAtomCount(rule, ctx, countyFips);
