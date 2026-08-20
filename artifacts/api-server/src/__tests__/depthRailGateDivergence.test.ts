@@ -29,19 +29,31 @@
  * is the only thing standing between a 0.00% row and a customer-facing
  * "satisfied". Its refusal is load-bearing safety, not over-strictness.
  *
- * Its defect is what it ERASES: it clears `isPartial` while demoting, so
- * "measured at 33.98% below a 95% bar" and "never scored at all" render
- * identically. All 18 partial cells in the entire ledger are zoning cells, so
- * the ledger summary's `satisfiedPresentPartialCells` — the field built to
- * surface exactly that class — reads 0 while the store holds 18. Changing it
- * moves a reported number and is an operator ruling, so lane SS-W13 filed it
- * rather than shipped it. The behaviour is PINNED below in both copies at
- * once, so the ruling cannot land in one of them.
+ * ITS DEFECT, AND THE RULING THAT FIXED IT. The gate used to demote to
+ * `not-yet` and clear `isPartial`, so "measured at 33.98% below a 95% bar" and
+ * "never scored at all" rendered identically. All 18 partial cells in the
+ * entire ledger are zoning cells, so the ledger summary's
+ * `satisfiedPresentPartialCells` — the field built to surface exactly that
+ * class — read 0 while the store held 18. Lane SS-W13 filed that rather than
+ * shipping it, because moving a reported number is an operator ruling.
+ *
+ * OPERATOR RULING 4 (2026-08-19, OPS-16 A-020) IS THAT RULING, and lane SS-W15
+ * executed it: the gate now demotes to `measured-below-bar`, and a cell with no
+ * ledger row at all renders `not-measured`. One is a coverage gap, the other an
+ * instrument gap, and they no longer look the same. The demotion target is
+ * `DEPTH_GATE_DEMOTION_STATE` in `lib/db/src/manifestDisplayState.ts` — a single
+ * constant both copies read, so the value can no longer be changed in one of
+ * them. `isPartial` is still cleared on demotion, and that is now correct
+ * rather than lossy: the display state itself carries what `isPartial` used to
+ * have to encode.
  */
 
 import { describe, it, expect } from "vitest";
 import { applyDepthRailDisplayGate as gateLedgerCompute } from "../countyLedgerCompute";
-import { readManifestGridFromPool } from "@workspace/db/manifest";
+import {
+  DEPTH_GATE_DEMOTION_STATE,
+  readManifestGridFromPool,
+} from "@workspace/db/manifest";
 
 interface GateCase {
   label: string;
@@ -142,7 +154,7 @@ describe("depth-rail display gate: two implementations, one rule", () => {
     const divergent = runLedgerComputeGate({
       label: "x", railKey: "geometry", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 0, thresholdPct: 95,
     });
-    expect(libDb[0]?.displayState).toBe("not-yet");
+    expect(libDb[0]?.displayState).toBe(DEPTH_GATE_DEMOTION_STATE);
     expect(divergent.displayState).toBe("satisfied-present");
     expect(divergent.displayState).not.toBe(libDb[0]?.displayState);
   });
@@ -151,14 +163,19 @@ describe("depth-rail display gate: two implementations, one rule", () => {
     const r = runLedgerComputeGate({
       label: "Travis at zero", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 0, thresholdPct: 95,
     });
-    expect(r.displayState).toBe("not-yet");
+    expect(r.displayState).toBe(DEPTH_GATE_DEMOTION_STATE);
+    // The refusal must still REFUSE. A rename that accidentally demoted to a
+    // satisfied-looking state would pass a `toBe(CONSTANT)` assertion while
+    // publishing a 0.00% cell as covered, so the state is also pinned by NAME.
+    expect(r.displayState).toBe("measured-below-bar");
+    expect(r.displayState).not.toBe("satisfied-present");
   });
 
-  it("PINS the erasure this lane declined to change: isPartial is cleared on demotion", async () => {
+  it("EXECUTES ruling 4: a demoted cell is measured-below-bar, not not-yet", async () => {
     const r = runLedgerComputeGate({
       label: "Williamson below bar", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95,
     });
-    expect(r.displayState).toBe("not-yet");
+    expect(r.displayState).toBe("measured-below-bar");
     expect(r.isPartial).toBe(false);
     const libDb = await runLibDbGate([
       { label: "same", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95 },

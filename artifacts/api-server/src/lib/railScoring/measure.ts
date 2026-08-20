@@ -24,11 +24,24 @@
 import type { RailCellMeasurement } from "./engine";
 import {
   absenceProbeCoversCounty,
+  denominatorNeedsCityBoundary,
   type AtomCountRule,
   type ParcelColumnConjunctionRule,
   type ParcelColumnStampRule,
   type RailScoringRule,
 } from "./registry";
+import { wiredZoningCityKeys } from "@workspace/cad-ingest";
+import {
+  countyHasAnyGeometry,
+  incorporatedStampDetail,
+  measureIncorporatedStampCounts,
+  readCityBoundaryAvailability,
+  readLocatableFeatureCounts,
+} from "./cityBoundaryDenominator";
+import {
+  resolveStampCellMeasurability,
+  type CountyMeasurability,
+} from "./countyMeasurability";
 
 /**
  * The narrow query surface a measurer needs. `pg.Pool` and `pg.Client` both
@@ -68,6 +81,29 @@ export class RailNotMeasurableError extends Error {
   ) {
     super(message);
     this.name = "RailNotMeasurableError";
+  }
+}
+
+/**
+ * Why ONE COUNTY of an otherwise-fine rail could not be measured.
+ *
+ * Distinct from `RailNotMeasurableError`, and the distinction is the whole
+ * point. That one abandons the rail everywhere, which is right for "no
+ * measurement spec" and catastrophic for "this county has no wired city
+ * layer". This one skips the cell, names the reason, writes no row, and lets
+ * the run continue. A refused cell is neither a zero nor a silence: it is a
+ * declared instrument gap, and `lib/db/src/manifestDisplayState.ts` renders it
+ * as one.
+ */
+export class CountyNotMeasurableError extends Error {
+  constructor(
+    readonly railKey: string,
+    readonly countyFips: string,
+    readonly refusal: string,
+    readonly basis: string,
+  ) {
+    super(`${railKey} ${countyFips}: ${refusal}: ${basis}`);
+    this.name = "CountyNotMeasurableError";
   }
 }
 
@@ -206,12 +242,140 @@ async function measureAtomCount(
   };
 }
 
+/**
+ * Does the resolved parcel table carry the stamp column at all?
+ *
+ * `to_regclass` (used by `tableExists`) is search_path-aware while
+ * `information_schema.columns` matches on bare NAME across every schema, so
+ * the `current_schemas(false)` predicate is required for the two lookups to be
+ * answering about the same table. That reasoning, and this predicate, are lane
+ * SS-W13's in `countyCoverageScoreCli.ts`; only the two-line helper is
+ * restated, never the measurability RULE, which is imported.
+ */
+async function columnExists(
+  q: RailScoreQueryable,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const r = await q.query<{ n: string }>(
+    `SELECT count(*)::text AS n
+       FROM information_schema.columns
+      WHERE table_name = $1 AND column_name = $2
+        AND table_schema = ANY(current_schemas(false))`,
+    [table, column],
+  );
+  return Number(r.rows[0]?.n ?? 0) > 0;
+}
+
+/**
+ * The stamp rate over the INCORPORATED-CITY denominator.
+ *
+ * Measurability is resolved FIRST, before any spatial work: a refusal costs
+ * one cheap query, and the join it avoids costs minutes on a metro county.
+ * That ordering is not an optimisation dressed as a rule; it is what makes the
+ * corrected denominator affordable, because only counties with a wired zoning
+ * layer ever reach the join (10 today, not 254).
+ */
+async function measureIncorporatedColumnStamp(
+  rule: ParcelColumnStampRule,
+  ctx: MeasureContext,
+  countyFips: string,
+  column: string,
+): Promise<RailCellMeasurement> {
+  // EVERY QUERY HERE IS CHEAP, and that is deliberate: this path runs for the
+  // whole target set, and 245 of 254 counties never get past the refusal. The
+  // first version ran a full per-county `count(DISTINCT ...) FILTER` scan
+  // before deciding measurability, which made the refusal path cost the same
+  // as the measured one for the 244 counties it was built to spare.
+  const den = await readParcelFeatureCount(ctx, countyFips);
+  const table = den?.table ?? null;
+  const boundary = await readCityBoundaryAvailability(ctx.deployment);
+  const hasStampColumn =
+    table === null ? false : await columnExists(ctx.deployment, table, column);
+  const anyStamped =
+    hasStampColumn && table !== null
+      ? await anyStampPresent(ctx.deployment, table, column, countyFips)
+      : false;
+  const anyGeometry =
+    table === null
+      ? false
+      : await countyHasAnyGeometry(ctx.deployment, table, countyFips);
+
+  const measurability: CountyMeasurability = resolveStampCellMeasurability({
+    table,
+    hasStampColumn,
+    wiredZoningLayers: wiredZoningCityKeys(countyFips).size,
+    anyStamped,
+    cityBoundaryRows: boundary.rows,
+    needsCityBoundary: true,
+    featuresWithGeom: anyGeometry ? 1 : 0,
+  });
+  if (!measurability.measurable) {
+    throw new CountyNotMeasurableError(
+      rule.railKey,
+      countyFips,
+      measurability.refusal ?? "unknown",
+      measurability.basis ?? "",
+    );
+  }
+
+  // Non-null by construction: every null-table path is refused above.
+  const parcelTable = table as string;
+  // The exact geom count is provenance, not a gate, so it is read only now
+  // that the county is known to be measurable.
+  const locatable = await readLocatableFeatureCounts(
+    ctx.deployment,
+    parcelTable,
+    countyFips,
+  );
+  const counts = await measureIncorporatedStampCounts(
+    ctx.deployment,
+    parcelTable,
+    column,
+    countyFips,
+    locatable,
+  );
+  return {
+    countyFips,
+    numerator: counts.stamped,
+    denominator: counts.incorporated,
+    // The COLUMN's existence, never a positive stamp rate (SF-24).
+    sourcePresent: true,
+    source: `${column}-stamp`,
+    detail: incorporatedStampDetail(counts, parcelTable, column),
+    absence: null,
+  };
+}
+
+/** Does ANY parcel in the county carry the stamp? Drives SS-W13's `stamp-not-rolled`. */
+async function anyStampPresent(
+  q: RailScoreQueryable,
+  table: string,
+  column: string,
+  countyFips: string,
+): Promise<boolean> {
+  const r = await q.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM ${table} WHERE county_fips = $1 AND ${column} IS NOT NULL
+     ) AS present`,
+    [countyFips],
+  );
+  return Boolean(r.rows[0]?.present);
+}
+
 async function measureColumnStamp(
   rule: ParcelColumnStampRule,
   ctx: MeasureContext,
   countyFips: string,
 ): Promise<RailCellMeasurement> {
   const column = assertIdentifier("stamp column", rule.column);
+  // THE DECLARED DENOMINATOR IS NOW LOAD-BEARING. Before lane SS-W15 this
+  // function ignored `rule.denominator` entirely and always used the
+  // parcel-feature count, so the registry's required denominator field was
+  // documentation rather than control.
+  if (denominatorNeedsCityBoundary(rule.denominator.kind)) {
+    return await measureIncorporatedColumnStamp(rule, ctx, countyFips, column);
+  }
   const den = await readParcelFeatureCount(ctx, countyFips);
   if (den == null) {
     return {

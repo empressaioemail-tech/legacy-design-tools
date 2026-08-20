@@ -40,6 +40,8 @@
 
 import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 
+import { incorporatedDenominatorBasis } from "./cityBoundaryDenominator";
+
 // ---------------------------------------------------------------------------
 // Denominators and reach.
 // ---------------------------------------------------------------------------
@@ -47,6 +49,18 @@ import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 export type DenominatorKind =
   /** DISTINCT feature_index in txgio_parcel for the county — the real-world parcel count. */
   | "txgio-parcel-distinct-feature-index"
+  /**
+   * DISTINCT feature_index whose representative point falls inside an
+   * incorporated municipal boundary in `tx_city_boundary` (lane SS-W15).
+   *
+   * The denominator for any rail whose subject is a MUNICIPAL AUTHORITY rather
+   * than a statewide fact. Unincorporated Texas has no municipal zoning
+   * authority, so a county-wide denominator charges a county for land nobody
+   * can zone: Bastrop 48021 measured 15.22% county-wide and 79.60% here, and
+   * only 18.89% of its parcels are inside a city at all. Full derivation and
+   * cost in `./cityBoundaryDenominator.ts`.
+   */
+  | "incorporated-city-parcels"
   /** No denominator: the rail could not be measured for this county. */
   | "none";
 
@@ -185,6 +199,18 @@ const PARCEL_FEATURE_DENOMINATOR: DenominatorSpec = {
     "count(DISTINCT feature_index) in txgio_parcel for the county (falling back to txgio_parcel_staging). The FEATURE is the real-world parcel; txgio_parcel carries multiple rows per feature, so the raw row count would understate coverage several-fold on some counties.",
 };
 
+/**
+ * The denominator for a MUNICIPAL-AUTHORITY rail (lane SS-W15, 2026-08-19).
+ *
+ * Measured before it was declared. The prose is the counting rule, and it
+ * travels into every run report and into the `artifact_path` provenance of
+ * every row it governs.
+ */
+const INCORPORATED_CITY_ZONING_DENOMINATOR: DenominatorSpec = {
+  kind: "incorporated-city-parcels",
+  basis: incorporatedDenominatorBasis("zoning_district"),
+};
+
 export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   {
     railKey: "geometry",
@@ -210,9 +236,9 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     column: "zoning_district",
     instrument: "countyRailScoreCli.ts:zoning",
     verificationMethod: "sweep",
-    denominator: PARCEL_FEATURE_DENOMINATOR,
+    denominator: INCORPORATED_CITY_ZONING_DENOMINATOR,
     notes:
-      "Stamp rate, not data presence: a low percentage is a wired-city gap, not missing zoning. 235 of the live zoning rows are roster-load doctrine rows (source zoning-regime-doctrine) which the rollup deliberately excludes; this rule measures the stamp and does not touch the doctrine rows' basis.",
+      "DENOMINATOR CORRECTED 2026-08-19 by lane SS-W15, measured first and declared second. This rule previously used PARCEL_FEATURE_DENOMINATOR — every parcel in the county — which answers a question nobody asks: unincorporated Texas has no municipal zoning authority, so those parcels can never be stamped and their presence in the denominator measures Texas geography rather than our coverage. Bastrop 48021 read 15.22% (9,642 / 63,357) and measures 79.60% (9,526 / 11,968); only 18.89% of its parcels are inside a city at all. Travis 48453 read 33.32% and measures 65.03%. The correction did NOT make the gap vanish and was not expected to: Bastrop's missing 20.40% is Smithville, 2,397 incorporated parcels with zero stamped, which the county-wide denominator had buried inside a number that looked like systemic failure. Stamp rate, not data presence, remains true: a low percentage is still a wired-city gap rather than missing zoning, and a county with no wired layer is now REFUSED rather than scored zero (see ./countyMeasurability.ts). 235 of the live zoning rows are roster-load doctrine rows (source zoning-regime-doctrine) which the rollup deliberately excludes; this rule measures the stamp and does not touch the doctrine rows' basis. TWO INSTRUMENTS NOW CLAIM FACET 'zoning' AND THEIR DENOMINATORS DISAGREE, WHICH IS AN OPERATOR RULING AND NOT THIS LANE'S TO MAKE. countyCoverageScoreCli.ts writes facet 'zoning' over the COUNTY parcel count; this rule writes it over the INCORPORATED count. Both are checked in, both upsert the same (county_fips, facet) primary key, and the last one run wins the cell: on Bastrop that is the difference between 15.22% and 79.60% depending on which CLI ran most recently. That is a paired-control divergence (DEV_PROCESS 2.4) created deliberately and named rather than resolved by unilateral edit (DEV_PROCESS 5.4), because countyCoverageScoreCli.ts is lane SS-W13's file and retiring a live instrument is a ruling. The ledger is not moved by either instrument in this PR: nothing here was applied.",
   },
   {
     railKey: "roads",
@@ -340,6 +366,34 @@ const THRESHOLD_BY_RAIL_KEY: ReadonlyMap<string, number> = new Map(
 
 export function railScoringRuleFor(railKey: string): RailScoringRule | undefined {
   return RULE_BY_RAIL_KEY.get(railKey);
+}
+
+/**
+ * Does this denominator require the municipal boundary table?
+ *
+ * EXHAUSTIVE OVER THE UNION, DELIBERATELY. The `never` assignment makes adding
+ * a `DenominatorKind` without deciding this question a TYPE ERROR rather than
+ * a silent `false`. That matters because until lane SS-W15 the `denominator`
+ * field was DECLARED AND NEVER READ: `measureColumnStamp` called
+ * `readParcelFeatureCount` unconditionally, so a rule could declare any
+ * denominator it liked and get the parcel-feature count regardless. One rule,
+ * two expressions, only one of them authoritative — the CTRL-1 shape
+ * (DEV_PROCESS 2.4), sitting inside the file whose whole purpose is that the
+ * rule is data. `registry.test.ts` and `measure` now both depend on this being
+ * the single answer.
+ */
+export function denominatorNeedsCityBoundary(kind: DenominatorKind): boolean {
+  switch (kind) {
+    case "incorporated-city-parcels":
+      return true;
+    case "txgio-parcel-distinct-feature-index":
+    case "none":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled denominator kind: ${String(exhaustive)}`);
+    }
+  }
 }
 
 /**
