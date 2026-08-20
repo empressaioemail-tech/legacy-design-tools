@@ -1,3 +1,8 @@
+// STAGE-2 VIOLATION PROOF — DO NOT MERGE. Deliberate reproduction of the
+// SS-W18 defect class: a CLI pulled into the api-server boot graph, where
+// bundling defeats the entrypoint guard. Four merges shipped unbootable this
+// way. This branch exists only to prove the required check refuses it.
+import "./countyCoverageScoreCli";
 import { ensureCodeAtomSources } from "@workspace/codes";
 import { validateMnmlEnvAtBoot } from "@workspace/mnml-client";
 import app from "./app";
