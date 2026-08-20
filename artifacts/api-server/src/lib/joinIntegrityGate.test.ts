@@ -19,11 +19,14 @@ import {
   ownerMatchRate,
   evaluateJoinIntegrity,
   resolveAddressLandUse,
+  loadLedgerBlockedFips,
+  LANDUSE_JOIN_LEDGER_BLOCK_FACETS,
   DEFAULT_MIN_OWNER_MATCH_RATE,
   MIN_INFORMATIVE_SAMPLE,
   normalizeForJoin,
   type OwnerPair,
   type AddressLandUseEntry,
+  type QueryablePool,
 } from "./joinIntegrityGate";
 
 // ---------------------------------------------------------------------------
@@ -350,5 +353,43 @@ describe("resolveAddressLandUse (per-match owner gate for the address join)", ()
   it("returns null for a null/empty address key (no key -> no join)", () => {
     expect(resolveAddressLandUse(null, "PURVIS MICHAEL", lookup)).toBeNull();
     expect(resolveAddressLandUse("", "PURVIS MICHAEL", lookup)).toBeNull();
+  });
+});
+
+describe("loadLedgerBlockedFips reads successor then retired", () => {
+  it("default facet list includes landuse-cad-join and still land-use", () => {
+    expect(LANDUSE_JOIN_LEDGER_BLOCK_FACETS).toContain("landuse-cad-join");
+    expect(LANDUSE_JOIN_LEDGER_BLOCK_FACETS).toContain("land-use");
+  });
+
+  it("queries ANY(landuse-cad-join, land-use) and collects block FIPS", async () => {
+    const captured: Array<{ text: string; params: unknown[] | undefined }> = [];
+    const pool: QueryablePool = {
+      query: async (text, params) => {
+        captured.push({ text, params });
+        if (text.includes("to_regclass")) {
+          return { rows: [{ r: "county_facet_coverage" }] };
+        }
+        return { rows: [{ county_fips: "48209" }] };
+      },
+    };
+    const blocked = await loadLedgerBlockedFips(pool);
+    expect(blocked.has("48209")).toBe(true);
+    const select = captured.find((c) => c.text.includes("integrity_verdict"));
+    expect(select).toBeDefined();
+    expect(select?.text).toContain("ANY($1::text[])");
+    const facets = select?.params?.[0] as string[];
+    expect(facets).toEqual(expect.arrayContaining(["landuse-cad-join", "land-use"]));
+  });
+
+  it("returns empty when the ledger table is absent, never a fabricated zero-block claim from a missing table", async () => {
+    const pool: QueryablePool = {
+      query: async (text) => {
+        if (text.includes("to_regclass")) return { rows: [{ r: null }] };
+        throw new Error("SELECT must not run when the table is absent");
+      },
+    };
+    const blocked = await loadLedgerBlockedFips(pool);
+    expect(blocked.size).toBe(0);
   });
 });
