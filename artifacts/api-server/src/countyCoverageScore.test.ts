@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { classifyFacet, sourcePresentForStampFacet } from "./countyCoverageScoreCli";
+import {
+  classifyFacet,
+  sourcePresentForStampFacet,
+} from "./lib/countyCoverageClassification";
 
 describe("classifyFacet", () => {
   it("a gate-BLOCKED land-use join -> fabricated-blocked, honest coverage 0", () => {

@@ -107,7 +107,10 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pg from "pg";
 
-import { classifyFacet, type FacetScore } from "./countyCoverageScoreCli";
+import {
+  classifyFacet,
+  type FacetScore,
+} from "./lib/countyCoverageClassification";
 
 const { Pool } = pg;
 

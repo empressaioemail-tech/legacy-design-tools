@@ -129,10 +129,32 @@ import {
   sampleJoinPairs,
   sampleAddressJoinPairs,
   evaluateJoinIntegrity,
-  type JoinIntegrityReport,
   type QueryablePool,
 } from "./lib/joinIntegrityGate";
 import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./lib/joinNormalize";
+/**
+ * The classifier moved OUT of this file on 2026-08-19 (lane SS-W18, P-47).
+ *
+ * `lib/railScoring/engine.ts` imported `classifyFacet` from here, and the
+ * `/api/county-ledger` route imports that engine, so THIS CLI was in the
+ * server's boot graph. esbuild bundles everything into one `dist/index.mjs`,
+ * which makes the `isDirectRun()` guard at the bottom of this file read TRUE
+ * at server boot (`import.meta.url` is the bundle, and so is `argv[1]`), so
+ * `main()` ran with an empty argv and `process.exit(1)`'d before Express
+ * listened. A canary deploy of `5688aa31` failed exactly this way.
+ *
+ * The pure decisions now live in a leaf module that imports nothing at
+ * runtime, and this CLI is a CONSUMER of it like every other scorer. Do not
+ * re-export them from here: a re-export would put this file back on the
+ * import path that broke production. Enforced by
+ * `scripts/checkBootGraphNoCliImports.mjs`.
+ */
+import {
+  classifyFacet,
+  resolveStampFacetMeasurability,
+  sourcePresentForStampFacet,
+  type FacetScore,
+} from "./lib/countyCoverageClassification";
 
 const { Pool } = pg;
 
@@ -184,7 +206,10 @@ function fail(msg: string): never {
 }
 
 // ---------------------------------------------------------------------------
-// Classification — PURE, unit-testable without a DB.
+// Facet keys, rail thresholds and provenance strings — PURE, unit-testable
+// without a DB. The CLASSIFIER itself now lives in
+// `lib/countyCoverageClassification.ts`; these stay here because they read
+// COUNTY_RAIL_DECLARATION and nothing in the server boot graph wants them.
 // ---------------------------------------------------------------------------
 
 /**
@@ -262,114 +287,6 @@ function landUseArtifactPath(fips: string, table: string): string {
 
 function stampArtifactPath(fips: string, table: string): string {
   return `${table}.zoning_district;county_fips=${fips};denom=distinct-feature_index`;
-}
-
-export type Classification =
-  | "real-at-ceiling"
-  | "needs-crosswalk"
-  | "true-source-gap"
-  | "fabricated-blocked";
-
-export interface FacetScore {
-  facet: string;
-  /** HONEST coverage 0..100 (a blocked land-use facet records 0). */
-  honestCoveragePct: number;
-  /** The integrity verdict; 'n/a' for facets with no owner oracle. */
-  integrityVerdict: JoinIntegrityReport["verdict"] | "n/a";
-  /** 0..1 owner-match rate, or null for n/a facets. */
-  ownerMatchRate: number | null;
-  source: string | null;
-  sourceVintage: string | null;
-  sampled: number;
-  classification: Classification;
-}
-
-export interface ClassifyInput {
-  facet: string;
-  /**
-   * RAW coverage the join produced BEFORE gating, 0..100 — for land-use this
-   * is the fabricated-or-real stamp rate; the classifier zeroes it when
-   * blocked.
-   */
-  rawCoveragePct: number;
-  /** Whether the SOURCE exists at all (e.g. a CAD roll is loaded). */
-  sourcePresent: boolean;
-  /** The gate verdict for facets with an owner oracle; null for n/a facets. */
-  verdict: JoinIntegrityReport["verdict"] | null;
-  ownerMatchRate: number | null;
-  source: string | null;
-  sourceVintage: string | null;
-  sampled: number;
-}
-
-/**
- * Zoning/envelope source presence is the SOURCE COLUMN, not a positive stamp
- * rate. `stampedPct > 0` manufacturing is SF-24.
- */
-export function sourcePresentForStampFacet(
-  hasSourceColumn: boolean,
-  _stampedPct: number,
-): boolean {
-  return hasSourceColumn;
-}
-
-/**
- * Classify a facet from its raw coverage + gate verdict + source presence.
- * PURE. This is the load-bearing decision the ledger records, so it is
- * separated from all I/O and unit-tested directly.
- *
- * Rules (in priority order):
- *  1. verdict 'block'                -> fabricated-blocked, honest coverage 0.
- *     (A proven fabrication is stored as honest-absence, never the stamp rate.)
- *  2. no source at all               -> true-source-gap, coverage 0.
- *     (Comal ships no CAD roll; the gap is the source's, honestly reported.)
- *  3. verdict 'insufficient-sample'
- *     AND some raw coverage          -> needs-crosswalk.
- *     (A source exists but the join key is too thin to prove — an external
- *     CAD-account⟷prop_id crosswalk is the unblock.)
- *  4. otherwise                      -> real-at-ceiling, honest = raw.
- */
-export function classifyFacet(input: ClassifyInput): FacetScore {
-  const {
-    facet,
-    rawCoveragePct,
-    sourcePresent,
-    verdict,
-    ownerMatchRate,
-    source,
-    sourceVintage,
-    sampled,
-  } = input;
-
-  let classification: Classification;
-  let honestCoveragePct: number;
-
-  if (verdict === "block") {
-    classification = "fabricated-blocked";
-    honestCoveragePct = 0;
-  } else if (!sourcePresent) {
-    classification = "true-source-gap";
-    honestCoveragePct = 0;
-  } else if (verdict === "insufficient-sample" && rawCoveragePct > 0) {
-    classification = "needs-crosswalk";
-    // The raw coverage is not proven real, so it is not asserted as honest
-    // coverage; the crosswalk lifts it later. Record 0 honest until proven.
-    honestCoveragePct = 0;
-  } else {
-    classification = "real-at-ceiling";
-    honestCoveragePct = rawCoveragePct;
-  }
-
-  return {
-    facet,
-    honestCoveragePct,
-    integrityVerdict: verdict ?? "n/a",
-    ownerMatchRate,
-    source,
-    sourceVintage,
-    sampled,
-    classification,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -459,69 +376,6 @@ interface CountyPresence {
   /** Wired city zoning layers registered for this county in ZONING_LAYERS. */
   wiredZoningLayers: number;
   parcels: number;
-}
-
-/**
- * Why a stamp facet could not be measured, or null when it can be.
- *
- * The three refusals are the file header's `no-zoning-column`,
- * `no-wired-layer` and `stamp-not-rolled`. Each carries the basis a reader
- * needs to act on it, because a refusal a reader cannot act on becomes a
- * shrug.
- */
-export interface StampFacetMeasurability {
-  measurable: boolean;
-  /** Stable machine code, one of the three refusals. Null when measurable. */
-  refusal: "no-zoning-column" | "no-wired-layer" | "stamp-not-rolled" | null;
-  /** Human basis, printed and carried into the close artifact. */
-  basis: string | null;
-}
-
-/**
- * Decide whether the zoning/envelope stamp facets are measurable for a county.
- *
- * PURE, so the rule is unit-testable without a database and the negative case
- * is provable (DEV_PROCESS 2.2: a gate is tested for its ability to FIRE).
- */
-export function resolveStampFacetMeasurability(input: {
-  table: string;
-  hasZoningColumn: boolean;
-  wiredZoningLayers: number;
-  stampedPct: number;
-}): StampFacetMeasurability {
-  if (!input.hasZoningColumn) {
-    return {
-      measurable: false,
-      refusal: "no-zoning-column",
-      basis:
-        `resolved parcel table '${input.table}' has no zoning_district column, ` +
-        "so this instrument cannot see zoning for this county. Recording a " +
-        "source gap from a missing column would assert an absence never " +
-        "determined.",
-    };
-  }
-  if (input.wiredZoningLayers === 0) {
-    return {
-      measurable: false,
-      refusal: "no-wired-layer",
-      basis:
-        "no city zoning layer is registered for this county in ZONING_LAYERS, " +
-        "so a 0% stamp rate would measure this instrument's wiring rather " +
-        "than the county. Wire a city layer, or establish the county's " +
-        "unincorporated status positively, before an absence is written.",
-    };
-  }
-  if (input.stampedPct <= 0) {
-    return {
-      measurable: false,
-      refusal: "stamp-not-rolled",
-      basis:
-        `${input.wiredZoningLayers} city zoning layer(s) are wired for this ` +
-        "county but no parcel carries a stamp, so the zoning-stamp CLI has " +
-        "not been run here. That is an unrun step, not a source gap.",
-    };
-  }
-  return { measurable: true, refusal: null, basis: null };
 }
 
 /** Which table serves this county (prod winning over staging), plus counts. */

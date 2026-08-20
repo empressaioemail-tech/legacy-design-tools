@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveStampFacetMeasurability } from "./countyCoverageScoreCli";
+import { resolveStampFacetMeasurability } from "./lib/countyCoverageClassification";
 
 describe("resolveStampFacetMeasurability", () => {
   it("REFUSES when the resolved table cannot carry zoning_district", () => {

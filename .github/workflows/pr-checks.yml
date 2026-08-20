@@ -414,6 +414,90 @@ jobs:
 
           echo "ci-tier2-flood-not-served: clean"
           echo "RESULT=clean"
+  ss-w18-api-server-boot:
+    name: SS-W18 api-server boots
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: ci-boot-graph-no-cli-import
+        run: |
+          # SS-W18 (2026-08-19, P-47). No module reachable from the server
+          # entrypoint may statically import a `*Cli` module. A CLI's
+          # isDirectRun() guard does not survive esbuild bundling, so its
+          # main() runs at server boot and can process.exit(1) before Express
+          # listens. That is what killed the canary deploy of 5688aa31.
+          #
+          # THIS GATE IS A GRAPH WALK, NOT A GREP, and that is the whole point.
+          # The live defect sat three hops from routes/index.ts behind the
+          # lib/railScoring barrel re-export. A grep over routes/ would have
+          # been green through the entire outage. Re-export through an
+          # intermediate module is the obvious bypass of a grep, so this
+          # control does not have one.
+          #
+          # THREE OUTCOMES, NOT TWO. The script exits 0 clean / 1 violation /
+          # 2 did-not-run, and this step keeps them distinguishable in the run
+          # summary. A did-not-run FAILS the job: a check that cannot run and
+          # silently passes is the defect class this gate exists for.
+          set +e
+          node artifacts/api-server/scripts/checkBootGraphNoCliImports.mjs
+          CODE=$?
+          set -e
+          SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+          case "$CODE" in
+            0) echo "ci-boot-graph-no-cli-import: RESULT=clean" >> "$SUMMARY" ;;
+            1) echo "ci-boot-graph-no-cli-import: RESULT=violation" >> "$SUMMARY"; exit 1 ;;
+            2) echo "ci-boot-graph-no-cli-import: RESULT=did-not-run (GATE-DID-NOT-RUN)" >> "$SUMMARY"; exit 1 ;;
+            *) echo "ci-boot-graph-no-cli-import: RESULT=did-not-run (unexpected exit $CODE)" >> "$SUMMARY"; exit 1 ;;
+          esac
+      - name: Build api-server bundle
+        run: pnpm --filter @workspace/api-server run build
+      - name: ci-api-server-boot-smoke
+        run: |
+          # SS-W18 (2026-08-19, P-47). Start the built bundle, wait for the
+          # port, kill it. Its ABSENCE is why four merges between 2026-08-16
+          # and 2026-08-19 all shipped unbootable with green CI: typecheck and
+          # vitest never start the process, so nothing in this workflow
+          # consumed the one signal that would have caught it.
+          #
+          # The harness self-tests its own probe in both directions before it
+          # renders a verdict, refuses to answer if the probe port is already
+          # occupied, and kills the child in a finally under a hard deadline.
+          # Same three outcomes and the same did-not-run handling as above.
+          set +e
+          node artifacts/api-server/scripts/bootSmokeTest.mjs
+          CODE=$?
+          set -e
+          SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+          case "$CODE" in
+            0) echo "ci-api-server-boot-smoke: RESULT=pass" >> "$SUMMARY" ;;
+            1) echo "ci-api-server-boot-smoke: RESULT=violation" >> "$SUMMARY"; exit 1 ;;
+            2) echo "ci-api-server-boot-smoke: RESULT=did-not-run (GATE-DID-NOT-RUN)" >> "$SUMMARY"; exit 1 ;;
+            *) echo "ci-api-server-boot-smoke: RESULT=did-not-run (unexpected exit $CODE)" >> "$SUMMARY"; exit 1 ;;
+          esac
+
   l17-ci-vintage-predicate:
     name: L17 ci-vintage-predicate
     runs-on: ubuntu-latest

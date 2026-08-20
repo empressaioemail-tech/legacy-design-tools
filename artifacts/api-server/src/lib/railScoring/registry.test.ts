@@ -160,11 +160,14 @@ describe("absence probe reach", () => {
 
 describe("the registry is DB-free by construction", () => {
   // `--list` reads a checked-in declaration and touches no database, so it
-  // must not need a connection string. It did: the barrel re-exports the
-  // engine, which imports classifyFacet from countyCoverageScoreCli.ts, which
-  // reaches @workspace/db, whose module body throws without DATABASE_URL. The
-  // cheapest command in the tool had become the one command that could not
-  // run. This pins the import boundary so the barrel cannot creep back in.
+  // must not need a connection string. It did: the barrel re-exported the
+  // engine, which imported classifyFacet from countyCoverageScoreCli.ts,
+  // which reaches @workspace/db, whose module body throws without
+  // DATABASE_URL. The cheapest command in the tool had become the one command
+  // that could not run. Lane SS-W18 broke that chain on 2026-08-19 by moving
+  // the classifier to lib/countyCoverageClassification.ts, after the same
+  // chain also exited the SERVER at boot. This pins the import boundary so
+  // neither the barrel nor a CLI can creep back in.
   const source = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "./registry.ts"),
     "utf8",
