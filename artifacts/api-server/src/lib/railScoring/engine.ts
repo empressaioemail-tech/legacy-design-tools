@@ -171,9 +171,22 @@ export function scoreRailCell(
   measurement: RailCellMeasurement,
 ): RailCellScore {
   if (!isScoreableRule(rule)) {
+    if (rule.denominator.kind === "retired-unknown-denominator") {
+      throw new Error(
+        `rail '${rule.railKey}' has a retired denominator and cannot be scored ` +
+          `until a new scorer lands. Substituting a reconstructible denominator ` +
+          `would rewrite live rows against a different counting rule.`,
+      );
+    }
+    if (rule.kind === "unspecified") {
+      throw new Error(
+        `rail '${rule.railKey}' has no measurement spec (kind 'unspecified'); ` +
+          `it cannot be scored. Owner: ${rule.specOwner}.`,
+      );
+    }
     throw new Error(
-      `rail '${rule.railKey}' has no measurement spec (kind 'unspecified'); ` +
-        `it cannot be scored. Owner: ${rule.specOwner}.`,
+      `rail '${rule.railKey}' cannot be scored (kind '${rule.kind}', ` +
+        `denominator '${rule.denominator.kind}')`,
     );
   }
 
