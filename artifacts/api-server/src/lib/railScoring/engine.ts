@@ -30,19 +30,28 @@
  *      source that cannot see a county cannot report that county empty.
  *   5. AN UNSPECIFIED RAIL IS REFUSED, never scored as zero.
  *
- * CLASSIFIER. `classifyFacet` is imported from `countyCoverageScoreCli.ts`
- * rather than duplicated — it is the existing single definition and the
- * geometry and flood CLIs already import it, so copying it would create the
- * future contradiction DEV_PROCESS 6.2 warns about. That file is owned by
- * lane SS-W13 this week, so `engine.test.ts` PINS the classifier behaviours
- * this engine depends on: if SS-W13 changes them, those tests fail loudly
- * instead of this engine drifting silently.
+ * CLASSIFIER. `classifyFacet` is imported from the pure leaf module
+ * `lib/countyCoverageClassification.ts` rather than duplicated — it is the
+ * single definition and the geometry and flood CLIs import the same one, so
+ * copying it would create the future contradiction DEV_PROCESS 6.2 warns
+ * about. `engine.test.ts` PINS the classifier behaviours this engine depends
+ * on, so a change to them fails loudly instead of this engine drifting.
+ *
+ * IT USED TO BE IMPORTED FROM `countyCoverageScoreCli.ts`, AND THAT BROKE
+ * PRODUCTION. `routes/countyRailScore.ts` imports this engine through the
+ * `./index.ts` barrel, so the CLI was in the server's boot graph. esbuild
+ * bundles everything into one file, which defeats the CLI's `isDirectRun()`
+ * guard (`import.meta.url` and `argv[1]` are both the bundle), so the CLI's
+ * `main()` ran at boot and `process.exit(1)`'d before Express listened — the
+ * canary deploy of `5688aa31` on 2026-08-19. Never import a `*Cli` module
+ * from anything on this path; `scripts/checkBootGraphNoCliImports.mjs`
+ * enforces it.
  */
 
 import {
   classifyFacet,
   type Classification,
-} from "../../countyCoverageScoreCli";
+} from "../countyCoverageClassification";
 import {
   absenceProbeCoversCounty,
   isScoreableRule,

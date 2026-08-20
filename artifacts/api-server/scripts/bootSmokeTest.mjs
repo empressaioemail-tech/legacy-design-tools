@@ -137,6 +137,10 @@ function smokeEnv(port) {
     SERVICE_API_KEY: "boot-smoke-dummy",
     AI_INTEGRATIONS_ANTHROPIC_BASE_URL: "https://api.anthropic.invalid",
     AI_INTEGRATIONS_ANTHROPIC_API_KEY: "boot-smoke-dummy",
+    // Presence-checked at boot by validateEngineSpineEnvAtBoot. Never dialled
+    // during boot, so an unroutable host is the honest value here: it must not
+    // be able to pass by reaching something real.
+    ENGINE_API_URL: "https://engine-api.boot-smoke.invalid",
   };
 }
 

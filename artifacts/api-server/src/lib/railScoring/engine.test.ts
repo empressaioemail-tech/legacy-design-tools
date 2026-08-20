@@ -15,7 +15,7 @@ import {
   type RailCellMeasurement,
   type RailLedgerValues,
 } from "./engine";
-import { classifyFacet } from "../../countyCoverageScoreCli";
+import { classifyFacet } from "../countyCoverageClassification";
 import type {
   AtomCountRule,
   RailScoringRule,
@@ -249,10 +249,14 @@ describe("idempotency is a VALUE diff, not a row count", () => {
 });
 
 describe("PINNED classifier behaviour (cross-lane drift detector)", () => {
-  // classifyFacet lives in countyCoverageScoreCli.ts, which lane SS-W13 owns
-  // this week. This engine imports it rather than duplicating it
-  // (DEV_PROCESS 6.2), so these assertions exist to make a change over there
-  // fail HERE, loudly, instead of silently altering what this engine writes.
+  // classifyFacet lives in lib/countyCoverageClassification.ts, a pure leaf
+  // module shared with the three scorer CLIs. This engine imports it rather
+  // than duplicating it (DEV_PROCESS 6.2), so these assertions exist to make a
+  // change over there fail HERE, loudly, instead of silently altering what
+  // this engine writes. It used to live in countyCoverageScoreCli.ts; lane
+  // SS-W18 moved it on 2026-08-19 because importing a CLI put the CLI in the
+  // server boot graph and a canary deploy of 5688aa31 exited before Express
+  // listened.
   it("sourcePresent=false yields true-source-gap at coverage 0", () => {
     const r = classifyFacet({
       facet: "flood",
