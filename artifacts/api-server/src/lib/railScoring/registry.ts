@@ -252,7 +252,7 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     verificationMethod: "sweep",
     denominator: PARCEL_FEATURE_DENOMINATOR,
     notes:
-      "The 254 live landuse rows are land-use-fact atom counts from score_cad_rails_fast.mjs, which is what this reproduces. SEPARATE from countyCoverageScoreCli.ts's owner-gated CAD-roll join, which writes facet 'land-use' (orphaned: no such rail key) and is owned by lane SS-W13. Both are named here so a successor does not mistake one for the other.",
+      "The 254 live landuse rows are land-use-fact atom counts from score_cad_rails_fast.mjs, which is what this reproduces. SEPARATE from countyCoverageScoreCli.ts's owner-gated CAD-roll join, which now upserts diagnostic facet 'landuse-cad-join' (the historical 'land-use' key is RETIRED; 19 orphan rows remain until operator-authorised retirement SQL). Both are named here so a successor does not mistake one for the other.",
   },
   {
     railKey: "footprint",
