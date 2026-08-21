@@ -38,6 +38,12 @@
  * `landUseFact` is read from land-use-fact atoms. Baked
  * `facets.baseFacts.landUse` stays the retiredStore cad-roll object this
  * pass. Never SELECT the CAD roll table for `landUseFact`.
+ *
+ * SPECIAL-DISTRICT ATOM IS A ROOT SIBLING (lane serve P-48, 2026-08-21).
+ * `specialDistrictFact` is read from special-district-fact atoms. Dual
+ * grammar on the parcel PREFIX only; districtId is the writer `:sd:`
+ * suffix. mud is a districtType on that family, not a second atom.
+ * Never SELECT bake / place_layer_snapshots / CAD / mud-pid for this field.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -49,6 +55,7 @@ import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
+import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -433,11 +440,13 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact, landUseFact] = await Promise.all([
-      loadBakedNodeFacetSnapshot(parcelNodeId),
-      loadFloodHazardFactAtom(parcelNodeId),
-      loadLandUseFactAtom(parcelNodeId),
-    ]);
+    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact] =
+      await Promise.all([
+        loadBakedNodeFacetSnapshot(parcelNodeId),
+        loadFloodHazardFactAtom(parcelNodeId),
+        loadLandUseFactAtom(parcelNodeId),
+        loadSpecialDistrictFactAtom(parcelNodeId),
+      ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
@@ -472,6 +481,10 @@ brokerageNodeFacetsRouter.get(
       // comes from the atom row. Baked facets.baseFacts.landUse stays
       // retiredStore. Never copied off the CAD roll table.
       landUseFact,
+      // Special-district-fact atom. Dual grammar on the parcel PREFIX only;
+      // districtId comes from the writer `:sd:` suffix. Never copied off
+      // bake / CAD / mud-pid. mud is a districtType, not a second family.
+      specialDistrictFact,
     });
   },
 );

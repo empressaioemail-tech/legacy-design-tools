@@ -49,6 +49,11 @@ import {
   resetLandUseFactAtomQueryableForTests,
   setLandUseFactAtomQueryableForTests,
 } from "../lib/landUseFactRead";
+import {
+  memorySpecialDistrictFactAtoms,
+  resetSpecialDistrictFactAtomQueryableForTests,
+  setSpecialDistrictFactAtomQueryableForTests,
+} from "../lib/specialDistrictFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -406,6 +411,23 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/\.from\(\s*cad_property/i);
     expect(routeSrc).not.toMatch(/landUseFact\s*=\s*.*baseFacts\.landUse/);
   });
+
+  it("the route source wires specialDistrictFact from atoms and does not read bake/CAD/mud-pid", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/specialDistrictFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadSpecialDistrictFactAtom/);
+    expect(routeSrc).toMatch(/specialDistrictFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /specialDistrictFact\s*=\s*.*place_layer_snapshots/,
+    );
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -542,6 +564,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   beforeEach(async () => {
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     setLandUseFactAtomQueryableForTests(memoryLandUseFactAtoms([]));
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([]),
+    );
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -574,6 +599,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   afterEach(async () => {
     resetFloodHazardAtomQueryableForTests();
     resetLandUseFactAtomQueryableForTests();
+    resetSpecialDistrictFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -652,6 +678,18 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
     expect(res.body.landUseFact.landUseCode).toBeUndefined();
     expect(res.body.landUseFact.code).not.toBe("A1");
+
+    // Special-district-fact miss is named. Snapshot / CAD must not fill it.
+    expect(res.body.specialDistrictFact).not.toBeNull();
+    expect(res.body.specialDistrictFact.state).toBe("refused");
+    expect(res.body.specialDistrictFact.code).toBe("atom-miss");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.specialDistrictFact.districtId).toBeUndefined();
+    expect(res.body.specialDistrictFact.districtType).toBeUndefined();
 
     // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
@@ -895,6 +933,183 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.landUseFact.landUseCode).toBe("C1");
     expect(res.body.landUseFact.boundAs).toBe(`${goldPadded}:2025`);
     expect(res.body.landUseFact.landUseLabel).toBeNull();
+  });
+
+  it("serves a fixture special-district-fact and does not copy snapshot district fields", async () => {
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${BAKED_NODE_ID}:sd:3504125`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: BAKED_NODE_ID,
+            sourceTier: "tceq-water-districts",
+            districtId: "3504125",
+            districtType: "MUD",
+            districtName: "The Colony MUD 1C",
+            sourceAdapter: "tceq-water-districts-v1",
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("present");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.districtId).toBe("3504125");
+    expect(res.body.specialDistrictFact.districtType).toBe("MUD");
+    expect(res.body.specialDistrictFact.districtName).toBe("The Colony MUD 1C");
+    expect(res.body.specialDistrictFact.boundAs).toBe(
+      `${BAKED_NODE_ID}:sd:3504125`,
+    );
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+  });
+
+  it("gold parcel 48021:34137 :sd:outside is typed absence, not a fabricated MUD", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold-sd-outside",
+    });
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${gold}:sd:outside`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: gold,
+            sourceTier: "tceq-water-districts",
+            absence: {
+              kind: "outside-tceq-source-boundaries",
+              reason:
+                "Parcel geometry does not intersect any polygon in tx_special_district for county 48021.",
+            },
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("absent");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.entityId).toBe(`${gold}:sd:outside`);
+    expect(res.body.specialDistrictFact.absence.kind).toBe(
+      "outside-tceq-source-boundaries",
+    );
+    expect(res.body.specialDistrictFact.districtType).toBeUndefined();
+    expect(res.body.specialDistrictFact.districtName).toBeUndefined();
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+  });
+
+  it("Bastrop present substitute 48021:102817:sd:3504125 dual-grammar prefix bind yields MUD", async () => {
+    const parcel = "48021:102817";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-bastrop-sd",
+    });
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${parcel}:sd:3504125`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: parcel,
+            sourceTier: "tceq-water-districts",
+            districtId: "3504125",
+            districtType: "MUD",
+            districtName: "The Colony MUD 1C",
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("present");
+    expect(res.body.specialDistrictFact.districtId).toBe("3504125");
+    expect(res.body.specialDistrictFact.districtType).toBe("MUD");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.boundAs).toBe(`${parcel}:sd:3504125`);
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      parcel,
+      `${parcel}.00000000`,
+    ]);
+  });
+
+  it("padded gold prefix 48021:102817.00000000:sd:3504125 dual-grammar bind yields districtId", async () => {
+    const parcel = "48021:102817";
+    const parcelPadded = "48021:102817.00000000";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-bastrop-sd-padded",
+    });
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${parcelPadded}:sd:3504125`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: parcelPadded,
+            sourceTier: "tceq-water-districts",
+            districtId: "3504125",
+            districtType: "MUD",
+            districtName: "The Colony MUD 1C",
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("present");
+    expect(res.body.specialDistrictFact.districtId).toBe("3504125");
+    expect(res.body.specialDistrictFact.boundAs).toBe(
+      `${parcelPadded}:sd:3504125`,
+    );
+    expect(res.body.specialDistrictFact.districtName).toBe("The Colony MUD 1C");
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
