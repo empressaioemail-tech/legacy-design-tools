@@ -39,6 +39,11 @@ import {
 } from "../routes/brokerageNodeFacets";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
+import {
+  memoryFloodHazardAtoms,
+  resetFloodHazardAtomQueryableForTests,
+  setFloodHazardAtomQueryableForTests,
+} from "../lib/floodHazardFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -255,7 +260,7 @@ describe("extractTier2Overlay — flood is refused, never served (SS-W16)", () =
     expect(extractTier2Overlay("not-an-object", null)).toBeNull();
   });
 
-  it("disposeTier2Flood is TOTAL — no input yields a value", () => {
+  it("disposeTier2Flood is TOTAL — no SNAPSHOT input yields a value (SS-W16 stays)", () => {
     const inputs: unknown[] = [
       undefined,
       null,
@@ -365,15 +370,31 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     // The Tier-2 bake writes rows under this exact key; the read composes them.
     expect(TIER2_ADAPTER_KEY).toBe("node-facets:tier2");
   });
+
+  it("the route source wires floodHazardFact from atoms and keeps flood: null", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/floodHazardFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadFloodHazardFactAtom/);
+    expect(routeSrc).toMatch(/floodHazardFact/);
+    // SS-W16 floor: the CI gate requires these two markers in this file.
+    expect(routeSrc).toMatch(/flood:\s*null;/);
+    expect(routeSrc).toMatch(/flood:\s*null,/);
+    expect(routeSrc).not.toMatch(/flood:\s*p\.flood/);
+  });
 });
 
 // -------------------------------------------------------------------------
 // 2. Integration tests — seed a baked row, hit the anonymous endpoint.
 // -------------------------------------------------------------------------
 
-const hasDb = Boolean(
-  process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
-);
+const hasDb =
+  Boolean(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL) &&
+  process.env.VITEST_DATABASE_STUB !== "1";
 
 // NB: do NOT destructure `db` here — the mocked `db` is a getter that throws
 // until ctx.schema is set (inside setupRouteTests' beforeAll). Destructuring at
@@ -385,9 +406,11 @@ const { setupRouteTests } = await import("./setup");
 const { truncateAll } = await import("@workspace/db/testing");
 
 let getApp: () => Express;
-setupRouteTests((g) => {
-  getApp = g;
-});
+if (hasDb) {
+  setupRouteTests((g) => {
+    getApp = g;
+  });
+}
 
 /** A realistic Tier-1 payload with a real land-use + a deliberately-injected
  * owner key at depth (to PROVE the route strips it — the real bake never
@@ -497,6 +520,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   beforeEach(async () => {
+    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -527,6 +551,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   afterEach(async () => {
+    resetFloodHazardAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -553,10 +578,12 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
   });
 
-  it("SERVES NO FLOOD DETERMINATION even though a real in-SFHA row is seeded", async () => {
+  it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {
+    // No atom fixture: the atoms path must name the miss, not copy the snapshot.
+    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     // The seeded Tier-2 row is a genuine in-SFHA "AE" determination — the exact
     // shape that was live on this anonymous route before SS-W16. The endpoint
-    // must return 200 with every other facet intact and NO flood value.
+    // must return 200 with every other facet intact and NO snapshot flood value.
     const res = await request(getApp()).get(
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
@@ -574,8 +601,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       "flood-hazard-fact",
     );
 
-    // WIRE ASSERTION — the determination is absent from the WHOLE response, not
-    // merely from the field it used to occupy.
+    // SNAPSHOT tokens must not appear. These values exist only on the bake.
     const wire = JSON.stringify(res.body);
     expect(wire).not.toContain("in-sfha");
     expect(wire).not.toContain('"AE"');
@@ -583,8 +609,17 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain("FLOODWAY");
     expect(wire).not.toContain("512.4");
 
-    // SCOPE ASSERTION — the cut is the flood facet, NOT the endpoint. Every
-    // other facet this route serves is unchanged.
+    // Atom miss is named, never a silent null.
+    expect(res.body.floodHazardFact).not.toBeNull();
+    expect(res.body.floodHazardFact.state).toBe("refused");
+    expect(res.body.floodHazardFact.code).toBe("atom-miss");
+    expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.floodHazardFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+
+    // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
     expect(res.body.facets.baseFacts.apn).toBe("10068");
     expect(res.body.facets.baseFacts.acreage.value).toBeCloseTo(0.2388);
@@ -594,6 +629,99 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     // OWNER LEAK GUARD extends to the overlay — the injected Tier-2 owner is gone.
     expect(payloadHasOwnerKey(res.body.tier2)).toBe(false);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
+  });
+
+  it("serves a fixture flood-hazard-fact while still refusing the snapshot bake", async () => {
+    // Divergence: snapshot is AE/FLOODWAY/512.4, atom is AO with no those tokens.
+    // If this test passed while serving the snapshot, AO would be missing and
+    // FLOODWAY would still be on the wire.
+    setFloodHazardAtomQueryableForTests(
+      memoryFloodHazardAtoms([
+        {
+          entityId: `${BAKED_NODE_ID}.00000000`,
+          body: {
+            entityType: "flood-hazard-fact",
+            atomDid: "fhfact_fedcba9876543210",
+            parcelNodeId: `${BAKED_NODE_ID}.00000000`,
+            sourceTier: "fema-nfhl",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AO",
+            zoneSubtype: null,
+            baseFloodElevation: null,
+            sourceAdapter: "fema-nfhl-bulk-v1",
+            sourceVintage: "NFHL_48_20260101",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+
+    expect(res.body.tier2.flood).toBeNull();
+    expect(res.body.tier2.floodDisposition.code).toBe("retired-instrument");
+
+    expect(res.body.floodHazardFact.state).toBe("present");
+    expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.floodHazardFact.floodZone).toBe("AO");
+    expect(res.body.floodHazardFact.inSpecialFloodHazardArea).toBe(true);
+    expect(res.body.floodHazardFact.boundAs).toBe(`${BAKED_NODE_ID}.00000000`);
+    expect(res.body.floodHazardFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+
+    const wire = JSON.stringify(res.body);
+    expect(wire).toContain('"AO"');
+    expect(wire).not.toContain("FLOODWAY");
+    expect(wire).not.toContain("512.4");
+    expect(wire).not.toContain("in-sfha");
+    expect(wire).not.toContain('"AE"');
+  });
+
+  it("gold parcel 48021:34137 dual-grammar bind yields the fixture atom", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold",
+    });
+    setFloodHazardAtomQueryableForTests(
+      memoryFloodHazardAtoms([
+        {
+          entityId: gold,
+          body: {
+            entityType: "flood-hazard-fact",
+            atomDid: "fhfact_4802134137aaaaaa",
+            parcelNodeId: gold,
+            sourceTier: "fema-nfhl",
+            inSpecialFloodHazardArea: false,
+            floodZone: "X",
+            sourceAdapter: "fema-nfhl-bulk-v1",
+            sourceVintage: "NFHL_48_20260101",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.floodHazardFact.state).toBe("present");
+    expect(res.body.floodHazardFact.floodZone).toBe("X");
+    expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.tier2).toBeNull();
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
