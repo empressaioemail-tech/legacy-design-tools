@@ -47,7 +47,12 @@ export interface DerivationProbeOptions {
   engineRoot?: string;
   ldtRoot?: string;
   fileExists?: FileExistsFn;
-  /** When true, fail closed if engineRoot path is missing on disk. Default true. */
+  /**
+   * When true (default), an absent engineRoot is not a probe target: capability
+   * comes from committed RAIL_ENGINE_BINDINGS + ENGINE_PROPERTY_TYPES_SNAPSHOT.
+   * CI `railEngineBindingCoverage.test.ts` is the file-existence proof.
+   * When false, missing writer files are confirmed false (refresh/CLI mocks).
+   */
   requireEngineRoot?: boolean;
 }
 
@@ -105,26 +110,23 @@ function resolveSnapshot(
 
 /**
  * Tri-state: is the atom family present in the engine/contract snapshot?
- * `false` = confirmed missing; `indeterminate` = snapshot lookup failed or engine root probe failed.
+ * `false` = confirmed missing; `indeterminate` = snapshot lookup failed.
+ * A missing sibling hauska-engine tree is not indeterminate: family presence
+ * is the committed snapshot. `engineRoot` / `fileExists` / `requireEngineRoot`
+ * stay on the signature so Cloud Run-shaped proofs share it with deriveHasWriter.
  */
 export function deriveAtomFamilyPresent(
   railKey: string,
   snapshot: EnginePropertyTypesSnapshot | null = ENGINE_PROPERTY_TYPES_SNAPSHOT,
   binding: RailEngineBinding | undefined = bindingFor(railKey),
   contractSnapshot: ContractPropertyTypesSnapshot = CONTRACT_PROPERTY_TYPES_SNAPSHOT,
-  engineRoot: string = resolveEngineRoot(),
-  fileExists: FileExistsFn = existsSync,
-  requireEngineRoot = true,
+  _engineRoot: string = resolveEngineRoot(),
+  _fileExists: FileExistsFn = existsSync,
+  _requireEngineRoot = true,
 ): DerivedTriState {
   if (snapshot === null) return "indeterminate";
   if (!binding) return false;
   if (binding.atomEntityTypes.length === 0) return false;
-
-  const needsEngineRoot =
-    requireEngineRoot && Boolean(binding.engineWriterScript);
-  if (needsEngineRoot && !fileExists(engineRoot)) {
-    return "indeterminate";
-  }
 
   const registered = snapshotTypeSet(snapshot);
   const allInEngine = binding.atomEntityTypes.every((t) => registered.has(t));
@@ -207,11 +209,17 @@ function writerPathsExist(
 }
 
 /**
- * Tri-state writer probe. `true` only when a bound writer/scorer file
- * exists on disk. Missing engine script → false (or indeterminate when
- * `requireEngineRoot` and the engine root itself is missing) — never a
- * fake true. Residual vs merged origin/main: local/sibling filesystem
- * only (SF-20).
+ * Tri-state writer probe.
+ *
+ * Capability is the committed binding, not per-county fill. A declared
+ * `engineWriterScript` or `ldtScorerPath` is `true` when the family is
+ * present and this host has no engine tree to probe (`requireEngineRoot`
+ * and absent root — Cloud Run cortex-api). CI
+ * `railEngineBindingCoverage.test.ts` is the file-existence proof.
+ *
+ * When `requireEngineRoot` is false, missing writer files are confirmed
+ * false. A binding with neither path (including `noWriterReason` only)
+ * is confirmed false either way. Never a fake true for an undeclared writer.
  */
 export function deriveHasWriter(
   railKey: string,
@@ -241,9 +249,9 @@ export function deriveHasWriter(
     return false;
   }
 
-  const needsEngineProbe = Boolean(binding.engineWriterScript);
-  if (needsEngineProbe && requireEngineRoot && !fileExists(engineRoot)) {
-    return "indeterminate";
+  const engineRootPresent = fileExists(engineRoot);
+  if (requireEngineRoot && !engineRootPresent) {
+    return true;
   }
 
   const { enginePath, ldtPath, engineProbePath, ldtProbePath } =
@@ -264,10 +272,6 @@ export function deriveHasWriter(
       binding.ldtScorerPath!,
     );
     if (fileExists(canonicalPath)) return "indeterminate";
-  }
-
-  if (needsEngineProbe && requireEngineRoot && !fileExists(engineRoot)) {
-    return "indeterminate";
   }
 
   return false;
@@ -341,7 +345,7 @@ export function deriveRailDeclarationFields(
   } else if (snapshot === null) {
     reasons.push("engine snapshot lookup failed");
   } else if (atomFamilyPresent === "indeterminate") {
-    reasons.push("atom family probe indeterminate (engine root or snapshot)");
+    reasons.push("atom family probe indeterminate (snapshot lookup failed)");
   } else {
     const missingTypes = binding.atomEntityTypes.filter(
       (t) => !snapshotTypeSet(snapshot).has(t),
@@ -358,7 +362,13 @@ export function deriveRailDeclarationFields(
 
   if (atomFamilyPresent === true) {
     if (hasWriter === true) {
-      reasons.push("writer/scorer file found on disk");
+      if (probe.enginePath || probe.ldtPath) {
+        reasons.push("writer/scorer file found on disk");
+      } else {
+        reasons.push(
+          "writer/scorer declared in RAIL_ENGINE_BINDINGS (engine tree not on this host; CI proves scripts exist)",
+        );
+      }
     } else if (!hasBoundWriterProbe) {
       reasons.push(
         binding?.noWriterReason ??
@@ -462,11 +472,12 @@ export function hasIndeterminateDerivations(
 /**
  * Read-path probe for the county-ledger overlay.
  *
- * Uses `requireEngineRoot: true` so a deploy surface without a sibling
- * hauska-engine tree (Cloud Run cortex-api) derives confirmed-false /
- * partial rather than trusting stale county_rail constants. A dev checkout
- * that DOES colocate engine still gets full derivation — that is correct
- * for local audit, not the shape production serves.
+ * `requireEngineRoot: true` means this host is not assumed to have a sibling
+ * hauska-engine tree (Cloud Run cortex-api). Capability then comes from
+ * committed RAIL_ENGINE_BINDINGS + ENGINE_PROPERTY_TYPES_SNAPSHOT. CI
+ * railEngineBindingCoverage.test.ts is the file-existence proof. Do not
+ * copy the engine into the image. A checkout that DOES colocate engine
+ * still probes files.
  */
 export function manifestReadProbeOptions(): DerivationProbeOptions {
   return {
@@ -476,7 +487,7 @@ export function manifestReadProbeOptions(): DerivationProbeOptions {
   };
 }
 
-/** Probe matching Cloud Run (no engine tree). Used by R-09 proof script only. */
+/** Probe matching Cloud Run (no engine tree). Used by unit proofs and the R-09 script. */
 export function cloudRunManifestReadProbeOptions(): DerivationProbeOptions {
   return {
     requireEngineRoot: true,
