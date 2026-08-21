@@ -33,6 +33,11 @@
  * flood-hazard-fact atoms (lane s1-flood-inspect, 2026-08-21). That read is
  * a NEW lookup, not a revival of the tile-centre NFHL bake. The reasoning
  * for the snapshot cut is on {@link disposeTier2Flood} below.
+ *
+ * LAND-USE ATOM IS A ROOT SIBLING (lane s7-land-use-inspect, 2026-08-21).
+ * `landUseFact` is read from land-use-fact atoms. Baked
+ * `facets.baseFacts.landUse` stays the retiredStore cad-roll object this
+ * pass. Never SELECT the CAD roll table for `landUseFact`.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -43,6 +48,7 @@ import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
+import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -427,9 +433,10 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact] = await Promise.all([
+    const [snapshot, floodHazardFact, landUseFact] = await Promise.all([
       loadBakedNodeFacetSnapshot(parcelNodeId),
       loadFloodHazardFactAtom(parcelNodeId),
+      loadLandUseFactAtom(parcelNodeId),
     ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -461,6 +468,10 @@ brokerageNodeFacetsRouter.get(
       // atoms. Typed refusal on miss / conflict / unconfigured store. Never
       // copied from the baked Tier-2 snapshot.
       floodHazardFact,
+      // Land-use-fact atom. Dual grammar on the parcel PREFIX only; taxYear
+      // comes from the atom row. Baked facets.baseFacts.landUse stays
+      // retiredStore. Never copied off the CAD roll table.
+      landUseFact,
     });
   },
 );

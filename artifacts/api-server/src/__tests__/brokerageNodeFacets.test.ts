@@ -44,6 +44,11 @@ import {
   resetFloodHazardAtomQueryableForTests,
   setFloodHazardAtomQueryableForTests,
 } from "../lib/floodHazardFactRead";
+import {
+  memoryLandUseFactAtoms,
+  resetLandUseFactAtomQueryableForTests,
+  setLandUseFactAtomQueryableForTests,
+} from "../lib/landUseFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -386,6 +391,21 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).toMatch(/flood:\s*null,/);
     expect(routeSrc).not.toMatch(/flood:\s*p\.flood/);
   });
+
+  it("the route source wires landUseFact from atoms and keeps baked landUse", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/landUseFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadLandUseFactAtom/);
+    expect(routeSrc).toMatch(/landUseFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/\.from\(\s*cad_property/i);
+    expect(routeSrc).not.toMatch(/landUseFact\s*=\s*.*baseFacts\.landUse/);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -521,6 +541,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
 
   beforeEach(async () => {
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
+    setLandUseFactAtomQueryableForTests(memoryLandUseFactAtoms([]));
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -552,6 +573,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
 
   afterEach(async () => {
     resetFloodHazardAtomQueryableForTests();
+    resetLandUseFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -618,6 +640,18 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       BAKED_NODE_ID,
       `${BAKED_NODE_ID}.00000000`,
     ]);
+
+    // Land-use-fact miss is named too. Cad-roll bake stays on retiredStore.
+    expect(res.body.landUseFact).not.toBeNull();
+    expect(res.body.landUseFact.state).toBe("refused");
+    expect(res.body.landUseFact.code).toBe("atom-miss");
+    expect(res.body.landUseFact.source).toBe("land-use-fact");
+    expect(res.body.landUseFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.landUseFact.landUseCode).toBeUndefined();
+    expect(res.body.landUseFact.code).not.toBe("A1");
 
     // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
@@ -722,6 +756,145 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.floodHazardFact.floodZone).toBe("X");
     expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
     expect(res.body.tier2).toBeNull();
+  });
+
+  it("serves a fixture land-use-fact while keeping baked cad-roll landUse as retiredStore", async () => {
+    // Divergence: bake is A1 / Single-family residential / cad-roll.
+    // Atom is C1 / Vacant commercial on ${parcel}:2025. If landUseFact copied
+    // the bake, landUseCode would be missing and code would be A1.
+    setLandUseFactAtomQueryableForTests(
+      memoryLandUseFactAtoms([
+        {
+          entityId: `${BAKED_NODE_ID}:2025`,
+          body: {
+            entityType: "land-use-fact",
+            atomDid: "lufact_fedcba9876543210",
+            parcelNodeId: BAKED_NODE_ID,
+            taxYear: 2025,
+            sourceTier: "cad-authoritative",
+            landUseCode: "C1",
+            landUseLabel: "Vacant commercial",
+            sourceAdapter: "cad-roll-v1",
+            sourceVintage: "2025-caldwell-cad-export",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+
+    expect(res.body.landUseFact.state).toBe("present");
+    expect(res.body.landUseFact.source).toBe("land-use-fact");
+    expect(res.body.landUseFact.landUseCode).toBe("C1");
+    expect(res.body.landUseFact.landUseLabel).toBe("Vacant commercial");
+    expect(res.body.landUseFact.taxYear).toBe(2025);
+    expect(res.body.landUseFact.boundAs).toBe(`${BAKED_NODE_ID}:2025`);
+    expect(res.body.landUseFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.landUseFact.code).toBeUndefined();
+    expect(res.body.landUseFact.description).toBeUndefined();
+
+    expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
+    expect(res.body.facets.baseFacts.landUse.description).toBe(
+      "Single-family residential",
+    );
+    expect(res.body.facets.baseFacts.landUse.source).toBe("cad-roll");
+  });
+
+  it("gold parcel 48021:34137 dual-grammar prefix bind yields the :2025 fixture atom", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold-landuse",
+    });
+    setLandUseFactAtomQueryableForTests(
+      memoryLandUseFactAtoms([
+        {
+          entityId: `${gold}:2025`,
+          body: {
+            entityType: "land-use-fact",
+            atomDid: "lufact_4802134137aaaaaa",
+            parcelNodeId: gold,
+            taxYear: 2025,
+            sourceTier: "cad-authoritative",
+            landUseCode: "A1",
+            landUseLabel: "Single Family",
+            sourceAdapter: "cad-roll-v1",
+            sourceVintage: "2025-bastrop-cad-export",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.landUseFact.state).toBe("present");
+    expect(res.body.landUseFact.landUseCode).toBe("A1");
+    expect(res.body.landUseFact.source).toBe("land-use-fact");
+    expect(res.body.landUseFact.taxYear).toBe(2025);
+    expect(res.body.landUseFact.boundAs).toBe(`${gold}:2025`);
+    expect(res.body.landUseFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+  });
+
+  it("padded gold prefix 48021:34137.00000000:2025 dual-grammar bind yields landUseCode", async () => {
+    const gold = "48021:34137";
+    const goldPadded = "48021:34137.00000000";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold-landuse-padded",
+    });
+    setLandUseFactAtomQueryableForTests(
+      memoryLandUseFactAtoms([
+        {
+          entityId: `${goldPadded}:2025`,
+          body: {
+            entityType: "land-use-fact",
+            parcelNodeId: goldPadded,
+            taxYear: 2025,
+            sourceTier: "cad-authoritative",
+            landUseCode: "C1",
+            sourceAdapter: "cad-roll-v1",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.landUseFact.state).toBe("present");
+    expect(res.body.landUseFact.landUseCode).toBe("C1");
+    expect(res.body.landUseFact.boundAs).toBe(`${goldPadded}:2025`);
+    expect(res.body.landUseFact.landUseLabel).toBeNull();
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
