@@ -462,22 +462,44 @@ export function hasIndeterminateDerivations(
 /**
  * Read-path probe for the county-ledger overlay.
  *
- * LDT scorers are checked with real existsSync. Engine writer scripts are
- * NOT trusted absent — a missing `/hauska-engine/` path must not return
- * true (SF-21). `requireEngineRoot` stays false so Cloud Run (no sibling
- * engine tree) yields confirmed-false rather than indeterminate overlay
- * that would blank the live grid; live `has_writer` remains the last
- * refresh write.
- *
- * SF-20 residual: this is still a filesystem probe of the local/sibling
- * tree, not proof the script exists on merged origin/main. Do not add a
- * git-ls-remote here.
+ * Uses `requireEngineRoot: true` so a deploy surface without a sibling
+ * hauska-engine tree (Cloud Run cortex-api) derives confirmed-false /
+ * partial rather than trusting stale county_rail constants. A dev checkout
+ * that DOES colocate engine still gets full derivation — that is correct
+ * for local audit, not the shape production serves.
  */
 export function manifestReadProbeOptions(): DerivationProbeOptions {
   return {
-    requireEngineRoot: false,
+    requireEngineRoot: true,
+    engineRoot: resolveEngineRoot(),
     fileExists: existsSync,
   };
+}
+
+/** Probe matching Cloud Run (no engine tree). Used by R-09 proof script only. */
+export function cloudRunManifestReadProbeOptions(): DerivationProbeOptions {
+  return {
+    requireEngineRoot: true,
+    engineRoot: resolveEngineRoot() + "__cloud_run_absent__",
+    fileExists: existsSync,
+  };
+}
+
+export type EffectiveRailFieldsByKey = ReadonlyMap<
+  string,
+  Pick<EffectiveCountyRailDeclaration, "atomFamilyState" | "hasWriter">
+>;
+
+/** Per-rail derived atom/writer fields for manifest read overlay. */
+export function effectiveRailFieldsByKey(
+  options: DerivationProbeOptions = manifestReadProbeOptions(),
+): EffectiveRailFieldsByKey {
+  return new Map(
+    buildEffectiveCountyRailDeclaration(options).map((decl) => [
+      decl.railKey,
+      { atomFamilyState: decl.atomFamilyState, hasWriter: decl.hasWriter },
+    ]),
+  );
 }
 
 /** CP1 self-check: expected manifest cell moves when derived declaration replaces stale hand-edited values. */
