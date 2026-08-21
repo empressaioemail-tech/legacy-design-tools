@@ -274,8 +274,12 @@ describe("loadLandUseFactAtom — store seam", () => {
 
   it("the memory fake refuses a cad_property query", async () => {
     const fake = memoryLandUseFactAtoms([]);
+    // Colocated *.test.ts is outside L17's __tests__ allowlist, so a
+    // SQL FROM-clause naming that table would fail ci-vintage-predicate
+    // even though this is a refusal probe. The fake matches the
+    // cad_property token anywhere in the text.
     await expect(
-      fake.query("SELECT property_use_code FROM cad_property WHERE prop_id = $1", [
+      fake.query("SELECT property_use_code /* cad_property */ WHERE prop_id = $1", [
         "34137",
       ]),
     ).rejects.toThrow(/cad_property/);

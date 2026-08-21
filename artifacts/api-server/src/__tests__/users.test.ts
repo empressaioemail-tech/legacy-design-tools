@@ -1200,24 +1200,32 @@ describe("session middleware — auto-upsert profile", () => {
   it("backfills a default profile the first time a user requestor is seen", async () => {
     // Hit any cheap endpoint with the dev `x-requestor` header that
     // the test session middleware honors. The backfill is fire-and-
-    // forget, so we wait a tick before asserting the row landed.
+    // forget: the route returns before the insert lands. A single
+    // 50ms sleep failed under CI load (PR 450 Test job 96915825264).
+    // Poll the row instead. Unique id so a shared-schema leak with
+    // me.test.ts `u-fresh` cannot empty this assertion.
+    const requestorId = "u-fresh-auto-upsert";
     const res = await request(getApp())
       .get("/api/healthz")
-      .set("x-requestor", "user:u-fresh");
+      .set("x-requestor", `user:${requestorId}`);
     expect(res.status).toBe(200);
 
-    // Give the void-promise a microtask to flush. The route returns
-    // synchronously so the insert runs in parallel; a single setTimeout
-    // is more than enough for an in-process drizzle call.
-    await new Promise((r) => setTimeout(r, 50));
-
     if (!ctx.schema) throw new Error("schema not ready");
-    const rows = await ctx.schema.db
-      .select()
-      .from(users)
-      .where(eq(users.id, "u-fresh"));
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.displayName).toBe("u-fresh");
+    const deadline = Date.now() + 2000;
+    let landed: { displayName: string | null } | undefined;
+    while (Date.now() < deadline) {
+      const batch = await ctx.schema.db
+        .select()
+        .from(users)
+        .where(eq(users.id, requestorId));
+      if (batch.length === 1) {
+        landed = batch[0];
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(landed).toBeDefined();
+    expect(landed?.displayName).toBe(requestorId);
   });
 
   it("does not overwrite an existing profile's displayName", async () => {
