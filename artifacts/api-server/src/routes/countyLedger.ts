@@ -46,9 +46,12 @@ import {
 } from "@workspace/db";
 import {
   buildEffectiveCountyRailDeclaration,
+  effectiveRailFieldsByKey,
   isRailDerivationIndeterminate,
   manifestReadProbeOptions,
   probeRailCapabilities,
+  resolveManifestDisplayState,
+  resolveManifestIsPartial,
 } from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
 
@@ -176,7 +179,7 @@ export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
   const threshold = cell.thresholdPct;
   const coverage = cell.honestCoveragePct;
   if (coverage === null || threshold === null || coverage < threshold) {
-    return { ...cell, displayState: "not-yet", isPartial: false };
+    return { ...cell, displayState: "not-yet" };
   }
   return cell;
 }
@@ -262,17 +265,36 @@ async function readManifestGrid(): Promise<ManifestCell[]> {
     ORDER BY m.county_fips, r.ordinal
   `);
   const indeterminateRails = indeterminateRailKeysFromEffectiveDeclaration();
+  const effectiveByKey = effectiveRailFieldsByKey(manifestReadProbeOptions());
   return applyDerivationIndeterminateOverlay(
-    rows.map((row) =>
-      applyDepthRailDisplayGate({
+    rows.map((row) => {
+      const effective = effectiveByKey.get(row.rail_key);
+      const atomFamilyState =
+        effective?.atomFamilyState ?? row.atom_family_state;
+      const hasWriter = effective?.hasWriter ?? Boolean(row.has_writer);
+      const honestCoveragePct = num(row.honest_coverage_pct);
+      const thresholdPct = num(row.cell_threshold ?? row.rail_default_threshold);
+      const displayState = resolveManifestDisplayState(
+        atomFamilyState,
+        hasWriter,
+        row.rail_state,
+      );
+      const isPartial = resolveManifestIsPartial(
+        atomFamilyState,
+        hasWriter,
+        row.rail_state,
+        honestCoveragePct,
+        thresholdPct,
+      );
+      return applyDepthRailDisplayGate({
         countyFips: row.county_fips,
         railKey: row.rail_key,
-        displayState: row.display_state,
-        isPartial: Boolean(row.is_partial),
-        honestCoveragePct: num(row.honest_coverage_pct),
-        thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
-        atomFamilyState: row.atom_family_state,
-        hasWriter: Boolean(row.has_writer),
+        displayState,
+        isPartial,
+        honestCoveragePct,
+        thresholdPct,
+        atomFamilyState,
+        hasWriter,
         absenceBasis: row.absence_basis ?? null,
         source: row.source ?? null,
         sourceVintage: row.source_vintage ?? null,
@@ -280,8 +302,8 @@ async function readManifestGrid(): Promise<ManifestCell[]> {
         verifiedByInstrument: row.verified_by_instrument ?? null,
         verificationMethod: row.verification_method ?? null,
         artifactPath: row.artifact_path ?? null,
-      }),
-    ),
+      });
+    }),
     indeterminateRails,
   );
 }

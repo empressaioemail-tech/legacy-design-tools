@@ -9,8 +9,10 @@ export {
   hasIndeterminateDerivations,
   isRailDerivationIndeterminate,
   manifestReadProbeOptions,
+  effectiveRailFieldsByKey,
   resolveEngineRoot,
   resolveLdtRoot,
+  type EffectiveRailFieldsByKey,
   type DerivationProbeOptions,
   type DerivedRailFields,
   type EffectiveCountyRailDeclaration,
@@ -41,6 +43,12 @@ export {
   type ReconciliationManifestCell,
 } from "./manifestReconciliationGate";
 export {
+  resolveManifestDisplayState,
+  resolveManifestIsPartial,
+  type ManifestDisplayState,
+} from "./manifestCellResolve";
+export {
+  applyDepthRailDisplayGate,
   readManifestGridFromPool,
   readCountyManifestRowCount,
   readCountyRailHasWriterMap,

@@ -456,16 +456,34 @@ export function hasIndeterminateDerivations(
   );
 }
 
-/** Read-path probe: LDT scorers checked on disk; engine scripts trusted when not colocated. */
+/**
+ * Read-path probe: LDT scorers are checked on disk in the deployed repo.
+ * Engine writer scripts are NOT assumed present when hauska-engine is not
+ * colocated — faking them made every engine-bound rail read hasWriter=true
+ * (R-09: constant indicator on the materialized ledger).
+ */
 export function manifestReadProbeOptions(): DerivationProbeOptions {
   return {
     requireEngineRoot: false,
-    fileExists: (filePath: string) => {
-      const normalized = filePath.replace(/\\/g, "/");
-      if (normalized.includes("/hauska-engine/")) return true;
-      return existsSync(filePath);
-    },
+    fileExists: (filePath: string) => existsSync(filePath),
   };
+}
+
+export type EffectiveRailFieldsByKey = ReadonlyMap<
+  string,
+  Pick<EffectiveCountyRailDeclaration, "atomFamilyState" | "hasWriter">
+>;
+
+/** Per-rail derived atom/writer fields for manifest read overlay. */
+export function effectiveRailFieldsByKey(
+  options: DerivationProbeOptions = manifestReadProbeOptions(),
+): EffectiveRailFieldsByKey {
+  return new Map(
+    buildEffectiveCountyRailDeclaration(options).map((decl) => [
+      decl.railKey,
+      { atomFamilyState: decl.atomFamilyState, hasWriter: decl.hasWriter },
+    ]),
+  );
 }
 
 /** CP1 self-check: expected manifest cell moves when derived declaration replaces stale hand-edited values. */

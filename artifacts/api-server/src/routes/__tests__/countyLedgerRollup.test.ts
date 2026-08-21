@@ -198,7 +198,7 @@ describe("applyDepthRailDisplayGate", () => {
   it("downgrades jurisdiction-depth satisfied-present below threshold to not-yet", () => {
     const result = applyDepthRailDisplayGate(baseCell());
     expect(result.displayState).toBe("not-yet");
-    expect(result.isPartial).toBe(false);
+    expect(result.isPartial).toBe(true);
   });
 
   it("leaves jurisdiction-depth satisfied-present at/above threshold unchanged", () => {
