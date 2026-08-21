@@ -27,11 +27,12 @@
  * as an explicit "not verified in this area" state — a designed trust signal,
  * not an empty cell — so this route passes the absence through verbatim.
  *
- * FLOOD IS NOT SERVED HERE (lane SS-W16, 2026-08-19). `tier2.flood` is always
- * null and carries a typed refusal in `tier2.floodDisposition` instead. The
- * reasoning, the measured error, and the scope of the retirement are on
- * {@link disposeTier2Flood} below. Every other facet this route serves is
- * unchanged — the cut is the flood facet, not the endpoint.
+ * SNAPSHOT FLOOD IS NOT SERVED HERE (lane SS-W16, 2026-08-19). `tier2.flood`
+ * is always null and carries a typed refusal in `tier2.floodDisposition`
+ * instead. The replacement is a sibling field `floodHazardFact` read from
+ * flood-hazard-fact atoms (lane s1-flood-inspect, 2026-08-21). That read is
+ * a NEW lookup, not a revival of the tile-centre NFHL bake. The reasoning
+ * for the snapshot cut is on {@link disposeTier2Flood} below.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -41,6 +42,7 @@ import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
+import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -425,7 +427,10 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+    const [snapshot, floodHazardFact] = await Promise.all([
+      loadBakedNodeFacetSnapshot(parcelNodeId),
+      loadFloodHazardFactAtom(parcelNodeId),
+    ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
@@ -449,9 +454,13 @@ brokerageNodeFacetsRouter.get(
       facets: snapshot.facets,
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying
-      // why — retired instrument, unrecognised producer, or no facet. No flood
-      // determination leaves this route (SS-W16, 2026-08-19).
+      // why — retired instrument, unrecognised producer, or no facet.
+      // Snapshot flood values never leave this field (SS-W16, 2026-08-19).
       tier2: snapshot.tier2,
+      // Replacement flood determination. Dual-grammar bind of flood-hazard-fact
+      // atoms. Typed refusal on miss / conflict / unconfigured store. Never
+      // copied from the baked Tier-2 snapshot.
+      floodHazardFact,
     });
   },
 );
