@@ -4,15 +4,23 @@ import { describe, it, expect } from "vitest";
 
 import {
   buildEffectiveCountyRailDeclaration,
+  cloudRunManifestReadProbeOptions,
   computeCp1CellMoveExpectations,
+  deriveAtomFamilyPresent,
   deriveAtomFamilyState,
   deriveHasWriter,
   deriveRailDeclarationFields,
+  isRailDerivationIndeterminate,
   manifestReadProbeOptions,
   resolveLdtRoot,
 } from "../railManifestDerivation";
+import { CONTRACT_PROPERTY_TYPES_SNAPSHOT } from "../schema/contractPropertyTypesSnapshot";
 import { ENGINE_PROPERTY_TYPES_SNAPSHOT } from "../schema/enginePropertyTypesSnapshot";
-import { RAIL_ENGINE_BINDING_BY_KEY } from "../schema/railEngineBinding";
+import {
+  RAIL_ENGINE_BINDINGS,
+  RAIL_ENGINE_BINDING_BY_KEY,
+  type RailEngineBinding,
+} from "../schema/railEngineBinding";
 
 /** CP1 pre-refresh hand-edited stale state (254 counties each). */
 const CP1_BEFORE_BY_KEY = {
@@ -177,18 +185,110 @@ describe("railManifestDerivation CP1", () => {
     expect(opts.fileExists!(trap)).toBe(false);
   });
 
-  it("read-path derivation does not report hasWriter true for a missing engine script (SF-20/SF-21)", () => {
-    const opts = manifestReadProbeOptions();
+  it("WDLL-1: missing engine root + committed snapshot is not indeterminate for easement", () => {
+    const present = deriveAtomFamilyPresent(
+      "easement",
+      ENGINE_PROPERTY_TYPES_SNAPSHOT,
+      RAIL_ENGINE_BINDING_BY_KEY.easement,
+      CONTRACT_PROPERTY_TYPES_SNAPSHOT,
+      "/nonexistent/hauska-engine",
+      existsSync,
+      true,
+    );
+    expect(present).toBe(true);
+  });
+
+  it("WDLL-2: Cloud Run probe derives easement hasWriter true from declared binding", () => {
+    const opts = cloudRunManifestReadProbeOptions();
+    const derived = deriveHasWriter(
+      "easement",
+      ENGINE_PROPERTY_TYPES_SNAPSHOT,
+      RAIL_ENGINE_BINDING_BY_KEY.easement,
+      opts.engineRoot!,
+      resolveLdtRoot(),
+      opts.fileExists ?? existsSync,
+      opts.requireEngineRoot ?? true,
+    );
+    expect(derived).toBe(true);
+  });
+
+  it("WDLL-3: fixture binding with neither writer path is hasWriter false, not true", () => {
+    const fixture: RailEngineBinding = {
+      railKey: "fixture-no-writer",
+      atomEntityTypes: ["utility-easement"],
+    };
+    const opts = cloudRunManifestReadProbeOptions();
+    expect(
+      deriveHasWriter(
+        "fixture-no-writer",
+        ENGINE_PROPERTY_TYPES_SNAPSHOT,
+        fixture,
+        opts.engineRoot!,
+        resolveLdtRoot(),
+        opts.fileExists ?? existsSync,
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it("WDLL-3: fixture binding with only noWriterReason is hasWriter false", () => {
+    const fixture: RailEngineBinding = {
+      railKey: "fixture-nowriter-reason",
+      atomEntityTypes: ["utility-easement"],
+      noWriterReason: "not bound; fixture for fail-closed",
+    };
+    const opts = cloudRunManifestReadProbeOptions();
+    expect(
+      deriveHasWriter(
+        "fixture-nowriter-reason",
+        ENGINE_PROPERTY_TYPES_SNAPSHOT,
+        fixture,
+        opts.engineRoot!,
+        resolveLdtRoot(),
+        opts.fileExists ?? existsSync,
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it("WDLL-4: Cloud Run probe has zero indeterminate rails among the fourteen bindings", () => {
+    const decls = buildEffectiveCountyRailDeclaration(
+      cloudRunManifestReadProbeOptions(),
+    );
+    expect(decls).toHaveLength(RAIL_ENGINE_BINDINGS.length);
+    expect(decls).toHaveLength(14);
+    expect(decls.filter(isRailDerivationIndeterminate)).toHaveLength(0);
+  });
+
+  it("SF-20/SF-21 rewritten: missing tree + declared binding => true", () => {
     const derived = deriveHasWriter(
       "owner",
       ENGINE_PROPERTY_TYPES_SNAPSHOT,
       RAIL_ENGINE_BINDING_BY_KEY.owner,
       "/nonexistent/hauska-engine",
       resolveLdtRoot(),
-      opts.fileExists ?? existsSync,
-      false,
+      existsSync,
+      true,
+    );
+    expect(derived).toBe(true);
+  });
+
+  it("SF-20/SF-21 rewritten: missing tree + no declared writer => not true", () => {
+    const fixture: RailEngineBinding = {
+      railKey: "fixture-undeclared",
+      atomEntityTypes: ["utility-easement"],
+    };
+    const derived = deriveHasWriter(
+      "fixture-undeclared",
+      ENGINE_PROPERTY_TYPES_SNAPSHOT,
+      fixture,
+      "/nonexistent/hauska-engine",
+      resolveLdtRoot(),
+      existsSync,
+      true,
     );
     expect(derived).not.toBe(true);
+    expect(derived).toBe(false);
   });
 
   it("module-anchored ldtRoot finds scorers without cwd override (D3 cwd trap)", () => {
