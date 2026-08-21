@@ -337,7 +337,7 @@ export function memoryFloodHazardAtoms(
       return {
         rows: rows
           .filter((r) => wanted.has(r.entityId))
-          .map((r) => ({ entity_id: r.entityId, body: r.body })) as T[],
+          .map((r) => ({ entity_id: r.entityId, body: r.body })) as unknown as T[],
       };
     },
   };
