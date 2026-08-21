@@ -53,23 +53,26 @@ import encumbrancesRouter from "./encumbrances";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import { countyLedgerRouter } from "./countyLedger";
+import { servingSweepRouter } from "./servingSweep";
 import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
 import { onboardingLedgerEventsRouter } from "./onboardingLedgerEvents";
+import { countyRailScoreRouter } from "./countyRailScore";
 import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
 import peAuthRouter from "./peAuth";
 import propertyExplorerRouter from "./propertyExplorer";
-import planReviewBffRouter from "./planReviewBff";
+import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
-
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use(peAuthRouter);
 router.use(propertyExplorerRouter);
-router.use("/plan-review", planReviewBffRouter);
+// G-60: plan-review BFF lives on plan-review Cloud Run. This mount is a
+// proxy, not a second implementation and not a 404 (unlike Smart Files).
+router.use("/plan-review", planReviewProxyRouter);
 // Hauska Property Brief Chrome extension — API-key auth + extension CORS.
 router.use(brokerageBriefRouter);
 // /engagements/match must register BEFORE /engagements/:id otherwise Express
@@ -106,6 +109,15 @@ router.use(coverageRequestsRouter);
 // County ledger — the CC factory-floor performance layer (R-FND-6, OPS-6).
 // Reachable at /api/county-ledger (mounted under the /api router).
 router.use("/county-ledger", countyLedgerRouter);
+// Statewide serving sweep (SS-W7 / P-44) — what the product SERVES per parcel,
+// the counterpart to the manifest's did-a-writer-run question. Reachable at
+// /api/serving-sweep, /api/serving-sweep/counties and
+// /api/serving-sweep/:countyFips (reads, anonymous like /county-ledger above),
+// plus POST /api/serving-sweep/ingest (service token). A mount is REQUIRED
+// rather than optional: unmatched /api/* GETs fall through to the SPA
+// catch-all and answer HTML 200, which is what made the missing route look
+// like missing data.
+router.use("/serving-sweep", servingSweepRouter);
 // Onboarding ledger ingest, OPS-9 S1 write path for hauska-engine's report
 // wrappers. Reachable at POST /api/onboarding-ledger/ingest (pinned contract).
 router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
@@ -113,6 +125,22 @@ router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
 // list backing the CC County Ledger's focusedFixCount. Reachable at
 // GET /api/onboarding-ledger/events (pinned contract; see module header).
 router.use("/onboarding-ledger", onboardingLedgerEventsRouter);
+// Rail scoring (SS-W12, P-47) — the WRITTEN-to-SCORED leg that feeds the
+// county ledger. Mounted at the SAME /county-ledger prefix as the ledger
+// router above (the /onboarding-ledger pair two lines up is the same
+// pattern): POST /api/county-ledger/score and
+// GET /api/county-ledger/score/registry. A separate router rather than a
+// handler inside countyLedger.ts because that file has a lane in flight
+// against it.
+router.use("/county-ledger", countyRailScoreRouter);
+// G-58: Smart Files is unmounted from cortex-api. A tombstone is required
+// because unmatched /api/* falls through to the SPA catch-all (HTML 200).
+router.use("/smart-files", (_req, res) => {
+  res.status(404).json({
+    error: "unmounted",
+    message: "Smart Files is not served by cortex-api.",
+  });
+});
 router.use(packagesRouter);
 router.use(canvaRouter);
 router.use(collateralRouter);

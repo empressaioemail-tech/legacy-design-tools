@@ -234,6 +234,8 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // "if a route writes to it, it's in this list" invariant so future
   // adapter-route suites start from a known-empty state.
   "cad_property",
+  "cad_property_vintage_crosswalk",
+  "cad_property_vintage_fallback",
   // feat/txgio-parcel-geometry — self-hosted TxGIO/StratMap parcel
   // geometry store (Hays/Comal). No FK to anything (loaded by the
   // @workspace/cad-ingest txgio-ingest CLI, read by the parcels
@@ -278,6 +280,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "manifest_slot_reservation",
   "manifest_jurisdiction_cost",
   "manifest_run",
+  // SS-W7 / P-44 — the serving-sweep store. Written by
+  // POST /api/serving-sweep/ingest, no FK to anything, so nothing else's
+  // CASCADE clears it. Listed per the "if a route writes to it, it's in
+  // this list" invariant so the serving-sweep suite starts from a
+  // known-empty state (its 503/404 cases assert an EMPTY store, which a
+  // row leaked from an earlier test would silently turn green).
+  "serving_sweep_county",
 ];
 
 /**
@@ -308,11 +317,30 @@ export async function buildTestApp(): Promise<Express> {
 }
 
 /**
+ * G-60: the live `/api/plan-review` mount is a proxy. BFF behavior tests
+ * still mount planReviewBff directly so they do not require Cloud Run env.
+ */
+export async function buildPlanReviewBffTestApp(): Promise<Express> {
+  const { default: planReviewBffRouter } = await import(
+    "../routes/planReviewBff"
+  );
+  const app = express();
+  app.use(cookieParser());
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use(sessionMiddleware);
+  app.use(userRateLimitMiddleware);
+  app.use("/api/plan-review", planReviewBffRouter);
+  return app;
+}
+
+/**
  * Wire up beforeAll/afterEach/afterAll for a route test file. Pass a callback
  * that receives the live `Express` app (rebuilt once after the schema opens).
  */
 export function setupRouteTests(
   onReady: (getApp: () => Express) => void = () => {},
+  buildApp: () => Promise<Express> = buildTestApp,
 ): void {
   let app: Express | null = null;
 
@@ -321,7 +349,7 @@ export function setupRouteTests(
       process.env.PRIVATE_OBJECT_DIR = "/test-bucket/private";
     }
     ctx.schema = await createTestSchema();
-    app = await buildTestApp();
+    app = await buildApp();
     onReady(() => {
       if (!app) throw new Error("setupRouteTests: app not built");
       return app;

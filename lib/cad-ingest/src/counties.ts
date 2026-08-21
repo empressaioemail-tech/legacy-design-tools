@@ -14,8 +14,10 @@
  *    lowercased headers and a variant owner dataset. The record-3 Land
  *    file carries the state category code (property_use_code). The
  *    parser is header-driven and handles both.
+ *  - `tad-propertydata` — Tarrant TAD PropertyData(Delimited) pipe file.
+ *  - `dcad-certified` — Dallas DCAD certified comma-delimited multi-file zip.
  */
-export type CadFormat = "pacs" | "orion";
+export type CadFormat = "pacs" | "orion" | "tad-propertydata" | "dcad-certified";
 
 export interface CadCounty {
   fips: string;
@@ -66,6 +68,20 @@ export const CAD_COUNTIES: Record<string, CadCounty> = {
     //   land:     https://data.wcad.org/api/views/2ckt-cqwj/rows.csv?accessType=DOWNLOAD
     //   segment:  https://data.wcad.org/api/views/4kxj-e8c3/rows.csv?accessType=DOWNLOAD
     bulkPage: "https://data.wcad.org",
+  },
+  "48439": {
+    fips: "48439",
+    name: "Tarrant",
+    cad: "TAD",
+    format: "tad-propertydata",
+    bulkPage: "https://www.tad.org/resources/data-downloads",
+  },
+  "48113": {
+    fips: "48113",
+    name: "Dallas",
+    cad: "DCAD",
+    format: "dcad-certified",
+    bulkPage: "https://www.dallascad.org/DataProducts.aspx",
   },
 };
 

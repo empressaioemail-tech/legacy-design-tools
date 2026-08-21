@@ -1,15 +1,13 @@
 /**
  * Per-CAD bulk-source registry tests (Rail B).
- *
- * These assert the acquisition posture of each corridor CAD — which
- * are open-fetch (fully automatable) vs manual-download (operator hands
- * the drop back) — and that the open-fetch dataset roles line up with
- * the roles the Orion CLI slots them into. Live-endpoint reachability
- * is proven separately by the bounded ingest sample, not in unit tests.
  */
 
 import { describe, expect, it } from "vitest";
-import { CAD_BULK_SOURCES, resolveCadBulkSource } from "../sources";
+import {
+  CAD_BULK_SOURCES,
+  DCAD_CERTIFIED_OPEN_FETCH_URL,
+  resolveCadBulkSource,
+} from "../sources";
 
 describe("CAD bulk-source registry", () => {
   it("resolves WCAD (48491) as an open-fetch source with the four Orion roles", () => {
@@ -20,13 +18,11 @@ describe("CAD bulk-source registry", () => {
     const roles = src.datasets.map((d) => d.kind).sort();
     expect(roles).toEqual(["land", "owner", "property", "segment"]);
 
-    // Every dataset is a plain https GET on the Socrata portal.
     for (const ds of src.datasets) {
       expect(ds.url).toMatch(
         /^https:\/\/data\.wcad\.org\/api\/views\/[a-z0-9-]+\/rows\.csv\?accessType=DOWNLOAD$/,
       );
     }
-    // Property is mandatory for the ingest to produce rows.
     expect(src.datasets.some((d) => d.kind === "property")).toBe(true);
   });
 
@@ -39,8 +35,23 @@ describe("CAD bulk-source registry", () => {
     expect(src.instructions).toMatch(/--file=/);
   });
 
+  it("resolves Tarrant (48439) as open-fetch-zip residential PropertyData", () => {
+    const src = resolveCadBulkSource("48439");
+    expect(src?.mode).toBe("open-fetch-zip");
+    if (src?.mode !== "open-fetch-zip") throw new Error("expected zip");
+    expect(src.url).toContain("PropertyData(Delimited)_R.ZIP");
+    expect(src.label).toBe("PropertyData(Delimited)_R.ZIP");
+  });
+
+  it("resolves Dallas (48113) as open-fetch-zip DCAD certified", () => {
+    const src = resolveCadBulkSource("48113");
+    expect(src?.mode).toBe("open-fetch-zip");
+    if (src?.mode !== "open-fetch-zip") throw new Error("expected zip");
+    expect(src.url).toBe(DCAD_CERTIFIED_OPEN_FETCH_URL);
+    expect(src.label).toContain("DCAD2026_CERTIFIED");
+  });
+
   it("returns undefined for counties with no registered bulk source", () => {
-    // Travis/TCAD has no free bulk roll (PIA route, separate).
     expect(resolveCadBulkSource("48453")).toBeUndefined();
     expect(resolveCadBulkSource("99999")).toBeUndefined();
   });
@@ -49,7 +60,12 @@ describe("CAD bulk-source registry", () => {
     expect(resolveCadBulkSource(" 48491 ")?.mode).toBe("open-fetch");
   });
 
-  it("registry has exactly the two corridor CADs wired for v1", () => {
-    expect(Object.keys(CAD_BULK_SOURCES).sort()).toEqual(["48209", "48491"]);
+  it("registry includes corridor + bulk_primary counties", () => {
+    expect(Object.keys(CAD_BULK_SOURCES).sort()).toEqual([
+      "48113",
+      "48209",
+      "48439",
+      "48491",
+    ]);
   });
 });

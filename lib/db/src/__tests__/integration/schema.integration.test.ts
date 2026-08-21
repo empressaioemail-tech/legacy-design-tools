@@ -43,7 +43,8 @@ async function expectPgError(p: Promise<unknown>, code: string): Promise<void> {
   }
   expect(err, "expected the promise to reject").toBeDefined();
   // Drizzle: { cause: pgError }. Direct pg: pgError. Defensively try both.
-  const pgErr = (err as { cause?: { code?: string }; code?: string }).cause ??
+  const pgErr =
+    (err as { cause?: { code?: string }; code?: string }).cause ??
     (err as { code?: string });
   expect(pgErr.code).toBe(code);
 }
@@ -110,6 +111,11 @@ describe("lib/db schema integration", () => {
         // (county_fips, prop_id, tax_year); loaded by the
         // @workspace/cad-ingest batch CLI from free CAD bulk exports.
         "cad_property",
+        // L21 / P-25 — deterministic cross-vintage CAD prop_id
+        // crosswalk used by the blessed declared-vintage resolver.
+        "cad_property_vintage_crosswalk",
+        // L21 follow-up 3 / P-25 — explicit prior-vintage fallback list.
+        "cad_property_vintage_fallback",
         // PLR-10 — tenant-scoped canned-finding library curated by
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.
@@ -132,6 +138,10 @@ describe("lib/db schema integration", () => {
         // gate + cert-grade state. Sorts after `county_facet_coverage`
         // (`_f` < `_g`) per `ORDER BY tablename`.
         "county_gate_cert_state",
+        // L18 / P-14: singleton materialized GET /api/county-ledger payload.
+        // Sorts after `county_gate_cert_state` (`_g` < `_l`) and before
+        // `county_manifest` (`_l` < `_m`) per `ORDER BY tablename`.
+        "county_ledger_snapshot",
         // Sprint 1 county manifest: `county_manifest` is the 254-row
         // denominator (every Texas county has a row whether or not it has
         // been worked) and `county_rail` is the 13-rail dimension. Sort
@@ -267,10 +277,40 @@ describe("lib/db schema integration", () => {
         // workspace-layout spaces (tenant-ready). Sorts before
         // `sheet_content_extractions` (`sav` < `she`) per `ORDER BY tablename`.
         "saved_workspace_spaces",
+        // SS-W7 / P-44 (0082) — one ingested CountyServingSweep per county,
+        // the store behind GET /api/serving-sweep. Deliberately NOT a
+        // statewide row: the statewide envelope is assembled at read time so
+        // countiesSwept is measured from the array served. Sorts between
+        // `saved_workspace_spaces` and `sheet_content_extractions`
+        // (`sav` < `ser` < `she`) per `ORDER BY tablename`.
+        "serving_sweep_county",
         // Cortex L2 (Lane C.4 / C.4.2) — structured sheet-content
         // extraction atoms (OCR segments + annotations).
         "sheet_content_extractions",
         "sheets",
+        // OPS-17 G-14 — Smart Files, the city-file-system artifact family
+        // (0078). A NEW family per amendment A-012; it does NOT extend
+        // `brokerage_workspaces`. Split three ways because the promise forces
+        // it: documents hold identity (one row per declared entityId, however
+        // many places it appears), versions hold content append-only (revision
+        // inserts and supersedes; nothing is overwritten, so history survives),
+        // placements hold location many-to-many (placing again adds a row here,
+        // never a copy of the document).
+        // G-34 typed absence (0079). The record that we LOOKED for a document
+        // and what we concluded. It exists as a TABLE because "only a positive
+        // determination writes an absence" is unenforceable if the read path
+        // can synthesize "absent" from a zero-row query — so the verdict must
+        // be a row something deliberately wrote, and a read with no row here
+        // reports `not-sought` instead. `basis` is NOT NULL and check-
+        // constrained non-empty at the DB, so raw SQL cannot record an uncited
+        // absence either.
+        "smart_file_absence_determinations",
+        "smart_file_documents",
+        // G-56 / 0081 seed-only folder registry (not the graph).
+        "smart_file_folder_records",
+        "smart_file_folders",
+        "smart_file_placements",
+        "smart_file_versions",
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",
         "snapshots",

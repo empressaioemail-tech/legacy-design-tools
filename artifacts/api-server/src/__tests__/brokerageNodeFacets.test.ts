@@ -34,6 +34,8 @@ import {
   sanitizeNodeFacetPayload,
   payloadHasOwnerKey,
   extractTier2Overlay,
+  disposeTier2Flood,
+  TIER2_FLOOD_PRODUCERS,
 } from "../routes/brokerageNodeFacets";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
@@ -122,8 +124,32 @@ describe("brokerageNodeFacets helpers (pure)", () => {
   });
 });
 
-describe("extractTier2Overlay (the card's FEMA flood read, pure)", () => {
-  it("pulls flood + envelope + bakedAt from a real Tier-2 payload", () => {
+// -------------------------------------------------------------------------
+// SS-W16 (2026-08-19) — the Tier-2 flood facet is RETIRED at the read path.
+//
+// Every case below is seeded with a value the OLD code served, so each one is
+// a known violation the new guard has to refuse. The in-SFHA "AE" payload is
+// the exact shape that was live on the anonymous route; if any of these start
+// returning a determination again, these tests go red.
+// -------------------------------------------------------------------------
+
+/** The real shape the Tier-2 bake writes — a determination, with its producer. */
+const RETIRED_FLOOD_FACET = {
+  status: "in-sfha",
+  floodZone: "AE",
+  inSpecialFloodHazardArea: true,
+  zoneSubtype: "FLOODWAY",
+  baseFloodElevation: 512.4,
+  provenance: {
+    source: "fema-nfhl",
+    adapterKey: "fema:nfhl-flood-zone",
+    layer: "flood-hazard-zones",
+    vintage: "2026-07-21T00:00:00.000Z",
+  },
+};
+
+describe("extractTier2Overlay — flood is refused, never served (SS-W16)", () => {
+  it("refuses a REAL in-SFHA determination and puts no value on the wire", () => {
     const tier2Payload = {
       facetSchemaVersion: "node-facets-tier2-v1",
       tier: 2,
@@ -131,43 +157,149 @@ describe("extractTier2Overlay (the card's FEMA flood read, pure)", () => {
       countyFips: "48055",
       countyName: "Caldwell",
       envelope: { status: "declined", edgeSignal: "shape" },
-      flood: {
-        status: "in-sfha",
-        floodZone: "AE",
-        inSpecialFloodHazardArea: true,
-        provenance: { source: "fema-nfhl", vintage: "2026-07-21T00:00:00.000Z" },
-      },
+      flood: RETIRED_FLOOD_FACET,
       bakedAt: "2026-07-21T00:00:00.000Z",
     };
-    const overlay = extractTier2Overlay(tier2Payload, new Date("2026-07-21T00:00:00.000Z"));
+    const overlay = extractTier2Overlay(
+      tier2Payload,
+      new Date("2026-07-21T00:00:00.000Z"),
+    );
     expect(overlay).not.toBeNull();
-    expect((overlay!.flood as Record<string, unknown>).status).toBe("in-sfha");
-    expect((overlay!.flood as Record<string, unknown>).floodZone).toBe("AE");
-    // Anti-zombie: Tier-2 envelope is never product truth on the wire.
+    expect(overlay!.flood).toBeNull();
+
+    // The refusal names the retired instrument and its replacement.
+    expect(overlay!.floodDisposition.state).toBe("refused");
+    expect(overlay!.floodDisposition.code).toBe("retired-instrument");
+    expect(overlay!.floodDisposition.producer).toBe("fema:nfhl-flood-zone");
+
+    // NOTHING of the determination survives serialization — not the zone code,
+    // not the SFHA flag, not the FEMA vintage. This is the assertion that would
+    // catch a partial strip that left a value nested somewhere.
+    const wire = JSON.stringify(overlay);
+    expect(wire).not.toContain("in-sfha");
+    expect(wire).not.toContain('"AE"');
+    expect(wire).not.toContain("inSpecialFloodHazardArea");
+    expect(wire).not.toContain("FLOODWAY");
+    expect(wire).not.toContain("512.4");
+
+    // Anti-zombie: Tier-2 envelope is still never product truth on the wire.
     expect(overlay!.envelope).toBeNull();
     expect(overlay!.snapshotAt).toBe("2026-07-21T00:00:00.000Z");
   });
 
-  it("surfaces an honest-absence flood (unavailable) verbatim, never a fabricated zone", () => {
+  it("refuses the 'outside-sfha' answer too — the 1,995-parcel failure mode", () => {
+    // The adjudication found 1,995 parcels told they were OUTSIDE a Special
+    // Flood Hazard Area whose centroid is inside one. A false negative is the
+    // dangerous direction, so it must be refused exactly as loudly as a hit.
     const overlay = extractTier2Overlay(
       {
         flood: {
-          status: "unavailable",
+          status: "outside-sfha",
           floodZone: null,
-          provenance: { source: "fema-nfhl", unavailableReason: "FEMA NFHL fetch failed" },
+          inSpecialFloodHazardArea: false,
+          provenance: {
+            source: "fema-nfhl",
+            adapterKey: "fema:nfhl-flood-zone",
+            layer: "flood-hazard-zones",
+            vintage: "2026-07-21T00:00:00.000Z",
+          },
         },
       },
       null,
     );
-    expect(overlay).not.toBeNull();
-    expect((overlay!.flood as Record<string, unknown>).status).toBe("unavailable");
-    expect((overlay!.flood as Record<string, unknown>).floodZone).toBeNull();
+    expect(overlay!.flood).toBeNull();
+    expect(overlay!.floodDisposition.code).toBe("retired-instrument");
+    expect(JSON.stringify(overlay)).not.toContain("inSpecialFloodHazardArea");
   });
 
-  it("returns null for a payload with no flood facet (malformed/legacy row)", () => {
-    expect(extractTier2Overlay({ tier: 2, envelope: {} }, null)).toBeNull();
+  it("FAILS CLOSED on an unrecognised producer rather than passing it through", () => {
+    // A facet from an instrument nobody has ruled on must not be served on the
+    // grounds that it is merely not the retired one. Refusal is the default.
+    const overlay = extractTier2Overlay(
+      {
+        flood: {
+          status: "in-sfha",
+          floodZone: "VE",
+          provenance: { source: "somewhere", adapterKey: "some:new-adapter" },
+        },
+      },
+      null,
+    );
+    expect(overlay!.flood).toBeNull();
+    expect(overlay!.floodDisposition.code).toBe("unrecognised-producer");
+    expect(overlay!.floodDisposition.producer).toBe("some:new-adapter");
+    expect(JSON.stringify(overlay)).not.toContain('"VE"');
+  });
+
+  it("FAILS CLOSED when the facet declares no producer at all", () => {
+    const overlay = extractTier2Overlay(
+      { flood: { status: "in-sfha", floodZone: "AO" } },
+      null,
+    );
+    expect(overlay!.flood).toBeNull();
+    expect(overlay!.floodDisposition.code).toBe("unrecognised-producer");
+    expect(overlay!.floodDisposition.producer).toBeNull();
+    expect(JSON.stringify(overlay)).not.toContain('"AO"');
+  });
+
+  it("distinguishes 'row exists, flood refused' from 'no Tier-2 row at all'", () => {
+    // Three states, never collapsed into one. A row with no flood facet is a
+    // THIRD thing again: it reports no-flood-facet, not a retirement.
+    const noFacet = extractTier2Overlay({ tier: 2, envelope: {} }, null);
+    expect(noFacet).not.toBeNull();
+    expect(noFacet!.flood).toBeNull();
+    expect(noFacet!.floodDisposition.code).toBe("no-flood-facet");
+
+    // No row at all -> no overlay. This is the only null the route emits.
     expect(extractTier2Overlay(null, null)).toBeNull();
     expect(extractTier2Overlay("not-an-object", null)).toBeNull();
+  });
+
+  it("disposeTier2Flood is TOTAL — no input yields a value", () => {
+    const inputs: unknown[] = [
+      undefined,
+      null,
+      0,
+      "",
+      "AE",
+      [],
+      [RETIRED_FLOOD_FACET],
+      {},
+      { provenance: null },
+      { provenance: {} },
+      { provenance: { adapterKey: "" } },
+      { provenance: { adapterKey: "  fema:nfhl-flood-zone  " } },
+      { provenance: { adapterKey: "fema:nfhl-flood-zone-v2" } },
+      { provenance: { adapterKey: "prefix/fema:nfhl-flood-zone" } },
+      RETIRED_FLOOD_FACET,
+    ];
+    for (const input of inputs) {
+      const disposition = disposeTier2Flood(input);
+      expect(disposition.state).toBe("refused");
+    }
+    // Exact equality, not substring: a key that merely CONTAINS the retired one
+    // is unrecognised, and a padded exact key is still the retired one.
+    expect(
+      disposeTier2Flood({ provenance: { adapterKey: "fema:nfhl-flood-zone-v2" } })
+        .code,
+    ).toBe("unrecognised-producer");
+    expect(
+      disposeTier2Flood({
+        provenance: { adapterKey: "prefix/fema:nfhl-flood-zone" },
+      }).code,
+    ).toBe("unrecognised-producer");
+    expect(
+      disposeTier2Flood({
+        provenance: { adapterKey: "  fema:nfhl-flood-zone  " },
+      }).code,
+    ).toBe("retired-instrument");
+  });
+
+  it("the recognised-producer set is closed and holds exactly the retired one", () => {
+    // If this grows, disposeTier2Flood's switch must grow with it or the build
+    // fails at its `never` assignment. This assertion makes the intent explicit
+    // so a future reader does not widen the set casually.
+    expect([...TIER2_FLOOD_PRODUCERS]).toEqual(["fema:nfhl-flood-zone"]);
   });
 });
 
@@ -421,30 +553,52 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
   });
 
-  it("composes the Tier-2 FEMA flood overlay onto the card's read (real per-node zone)", async () => {
+  it("SERVES NO FLOOD DETERMINATION even though a real in-SFHA row is seeded", async () => {
+    // The seeded Tier-2 row is a genuine in-SFHA "AE" determination — the exact
+    // shape that was live on this anonymous route before SS-W16. The endpoint
+    // must return 200 with every other facet intact and NO flood value.
     const res = await request(getApp()).get(
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
     expect(res.status).toBe(200);
-    // The Tier-2 overlay the card + the map's "FEMA flood zone" layer consume.
+
+    // The overlay still exists (the row exists) but carries no determination.
     expect(res.body.tier2).not.toBeNull();
-    expect(res.body.tier2.flood.status).toBe("in-sfha");
-    expect(res.body.tier2.flood.floodZone).toBe("AE");
-    expect(res.body.tier2.flood.inSpecialFloodHazardArea).toBe(true);
-    // Carries the FEMA vintage so the card can cite it (commitment #1).
-    expect(res.body.tier2.flood.provenance.source).toBe("fema-nfhl");
-    expect(res.body.tier2.flood.provenance.vintage).toBe(
-      "2026-07-21T00:00:00.000Z",
+    expect(res.body.tier2.flood).toBeNull();
+    expect(res.body.tier2.floodDisposition.state).toBe("refused");
+    expect(res.body.tier2.floodDisposition.code).toBe("retired-instrument");
+    expect(res.body.tier2.floodDisposition.producer).toBe(
+      "fema:nfhl-flood-zone",
     );
-    // Tier-1 base still present alongside the overlay.
+    expect(res.body.tier2.floodDisposition.supersededBy).toBe(
+      "flood-hazard-fact",
+    );
+
+    // WIRE ASSERTION — the determination is absent from the WHOLE response, not
+    // merely from the field it used to occupy.
+    const wire = JSON.stringify(res.body);
+    expect(wire).not.toContain("in-sfha");
+    expect(wire).not.toContain('"AE"');
+    expect(wire).not.toContain("inSpecialFloodHazardArea");
+    expect(wire).not.toContain("FLOODWAY");
+    expect(wire).not.toContain("512.4");
+
+    // SCOPE ASSERTION — the cut is the flood facet, NOT the endpoint. Every
+    // other facet this route serves is unchanged.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
+    expect(res.body.facets.baseFacts.apn).toBe("10068");
+    expect(res.body.facets.baseFacts.acreage.value).toBeCloseTo(0.2388);
+    expect(res.body.adapterKey).toBe(TIER1_ADAPTER_KEY);
+    expect(res.body.source).toBe("baked-snapshot");
+
     // OWNER LEAK GUARD extends to the overlay — the injected Tier-2 owner is gone.
     expect(payloadHasOwnerKey(res.body.tier2)).toBe(false);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
   });
 
-  it("returns tier2:null for a node with a Tier-1 row but no Tier-2 flood overlay yet", async () => {
-    // Comal has only a Tier-1 row — the card renders the base unchanged, no flood.
+  it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
+    // Comal has only a Tier-1 row. `tier2: null` now means exactly one thing —
+    // no Tier-2 row exists — and is distinct from the refusal above.
     const res = await request(getApp()).get(
       `/api/brokerage/v1/place/node/${encodeURIComponent(COMAL_NODE_ID)}/facets`,
     );

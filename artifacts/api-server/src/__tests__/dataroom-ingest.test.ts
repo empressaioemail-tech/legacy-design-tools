@@ -108,12 +108,12 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
-const { setupRouteTests } = await import("./setup");
+const { setupRouteTests, buildPlanReviewBffTestApp } = await import("./setup");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
-});
+}, buildPlanReviewBffTestApp);
 
 async function seedEngagementWithFile(): Promise<{
   engagementId: string;

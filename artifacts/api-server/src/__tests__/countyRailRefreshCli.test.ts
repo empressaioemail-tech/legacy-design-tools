@@ -23,11 +23,14 @@ function liveRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-const mockExists = (p: string) =>
-  p.includes("write-") ||
-  p.includes("countyGeometryScoreCli") ||
-  p.includes("countyCoverageScoreCli") ||
-  p.includes("hauska-engine");
+const mockExists = (p: string) => {
+  const normalized = p.replace(/\\/g, "/");
+  return (
+    /\/write-[^/]+-county\.mjs$/.test(normalized) ||
+    normalized.endsWith("countyGeometryScoreCli.ts") ||
+    normalized.endsWith("countyCoverageScoreCli.ts")
+  );
+};
 
 describe("diffRails", () => {
   const effectiveDeclaration = buildEffectiveCountyRailDeclaration({

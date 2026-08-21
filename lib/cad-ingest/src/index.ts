@@ -36,6 +36,25 @@ export {
 } from "./orion/parser";
 export { upsertCadProperties, DEFAULT_BATCH_SIZE } from "./ingest";
 export type { CadIngestDb, UpsertOptions } from "./ingest";
+export {
+  DECLARED_CAD_VINTAGES,
+  VINTAGE_GAP_ABSENCE_BASIS,
+  classifyCadPropertyMiss,
+  collapseCadPropIdWhitespace,
+  chooseCadPropIdResolution,
+  normalizeCadGisLinkKey,
+  resolveDeclaredCadVintage,
+  tryResolveDeclaredCadVintage,
+} from "./vintage";
+export type {
+  DeclaredCadVintage,
+  CadVintageMissClass,
+  CadPropIdResolution,
+} from "./vintage";
+export { upsertCadVintageCrosswalk } from "./vintage-crosswalk";
+export type { CadCrosswalkDb, CadCrosswalkRecord } from "./vintage-crosswalk";
+export { upsertCadVintageFallback } from "./vintage-fallback";
+export type { CadFallbackDb, CadFallbackRecord } from "./vintage-fallback";
 export { downloadToFile, isUrl, BROWSER_UA } from "./download";
 export {
   extractCadDrop,
@@ -113,6 +132,13 @@ export type {
   TxgioUpsertOptions,
   TxgioUpsertSummary,
 } from "./txgio/ingest";
+export {
+  ZONING_LAYERS,
+  resolveZoningLayer,
+  wiredZoningCityKeys,
+  resolveZoningJurisdiction,
+} from "./txgio/zoning-layers";
+export type { ZoningLayerConfig } from "./txgio/zoning-layers";
 export { ADDRESS_COUNTIES, resolveAddressCounty } from "./address/counties";
 export type { AddressCounty } from "./address/counties";
 export {
@@ -197,7 +223,10 @@ export {
   NFHL_SOURCE_CITATION,
   nfhlBulkDownloadUrl,
 } from "./nfhl/service";
-export { normalizeNfhlFeature, assertNfhlGeographicCoordinates } from "./nfhl/parse";
+export {
+  normalizeNfhlFeature,
+  assertNfhlGeographicCoordinates,
+} from "./nfhl/parse";
 export type { TxFemaNfhlFloodZoneRecord, NfhlFeature } from "./nfhl/parse";
 export {
   deleteAllNfhlFloodZones,
@@ -205,11 +234,12 @@ export {
   upsertNfhlFloodZones,
   NFHL_DEFAULT_BATCH_SIZE,
 } from "./nfhl/ingest";
-export type { NfhlIngestDb, NfhlUpsertOptions, NfhlUpsertSummary } from "./nfhl/ingest";
-export {
-  buildNfhlZoneIndex,
-  resolveParcelFloodZones,
-} from "./nfhl/evaluation";
+export type {
+  NfhlIngestDb,
+  NfhlUpsertOptions,
+  NfhlUpsertSummary,
+} from "./nfhl/ingest";
+export { buildNfhlZoneIndex, resolveParcelFloodZones } from "./nfhl/evaluation";
 export type {
   NfhlZoneIndexEntry,
   ParcelFloodZoneHit,

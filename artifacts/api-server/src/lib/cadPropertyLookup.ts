@@ -5,12 +5,13 @@
  * `lib/adapters` is HTTP-fetch-shaped and must not import
  * `@workspace/db`, so the adapters declare an injected accessor on the
  * `AdapterContext` (`ctx.cadLookup`) and this module supplies the real
- * implementation: latest `tax_year` row for a `(county_fips, prop_id)`
- * pair out of the `cad_property` store (PR #245).
+ * implementation: the county's DECLARED vintage row for a
+ * `(county_fips, prop_id)` pair out of the `cad_property` store
+ * (L17 / P-25 vintage-read discipline — replaces "latest tax_year wins").
  *
- * The query walks the table's primary key — `(county_fips, prop_id,
- * tax_year)` — as an exact prefix match plus an ORDER BY on the key's
- * last column, so no additional index is needed.
+ * L21: on declared-year miss, consult `cad_property_vintage_crosswalk`
+ * for at most one mapped key at the declared year (still no year
+ * fallback).
  *
  * propId normalization mirrors `@workspace/cad-ingest`'s
  * `stripLeadingZeros`: the store keys prop ids as decimal strings with
@@ -18,10 +19,20 @@
  * zero-padded or numeric ids.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { db as defaultDb, cadProperty } from "@workspace/db";
+import {
+  db as defaultDb,
+  cadProperty,
+  cadPropertyVintageCrosswalk,
+  cadPropertyVintageFallback,
+} from "@workspace/db";
 import type { CadPropertyLookup } from "@workspace/adapters";
+import {
+  chooseCadPropIdResolution,
+  classifyCadPropertyMiss,
+  tryResolveDeclaredCadVintage,
+} from "@workspace/cad-ingest";
 import { normalizeCadPropId } from "./parcelNodeId";
 
 // Re-exported so existing `./cadPropertyLookup` import sites keep working;
@@ -43,22 +54,151 @@ export type CadLookupDb = Pick<
 /**
  * Build the accessor. `database` is injectable for tests (the
  * integration suite passes its per-file test-schema drizzle handle).
+ *
+ * Vintage discipline: filters to `resolveDeclaredCadVintage` tax year.
+ * If the declared year has no row but another year does, returns null
+ * (vintage-gap — never the other vintage's row). Undeclared counties
+ * return null (honest empty). Crosswalk may remap the prop id inside
+ * the declared year only. A named fallback may then return one explicitly
+ * sanctioned prior-year row with a visible vintageResolution marker.
  */
 export function makeCadPropertyLookup(
   database: CadLookupDb = defaultDb,
 ): CadPropertyLookup {
   return async (countyFips, propId) => {
-    const rows = await database
+    const declared = tryResolveDeclaredCadVintage(countyFips);
+    if (!declared) return null;
+
+    const prop = normalizeCadPropId(propId);
+    const exact = await database
       .select()
       .from(cadProperty)
       .where(
         and(
-          eq(cadProperty.countyFips, countyFips.trim()),
-          eq(cadProperty.propId, normalizeCadPropId(propId)),
+          eq(cadProperty.countyFips, declared.countyFips),
+          eq(cadProperty.propId, prop),
+          eq(cadProperty.taxYear, declared.taxYear),
         ),
       )
-      .orderBy(desc(cadProperty.taxYear))
       .limit(1);
-    return rows[0] ?? null;
+    if (exact[0]) return exact[0];
+
+    // L21: deterministic declared-year key mapping (not year fallback).
+    const mapped = await database
+      .select({
+        toPropId: cadPropertyVintageCrosswalk.toPropId,
+        method: cadPropertyVintageCrosswalk.method,
+      })
+      .from(cadPropertyVintageCrosswalk)
+      .where(
+        and(
+          eq(cadPropertyVintageCrosswalk.countyFips, declared.countyFips),
+          eq(cadPropertyVintageCrosswalk.fromPropId, prop),
+          eq(cadPropertyVintageCrosswalk.toTaxYear, declared.taxYear),
+        ),
+      )
+      .limit(2);
+    if (mapped.length > 1) {
+      // Unique constraint should prevent this; fail closed if violated.
+      return null;
+    }
+    const fallback = await database
+      .select({
+        fallbackPropId: cadPropertyVintageFallback.fallbackPropId,
+        fallbackTaxYear: cadPropertyVintageFallback.fallbackTaxYear,
+        method: cadPropertyVintageFallback.method,
+        evidenceClass: cadPropertyVintageFallback.evidenceClass,
+      })
+      .from(cadPropertyVintageFallback)
+      .where(
+        and(
+          eq(cadPropertyVintageFallback.countyFips, declared.countyFips),
+          eq(cadPropertyVintageFallback.requestedPropId, prop),
+          eq(cadPropertyVintageFallback.declaredTaxYear, declared.taxYear),
+        ),
+      )
+      .limit(2);
+    if (fallback.length > 1) return null;
+
+    let decision = chooseCadPropIdResolution({
+      requestedPropId: prop,
+      exactDeclaredHit: false,
+      crosswalk: mapped[0]
+        ? { toPropId: mapped[0].toPropId, method: mapped[0].method }
+        : null,
+      namedFallback: fallback[0] ?? null,
+    });
+    if (decision.kind === "crosswalk") {
+      const rows = await database
+        .select()
+        .from(cadProperty)
+        .where(
+          and(
+            eq(cadProperty.countyFips, declared.countyFips),
+            eq(cadProperty.propId, decision.propId),
+            eq(cadProperty.taxYear, declared.taxYear),
+          ),
+        )
+        .limit(1);
+      if (rows[0]) return rows[0];
+
+      // A stale/missing crosswalk target is not a license to invent a hit.
+      // Continue to the separately named fallback, if one exists.
+      decision = chooseCadPropIdResolution({
+        requestedPropId: prop,
+        exactDeclaredHit: false,
+        crosswalk: null,
+        namedFallback: fallback[0] ?? null,
+      });
+    }
+
+    if (decision.kind === "named-fallback") {
+      const rows = await database
+        .select()
+        .from(cadProperty)
+        .where(
+          and(
+            eq(cadProperty.countyFips, declared.countyFips),
+            eq(cadProperty.propId, decision.propId),
+            eq(cadProperty.taxYear, decision.taxYear),
+          ),
+        )
+        .limit(1);
+      if (rows[0]) {
+        return {
+          ...rows[0],
+          vintageResolution: {
+            kind: "named-fallback",
+            requestedPropId: decision.fromPropId,
+            declaredTaxYear: declared.taxYear,
+            servedTaxYear: decision.taxYear,
+            method: decision.method,
+            evidenceClass: decision.evidenceClass,
+          },
+        };
+      }
+    }
+
+    // Fail-closed vintage-gap probe: does another year have this prop
+    // (requested key OR mapped key)?
+    const other = await database
+      .select({ taxYear: cadProperty.taxYear })
+      .from(cadProperty)
+      .where(
+        and(
+          eq(cadProperty.countyFips, declared.countyFips),
+          eq(cadProperty.propId, prop),
+          ne(cadProperty.taxYear, declared.taxYear),
+        ),
+      )
+      .limit(1);
+    const miss = classifyCadPropertyMiss({
+      declaredYearHit: false,
+      otherVintageHit: other.length > 0,
+    });
+    // Brief adapters only consume CadPropertyLookupRow | null today;
+    // vintage-gap and not-found both surface as null (never cross-vintage).
+    void miss;
+    return null;
   };
 }

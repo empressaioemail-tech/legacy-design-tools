@@ -149,7 +149,7 @@ export const COUNTY_RAIL_STATIC_DECLARATION: ReadonlyArray<CountyRailStaticMetad
     thresholdPct: 90,
     coverageClass: "statewide-uniform",
     declaredSource: "RRC public GIS pipelines (TXRRC/Pipelines MapServer/0)",
-    notes: "No pipeline-fact atom registered.",
+    notes: "rrc-pipeline-fact + write-rrc-pipeline-fact-county.mjs.",
   },
   {
     railKey: "rail-corridor",

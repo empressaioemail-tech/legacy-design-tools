@@ -111,5 +111,437 @@ jobs:
         # checked-in fixture will be stale and integration tests would
         # silently miss new columns/tables. Fail the PR loudly instead.
         run: pnpm --filter @workspace/db run test:fixture:drift
+      - name: Checkout hauska-engine (writer disk probe)
+        uses: actions/checkout@v4
+        with:
+          repository: empressaioemail-tech/hauska-engine
+          path: hauska-engine-checkout
+          sparse-checkout: |
+            packages/engine-core/scripts
       - name: Run tests
+        env:
+          HAUSKA_ENGINE_ROOT: ${{ github.workspace }}/hauska-engine-checkout
         run: pnpm test
+  l5-sf30-cotality-grep:
+    name: L5 SF-30 Cotality warm grep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-cotality-warm-gate
+        run: |
+          if rg -n 'canWarm\s*=\s*present\.has\(["'"'"']cotality:' artifacts/api-server/src/lib/warmingHarness.ts; then
+            echo "FAIL ci-cotality-warm-gate: Cotality is extinguished; do not gate warm on cotality:*"
+            exit 1
+          fi
+          echo "ci-cotality-warm-gate: clean"
+  l5-sf24-sf25-score-greps:
+    name: L5 SF-24/SF-25 score greps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-stamp-as-sourcePresent
+        run: |
+          if rg -n 'sourcePresent:\s*cov\.\w+Pct\s*>\s*0' artifacts/api-server/src/countyCoverageScoreCli.ts; then
+            echo "FAIL ci-stamp-as-sourcePresent: stamp rate must not manufacture sourcePresent"
+            exit 1
+          fi
+          echo "ci-stamp-as-sourcePresent: clean"
+      - name: ci-coverage-clamp
+        run: |
+          if rg -n 'Math\.min\(\s*100\s*,\s*\(atomCount' artifacts/api-server/src/countyGeometryScoreCli.ts; then
+            echo "FAIL ci-coverage-clamp: overcount must not clamp to 100% satisfied-present"
+            exit 1
+          fi
+          echo "ci-coverage-clamp: clean"
+      - name: ci-coverage-clamp-shared-engine
+        run: |
+          # SF-25 scoped to the RULE, not to the two files the defect was
+          # first found in. Every rail's coverage arithmetic now runs through
+          # lib/railScoring, so a clamp introduced there would reach every
+          # rail at once while both greps above stayed green. Any clamp of a
+          # coverage percentage to 100 in that tree fails: overcount is a real
+          # signal (duplicate or stale atoms) and must fail closed to not-yet
+          # carrying the honest unclamped ratio. Live evidence for why this
+          # matters: Bastrop cad and Caldwell cad both store exactly 100.00
+          # satisfied-present and are really 121.65% and 184.98%.
+          # COMMENT LINES ARE EXCLUDED, and that is not cosmetic. The engine's
+          # own header quotes the defect it exists to prevent, so a naive grep
+          # matches the documentation and the gate is permanently red: a dead
+          # gate, which is DEV_PROCESS 2.0's failure mode and the mirror of
+          # CTRL-3, where a defect report's prose granted the defective row
+          # authority. This grep matches CODE.
+          # rg exit codes: 0 = matches, 1 = no matches, >1 = ERROR. `|| true`
+          # around the whole pipeline would make a missing or broken ripgrep
+          # read as "clean". A gate that passes when its instrument is absent
+          # is worse than no gate. The exit code is captured from rg itself,
+          # never from the pipe (DEV_PROCESS 2.3).
+          set +e
+          RAW=$(rg -n --glob '!*.test.ts' 'Math\.min\(\s*100'             artifacts/api-server/src/lib/railScoring)
+          RG_EXIT=$?
+          set -e
+          if [ "$RG_EXIT" -gt 1 ]; then
+            echo "FAIL ci-coverage-clamp-shared-engine: ripgrep errored (exit $RG_EXIT); the gate did not run"
+            exit 1
+          fi
+          MATCHES=$(printf '%s' "$RAW" | grep -vE ':[0-9]+: *(\*|//|/\*)' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "$MATCHES"
+            echo "FAIL ci-coverage-clamp-shared-engine: the shared rail scorer must never clamp coverage to 100"
+            exit 1
+          fi
+          echo "ci-coverage-clamp-shared-engine: clean"
+  l5-silent-fallback-greps:
+    name: L5 silent-fallback greps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-fake-engine-exists
+        run: |
+          if rg -n 'includes\(["'"'"']/hauska-engine/["'"'"']\)\)\s*return true' lib/db/src/railManifestDerivation.ts; then
+            echo "FAIL ci-fake-engine-exists: read-path must not pretend engine writers exist"
+            exit 1
+          fi
+          echo "ci-fake-engine-exists: clean"
+      - name: ci-mock-allowlist-hauska-engine
+        run: |
+          if rg -n --glob '**/__tests__/**' 'includes\(["'"'"']hauska-engine["'"'"']\)'; then
+            echo "FAIL ci-mock-allowlist-hauska-engine: tests must not substring-match hauska-engine paths as existing"
+            exit 1
+          fi
+          echo "ci-mock-allowlist-hauska-engine: clean"
+  l5-sf26-hand-hasWriter-grep:
+    name: L5 SF-26 hand hasWriter grep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-hand-hasWriter-in-declaration
+        run: |
+          if rg -n 'hasWriter:\s*(true|false)' lib/db/src/schema/countyRailDimension.ts; then
+            echo "FAIL ci-hand-hasWriter-in-declaration: hasWriter must be derived, not hand-declared"
+            exit 1
+          fi
+          echo "ci-hand-hasWriter-in-declaration: clean"
+  ss-w16-tier2-flood-not-served:
+    name: SS-W16 tier2 flood not served
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-tier2-flood-not-served
+        run: |
+          # SS-W16 (2026-08-19, P-45). The baked Tier-2 flood facet is RETIRED
+          # at the node-facets read path: it asked FEMA NFHL once per
+          # 0.005-degree tile at the tile CENTRE, a measured median 227 m from
+          # the parcel it answered for, and was correct in 0 of 5,714
+          # adjudicated cases including 1,995 parcels reported outside a
+          # Special Flood Hazard Area whose centroid is inside one.
+          #
+          # WHAT THIS GATE CLAIMS, exactly and no wider: on the node-facets read
+          # path (ONE named file), the `flood` KEY may only ever be assigned the
+          # literal `null`. It does not claim the store is retired, it does not
+          # claim other flood surfaces are safe, and it deliberately does not
+          # reach the live fema:nfhl-flood-zone map-layer adapter, which queries
+          # FEMA at a real point and is a different instrument sharing a string.
+          # A control whose scope is broader than its claim teaches people to
+          # reach for the bypass, so the scope is pinned to the claim.
+          #
+          # WHAT BYPASSES IT: a NEW read path under a DIFFERENT name serving the
+          # same place_layer_snapshots rows. This gate matches a string in one
+          # file; it does not match a rename or a second route. It is a
+          # regression tripwire. The semantic guarantee is the `flood: null`
+          # TYPE on Tier2Overlay plus the exhaustive producer switch in
+          # disposeTier2Flood, both of which travel with the code.
+          #
+          # THREE OUTCOMES, NOT TWO: clean / violation / DID-NOT-RUN. A check
+          # that cannot run and silently passes is the defect class this whole
+          # programme exists for, so "did not run" is its own loud, greppable
+          # outcome (marker GATE-DID-NOT-RUN, RESULT=did-not-run, exit 2) and
+          # never collapses into either pass or ordinary failure.
+          #
+          # SELF-TEST FIRST, IN BOTH DIRECTIONS. Before any verdict on the real
+          # file is trusted, the predicate is run against a fixture that DOES
+          # violate it and a fixture that does NOT. A predicate that flags
+          # nothing is a starved gate; a predicate that flags everything is a
+          # dead gate, permanently red, which is how this step behaved when
+          # first written (the comment-strip regex assumed rg's multi-file
+          # output format). Either failure reports DID-NOT-RUN rather than a
+          # verdict. This wires in "a check seen only passing has not been seen
+          # working": the gate is observed both failing and passing every run.
+          set -uo pipefail
+
+          FILE=artifacts/api-server/src/routes/brokerageNodeFacets.ts
+
+          did_not_run() {
+            echo "GATE-DID-NOT-RUN ci-tier2-flood-not-served: $1"
+            echo "RESULT=did-not-run"
+            exit 2
+          }
+
+          # Returns 0 when the target is CLEAN, 1 when it VIOLATES, and exits
+          # did_not_run when the instrument itself could not answer. Offenders
+          # are printed on the violation path.
+          #
+          # rg exit codes: 0 = matches, 1 = no matches, >1 = ERROR. The exit code
+          # is captured from rg itself, never from a pipe, so a missing or broken
+          # ripgrep can never read as "no matches" and therefore as clean.
+          #
+          # --with-filename is NOT cosmetic. Given a single file argument rg
+          # omits the filename and prints "LINE:content", so a comment-strip
+          # regex anchored on ":LINE:" (correct for the directory-scanning greps
+          # elsewhere in this workflow) matches nothing.
+          #
+          # COMMENT LINES ARE EXCLUDED and that is not cosmetic either. The
+          # route's own header documents the retirement it implements, so a
+          # naive grep matches its own documentation — the dead-gate failure
+          # mode that ci-coverage-clamp-shared-engine in this same workflow
+          # already records. POSIX classes, not \s: \s in ERE is a GNU extension
+          # and this gate must not depend on which grep the runner ships.
+          scan() {
+            local target="$1"
+            local raw rg_exit offenders
+            raw=$(rg -n --with-filename 'flood\s*:' "$target")
+            rg_exit=$?
+            if [ "$rg_exit" -gt 1 ]; then
+              did_not_run "ripgrep errored (exit $rg_exit) scanning $target"
+            fi
+            offenders=$(printf '%s' "$raw" \
+              | grep -vE '(^|:)[0-9]+:[[:space:]]*(\*|//|/\*)' \
+              | grep -vE 'flood[[:space:]]*:[[:space:]]*null[[:space:]]*[,;]?[[:space:]]*$')
+            if [ -n "$offenders" ]; then
+              printf '%s\n' "$offenders"
+              return 1
+            fi
+            return 0
+          }
+
+          command -v rg >/dev/null 2>&1 || did_not_run "ripgrep is not installed"
+
+          # ---- SELF-TEST A: a known violation MUST be flagged ---------------
+          DIRTY=$(mktemp)
+          cat > "$DIRTY" <<'DIRTY_EOF'
+          export interface Tier2Overlay {
+            flood: null;
+          }
+          export function extractTier2Overlay(p: Record<string, unknown>) {
+            return { flood: p.flood, floodDisposition: null };
+          }
+          DIRTY_EOF
+          if scan "$DIRTY" > /dev/null; then
+            rm -f "$DIRTY"
+            did_not_run "self-test A failed: the predicate did not flag a known violation, so a 'clean' verdict would be meaningless"
+          fi
+          rm -f "$DIRTY"
+
+          # ---- SELF-TEST B: a compliant file MUST NOT be flagged ------------
+          # Mirrors the real route's SHAPE, not just its rule: the same comment
+          # noise (a comment-strip regression is what makes this gate
+          # permanently red) and the same one-assignment-per-line formatting.
+          #
+          # The permitted-assignment pattern is END-ANCHORED, so `flood: null`
+          # must sit on its own line. That is deliberate: an un-anchored pattern
+          # would also swallow a line like `flood: null, legacy: p.flood`, which
+          # smuggles a value past the gate on the tail of a compliant head.
+          # Prettier already formats this object one property per line, so the
+          # constraint costs nothing — but it IS a constraint, and this fixture
+          # is what proves the two agree.
+          CLEAN=$(mktemp)
+          cat > "$CLEAN" <<'CLEAN_EOF'
+          /**
+           * `flood: null` is documented here on purpose. A gate that matches its
+           * own documentation is a dead gate.
+           */
+          export interface Tier2Overlay {
+            flood: null;
+          }
+          export function extractTier2Overlay(p: Record<string, unknown>) {
+            // returns flood: null and a typed refusal instead of a value
+            return {
+              flood: null,
+              floodDisposition: disposeTier2Flood(p.flood),
+            };
+          }
+          CLEAN_EOF
+          if ! scan "$CLEAN" > /dev/null; then
+            rm -f "$CLEAN"
+            did_not_run "self-test B failed: the predicate flagged a compliant file, so this gate is permanently red and enforces nothing"
+          fi
+          rm -f "$CLEAN"
+          echo "ci-tier2-flood-not-served: self-test passed in both directions"
+
+          # ---- VERDICT on the real file -------------------------------------
+          [ -f "$FILE" ] || did_not_run "$FILE is missing; the read path was renamed or removed and this gate no longer covers it"
+
+          if ! scan "$FILE"; then
+            echo "FAIL ci-tier2-flood-not-served: the node-facets read path must not assign a Tier-2 flood value. It is retired (SS-W16); read flood hazard from the flood-hazard-fact atom instead."
+            echo "RESULT=violation"
+            exit 1
+          fi
+
+          # A gate that can pass on its own absence is not a gate. TWO markers
+          # are required and are checked SEPARATELY:
+          #
+          #   flood: null;   the Tier2Overlay TYPE field (the compile-time floor)
+          #   flood: null,   the object-literal ASSIGNMENT in extractTier2Overlay
+          #
+          # A single `flood:\s*null` probe is satisfiable by the type field
+          # alone, so deleting the assignment read as clean when this step was
+          # first written — the sentinel-satisfiable shape, a check passing on a
+          # value that does not carry its meaning.
+          if ! rg -q 'flood[[:space:]]*:[[:space:]]*null;' "$FILE"; then
+            echo "FAIL ci-tier2-flood-not-served: the Tier2Overlay type no longer pins flood to null in $FILE; the compile-time floor was removed"
+            echo "RESULT=violation"
+            exit 1
+          fi
+          if ! rg -q 'flood[[:space:]]*:[[:space:]]*null,' "$FILE"; then
+            echo "FAIL ci-tier2-flood-not-served: extractTier2Overlay no longer assigns flood: null in $FILE; the retirement was removed rather than kept"
+            echo "RESULT=violation"
+            exit 1
+          fi
+
+          echo "ci-tier2-flood-not-served: clean"
+          echo "RESULT=clean"
+  ss-w18-api-server-boot:
+    # LOAD-BEARING NAME. "SS-W18 api-server boots" is a REQUIRED status check on
+    # main (branch protection Stage 2). Protection matches the check-run name, so
+    # renaming this silently removes the requirement with no error and a green PR.
+    # Change it only together with the protection setting.
+    name: SS-W18 api-server boots
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: ci-boot-graph-no-cli-import
+        run: |
+          # SS-W18 (2026-08-19, P-47). No module reachable from the server
+          # entrypoint may statically import a `*Cli` module. A CLI's
+          # isDirectRun() guard does not survive esbuild bundling, so its
+          # main() runs at server boot and can process.exit(1) before Express
+          # listens. That is what killed the canary deploy of 5688aa31.
+          #
+          # THIS GATE IS A GRAPH WALK, NOT A GREP, and that is the whole point.
+          # The live defect sat three hops from routes/index.ts behind the
+          # lib/railScoring barrel re-export. A grep over routes/ would have
+          # been green through the entire outage. Re-export through an
+          # intermediate module is the obvious bypass of a grep, so this
+          # control does not have one.
+          #
+          # THREE OUTCOMES, NOT TWO. The script exits 0 clean / 1 violation /
+          # 2 did-not-run, and this step keeps them distinguishable in the run
+          # summary. A did-not-run FAILS the job: a check that cannot run and
+          # silently passes is the defect class this gate exists for.
+          set +e
+          node artifacts/api-server/scripts/checkBootGraphNoCliImports.mjs
+          CODE=$?
+          set -e
+          SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+          case "$CODE" in
+            0) echo "ci-boot-graph-no-cli-import: RESULT=clean" >> "$SUMMARY" ;;
+            1) echo "ci-boot-graph-no-cli-import: RESULT=violation" >> "$SUMMARY"; exit 1 ;;
+            2) echo "ci-boot-graph-no-cli-import: RESULT=did-not-run (GATE-DID-NOT-RUN)" >> "$SUMMARY"; exit 1 ;;
+            *) echo "ci-boot-graph-no-cli-import: RESULT=did-not-run (unexpected exit $CODE)" >> "$SUMMARY"; exit 1 ;;
+          esac
+      - name: Build api-server bundle
+        run: pnpm --filter @workspace/api-server run build
+      - name: ci-api-server-boot-smoke
+        run: |
+          # SS-W18 (2026-08-19, P-47). Start the built bundle, wait for the
+          # port, kill it. Its ABSENCE is why four merges between 2026-08-16
+          # and 2026-08-19 all shipped unbootable with green CI: typecheck and
+          # vitest never start the process, so nothing in this workflow
+          # consumed the one signal that would have caught it.
+          #
+          # The harness self-tests its own probe in both directions before it
+          # renders a verdict, refuses to answer if the probe port is already
+          # occupied, and kills the child in a finally under a hard deadline.
+          # Same three outcomes and the same did-not-run handling as above.
+          set +e
+          node artifacts/api-server/scripts/bootSmokeTest.mjs
+          CODE=$?
+          set -e
+          SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+          case "$CODE" in
+            0) echo "ci-api-server-boot-smoke: RESULT=pass" >> "$SUMMARY" ;;
+            1) echo "ci-api-server-boot-smoke: RESULT=violation" >> "$SUMMARY"; exit 1 ;;
+            2) echo "ci-api-server-boot-smoke: RESULT=did-not-run (GATE-DID-NOT-RUN)" >> "$SUMMARY"; exit 1 ;;
+            *) echo "ci-api-server-boot-smoke: RESULT=did-not-run (unexpected exit $CODE)" >> "$SUMMARY"; exit 1 ;;
+          esac
+
+  l17-ci-vintage-predicate:
+    name: L17 ci-vintage-predicate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-vintage-predicate
+        run: |
+          # Fail if production files mention cad_property/cadProperty FROM/from(
+          # without importing resolveDeclaredCadVintage/tryResolveDeclaredCadVintage
+          # AND without CAD_PROPERTY_MULTI_YEAR_INVENTORY marker.
+          # Allowlist: lib/cad-ingest/src/ingest.ts, lib/cad-ingest/src/vintage.ts,
+          # lib/cad-ingest/src/vintage-crosswalk.ts, lib/cad-ingest/src/txgio/landuse*.ts,
+          # lib/db/src/schema/cadProperty.ts, lib/db/src/schema/cadPropertyVintageCrosswalk.ts,
+          # **/__tests__/**
+          set -euo pipefail
+          mapfile -t hits < <(rg -l \
+            -e 'FROM[[:space:]]+cad_property' \
+            -e 'from\(cadProperty\)' \
+            -e '\.from\(cadProperty\)' \
+            --glob '!**/__tests__/**' \
+            --glob '!lib/cad-ingest/src/ingest.ts' \
+            --glob '!lib/cad-ingest/src/vintage.ts' \
+            --glob '!lib/cad-ingest/src/vintage-crosswalk.ts' \
+            --glob '!lib/cad-ingest/src/txgio/landuse*.ts' \
+            --glob '!lib/db/src/schema/cadProperty.ts' \
+            --glob '!lib/db/src/schema/cadPropertyVintageCrosswalk.ts' \
+            . || true)
+          failed=0
+          for f in "${hits[@]+"${hits[@]}"}"; do
+            [ -z "${f:-}" ] && continue
+            if rg -q 'resolveDeclaredCadVintage|tryResolveDeclaredCadVintage|CAD_PROPERTY_MULTI_YEAR_INVENTORY' "$f"; then
+              continue
+            fi
+            echo "FAIL ci-vintage-predicate: $f queries cad_property without declared-vintage import or CAD_PROPERTY_MULTI_YEAR_INVENTORY marker"
+            failed=1
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "ci-vintage-predicate: clean (${#hits[@]} candidate file(s) checked)"

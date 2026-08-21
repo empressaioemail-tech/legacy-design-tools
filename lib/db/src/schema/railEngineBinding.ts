@@ -57,8 +57,10 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
     railKey: "flood",
     atomEntityTypes: ["flood-hazard-fact"],
     engineWriterScript: "write-flood-hazard-fact-county.mjs",
+    ldtScorerPath: "countyFloodScoreCli.ts",
     atomFamilyRefLabel: "flood-hazard-fact (engine PROPERTY_ENTITY_TYPES)",
-    writerRefLabel: "hauska-engine write-flood-hazard-fact-county.mjs",
+    writerRefLabel:
+      "hauska-engine write-flood-hazard-fact-county.mjs; countyFloodScoreCli.ts facet flood",
   },
   {
     railKey: "envelope",
@@ -86,9 +88,9 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   {
     railKey: "easement",
     atomEntityTypes: ["utility-easement"],
-    noWriterReason:
-      "No bulk writer or LDT scorer bound — honest no-writer until easement ingest ships",
+    engineWriterScript: "write-utility-easement-county.mjs",
     atomFamilyRefLabel: "utility-easement (engine PROPERTY_ENTITY_TYPES)",
+    writerRefLabel: "hauska-engine write-utility-easement-county.mjs",
   },
   {
     railKey: "owner",
@@ -106,9 +108,10 @@ export const RAIL_ENGINE_BINDINGS: ReadonlyArray<RailEngineBinding> = [
   },
   {
     railKey: "rrc-pipelines",
-    atomEntityTypes: [],
-    noWriterReason:
-      "Atom family not registered in engine PROPERTY_ENTITY_TYPES — no writer until pipeline atom ships",
+    atomEntityTypes: ["rrc-pipeline-fact"],
+    engineWriterScript: "write-rrc-pipeline-fact-county.mjs",
+    atomFamilyRefLabel: "rrc-pipeline-fact (engine PROPERTY_ENTITY_TYPES)",
+    writerRefLabel: "hauska-engine write-rrc-pipeline-fact-county.mjs",
   },
   {
     railKey: "rail-corridor",

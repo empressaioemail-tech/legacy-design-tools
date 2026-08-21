@@ -207,8 +207,11 @@ function writerPathsExist(
 }
 
 /**
- * Tri-state writer probe. `false` only when family absent or writer
- * confirmed absent; `indeterminate` when bound probe paths miss on disk.
+ * Tri-state writer probe. `true` only when a bound writer/scorer file
+ * exists on disk. Missing engine script → false (or indeterminate when
+ * `requireEngineRoot` and the engine root itself is missing) — never a
+ * fake true. Residual vs merged origin/main: local/sibling filesystem
+ * only (SF-20).
  */
 export function deriveHasWriter(
   railKey: string,
@@ -457,15 +460,28 @@ export function hasIndeterminateDerivations(
 }
 
 /**
- * Read-path probe: LDT scorers are checked on disk in the deployed repo.
- * Engine writer scripts are NOT assumed present when hauska-engine is not
- * colocated — faking them made every engine-bound rail read hasWriter=true
- * (R-09: constant indicator on the materialized ledger).
+ * Read-path probe for the county-ledger overlay.
+ *
+ * Uses `requireEngineRoot: true` so a deploy surface without a sibling
+ * hauska-engine tree (Cloud Run cortex-api) derives confirmed-false /
+ * partial rather than trusting stale county_rail constants. A dev checkout
+ * that DOES colocate engine still gets full derivation — that is correct
+ * for local audit, not the shape production serves.
  */
 export function manifestReadProbeOptions(): DerivationProbeOptions {
   return {
-    requireEngineRoot: false,
-    fileExists: (filePath: string) => existsSync(filePath),
+    requireEngineRoot: true,
+    engineRoot: resolveEngineRoot(),
+    fileExists: existsSync,
+  };
+}
+
+/** Probe matching Cloud Run (no engine tree). Used by R-09 proof script only. */
+export function cloudRunManifestReadProbeOptions(): DerivationProbeOptions {
+  return {
+    requireEngineRoot: true,
+    engineRoot: resolveEngineRoot() + "__cloud_run_absent__",
+    fileExists: existsSync,
   };
 }
 

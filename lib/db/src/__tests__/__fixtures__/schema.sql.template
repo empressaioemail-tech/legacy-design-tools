@@ -357,6 +357,39 @@ CREATE TABLE @@SCHEMA@@.cad_property (
 );
 
 
+-- Name: cad_property_vintage_crosswalk; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cad_property_vintage_crosswalk (
+    county_fips text NOT NULL,
+    from_tax_year integer NOT NULL,
+    from_prop_id text NOT NULL,
+    to_tax_year integer NOT NULL,
+    to_prop_id text NOT NULL,
+    method text NOT NULL,
+    evidence_class text NOT NULL,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: cad_property_vintage_fallback; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.cad_property_vintage_fallback (
+    county_fips text NOT NULL,
+    requested_prop_id text NOT NULL,
+    declared_tax_year integer NOT NULL,
+    fallback_prop_id text NOT NULL,
+    fallback_tax_year integer NOT NULL,
+    method text NOT NULL,
+    evidence_class text NOT NULL,
+    source_file text NOT NULL,
+    source_vintage text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cad_property_vintage_fallback_distinct_years CHECK ((declared_tax_year <> fallback_tax_year))
+);
+
+
 -- Name: canned_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.canned_findings (
@@ -635,6 +668,16 @@ CREATE TABLE @@SCHEMA@@.county_gate_cert_state (
     cert_scope_annotations jsonb,
     cert_graded_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: county_ledger_snapshot; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.county_ledger_snapshot (
+    id text NOT NULL,
+    computed_at timestamp with time zone NOT NULL,
+    payload jsonb NOT NULL,
+    CONSTRAINT county_ledger_snapshot_id_check CHECK ((id = 'current'::text))
 );
 
 
@@ -1629,6 +1672,21 @@ CREATE TABLE @@SCHEMA@@.saved_workspace_spaces (
 );
 
 
+-- Name: serving_sweep_county; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.serving_sweep_county (
+    county_fips text NOT NULL,
+    county_name text NOT NULL,
+    swept_at timestamp with time zone NOT NULL,
+    resolver_version text NOT NULL,
+    parcels_total integer NOT NULL,
+    payload jsonb NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT serving_sweep_county_fips_check CHECK ((county_fips ~ '^[0-9]{5}$'::text)),
+    CONSTRAINT serving_sweep_county_parcels_total_check CHECK ((parcels_total >= 0))
+);
+
+
 -- Name: sheet_content_extractions; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheet_content_extractions (
@@ -1665,6 +1723,109 @@ CREATE TABLE @@SCHEMA@@.sheets (
     sort_order integer NOT NULL,
     content_body text,
     created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: smart_file_absence_determinations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_absence_determinations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_id text NOT NULL,
+    jurisdiction_fips text,
+    doc_slug text NOT NULL,
+    verdict text NOT NULL,
+    basis text NOT NULL,
+    determined_at timestamp with time zone DEFAULT now() NOT NULL,
+    determined_by text NOT NULL,
+    source_uri text,
+    access_policy text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_absence_determinations_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
+    CONSTRAINT smart_file_absence_determinations_basis_check CHECK ((length(btrim(basis)) > 0)),
+    CONSTRAINT smart_file_absence_determinations_determined_by_check CHECK ((length(btrim(determined_by)) > 0)),
+    CONSTRAINT smart_file_absence_determinations_verdict_check CHECK ((verdict = ANY (ARRAY['absent-verified'::text, 'lookup-failed'::text])))
+);
+
+
+-- Name: smart_file_documents; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_documents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_id text NOT NULL,
+    scope_type text NOT NULL,
+    scope_id text NOT NULL,
+    jurisdiction_fips text,
+    doc_slug text NOT NULL,
+    title text NOT NULL,
+    access_policy text NOT NULL,
+    current_version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_documents_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
+    CONSTRAINT smart_file_documents_current_version_check CHECK ((current_version >= 1)),
+    CONSTRAINT smart_file_documents_scope_type_check CHECK ((scope_type = ANY (ARRAY['jurisdiction'::text, 'tenant'::text, 'site'::text])))
+);
+
+
+-- Name: smart_file_folder_records; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_folder_records (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    folder_id text NOT NULL,
+    record_entity_id text NOT NULL,
+    entity_type text NOT NULL,
+    payload jsonb NOT NULL,
+    access_policy text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_folder_records_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text])))
+);
+
+
+-- Name: smart_file_folders; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_folders (
+    folder_id text NOT NULL,
+    scope_type text NOT NULL,
+    scope_id text NOT NULL,
+    label text NOT NULL,
+    access_policy text NOT NULL,
+    parent_folder_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_folders_access_policy_check CHECK ((access_policy = ANY (ARRAY['public-free'::text, 'public-paid'::text, 'platform-internal'::text, 'tenant-private'::text, 'tenant-shared'::text]))),
+    CONSTRAINT smart_file_folders_scope_type_check CHECK ((scope_type = ANY (ARRAY['jurisdiction'::text, 'tenant'::text, 'site'::text])))
+);
+
+
+-- Name: smart_file_placements; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_placements (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    document_id uuid NOT NULL,
+    document_entity_id text NOT NULL,
+    target_type text NOT NULL,
+    target_id text NOT NULL,
+    placed_at timestamp with time zone DEFAULT now() NOT NULL,
+    placed_by text,
+    CONSTRAINT smart_file_placements_target_type_check CHECK ((target_type = ANY (ARRAY['folder'::text, 'parcel'::text, 'project'::text, 'asset'::text, 'permit'::text, 'meeting'::text])))
+);
+
+
+-- Name: smart_file_versions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.smart_file_versions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    document_id uuid NOT NULL,
+    document_entity_id text NOT NULL,
+    version integer NOT NULL,
+    content_cid text NOT NULL,
+    content_type text NOT NULL,
+    byte_size bigint NOT NULL,
+    provenance jsonb NOT NULL,
+    computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    superseded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT smart_file_versions_version_check CHECK ((version >= 1))
 );
 
 
@@ -2117,6 +2278,24 @@ ALTER TABLE ONLY @@SCHEMA@@.cad_property
     ADD CONSTRAINT cad_property_county_fips_prop_id_tax_year_pk PRIMARY KEY (county_fips, prop_id, tax_year);
 
 
+-- Name: cad_property_vintage_crosswalk cad_property_vintage_crosswalk_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_crosswalk
+    ADD CONSTRAINT cad_property_vintage_crosswalk_pk PRIMARY KEY (county_fips, from_tax_year, from_prop_id, to_tax_year);
+
+
+-- Name: cad_property_vintage_crosswalk cad_property_vintage_crosswalk_unique_target; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_crosswalk
+    ADD CONSTRAINT cad_property_vintage_crosswalk_unique_target UNIQUE (county_fips, to_tax_year, to_prop_id, from_tax_year);
+
+
+-- Name: cad_property_vintage_fallback cad_property_vintage_fallback_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.cad_property_vintage_fallback
+    ADD CONSTRAINT cad_property_vintage_fallback_pk PRIMARY KEY (county_fips, requested_prop_id, declared_tax_year);
+
+
 -- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.canned_findings
@@ -2223,6 +2402,12 @@ ALTER TABLE ONLY @@SCHEMA@@.county_facet_coverage
 
 ALTER TABLE ONLY @@SCHEMA@@.county_gate_cert_state
     ADD CONSTRAINT county_gate_cert_state_pkey PRIMARY KEY (row_id);
+
+
+-- Name: county_ledger_snapshot county_ledger_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.county_ledger_snapshot
+    ADD CONSTRAINT county_ledger_snapshot_pkey PRIMARY KEY (id);
 
 
 -- Name: county_manifest county_manifest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2567,6 +2752,12 @@ ALTER TABLE ONLY @@SCHEMA@@.saved_workspace_spaces
     ADD CONSTRAINT saved_workspace_spaces_pkey PRIMARY KEY (id);
 
 
+-- Name: serving_sweep_county serving_sweep_county_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.serving_sweep_county
+    ADD CONSTRAINT serving_sweep_county_pkey PRIMARY KEY (county_fips);
+
+
 -- Name: sheet_content_extractions sheet_content_extractions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
@@ -2583,6 +2774,42 @@ ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_absence_determinations smart_file_absence_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_absence_determinations
+    ADD CONSTRAINT smart_file_absence_determinations_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_documents smart_file_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_documents
+    ADD CONSTRAINT smart_file_documents_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_folder_records smart_file_folder_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_folder_records
+    ADD CONSTRAINT smart_file_folder_records_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_folders smart_file_folders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_folders
+    ADD CONSTRAINT smart_file_folders_pkey PRIMARY KEY (folder_id);
+
+
+-- Name: smart_file_placements smart_file_placements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_placements
+    ADD CONSTRAINT smart_file_placements_pkey PRIMARY KEY (id);
+
+
+-- Name: smart_file_versions smart_file_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_versions
+    ADD CONSTRAINT smart_file_versions_pkey PRIMARY KEY (id);
 
 
 -- Name: snapshot_ifc_files snapshot_ifc_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2858,6 +3085,16 @@ CREATE INDEX brokerage_workspaces_install_opened_idx ON @@SCHEMA@@.brokerage_wor
 -- Name: brokerage_workspaces_owner_user_id_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX brokerage_workspaces_owner_user_id_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (owner_user_id, opened_at);
+
+
+-- Name: cad_property_vintage_crosswalk_to_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cad_property_vintage_crosswalk_to_idx ON @@SCHEMA@@.cad_property_vintage_crosswalk USING btree (county_fips, to_tax_year, to_prop_id);
+
+
+-- Name: cad_property_vintage_fallback_lookup_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX cad_property_vintage_fallback_lookup_idx ON @@SCHEMA@@.cad_property_vintage_fallback USING btree (county_fips, fallback_tax_year, fallback_prop_id);
 
 
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
@@ -3440,6 +3677,81 @@ CREATE UNIQUE INDEX sheets_snapshot_number_unique ON @@SCHEMA@@.sheets USING btr
 CREATE INDEX sheets_snapshot_sort_idx ON @@SCHEMA@@.sheets USING btree (snapshot_id, sort_order);
 
 
+-- Name: smart_file_absence_determinations_entity_id_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_absence_determinations_entity_id_uniq ON @@SCHEMA@@.smart_file_absence_determinations USING btree (entity_id);
+
+
+-- Name: smart_file_absence_determinations_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_absence_determinations_jurisdiction_idx ON @@SCHEMA@@.smart_file_absence_determinations USING btree (jurisdiction_fips, doc_slug);
+
+
+-- Name: smart_file_absence_determinations_verdict_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_absence_determinations_verdict_idx ON @@SCHEMA@@.smart_file_absence_determinations USING btree (verdict);
+
+
+-- Name: smart_file_documents_access_policy_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_documents_access_policy_idx ON @@SCHEMA@@.smart_file_documents USING btree (access_policy);
+
+
+-- Name: smart_file_documents_entity_id_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_documents_entity_id_uniq ON @@SCHEMA@@.smart_file_documents USING btree (entity_id);
+
+
+-- Name: smart_file_documents_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_documents_jurisdiction_idx ON @@SCHEMA@@.smart_file_documents USING btree (jurisdiction_fips, doc_slug);
+
+
+-- Name: smart_file_documents_scope_identity_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_documents_scope_identity_uniq ON @@SCHEMA@@.smart_file_documents USING btree (scope_type, scope_id, doc_slug);
+
+
+-- Name: smart_file_folder_records_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_folder_records_uniq ON @@SCHEMA@@.smart_file_folder_records USING btree (folder_id, record_entity_id);
+
+
+-- Name: smart_file_folders_scope_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_folders_scope_idx ON @@SCHEMA@@.smart_file_folders USING btree (scope_type, scope_id);
+
+
+-- Name: smart_file_placements_document_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_placements_document_idx ON @@SCHEMA@@.smart_file_placements USING btree (document_id);
+
+
+-- Name: smart_file_placements_target_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_placements_target_idx ON @@SCHEMA@@.smart_file_placements USING btree (target_type, target_id);
+
+
+-- Name: smart_file_placements_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_placements_uniq ON @@SCHEMA@@.smart_file_placements USING btree (document_id, target_type, target_id);
+
+
+-- Name: smart_file_versions_content_cid_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_versions_content_cid_idx ON @@SCHEMA@@.smart_file_versions USING btree (content_cid);
+
+
+-- Name: smart_file_versions_doc_version_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX smart_file_versions_doc_version_uniq ON @@SCHEMA@@.smart_file_versions USING btree (document_id, version);
+
+
+-- Name: smart_file_versions_document_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX smart_file_versions_document_idx ON @@SCHEMA@@.smart_file_versions USING btree (document_id, version);
+
+
 -- Name: snapshot_ifc_files_parsed_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX snapshot_ifc_files_parsed_at_idx ON @@SCHEMA@@.snapshot_ifc_files USING btree (parsed_at);
@@ -3944,6 +4256,24 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
+-- Name: smart_file_folder_records smart_file_folder_records_folder_id_smart_file_folders_folder_i; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_folder_records
+    ADD CONSTRAINT smart_file_folder_records_folder_id_smart_file_folders_folder_i FOREIGN KEY (folder_id) REFERENCES @@SCHEMA@@.smart_file_folders(folder_id) ON DELETE CASCADE;
+
+
+-- Name: smart_file_placements smart_file_placements_document_id_smart_file_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_placements
+    ADD CONSTRAINT smart_file_placements_document_id_smart_file_documents_id_fk FOREIGN KEY (document_id) REFERENCES @@SCHEMA@@.smart_file_documents(id) ON DELETE CASCADE;
+
+
+-- Name: smart_file_versions smart_file_versions_document_id_smart_file_documents_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.smart_file_versions
+    ADD CONSTRAINT smart_file_versions_document_id_smart_file_documents_id_fk FOREIGN KEY (document_id) REFERENCES @@SCHEMA@@.smart_file_documents(id) ON DELETE CASCADE;
 
 
 -- Name: snapshot_ifc_files snapshot_ifc_files_snapshot_id_snapshots_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -8,6 +8,7 @@ import {
   deriveAtomFamilyState,
   deriveHasWriter,
   deriveRailDeclarationFields,
+  manifestReadProbeOptions,
   resolveLdtRoot,
 } from "../railManifestDerivation";
 import { ENGINE_PROPERTY_TYPES_SNAPSHOT } from "../schema/enginePropertyTypesSnapshot";
@@ -38,7 +39,9 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("write-flood-hazard-fact-county.mjs") ||
       normalized.endsWith("write-land-use-fact-county.mjs") ||
       normalized.endsWith("write-road-node-county.mjs") ||
-      normalized.endsWith("write-parcel-node-county.mjs")
+      normalized.endsWith("write-parcel-node-county.mjs") ||
+      normalized.endsWith("write-utility-easement-county.mjs") ||
+      normalized.endsWith("write-rrc-pipeline-fact-county.mjs")
     );
   }
   if (normalized.includes("artifacts/api-server/src/")) {
@@ -47,7 +50,7 @@ function cp1MockFileExists(filePath: string): boolean {
       normalized.endsWith("countyCoverageScoreCli.ts")
     );
   }
-  return normalized.includes("hauska-engine");
+  return false;
 }
 
 describe("railManifestDerivation CP1", () => {
@@ -73,14 +76,17 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("footprint")?.hasWriter).toBe(true);
   });
 
-  it("keeps rrc-pipelines missing without writer", () => {
-    expect(byKey.get("rrc-pipelines")?.atomFamilyState).toBe("missing");
-    expect(byKey.get("rrc-pipelines")?.hasWriter).toBe(false);
+  it("derives rrc-pipelines present with writer (engine PR #314)", () => {
+    expect(byKey.get("rrc-pipelines")?.atomFamilyState).toBe("present");
+    expect(byKey.get("rrc-pipelines")?.hasWriter).toBe(true);
+    expect(byKey.get("rrc-pipelines")?.writerRef).toContain(
+      "write-rrc-pipeline-fact-county",
+    );
   });
 
-  it("keeps easement present without writer", () => {
+  it("derives easement present with writer (E1: engine PR #295 merged)", () => {
     expect(byKey.get("easement")?.atomFamilyState).toBe("present");
-    expect(byKey.get("easement")?.hasWriter).toBe(false);
+    expect(byKey.get("easement")?.hasWriter).toBe(true);
   });
 
   it("keeps owner present with writer", () => {
@@ -88,18 +94,24 @@ describe("railManifestDerivation CP1", () => {
     expect(byKey.get("owner")?.hasWriter).toBe(true);
   });
 
-  it("matches CP1 cell move expectations (762 no-atom, 508 no-writer)", () => {
+  it("matches CP1 cell move expectations (1016 no-atom, 762 no-writer)", () => {
     const moves = computeCp1CellMoveExpectations(CP1_BEFORE_BY_KEY, effective);
-    expect(moves.cellsMovedOutOfNoAtom).toBe(762);
-    expect(moves.cellsMovedOutOfNoWriter).toBe(508);
+    // 762 + rrc-pipelines 254: engine PR #314 registered rrc-pipeline-fact
+    // and bound write-rrc-pipeline-fact-county.mjs (no-atom → not-yet).
+    expect(moves.cellsMovedOutOfNoAtom).toBe(1016);
+    // no-writer moves unchanged: rrc-pipelines left no-atom, not no-writer.
+    expect(moves.cellsMovedOutOfNoWriter).toBe(762);
   });
 
   it("fail-closes atomFamilyState to missing for unregistered types without contract fallback", () => {
     expect(
       deriveAtomFamilyState(
-        "rrc-pipelines",
+        "unknown-unbound-rail",
         ENGINE_PROPERTY_TYPES_SNAPSHOT,
-        RAIL_ENGINE_BINDING_BY_KEY["rrc-pipelines"],
+        {
+          railKey: "unknown-unbound-rail",
+          atomEntityTypes: ["not-a-registered-entity-type"],
+        },
       ),
     ).toBe("missing");
   });
@@ -141,9 +153,11 @@ describe("railManifestDerivation CP1", () => {
   });
 
   it("effective declaration carries hasWriterDerivation alongside boolean hasWriter", () => {
+    // E1: easement now binds the merged utility-easement county writer, so
+    // both the tri-state derivation and the boolean resolve true.
     const rail = effective.find((r) => r.railKey === "easement");
-    expect(rail?.hasWriterDerivation).toBe(false);
-    expect(rail?.hasWriter).toBe(false);
+    expect(rail?.hasWriterDerivation).toBe(true);
+    expect(rail?.hasWriter).toBe(true);
     expect(rail?.atomFamilyPresent).toBe(true);
   });
 
@@ -153,6 +167,28 @@ describe("railManifestDerivation CP1", () => {
       expect(byKey.get(key)?.hasWriter).toBe(true);
     }
     expect(byKey.get("geometry")?.writerRef).toContain("write-parcel-node-county");
+  });
+
+  it("read-path probe does not pretend a missing hauska-engine writer exists (SF-21)", () => {
+    const opts = manifestReadProbeOptions();
+    const trap =
+      "/nonexistent/hauska-engine/packages/engine-core/scripts/write-owner-fact-county.mjs";
+    expect(opts.fileExists).toBeTypeOf("function");
+    expect(opts.fileExists!(trap)).toBe(false);
+  });
+
+  it("read-path derivation does not report hasWriter true for a missing engine script (SF-20/SF-21)", () => {
+    const opts = manifestReadProbeOptions();
+    const derived = deriveHasWriter(
+      "owner",
+      ENGINE_PROPERTY_TYPES_SNAPSHOT,
+      RAIL_ENGINE_BINDING_BY_KEY.owner,
+      "/nonexistent/hauska-engine",
+      resolveLdtRoot(),
+      opts.fileExists ?? existsSync,
+      false,
+    );
+    expect(derived).not.toBe(true);
   });
 
   it("module-anchored ldtRoot finds scorers without cwd override (D3 cwd trap)", () => {

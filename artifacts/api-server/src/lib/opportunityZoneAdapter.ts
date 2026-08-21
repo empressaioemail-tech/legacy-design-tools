@@ -28,8 +28,34 @@ export interface OzTractFeature {
   };
 }
 
+export interface OzCoverageBbox {
+  westLng: number;
+  southLat: number;
+  eastLng: number;
+  northLat: number;
+}
+
+export interface OzTractCollectionMetadata {
+  version?: string;
+  designationRound?: string;
+  source?: string;
+  sourceUrl?: string;
+  retrievedAt?: string;
+  nationalDesignatedTractCount?: number;
+  nationalCountNote?: string;
+  bundledScope?: string;
+  bundledScopeCountyFips?: string[];
+  bundledScopeReason?: string;
+  bundledCoverageBbox?: OzCoverageBbox;
+  bundledTractCount?: number;
+  coordinatePrecisionDecimals?: number;
+  note?: string;
+  [key: string]: unknown;
+}
+
 interface OzTractCollection {
   type: "FeatureCollection";
+  metadata?: OzTractCollectionMetadata;
   features: OzTractFeature[];
 }
 
@@ -142,6 +168,175 @@ export function lookupOpportunityZone(input: {
   };
 }
 
+/** Provenance for the currently-loaded OZ tract layer (source, vintage, scope). */
+export function ozTractLayerProvenance(): {
+  source: string;
+  sourceUrl: string | null;
+  designationRound: string;
+  dataVintage: string | null;
+  tractListVersion: string;
+  nationalDesignatedTractCount: number | null;
+  nationalCountNote: string | null;
+  bundledScope: string | null;
+  bundledTractCount: number;
+  coverageBbox: OzCoverageBbox | null;
+} {
+  const collection = loadOzTractFixture();
+  const meta = collection.metadata ?? {};
+  return {
+    source: meta.source ?? "CDFI Fund / HUD (OZ tracts)",
+    sourceUrl: meta.sourceUrl ?? null,
+    designationRound:
+      meta.designationRound ??
+      "2018 designation under the Tax Cuts and Jobs Act of 2017",
+    dataVintage: meta.retrievedAt ?? null,
+    tractListVersion: OZ_TRACT_LIST_VERSION,
+    nationalDesignatedTractCount: meta.nationalDesignatedTractCount ?? null,
+    nationalCountNote: meta.nationalCountNote ?? null,
+    bundledScope: meta.bundledScope ?? null,
+    bundledTractCount: meta.bundledTractCount ?? collection.features.length,
+    coverageBbox: ozLayerCoverageEnvelope(),
+  };
+}
+
+interface OzBboxEnvelope {
+  westLng: number;
+  southLat: number;
+  eastLng: number;
+  northLat: number;
+}
+
+let cachedCoverageEnvelope: OzCoverageBbox | null | undefined;
+
+/**
+ * The geographic coverage envelope of the currently-loaded OZ dataset.
+ *
+ * Prefers the explicit `metadata.bundledCoverageBbox` (bundled Central-TX file),
+ * otherwise derives the bbox union of every loaded tract geometry (e.g. the
+ * GCS-hydrated national set, which carries no bundledCoverageBbox). Returns null
+ * only if there is no usable geometry. Used to distinguish an in-scope empty
+ * viewport (confident "no OZ here") from an out-of-scope viewport (unknown —
+ * the layer simply does not cover that region in this environment).
+ */
+export function ozLayerCoverageEnvelope(): OzCoverageBbox | null {
+  if (cachedCoverageEnvelope !== undefined) return cachedCoverageEnvelope;
+  const collection = loadOzTractFixture();
+  const declared = collection.metadata?.bundledCoverageBbox;
+  if (
+    declared &&
+    Number.isFinite(declared.westLng) &&
+    Number.isFinite(declared.southLat) &&
+    Number.isFinite(declared.eastLng) &&
+    Number.isFinite(declared.northLat)
+  ) {
+    cachedCoverageEnvelope = declared;
+    return cachedCoverageEnvelope;
+  }
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  for (const feature of collection.features) {
+    const gb = geometryBbox(feature.geometry);
+    if (!gb) continue;
+    if (gb.minLng < minLng) minLng = gb.minLng;
+    if (gb.minLat < minLat) minLat = gb.minLat;
+    if (gb.maxLng > maxLng) maxLng = gb.maxLng;
+    if (gb.maxLat > maxLat) maxLat = gb.maxLat;
+  }
+  cachedCoverageEnvelope = Number.isFinite(minLng)
+    ? { westLng: minLng, southLat: minLat, eastLng: maxLng, northLat: maxLat }
+    : null;
+  return cachedCoverageEnvelope;
+}
+
+/**
+ * True when the requested viewport lies within (overlaps) the loaded OZ
+ * dataset's coverage envelope, i.e. the layer can speak to this region. A
+ * viewport that does not overlap the envelope is out-of-scope: absence of a
+ * tract there is "unknown", not "confidently none".
+ */
+export function bboxWithinOzCoverage(bbox: OzBboxEnvelope): boolean {
+  const env = ozLayerCoverageEnvelope();
+  if (!env) return false;
+  return (
+    env.westLng <= bbox.eastLng &&
+    env.eastLng >= bbox.westLng &&
+    env.southLat <= bbox.northLat &&
+    env.northLat >= bbox.southLat
+  );
+}
+
+export function __resetOzCoverageEnvelopeForTests(): void {
+  cachedCoverageEnvelope = undefined;
+}
+
+function ringBbox(
+  ring: number[][],
+): { minLng: number; minLat: number; maxLng: number; maxLat: number } | null {
+  if (!ring.length) return null;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of ring as [number, number][]) {
+    if (lng < minLng) minLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lng > maxLng) maxLng = lng;
+    if (lat > maxLat) maxLat = lat;
+  }
+  return { minLng, minLat, maxLng, maxLat };
+}
+
+function geometryBbox(
+  geometry: OzTractFeature["geometry"],
+): { minLng: number; minLat: number; maxLng: number; maxLat: number } | null {
+  const rings: number[][][] =
+    geometry.type === "Polygon"
+      ? (geometry.coordinates as number[][][])
+      : (geometry.coordinates as number[][][][]).flatMap((poly) => poly);
+  let acc: {
+    minLng: number;
+    minLat: number;
+    maxLng: number;
+    maxLat: number;
+  } | null = null;
+  for (const ring of rings) {
+    const rb = ringBbox(ring);
+    if (!rb) continue;
+    acc = acc
+      ? {
+          minLng: Math.min(acc.minLng, rb.minLng),
+          minLat: Math.min(acc.minLat, rb.minLat),
+          maxLng: Math.max(acc.maxLng, rb.maxLng),
+          maxLat: Math.max(acc.maxLat, rb.maxLat),
+        }
+      : rb;
+  }
+  return acc;
+}
+
+/**
+ * Return the designated OZ tracts whose geometry bounding box overlaps the
+ * requested viewport bbox. Deterministic bbox-overlap test against authoritative
+ * federal geometry — no synthetic geometry, no external network call.
+ */
+export function ozTractsInBbox(bbox: OzBboxEnvelope): OzTractFeature[] {
+  const collection = loadOzTractFixture();
+  const hits: OzTractFeature[] = [];
+  for (const feature of collection.features) {
+    const gb = geometryBbox(feature.geometry);
+    if (!gb) continue;
+    const overlaps =
+      gb.minLng <= bbox.eastLng &&
+      gb.maxLng >= bbox.westLng &&
+      gb.minLat <= bbox.northLat &&
+      gb.maxLat >= bbox.southLat;
+    if (overlaps) hits.push(feature);
+  }
+  return hits;
+}
+
 export const opportunityZoneAdapter: Adapter = {
   adapterKey: "national:opportunity-zone",
   tier: "federal",
@@ -176,4 +371,5 @@ export const opportunityZoneAdapter: Adapter = {
 
 export function __resetOzTractCacheForTests(): void {
   cachedTracts = null;
+  cachedCoverageEnvelope = undefined;
 }
