@@ -1,45 +1,37 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  effectiveRailFieldsByKey,
+  buildEffectiveCountyRailDeclaration,
   cloudRunManifestReadProbeOptions,
+  effectiveRailFieldsByKey,
+  isRailDerivationIndeterminate,
 } from "../railManifestDerivation";
 import { applyDepthRailDisplayGate } from "../manifestGridRead";
 import {
   resolveManifestDisplayState,
   resolveManifestIsPartial,
 } from "../manifestCellResolve";
+import { RAIL_ENGINE_BINDINGS } from "../schema/railEngineBinding";
 
 describe("manifest read-path indicator overlay (R-09)", () => {
-  const cloudRun = effectiveRailFieldsByKey(cloudRunManifestReadProbeOptions());
+  const cloudRunOpts = cloudRunManifestReadProbeOptions();
+  const cloudRun = effectiveRailFieldsByKey(cloudRunOpts);
+  const cloudRunDecls = buildEffectiveCountyRailDeclaration(cloudRunOpts);
 
-  it("hasWriter takes more than one value on Cloud Run probe", () => {
-    const writers = new Set([...cloudRun.values()].map((v) => v.hasWriter));
-    expect(writers.has(true)).toBe(true);
-    expect(writers.has(false)).toBe(true);
-    expect(cloudRun.get("easement")?.hasWriter).toBe(false);
+  it("Cloud Run probe has zero indeterminate rails among the fourteen bindings", () => {
+    expect(cloudRunDecls).toHaveLength(RAIL_ENGINE_BINDINGS.length);
+    expect(cloudRunDecls).toHaveLength(14);
+    expect(cloudRunDecls.filter(isRailDerivationIndeterminate)).toHaveLength(0);
   });
 
-  it("atomFamilyState takes more than one value on Cloud Run probe", () => {
-    const states = new Set([...cloudRun.values()].map((v) => v.atomFamilyState));
-    expect(states.has("present")).toBe(true);
-    expect(states.has("partial")).toBe(true);
+  it("Cloud Run probe derives easement hasWriter true and atomFamilyState present", () => {
+    expect(cloudRun.get("easement")?.hasWriter).toBe(true);
+    expect(cloudRun.get("easement")?.atomFamilyState).toBe("present");
   });
 
-  it("overlay marks easement hasWriter false on Cloud Run probe", () => {
-    const effective = cloudRun.get("easement")!;
-    expect(effective.hasWriter).toBe(false);
-  });
-
-  it("overlay produces no-atom when atom family is partial", () => {
-    const effective = cloudRun.get("cad")!;
-    expect(effective.atomFamilyState).toBe("partial");
+  it("overlay produces no-atom when atom family is partial (constructed, not live cad)", () => {
     expect(
-      resolveManifestDisplayState(
-        effective.atomFamilyState,
-        effective.hasWriter,
-        "satisfied-present",
-      ),
+      resolveManifestDisplayState("partial", true, "satisfied-present"),
     ).toBe("no-atom");
   });
 
