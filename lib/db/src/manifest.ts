@@ -46,6 +46,9 @@ export {
 export {
   resolveManifestDisplayState,
   resolveManifestIsPartial,
+  mergeAtomFamilyState,
+  mergeHasWriter,
+  mergeEffectiveRailFields,
   type ManifestDisplayState,
 } from "./manifestCellResolve";
 export {

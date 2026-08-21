@@ -25,6 +25,7 @@ import {
   probeRailCapabilities,
   resolveManifestDisplayState,
   resolveManifestIsPartial,
+  mergeEffectiveRailFields,
 } from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
 
@@ -238,9 +239,14 @@ async function readManifestGrid(db: SelectDb): Promise<ManifestCell[]> {
   return applyDerivationIndeterminateOverlay(
     rows.map((row) => {
       const effective = effectiveByKey.get(row.rail_key);
-      const atomFamilyState =
-        effective?.atomFamilyState ?? row.atom_family_state;
-      const hasWriter = effective?.hasWriter ?? Boolean(row.has_writer);
+      const merged = mergeEffectiveRailFields(
+        row.atom_family_state,
+        Boolean(row.has_writer),
+        effective?.atomFamilyState,
+        effective?.hasWriter,
+      );
+      const atomFamilyState = merged.atomFamilyState;
+      const hasWriter = merged.hasWriter;
       const honestCoveragePct = num(row.honest_coverage_pct);
       const thresholdPct = num(row.cell_threshold ?? row.rail_default_threshold);
       const displayState = resolveManifestDisplayState(

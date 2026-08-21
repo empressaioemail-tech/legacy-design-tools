@@ -11,6 +11,7 @@ import {
 import {
   resolveManifestDisplayState,
   resolveManifestIsPartial,
+  mergeEffectiveRailFields,
 } from "./manifestCellResolve";
 
 interface ManifestGridQueryRow extends Record<string, unknown> {
@@ -58,8 +59,14 @@ function overlayEffectiveRailFields(
   isPartial: boolean;
 } {
   const effective = effectiveByKey.get(row.rail_key);
-  const atomFamilyState = effective?.atomFamilyState ?? row.atom_family_state;
-  const hasWriter = effective?.hasWriter ?? Boolean(row.has_writer);
+  const merged = mergeEffectiveRailFields(
+    row.atom_family_state,
+    Boolean(row.has_writer),
+    effective?.atomFamilyState,
+    effective?.hasWriter,
+  );
+  const atomFamilyState = merged.atomFamilyState;
+  const hasWriter = merged.hasWriter;
   const honestCoveragePct = num(row.honest_coverage_pct);
   const thresholdPct = num(row.cell_threshold ?? row.rail_default_threshold);
   const displayState = resolveManifestDisplayState(
@@ -147,7 +154,7 @@ export async function readCountyRailHasWriterMap(
   return new Map(
     rows.map((r) => [
       r.rail_key,
-      effectiveByKey.get(r.rail_key)?.hasWriter ?? r.has_writer,
+      mergeHasWriter(r.has_writer, effectiveByKey.get(r.rail_key)?.hasWriter ?? true),
     ]),
   );
 }
