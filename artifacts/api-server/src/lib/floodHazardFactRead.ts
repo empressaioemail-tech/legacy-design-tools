@@ -310,7 +310,10 @@ export function memoryFloodHazardAtoms(
   rows: ReadonlyArray<{ entityId: string; body: Record<string, unknown> }>,
 ): AtomQueryable {
   return {
-    async query(text, params) {
+    async query<T extends Record<string, unknown> = Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
       if (!text.includes("FROM atoms") || !text.includes("entity_type")) {
         throw new Error(
           "memoryFloodHazardAtoms: refusing a query that is not the flood-hazard-fact atoms SELECT",
@@ -334,7 +337,7 @@ export function memoryFloodHazardAtoms(
       return {
         rows: rows
           .filter((r) => wanted.has(r.entityId))
-          .map((r) => ({ entity_id: r.entityId, body: r.body })),
+          .map((r) => ({ entity_id: r.entityId, body: r.body })) as T[],
       };
     },
   };
