@@ -12,6 +12,7 @@ import {
   resolveManifestDisplayState,
   resolveManifestIsPartial,
   mergeEffectiveRailFields,
+  mergeHasWriter,
 } from "./manifestCellResolve";
 
 interface ManifestGridQueryRow extends Record<string, unknown> {
