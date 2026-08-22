@@ -64,6 +64,11 @@ import {
   resetWellFactAtomQueryableForTests,
   setWellFactAtomQueryableForTests,
 } from "../lib/wellFactRead";
+import {
+  memoryBuildingFootprintFactAtoms,
+  resetBuildingFootprintFactAtomQueryableForTests,
+  setBuildingFootprintFactAtomQueryableForTests,
+} from "../lib/buildingFootprintFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -472,6 +477,27 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*texas-rrc/);
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*tx_rrc_well/);
   });
+
+  it("the route source wires buildingFootprintFact from atoms and does not read bake/CAD/GIS", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/buildingFootprintFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadBuildingFootprintFactAtom/);
+    expect(routeSrc).toMatch(/buildingFootprintFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*tx_building_footprint[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /buildingFootprintFact\s*=\s*.*place_layer_snapshots/,
+    );
+    expect(routeSrc).not.toMatch(/buildingFootprintFact\s*=\s*.*tx_building_footprint/);
+    expect(routeSrc).not.toMatch(
+      /buildingFootprintFact\s*=\s*.*split_part/,
+    );
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -613,6 +639,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
     setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
     setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([]),
+    );
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -648,6 +677,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     resetSpecialDistrictFactAtomQueryableForTests();
     resetPipelineFactAtomQueryableForTests();
     resetWellFactAtomQueryableForTests();
+    resetBuildingFootprintFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -764,6 +794,18 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.wellFact.apiNumber14).toBeUndefined();
     expect(res.body.wellFact.wellKey).toBeUndefined();
     expect(res.body.wellFact.parcelRelation).toBeUndefined();
+
+    // building-footprint miss is named. Snapshot / CAD / GIS must not fill it.
+    expect(res.body.buildingFootprintFact).not.toBeNull();
+    expect(res.body.buildingFootprintFact.state).toBe("refused");
+    expect(res.body.buildingFootprintFact.code).toBe("atom-miss");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+    expect(res.body.buildingFootprintFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.buildingFootprintFact.structureRole).toBeUndefined();
+    expect(res.body.buildingFootprintFact.footprintId).toBeUndefined();
 
     // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
@@ -1482,6 +1524,202 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.wellFact.boundAs).toBe(leadPadded);
     expect(res.body.wellFact.apiNumber14).toBe("42000001030000");
     expect(res.body.wellFact.source).toBe("well-fact");
+  });
+
+  it("Anderson 48001:10136 fixture is present buildingFootprintFact from the atom body, not bake/GIS", async () => {
+    const parcel = "48001:10136";
+    const lead = "48001:10136.00000000:footprint:primary";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.75000",
+      lngRounded: "-95.63000",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48001",
+        countyName: "Anderson",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "10136",
+          structureRole: "GIS-MUST-NOT-LEAK",
+          FOOTPRINT: "GIS FOOTPRINT MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-fp-anderson",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([
+        {
+          entityId: lead,
+          body: {
+            entityType: "building-footprint",
+            atomDid: "bfoot_4800110136aaaaaaaa",
+            parcelNodeId: "48001:10136.00000000",
+            footprintId: "primary",
+            structureRole: "primary",
+            sourceTier: "ml-derived",
+            verificationStatus: "unsurveyed",
+            footprintGeometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-95.0, 31.0],
+                  [-95.0, 31.001],
+                  [-94.999, 31.001],
+                  [-94.999, 31.0],
+                  [-95.0, 31.0],
+                ],
+              ],
+            },
+            sourceAdapter: "ml-global-building-footprints-v1",
+            evaluatedAt: "2026-08-16T10:45:43.182Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("present");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+    expect(res.body.buildingFootprintFact.structureRole).toBe("primary");
+    expect(res.body.buildingFootprintFact.footprintId).toBe("primary");
+    expect(res.body.buildingFootprintFact.boundAs).toBe(lead);
+    expect(res.body.buildingFootprintFact.tried).toEqual([
+      parcel,
+      `${parcel}.00000000`,
+    ]);
+    expect(res.body.buildingFootprintFact.FOOTPRINT).toBeUndefined();
+    const wire = JSON.stringify(res.body.buildingFootprintFact);
+    expect(wire).not.toContain("GIS-MUST-NOT-LEAK");
+    expect(wire).not.toContain("GIS FOOTPRINT MUST NOT LEAK");
+  });
+
+  it("gold 48021:34137 empty building-footprint is atom-miss, not a fabricated absence", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          structureRole: "GIS-MUST-NOT-LEAK",
+        },
+      },
+      contentHash: "test-hash-fp-gold",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("refused");
+    expect(res.body.buildingFootprintFact.code).toBe("atom-miss");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+    expect(res.body.buildingFootprintFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+    expect(res.body.buildingFootprintFact.structureRole).toBeUndefined();
+    expect(res.body.buildingFootprintFact.absence).toBeUndefined();
+    expect(JSON.stringify(res.body.buildingFootprintFact)).not.toContain(
+      "GIS-MUST-NOT-LEAK",
+    );
+  });
+
+  it("padded-only building-footprint fixture binds on inbound integer id", async () => {
+    const parcel = "48001:10136";
+    const padded = `${parcel}.00000000`;
+    const leadPadded = `${padded}:footprint:primary`;
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.75000",
+      lngRounded: "-95.63000",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48001",
+        countyName: "Anderson",
+      },
+      contentHash: "test-hash-fp-padded",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([
+        {
+          entityId: leadPadded,
+          body: {
+            entityType: "building-footprint",
+            parcelNodeId: padded,
+            footprintId: "primary",
+            structureRole: "primary",
+            sourceTier: "ml-derived",
+            footprintGeometry: { type: "Polygon", coordinates: [] },
+            sourceAdapter: "ml-global-building-footprints-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("present");
+    expect(res.body.buildingFootprintFact.boundAs).toBe(leadPadded);
+    expect(res.body.buildingFootprintFact.structureRole).toBe("primary");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+  });
+
+  it("does not parse :primary as identity — body.structureRole=accessory is served", async () => {
+    const parcel = "48001:10136";
+    const lead = "48001:10136.00000000:footprint:primary";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.75000",
+      lngRounded: "-95.63000",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48001",
+        countyName: "Anderson",
+      },
+      contentHash: "test-hash-fp-role-body",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([
+        {
+          entityId: lead,
+          body: {
+            entityType: "building-footprint",
+            parcelNodeId: "48001:10136.00000000",
+            footprintId: "primary",
+            structureRole: "accessory",
+            sourceTier: "ml-derived",
+            footprintGeometry: { type: "Polygon", coordinates: [] },
+            sourceAdapter: "ml-global-building-footprints-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("present");
+    expect(res.body.buildingFootprintFact.structureRole).toBe("accessory");
+    expect(res.body.buildingFootprintFact.footprintId).toBe("primary");
+    expect(res.body.buildingFootprintFact.entityId).toBe(lead);
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {

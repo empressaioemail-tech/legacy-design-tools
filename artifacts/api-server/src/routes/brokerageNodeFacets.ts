@@ -59,6 +59,14 @@
  * special-district :sd: picker. Spatial attach is write-time 152 m
  * on-or-near. Never SELECT bake / place_layer_snapshots / CAD / GIS /
  * texas-rrc / tx_rrc_well for this field.
+ *
+ * BUILDING-FOOTPRINT ATOM IS A ROOT SIBLING (lane serve P-51, 2026-08-22).
+ * `buildingFootprintFact` is read from building-footprint atoms. Writer
+ * keys entity_id = `${parcelNodeId}:footprint:${footprintId}` on today's
+ * store. Dual grammar is prefix-range on both parcel prefixes.
+ * structureRole is body.structureRole — do not parse `:primary` as
+ * identity. Spatial attach is write-time staged overlap. Never SELECT
+ * bake / place_layer_snapshots / CAD / GIS / tx_building_footprint.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -73,6 +81,7 @@ import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactAtom } from "../lib/wellFactRead";
+import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -457,7 +466,7 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact] =
+    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
@@ -465,6 +474,7 @@ brokerageNodeFacetsRouter.get(
         loadSpecialDistrictFactAtom(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
         loadWellFactAtom(parcelNodeId),
+        loadBuildingFootprintFactAtom(parcelNodeId),
       ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -512,6 +522,11 @@ brokerageNodeFacetsRouter.get(
       // is the writer suffix. Spatial attach is write-time 152 m. Never
       // copied off bake / CAD / GIS / texas-rrc / tx_rrc_well.
       wellFact,
+      // building-footprint atom. Dual grammar on the parcel PREFIX only.
+      // structureRole is body.structureRole, never the :primary token.
+      // Spatial attach is write-time staged overlap. Never copied off
+      // bake / CAD / GIS / tx_building_footprint.
+      buildingFootprintFact,
     });
   },
 );
