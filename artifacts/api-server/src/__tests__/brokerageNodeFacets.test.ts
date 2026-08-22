@@ -54,6 +54,11 @@ import {
   resetSpecialDistrictFactAtomQueryableForTests,
   setSpecialDistrictFactAtomQueryableForTests,
 } from "../lib/specialDistrictFactRead";
+import {
+  memoryPipelineFactAtoms,
+  resetPipelineFactAtomQueryableForTests,
+  setPipelineFactAtomQueryableForTests,
+} from "../lib/pipelineFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -428,6 +433,24 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
       /specialDistrictFact\s*=\s*.*place_layer_snapshots/,
     );
   });
+
+  it("the route source wires pipelineFact from atoms and does not read bake/CAD/GIS", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/pipelineFactRead["']/);
+    expect(routeSrc).toMatch(/loadPipelineFactAtom/);
+    expect(routeSrc).toMatch(/pipelineFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_pipeline[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /pipelineFact\s*=\s*.*place_layer_snapshots/,
+    );
+    expect(routeSrc).not.toMatch(/pipelineFact\s*=\s*.*texas-rrc/);
+    expect(routeSrc).not.toMatch(/specialDistrictFactFromCortexRoot/);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -567,6 +590,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([]),
     );
+    setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -600,6 +624,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     resetFloodHazardAtomQueryableForTests();
     resetLandUseFactAtomQueryableForTests();
     resetSpecialDistrictFactAtomQueryableForTests();
+    resetPipelineFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -690,6 +715,19 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
     expect(res.body.specialDistrictFact.districtId).toBeUndefined();
     expect(res.body.specialDistrictFact.districtType).toBeUndefined();
+
+    // rrc-pipeline-fact miss is named. Snapshot / CAD / GIS must not fill it.
+    expect(res.body.pipelineFact).not.toBeNull();
+    expect(res.body.pipelineFact.state).toBe("refused");
+    expect(res.body.pipelineFact.code).toBe("atom-miss");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+    expect(res.body.pipelineFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.pipelineFact.t4permit).toBeUndefined();
+    expect(res.body.pipelineFact.operatorName).toBeUndefined();
+    expect(res.body.pipelineFact.nearPipeline).toBeUndefined();
 
     // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
@@ -1110,6 +1148,161 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       `${parcelPadded}:sd:3504125`,
     );
     expect(res.body.specialDistrictFact.districtName).toBe("The Colony MUD 1C");
+  });
+
+  it("serves a fixture rrc-pipeline-fact nearby hit and does not copy GIS/bake fields", async () => {
+    const near = "48021:10048";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(near),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: near,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "10048",
+          P5_NUM: "GIS-MUST-NOT-LEAK",
+          OPER_NM: "GIS OPERATOR MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-pipeline-near",
+    });
+    setPipelineFactAtomQueryableForTests(
+      memoryPipelineFactAtoms([
+        {
+          entityId: near,
+          body: {
+            entityType: "rrc-pipeline-fact",
+            atomDid: "pipefact_4802110048aaaaaa",
+            parcelNodeId: near,
+            sourceTier: "rrc-public-gis",
+            nearPipeline: true,
+            bufferMeters: 152.4,
+            nearestPipelineDistanceMeters: 87.9,
+            t4permit: "05781",
+            p5Num: "252017",
+            operatorName: "ENERGY TRANSFER COMPANY",
+            systemName: "PRAIRIE LEA",
+            commodity: "NATURAL GAS",
+            sourceAdapter: "tx-rrc-pipeline-staged-v1",
+            evaluatedAt: "2026-08-12T14:20:00.000Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(near)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.pipelineFact.state).toBe("present");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+    expect(res.body.pipelineFact.nearPipeline).toBe(true);
+    expect(res.body.pipelineFact.t4permit).toBe("05781");
+    expect(res.body.pipelineFact.p5Num).toBe("252017");
+    expect(res.body.pipelineFact.operatorName).toBe("ENERGY TRANSFER COMPANY");
+    expect(res.body.pipelineFact.systemName).toBe("PRAIRIE LEA");
+    expect(res.body.pipelineFact.commodity).toBe("NATURAL GAS");
+    expect(res.body.pipelineFact.boundAs).toBe(near);
+    expect(res.body.pipelineFact.tried).toEqual([near, `${near}.00000000`]);
+    expect(res.body.pipelineFact.P5_NUM).toBeUndefined();
+    expect(res.body.pipelineFact.OPER_NM).toBeUndefined();
+    const wire = JSON.stringify(res.body.pipelineFact);
+    expect(wire).not.toContain("GIS-MUST-NOT-LEAK");
+    expect(wire).not.toContain("GIS OPERATOR MUST NOT LEAK");
+  });
+
+  it("gold 48021:34137 outside-buffer fixture is present, not a fabricated nearby pipeline", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-pipeline-gold",
+    });
+    setPipelineFactAtomQueryableForTests(
+      memoryPipelineFactAtoms([
+        {
+          entityId: gold,
+          body: {
+            entityType: "rrc-pipeline-fact",
+            atomDid: "pipefact_4802134137aaaaaa",
+            parcelNodeId: gold,
+            sourceTier: "rrc-public-gis",
+            nearPipeline: false,
+            bufferMeters: 152.4,
+            sourceAdapter: "tx-rrc-pipeline-staged-v1",
+            evaluatedAt: "2026-08-12T14:20:00.000Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.pipelineFact.state).toBe("present");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+    expect(res.body.pipelineFact.nearPipeline).toBe(false);
+    expect(res.body.pipelineFact.t4permit).toBeNull();
+    expect(res.body.pipelineFact.operatorName).toBeNull();
+    expect(res.body.pipelineFact.entityId).toBe(gold);
+    expect(res.body.pipelineFact.tried).toEqual([gold, `${gold}.00000000`]);
+  });
+
+  it("padded-only rrc-pipeline-fact fixture binds on inbound integer id", async () => {
+    const near = "48021:10048";
+    const nearPadded = `${near}.00000000`;
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(near),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: near,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-pipeline-padded",
+    });
+    setPipelineFactAtomQueryableForTests(
+      memoryPipelineFactAtoms([
+        {
+          entityId: nearPadded,
+          body: {
+            entityType: "rrc-pipeline-fact",
+            atomDid: "pipefact_4802110048padded",
+            parcelNodeId: nearPadded,
+            sourceTier: "rrc-public-gis",
+            nearPipeline: true,
+            bufferMeters: 152.4,
+            nearestPipelineDistanceMeters: 87.9,
+            t4permit: "05781",
+            operatorName: "ENERGY TRANSFER COMPANY",
+            sourceAdapter: "tx-rrc-pipeline-staged-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(near)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.pipelineFact.state).toBe("present");
+    expect(res.body.pipelineFact.boundAs).toBe(nearPadded);
+    expect(res.body.pipelineFact.t4permit).toBe("05781");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
