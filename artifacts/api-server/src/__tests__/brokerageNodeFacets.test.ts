@@ -69,6 +69,11 @@ import {
   resetBuildingFootprintFactAtomQueryableForTests,
   setBuildingFootprintFactAtomQueryableForTests,
 } from "../lib/buildingFootprintFactRead";
+import {
+  memoryBoundaryEdgeFactAtoms,
+  resetBoundaryEdgeFactAtomQueryableForTests,
+  setBoundaryEdgeFactAtomQueryableForTests,
+} from "../lib/boundaryEdgeFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -498,6 +503,25 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
       /buildingFootprintFact\s*=\s*.*split_part/,
     );
   });
+
+  it("the route source wires boundaryEdgeFact from atoms and does not read bake/CAD/GIS/txgio_parcel", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/boundaryEdgeFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadBoundaryEdgeFactAtom/);
+    expect(routeSrc).toMatch(/boundaryEdgeFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*txgio_parcel[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /boundaryEdgeFact\s*=\s*.*place_layer_snapshots/,
+    );
+    expect(routeSrc).not.toMatch(/boundaryEdgeFact\s*=\s*.*txgio_parcel/);
+    expect(routeSrc).not.toMatch(/boundaryEdgeFact\s*=\s*.*entity_id = ANY/);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -642,6 +666,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     setBuildingFootprintFactAtomQueryableForTests(
       memoryBuildingFootprintFactAtoms([]),
     );
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -678,6 +703,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     resetPipelineFactAtomQueryableForTests();
     resetWellFactAtomQueryableForTests();
     resetBuildingFootprintFactAtomQueryableForTests();
+    resetBoundaryEdgeFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -806,6 +832,18 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
     expect(res.body.buildingFootprintFact.structureRole).toBeUndefined();
     expect(res.body.buildingFootprintFact.footprintId).toBeUndefined();
+
+    // property-boundary-edge miss is named. Snapshot / CAD / GIS / txgio_parcel must not fill it.
+    expect(res.body.boundaryEdgeFact).not.toBeNull();
+    expect(res.body.boundaryEdgeFact.state).toBe("refused");
+    expect(res.body.boundaryEdgeFact.code).toBe("atom-miss");
+    expect(res.body.boundaryEdgeFact.source).toBe("property-boundary-edge");
+    expect(res.body.boundaryEdgeFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.boundaryEdgeFact.edgeIndex).toBeUndefined();
+    expect(res.body.boundaryEdgeFact.interior).toBeUndefined();
 
     // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
@@ -1720,6 +1758,127 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.buildingFootprintFact.structureRole).toBe("accessory");
     expect(res.body.buildingFootprintFact.footprintId).toBe("primary");
     expect(res.body.buildingFootprintFact.entityId).toBe(lead);
+  });
+
+  it("gold 48021:34137 fixture is present boundaryEdgeFact from the atom body, not GIS/txgio_parcel", async () => {
+    const gold = "48021:34137";
+    const localEnu: [[number, number], [number, number]] = [
+      [0, 0],
+      [30.18, 0],
+    ];
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          parcelRing: "GIS-OUTLINE-MUST-NOT-LEAK",
+          txgio_parcel: "TXGIO RING MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-edge-gold",
+    });
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:0",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 0,
+            role: "rear",
+            adjacencyKind: "alley",
+            interior: { edgeEndpoints: localEnu },
+            sourceAdapter: "descriptor-fixture",
+          },
+        },
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            frontBasis: "situs-street-match",
+            facingRoad: {
+              roadNodeId: "48021:road:15113284",
+              classification: "residential",
+            },
+            interior: { edgeEndpoints: localEnu },
+            sourceAdapter: "descriptor-fixture",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.boundaryEdgeFact.state).toBe("present");
+    expect(res.body.boundaryEdgeFact.source).toBe("property-boundary-edge");
+    expect(res.body.boundaryEdgeFact.entityId).toBe("48021:34137:boundary:2");
+    expect(res.body.boundaryEdgeFact.role).toBe("front");
+    expect(res.body.boundaryEdgeFact.edgeIndex).toBe(2);
+    expect(res.body.boundaryEdgeFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+    expect(res.body.boundaryEdgeFact.edges).toHaveLength(2);
+    expect(res.body.boundaryEdgeFact.txgio_parcel).toBeUndefined();
+    expect(res.body.boundaryEdgeFact.parcelRing).toBeUndefined();
+    const wire = JSON.stringify(res.body.boundaryEdgeFact);
+    expect(wire).not.toContain("GIS-OUTLINE-MUST-NOT-LEAK");
+    expect(wire).not.toContain("TXGIO RING MUST NOT LEAK");
+  });
+
+  it("gold 48021:34137 empty boundary-edge atoms is atom-miss, not a copied GIS outline", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          parcelRing: "GIS-OUTLINE-MUST-NOT-LEAK",
+          txgio_parcel: "TXGIO RING MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-edge-gold-miss",
+    });
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.boundaryEdgeFact.state).toBe("refused");
+    expect(res.body.boundaryEdgeFact.code).toBe("atom-miss");
+    expect(res.body.boundaryEdgeFact.source).toBe("property-boundary-edge");
+    expect(res.body.boundaryEdgeFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+    expect(res.body.boundaryEdgeFact.interior).toBeUndefined();
+    expect(res.body.boundaryEdgeFact.edges).toBeUndefined();
+    expect(JSON.stringify(res.body.boundaryEdgeFact)).not.toContain(
+      "GIS-OUTLINE-MUST-NOT-LEAK",
+    );
+    expect(JSON.stringify(res.body.boundaryEdgeFact)).not.toContain(
+      "TXGIO RING MUST NOT LEAK",
+    );
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
