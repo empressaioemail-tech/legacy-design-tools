@@ -44,6 +44,13 @@
  * grammar on the parcel PREFIX only; districtId is the writer `:sd:`
  * suffix. mud is a districtType on that family, not a second atom.
  * Never SELECT bake / place_layer_snapshots / CAD / mud-pid for this field.
+ *
+ * PIPELINE ATOM IS A ROOT SIBLING (lane serve P-49, 2026-08-22).
+ * `pipelineFact` is read from rrc-pipeline-fact atoms. Writer keys by
+ * bare parcelNodeId; dual grammar is ANY(parcel keys). Spatial attach is
+ * write-time buffer-intersect, not a live texas-rrc / tx_rrc_pipeline
+ * query and not a special-district :sd: picker. Never SELECT bake /
+ * place_layer_snapshots / CAD / GIS for this field.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -56,6 +63,7 @@ import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -440,12 +448,13 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact] =
+    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
         loadSpecialDistrictFactAtom(parcelNodeId),
+        loadPipelineFactAtom(parcelNodeId),
       ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -485,6 +494,10 @@ brokerageNodeFacetsRouter.get(
       // districtId comes from the writer `:sd:` suffix. Never copied off
       // bake / CAD / mud-pid. mud is a districtType, not a second family.
       specialDistrictFact,
+      // rrc-pipeline-fact atom. Dual grammar on the parcel keys (writer
+      // stores bare parcelNodeId). Spatial attach is write-time, not a
+      // live texas-rrc overlay. Never copied off bake / CAD / GIS.
+      pipelineFact,
     });
   },
 );
