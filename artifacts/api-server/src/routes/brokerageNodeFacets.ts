@@ -67,6 +67,14 @@
  * structureRole is body.structureRole — do not parse `:primary` as
  * identity. Spatial attach is write-time staged overlap. Never SELECT
  * bake / place_layer_snapshots / CAD / GIS / tx_building_footprint.
+ *
+ * BOUNDARY-EDGE ATOM IS A ROOT SIBLING (lane serve P-53, 2026-08-22).
+ * `boundaryEdgeFact` is read from property-boundary-edge atoms. Writer
+ * keys entity_id = `${countyFips}:${propId}:boundary:${edgeIndex}`. Dual
+ * grammar is prefix-range on both parcel prefixes for `:boundary:`
+ * suffixes. Geometry is the atom body, never GIS parcel outline /
+ * txgio_parcel / bake ring. Never SELECT bake / place_layer_snapshots /
+ * CAD / GIS / txgio_parcel for this field.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -82,6 +90,7 @@ import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactAtom } from "../lib/wellFactRead";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
+import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -466,7 +475,7 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact] =
+    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
@@ -475,6 +484,7 @@ brokerageNodeFacetsRouter.get(
         loadPipelineFactAtom(parcelNodeId),
         loadWellFactAtom(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
+        loadBoundaryEdgeFactAtom(parcelNodeId),
       ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -527,6 +537,10 @@ brokerageNodeFacetsRouter.get(
       // Spatial attach is write-time staged overlap. Never copied off
       // bake / CAD / GIS / tx_building_footprint.
       buildingFootprintFact,
+      // property-boundary-edge atom. Dual grammar on the parcel PREFIX
+      // only for :boundary: suffixes. Geometry is the atom body, never
+      // GIS parcel outline / txgio_parcel / bake ring.
+      boundaryEdgeFact,
     });
   },
 );
