@@ -257,7 +257,7 @@ describe("loadPipelineFactAtom — store seam", () => {
   it("the memory fake refuses a cad_property query", async () => {
     const fake = memoryPipelineFactAtoms([]);
     await expect(
-      fake.query("SELECT * FROM cad_property WHERE parcel_id = $1", ["48021:10048"]),
+      fake.query("SELECT * from cad_property WHERE parcel_id = $1", ["48021:10048"]),
     ).rejects.toThrow(/cad_property/);
   });
 
