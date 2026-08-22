@@ -19,6 +19,11 @@ import { describe, it, expect } from "vitest";
 import {
   scoreGeometry,
   countyFipsFromAtomRow,
+  geometryNumeratorQualifies,
+  countGeometryNumerator,
+  assertGeometryNumeratorExcludesRetired,
+  GEOMETRY_ATOM_COUNT_SQL_ONE_COUNTY,
+  ECTOR_GEOMETRY_FIPS,
 } from "./countyGeometryScoreCli";
 
 describe("scoreGeometry", () => {
@@ -249,5 +254,120 @@ describe("countyFipsFromAtomRow", () => {
         body: {},
       }),
     ).toBeNull();
+  });
+});
+
+describe("P-56 48135 numerator excludes retired prop_id", () => {
+  const active = {
+    entity_id: "48135:00050-00401-00100",
+    status: "active",
+    keyKind: "geo_id_crosswalk",
+  };
+  const retired = {
+    entity_id: "48135:1004.00000000",
+    status: "retired",
+    keyKind: "prop_id",
+  };
+
+  it("SQL for one-county count excludes retired and requires geo_id on 48135", () => {
+    expect(GEOMETRY_ATOM_COUNT_SQL_ONE_COUNTY).toContain(
+      "COALESCE(body->>'status', 'active') = 'active'",
+    );
+    expect(GEOMETRY_ATOM_COUNT_SQL_ONE_COUNTY).toContain("$1 <> '48135'");
+    expect(GEOMETRY_ATOM_COUNT_SQL_ONE_COUNTY).toContain(
+      "IN ('geo_id', 'geo_id_crosswalk')",
+    );
+  });
+
+  it("retired prop_id does not qualify on 48135; active geo_id does", () => {
+    expect(geometryNumeratorQualifies(retired, ECTOR_GEOMETRY_FIPS)).toBe(false);
+    expect(geometryNumeratorQualifies(active, ECTOR_GEOMETRY_FIPS)).toBe(true);
+    expect(
+      geometryNumeratorQualifies(
+        { entity_id: "48135:x", status: "active", keyKind: "prop_id" },
+        ECTOR_GEOMETRY_FIPS,
+      ),
+    ).toBe(false);
+  });
+
+  it("assert throws when the counted set includes retired ids", () => {
+    expect(() =>
+      assertGeometryNumeratorExcludesRetired([active, retired]),
+    ).toThrow(/retired/);
+    expect(() => assertGeometryNumeratorExcludesRetired([active])).not.toThrow();
+  });
+
+  it("fixture with retired ids cannot score satisfied-present by clamp (fill-to-100)", () => {
+    const fixture = [
+      ...Array.from({ length: 90 }, (_, i) => ({
+        entity_id: `48135:active-${i}`,
+        status: "active",
+        keyKind: "geo_id_crosswalk",
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        entity_id: `48135:${i}.00000000`,
+        status: "retired",
+        keyKind: "prop_id",
+      })),
+    ];
+    expect(() => assertGeometryNumeratorExcludesRetired(fixture)).toThrow(
+      /retired/,
+    );
+    const naive = fixture.length;
+    const honest = countGeometryNumerator(fixture, ECTOR_GEOMETRY_FIPS);
+    expect(naive).toBe(100);
+    expect(honest).toBe(90);
+    const oldPath = scoreGeometry({
+      fips: ECTOR_GEOMETRY_FIPS,
+      name: "Ector",
+      atomCount: naive,
+      featureCount: 100,
+    });
+    const newPath = scoreGeometry({
+      fips: ECTOR_GEOMETRY_FIPS,
+      name: "Ector",
+      atomCount: honest,
+      featureCount: 100,
+    });
+    expect(oldPath.facet.honestCoveragePct).toBe(100);
+    expect(oldPath.railState).toBe("satisfied-present");
+    expect(newPath.facet.honestCoveragePct).toBe(90);
+    expect(newPath.railState).toBe("not-yet");
+    expect(newPath.railState).not.toBe("satisfied-present");
+  });
+
+  it("stock 48135 overcount 79650/75891 is not-yet, never clamped satisfied-present", () => {
+    const over = scoreGeometry({
+      fips: ECTOR_GEOMETRY_FIPS,
+      name: "Ector",
+      atomCount: 79650,
+      featureCount: 75891,
+    });
+    expect(over.facet.honestCoveragePct).toBeCloseTo(104.9531565, 5);
+    expect(over.railState).toBe("not-yet");
+    expect(over.facet.honestCoveragePct).toBeGreaterThan(100);
+
+    const honest = scoreGeometry({
+      fips: ECTOR_GEOMETRY_FIPS,
+      name: "Ector",
+      atomCount: 75859,
+      featureCount: 75891,
+    });
+    expect(honest.facet.honestCoveragePct).toBeCloseTo((75859 / 75891) * 100, 5);
+    expect(honest.facet.honestCoveragePct).toBeLessThan(100);
+    expect(honest.railState).toBe("satisfied-present");
+    expect(honest.artifactPath).toContain("numerator=active-geo_id");
+  });
+
+  it("other counties still count active prop_id rows", () => {
+    const row = {
+      entity_id: "48021:34137",
+      status: "active",
+      keyKind: "prop_id",
+    };
+    expect(geometryNumeratorQualifies(row, "48021")).toBe(true);
+    expect(
+      geometryNumeratorQualifies({ ...row, status: "retired" }, "48021"),
+    ).toBe(false);
   });
 });
