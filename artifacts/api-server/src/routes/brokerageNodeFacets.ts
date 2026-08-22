@@ -51,6 +51,14 @@
  * write-time buffer-intersect, not a live texas-rrc / tx_rrc_pipeline
  * query and not a special-district :sd: picker. Never SELECT bake /
  * place_layer_snapshots / CAD / GIS for this field.
+ *
+ * WELL ATOM IS A ROOT SIBLING (lane serve P-50, 2026-08-22).
+ * `wellFact` is read from well-fact atoms. Writer keys
+ * entity_id = `${parcelNodeId}:${wellKey}`; dual grammar is prefix-range
+ * on both parcel prefixes, not pipeline ANY(bare parcel) and not the
+ * special-district :sd: picker. Spatial attach is write-time 152 m
+ * on-or-near. Never SELECT bake / place_layer_snapshots / CAD / GIS /
+ * texas-rrc / tx_rrc_well for this field.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -64,6 +72,7 @@ import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
+import { loadWellFactAtom } from "../lib/wellFactRead";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -448,13 +457,14 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact] =
+    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
         loadSpecialDistrictFactAtom(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
+        loadWellFactAtom(parcelNodeId),
       ]);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -498,6 +508,10 @@ brokerageNodeFacetsRouter.get(
       // stores bare parcelNodeId). Spatial attach is write-time, not a
       // live texas-rrc overlay. Never copied off bake / CAD / GIS.
       pipelineFact,
+      // well-fact atom. Dual grammar on the parcel PREFIX only; wellKey
+      // is the writer suffix. Spatial attach is write-time 152 m. Never
+      // copied off bake / CAD / GIS / texas-rrc / tx_rrc_well.
+      wellFact,
     });
   },
 );
