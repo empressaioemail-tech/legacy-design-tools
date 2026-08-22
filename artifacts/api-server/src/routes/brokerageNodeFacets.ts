@@ -75,6 +75,19 @@
  * suffixes. Geometry is the atom body, never GIS parcel outline /
  * txgio_parcel / bake ring. Never SELECT bake / place_layer_snapshots /
  * CAD / GIS / txgio_parcel for this field.
+ *
+ * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22).
+ * `ownerFact` is read from owner-fact atoms. Writer keys
+ * entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year family as
+ * land-use-fact). Dual grammar is LIKE prefix:% on both parcel prefixes;
+ * taxYear is the writer suffix. S7 is identified-session only. Anonymous
+ * GET returns a typed refusal with no ownerName and no mailing, and does
+ * not query atoms. Identified uses the existing brokerage session
+ * signal (`authenticatedBrokerageUserId` after `verifySessionToken` on
+ * a dotted Bearer). Operator / extension API keys are not a session.
+ * Never SELECT cad-parcel-roll / bake / cad_property / GIS
+ * ParcelCardData.owner for this field. Do not run sanitizeNodeFacetPayload
+ * on identified ownerFact (it would strip ownerName).
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -91,6 +104,15 @@ import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactAtom } from "../lib/wellFactRead";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
+import {
+  anonymousOwnerFactRefusal,
+  loadOwnerFactAtom,
+} from "../lib/ownerFactRead";
+import {
+  authenticatedBrokerageUserId,
+  extractBrokerageApiKey,
+} from "../middlewares/brokerageAuth";
+import { verifySessionToken } from "../lib/sessionToken";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -107,6 +129,33 @@ const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function isValidParcelNodeId(raw: string): boolean {
   return PARCEL_NODE_ID_RE.test(raw);
+}
+
+/**
+ * Reuse the existing brokerage identified-session signal without remounting
+ * this public route behind 401. Operator / extension keys stay anonymous
+ * for ownerFact (`authenticatedBrokerageUserId` requires tier `user`).
+ */
+function applyExistingIdentifiedBrokerageSession(req: Request): void {
+  if (authenticatedBrokerageUserId(req) != null) return;
+  const provided = extractBrokerageApiKey(req);
+  if (!provided?.includes(".")) return;
+  if (!process.env.SESSION_SECRET?.trim()) return;
+  let verified: ReturnType<typeof verifySessionToken>;
+  try {
+    verified = verifySessionToken(provided);
+  } catch {
+    return;
+  }
+  if (verified.ok && verified.session.requestor?.kind === "user") {
+    req.session = verified.session;
+    req.brokerageAuth = { tier: "user" };
+  }
+}
+
+export function isIdentifiedOwnerFactCaller(req: Request): boolean {
+  applyExistingIdentifiedBrokerageSession(req);
+  return authenticatedBrokerageUserId(req) != null;
 }
 
 /**
@@ -475,7 +524,8 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact] =
+    const identifiedOwnerCaller = isIdentifiedOwnerFactCaller(req);
+    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact, ownerFactLoaded] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
@@ -485,7 +535,12 @@ brokerageNodeFacetsRouter.get(
         loadWellFactAtom(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
         loadBoundaryEdgeFactAtom(parcelNodeId),
+        identifiedOwnerCaller
+          ? loadOwnerFactAtom(parcelNodeId)
+          : Promise.resolve(null),
       ]);
+    const ownerFact =
+      ownerFactLoaded ?? anonymousOwnerFactRefusal(parcelNodeId);
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
@@ -541,6 +596,11 @@ brokerageNodeFacetsRouter.get(
       // only for :boundary: suffixes. Geometry is the atom body, never
       // GIS parcel outline / txgio_parcel / bake ring.
       boundaryEdgeFact,
+      // owner-fact atom. Dual grammar on the parcel PREFIX only; taxYear
+      // is the writer suffix. Identified session only. Anonymous is a
+      // typed refusal with no ownerName / mailing and no atoms SELECT.
+      // Never copied off cad-parcel-roll / bake / cad_property / GIS.
+      ownerFact,
     });
   },
 );
