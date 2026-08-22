@@ -74,6 +74,13 @@ import {
   resetBoundaryEdgeFactAtomQueryableForTests,
   setBoundaryEdgeFactAtomQueryableForTests,
 } from "../lib/boundaryEdgeFactRead";
+import {
+  memoryOwnerFactAtoms,
+  resetOwnerFactAtomQueryableForTests,
+  setOwnerFactAtomQueryableForTests,
+} from "../lib/ownerFactRead";
+import { mintSessionToken } from "../lib/sessionToken";
+import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -522,6 +529,24 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/boundaryEdgeFact\s*=\s*.*txgio_parcel/);
     expect(routeSrc).not.toMatch(/boundaryEdgeFact\s*=\s*.*entity_id = ANY/);
   });
+
+  it("the route source wires ownerFact from atoms and does not read bake/CAD/GIS", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/ownerFactRead["']/);
+    expect(routeSrc).toMatch(/loadOwnerFactAtom/);
+    expect(routeSrc).toMatch(/ownerFact/);
+    expect(routeSrc).toMatch(/authenticatedBrokerageUserId/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad-parcel-roll[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*place_layer_snapshots/);
+    expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*cad-parcel-roll/);
+    expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*ParcelCardData/);
+    expect(routeSrc).not.toMatch(/Clerk/);
+    expect(routeSrc).not.toMatch(/stripe/i);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -667,6 +692,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       memoryBuildingFootprintFactAtoms([]),
     );
     setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    setOwnerFactAtomQueryableForTests(memoryOwnerFactAtoms([]));
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -704,6 +730,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     resetWellFactAtomQueryableForTests();
     resetBuildingFootprintFactAtomQueryableForTests();
     resetBoundaryEdgeFactAtomQueryableForTests();
+    resetOwnerFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -724,10 +751,17 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.facets.baseFacts.acreage.value).toBeCloseTo(0.2388);
     expect(res.body.facets.facetCoverage.landUse).toBe(true);
 
-    // OWNER LEAK GUARD — no owner key anywhere, no owner value anywhere.
+    // OWNER LEAK GUARD — baked owner keys stay stripped. Anonymous
+    // ownerFact is a typed refusal with no ownerName / mailing. The
+    // field name itself is allowed; PII is not.
     expect(payloadHasOwnerKey(res.body.facets)).toBe(false);
-    expect(JSON.stringify(res.body)).not.toMatch(/owner/i);
+    expect(JSON.stringify(res.body.facets)).not.toMatch(/SHOULD NOT LEAK/);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("identified-session-required");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
   });
 
   it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {
@@ -1920,5 +1954,148 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       "/api/brokerage/v1/place/node/not-a-node/facets",
     );
     expect(res.status).toBe(400);
+  });
+
+  it("anonymous GET with a gold owner-fact fixture still has no ownerName or mailing", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          owner_name: "CAD ROLL MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-owner-anon",
+    });
+    setOwnerFactAtomQueryableForTests(
+      memoryOwnerFactAtoms([
+        {
+          entityId: "48021:34137:2025",
+          body: {
+            entityType: "owner-fact",
+            parcelNodeId: gold,
+            taxYear: 2025,
+            ownerName: "FIXTURE OWNER",
+            ownerMailingAddress: "1 FIXTURE RD, BASTROP, TX 78602",
+            sourceAdapter: "cad-property-owner-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("identified-session-required");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("CAD ROLL MUST NOT LEAK");
+    expect(JSON.stringify(res.body.facets)).not.toContain("CAD ROLL MUST NOT LEAK");
+  });
+
+  it("identified GET serves gold 48021:34137:2025 from owner-fact, not CAD-roll", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          owner_name: "CAD ROLL MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-owner-ident",
+    });
+    setOwnerFactAtomQueryableForTests(
+      memoryOwnerFactAtoms([
+        {
+          entityId: "48021:34137:2025",
+          body: {
+            entityType: "owner-fact",
+            parcelNodeId: gold,
+            taxYear: 2025,
+            ownerName: "FIXTURE OWNER",
+            ownerMailingAddress: "1 FIXTURE RD, BASTROP, TX 78602",
+            sourceAdapter: "cad-property-owner-v1",
+          },
+        },
+      ]),
+    );
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: "user_owner_fact_p54" },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("present");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.entityId).toBe("48021:34137:2025");
+    expect(res.body.ownerFact.taxYear).toBe(2025);
+    expect(res.body.ownerFact.ownerName).toBe("FIXTURE OWNER");
+    expect(res.body.ownerFact.tried).toEqual([gold, `${gold}.00000000`]);
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain(
+      "CAD ROLL MUST NOT LEAK",
+    );
+  });
+
+  it("identified GET with empty owner-fact atoms is atom-miss, not a copied CAD-roll owner", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          owner_name: "CAD ROLL MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-owner-ident-miss",
+    });
+    setOwnerFactAtomQueryableForTests(memoryOwnerFactAtoms([]));
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: "user_owner_fact_p54" },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("atom-miss");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain(
+      "CAD ROLL MUST NOT LEAK",
+    );
   });
 });
