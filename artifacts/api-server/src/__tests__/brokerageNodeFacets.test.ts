@@ -59,6 +59,11 @@ import {
   resetPipelineFactAtomQueryableForTests,
   setPipelineFactAtomQueryableForTests,
 } from "../lib/pipelineFactRead";
+import {
+  memoryWellFactAtoms,
+  resetWellFactAtomQueryableForTests,
+  setWellFactAtomQueryableForTests,
+} from "../lib/wellFactRead";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -451,6 +456,22 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/pipelineFact\s*=\s*.*texas-rrc/);
     expect(routeSrc).not.toMatch(/specialDistrictFactFromCortexRoot/);
   });
+
+  it("the route source wires wellFact from atoms and does not read bake/CAD/GIS/texas-rrc", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/wellFactRead["']/);
+    expect(routeSrc).toMatch(/loadWellFactAtom/);
+    expect(routeSrc).toMatch(/wellFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_well[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*place_layer_snapshots/);
+    expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*texas-rrc/);
+    expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*tx_rrc_well/);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -591,6 +612,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       memorySpecialDistrictFactAtoms([]),
     );
     setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -625,6 +647,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     resetLandUseFactAtomQueryableForTests();
     resetSpecialDistrictFactAtomQueryableForTests();
     resetPipelineFactAtomQueryableForTests();
+    resetWellFactAtomQueryableForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -728,6 +751,19 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.pipelineFact.t4permit).toBeUndefined();
     expect(res.body.pipelineFact.operatorName).toBeUndefined();
     expect(res.body.pipelineFact.nearPipeline).toBeUndefined();
+
+    // well-fact miss is named. Snapshot / CAD / GIS / texas-rrc must not fill it.
+    expect(res.body.wellFact).not.toBeNull();
+    expect(res.body.wellFact.state).toBe("refused");
+    expect(res.body.wellFact.code).toBe("atom-miss");
+    expect(res.body.wellFact.source).toBe("well-fact");
+    expect(res.body.wellFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.wellFact.apiNumber14).toBeUndefined();
+    expect(res.body.wellFact.wellKey).toBeUndefined();
+    expect(res.body.wellFact.parcelRelation).toBeUndefined();
 
     // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
@@ -1303,6 +1339,149 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.pipelineFact.boundAs).toBe(nearPadded);
     expect(res.body.pipelineFact.t4permit).toBe("05781");
     expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+  });
+
+  it("Crane 48103:100 fixture is present wellFact from well-fact, not bake/GIS", async () => {
+    const crane = "48103:100";
+    const lead = "48103:100:42000001030000";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(crane),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.48000",
+      lngRounded: "-102.75900",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: crane,
+        countyFips: "48103",
+        countyName: "Crane",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "100",
+          API: "GIS-MUST-NOT-LEAK",
+          OPER_NM: "GIS OPERATOR MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-well-crane",
+    });
+    setWellFactAtomQueryableForTests(
+      memoryWellFactAtoms([
+        {
+          entityId: lead,
+          body: {
+            entityType: "well-fact",
+            atomDid: "wlfact_48103100aaaaaaaa",
+            parcelNodeId: crane,
+            wellKey: "42000001030000",
+            apiNumber14: "42000001030000",
+            wellStatus: "dry",
+            wellType: "unknown",
+            orphaned: false,
+            parcelRelation: "on-parcel",
+            proximityRadiusMeters: 152,
+            sourceAdapter: "tx-rrc-well-staged-v1",
+            evaluatedAt: "2026-08-16T09:57:36.576Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(crane)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.wellFact.state).toBe("present");
+    expect(res.body.wellFact.source).toBe("well-fact");
+    expect(res.body.wellFact.parcelRelation).toBe("on-parcel");
+    expect(res.body.wellFact.apiNumber14).toBe("42000001030000");
+    expect(res.body.wellFact.wellKey).toBe("42000001030000");
+    expect(res.body.wellFact.wellStatus).toBe("dry");
+    expect(res.body.wellFact.operatorName).toBeNull();
+    expect(res.body.wellFact.boundAs).toBe(lead);
+    expect(res.body.wellFact.tried).toEqual([crane, `${crane}.00000000`]);
+    expect(res.body.wellFact.API).toBeUndefined();
+    expect(res.body.wellFact.OPER_NM).toBeUndefined();
+    const wire = JSON.stringify(res.body.wellFact);
+    expect(wire).not.toContain("GIS-MUST-NOT-LEAK");
+    expect(wire).not.toContain("GIS OPERATOR MUST NOT LEAK");
+    expect(wire).not.toContain("t4permit");
+  });
+
+  it("gold 48021:34137 empty well-fact is atom-miss, not a fabricated :none", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          API: "GIS-MUST-NOT-LEAK",
+        },
+      },
+      contentHash: "test-hash-well-gold",
+    });
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.wellFact.state).toBe("refused");
+    expect(res.body.wellFact.code).toBe("atom-miss");
+    expect(res.body.wellFact.source).toBe("well-fact");
+    expect(res.body.wellFact.tried).toEqual([gold, `${gold}.00000000`]);
+    expect(res.body.wellFact.apiNumber14).toBeUndefined();
+    expect(res.body.wellFact.absence).toBeUndefined();
+    expect(JSON.stringify(res.body.wellFact)).not.toContain("GIS-MUST-NOT-LEAK");
+  });
+
+  it("padded-only well-fact fixture binds on inbound integer id", async () => {
+    const crane = "48103:100";
+    const cranePadded = `${crane}.00000000`;
+    const leadPadded = `${cranePadded}:42000001030000`;
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(crane),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.48000",
+      lngRounded: "-102.75900",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: crane,
+        countyFips: "48103",
+        countyName: "Crane",
+      },
+      contentHash: "test-hash-well-padded",
+    });
+    setWellFactAtomQueryableForTests(
+      memoryWellFactAtoms([
+        {
+          entityId: leadPadded,
+          body: {
+            entityType: "well-fact",
+            parcelNodeId: cranePadded,
+            wellKey: "42000001030000",
+            apiNumber14: "42000001030000",
+            wellStatus: "dry",
+            wellType: "unknown",
+            orphaned: false,
+            parcelRelation: "on-parcel",
+            proximityRadiusMeters: 152,
+            sourceAdapter: "tx-rrc-well-staged-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(crane)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.wellFact.state).toBe("present");
+    expect(res.body.wellFact.boundAs).toBe(leadPadded);
+    expect(res.body.wellFact.apiNumber14).toBe("42000001030000");
+    expect(res.body.wellFact.source).toBe("well-fact");
   });
 
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
