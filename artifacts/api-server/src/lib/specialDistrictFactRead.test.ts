@@ -131,6 +131,18 @@ describe("districtSuffixFromSpecialDistrictEntityId", () => {
       districtSuffixFromSpecialDistrictEntityId(GOLD_PADDED, prefixes),
     ).toBeNull();
   });
+
+  it("parses IDENT new-write absence :sd:none", () => {
+    expect(
+      districtSuffixFromSpecialDistrictEntityId(`${GOLD}:sd:none`, prefixes),
+    ).toEqual({ prefix: GOLD, districtId: "none" });
+  });
+
+  it("parses unpatched IDENT exact :sd as absence, not a miss", () => {
+    expect(
+      districtSuffixFromSpecialDistrictEntityId(`${GOLD}:sd`, prefixes),
+    ).toEqual({ prefix: GOLD, districtId: "" });
+  });
 });
 
 describe("interpretSpecialDistrictFactRows", () => {
@@ -232,6 +244,27 @@ describe("interpretSpecialDistrictFactRows", () => {
     expect(read.districtName).toBe("The Colony MUD 1C");
   });
 
+  it("serves IDENT :sd:none as typed absence and does not emit districtId none", () => {
+    const read = interpretSpecialDistrictFactRows(GOLD, [
+      { entity_id: `${GOLD}:sd:none`, body: GOLD_OUTSIDE_BODY },
+    ]);
+    expect(read.state).toBe("absent");
+    if (read.state !== "absent") return;
+    expect(read.entityId).toBe(`${GOLD}:sd:none`);
+    expect(read).not.toHaveProperty("districtId");
+    expect(read).not.toHaveProperty("districtType");
+  });
+
+  it("serves unpatched IDENT exact :sd as typed absence, not atom-miss", () => {
+    const read = interpretSpecialDistrictFactRows(GOLD, [
+      { entity_id: `${GOLD}:sd`, body: GOLD_OUTSIDE_BODY },
+    ]);
+    expect(read.state).toBe("absent");
+    if (read.state !== "absent") return;
+    expect(read.entityId).toBe(`${GOLD}:sd`);
+    expect(read).not.toHaveProperty("districtId");
+  });
+
   it("prefers present membership over :sd:outside on the same parcel", () => {
     const read = interpretSpecialDistrictFactRows(BASTROP_PRESENT, [
       {
@@ -299,6 +332,31 @@ describe("loadSpecialDistrictFactAtom — store seam", () => {
     expect(read.code).toBe("atoms-store-not-configured");
     expect(read.reason).toContain("ATOMS_DATABASE_URL");
     expect(read.reason).toMatch(/Refusing rather than reading place_layer_snapshots/);
+  });
+
+  it("yields typed absence when a fixture atom exists on 48021:34137:sd:none", async () => {
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        { entityId: `${GOLD}:sd:none`, body: GOLD_OUTSIDE_BODY },
+      ]),
+    );
+    const read = await loadSpecialDistrictFactAtom(GOLD);
+    expect(read.state).toBe("absent");
+    if (read.state !== "absent") return;
+    expect(read.entityId).toBe(`${GOLD}:sd:none`);
+    expect(read).not.toHaveProperty("districtId");
+  });
+
+  it("yields typed absence for unpatched exact :sd, not atom-miss", async () => {
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        { entityId: `${GOLD}:sd`, body: GOLD_OUTSIDE_BODY },
+      ]),
+    );
+    const read = await loadSpecialDistrictFactAtom(GOLD);
+    expect(read.state).toBe("absent");
+    if (read.state !== "absent") return;
+    expect(read.entityId).toBe(`${GOLD}:sd`);
   });
 
   it("yields districtId when a fixture atom exists on 48021:102817:sd:3504125", async () => {
@@ -374,6 +432,8 @@ describe("specialDistrictFactRead source does not name the retired store", () =>
     expect(select).toMatch(/FROM atoms/);
     expect(select).toMatch(/LIKE \$2 ESCAPE/);
     expect(select).toMatch(/LIKE \$3 ESCAPE/);
+    expect(select).toMatch(/entity_id = \$4/);
+    expect(select).toMatch(/entity_id = \$5/);
     expect(select).not.toMatch(/\$2 \|\| ':%'/);
     expect(select).not.toMatch(/\bANY\b/);
     expect(select).toMatch(/entity_type = \$1/);

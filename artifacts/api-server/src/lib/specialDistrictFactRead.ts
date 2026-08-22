@@ -3,9 +3,11 @@
  *
  * Writer seam `special-district-fact-writer.ts` stores
  * entity_id = `${parcelNodeId}:sd:${districtId}` (present) or
- * `${parcelNodeId}:sd:outside` (scoped absence). Q8b strips `:sd:{districtId}`
- * to reach a parcel. Dual grammar applies to the parcel PREFIX only.
- * Flood's `entity_id = ANY(parcel keys)` WILL MISS.
+ * `${parcelNodeId}:sd:none` (new-write absence). Live store still has
+ * `${parcelNodeId}:sd:outside`. Exact `${parcelNodeId}:sd` is accepted so an
+ * unpatched IDENT apply is honest-absent, not atom-miss. Q8b strips
+ * `:sd:{districtId}` to reach a parcel. Dual grammar applies to the parcel
+ * PREFIX only. Flood's `entity_id = ANY(parcel keys)` WILL MISS.
  *
  * mud is a `districtType` on this family (A-002), not a second atom. This
  * module never invents a type or a name and never emits a fake mud atom.
@@ -24,7 +26,22 @@ const SD_INFIX = ":sd:";
 export const SPECIAL_DISTRICT_FACT_ENTITY_TYPE = "special-district-fact" as const;
 export const SPECIAL_DISTRICT_FACT_SOURCE = "special-district-fact" as const;
 const OUTSIDE_DISTRICT_ID = "outside";
+const NONE_DISTRICT_ID = "none";
+/** Exact `{prefix}:sd` (no third token). Unpatched IDENT absence. */
+const EXACT_SD_ABSENCE_ID = "";
 const MUD_DISTRICT_TYPE = "MUD";
+
+export function isSpecialDistrictAbsenceSuffix(districtId: string): boolean {
+  return (
+    districtId === OUTSIDE_DISTRICT_ID ||
+    districtId === NONE_DISTRICT_ID ||
+    districtId === EXACT_SD_ABSENCE_ID
+  );
+}
+
+export function specialDistrictFactExactAbsenceEntityId(prefix: string): string {
+  return `${prefix}:sd`;
+}
 
 export interface AtomQueryable {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
@@ -105,6 +122,8 @@ SELECT entity_id, body
    AND (
      entity_id LIKE $2 ESCAPE '\\'
      OR entity_id LIKE $3 ESCAPE '\\'
+     OR entity_id = $4
+     OR entity_id = $5
    )
 `;
 
@@ -165,16 +184,20 @@ function asNullableString(value: unknown): string | null {
 }
 
 /**
- * entity_id is `${prefix}:sd:${districtId}`. Integer prefix is a string
- * prefix of the padded prefix, so the match requires `:sd:` immediately
- * after the chosen prefix (`48021:34137.00000000:sd:X` does not match
- * `48021:34137:sd:`).
+ * entity_id is `${prefix}:sd:${districtId}`, `${prefix}:sd:none`,
+ * `${prefix}:sd:outside` (live), or exact `${prefix}:sd` (unpatched IDENT).
+ * Integer prefix is a string prefix of the padded prefix, so `:sd:` /
+ * exact `:sd` must sit immediately after the chosen prefix
+ * (`48021:34137.00000000:sd:X` does not match `48021:34137:sd`).
  */
 export function districtSuffixFromSpecialDistrictEntityId(
   entityId: string,
   prefixes: SpecialDistrictFactBindPrefixes,
 ): { prefix: string; districtId: string } | null {
   for (const prefix of prefixes) {
+    if (entityId === specialDistrictFactExactAbsenceEntityId(prefix)) {
+      return { prefix, districtId: EXACT_SD_ABSENCE_ID };
+    }
     const needle = `${prefix}${SD_INFIX}`;
     if (!entityId.startsWith(needle)) continue;
     const rest = entityId.slice(needle.length);
@@ -237,8 +260,7 @@ function interpretBody(
     };
   }
 
-  const isOutside = districtIdFromId === OUTSIDE_DISTRICT_ID;
-  if (isOutside || bodyLooksAbsent(rec)) {
+  if (isSpecialDistrictAbsenceSuffix(districtIdFromId) || bodyLooksAbsent(rec)) {
     const absence = asRecord(rec.absence);
     const kind = asNullableString(absence?.kind);
     const reason = asNullableString(absence?.reason);
@@ -355,7 +377,7 @@ export function interpretSpecialDistrictFactRows(
   }
 
   const presentHits = parsedHits.filter((h) => {
-    if (h.districtId === OUTSIDE_DISTRICT_ID) return false;
+    if (isSpecialDistrictAbsenceSuffix(h.districtId)) return false;
     const rec = asRecord(h.row.body);
     if (!rec) return true;
     return !bodyLooksAbsent(rec);
@@ -394,17 +416,25 @@ export function interpretSpecialDistrictFactRows(
     );
   }
 
+  const integerNone = `${tried[0]}${SD_INFIX}${NONE_DISTRICT_ID}`;
+  const paddedNone = `${tried[1]}${SD_INFIX}${NONE_DISTRICT_ID}`;
   const integerOutside = `${tried[0]}${SD_INFIX}${OUTSIDE_DISTRICT_ID}`;
   const paddedOutside = `${tried[1]}${SD_INFIX}${OUTSIDE_DISTRICT_ID}`;
+  const integerExact = specialDistrictFactExactAbsenceEntityId(tried[0]);
+  const paddedExact = specialDistrictFactExactAbsenceEntityId(tried[1]);
   const conflict = conflictAmong(
     absentHits.map((h) => h.row),
     tried,
-    `${integerOutside} and ${paddedOutside}`,
+    `${integerNone}, ${integerOutside}, ${integerExact} and padded twins`,
   );
   if (conflict) return conflict;
   const chosen =
+    absentHits.find((h) => h.row.entity_id === integerNone)?.row ??
+    absentHits.find((h) => h.row.entity_id === paddedNone)?.row ??
     absentHits.find((h) => h.row.entity_id === integerOutside)?.row ??
     absentHits.find((h) => h.row.entity_id === paddedOutside)?.row ??
+    absentHits.find((h) => h.row.entity_id === integerExact)?.row ??
+    absentHits.find((h) => h.row.entity_id === paddedExact)?.row ??
     absentHits[0].row;
   const chosenParsed = districtSuffixFromSpecialDistrictEntityId(
     chosen.entity_id,
@@ -437,6 +467,8 @@ export async function loadSpecialDistrictFactAtom(
     SPECIAL_DISTRICT_FACT_ENTITY_TYPE,
     specialDistrictFactLikePrefixPattern(tried[0]),
     specialDistrictFactLikePrefixPattern(tried[1]),
+    specialDistrictFactExactAbsenceEntityId(tried[0]),
+    specialDistrictFactExactAbsenceEntityId(tried[1]),
   ]);
   return interpretSpecialDistrictFactRows(parcelNodeId, result.rows);
 }
