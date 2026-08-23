@@ -183,7 +183,7 @@ describe("fail closed and NAMED", () => {
 
   it("a rail with no measurement spec is UNAVAILABLE with its owner named", async () => {
     const { ctx } = makeFakeStores(BASE);
-    const report = await runRailScore(ctx, { railKeys: ["footprint"], dryRun: true });
+    const report = await runRailScore(ctx, { railKeys: ["mud"], dryRun: true });
     expect(report.rails).toEqual([]);
     expect(report.railsUnavailable[0]?.reason).toBe("no_measurement_spec");
     expect(report.railsUnavailable[0]?.message).toMatch(/SS-W14/);
