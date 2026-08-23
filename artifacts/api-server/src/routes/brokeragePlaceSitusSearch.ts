@@ -10,7 +10,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { searchSitusByPrefix } from "../lib/txgioAddressResolve";
+import { searchPlaceByPrefix } from "../lib/txgioAddressResolve";
 
 export const brokeragePlaceSitusSearchRouter: IRouter = Router();
 
@@ -34,7 +34,7 @@ brokeragePlaceSitusSearchRouter.get(
       return;
     }
 
-    const hits = await searchSitusByPrefix({
+    const hits = await searchPlaceByPrefix({
       query: parsed.data.q,
       limit: parsed.data.limit,
     });

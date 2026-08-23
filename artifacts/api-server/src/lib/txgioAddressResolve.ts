@@ -506,5 +506,211 @@ export async function searchSitusByPrefix(input: {
   return [...byParcel.values()];
 }
 
+export interface AddressPointSearchHit {
+  parcelNodeId: null;
+  situsAddress: string;
+  countyFips: string;
+  latitude: number;
+  longitude: number;
+  source: "address-point";
+}
+
+export type PlaceSearchHit =
+  | (SitusSearchHit & { source: "parcel-situs" })
+  | AddressPointSearchHit;
+
+function formatAddressPointLabel(row: {
+  fullAddr: string | null;
+  postComm: string | null;
+  state: string | null;
+  postCode: string | null;
+}): string {
+  const street = row.fullAddr?.trim() ?? "";
+  if (!street) return "";
+  const locality = [row.postComm, row.state ?? "TX", row.postCode]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+  return locality ? `${street}, ${locality}` : street;
+}
+
+/**
+ * Prefix search over authoritative TxGIO/StratMap address points (`txgio_address`).
+ * Travis and other counties carry rooftop coords here when `txgio_parcel.situs`
+ * is empty or city-less.
+ */
+export async function searchAddressPointsByPrefix(input: {
+  query: string;
+  limit?: number;
+  database?: TxgioAddressResolveDb;
+}): Promise<AddressPointSearchHit[]> {
+  const prefix = normalizeSitusSearchPrefix(input.query);
+  if (!prefix) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+  const fipsList = allStoreCounties().map((c) => c.fips);
+  if (fipsList.length === 0) return [];
+
+  const database = input.database ?? defaultDb;
+  const pattern = `${escapeIlikeLiteral(prefix)}%`;
+
+  const rows = (await database
+    .select({
+      countyFips: txgioAddress.countyFips,
+      fullAddr: txgioAddress.fullAddr,
+      postComm: txgioAddress.postComm,
+      state: txgioAddress.state,
+      postCode: txgioAddress.postCode,
+      latitude: txgioAddress.latitude,
+      longitude: txgioAddress.longitude,
+    })
+    .from(txgioAddress)
+    .where(
+      and(
+        inArray(txgioAddress.countyFips, fipsList),
+        sql`${normalizedColumnExpr("full_addr")} ILIKE ${pattern}`,
+      ),
+    )
+    .limit(limit * 8)) as {
+    countyFips: string | null;
+    fullAddr: string | null;
+    postComm: string | null;
+    state: string | null;
+    postCode: string | null;
+    latitude: number;
+    longitude: number;
+  }[];
+
+  const byLabel = new Map<string, AddressPointSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const label = formatAddressPointLabel(r);
+    if (!fips || !label) continue;
+    if (
+      !Number.isFinite(r.latitude) ||
+      !Number.isFinite(r.longitude)
+    ) {
+      continue;
+    }
+    const key = `${fips}|${label.toLowerCase()}`;
+    if (!byLabel.has(key)) {
+      byLabel.set(key, {
+        parcelNodeId: null,
+        situsAddress: label,
+        countyFips: fips,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        source: "address-point",
+      });
+    }
+    if (byLabel.size >= limit) break;
+  }
+
+  return [...byLabel.values()];
+}
+
+/**
+ * Merge parcel-situs prefix hits with authoritative address-point hits for PE
+ * typeahead. Parcel situs wins ordering; address points fill gaps (Travis Simsbrook).
+ */
+export async function searchPlaceByPrefix(input: {
+  query: string;
+  limit?: number;
+  database?: TxgioAddressResolveDb;
+}): Promise<PlaceSearchHit[]> {
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+
+  const situsHits = (
+    await searchSitusByPrefix({ ...input, limit })
+  ).map((h) => ({ ...h, source: "parcel-situs" as const }));
+
+  const seenLookup = new Set(
+    situsHits.map((h) => h.situsAddress.trim().toLowerCase()),
+  );
+  const remaining = Math.max(limit - situsHits.length, 0);
+  const addressHits =
+    remaining > 0
+      ? await searchAddressPointsByPrefix({ ...input, limit: remaining })
+      : [];
+
+  const merged: PlaceSearchHit[] = [...situsHits];
+  for (const hit of addressHits) {
+    const key = hit.situsAddress.trim().toLowerCase();
+    if (seenLookup.has(key)) continue;
+    seenLookup.add(key);
+    merged.push(hit);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
+/**
+ * Resolve an address to an authoritative rooftop across every store county.
+ * Used when county routing from a fuzzy geocode would miss the correct table.
+ */
+export async function resolveRooftopAcrossCounties(input: {
+  address: string;
+  database?: TxgioAddressResolveDb;
+}): Promise<(RooftopHit & { countyFips: string }) | null> {
+  const keys = normalizeStreetLineCandidates(input.address);
+  if (keys.length === 0) return null;
+  const database = input.database ?? defaultDb;
+  const fipsList = allStoreCounties().map((c) => c.fips);
+  if (fipsList.length === 0) return null;
+
+  const rows = (await database
+    .select({
+      countyFips: txgioAddress.countyFips,
+      latitude: txgioAddress.latitude,
+      longitude: txgioAddress.longitude,
+    })
+    .from(txgioAddress)
+    .where(
+      and(
+        inArray(txgioAddress.countyFips, fipsList),
+        inArray(normalizedColumnExpr("full_addr"), keys),
+      ),
+    )) as {
+    countyFips: string | null;
+    latitude: number;
+    longitude: number;
+  }[];
+
+  if (rows.length === 0) return null;
+
+  const distinct = new Map<
+    string,
+    { countyFips: string; latitude: number; longitude: number }
+  >();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    if (!fips || !Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) {
+      continue;
+    }
+    const k = `${r.latitude.toFixed(6)},${r.longitude.toFixed(6)}`;
+    if (!distinct.has(k)) {
+      distinct.set(k, {
+        countyFips: fips,
+        latitude: r.latitude,
+        longitude: r.longitude,
+      });
+    }
+  }
+  if (distinct.size !== 1) return null;
+  const point = [...distinct.values()][0]!;
+  return {
+    countyFips: point.countyFips,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    matchSource: "txgio-address",
+  };
+}
+
 /** Exposed for unit tests. */
 export const __internal = { normalizedColumnExpr, escapeIlikeLiteral };

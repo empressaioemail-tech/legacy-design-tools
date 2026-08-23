@@ -13,12 +13,13 @@ const { searchMock } = vi.hoisted(() => ({
       parcelNodeId: "48209:193340",
       situsAddress: "6026 MARSH LN, BUDA, TX 78610",
       countyFips: "48209",
+      source: "parcel-situs",
     },
   ]),
 }));
 
 vi.mock("../lib/txgioAddressResolve", () => ({
-  searchSitusByPrefix: (input: { query: string; limit?: number }) =>
+  searchPlaceByPrefix: (input: { query: string; limit?: number }) =>
     searchMock(input),
 }));
 
