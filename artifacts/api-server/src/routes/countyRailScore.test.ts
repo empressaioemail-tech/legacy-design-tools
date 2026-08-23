@@ -96,9 +96,10 @@ describe("GET /score/registry", () => {
       unspecified: Array<{ railKey: string; unspecifiedReason: string; specOwner: string }>;
     };
 
-    // The six rails with zero rows in county_facet_coverage, verified against
-    // the deployment store 2026-08-19.
+    // P-59 (2026-08-23): six former A-020 gaps are scoreable; only `mud`
+    // remains unspecified (script-shaped live rows, no checked-in spec).
     const unspecifiedKeys = payload.unspecified.map((u) => u.railKey);
+    expect(unspecifiedKeys).toEqual(["mud"]);
     for (const railKey of [
       "roads",
       "footprint",
@@ -107,7 +108,7 @@ describe("GET /score/registry", () => {
       "rrc-pipelines",
       "rail-corridor",
     ]) {
-      expect(unspecifiedKeys, railKey).toContain(railKey);
+      expect(payload.scoreable, railKey).toContain(railKey);
     }
     for (const u of payload.unspecified) {
       expect(u.specOwner.length, u.railKey).toBeGreaterThan(0);

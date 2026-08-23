@@ -91,6 +91,11 @@ export interface RailCellMeasurement {
   detail?: string | null;
   /** Set only when a declared probe POSITIVELY established absence. */
   absence?: AbsenceDetermination | null;
+  /**
+   * Layer applicability from serve-layer verdict vocabulary. When
+   * `not-applicable`, the rail must not score as a coverage gap.
+   */
+  applicabilityVerdict?: "not-applicable" | null;
 }
 
 /** Exactly the values that define a ledger row. Timestamps are NOT here — see `railCellChanged`. */
@@ -201,6 +206,32 @@ export function scoreRailCell(
     verificationMethod: rule.verificationMethod,
     verifiedByInstrument: rule.instrument,
   };
+
+  // --- layer not applicable (verdict input, not a boolean gap) ---------------
+  if (measurement.applicabilityVerdict === "not-applicable") {
+    const facet = classifyFacet({
+      facet: rule.railKey,
+      rawCoveragePct: 0,
+      sourcePresent: true,
+      verdict: null,
+      ownerMatchRate: null,
+      source: "layer-not-applicable",
+      sourceVintage: measurement.sourceVintage ?? null,
+      sampled: 0,
+    });
+    return {
+      ...base,
+      honestCoveragePct: 0,
+      classification: facet.classification,
+      integrityVerdict: facet.integrityVerdict,
+      source: facet.source,
+      railState: "satisfied-absent",
+      absenceBasis: "layer-not-applicable",
+      artifactPath: provenanceFor(numerator, denominator),
+      overcount: false,
+      absenceRefusedReason: null,
+    };
+  }
 
   // --- established absence -------------------------------------------------
   if (absence.allowed) {
