@@ -21,6 +21,16 @@ export const RESEARCH_AREA_VISIBLE_PARCEL = z.object({
  * Fully optional so content-bundle / intel-panel callers that send no subject
  * never break. Numbers are approximate, not survey-grade (honesty contract).
  */
+export const RESEARCH_AREA_SUBJECT_PARCEL_FACTS = z.object({
+  acreageAc: z.number().nullish(),
+  acreageSqft: z.number().nullish(),
+  livingAreaSqft: z.number().nullish(),
+  floodZoneLabel: z.string().nullish(),
+  landUseCode: z.string().nullish(),
+  landUseDescription: z.string().nullish(),
+  zoningDistrict: z.string().nullish(),
+});
+
 export const RESEARCH_AREA_SUBJECT = z.object({
   parcelNodeId: z.string().nullish(),
   address: z.string().nullish(),
@@ -46,6 +56,7 @@ export const RESEARCH_AREA_SUBJECT = z.object({
       citationUrl: z.string().nullish(),
     })
     .nullish(),
+  parcelFacts: RESEARCH_AREA_SUBJECT_PARCEL_FACTS.nullish(),
 });
 
 export const RESEARCH_AREA_CONTEXT = z
@@ -162,11 +173,44 @@ export function formatSubjectConstraintsForLlm(
 
   const sb = subject.setbacks ?? undefined;
   const env = subject.envelope ?? undefined;
+  const pf = subject.parcelFacts ?? undefined;
 
   const detail: string[] = [];
 
-  const district = sb?.district;
+  const district = sb?.district ?? pf?.zoningDistrict;
   if (district) detail.push(`- Zoning district: ${district}`);
+
+  if (pf?.acreageAc != null) {
+    const sqftPart =
+      pf.acreageSqft != null
+        ? ` (${pf.acreageSqft.toLocaleString("en-US")} sqft)`
+        : "";
+    detail.push(`- Lot size: ${pf.acreageAc} ac${sqftPart}`);
+  } else if (pf?.acreageSqft != null) {
+    detail.push(
+      `- Lot size: ${pf.acreageSqft.toLocaleString("en-US")} sqft`,
+    );
+  }
+
+  if (pf?.livingAreaSqft != null) {
+    detail.push(
+      `- Living area: ${pf.livingAreaSqft.toLocaleString("en-US")} sqft`,
+    );
+  }
+
+  if (pf?.floodZoneLabel) {
+    detail.push(`- Flood zone: ${pf.floodZoneLabel}`);
+  }
+
+  const landUseCode = pf?.landUseCode;
+  const landUseDescription = pf?.landUseDescription;
+  if (landUseCode || landUseDescription) {
+    const label =
+      landUseCode && landUseDescription
+        ? `${landUseCode} — ${landUseDescription}`
+        : landUseDescription || landUseCode;
+    detail.push(`- Land use: ${label}`);
+  }
 
   const setbackParts: string[] = [];
   if (sb?.front_ft != null) setbackParts.push(`front ${sb.front_ft} ft`);
@@ -218,8 +262,9 @@ export function formatSubjectConstraintsForLlm(
       ? `answer from them and cite them as [${citationNumber}]`
       : "answer from them and cite the source";
   const instruction =
-    "When the user asks about setbacks / ADU / additions and SUBJECT PARCEL " +
-    `CONSTRAINTS are present, ${citeInstruction}; state they ` +
+    "When the user asks about setbacks / ADU / additions / lot size / flood / " +
+    "land use and SUBJECT PARCEL CONSTRAINTS are present, " +
+    `${citeInstruction}; state they ` +
     "are approximate and to verify with the city. If absent, say the setbacks " +
     "aren't resolved for this parcel yet — do not fabricate.";
 

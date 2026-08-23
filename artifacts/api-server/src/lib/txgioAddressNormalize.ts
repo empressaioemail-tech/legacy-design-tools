@@ -200,6 +200,17 @@ export function normalizeStreetLine(raw: string): string | null {
 }
 
 /**
+ * Prefix-search key for situs typeahead — same tokenization as equality
+ * match but allows a single house-number token ("6026") or a partial street
+ * ("6026 MARSH"). Returns null when there is no leading house number.
+ */
+export function normalizeSitusSearchPrefix(raw: string): string | null {
+  const tokens = tokenizeSegment(raw.split(",")[0] ?? raw);
+  if (tokens.length === 0) return null;
+  return tokens.join(" ");
+}
+
+/**
  * QUERY-SIDE key derivation for the F4d/F4e situs + rooftop lookups. Given
  * a typed address, return the set of candidate normalized street-line keys
  * to match against the stored (comma-bearing) situs/full_addr — most
