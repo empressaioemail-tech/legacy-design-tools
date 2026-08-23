@@ -67,13 +67,15 @@ import { parcelNodeId } from "./parcelNodeId";
 import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
+  normalizeSitusSearchPrefix,
   buildNormalizedStreetSql,
 } from "./txgioAddressNormalize";
+import { allStoreCounties } from "./brokerageTxParcels";
 
 /** Re-exported so existing import sites keep working; defined in the
  *  dependency-free `./txgioAddressNormalize` so its pure logic can be
  *  unit-tested without pulling in `@workspace/db`. */
-export { normalizeStreetLine };
+export { normalizeStreetLine, normalizeSitusSearchPrefix };
 
 /** Narrow db surface — injectable for tests (mirrors TxgioStoreDb). */
 export type TxgioAddressResolveDb = Pick<
@@ -428,5 +430,81 @@ export async function resolveRooftopByAddress(input: {
   };
 }
 
+export interface SitusSearchHit {
+  parcelNodeId: string;
+  situsAddress: string;
+  countyFips: string;
+}
+
+const SITUS_SEARCH_MAX_LIMIT = 10;
+
+/** Escape `%` and `_` for a literal ILIKE prefix pattern. */
+function escapeIlikeLiteral(prefix: string): string {
+  return prefix.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
+ * Prefix search over store-backed situs addresses for PE typeahead.
+ * Matches the normalized first-comma segment of `situs_address` across
+ * every `txgio-store` county. Dedupes tile-cell duplicates per parcel.
+ */
+export async function searchSitusByPrefix(input: {
+  query: string;
+  limit?: number;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit[]> {
+  const prefix = normalizeSitusSearchPrefix(input.query);
+  if (!prefix) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+  const fipsList = allStoreCounties().map((c) => c.fips);
+  if (fipsList.length === 0) return [];
+
+  const database = input.database ?? defaultDb;
+  const pattern = `${escapeIlikeLiteral(prefix)}%`;
+
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        inArray(txgioParcel.countyFips, fipsList),
+        sql`${normalizedColumnExpr("situs_address")} ILIKE ${pattern}`,
+      ),
+    )
+    .limit(limit * 8)) as {
+    countyFips: string | null;
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const byParcel = new Map<string, SitusSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!fips || !propId || !situs) continue;
+    const nodeId = parcelNodeId(fips, propId);
+    if (!nodeId) continue;
+    if (!byParcel.has(nodeId)) {
+      byParcel.set(nodeId, {
+        parcelNodeId: nodeId,
+        situsAddress: situs,
+        countyFips: fips,
+      });
+    }
+    if (byParcel.size >= limit) break;
+  }
+
+  return [...byParcel.values()];
+}
+
 /** Exposed for unit tests. */
-export const __internal = { normalizedColumnExpr };
+export const __internal = { normalizedColumnExpr, escapeIlikeLiteral };

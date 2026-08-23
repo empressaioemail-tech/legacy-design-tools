@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
+  normalizeSitusSearchPrefix,
 } from "../txgioAddressNormalize";
 
 describe("normalizeStreetLine", () => {
@@ -201,5 +202,16 @@ describe("normalizeStreetLineCandidates (F4f comma-less query key)", () => {
     const cands = normalizeStreetLineCandidates("100 Main St TX 78610");
     expect(cands).toContain("100 MAIN ST");
     expect(cands.every((c) => c.split(" ").length >= 2)).toBe(true);
+  });
+});
+
+describe("normalizeSitusSearchPrefix", () => {
+  it("allows a single house-number token for prefix search", () => {
+    expect(normalizeSitusSearchPrefix("6026")).toBe("6026");
+    expect(normalizeSitusSearchPrefix("6026 Marsh Lane")).toBe("6026 MARSH LN");
+  });
+
+  it("rejects bare street names without a house number", () => {
+    expect(normalizeSitusSearchPrefix("Marsh Lane")).toBeNull();
   });
 });
