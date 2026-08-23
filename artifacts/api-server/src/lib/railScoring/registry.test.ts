@@ -95,20 +95,24 @@ describe("registry completeness", () => {
     }
   });
 
-  it("the six rails that had zero live coverage rows are now scoreable; only mud stays unspecified", () => {
-    const declaredUnspecified = new Set(unspecifiedRails().map((r) => r.railKey));
-    expect(declaredUnspecified.has("mud")).toBe(true);
-    for (const railKey of [
-      "roads",
-      "footprint",
-      "easement",
-      "rrc-wells",
-      "rrc-pipelines",
-      "rail-corridor",
-    ]) {
-      expect(declaredUnspecified.has(railKey), railKey).toBe(false);
-      expect(railScoringRuleFor(railKey)?.kind, railKey).not.toBe("unspecified");
-    }
+  it("all fourteen rails are scoreable; none remain unspecified", () => {
+    expect(unspecifiedRails()).toEqual([]);
+    expect(scoreableRailKeys().length).toBe(RAIL_SCORING_DECLARATION.length);
+    expect(railScoringRuleFor("mud")?.kind).toBe("atom-count-over-parcel-features");
+  });
+
+  it("mud declares distinct-parcel-keys, statewide absence probe, and present source label", () => {
+    const mud = railScoringRuleFor("mud");
+    expect(mud?.kind).toBe("atom-count-over-parcel-features");
+    if (mud?.kind !== "atom-count-over-parcel-features") return;
+    expect(mud.entityType).toBe("special-district-fact");
+    expect(mud.numeratorMode).toBe("distinct-parcel-keys");
+    expect(mud.presentSourceLabel).toBe(
+      "special-district-fact-determination-over-txgio-feature-index",
+    );
+    expect(mud.absenceProbe?.table).toBe("tx_special_district");
+    expect(mud.absenceProbe?.reach).toEqual({ kind: "statewide" });
+    expect(thresholdPctForRail("mud")).toBe(90);
   });
 
   it("scoreableRailKeys and unspecifiedRails partition the registry", () => {

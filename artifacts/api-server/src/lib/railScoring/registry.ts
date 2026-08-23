@@ -150,6 +150,11 @@ export interface AtomCountRule extends RailScoringRuleBase {
    * (family suffix stripped), so coverage cannot exceed 100%.
    */
   numeratorMode?: "atom-count" | "distinct-parcel-keys";
+  /**
+   * Provenance label when coverage is present. Default `${entityType}-atom-count`.
+   * Mud uses `special-district-fact-determination-over-txgio-feature-index`.
+   */
+  presentSourceLabel?: string;
 }
 
 export interface ParcelColumnStampRule extends RailScoringRuleBase {
@@ -331,13 +336,22 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   },
   {
     railKey: "mud",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "special-district-fact",
+    numeratorMode: "distinct-parcel-keys",
+    presentSourceLabel: "special-district-fact-determination-over-txgio-feature-index",
     instrument: "countyRailScoreCli.ts:mud",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "254 live rows exist (134 satisfied-present, 75 satisfied-absent) and the rule that produced them exists NOWHERE in checked-in source: l16-score-mud.mjs is not in this repo and is not on the machine. What the stored rows reveal is only an outline — source 'special-district-fact-determination-over-txgio-feature-index' for present cells, and absence basis 'tceq-tx_special_district-statewide-zero-districts-for-fips' for absent ones. Reconstructing a rule from the shape of its own output would be a guess presented as a spec, which is exactly the failure this lane was dispatched against, so it is declared unspecified. This rail is the single clearest statement of why scoring had to become a capability.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    absenceProbe: {
+      kind: "source-table-zero-rows",
+      table: "tx_special_district",
+      fipsColumn: "county_fips",
+      basis: "tceq-tx_special_district-statewide-zero-districts-for-fips",
+      reach: { kind: "statewide" },
+    },
+    notes:
+      "Numerator is DISTINCT parcel keys with at least one special-district-fact determination (entity_id FIPS prefix before the :sd: family suffix). The county marker {fips}:_county_coverage is excluded from the ratio and establishes satisfied-absent instead. tx_special_district zero rows for the FIPS establishes satisfied-absent; features=0 with districts>0 (Donley 48129) fails closed to not-yet.",
   },
 ] as const;
 
