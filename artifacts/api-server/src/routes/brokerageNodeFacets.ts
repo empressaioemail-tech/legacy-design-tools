@@ -108,6 +108,11 @@ import {
   anonymousOwnerFactRefusal,
   loadOwnerFactAtom,
 } from "../lib/ownerFactRead";
+import { loadStructuralFactAtom } from "../lib/structuralFactRead";
+import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
+import {
+  attachVerdictLayersToFacets,
+} from "../lib/structuralFactToFacetsWire";
 import {
   authenticatedBrokerageUserId,
   extractBrokerageApiKey,
@@ -525,7 +530,7 @@ brokerageNodeFacetsRouter.get(
     }
 
     const identifiedOwnerCaller = isIdentifiedOwnerFactCaller(req);
-    const [snapshot, floodHazardFact, landUseFact, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact, ownerFactLoaded] =
+    const [snapshot, floodHazardFact, landUseFactRaw, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact, ownerFactLoaded, structuralFact] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
@@ -538,9 +543,15 @@ brokerageNodeFacetsRouter.get(
         identifiedOwnerCaller
           ? loadOwnerFactAtom(parcelNodeId)
           : Promise.resolve(null),
+        loadStructuralFactAtom(parcelNodeId),
       ]);
     const ownerFact =
       ownerFactLoaded ?? anonymousOwnerFactRefusal(parcelNodeId);
+    const landUseFact = enrichLandUseFactWithZoningVerdict(
+      landUseFactRaw,
+      parcelNodeId,
+      snapshot?.facets ?? null,
+    );
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
@@ -561,7 +572,11 @@ brokerageNodeFacetsRouter.get(
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: snapshot.facets,
+      facets: attachVerdictLayersToFacets(
+        snapshot.facets as Record<string, unknown>,
+        structuralFact,
+        landUseFact,
+      ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying
       // why — retired instrument, unrecognised producer, or no facet.
@@ -601,6 +616,10 @@ brokerageNodeFacetsRouter.get(
       // typed refusal with no ownerName / mailing and no atoms SELECT.
       // Never copied off cad-parcel-roll / bake / cad_property / GIS.
       ownerFact,
+      // Structural/CAMA layer (living_area_sqft, year_built). bulk_primary
+      // counties on stratmap-roll tier return lookup-failed; populated
+      // counties return present. Never upgrades lookup-failed in transit.
+      structuralFact,
     });
   },
 );
