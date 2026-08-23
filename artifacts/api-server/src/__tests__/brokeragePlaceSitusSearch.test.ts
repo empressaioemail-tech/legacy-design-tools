@@ -8,7 +8,7 @@ import request from "supertest";
 import { brokeragePlaceSitusSearchRouter } from "../routes/brokeragePlaceSitusSearch";
 
 const { searchMock } = vi.hoisted(() => ({
-  searchMock: vi.fn(async () => [
+  searchMock: vi.fn(async (_input: { query: string; limit?: number }) => [
     {
       parcelNodeId: "48209:193340",
       situsAddress: "6026 MARSH LN, BUDA, TX 78610",
@@ -18,7 +18,8 @@ const { searchMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/txgioAddressResolve", () => ({
-  searchSitusByPrefix: (...args: unknown[]) => searchMock(...args),
+  searchSitusByPrefix: (input: { query: string; limit?: number }) =>
+    searchMock(input),
 }));
 
 function buildApp() {
