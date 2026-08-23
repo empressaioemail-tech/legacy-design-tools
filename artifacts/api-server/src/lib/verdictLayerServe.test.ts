@@ -151,4 +151,32 @@ describe("enrichLandUseFactWithZoningVerdict", () => {
       enrichLandUseFactWithZoningVerdict(atomMiss, "48021:34137", facets),
     ).toBe(atomMiss);
   });
+
+  it("upgrades absent no-cad-row to not-applicable on unincorporated unzoned shape", () => {
+    const absentNoCad = {
+      state: "absent" as const,
+      source: "land-use-fact",
+      boundAs: "48055:1:2026",
+      absence: {
+        kind: "no-cad-row",
+        reason: "no cad_property row for 48055:1 at taxYear=2026",
+      },
+    };
+    const facets = {
+      zoning: null,
+      baseFacts: { situsCity: null },
+      envelope: { declineReason: "no-zoning-stamp" },
+      facetCoverage: { zoning: false },
+    };
+    const enriched = enrichLandUseFactWithZoningVerdict(
+      absentNoCad,
+      "48055:1",
+      facets,
+    );
+    expect(enriched).toMatchObject({
+      status: "absent",
+      verdict: "not-applicable",
+      absence: { kind: "no-cad-row" },
+    });
+  });
 });
