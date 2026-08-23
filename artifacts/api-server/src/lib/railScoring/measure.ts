@@ -157,16 +157,159 @@ export async function readDistinctParcelKeysWithAtoms(
   atoms: RailScoreQueryable,
   entityType: string,
   countyFips: string,
+  excludeEntityId?: string,
 ): Promise<number> {
+  const params: unknown[] = [entityType, countyFips, `${countyFips}￿`];
+  let excludeClause = "";
+  if (excludeEntityId != null) {
+    excludeClause = " AND entity_id <> $4";
+    params.push(excludeEntityId);
+  }
   const r = await atoms.query<{ n: string }>(
     `SELECT count(DISTINCT split_part(entity_id, ':', 1) || ':' || split_part(entity_id, ':', 2))::text AS n
        FROM atoms
       WHERE entity_type = $1
         AND entity_id >= $2
-        AND entity_id < $3`,
-    [entityType, countyFips, `${countyFips}￿`],
+        AND entity_id < $3${excludeClause}`,
+    params,
   );
   return Number(r.rows[0]?.n ?? 0);
+}
+
+async function readSpecialDistrictCountForCounty(
+  deployment: RailScoreQueryable,
+  countyFips: string,
+): Promise<number | null> {
+  const table = "tx_special_district";
+  if (!(await tableExists(deployment, table))) return null;
+  const r = await deployment.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM ${table} WHERE county_fips = $1`,
+    [countyFips],
+  );
+  return Number(r.rows[0]?.n ?? 0);
+}
+
+function countyCoverageMarkerEntityId(countyFips: string): string {
+  return `${countyFips}:_county_coverage`;
+}
+
+function basisFromCountyCoverageMarkerBody(body: unknown): string {
+  if (body != null && typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    if (typeof record.absenceBasis === "string" && record.absenceBasis.trim()) {
+      return record.absenceBasis.trim();
+    }
+    const verified = record.verifiedAbsence;
+    if (verified != null && typeof verified === "object") {
+      const scope = (verified as { provenanceScope?: unknown }).provenanceScope;
+      if (Array.isArray(scope) && scope.length > 0) {
+        return scope.filter((s): s is string => typeof s === "string").join(";");
+      }
+    }
+  }
+  return "special-district-county-coverage-marker;not-a-parcel";
+}
+
+async function readCountyCoverageMarkerAbsence(
+  atoms: RailScoreQueryable,
+  entityType: string,
+  countyFips: string,
+): Promise<RailCellMeasurement["establishedAbsence"]> {
+  const entityId = countyCoverageMarkerEntityId(countyFips);
+  const r = await atoms.query<{ body: unknown }>(
+    `SELECT body
+       FROM atoms
+      WHERE entity_type = $1
+        AND entity_id = $2
+      LIMIT 1`,
+    [entityType, entityId],
+  );
+  if (r.rows.length === 0) return null;
+  return {
+    basis: basisFromCountyCoverageMarkerBody(r.rows[0]?.body),
+    source: "special-district-fact:_county_coverage",
+    evidence: null,
+  };
+}
+
+const MUD_PRESENT_SOURCE = "special-district-fact-determination-over-txgio-feature-index";
+
+async function measureMud(
+  rule: AtomCountRule,
+  ctx: MeasureContext,
+  countyFips: string,
+): Promise<RailCellMeasurement> {
+  if (!ctx.atoms) {
+    throw new RailNotMeasurableError(
+      rule.railKey,
+      "atoms_store_not_configured",
+      `rail '${rule.railKey}' is measured from the ATOMS store, which is not configured ` +
+        `(set ATOMS_DATABASE_URL). Refusing to score it rather than reporting zero coverage.`,
+    );
+  }
+
+  const markerEntityId = countyCoverageMarkerEntityId(countyFips);
+  const establishedAbsence = await readCountyCoverageMarkerAbsence(
+    ctx.atoms,
+    rule.entityType,
+    countyFips,
+  );
+  if (establishedAbsence != null) {
+    return {
+      countyFips,
+      numerator: 0,
+      denominator: null,
+      sourcePresent: false,
+      source: "special-district-fact:_county_coverage",
+      detail: "countyCoverageMarker=true",
+      absence: null,
+      establishedAbsence,
+    };
+  }
+
+  const den = await readParcelFeatureCount(ctx, countyFips);
+  const num = await readDistinctParcelKeysWithAtoms(
+    ctx.atoms,
+    rule.entityType,
+    countyFips,
+    markerEntityId,
+  );
+  const presentSource = rule.presentSourceLabel ?? MUD_PRESENT_SOURCE;
+
+  if (den == null) {
+    const districtCount = await readSpecialDistrictCountForCounty(ctx.deployment, countyFips);
+    if (districtCount != null && districtCount > 0) {
+      return {
+        countyFips,
+        numerator: num,
+        denominator: null,
+        sourcePresent: num > 0,
+        source: num > 0 ? presentSource : null,
+        detail: "donleyGuard=features-zero-districts-positive",
+        absence: null,
+      };
+    }
+    const absence = await runAbsenceProbe(rule, ctx.deployment, countyFips);
+    return {
+      countyFips,
+      numerator: num,
+      denominator: null,
+      sourcePresent: num > 0,
+      source: num > 0 ? presentSource : null,
+      detail: `atoms:entity_type=${rule.entityType},numeratorMode=distinct-parcel-keys,table=none`,
+      absence,
+    };
+  }
+
+  return {
+    countyFips,
+    numerator: num,
+    denominator: den.features,
+    sourcePresent: num > 0,
+    source: presentSource,
+    detail: `atoms:entity_type=${rule.entityType},numeratorMode=distinct-parcel-keys,table=${den.table}`,
+    absence: null,
+  };
 }
 
 /**
@@ -324,6 +467,9 @@ export async function measureRailCell(
 ): Promise<RailCellMeasurement> {
   switch (rule.kind) {
     case "atom-count-over-parcel-features":
+      if (rule.railKey === "mud") {
+        return await measureMud(rule, ctx, countyFips);
+      }
       return await measureAtomCount(rule, ctx, countyFips);
     case "parcel-column-stamp-rate":
       return await measureColumnStamp(rule, ctx, countyFips);
