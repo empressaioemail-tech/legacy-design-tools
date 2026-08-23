@@ -27,11 +27,67 @@
  * as an explicit "not verified in this area" state — a designed trust signal,
  * not an empty cell — so this route passes the absence through verbatim.
  *
- * FLOOD IS NOT SERVED HERE (lane SS-W16, 2026-08-19). `tier2.flood` is always
- * null and carries a typed refusal in `tier2.floodDisposition` instead. The
- * reasoning, the measured error, and the scope of the retirement are on
- * {@link disposeTier2Flood} below. Every other facet this route serves is
- * unchanged — the cut is the flood facet, not the endpoint.
+ * SNAPSHOT FLOOD IS NOT SERVED HERE (lane SS-W16, 2026-08-19). `tier2.flood`
+ * is always null and carries a typed refusal in `tier2.floodDisposition`
+ * instead. The replacement is a sibling field `floodHazardFact` read from
+ * flood-hazard-fact atoms (lane s1-flood-inspect, 2026-08-21). That read is
+ * a NEW lookup, not a revival of the tile-centre NFHL bake. The reasoning
+ * for the snapshot cut is on {@link disposeTier2Flood} below.
+ *
+ * LAND-USE ATOM IS A ROOT SIBLING (lane s7-land-use-inspect, 2026-08-21).
+ * `landUseFact` is read from land-use-fact atoms. Baked
+ * `facets.baseFacts.landUse` stays the retiredStore cad-roll object this
+ * pass. Never SELECT the CAD roll table for `landUseFact`.
+ *
+ * SPECIAL-DISTRICT ATOM IS A ROOT SIBLING (lane serve P-48, 2026-08-21).
+ * `specialDistrictFact` is read from special-district-fact atoms. Dual
+ * grammar on the parcel PREFIX only; districtId is the writer `:sd:`
+ * suffix. mud is a districtType on that family, not a second atom.
+ * Never SELECT bake / place_layer_snapshots / CAD / mud-pid for this field.
+ *
+ * PIPELINE ATOM IS A ROOT SIBLING (lane serve P-49, 2026-08-22).
+ * `pipelineFact` is read from rrc-pipeline-fact atoms. Writer keys by
+ * bare parcelNodeId; dual grammar is ANY(parcel keys). Spatial attach is
+ * write-time buffer-intersect, not a live texas-rrc / tx_rrc_pipeline
+ * query and not a special-district :sd: picker. Never SELECT bake /
+ * place_layer_snapshots / CAD / GIS for this field.
+ *
+ * WELL ATOM IS A ROOT SIBLING (lane serve P-50, 2026-08-22).
+ * `wellFact` is read from well-fact atoms. Writer keys
+ * entity_id = `${parcelNodeId}:${wellKey}`; dual grammar is prefix-range
+ * on both parcel prefixes, not pipeline ANY(bare parcel) and not the
+ * special-district :sd: picker. Spatial attach is write-time 152 m
+ * on-or-near. Never SELECT bake / place_layer_snapshots / CAD / GIS /
+ * texas-rrc / tx_rrc_well for this field.
+ *
+ * BUILDING-FOOTPRINT ATOM IS A ROOT SIBLING (lane serve P-51, 2026-08-22).
+ * `buildingFootprintFact` is read from building-footprint atoms. Writer
+ * keys entity_id = `${parcelNodeId}:footprint:${footprintId}` on today's
+ * store. Dual grammar is prefix-range on both parcel prefixes.
+ * structureRole is body.structureRole — do not parse `:primary` as
+ * identity. Spatial attach is write-time staged overlap. Never SELECT
+ * bake / place_layer_snapshots / CAD / GIS / tx_building_footprint.
+ *
+ * BOUNDARY-EDGE ATOM IS A ROOT SIBLING (lane serve P-53, 2026-08-22).
+ * `boundaryEdgeFact` is read from property-boundary-edge atoms. Writer
+ * keys entity_id = `${countyFips}:${propId}:boundary:${edgeIndex}`. Dual
+ * grammar is prefix-range on both parcel prefixes for `:boundary:`
+ * suffixes. Geometry is the atom body, never GIS parcel outline /
+ * txgio_parcel / bake ring. Never SELECT bake / place_layer_snapshots /
+ * CAD / GIS / txgio_parcel for this field.
+ *
+ * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22).
+ * `ownerFact` is read from owner-fact atoms. Writer keys
+ * entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year family as
+ * land-use-fact). Dual grammar is LIKE prefix:% on both parcel prefixes;
+ * taxYear is the writer suffix. S7 is identified-session only. Anonymous
+ * GET returns a typed refusal with no ownerName and no mailing, and does
+ * not query atoms. Identified uses the existing brokerage session
+ * signal (`authenticatedBrokerageUserId` after `verifySessionToken` on
+ * a dotted Bearer). Operator / extension API keys are not a session.
+ * Never SELECT cad-parcel-roll / bake / cad_property / GIS
+ * ParcelCardData.owner for this field. Do not run sanitizeNodeFacetPayload
+ * on identified ownerFact (it would strip ownerName).
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -41,6 +97,27 @@ import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
+import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
+import { loadLandUseFactAtom } from "../lib/landUseFactRead";
+import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
+import { loadWellFactAtom } from "../lib/wellFactRead";
+import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
+import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
+import {
+  anonymousOwnerFactRefusal,
+  loadOwnerFactAtom,
+} from "../lib/ownerFactRead";
+import { loadStructuralFactAtom } from "../lib/structuralFactRead";
+import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
+import {
+  attachVerdictLayersToFacets,
+} from "../lib/structuralFactToFacetsWire";
+import {
+  authenticatedBrokerageUserId,
+  extractBrokerageApiKey,
+} from "../middlewares/brokerageAuth";
+import { verifySessionToken } from "../lib/sessionToken";
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -57,6 +134,33 @@ const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function isValidParcelNodeId(raw: string): boolean {
   return PARCEL_NODE_ID_RE.test(raw);
+}
+
+/**
+ * Reuse the existing brokerage identified-session signal without remounting
+ * this public route behind 401. Operator / extension keys stay anonymous
+ * for ownerFact (`authenticatedBrokerageUserId` requires tier `user`).
+ */
+function applyExistingIdentifiedBrokerageSession(req: Request): void {
+  if (authenticatedBrokerageUserId(req) != null) return;
+  const provided = extractBrokerageApiKey(req);
+  if (!provided?.includes(".")) return;
+  if (!process.env.SESSION_SECRET?.trim()) return;
+  let verified: ReturnType<typeof verifySessionToken>;
+  try {
+    verified = verifySessionToken(provided);
+  } catch {
+    return;
+  }
+  if (verified.ok && verified.session.requestor?.kind === "user") {
+    req.session = verified.session;
+    req.brokerageAuth = { tier: "user" };
+  }
+}
+
+export function isIdentifiedOwnerFactCaller(req: Request): boolean {
+  applyExistingIdentifiedBrokerageSession(req);
+  return authenticatedBrokerageUserId(req) != null;
 }
 
 /**
@@ -425,7 +529,29 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+    const identifiedOwnerCaller = isIdentifiedOwnerFactCaller(req);
+    const [snapshot, floodHazardFact, landUseFactRaw, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact, ownerFactLoaded, structuralFact] =
+      await Promise.all([
+        loadBakedNodeFacetSnapshot(parcelNodeId),
+        loadFloodHazardFactAtom(parcelNodeId),
+        loadLandUseFactAtom(parcelNodeId),
+        loadSpecialDistrictFactAtom(parcelNodeId),
+        loadPipelineFactAtom(parcelNodeId),
+        loadWellFactAtom(parcelNodeId),
+        loadBuildingFootprintFactAtom(parcelNodeId),
+        loadBoundaryEdgeFactAtom(parcelNodeId),
+        identifiedOwnerCaller
+          ? loadOwnerFactAtom(parcelNodeId)
+          : Promise.resolve(null),
+        loadStructuralFactAtom(parcelNodeId),
+      ]);
+    const ownerFact =
+      ownerFactLoaded ?? anonymousOwnerFactRefusal(parcelNodeId);
+    const landUseFact = enrichLandUseFactWithZoningVerdict(
+      landUseFactRaw,
+      parcelNodeId,
+      snapshot?.facets ?? null,
+    );
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
@@ -446,12 +572,54 @@ brokerageNodeFacetsRouter.get(
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: snapshot.facets,
+      facets: attachVerdictLayersToFacets(
+        snapshot.facets as Record<string, unknown>,
+        structuralFact,
+        landUseFact,
+      ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying
-      // why — retired instrument, unrecognised producer, or no facet. No flood
-      // determination leaves this route (SS-W16, 2026-08-19).
+      // why — retired instrument, unrecognised producer, or no facet.
+      // Snapshot flood values never leave this field (SS-W16, 2026-08-19).
       tier2: snapshot.tier2,
+      // Replacement flood determination. Dual-grammar bind of flood-hazard-fact
+      // atoms. Typed refusal on miss / conflict / unconfigured store. Never
+      // copied from the baked Tier-2 snapshot.
+      floodHazardFact,
+      // Land-use-fact atom. Dual grammar on the parcel PREFIX only; taxYear
+      // comes from the atom row. Baked facets.baseFacts.landUse stays
+      // retiredStore. Never copied off the CAD roll table.
+      landUseFact,
+      // Special-district-fact atom. Dual grammar on the parcel PREFIX only;
+      // districtId comes from the writer `:sd:` suffix. Never copied off
+      // bake / CAD / mud-pid. mud is a districtType, not a second family.
+      specialDistrictFact,
+      // rrc-pipeline-fact atom. Dual grammar on the parcel keys (writer
+      // stores bare parcelNodeId). Spatial attach is write-time, not a
+      // live texas-rrc overlay. Never copied off bake / CAD / GIS.
+      pipelineFact,
+      // well-fact atom. Dual grammar on the parcel PREFIX only; wellKey
+      // is the writer suffix. Spatial attach is write-time 152 m. Never
+      // copied off bake / CAD / GIS / texas-rrc / tx_rrc_well.
+      wellFact,
+      // building-footprint atom. Dual grammar on the parcel PREFIX only.
+      // structureRole is body.structureRole, never the :primary token.
+      // Spatial attach is write-time staged overlap. Never copied off
+      // bake / CAD / GIS / tx_building_footprint.
+      buildingFootprintFact,
+      // property-boundary-edge atom. Dual grammar on the parcel PREFIX
+      // only for :boundary: suffixes. Geometry is the atom body, never
+      // GIS parcel outline / txgio_parcel / bake ring.
+      boundaryEdgeFact,
+      // owner-fact atom. Dual grammar on the parcel PREFIX only; taxYear
+      // is the writer suffix. Identified session only. Anonymous is a
+      // typed refusal with no ownerName / mailing and no atoms SELECT.
+      // Never copied off cad-parcel-roll / bake / cad_property / GIS.
+      ownerFact,
+      // Structural/CAMA layer (living_area_sqft, year_built). bulk_primary
+      // counties on stratmap-roll tier return lookup-failed; populated
+      // counties return present. Never upgrades lookup-failed in transit.
+      structuralFact,
     });
   },
 );
