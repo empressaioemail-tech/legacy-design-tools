@@ -96,10 +96,9 @@ describe("GET /score/registry", () => {
       unspecified: Array<{ railKey: string; unspecifiedReason: string; specOwner: string }>;
     };
 
-    // P-59 (2026-08-23): six former A-020 gaps are scoreable; only `mud`
-    // remains unspecified (script-shaped live rows, no checked-in spec).
+    // P-59 mud scorer (2026-08-23): all 14 rails scoreable; none unspecified.
     const unspecifiedKeys = payload.unspecified.map((u) => u.railKey);
-    expect(unspecifiedKeys).toEqual(["mud"]);
+    expect(unspecifiedKeys).toEqual([]);
     for (const railKey of [
       "roads",
       "footprint",
@@ -107,6 +106,7 @@ describe("GET /score/registry", () => {
       "rrc-wells",
       "rrc-pipelines",
       "rail-corridor",
+      "mud",
     ]) {
       expect(payload.scoreable, railKey).toContain(railKey);
     }
