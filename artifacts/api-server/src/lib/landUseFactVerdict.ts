@@ -33,9 +33,8 @@ export type LandUseFactVerdictInput = LandUseAtomMiss | {
 };
 
 function landUseFactAlreadyHasVerdict(landUseFact: LandUseFactVerdictInput): boolean {
-  return (
-    typeof landUseFact.verdict === "string" && landUseFact.verdict.trim().length > 0
-  );
+  const verdict = (landUseFact as { verdict?: unknown }).verdict;
+  return typeof verdict === "string" && verdict.trim().length > 0;
 }
 
 function landUseFactEligibleForZoningNotApplicable(
