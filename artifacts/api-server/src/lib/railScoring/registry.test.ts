@@ -95,11 +95,9 @@ describe("registry completeness", () => {
     }
   });
 
-  it("the six rails with zero live coverage rows are declared, not omitted", () => {
-    // Verified against the deployment store 2026-08-19: these six have zero
-    // rows in county_facet_coverage — 1,524 of 3,556 cells. `mud` is here
-    // too: it has 254 live rows written by a script that exists nowhere.
+  it("the six rails that had zero live coverage rows are now scoreable; only mud stays unspecified", () => {
     const declaredUnspecified = new Set(unspecifiedRails().map((r) => r.railKey));
+    expect(declaredUnspecified.has("mud")).toBe(true);
     for (const railKey of [
       "roads",
       "footprint",
@@ -108,7 +106,8 @@ describe("registry completeness", () => {
       "rrc-pipelines",
       "rail-corridor",
     ]) {
-      expect(declaredUnspecified.has(railKey), railKey).toBe(true);
+      expect(declaredUnspecified.has(railKey), railKey).toBe(false);
+      expect(railScoringRuleFor(railKey)?.kind, railKey).not.toBe("unspecified");
     }
   });
 

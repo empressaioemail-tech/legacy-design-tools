@@ -195,6 +195,34 @@ describe("an unspecified rail is refused, never scored as zero", () => {
   });
 });
 
+describe("layer applicability verdict (P-59)", () => {
+  it("not-applicable writes satisfied-absent, not a below-threshold not-yet gap", () => {
+    const score = scoreRailCell(
+      atomRule,
+      95,
+      measurement({
+        numerator: 0,
+        denominator: 1000,
+        sourcePresent: false,
+        applicabilityVerdict: "not-applicable",
+      }),
+    );
+    expect(score.railState).toBe("satisfied-absent");
+    expect(score.absenceBasis).toBe("layer-not-applicable");
+    expect(score.classification).not.toBe("true-source-gap");
+  });
+
+  it("zero coverage without applicability verdict stays not-yet (the gap shape)", () => {
+    const score = scoreRailCell(
+      atomRule,
+      95,
+      measurement({ numerator: 0, denominator: 1000, sourcePresent: false }),
+    );
+    expect(score.railState).toBe("not-yet");
+    expect(score.absenceBasis).toBeNull();
+  });
+});
+
 describe("facet equals rail key by construction", () => {
   it("takes the facet from the rule, so a hand-typed key cannot orphan a row", () => {
     // countyCoverageScoreCli.ts writes facet 'land-use' while the rail is

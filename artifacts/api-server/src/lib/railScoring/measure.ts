@@ -149,6 +149,27 @@ export async function readAtomCountForCounty(
 }
 
 /**
+ * Distinct parcel keys with at least one atom of the given type in the county.
+ * Strips the family suffix after the first `:`-delimited parcel key segment
+ * (e.g. `48021:34137:footprint:…` → `48021:34137`).
+ */
+export async function readDistinctParcelKeysWithAtoms(
+  atoms: RailScoreQueryable,
+  entityType: string,
+  countyFips: string,
+): Promise<number> {
+  const r = await atoms.query<{ n: string }>(
+    `SELECT count(DISTINCT split_part(entity_id, ':', 1) || ':' || split_part(entity_id, ':', 2))::text AS n
+       FROM atoms
+      WHERE entity_type = $1
+        AND entity_id >= $2
+        AND entity_id < $3`,
+    [entityType, countyFips, `${countyFips}￿`],
+  );
+  return Number(r.rows[0]?.n ?? 0);
+}
+
+/**
  * Run a declared absence probe. Returns a determination ONLY on a positive
  * finding (the source table is reachable for this county AND holds zero rows
  * for it). Everything else returns null, and null means "not established",
@@ -193,7 +214,11 @@ async function measureAtomCount(
     );
   }
   const den = await readParcelFeatureCount(ctx, countyFips);
-  const num = await readAtomCountForCounty(ctx.atoms, rule.entityType, countyFips);
+  const numeratorMode = rule.numeratorMode ?? "atom-count";
+  const num =
+    numeratorMode === "distinct-parcel-keys"
+      ? await readDistinctParcelKeysWithAtoms(ctx.atoms, rule.entityType, countyFips)
+      : await readAtomCountForCounty(ctx.atoms, rule.entityType, countyFips);
   const absence = den == null ? await runAbsenceProbe(rule, ctx.deployment, countyFips) : null;
   return {
     countyFips,
@@ -201,7 +226,7 @@ async function measureAtomCount(
     denominator: den?.features ?? null,
     sourcePresent: num > 0,
     source: `${rule.entityType}-atom-count`,
-    detail: `atoms:entity_type=${rule.entityType},table=${den?.table ?? "none"}`,
+    detail: `atoms:entity_type=${rule.entityType},numeratorMode=${numeratorMode},table=${den?.table ?? "none"}`,
     absence,
   };
 }
