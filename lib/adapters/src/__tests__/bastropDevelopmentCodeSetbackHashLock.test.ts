@@ -4,7 +4,7 @@
  * Engine and LDT must keep identical LF bytes of bastrop-development-code.json.
  *
  * Locked SHA256 (UTF-8, LF newlines, no BOM):
- *   e45ba0655c4c11b5c07fd5bcc1a09dbedf8e3d64c5b739b2a76fb59eec03398e
+ *   18b9bca9d166129bbefe0fce482fb97c40f6fe136a8f50b3e3b91b633143b56b
  *
  * Mirror test: hauska-engine/packages/adapters/src/__tests__/bastropDevelopmentCodeSetbackHashLock.test.ts
  */
@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 /** Canonical SHA256 of bastrop-development-code.json (LF). Keep in sync with engine lock. */
 export const BASTROP_DEVELOPMENT_CODE_SETBACK_SHA256 =
-  "e45ba0655c4c11b5c07fd5bcc1a09dbedf8e3d64c5b739b2a76fb59eec03398e";
+  "18b9bca9d166129bbefe0fce482fb97c40f6fe136a8f50b3e3b91b633143b56b";
 
 const TABLE_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
