@@ -9,6 +9,7 @@ import {
   countyFipsFromParcelNodeId,
   type LayerAbsenceWire,
 } from "./verdictLayerServe";
+import { absenceClassificationForEntityType } from "@workspace/instrument-registry";
 import { normalizeCadPropId } from "./parcelNodeId";
 
 export const STRUCTURAL_FACT_SOURCE = "structural-fact" as const;
@@ -50,6 +51,7 @@ export function structuralFactAbsentVerified(
       : countyFips === "48113"
         ? "dcad"
         : "county-appraisal-district";
+  const classification = absenceClassificationForEntityType("cad-parcel-roll");
   return {
     status: "absent",
     verdict: "absent-verified",
@@ -57,7 +59,9 @@ export function structuralFactAbsentVerified(
     scopeSearched,
     asOf,
     basis,
-    provenanceClass: "Record",
+    ...classification,
+    entityType: "cad-parcel-roll",
+    provenanceClass: classification.provenanceClass ?? "Record",
     source: STRUCTURAL_FACT_SOURCE,
   };
 }

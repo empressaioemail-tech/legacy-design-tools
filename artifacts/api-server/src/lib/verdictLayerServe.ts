@@ -5,6 +5,7 @@
  * Serve path never upgrades `lookup-failed` → `absent-verified`.
  */
 
+import { absenceClassificationForEntityType } from "@workspace/instrument-registry";
 import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { NO_ZONING_STAMP_REASON } from "./buildableEnvelope/absentZoningHonesty";
 import texasCountyRoster from "../../data/texas_county_roster_v1.json";
@@ -20,6 +21,8 @@ export const LAYER_ABSENCE_VERDICTS = [
 export type LayerAbsenceVerdict = (typeof LAYER_ABSENCE_VERDICTS)[number];
 
 export type LayerProvenanceClass = "Record" | "Observation" | "Derivation" | "Synthesis";
+export type LayerSubjectKind = "extensional" | "intensional";
+export type LayerChainAnchoring = "contemporaneous" | "backfill";
 
 /** Wire shape for a non-populated layer per doc 19 §Layer. */
 export interface LayerAbsenceWire {
@@ -30,6 +33,10 @@ export interface LayerAbsenceWire {
   asOf: string;
   basis: string;
   provenanceClass: LayerProvenanceClass;
+  subjectKind: LayerSubjectKind;
+  chainAnchoring: LayerChainAnchoring;
+  serveLayer: string;
+  entityType?: string;
 }
 
 /** Counties with bulk_primary=true in tx_cad_source_registry.json (2026-08-22). */
@@ -94,6 +101,7 @@ export function buildStructuralLookupFailedAbsence(
   tier: CadSourceTier = "stratmap-roll",
 ): LayerAbsenceWire {
   const authority = structuralLookupFailedAuthority(countyFips);
+  const classification = absenceClassificationForEntityType("cad-parcel-roll");
   return {
     status: "absent",
     verdict: "lookup-failed",
@@ -103,7 +111,9 @@ export function buildStructuralLookupFailedAbsence(
     basis:
       `registry bulk_primary=true; declared vintage tier=${tier}; ` +
       "CAMA bulk export undeclared",
-    provenanceClass: "Record",
+    ...classification,
+    entityType: "cad-parcel-roll",
+    provenanceClass: classification.provenanceClass ?? "Record",
   };
 }
 
@@ -167,6 +177,7 @@ export function isUnincorporatedNoZoningAuthorityShape(
 export function buildZoningNotApplicableAbsence(
   asOf: string = new Date().toISOString(),
 ): LayerAbsenceWire {
+  const classification = absenceClassificationForEntityType("zoning-fact");
   return {
     status: "absent",
     verdict: "not-applicable",
@@ -174,7 +185,9 @@ export function buildZoningNotApplicableAbsence(
     scopeSearched: "municipal zoning authority for parcel shape=unincorporated",
     asOf,
     basis: "shape predicate: no zoning authority exists for unincorporated land",
-    provenanceClass: "Record",
+    ...classification,
+    entityType: "zoning-fact",
+    provenanceClass: classification.provenanceClass ?? "Record",
   };
 }
 

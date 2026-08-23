@@ -66,6 +66,7 @@ export default defineConfig({
           "@workspace/codes-sources",
           "@workspace/integrations-anthropic-ai",
           "@workspace/api-zod",
+          "@workspace/instrument-registry",
           "@workspace/logger",
         ],
       },

@@ -231,6 +231,9 @@ importers:
       '@workspace/finding-engine':
         specifier: workspace:*
         version: link:../../lib/finding-engine
+      '@workspace/instrument-registry':
+        specifier: workspace:*
+        version: link:../../lib/instrument-registry
       '@workspace/integrations-anthropic-ai':
         specifier: workspace:*
         version: link:../../lib/integrations-anthropic-ai
@@ -1825,6 +1828,21 @@ importers:
       '@workspace/integrations-xai-grok':
         specifier: workspace:*
         version: link:../integrations-xai-grok
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@16.8.1)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@16.8.1)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  lib/instrument-registry:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

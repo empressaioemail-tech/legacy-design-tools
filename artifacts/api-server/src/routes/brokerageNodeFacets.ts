@@ -113,6 +113,7 @@ import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
 import {
   attachVerdictLayersToFacets,
 } from "../lib/structuralFactToFacetsWire";
+import { enrichFacetsResponseWithRegistry } from "@workspace/instrument-registry";
 import {
   authenticatedBrokerageUserId,
   extractBrokerageApiKey,
@@ -567,7 +568,8 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    res.json({
+    res.json(
+      enrichFacetsResponseWithRegistry({
       parcelNodeId,
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
@@ -620,6 +622,7 @@ brokerageNodeFacetsRouter.get(
       // counties on stratmap-roll tier return lookup-failed; populated
       // counties return present. Never upgrades lookup-failed in transit.
       structuralFact,
-    });
+      }),
+    );
   },
 );
