@@ -53,6 +53,7 @@ import { placeKeyFromCoords, roundPlaceCoord } from "../lib/placeLayerUtils";
 import { queryGisLayerGeoJson } from "../lib/brokerageGisLayers";
 import {
   resolveRooftopByAddress,
+  resolveRooftopAcrossCounties,
   resolveParcelBySitusDisambiguated,
   type SitusResolveOutcome,
 } from "../lib/txgioAddressResolve";
@@ -794,6 +795,20 @@ async function situsFirstPreResolve(input: {
 
   let point = explicitPoint;
   let geocode: Awaited<ReturnType<typeof geocodeAddress>> | null = null;
+  if (!point && address) {
+    // Authoritative StratMap rooftop BEFORE fuzzy geocode (Travis Simsbrook class).
+    try {
+      const rooftop = await resolveRooftopAcrossCounties({ address });
+      if (rooftop) {
+        point = { latitude: rooftop.latitude, longitude: rooftop.longitude };
+      }
+    } catch (err) {
+      input.log.warn(
+        { err, address, placeKey: input.placeKey },
+        "buildable-envelope: multi-county rooftop lookup failed; falling back to geocode",
+      );
+    }
+  }
   if (!point) {
     // Best-effort geocode ONLY for a disambiguation point + city/state. A
     // miss (or a service hiccup) must NOT abort â€” a unique situs resolves
