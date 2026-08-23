@@ -52,6 +52,10 @@ describe("verdictLayerServe", () => {
       verdict: "lookup-failed",
       authority: "tad",
       provenanceClass: "Record",
+      serveLayer: "cad",
+      chainAnchoring: "backfill",
+      subjectKind: "extensional",
+      entityType: "cad-parcel-roll",
     });
     expect(wire.basis).toContain("bulk_primary=true");
     expect(wire.basis).toContain("stratmap-roll");
@@ -79,10 +83,16 @@ describe("verdictLayerServe", () => {
     ).toBe(false);
   });
 
-  it("builds not-applicable zoning absence", () => {
+  it("builds not-applicable zoning absence with registry fields", () => {
     const wire = buildZoningNotApplicableAbsence("2026-08-22T00:00:00.000Z");
     expect(wire.verdict).toBe("not-applicable");
     expect(wire.authority).toBe("none");
+    expect(wire).toMatchObject({
+      provenanceClass: "Record",
+      serveLayer: "zoning",
+      entityType: "zoning-fact",
+      chainAnchoring: "backfill",
+    });
   });
 
   it("refuses lookup-failed → absent-verified upgrade", () => {
@@ -106,6 +116,9 @@ describe("verdictLayerServe", () => {
           asOf: "2026-08-22T00:00:00.000Z",
           basis: "x",
           provenanceClass: "Record",
+          subjectKind: "extensional",
+          chainAnchoring: "backfill",
+          serveLayer: "cad",
         },
         { priorVerdict: "lookup-failed" },
       ),

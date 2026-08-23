@@ -50,6 +50,13 @@ function layerAbsenceFromRecord(
       o.provenanceClass === "Synthesis"
         ? o.provenanceClass
         : "Record",
+    subjectKind:
+      o.subjectKind === "intensional" ? "intensional" : "extensional",
+    chainAnchoring:
+      o.chainAnchoring === "contemporaneous" ? "contemporaneous" : "backfill",
+    serveLayer: typeof o.serveLayer === "string" ? o.serveLayer : "cad",
+    entityType:
+      typeof o.entityType === "string" ? o.entityType : "cad-parcel-roll",
   };
 }
 
