@@ -77,6 +77,9 @@
     },
     {
       "path": "./lib/cad-ingest"
+    },
+    {
+      "path": "./lib/instrument-registry"
     }
   ]
 }

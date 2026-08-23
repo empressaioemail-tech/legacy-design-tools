@@ -195,7 +195,7 @@ export function withServeClassificationForSource<
 export function enrichFacetsResponseWithRegistry<
   T extends Record<string, unknown>,
 >(response: T): T {
-  const out = { ...response };
+  const out: Record<string, unknown> = { ...response };
   for (const [slot, entityType] of Object.entries(FACET_SLOT_TO_ENTITY_TYPE)) {
     const fact = out[slot];
     if (fact && typeof fact === "object" && !Array.isArray(fact)) {
@@ -212,7 +212,7 @@ export function enrichFacetsResponseWithRegistry<
       );
     }
   }
-  return out;
+  return out as T;
 }
 
 function inferRoadAdapterKey(fact: Record<string, unknown>): string | null {
