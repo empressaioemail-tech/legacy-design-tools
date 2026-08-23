@@ -66,6 +66,7 @@ export interface SetbackDistrict {
 export interface SetbackTable {
   jurisdictionKey: string;
   jurisdictionDisplayName: string;
+  effectiveDate?: string;
   /** Optional context note for fallback / statewide-default tables. */
   note?: string;
   districts: SetbackDistrict[];

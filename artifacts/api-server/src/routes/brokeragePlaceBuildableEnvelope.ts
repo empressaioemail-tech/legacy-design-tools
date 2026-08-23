@@ -32,10 +32,6 @@ import {
   type Response,
 } from "express";
 import { z } from "zod";
-import {
-  getSetbackTableForZoning,
-  type SetbackTable,
-} from "@workspace/adapters";
 import { keyFromEngagementOrSynthesize } from "@workspace/codes";
 import {
   wrapEngineEnvelope,
@@ -70,10 +66,17 @@ import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
 import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
 import {
+  fetchPropertyAtomChain,
+  type PropertyAtomChainWire,
+} from "../lib/buildableEnvelope/fetchPropertyAtomChain";
+import {
+  resolveAuthoritativeSetbacks,
+  type AuthoritativeSetbackResolution,
+} from "../lib/buildableEnvelope/authoritativeSetbackSource";
+import {
   labelEdges,
   type RoadCandidate,
 } from "../lib/buildableEnvelope/edgeLabeling";
-import { mapDistrict } from "../lib/buildableEnvelope/districtMapping";
 import { fetchNearbyRoads, namedRoadsToCandidates } from "../lib/buildableEnvelope/roads";
 import {
   resolveSpineZoningWhenGisAbsent,
@@ -83,247 +86,6 @@ import {
 import type { Ring } from "../lib/buildableEnvelope/geometry";
 
 export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
-
-const DEFAULT_RETRIEVAL =
-  "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
-
-async function tryServeAtomChainEnvelope(args: {
-  res: Response;
-  ctx: EnvelopeContext;
-  parcelNodeId: string | null;
-  parcel: {
-    apn: string | null;
-    situsAddress: string | null;
-    zoningCode: string | null;
-    parcelNodeId: string | null;
-    ring: Ring;
-  };
-  provider: string | null;
-}): Promise<boolean> {
-  const { res, ctx, parcelNodeId, parcel, provider } = args;
-  if (!parcelNodeId) return false;
-  const baseUrl = (
-    process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
-    process.env.RETRIEVAL_API_URL?.trim() ||
-    DEFAULT_RETRIEVAL
-  ).replace(/\/$/, "");
-  const key =
-    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
-    process.env.RETRIEVAL_API_KEY?.trim();
-  if (!key) return false;
-
-  type AtomChainWire = {
-    zoningFact?: {
-      district?: string | null;
-      absence?: { kind?: string } | null;
-      /**
-       * Hauska property atom DID for the zoning fact, once the
-       * hauska-engine atom-chain wire enrichment (feat/atom-chain-wire-dids,
-       * separate repo) ships it. Absent on today's wire — optional/additive.
-       */
-      atomDid?: string | null;
-    } | null;
-    setbackRule?: {
-      front?: number;
-      side?: number;
-      rear?: number;
-      districtCode?: string | null;
-      /** See zoningFact.atomDid — same not-yet-shipped DID enrichment. */
-      atomDid?: string | null;
-    } | null;
-    buildableEnvelope?: {
-      outcome?: { kind?: string; areaSqFt?: number } | null;
-      readContract?: {
-        axes?: { assertedConfidence?: { estimate?: number } };
-      } | null;
-      /** See zoningFact.atomDid — same not-yet-shipped DID enrichment. */
-      atomDid?: string | null;
-    } | null;
-    /**
-     * Adopted-code sections backing this envelope derivation, once the wire
-     * carries them with DIDs. Absent on today's wire — optional/additive.
-     */
-    codeSections?: Array<{
-      atomDid?: string | null;
-      sectionNumber?: string | null;
-      title?: string | null;
-    }> | null;
-  };
-  let chain: AtomChainWire | null = null;
-  try {
-    const upstream = await fetch(
-      `${baseUrl}/property-nodes/${encodeURIComponent(parcelNodeId)}/atom-chain`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          Accept: "application/json",
-        },
-      },
-    );
-    if (!upstream.ok) return false;
-    chain = (await upstream.json()) as AtomChainWire;
-  } catch {
-    return false;
-  }
-  if (!chain?.buildableEnvelope?.outcome) return false;
-
-  const outcome = chain.buildableEnvelope.outcome;
-  const rule = chain.setbackRule;
-  let absenceKind = chain.zoningFact?.absence?.kind;
-  let district =
-    typeof chain.zoningFact?.district === "string"
-      ? chain.zoningFact.district
-      : typeof rule?.districtCode === "string"
-        ? rule.districtCode
-        : null;
-  let spineProvenance: SpineZoningResolution | null = null;
-
-  const gisZoningBlank =
-    !parcel.zoningCode || !String(parcel.zoningCode).trim();
-  if (
-    gisZoningBlank &&
-    (!district || absenceKind === "no-zoning-stamp")
-  ) {
-    spineProvenance = await resolveSpineZoningWhenGisAbsent(
-      parcelNodeId,
-      parcel.zoningCode,
-    );
-    if (spineProvenance) {
-      district = spineProvenance.district;
-      absenceKind = undefined;
-    }
-  }
-  const estimate =
-    chain.buildableEnvelope.readContract?.axes?.assertedConfidence?.estimate;
-  const confidenceValue =
-    typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
-
-  let status: "ok" | "no-buildable-area" | "declined" = "ok";
-  if (absenceKind === "no-zoning-stamp") status = "declined";
-  else if (outcome.kind === "no-buildable-area") status = "no-buildable-area";
-  else if (outcome.kind !== "buildable") status = "declined";
-
-  const honesty: EngineHonesty = {
-    confidence: { value: confidenceValue, kind: "asserted" },
-    dataVintage: new Date().toISOString().slice(0, 10),
-    coverage: {
-      degraded: true,
-      reason: spineProvenance
-        ? spineZoningProvenanceNote(spineProvenance)
-        : "Served from property atom-chain readContract (not cortex multiply).",
-    },
-    source: {
-      adapter: spineProvenance
-        ? `brokerage:buildable-envelope:atom-chain+${spineProvenance.source}`
-        : "brokerage:buildable-envelope:atom-chain",
-      citationIds: [],
-    },
-  };
-
-  // Optional additive provenance: populated only from atom-chain wire fields
-  // that are actually present. The hauska-engine wire enrichment that adds
-  // these DIDs (feat/atom-chain-wire-dids) ships separately from this repo —
-  // until it deploys, every sub-field (and the whole block) is simply
-  // omitted, never emitted as null/empty placeholders.
-  const zoningAtomDid = chain.zoningFact?.atomDid;
-  const setbackAtomDid = rule?.atomDid;
-  const envelopeAtomDid = chain.buildableEnvelope?.atomDid;
-  const codeSectionRefs = (chain.codeSections ?? [])
-    .filter(
-      (s): s is { atomDid: string; sectionNumber: string; title?: string | null } =>
-        typeof s?.atomDid === "string" &&
-        s.atomDid.length > 0 &&
-        typeof s.sectionNumber === "string" &&
-        s.sectionNumber.length > 0,
-    )
-    .map((s) => ({
-      atomDid: s.atomDid,
-      sectionNumber: s.sectionNumber,
-      ...(typeof s.title === "string" && s.title ? { title: s.title } : {}),
-    }));
-
-  type ProvenanceRefs = {
-    zoning?: { atomDid: string };
-    setback?: { atomDid: string };
-    envelope?: { atomDid: string };
-    codeSections?: Array<{
-      atomDid: string;
-      sectionNumber: string;
-      title?: string;
-    }>;
-  };
-  const builtProvenanceRefs: ProvenanceRefs = {};
-  if (typeof zoningAtomDid === "string" && zoningAtomDid) {
-    builtProvenanceRefs.zoning = { atomDid: zoningAtomDid };
-  }
-  if (typeof setbackAtomDid === "string" && setbackAtomDid) {
-    builtProvenanceRefs.setback = { atomDid: setbackAtomDid };
-  }
-  if (typeof envelopeAtomDid === "string" && envelopeAtomDid) {
-    builtProvenanceRefs.envelope = { atomDid: envelopeAtomDid };
-  }
-  if (codeSectionRefs.length > 0) {
-    builtProvenanceRefs.codeSections = codeSectionRefs;
-  }
-  const provenanceRefs: ProvenanceRefs | undefined =
-    Object.keys(builtProvenanceRefs).length > 0 ? builtProvenanceRefs : undefined;
-
-  res.status(200).json(
-    withPlace(
-      {
-        status,
-        ...(provenanceRefs ? { provenanceRefs } : {}),
-        ...(status === "declined"
-          ? {
-              declineReason:
-                absenceKind === "no-zoning-stamp"
-                  ? NO_ZONING_STAMP_REASON
-                  : "atom_path_pending",
-            }
-          : {}),
-        layer: "buildable-envelope",
-        parcel_node_id: parcelNodeId,
-        atomPath: "atom-chain",
-        setbacks:
-          rule &&
-          typeof rule.front === "number" &&
-          typeof rule.side === "number" &&
-          typeof rule.rear === "number"
-            ? {
-                front_ft: rule.front,
-                side_ft: rule.side,
-                rear_ft: rule.rear,
-                district,
-              }
-            : undefined,
-        buildableAreaSqFt:
-          typeof outcome.areaSqFt === "number" ? outcome.areaSqFt : undefined,
-        ...wrapEngineEnvelope(
-          {
-            geojson: { type: "FeatureCollection", features: [] },
-            district,
-            approximate: true,
-            empty: status !== "ok",
-            citationUrl: "",
-            parcel: {
-              apn: parcel.apn,
-              situsAddress: parcel.situsAddress,
-              zoningCode: parcel.zoningCode,
-              parcel_node_id: parcelNodeId,
-              provider,
-              notSurveyGrade: true,
-            },
-          },
-          honesty,
-        ),
-        readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
-      },
-      ctx,
-    ),
-  );
-  return true;
-}
 
 const PLACE_KEY_PARAM = z.string().min(1);
 const POST_BODY = z
@@ -1066,6 +828,188 @@ async function handleBuildableEnvelope(
   await deriveAndRespond({ req, res, ctx, parcelGeo, skipRoad, log });
 }
 
+async function deriveLabelAndRespond(args: {
+  res: Response;
+  ctx: EnvelopeContext;
+  parcel: {
+    apn: string | null;
+    situsAddress: string | null;
+    zoningCode: string | null;
+    parcelNodeId: string | null;
+    ring: Ring;
+  };
+  parcelGeo: { geojson: unknown; provider: string | null };
+  skipRoad: boolean;
+  parcelNodeId: string | null;
+  effectiveZoningCode: string;
+  resolved: AuthoritativeSetbackResolution;
+  atomChain: PropertyAtomChainWire | null;
+  spineZoning: SpineZoningResolution | null;
+}): Promise<void> {
+  const {
+    res,
+    ctx,
+    parcel,
+    parcelGeo,
+    skipRoad,
+    parcelNodeId,
+    effectiveZoningCode,
+    resolved,
+    atomChain,
+    spineZoning,
+  } = args;
+
+  const hasPoint = ctx.hasPoint !== false;
+  let roads: RoadCandidate[] = [];
+  if (!skipRoad && hasPoint) {
+    roads = namedRoadsToCandidates(
+      await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng }),
+    );
+  }
+  const labeling = labelEdges({
+    ring: parcel.ring,
+    roads,
+    refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
+    situsAddress: parcel.situsAddress,
+  });
+  if (!labeling) {
+    res.status(422).json(
+      withPlace(
+        {
+          status: "ungeometric-parcel",
+          reason: "Parcel geometry is not a usable polygon for envelope derivation.",
+          parcel_node_id: parcelNodeId,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  const derived = deriveBuildableEnvelope({
+    ring: parcel.ring,
+    table: resolved.table,
+    district: resolved.district,
+    labeling,
+  });
+
+  const estimate =
+    atomChain?.buildableEnvelope?.readContract?.axes?.assertedConfidence
+      ?.estimate;
+  const confidenceValue =
+    typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
+
+  const provenanceNote = spineZoning
+    ? spineZoningProvenanceNote(spineZoning)
+    : `Setbacks from ${resolved.sourceKind} (${resolved.sourceLabel}, effective ${resolved.effectiveDate}). Geometry from labelEdges+derive (map/export parity).`;
+
+  const honesty: EngineHonesty = {
+    confidence: { value: confidenceValue, kind: "asserted" },
+    dataVintage: new Date().toISOString().slice(0, 10),
+    coverage: {
+      degraded: true,
+      reason: derived.approximate
+        ? `${provenanceNote} Geometry approximate — verify with survey + city.`
+        : provenanceNote,
+    },
+    source: {
+      adapter: spineZoning
+        ? `brokerage:buildable-envelope:derive+${spineZoning.source}`
+        : `brokerage:buildable-envelope:derive+${resolved.sourceKind}`,
+      citationIds: derived.citationUrl ? [derived.citationUrl] : [],
+    },
+  };
+
+  const wireStatus = derived.empty ? "no-buildable-area" : "ok";
+
+  const zoningAtomDid = atomChain?.zoningFact?.atomDid;
+  const setbackAtomDid = atomChain?.setbackRule?.atomDid;
+  const envelopeAtomDid = atomChain?.buildableEnvelope?.atomDid;
+  const codeSectionRefs = (atomChain?.codeSections ?? [])
+    .filter(
+      (s): s is { atomDid: string; sectionNumber: string; title?: string | null } =>
+        typeof s?.atomDid === "string" &&
+        s.atomDid.length > 0 &&
+        typeof s.sectionNumber === "string" &&
+        s.sectionNumber.length > 0,
+    )
+    .map((s) => ({
+      atomDid: s.atomDid,
+      sectionNumber: s.sectionNumber,
+      ...(typeof s.title === "string" && s.title ? { title: s.title } : {}),
+    }));
+  type ProvenanceRefs = {
+    zoning?: { atomDid: string };
+    setback?: { atomDid: string };
+    envelope?: { atomDid: string };
+    codeSections?: Array<{
+      atomDid: string;
+      sectionNumber: string;
+      title?: string;
+    }>;
+  };
+  const builtProvenanceRefs: ProvenanceRefs = {};
+  if (typeof zoningAtomDid === "string" && zoningAtomDid) {
+    builtProvenanceRefs.zoning = { atomDid: zoningAtomDid };
+  }
+  if (typeof setbackAtomDid === "string" && setbackAtomDid) {
+    builtProvenanceRefs.setback = { atomDid: setbackAtomDid };
+  }
+  if (typeof envelopeAtomDid === "string" && envelopeAtomDid) {
+    builtProvenanceRefs.envelope = { atomDid: envelopeAtomDid };
+  }
+  if (codeSectionRefs.length > 0) {
+    builtProvenanceRefs.codeSections = codeSectionRefs;
+  }
+  const provenanceRefs: ProvenanceRefs | undefined =
+    Object.keys(builtProvenanceRefs).length > 0 ? builtProvenanceRefs : undefined;
+
+  res.status(200).json(
+    withPlace(
+      {
+        status: wireStatus,
+        layer: "buildable-envelope",
+        parcel_node_id: parcelNodeId,
+        derivePath: "labelEdges+derive",
+        setbackSource: resolved.sourceKind,
+        effectiveZoningCode,
+        ...(provenanceRefs ? { provenanceRefs } : {}),
+        ...(spineZoning ? { spineZoningSource: spineZoning.source } : {}),
+        setbacks: {
+          front_ft: resolved.scalars.front_ft,
+          side_ft: resolved.scalars.side_ft,
+          rear_ft: resolved.scalars.rear_ft,
+          ...(typeof resolved.scalars.side_corner_ft === "number"
+            ? { side_corner_ft: resolved.scalars.side_corner_ft }
+            : {}),
+          district: effectiveZoningCode,
+        },
+        ...wrapEngineEnvelope(
+          {
+            geojson: derived.geojson,
+            district: derived.district,
+            approximate: derived.approximate,
+            empty: derived.empty,
+            citationUrl: derived.citationUrl,
+            parcel: {
+              apn: parcel.apn,
+              situsAddress: parcel.situsAddress,
+              zoningCode: parcel.zoningCode,
+              effectiveZoningCode,
+              parcel_node_id: parcelNodeId,
+              provider: parcelGeo.provider ?? null,
+              notSurveyGrade: true,
+            },
+          },
+          honesty,
+        ),
+        readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+      },
+      ctx,
+    ),
+  );
+}
+
 /**
  * Shared derivation tail: given a resolved parcel `parcelGeo` (from EITHER
  * the authoritative situs path or the point pin-query) plus the context,
@@ -1108,24 +1052,27 @@ async function deriveAndRespond(args: {
   // response below so the map can snap + glow regardless of envelope outcome.
   const parcelNodeIdValue: string | null = parcel.parcelNodeId;
 
-  // Anti-zombie (Master WDLL 3.7 / I-A): this cortex route no longer computes
-  // product envelope confidence via labelingÃ—district multiply. Serve from the
-  // retrieval atom-chain when available; otherwise honest-decline.
-  const atomServed = await tryServeAtomChainEnvelope({
-    res,
-    ctx,
-    parcelNodeId: parcelNodeIdValue,
-    parcel,
-    provider: parcelGeo.provider ?? null,
-  });
-  if (atomServed) return;
+  const atomChain = parcelNodeIdValue
+    ? await fetchPropertyAtomChain(parcelNodeIdValue)
+    : null;
 
   const gisZoning = (parcel.zoningCode ?? "").trim();
-  const spineZoning = gisZoning
+  let spineZoning: SpineZoningResolution | null = gisZoning
     ? null
     : await resolveSpineZoningWhenGisAbsent(parcelNodeIdValue, parcel.zoningCode);
 
-  if (!gisZoning && !spineZoning) {
+  const effectiveZoningCode =
+    gisZoning ||
+    spineZoning?.district ||
+    (typeof atomChain?.zoningFact?.district === "string"
+      ? atomChain.zoningFact.district
+      : null) ||
+    (typeof atomChain?.setbackRule?.districtCode === "string"
+      ? atomChain.setbackRule.districtCode
+      : null) ||
+    "";
+
+  if (!effectiveZoningCode.trim()) {
     const honesty: EngineHonesty = {
       confidence: { value: 0, kind: "asserted" },
       dataVintage: new Date().toISOString().slice(0, 10),
@@ -1176,142 +1123,28 @@ async function deriveAndRespond(args: {
     return;
   }
 
-  if (gisZoning && !spineZoning) {
-    const honesty: EngineHonesty = {
-      confidence: { value: 0, kind: "asserted" },
-      dataVintage: new Date().toISOString().slice(0, 10),
-      coverage: {
-        degraded: true,
-        reason:
-          "Buildable envelope product path is the property atom chain. Cortex multiply path retired (anti-zombie).",
-      },
-      source: {
-        adapter: "brokerage:buildable-envelope",
-        citationIds: [],
-      },
-    };
-
-    res.status(200).json(
-      withPlace(
-        {
-          status: "declined",
-          declineReason: "atom_path_pending",
-          layer: "buildable-envelope",
-          parcel_node_id: parcelNodeIdValue,
-          ...wrapEngineEnvelope(
-            {
-              geojson: {
-                type: "FeatureCollection",
-                features: [],
-              },
-              district: null,
-              approximate: true,
-              empty: true,
-              citationUrl: "",
-              parcel: {
-                apn: parcel.apn,
-                situsAddress: parcel.situsAddress,
-                zoningCode: parcel.zoningCode,
-                parcel_node_id: parcelNodeIdValue,
-                provider: parcelGeo.provider ?? null,
-                notSurveyGrade: true,
-              },
-            },
-            honesty,
-          ),
-          readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  await deriveGeometryFromSpineZoning({
-    res,
-    ctx,
-    parcel,
-    parcelGeo,
-    skipRoad,
-    spineZoning: spineZoning!,
-    parcelNodeId: parcelNodeIdValue,
-  });
-}
-
-/**
- * Geometry-only derive when GIS `zoningCode` is absent but the spine (baked
- * facets or atom-chain zoningFact) carries a district. Product confidence
- * stays asserted baseline — never cortex multiply.
- */
-async function deriveGeometryFromSpineZoning(args: {
-  res: Response;
-  ctx: EnvelopeContext;
-  parcel: {
-    apn: string | null;
-    situsAddress: string | null;
-    zoningCode: string | null;
-    parcelNodeId: string | null;
-    ring: Ring;
-  };
-  parcelGeo: { geojson: unknown; provider: string | null };
-  skipRoad: boolean;
-  spineZoning: SpineZoningResolution;
-  parcelNodeId: string | null;
-}): Promise<void> {
-  const { res, ctx, parcel, parcelGeo, skipRoad, spineZoning, parcelNodeId } =
-    args;
-
   const situsCityState = cityStateFromSitus(parcel.situsAddress);
   const jurisdictionKey = keyFromEngagementOrSynthesize({
     jurisdictionCity: ctx.city ?? situsCityState.city,
     jurisdictionState: ctx.state ?? situsCityState.state,
     address: ctx.address ?? undefined,
   });
-  const effectiveZoningCode = spineZoning.district;
-  const table: SetbackTable | null = jurisdictionKey
-    ? getSetbackTableForZoning(jurisdictionKey, effectiveZoningCode)
-    : null;
-  if (!table) {
-    res.status(404).json(
-      withPlace(
-        {
-          status: "no-setbacks",
-          reason:
-            "No codified setback table for this jurisdiction yet, so a buildable envelope can't be derived.",
-          jurisdictionKey: jurisdictionKey ?? null,
-          parcel_node_id: parcelNodeId,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-  if (!table.districts.length) {
-    res.status(200).json(
-      withPlace(
-        {
-          status: "pending",
-          reason:
-            table.note ??
-            "Setback table for this jurisdiction is pending onboarding.",
-          jurisdictionKey,
-          parcel_node_id: parcelNodeId,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
 
-  const district = mapDistrict(table, effectiveZoningCode);
-  if (!district || district.kind === "fallback-conservative") {
+  const resolved = resolveAuthoritativeSetbacks({
+    jurisdictionKey,
+    districtCode: effectiveZoningCode,
+    atomRule: atomChain?.setbackRule ?? null,
+  });
+
+  if (!resolved) {
     res.status(404).json(
       withPlace(
         {
           status: "no-district",
           reason:
-            "Spine zoning district did not match a setback table row (not invented).",
-          parcel_node_id: parcelNodeId,
+            "No authoritative setback source covers this district — geometry not derived.",
+          jurisdictionKey: jurisdictionKey ?? null,
+          parcel_node_id: parcelNodeIdValue,
         },
         ctx,
       ),
@@ -1319,91 +1152,18 @@ async function deriveGeometryFromSpineZoning(args: {
     return;
   }
 
-  const hasPoint = ctx.hasPoint !== false;
-  let roads: RoadCandidate[] = [];
-  if (!skipRoad && hasPoint) {
-    roads = namedRoadsToCandidates(
-      await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng }),
-    );
-  }
-  const labeling = labelEdges({
-    ring: parcel.ring,
-    roads,
-    refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
-    situsAddress: parcel.situsAddress,
+  await deriveLabelAndRespond({
+    res,
+    ctx,
+    parcel,
+    parcelGeo,
+    skipRoad,
+    parcelNodeId: parcelNodeIdValue,
+    effectiveZoningCode,
+    resolved,
+    atomChain,
+    spineZoning,
   });
-  if (!labeling) {
-    res.status(422).json(
-      withPlace(
-        {
-          status: "ungeometric-parcel",
-          reason: "Parcel geometry is not a usable polygon for envelope derivation.",
-          parcel_node_id: parcelNodeId,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  const derived = deriveBuildableEnvelope({
-    ring: parcel.ring,
-    table,
-    district,
-    labeling,
-  });
-
-  const provenanceNote = spineZoningProvenanceNote(spineZoning);
-  const honesty: EngineHonesty = {
-    confidence: { value: 0, kind: "asserted" },
-    dataVintage: new Date().toISOString().slice(0, 10),
-    coverage: {
-      degraded: true,
-      reason: derived.approximate
-        ? `${provenanceNote} Geometry approximate — verify with survey + city.`
-        : provenanceNote,
-    },
-    source: {
-      adapter: `brokerage:buildable-envelope:spine-${spineZoning.source}`,
-      citationIds: derived.citationUrl ? [derived.citationUrl] : [],
-    },
-  };
-
-  const wireStatus = derived.empty ? "no-buildable-area" : "ok";
-
-  res.status(200).json(
-    withPlace(
-      {
-        status: wireStatus,
-        layer: "buildable-envelope",
-        parcel_node_id: parcelNodeId,
-        spineZoningSource: spineZoning.source,
-        effectiveZoningCode,
-        ...wrapEngineEnvelope(
-          {
-            geojson: derived.geojson,
-            district: derived.district,
-            approximate: derived.approximate,
-            empty: derived.empty,
-            citationUrl: derived.citationUrl,
-            parcel: {
-              apn: parcel.apn,
-              situsAddress: parcel.situsAddress,
-              zoningCode: parcel.zoningCode,
-              effectiveZoningCode,
-              spineZoningSource: spineZoning.source,
-              parcel_node_id: parcelNodeId,
-              provider: parcelGeo.provider ?? null,
-              notSurveyGrade: true,
-            },
-          },
-          honesty,
-        ),
-        readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
-      },
-      ctx,
-    ),
-  );
 }
 
 brokeragePlaceBuildableEnvelopeRouter.get(
