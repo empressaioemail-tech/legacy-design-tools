@@ -2,7 +2,7 @@
  * Pure structural fact resolution (db-free) for tests and the async loader.
  */
 
-import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest/vintage";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import {
   BULK_PRIMARY_COUNTY_FIPS,
   buildStructuralLookupFailedAbsence,

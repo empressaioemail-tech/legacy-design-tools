@@ -3,7 +3,7 @@
  * {@link structuralFactResolve}.
  */
 
-import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest/vintage";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { db } from "@workspace/db";
 import {
   buildStructuralLookupFailedAbsence,

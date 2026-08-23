@@ -12,7 +12,7 @@ export type LivingAreaSqftLayerWire =
 export function structuralFactToLivingAreaWire(
   fact: StructuralFactRead,
 ): LivingAreaSqftLayerWire | null {
-  if (fact.state === "present") {
+  if ("state" in fact && fact.state === "present") {
     const sqft = fact.livingAreaSqft;
     if (typeof sqft === "number" && Number.isFinite(sqft) && sqft > 0) {
       return { status: "populated", value: sqft };

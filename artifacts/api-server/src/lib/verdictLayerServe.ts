@@ -5,10 +5,11 @@
  * Serve path never upgrades `lookup-failed` → `absent-verified`.
  */
 
-import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest/vintage";
-import type { CadSourceTier } from "@workspace/cad-ingest/tier";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { NO_ZONING_STAMP_REASON } from "./buildableEnvelope/absentZoningHonesty";
 import texasCountyRoster from "../../data/texas_county_roster_v1.json";
+
+type CadSourceTier = "cad-export" | "stratmap-roll";
 
 export const LAYER_ABSENCE_VERDICTS = [
   "absent-verified",

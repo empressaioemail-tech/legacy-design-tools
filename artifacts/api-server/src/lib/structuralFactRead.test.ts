@@ -15,7 +15,7 @@ describe("resolveStructuralFactRead", () => {
       source: "structural-fact",
       authority: "tad",
     });
-    expect(read.basis).toContain("bulk_primary=true");
+    expect("basis" in read && read.basis).toContain("bulk_primary=true");
   });
 
   it("returns present when CAD row carries living_area_sqft", () => {
@@ -54,7 +54,7 @@ describe("resolveStructuralFactRead", () => {
       authority: "dcad",
       source: "structural-fact",
     });
-    expect(read.basis).toContain("bulk_primary=true");
+    expect("basis" in read && read.basis).toContain("bulk_primary=true");
   });
 
   it("never emits absent-verified when lookupFailed is true", () => {
