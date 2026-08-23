@@ -346,11 +346,11 @@ describe("POST /place/buildable-envelope", () => {
     expect(res.body.payload.approximate).toBe(true);
   });
 
-  it("derives from baked P-5 when GIS zoningCode is null (R0.2)", async () => {
+  it("derives from baked SF-1 when GIS zoningCode is null (R0.2)", async () => {
     parcelZoning = null;
     parcelNodeIdStamped = "48021:33512";
     resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
-      district: "P-5",
+      district: "SF-1",
       source: "baked-snapshot",
       snapshotAt: "2026-07-20T12:00:00.000Z",
     });
@@ -359,7 +359,7 @@ describe("POST /place/buildable-envelope", () => {
     expect(res.body.declineReason).not.toBe("no-zoning-stamp");
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
     expect(res.body.spineZoningSource).toBe("baked-snapshot");
-    expect(res.body.effectiveZoningCode).toBe("P-5");
+    expect(res.body.effectiveZoningCode).toBe("SF-1");
     expect(res.body.payload.district).toBeTruthy();
     expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
     expect(res.body.coverage.reason).toContain("baked node-facet snapshot");

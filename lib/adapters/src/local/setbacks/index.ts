@@ -35,6 +35,7 @@ import libertyHillTx from "./liberty-hill-tx.json" with { type: "json" };
 import lockhartTx from "./lockhart-tx.json" with { type: "json" };
 import taylorTx from "./taylor-tx.json" with { type: "json" };
 import bastropCityTx from "./bastrop-city-tx.json" with { type: "json" };
+import bastropDevelopmentCode from "./bastrop-development-code.json" with { type: "json" };
 import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
@@ -114,7 +115,12 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "liberty-hill-tx": libertyHillTx as SetbackTable,
   "lockhart-tx": lockhartTx as SetbackTable,
   "taylor-tx": taylorTx as SetbackTable,
+  // Historical B3 Place Type rows (REPEALED by Ord. 2026-06 / 2026-04-14).
+  // Kept for C1 hash-lock + archival getSetbackTable("bastrop-city-tx") only.
+  // getSetbackTableForZoning MUST NOT serve these as current law (WDLL STEP 3).
   "bastrop-city-tx": bastropCityTx as SetbackTable,
+  // CURRENT City of Bastrop Euclidean setbacks (BDC Sec. 14.02.003 / Ord. 2026-06).
+  "bastrop-development-code": bastropDevelopmentCode as SetbackTable,
   "san-antonio-tx": sanAntonioTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
@@ -132,6 +138,46 @@ function normalizeJurisdictionKey(key: string): string {
   return key.toLowerCase().replace(/_/g, "-");
 }
 
+/** Repealed B3 Place Types — must not be served as current setback law. */
+function isRepealedB3PlaceType(code: string): boolean {
+  return (
+    /^P-[1-5](?:$|[-_\s])/.test(code) ||
+    /^P-(?:CS|EC)(?:$|[-_\s])/.test(code)
+  );
+}
+
+/** BDC districts whose scalars live on layer 23 only (not ordinance chart). */
+function isBdcPerParcelDistrictCode(code: string): boolean {
+  return (
+    /^(MU|GC|PDD|PI|IND|OS)(?:$|[-_\s])/.test(code) ||
+    /^P\/OS(?:$|[-_\s])/.test(code) ||
+    /^P-OS(?:$|[-_\s])/.test(code)
+  );
+}
+
+/** BDC Euclidean districts with ordinance-text scalar rows in bastrop-development-code. */
+function isBdcEuclideanCode(code: string): boolean {
+  return /^(SF-[123]|RR)(?:$|[-_\s])/.test(code);
+}
+
+/**
+ * Any known BDC Chapter 14 district stamp (Euclidean + conditional).
+ * Conditional codes (MU/GC/…) route to the BDC table so callers
+ * honest-decline on the missing row (CORRECTION C) instead of falling
+ * through to the legacy bastrop-tx county table.
+ */
+function isKnownBdcDistrictCode(code: string): boolean {
+  return isBdcEuclideanCode(code) || isBdcPerParcelDistrictCode(code);
+}
+
+function isBastropCityJurisdiction(normalizedKey: string): boolean {
+  return (
+    normalizedKey === "bastrop-tx" ||
+    normalizedKey === "bastrop-city-tx" ||
+    normalizedKey === "bastrop-development-code"
+  );
+}
+
 /**
  * Returns the setback table for a jurisdiction key, or null if no table
  * exists. The briefing engine should treat null as "no codified
@@ -143,14 +189,17 @@ export function getSetbackTable(jurisdictionKey: string): SetbackTable | null {
 }
 
 /**
- * Resolve the table applicable to a parcel's stamped zoning code.
+ * Resolve the table for a parcel's stamped zoning code.
  *
- * Bastrop's legacy corpus key is `bastrop-tx`, but the live city GIS stamps
- * B3 PlaceTypeClass codes (P-1 through P-5, P-CS, P-EC, and PDD). Those are not conventional
- * `bastrop-tx` districts: they require lot, frontage, and building-type facts
- * the scalar envelope model does not have. Route those codes to the cited
- * `bastrop-city-tx` honest-empty table rather than falling back to a legacy
- * conventional district and drawing an invented envelope.
+ * City of Bastrop (current law = BDC Sec. 14.02.003, WDLL STEP 3):
+ *   - SF-1 / SF-2 / SF-3 / RR → bastrop-development-code (ordinance scalars).
+ *   - MU / GC / PDD (layer 23 only): route to bastrop-development-code but
+ *     chart has no rows → mapDistrict honest-decline.
+ *   - Repealed B3 Place Types (P-1..P-5, P-CS, P-EC) → null
+ *     (honest-decline). Do NOT silently serve bastrop-city-tx as current.
+ *
+ * County / other jurisdictions: fall through to the keyed table
+ * (e.g. bastrop-tx legacy R-MD rows for non-city codes).
  */
 export function getSetbackTableForZoning(
   jurisdictionKey: string,
@@ -158,14 +207,24 @@ export function getSetbackTableForZoning(
 ): SetbackTable | null {
   const normalized = normalizeJurisdictionKey(jurisdictionKey);
   const code = (zoningCode ?? "").trim().toUpperCase();
-  if (
-    normalized === "bastrop-tx" &&
-    (/^P-[1-5](?:$|[-_\s])/.test(code) ||
-      /^P-(?:CS|EC)(?:$|[-_\s])/.test(code) ||
-      /^PDD(?:$|[-_\s])/.test(code))
-  ) {
-    return SETBACK_TABLES["bastrop-city-tx"] ?? null;
+
+  if (isBastropCityJurisdiction(normalized)) {
+    if (code && isRepealedB3PlaceType(code)) {
+      return null;
+    }
+
+    // County-only legacy codes (R-MD, etc.) on bastrop-tx key — not city BDC.
+    if (
+      normalized === "bastrop-tx" &&
+      code &&
+      !isKnownBdcDistrictCode(code)
+    ) {
+      return SETBACK_TABLES["bastrop-tx"] ?? null;
+    }
+
+    return SETBACK_TABLES["bastrop-development-code"] ?? null;
   }
+
   return SETBACK_TABLES[normalized] ?? null;
 }
 
