@@ -19,11 +19,22 @@
  *            is a SHORT edge (lots are deeper than wide); we pick the shorter
  *            of the two "end" edges. LOW confidence — flagged approximate.
  *
- * Sides/rear, once the front is chosen: the edge "opposite" the front (most
- * anti-parallel, farthest) is the REAR; everything else is a SIDE. Corner lots
- * (parcel touches 2+ distinct NAMED street frontages) label a second street
- * edge as side_corner and apply the street-side setback there. Unresolved
- * corners are disclosed honestly — never fabricate a second frontage.
+ * GROUPING (WDLL P-60b item 3): GIS parcel rings digitize a curved street
+ * frontage as many short chords (observed: 7 segments with ~0.6° joints on
+ * 48453:280239) and a straight boundary as several collinear pieces. Labeling
+ * therefore operates on LOGICAL edges: contiguous runs of near-collinear ring
+ * edges grouped by turn angle at the shared vertex. Every member edge of a
+ * group receives the group's label, and the output stays aligned 1:1 with the
+ * ORIGINAL ring edges — grouping is a labeling-time view only; insetPerEdge
+ * still consumes one feet value per original edge.
+ *
+ * Sides/rear, once the front is chosen: the logical edge "opposite" the front
+ * (most anti-parallel, farthest) is the REAR; everything else is a SIDE.
+ * Corner lots (parcel touches 2+ distinct NAMED street frontages) label a
+ * second street edge as side_corner and apply the street-side setback there —
+ * and the second street must actually ADJOIN the parcel (CORNER_ADJOIN_MAX_M),
+ * not merely sit within the primary trust gate. Unresolved corners are
+ * disclosed honestly — never fabricate a second frontage.
  *
  * This module is pure: it consumes an already-fetched nearest-road polyline
  * and/or reference point and returns a per-edge label + a labeling confidence.
@@ -249,6 +260,207 @@ function projectPoint(
   };
 }
 
+// === Logical-edge grouping (WDLL P-60b item 3) ===
+
+/**
+ * Max |turn| in DEGREES at a shared vertex for two adjacent ring edges to be
+ * treated as one logical edge for labeling.
+ *
+ * Choice of 20°, from the 48453:280239 forensics: joints along a digitized
+ * frontage curve measure ~0.6° each, while the real lot corners on the same
+ * ring turn 89.8–92.7°. Even a chamfered (cut) 90° corner splits into two
+ * ~45° joints. 20° sits more than an order of magnitude above observed
+ * digitization curvature and comfortably below the smallest semantically
+ * distinct corner, the same "ignore artifacts, keep meaning" posture as
+ * SURVEY_NOISE_THRESHOLD_M in geometry.ts (which handles sliver LENGTHS; this
+ * handles joint ANGLES).
+ */
+export const COLLINEAR_TURN_MAX_DEG = 20;
+
+/**
+ * Cap on the ACCUMULATED |turn| across one group. A smoothly digitized 90°
+ * corner arc (e.g. nine 12° joints) passes the per-joint test at every vertex
+ * but is a corner, not a frontage; without a cumulative cap it would merge two
+ * semantically distinct boundaries. 45° is the smallest total turn at which
+ * two runs plausibly face different streets. The Simsbrook frontage curve
+ * accumulates only ~3.6° across six joints — far under the cap.
+ */
+export const GROUP_TOTAL_TURN_MAX_DEG = 45;
+
+/** |turn| between two direction vectors, in degrees (0..180). */
+function turnAngleDeg(a: XY, b: XY): number {
+  const cross = a.x * b.y - a.y * b.x;
+  const dot = a.x * b.x + a.y * b.y;
+  return Math.abs((Math.atan2(cross, dot) * 180) / Math.PI);
+}
+
+interface EdgeGroups {
+  /** groups[g] = contiguous (circularly) original edge indices, in ring order. */
+  groups: number[][];
+  /** groupOf[i] = group index for original edge i. */
+  groupOf: number[];
+}
+
+function identityGroups(n: number): EdgeGroups {
+  const groups: number[][] = [];
+  const groupOf: number[] = [];
+  for (let i = 0; i < n; i++) {
+    groups.push([i]);
+    groupOf.push(i);
+  }
+  return { groups, groupOf };
+}
+
+/**
+ * Partition ring edges into contiguous near-collinear groups. Joint j sits at
+ * the shared vertex between edge j and edge (j+1)%n; it BREAKS a group when
+ * its |turn| ≥ COLLINEAR_TURN_MAX_DEG, or when the group's accumulated turn
+ * would exceed GROUP_TOTAL_TURN_MAX_DEG. The walk starts just after the first
+ * breaking joint so the circular wrap needs no merge pass.
+ *
+ * Fallbacks to identity (no grouping): a ring with no breaking joint at all
+ * (a smooth blob — one "logical edge" is meaningless), or one that groups to
+ * fewer than 3 logical edges (front/rear/side needs at least 3).
+ */
+function groupCollinearEdges(edges: ProjEdges): EdgeGroups {
+  const n = edges.edgeLen.length;
+  const jointTurn: number[] = [];
+  for (let j = 0; j < n; j++) {
+    jointTurn.push(
+      turnAngleDeg(edges.edgeDir[j]!, edges.edgeDir[(j + 1) % n]!),
+    );
+  }
+  const firstBreak = jointTurn.findIndex((t) => t >= COLLINEAR_TURN_MAX_DEG);
+  if (firstBreak < 0) return identityGroups(n);
+
+  const groups: number[][] = [];
+  let current: number[] = [];
+  let accTurn = 0;
+  for (let k = 1; k <= n; k++) {
+    const i = (firstBreak + k) % n;
+    current.push(i);
+    const t = jointTurn[i]!;
+    if (t >= COLLINEAR_TURN_MAX_DEG || accTurn + t >= GROUP_TOTAL_TURN_MAX_DEG) {
+      groups.push(current);
+      current = [];
+      accTurn = 0;
+    } else {
+      accTurn += t;
+    }
+  }
+  // The walk ends exactly at the first breaking joint, which closes the last
+  // group; anything else is a broken invariant, not a state to paper over.
+  if (current.length) {
+    throw new Error(
+      "groupCollinearEdges: walk ended with an unclosed group (invariant violated)",
+    );
+  }
+  if (groups.length < 3) return identityGroups(n);
+
+  const groupOf = new Array<number>(n).fill(-1);
+  for (let g = 0; g < groups.length; g++) {
+    for (const i of groups[g]!) groupOf[i] = g;
+  }
+  return { groups, groupOf };
+}
+
+interface GroupGeom {
+  /** Sum of member edge lengths (m). */
+  totalLen: number;
+  /** Length-weighted centroid of member edge midpoints. */
+  mid: XY;
+  /** Chord: start vertex of first member -> end vertex of last member. */
+  chordDir: XY;
+}
+
+function groupGeometry(edges: ProjEdges, members: number[]): GroupGeom {
+  const n = edges.edgeLen.length;
+  let totalLen = 0;
+  let mx = 0;
+  let my = 0;
+  for (const i of members) {
+    const len = edges.edgeLen[i]!;
+    totalLen += len;
+    mx += edges.edgeMid[i]!.x * len;
+    my += edges.edgeMid[i]!.y * len;
+  }
+  const w = totalLen > 1e-9 ? totalLen : members.length;
+  const mid =
+    totalLen > 1e-9
+      ? { x: mx / w, y: my / w }
+      : edges.edgeMid[members[0]!]!;
+  const first = edges.points[members[0]!]!;
+  const last = edges.points[(members[members.length - 1]! + 1) % n]!;
+  return { totalLen, mid, chordDir: { x: last.x - first.x, y: last.y - first.y } };
+}
+
+/**
+ * Expand per-GROUP labels back to per-ORIGINAL-edge labels, enforcing the 1:1
+ * alignment contract insetPerEdge depends on: the groups must partition
+ * exactly [0..edgeCount) and there must be one label per group. Throws on any
+ * violation — an off-by-one here would silently inset the wrong edges by the
+ * wrong feet, which is worse than a loud failure. Exported for the violation
+ * tests.
+ */
+export function expandGroupLabelsToEdges(
+  groups: number[][],
+  groupLabels: EdgeLabel[],
+  edgeCount: number,
+): EdgeLabel[] {
+  if (groups.length !== groupLabels.length) {
+    throw new Error(
+      `expandGroupLabelsToEdges: ${groups.length} groups but ${groupLabels.length} labels`,
+    );
+  }
+  const out = new Array<EdgeLabel | null>(edgeCount).fill(null);
+  let assigned = 0;
+  for (let g = 0; g < groups.length; g++) {
+    for (const i of groups[g]!) {
+      if (!Number.isInteger(i) || i < 0 || i >= edgeCount) {
+        throw new Error(
+          `expandGroupLabelsToEdges: member index ${i} outside [0..${edgeCount})`,
+        );
+      }
+      if (out[i] !== null) {
+        throw new Error(
+          `expandGroupLabelsToEdges: edge ${i} assigned by two groups`,
+        );
+      }
+      out[i] = groupLabels[g]!;
+      assigned++;
+    }
+  }
+  if (assigned !== edgeCount) {
+    throw new Error(
+      `expandGroupLabelsToEdges: ${assigned} edges labeled, expected ${edgeCount}`,
+    );
+  }
+  return out as EdgeLabel[];
+}
+
+/**
+ * PRIMARY trust gate (m): how far a road centerline may sit from a parcel edge
+ * midpoint and still count as usable front-edge signal. Deliberately loose —
+ * the nearest road really is the frontage for most lots, and tightening it
+ * darkens the road tier on deep-setback parcels.
+ */
+const ROAD_TRUST_MAX_M = 45;
+
+/**
+ * SECOND-frontage adjacency bound (m) — WDLL P-60b item 5. Claiming a CORNER
+ * lot asserts the parcel adjoins a second street, so the bar is adjacency,
+ * not mere proximity: the road centerline must be within roughly one
+ * right-of-way half-width of the candidate edge. Local-residential ROW is
+ * typically 50–60 ft (15–18 m) full width, i.e. centerline-to-frontage
+ * ~7.5–9 m (Simsbrook's own frontage measures 7.5 m here); 25 m adds slack
+ * for wide collector ROWs and curved-frontage midpoint offsets while still
+ * excluding across-the-block roads (Dashwood Creek at 43.3 m / 142 ft from
+ * parcel 48453:280239 passed the 45 m blanket and fabricated a corner).
+ * Measured with the same metric as the primary match: bestEdgeForRoad's
+ * perpendicular midpoint-to-centerline distance.
+ */
+export const CORNER_ADJOIN_MAX_M = 25;
+
 /**
  * Best edge for ONE road polyline: the parcel edge whose midpoint is closest to
  * the road AND is reasonably parallel to it, subject to the trust gate. Returns
@@ -292,9 +504,9 @@ function bestEdgeForRoad(
   // Trust gate: the road must be within a plausible frontage distance of the
   // chosen edge (a parcel's frontage is within ~40 m of the street centerline
   // for typical residential lots; beyond that the "nearest road" is ambiguous).
-  if (bestDist > 45) return null;
+  if (bestDist > ROAD_TRUST_MAX_M) return null;
   // Confidence scales down as the road gets farther / less parallel.
-  const proximity = Math.max(0, 1 - bestDist / 45);
+  const proximity = Math.max(0, 1 - bestDist / ROAD_TRUST_MAX_M);
   const confidence = 0.7 + 0.2 * proximity; // 0.70..0.90
   return {
     index: best,
@@ -303,34 +515,37 @@ function bestEdgeForRoad(
   };
 }
 
-/** Nearest road classification for a parcel edge (when a candidate trust-gates). */
-function roadClassForEdge(
-  edges: ProjEdges,
-  edgeIdx: number,
-  roads: RoadCandidate[],
-): V1RoadClassification | undefined {
-  let bestDist = Infinity;
-  let bestClass: V1RoadClassification | undefined;
-  for (const road of roads) {
-    if (!road.classification) continue;
-    const cand = bestEdgeForRoad(edges, road.polyline);
-    if (!cand || cand.index !== edgeIdx) continue;
-    if (cand.dist < bestDist) {
-      bestDist = cand.dist;
-      bestClass = road.classification;
-    }
-  }
-  return bestClass;
-}
-
+/**
+ * Attach the nearest ADJOINING road classification per LOGICAL edge: a road
+ * that matches any member of a group classifies the whole group, so a
+ * segmented frontage carries one class across all of its member edges (a
+ * road-class setback table must not split feet across one frontage).
+ * Adjacency bound (CORNER_ADJOIN_MAX_M), not the 45 m trust gate: road-class
+ * setbacks apply to the street an edge actually fronts/abuts, and the blanket
+ * gate let a road across the block (Dashwood Creek, 43.3 m) classify a rear
+ * edge it never touches.
+ */
 function attachRoadClasses(
   labeled: EdgeInfo[],
   edges: ProjEdges,
+  eg: EdgeGroups,
   roads: RoadCandidate[],
 ): EdgeInfo[] {
   if (!roads.length) return labeled;
+  const classByGroup = new Map<number, V1RoadClassification>();
+  const distByGroup = new Map<number, number>();
+  for (const road of roads) {
+    if (!road.classification) continue;
+    const cand = bestEdgeForRoad(edges, road.polyline);
+    if (!cand || cand.dist > CORNER_ADJOIN_MAX_M) continue;
+    const g = eg.groupOf[cand.index]!;
+    if (cand.dist < (distByGroup.get(g) ?? Infinity)) {
+      distByGroup.set(g, cand.dist);
+      classByGroup.set(g, road.classification);
+    }
+  }
   return labeled.map((e) => {
-    const roadClass = roadClassForEdge(edges, e.index, roads);
+    const roadClass = classByGroup.get(eg.groupOf[e.index]!);
     return roadClass ? { ...e, roadClass } : e;
   });
 }
@@ -491,75 +706,98 @@ function frontFromShape(edges: ProjEdges): { index: number; confidence: number }
 }
 
 /**
- * Given the chosen front edge (and optional second street edge for a corner),
- * label the rest: the edge most ANTI-parallel to the front and farthest from
- * it is the REAR; the second street edge is side_corner; all others are SIDES.
+ * Given the chosen front GROUP (and optional second street group for a
+ * corner), label the rest: the logical edge most ANTI-parallel to the front
+ * chord and farthest from it is the REAR; the second street group is
+ * side_corner; all others are SIDES. Labels are chosen per group and expanded
+ * back to one label per ORIGINAL ring edge through the asserted 1:1 expansion.
  */
 function labelFromFront(
   edges: ProjEdges,
-  frontIdx: number,
-  cornerIdx: number | null = null,
+  eg: EdgeGroups,
+  frontGroup: number,
+  cornerGroup: number | null = null,
 ): EdgeInfo[] {
   const n = edges.edgeLen.length;
-  const front = edges.edgeDir[frontIdx]!;
-  const frontMid = edges.edgeMid[frontIdx]!;
+  const geoms = eg.groups.map((members) => groupGeometry(edges, members));
+  const front = geoms[frontGroup]!;
 
-  // Rear: maximize (anti-parallel-ness * distance-from-front).
-  let rearIdx = -1;
+  // Rear: maximize (anti-parallel-ness * distance-from-front) across groups.
+  let rearGroup = -1;
   let rearScore = -Infinity;
-  for (let i = 0; i < n; i++) {
-    if (i === frontIdx) continue;
-    if (cornerIdx != null && i === cornerIdx) continue;
-    const dir = edges.edgeDir[i]!;
-    const par = absCosBetween(front.x, front.y, dir.x, dir.y); // parallel-ness
-    const d = dist(frontMid, edges.edgeMid[i]!);
-    const score = par * d;
+  for (let g = 0; g < eg.groups.length; g++) {
+    if (g === frontGroup) continue;
+    if (cornerGroup != null && g === cornerGroup) continue;
+    const geom = geoms[g]!;
+    const par = absCosBetween(
+      front.chordDir.x,
+      front.chordDir.y,
+      geom.chordDir.x,
+      geom.chordDir.y,
+    );
+    const score = par * dist(front.mid, geom.mid);
     if (score > rearScore) {
       rearScore = score;
-      rearIdx = i;
+      rearGroup = g;
     }
   }
 
-  const out: EdgeInfo[] = [];
-  for (let i = 0; i < n; i++) {
-    let label: EdgeLabel = "side";
-    if (i === frontIdx) label = "front";
-    else if (cornerIdx != null && i === cornerIdx) label = "side_corner";
-    else if (i === rearIdx) label = "rear";
-    out.push({ index: i, label, lengthM: edges.edgeLen[i]! });
-  }
-  return out;
+  const groupLabels: EdgeLabel[] = eg.groups.map((_, g) => {
+    if (g === frontGroup) return "front";
+    if (cornerGroup != null && g === cornerGroup) return "side_corner";
+    if (g === rearGroup) return "rear";
+    return "side";
+  });
+  const perEdge = expandGroupLabelsToEdges(eg.groups, groupLabels, n);
+  return perEdge.map((label, i) => ({
+    index: i,
+    label,
+    lengthM: edges.edgeLen[i]!,
+  }));
 }
 
 /**
  * Detect a second named street frontage for corner lots.
  * Requires a distinct NAMED road (different normalized name from the primary)
- * whose best edge is a different ring edge within the trust gate.
- * Returns null when unresolved — never fabricates a second frontage.
+ * whose best edge falls in a DIFFERENT logical-edge group AND actually adjoins
+ * that edge (within CORNER_ADJOIN_MAX_M — a corner claim asserts adjacency,
+ * not 45 m proximity; that blanket admitted Dashwood Creek at 43.3 m against
+ * a parcel it never touches). Returns null when unresolved — never fabricates
+ * a second frontage.
  */
 function secondNamedStreetEdge(
   edges: ProjEdges,
+  eg: EdgeGroups,
   roads: RoadCandidate[],
-  primaryEdgeIdx: number,
+  frontGroup: number,
   primaryRoadName: string | null,
-): { index: number; roadName: string } | null {
+): { groupIdx: number; roadName: string } | null {
   const primaryNorm = normalizeStreetName(primaryRoadName);
-  let best: { index: number; dist: number; roadName: string } | null = null;
+  let best: { groupIdx: number; dist: number; roadName: string } | null = null;
   for (const road of roads) {
     const name = normalizeStreetName(road.name);
     if (!name) continue;
     if (primaryNorm && name === primaryNorm) continue;
     const cand = bestEdgeForRoad(edges, road.polyline);
-    if (!cand || cand.index === primaryEdgeIdx) continue;
+    if (!cand || eg.groupOf[cand.index] === frontGroup) continue;
+    if (cand.dist > CORNER_ADJOIN_MAX_M) continue;
     if (!best || cand.dist < best.dist) {
-      best = { index: cand.index, dist: cand.dist, roadName: name };
+      best = {
+        groupIdx: eg.groupOf[cand.index]!,
+        dist: cand.dist,
+        roadName: name,
+      };
     }
   }
-  return best ? { index: best.index, roadName: best.roadName } : null;
+  return best ? { groupIdx: best.groupIdx, roadName: best.roadName } : null;
 }
 
-/** Count distinct named roads that trust-gate to some parcel edge. */
-function namedRoadsTouchingParcel(
+/**
+ * Count distinct named roads that ADJOIN some parcel edge (adjacency bound,
+ * same bar as the corner resolver — a road 43 m across the block must not
+ * flip a parcel into "possible corner lot" wording either).
+ */
+function namedRoadsAdjoiningParcel(
   edges: ProjEdges,
   roads: RoadCandidate[],
 ): number {
@@ -567,7 +805,8 @@ function namedRoadsTouchingParcel(
   for (const road of roads) {
     const name = normalizeStreetName(road.name);
     if (!name) continue;
-    if (bestEdgeForRoad(edges, road.polyline)) names.add(name);
+    const cand = bestEdgeForRoad(edges, road.polyline);
+    if (cand && cand.dist <= CORNER_ADJOIN_MAX_M) names.add(name);
   }
   return names.size;
 }
@@ -596,13 +835,17 @@ export interface LabelInputs {
 
 /**
  * Label every edge of the parcel ring, choosing the best available signal for
- * the front edge and deriving sides/rear. Always returns a labeling (never
- * throws) — the confidence + note carry the honesty.
+ * the front edge and deriving sides/rear. Returns a labeling for any valid
+ * ring (degenerate rings return null); the confidence + note carry the
+ * honesty. The one deliberate exception: a violated group-expansion invariant
+ * (labels not 1:1 with original edges) throws loudly rather than letting a
+ * misaligned feet array reach insetPerEdge.
  */
 export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
   const edges = buildEdges(input.ring);
   if (!edges) return null;
   if (openRing(input.ring).length < 3) return null;
+  const eg = groupCollinearEdges(edges);
 
   let front: { index: number; confidence: number } | null = null;
   let signal: LabelSignal = "shape";
@@ -654,18 +897,21 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
       "Front edge inferred from lot shape only (no street or address reference) — orientation is approximate.";
   }
 
-  let cornerIdx: number | null = null;
+  const frontGroup = eg.groupOf[front.index]!;
+
+  let cornerGroup: number | null = null;
   let cornerLot = false;
   let cornerUnresolved = false;
   if (signal === "road" && candidates.length) {
     const second = secondNamedStreetEdge(
       edges,
+      eg,
       candidates,
-      front.index,
+      frontGroup,
       primaryRoadName,
     );
     if (second) {
-      cornerIdx = second.index;
+      cornerGroup = second.groupIdx;
       cornerLot = true;
       note =
         note.replace(/\.$/, "") +
@@ -675,7 +921,7 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
         index: front.index,
         confidence: Math.min(front.confidence, 0.85),
       };
-    } else if (namedRoadsTouchingParcel(edges, candidates) >= 2) {
+    } else if (namedRoadsAdjoiningParcel(edges, candidates) >= 2) {
       // Suggests a corner but second frontage did not resolve — honest decline
       // of corner geometry (still label as single-front; disclose).
       cornerUnresolved = true;
@@ -690,9 +936,18 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
     }
   }
 
+  const frontSegments = eg.groups[frontGroup]!.length;
+  if (frontSegments > 1) {
+    note =
+      note.replace(/\.?$/, ".") +
+      ` Street frontage is digitized as ${frontSegments} contiguous` +
+      " near-collinear segments; the front setback applies along the entire frontage.";
+  }
+
   const labeled = attachRoadClasses(
-    labelFromFront(edges, front.index, cornerIdx),
+    labelFromFront(edges, eg, frontGroup, cornerGroup),
     edges,
+    eg,
     candidates,
   );
   return {

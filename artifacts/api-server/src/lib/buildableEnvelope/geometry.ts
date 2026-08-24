@@ -208,24 +208,16 @@ function setbackStrip(a: XY, b: XY, nrm: XY, distM: number): polygonClipping.Pol
 }
 
 /**
- * Variable-distance inset via strip union + difference (polygon-clipping).
- *
- * `insetMetersPerEdge[i]` is the inward offset for edge i (vertex i -> i+1).
+ * Union of the per-edge inward setback strips. Returns null when every edge
+ * has a zero setback (no forbidden area at all). May throw when the boolean
+ * union throws; callers convert that to an explicit clip-error, never to a
+ * consume-lot verdict.
  */
-function insetProjected(
-  proj: ProjectedRing,
+function buildForbiddenStrips(
+  pts: XY[],
   insetMetersPerEdge: number[],
-): { points: XY[] } | null {
-  const pts = proj.points;
+): polygonClipping.MultiPolygon | null {
   const n = pts.length;
-  if (n < 3 || insetMetersPerEdge.length !== n) return null;
-
-  for (const d of insetMetersPerEdge) {
-    if (!Number.isFinite(d) || d < 0) return null;
-  }
-
-  const parcelPoly: polygonClipping.Polygon = [closeClipRing(pts)];
-
   let forbidden: polygonClipping.MultiPolygon | null = null;
   for (let i = 0; i < n; i++) {
     const a = pts[i]!;
@@ -234,26 +226,72 @@ function insetProjected(
     if (!nrm) continue;
     const strip = setbackStrip(a, b, nrm, insetMetersPerEdge[i]!);
     if (!strip) continue;
-    try {
-      forbidden = forbidden
-        ? polygonClipping.union(forbidden, strip)
-        : [strip];
-    } catch {
-      return null;
+    forbidden = forbidden ? polygonClipping.union(forbidden, strip) : [strip];
+  }
+  return forbidden;
+}
+
+/**
+ * Outcome of the boolean clip. "empty" is the ONLY outcome that supports a
+ * consume-lot claim; "clip-error" is an instrument failure and must surface
+ * as a validation decline, never as a measurement.
+ */
+type ClipOutcome =
+  | {
+      kind: "ok";
+      points: XY[];
+      forbidden: polygonClipping.MultiPolygon | null;
+    }
+  | { kind: "empty" }
+  | { kind: "clip-error"; detail: string };
+
+/**
+ * Variable-distance inset via strip union + difference (polygon-clipping).
+ *
+ * `insetMetersPerEdge[i]` is the inward offset for edge i (vertex i -> i+1).
+ * When the difference yields several pieces, the largest is kept (a parcel
+ * pinched into disjoint buildable regions renders its dominant region).
+ */
+function insetProjected(
+  proj: ProjectedRing,
+  insetMetersPerEdge: number[],
+): ClipOutcome {
+  const pts = proj.points;
+  const n = pts.length;
+  if (n < 3 || insetMetersPerEdge.length !== n) {
+    return { kind: "clip-error", detail: "edge/setback count mismatch" };
+  }
+
+  for (const d of insetMetersPerEdge) {
+    if (!Number.isFinite(d) || d < 0) {
+      return { kind: "clip-error", detail: "invalid setback distance" };
     }
   }
 
+  const parcelPoly: polygonClipping.Polygon = [closeClipRing(pts)];
+
+  let forbidden: polygonClipping.MultiPolygon | null;
+  try {
+    forbidden = buildForbiddenStrips(pts, insetMetersPerEdge);
+  } catch {
+    return { kind: "clip-error", detail: "setback strip union threw" };
+  }
+
   if (!forbidden) {
-    return { points: pts.map((p) => ({ x: p.x, y: p.y })) };
+    return {
+      kind: "ok",
+      points: pts.map((p) => ({ x: p.x, y: p.y })),
+      forbidden: null,
+    };
   }
 
   let diff: polygonClipping.MultiPolygon;
   try {
     diff = polygonClipping.difference(parcelPoly, forbidden);
   } catch {
-    return null;
+    return { kind: "clip-error", detail: "parcel-minus-strips difference threw" };
   }
-  if (!diff.length) return null;
+  if (!diff.length) return { kind: "empty" };
 
   let best: XY[] | null = null;
   let bestArea = 0;
@@ -269,8 +307,8 @@ function insetProjected(
     }
   }
 
-  if (!best) return null;
-  return { points: best };
+  if (!best) return { kind: "empty" };
+  return { kind: "ok", points: best, forbidden };
 }
 
 /** Ray-cast point-in-polygon with an on-edge tolerance (local metres). */
@@ -337,85 +375,188 @@ function ringSelfIntersects(points: XY[]): boolean {
   return false;
 }
 
-/** Vertex lying on a non-adjacent edge (self-touch / bowtie precursor). */
-function ringHasSelfTouch(points: XY[]): boolean {
-  const n = points.length;
-  for (let v = 0; v < n; v++) {
-    const p = points[v]!;
-    for (let e = 0; e < n; e++) {
-      if (e === v || (e + 1) % n === v || e === (v + 1) % n) continue;
-      const a = points[e]!;
-      const b = points[(e + 1) % n]!;
-      if (pointOnSegment(p, a, b, 0.08)) return true;
-    }
+/** Area (m²) of one polygon-clipping polygon: |outer| minus |holes|. */
+function clipPolygonAreaM2(poly: polygonClipping.Polygon): number {
+  let area = 0;
+  for (let r = 0; r < poly.length; r++) {
+    const open = xyFromClipRing(poly[r]!);
+    if (open.length < 3) continue;
+    const a = Math.abs(signedArea(open));
+    area += r === 0 ? a : -a;
   }
-  return false;
+  return Math.max(0, area);
 }
 
-function midpoint(a: XY, b: XY): XY {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+/** Total area (m²) of a polygon-clipping MultiPolygon. */
+function multiPolygonAreaM2(
+  mp: polygonClipping.MultiPolygon | null | undefined,
+): number {
+  if (!mp) return 0;
+  let total = 0;
+  for (const poly of mp) total += clipPolygonAreaM2(poly);
+  return total;
 }
 
 /**
- * For each parcel edge with setback d, the point d metres inward from the edge
- * midpoint must lie inside (or on) the inset ring; a point slightly farther
- * inward must remain inside the parcel but outside the inset.
+ * Epsilon for the conservation checks: max(0.5 m², 0.5% of parcel area).
+ *
+ * Why 0.5 m² absolute: polygon-clipping boolean ops at parcel scale (tens of
+ * metres) leave float/boundary-sliver noise orders of magnitude below 1e-3
+ * m², while 0.5 m² (~5.4 sq ft) is far below any buildable-area figure a
+ * consumer would act on — so violations above it are real geometry defects,
+ * not numerical noise. Why the 0.5% relative term: boundary-artifact area
+ * scales with perimeter, so a fixed absolute bound would be too tight on
+ * multi-acre parcels and meaninglessly loose is avoided by keeping it
+ * proportional rather than unbounded.
  */
-function perEdgeOffsetPlausible(
-  orig: XY[],
-  inset: XY[],
-  insetMetersPerEdge: number[],
-): boolean {
-  const n = orig.length;
-  for (let i = 0; i < n; i++) {
-    const d = insetMetersPerEdge[i]!;
-    if (d <= 1e-6) continue;
-    const a = orig[i]!;
-    const b = orig[(i + 1) % n]!;
-    const edgeLen = Math.hypot(b.x - a.x, b.y - a.y);
-    if (edgeLen < 1e-6) return false;
-    if (d >= edgeLen * 0.95) continue;
-    const nrm = inwardNormal(a, b);
-    if (!nrm) return false;
-    const mid = midpoint(a, b);
-    const justInsideBuildable = {
-      x: mid.x + nrm.x * (d + 0.12),
-      y: mid.y + nrm.y * (d + 0.12),
-    };
-    if (!pointInOrOnPolygon(justInsideBuildable, inset, 0.2)) return false;
-    if (d > 0.25) {
-      const stillForbidden = {
-        x: mid.x + nrm.x * Math.max(0, d - 0.15),
-        y: mid.y + nrm.y * Math.max(0, d - 0.15),
-      };
-      if (pointInOrOnPolygon(stillForbidden, inset, 0.05)) return false;
-    }
-  }
-  return true;
+function conservationEpsilonM2(parcelAreaM2: number): number {
+  return Math.max(0.5, parcelAreaM2 * 0.005);
 }
 
-function insetIsDegenerate(
+/**
+ * Conservation gate (P60b): validates a candidate inset ring against the
+ * boolean-clip decomposition of the parcel — two independently derived
+ * inputs, per the enforcement doctrine's meaning-shaped-check rule.
+ *
+ *  (a) exclusion: area(inset ∩ forbidden strips) < ε — no part of the inset
+ *      may lie inside a setback strip;
+ *  (b) conservation: area(parcel) = area(forbidden ∩ parcel) + Σ area(clip
+ *      remainder) within ε, AND area(inset) must match the DOMINANT remainder
+ *      piece within ε. (insetProjected intentionally keeps the largest piece
+ *      when strips pinch the parcel into several buildable regions, so
+ *      secondary pieces are accounted explicitly rather than absorbed into
+ *      tolerance — together these imply the plain identity
+ *      |area(parcel) − area(forbidden ∩ parcel) − area(inset)| < ε whenever
+ *      the remainder is a single piece.)
+ *
+ * This replaces the retired proximity heuristics (ringHasSelfTouch's 8 cm
+ * vertex-to-edge probe and perEdgeOffsetPlausible's midpoint probes), which
+ * false-fired on centimetre notch artifacts from offsetting near-collinear
+ * digitized edges and on probes landing in a NEIGHBORING edge's legitimate
+ * strip (P60b forensics, parcel 48453:280239).
+ */
+function conservationFailures(
+  parcelPts: XY[],
+  insetPts: XY[],
+  forbidden: polygonClipping.MultiPolygon | null,
+): string[] {
+  const failures: string[] = [];
+  const parcelAreaM2 = ringAreaM2(parcelPts);
+  const insetAreaM2 = ringAreaM2(insetPts);
+  const eps = conservationEpsilonM2(parcelAreaM2);
+
+  if (!forbidden) {
+    if (Math.abs(parcelAreaM2 - insetAreaM2) >= eps) {
+      failures.push(
+        `zero-setback inset area ${insetAreaM2.toFixed(2)} m² does not match parcel ${parcelAreaM2.toFixed(2)} m²`,
+      );
+    }
+    return failures;
+  }
+
+  const parcelPoly: polygonClipping.Polygon = [closeClipRing(parcelPts)];
+  const insetPoly: polygonClipping.Polygon = [closeClipRing(insetPts)];
+
+  let overlapM2: number;
+  let forbiddenInParcelM2: number;
+  let remainder: polygonClipping.MultiPolygon;
+  try {
+    overlapM2 = multiPolygonAreaM2(
+      polygonClipping.intersection(insetPoly, forbidden),
+    );
+    forbiddenInParcelM2 = multiPolygonAreaM2(
+      polygonClipping.intersection(forbidden, parcelPoly),
+    );
+    remainder = polygonClipping.difference(parcelPoly, forbidden);
+  } catch {
+    return ["conservation check could not run (boolean op threw)"];
+  }
+
+  if (overlapM2 >= eps) {
+    failures.push(
+      `inset overlaps forbidden setback strips by ${overlapM2.toFixed(2)} m² (ε ${eps.toFixed(2)})`,
+    );
+  }
+
+  const remainderTotalM2 = multiPolygonAreaM2(remainder);
+  let dominantPieceM2 = 0;
+  for (const poly of remainder) {
+    const a = clipPolygonAreaM2(poly);
+    if (a > dominantPieceM2) dominantPieceM2 = a;
+  }
+
+  if (Math.abs(parcelAreaM2 - forbiddenInParcelM2 - remainderTotalM2) >= eps) {
+    failures.push(
+      `area conservation violated: parcel ${parcelAreaM2.toFixed(2)} m² != strips∩parcel ${forbiddenInParcelM2.toFixed(2)} m² + remainder ${remainderTotalM2.toFixed(2)} m² (ε ${eps.toFixed(2)})`,
+    );
+  }
+  if (Math.abs(insetAreaM2 - dominantPieceM2) >= eps) {
+    failures.push(
+      `inset area ${insetAreaM2.toFixed(2)} m² does not match the clip's dominant remainder piece ${dominantPieceM2.toFixed(2)} m² (ε ${eps.toFixed(2)})`,
+    );
+  }
+
+  return failures;
+}
+
+/** Classified rejection of a clip-produced inset. Null when the inset stands. */
+type InsetRejection =
+  | { kind: "consumed"; reason: string }
+  | { kind: "validation-failed"; reason: string }
+  | null;
+
+/**
+ * Post-clip validation. Genuine protections kept: orientation/winding, the
+ * minimum-area sliver floor, true self-intersection (proper segment crossing,
+ * not a proximity heuristic), containment inside the parcel, and the
+ * conservation gate above. Only degenerate-by-area maps to "consumed"; every
+ * other rejection is a validation failure and must never masquerade as a
+ * consume-lot measurement.
+ */
+function classifyInset(
   orig: XY[],
   inset: XY[],
-  insetMetersPerEdge: number[],
-): boolean {
+  forbidden: polygonClipping.MultiPolygon | null,
+): InsetRejection {
   const origArea = signedArea(orig);
   const insetArea = signedArea(inset);
-  if (insetArea <= 0) return true;
-  if (insetArea < origArea * 0.0025) return true;
-  if (ringSelfIntersects(inset)) return true;
-  if (ringHasSelfTouch(inset)) return true;
-  for (const p of inset) {
-    if (!pointInOrOnPolygon(p, orig)) return true;
+  if (insetArea <= 0) {
+    return {
+      kind: "validation-failed",
+      reason: "inset orientation flipped or zero area",
+    };
   }
-  if (!perEdgeOffsetPlausible(orig, inset, insetMetersPerEdge)) return true;
-  return false;
+  if (insetArea < origArea * 0.0025) {
+    return {
+      kind: "consumed",
+      reason: "remaining area is a sliver below 0.25% of the parcel",
+    };
+  }
+  if (ringSelfIntersects(inset)) {
+    return { kind: "validation-failed", reason: "inset ring self-intersects" };
+  }
+  for (const p of inset) {
+    if (!pointInOrOnPolygon(p, orig)) {
+      return {
+        kind: "validation-failed",
+        reason: "inset vertex lies outside parcel",
+      };
+    }
+  }
+  const failures = conservationFailures(orig, inset, forbidden);
+  if (failures.length) {
+    return { kind: "validation-failed", reason: failures.join("; ") };
+  }
+  return null;
 }
 
 /**
- * Mechanical geometry-correctness gate (27c WDLL 2). Exported for CI regression
- * tests — fails closed on self-intersection, containment violations, or
- * implausible per-edge offsets.
+ * Mechanical geometry-correctness gate (27c WDLL 2, reworked P60b). Exported
+ * for CI regression tests — fails closed on orientation flip, true
+ * self-intersection, containment violations, sliver collapse, and the
+ * conservation checks (inset ∩ strips ≈ 0; inset area matches the recomputed
+ * clip remainder). The retired 8 cm self-touch and midpoint-probe heuristics
+ * are gone: they false-fired on legitimate insets of digitized rings.
  */
 export function geometryCorrectnessGate(
   parcelRing: Ring,
@@ -427,7 +568,7 @@ export function geometryCorrectnessGate(
     return { pass: false, reasons: ["inset ring is null"] };
   }
   const parcelProj = projectRing(parcelRing);
-  if (!parcelProj || !insetRing) {
+  if (!parcelProj) {
     return { pass: false, reasons: ["parcel or inset is not a valid polygon"] };
   }
   const orig = parcelProj.points;
@@ -440,21 +581,28 @@ export function geometryCorrectnessGate(
       `edge/setback count mismatch (${insetFeetPerEdge.length} vs ${orig.length})`,
     );
   }
-  const insetMeters = insetFeetPerEdge.map((ft) => feetToMeters(Math.max(0, ft)));
   if (signedArea(inset) <= 0) reasons.push("inset orientation flipped or zero area");
   if (ringSelfIntersects(inset)) reasons.push("inset ring self-intersects");
-  if (ringHasSelfTouch(inset)) reasons.push("inset ring has self-touch");
   for (const p of inset) {
     if (!pointInOrOnPolygon(p, orig, 0.12)) {
       reasons.push("inset vertex lies outside parcel");
       break;
     }
   }
-  if (!perEdgeOffsetPlausible(orig, inset, insetMeters)) {
-    reasons.push("per-edge offset distance implausible");
-  }
   if (insetAreaTooSmall(orig, inset)) {
     reasons.push("inset collapsed to a sliver relative to parcel");
+  }
+  if (insetFeetPerEdge.length === orig.length) {
+    const insetMeters = insetFeetPerEdge.map((ft) =>
+      feetToMeters(Math.max(0, ft)),
+    );
+    let forbidden: polygonClipping.MultiPolygon | null;
+    try {
+      forbidden = buildForbiddenStrips(orig, insetMeters);
+      reasons.push(...conservationFailures(orig, inset, forbidden));
+    } catch {
+      reasons.push("conservation check could not run (strip union threw)");
+    }
   }
   return { pass: reasons.length === 0, reasons };
 }
@@ -465,12 +613,24 @@ function insetAreaTooSmall(orig: XY[], inset: XY[]): boolean {
   return insetArea < origArea * 0.0025;
 }
 
+/**
+ * Machine-readable class of an empty inset result (P60b reason split):
+ *  - "invalid-input": the parcel ring or setback array could not be used;
+ *  - "consumed": the boolean clip itself returned empty or degenerate-by-area
+ *    — the ONLY class that supports a "setbacks exceed the lot" claim;
+ *  - "validation-failed": the clip produced a ring that the correctness /
+ *    conservation gates rejected. A validation failure must surface as such,
+ *    never masquerade as a consume-lot measurement.
+ */
+export type InsetEmptyKind = "invalid-input" | "consumed" | "validation-failed";
+
 export interface InsetResult {
   ring: Ring | null;
   areaSqFt: number;
   parcelAreaSqFt: number;
   empty: boolean;
   emptyReason?: string;
+  emptyKind?: InsetEmptyKind;
 }
 
 /**
@@ -490,6 +650,7 @@ export function insetPerEdge(
       parcelAreaSqFt: 0,
       empty: true,
       emptyReason: "parcel geometry is not a valid polygon",
+      emptyKind: "invalid-input",
     };
   }
   const parcelAreaSqFt =
@@ -503,6 +664,7 @@ export function insetPerEdge(
       parcelAreaSqFt,
       empty: true,
       emptyReason: `edge/setback count mismatch (${insetFeetPerEdge.length} vs ${n})`,
+      emptyKind: "invalid-input",
     };
   }
 
@@ -513,37 +675,60 @@ export function insetPerEdge(
       parcelAreaSqFt,
       empty: true,
       emptyReason: "non-finite setback distance",
+      emptyKind: "invalid-input",
     };
   }
 
   const insetMeters = insetFeetPerEdge.map((ft) =>
     feetToMeters(Math.max(0, ft)),
   );
-  const insetXY = insetProjected(proj, insetMeters);
-  if (!insetXY) {
+  const clip = insetProjected(proj, insetMeters);
+  if (clip.kind === "clip-error") {
     return {
       ring: null,
       areaSqFt: 0,
       parcelAreaSqFt,
       empty: true,
-      emptyReason:
-        "setbacks leave no buildable area (offset lines did not close)",
+      emptyReason: `geometry validation failed (boolean clip error: ${clip.detail})`,
+      emptyKind: "validation-failed",
     };
   }
-
-  if (insetIsDegenerate(proj.points, insetXY.points, insetMeters)) {
+  if (clip.kind === "empty") {
     return {
       ring: null,
       areaSqFt: 0,
       parcelAreaSqFt,
       empty: true,
       emptyReason: "setbacks exceed the lot — no buildable area remains",
+      emptyKind: "consumed",
+    };
+  }
+
+  const rejection = classifyInset(proj.points, clip.points, clip.forbidden);
+  if (rejection) {
+    if (rejection.kind === "consumed") {
+      return {
+        ring: null,
+        areaSqFt: 0,
+        parcelAreaSqFt,
+        empty: true,
+        emptyReason: `setbacks exceed the lot — no buildable area remains (${rejection.reason})`,
+        emptyKind: "consumed",
+      };
+    }
+    return {
+      ring: null,
+      areaSqFt: 0,
+      parcelAreaSqFt,
+      empty: true,
+      emptyReason: `geometry validation failed (${rejection.reason})`,
+      emptyKind: "validation-failed",
     };
   }
 
   const insetArea =
-    ringAreaM2(insetXY.points) * FEET_PER_METER * FEET_PER_METER;
-  const closed: Ring = insetXY.points.map((p) => unproject(p, proj));
+    ringAreaM2(clip.points) * FEET_PER_METER * FEET_PER_METER;
+  const closed: Ring = clip.points.map((p) => unproject(p, proj));
   closed.push([closed[0]![0], closed[0]![1]]);
 
   const fullGate = geometryCorrectnessGate(ring, closed, insetFeetPerEdge);
@@ -553,7 +738,8 @@ export function insetPerEdge(
       areaSqFt: 0,
       parcelAreaSqFt,
       empty: true,
-      emptyReason: `geometry failed correctness gate (${fullGate.reasons.join("; ")})`,
+      emptyReason: `geometry validation failed (correctness gate: ${fullGate.reasons.join("; ")})`,
+      emptyKind: "validation-failed",
     };
   }
 
