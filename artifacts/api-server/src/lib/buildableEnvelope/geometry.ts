@@ -231,6 +231,64 @@ function buildForbiddenStrips(
   return forbidden;
 }
 
+/** Deviation-from-straight beyond which a vertex is a reversal, degrees. */
+const SPIKE_TURN_MAX_DEG = 160;
+/** Max gap (m) between a spike's out-leg start and back-leg end. */
+const SPIKE_MOUTH_MAX_M = 0.5;
+/** Consecutive vertices closer than this collapse to one (m). */
+const SPIKE_DUP_EPS_M = 0.05;
+
+/**
+ * Remove zero-width out-and-back excursions from a clip-output ring.
+ *
+ * On a curved frontage digitized as near-collinear chords, the per-edge strip
+ * union leaves a sliver gap at each chord junction; the difference then emits
+ * the buildable region with a degenerate spike running the full setback depth
+ * back to the parcel boundary (observed live on 48453:280239: 7.61 m spikes at
+ * every frontage junction, drawn by PE as perpendicular "ladder" strokes).
+ * A spike encloses no area, so stripping it changes neither the area figure
+ * nor the conservation gate; a genuinely pointed lot corner has a wide mouth
+ * (prev->next distance) and is preserved. Returns the input unchanged when
+ * nothing qualifies or when stripping would leave fewer than 3 vertices.
+ */
+export function stripReversalSpikes(points: XY[]): XY[] {
+  if (points.length < 4) return points;
+  const pts = points.slice();
+  let removed = false;
+  let changed = true;
+  let guard = 0;
+  while (changed && pts.length >= 4 && guard++ <= points.length + 8) {
+    changed = false;
+    for (let i = 0; i < pts.length; i++) {
+      const prev = pts[(i - 1 + pts.length) % pts.length]!;
+      const cur = pts[i]!;
+      const next = pts[(i + 1) % pts.length]!;
+      const ul = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+      const vl = Math.hypot(next.x - cur.x, next.y - cur.y);
+      if (ul < SPIKE_DUP_EPS_M) {
+        pts.splice(i, 1);
+        removed = true;
+        changed = true;
+        break;
+      }
+      if (vl < 1e-9) continue; // next pass drops `next` as the duplicate.
+      const cos =
+        ((cur.x - prev.x) * (next.x - cur.x) + (cur.y - prev.y) * (next.y - cur.y)) /
+        (ul * vl);
+      const devDeg = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
+      const mouth = Math.hypot(next.x - prev.x, next.y - prev.y);
+      if (devDeg > SPIKE_TURN_MAX_DEG && mouth < SPIKE_MOUTH_MAX_M) {
+        pts.splice(i, 1);
+        removed = true;
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (!removed || pts.length < 3) return points;
+  return pts;
+}
+
 /**
  * Outcome of the boolean clip. "empty" is the ONLY outcome that supports a
  * consume-lot claim; "clip-error" is an instrument failure and must surface
@@ -308,7 +366,11 @@ function insetProjected(
   }
 
   if (!best) return { kind: "empty" };
-  return { kind: "ok", points: best, forbidden };
+  // Clean degenerate zero-width excursions BEFORE the ring reaches callers:
+  // the wire geometry, exports, and the conservation gate all see the same
+  // spike-free ring (spikes carry no area, so the gate arithmetic is
+  // unaffected either way).
+  return { kind: "ok", points: stripReversalSpikes(best), forbidden };
 }
 
 /** Ray-cast point-in-polygon with an on-edge tolerance (local metres). */
