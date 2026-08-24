@@ -74,6 +74,11 @@ import {
   type AuthoritativeSetbackResolution,
 } from "../lib/buildableEnvelope/authoritativeSetbackSource";
 import {
+  cityStateFromSitus,
+  jurisdictionKeyFromParcelNode,
+} from "../lib/buildableEnvelope/envelopeJurisdiction";
+import { POST_BODY } from "../lib/buildableEnvelope/envelopePostBody";
+import {
   labelEdges,
   type RoadCandidate,
 } from "../lib/buildableEnvelope/edgeLabeling";
@@ -88,15 +93,7 @@ import type { Ring } from "../lib/buildableEnvelope/geometry";
 export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
 
 const PLACE_KEY_PARAM = z.string().min(1);
-const POST_BODY = z
-  .object({
-    address: z.string().min(1).optional(),
-    lat: z.number().finite().optional(),
-    lng: z.number().finite().optional(),
-    /** Skip the (slow, best-effort) OSM road fetch â€” labeling uses point/shape. */
-    skipRoad: z.boolean().optional(),
-  })
-  .strict();
+export { POST_BODY } from "../lib/buildableEnvelope/envelopePostBody";
 
 function reqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
@@ -597,28 +594,6 @@ async function situsFirstPreResolve(input: {
   return { situs, geocode };
 }
 
-/**
- * Best-effort city/state from a stored situs string
- * ("300 BLANCO RIVER RD, WIMBERLEY, TX 78676" -> { city: "WIMBERLEY",
- * state: "TX" }). Used to synthesize the setback jurisdiction key when a
- * situs hit resolved WITHOUT a geocode (miss) so there is no geocode
- * city/state. Returns nulls when the shape is not the expected
- * "street, city, ST zip". Never fabricates.
- */
-function cityStateFromSitus(situs: string | null): {
-  city: string | null;
-  state: string | null;
-} {
-  if (!situs) return { city: null, state: null };
-  const parts = situs.split(",").map((p) => p.trim()).filter(Boolean);
-  // Expect [street, city, "ST zip"] (or [street, city, "ST", zip]).
-  if (parts.length < 3) return { city: null, state: null };
-  const city = parts[1] || null;
-  const stateZip = parts.slice(2).join(" ").trim();
-  const stateMatch = /\b([A-Za-z]{2})\b/.exec(stateZip);
-  const state = stateMatch ? stateMatch[1]!.toUpperCase() : null;
-  return { city, state };
-}
 
 /**
  * The core derivation, shared by the GET (:placeKey) and POST (address) forms.
@@ -630,7 +605,12 @@ async function handleBuildableEnvelope(
   res: Response,
   input:
     | { placeKey: string }
-    | { address?: string; lat?: number; lng?: number },
+    | {
+        address?: string;
+        lat?: number;
+        lng?: number;
+        parcel_node_id?: string;
+      },
   skipRoad: boolean,
 ): Promise<void> {
   const log = reqLog(req);
@@ -728,7 +708,16 @@ async function handleBuildableEnvelope(
     };
     parcelGeo = situs.parcelGeo;
     // Skip the geocode gate and the pin-query â€” the parcel is already in hand.
-    await deriveAndRespond({ req, res, ctx, parcelGeo, skipRoad, log });
+    await deriveAndRespond({
+      req,
+      res,
+      ctx,
+      parcelGeo,
+      skipRoad,
+      log,
+      postedParcelNodeId:
+        "parcel_node_id" in input ? input.parcel_node_id ?? null : null,
+    });
     return;
   }
 
@@ -825,7 +814,16 @@ async function handleBuildableEnvelope(
     return;
   }
 
-  await deriveAndRespond({ req, res, ctx, parcelGeo, skipRoad, log });
+  await deriveAndRespond({
+    req,
+    res,
+    ctx,
+    parcelGeo,
+    skipRoad,
+    log,
+    postedParcelNodeId:
+      "parcel_node_id" in input ? input.parcel_node_id ?? null : null,
+  });
 }
 
 async function deriveLabelAndRespond(args: {
@@ -1033,8 +1031,9 @@ async function deriveAndRespond(args: {
   parcelGeo: { geojson: unknown; provider: string | null };
   skipRoad: boolean;
   log: typeof logger;
+  postedParcelNodeId?: string | null;
 }): Promise<void> {
-  const { res, ctx, parcelGeo, skipRoad } = args;
+  const { res, ctx, parcelGeo, skipRoad, postedParcelNodeId } = args;
   const parcel = firstParcelRing(parcelGeo.geojson);
   if (!parcel) {
     // The query succeeded but returned no usable polygon at this point.
@@ -1058,7 +1057,8 @@ async function deriveAndRespond(args: {
   // The tile-matching subject-parcel id, populated whenever the containing
   // parcel resolved (independent of setbacks). Threaded through every honest
   // response below so the map can snap + glow regardless of envelope outcome.
-  const parcelNodeIdValue: string | null = parcel.parcelNodeId;
+  const parcelNodeIdValue: string | null =
+    parcel.parcelNodeId ?? postedParcelNodeId ?? null;
 
   const atomChain = parcelNodeIdValue
     ? await fetchPropertyAtomChain(parcelNodeIdValue)
@@ -1132,11 +1132,17 @@ async function deriveAndRespond(args: {
   }
 
   const situsCityState = cityStateFromSitus(parcel.situsAddress);
-  const jurisdictionKey = keyFromEngagementOrSynthesize({
+  const fromCityState = keyFromEngagementOrSynthesize({
     jurisdictionCity: ctx.city ?? situsCityState.city,
     jurisdictionState: ctx.state ?? situsCityState.state,
     address: ctx.address ?? undefined,
   });
+  const jurisdictionKey =
+    fromCityState ??
+    jurisdictionKeyFromParcelNode({
+      parcelNodeId: parcelNodeIdValue,
+      districtCode: effectiveZoningCode,
+    });
 
   const resolved = resolveAuthoritativeSetbacks({
     jurisdictionKey,
@@ -1195,7 +1201,7 @@ brokeragePlaceBuildableEnvelopeRouter.post("/buildable-envelope", (req, res) => 
     res.status(400).json({ error: "invalid_body", issues: parsed.error.issues });
     return;
   }
-  const { address, lat, lng, skipRoad } = parsed.data;
+  const { address, lat, lng, skipRoad, parcel_node_id } = parsed.data;
   if (!address && (lat == null || lng == null)) {
     res.status(400).json({
       error: "invalid_request",
@@ -1210,7 +1216,7 @@ brokeragePlaceBuildableEnvelopeRouter.post("/buildable-envelope", (req, res) => 
   void handleBuildableEnvelope(
     req,
     res,
-    { address, lat, lng },
+    { address, lat, lng, parcel_node_id },
     skipRoad === true,
   );
 });
