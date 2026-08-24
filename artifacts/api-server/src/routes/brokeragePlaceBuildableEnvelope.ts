@@ -920,7 +920,15 @@ async function deriveLabelAndRespond(args: {
     },
   };
 
-  const wireStatus = derived.empty ? "no-buildable-area" : "ok";
+  // P60b reason split: "no-buildable-area" is a consume-lot MEASUREMENT and
+  // is only claimed when the boolean clip itself returned empty. A geometry
+  // gate decline is a distinct machine-readable status — silent degradation
+  // (a validation failure masquerading as a measurement) is prohibited.
+  const wireStatus = !derived.empty
+    ? "ok"
+    : derived.emptyKind === "consumed"
+      ? "no-buildable-area"
+      : "geometry-validation-failed";
 
   const zoningAtomDid = atomChain?.zoningFact?.atomDid;
   const setbackAtomDid = atomChain?.setbackRule?.atomDid;
