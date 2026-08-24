@@ -339,8 +339,9 @@ describe("POST /place/buildable-envelope", () => {
     expect(res.body.layer).toBe("buildable-envelope");
     expect(res.body.confidence).toBeDefined();
     expect(res.body.confidence.kind).toBe("asserted");
-    expect(res.body.payload.approximate).toBe(true);
+    expect(res.body.payload.approximate).toBe(false);
     expect(res.body.coverage.degraded).toBe(true);
+    expect(res.body.setbackSource).toBe("codified-ordinance");
     expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
   });
 
@@ -349,7 +350,7 @@ describe("POST /place/buildable-envelope", () => {
     parcelNodeIdStamped = null;
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
-    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.status).toBe("declined");
     expect(res.body.declineReason).toBe("no-zoning-stamp");
     expect(res.body.payload.approximate).toBe(true);
   });
@@ -508,13 +509,9 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       queryMode: "pin" as const,
     };
     const res = await postWith({ address: "300 Blanco River Rd, Wimberley, TX 78676" });
-    // AUTHORITATIVE situs short-circuit resolves the subject parcel; envelope derives.
-    expect(res.status).toBe(200);
-    expect(res.body.status).toMatch(/ok|no-buildable-area/);
-    expect(res.body.derivePath).toBe("labelEdges+derive");
-    expect(res.body.parcel_node_id).toBe("48209:193340");
-    // The point pin-query must NOT have been consulted — the situs path
-    // short-circuited it.
+    // Hays has no codified setback table for R-MD — honest no-district, not invented geometry.
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-district");
     expect(lastPinQueryPoint).toBeNull();
   });
 
@@ -625,10 +622,12 @@ describe("POST /place/buildable-envelope — atom-chain provenanceRefs (R3)", ()
     // Nothing to attach yet — omitted, not emitted as null/empty.
     expect(res.body.provenanceRefs).toBeUndefined();
     expect(res.body.status).toBe("ok");
+    expect(res.body.setbackSource).toBe("codified-ordinance");
     expect(res.body.setbacks).toEqual({
       front_ft: 25,
-      side_ft: 5,
-      rear_ft: 10,
+      side_ft: 7.5,
+      rear_ft: 20,
+      side_corner_ft: 15,
       district: "R-MD",
     });
     expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
