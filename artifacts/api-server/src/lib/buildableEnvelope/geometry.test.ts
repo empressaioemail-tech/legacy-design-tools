@@ -12,6 +12,7 @@ import {
   feetToMeters,
   metersToFeet,
   geometryCorrectnessGate,
+  stripReversalSpikes,
   type Ring,
 } from "./geometry";
 import {
@@ -412,6 +413,78 @@ describe("insetPerEdge — P60b false-empty regressions (digitized/curved rings)
     expect(res.areaSqFt).toBeGreaterThan(4_340);
     expect(res.areaSqFt).toBeLessThan(4_460);
     assertGatePass(SIMSBROOK_280239, res.ring!, feet);
+  });
+});
+
+/**
+ * True when any vertex is a zero-width reversal: deviation-from-straight
+ * beyond 160deg with the two legs rejoining inside 0.5 m.
+ */
+function ringHasReversalSpike(ring: Ring): boolean {
+  const proj = projectRing(ring);
+  if (!proj) return false;
+  const pts = proj.points;
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n]!;
+    const cur = pts[i]!;
+    const next = pts[(i + 1) % n]!;
+    const ul = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+    const vl = Math.hypot(next.x - cur.x, next.y - cur.y);
+    if (ul < 1e-9 || vl < 1e-9) return true; // duplicate vertex = degenerate
+    const cos =
+      ((cur.x - prev.x) * (next.x - cur.x) + (cur.y - prev.y) * (next.y - cur.y)) /
+      (ul * vl);
+    const devDeg = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
+    const mouth = Math.hypot(next.x - prev.x, next.y - prev.y);
+    if (devDeg > 160 && mouth < 0.5) return true;
+  }
+  return false;
+}
+
+describe("stripReversalSpikes — P60c zero-width spike cleanup at the source", () => {
+  it("removes an injected zero-width out-and-back spike (violation direction)", () => {
+    // 20x20 m square with a 7.6 m spike jammed into the south edge.
+    const spiked = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10.01, y: -7.6 }, // spike tip: out-and-back, mouth 0.02 m
+      { x: 10.02, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 20 },
+      { x: 0, y: 20 },
+    ];
+    const out = stripReversalSpikes(spiked);
+    expect(out.length).toBeLessThan(spiked.length);
+    for (const p of out) expect(p.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it("preserves a genuinely pointed lot corner (wide mouth)", () => {
+    // Triangle-nosed lot: sharp corner but legs diverge > 0.5 m mouth.
+    const pointed = [
+      { x: 0, y: 0 },
+      { x: 30, y: 0 },
+      { x: 34, y: 6 }, // ~41deg deviation, mouth huge — must survive
+      { x: 30, y: 12 },
+      { x: 0, y: 12 },
+    ];
+    expect(stripReversalSpikes(pointed)).toEqual(pointed);
+  });
+
+  it("REGRESSION: real Simsbrook inset rings carry no reversal spikes", () => {
+    // Live 2026-08-24 defect: the wire ring for 48453:280239 carried a 7.61 m
+    // zero-width excursion at every frontage chord junction; PE drew them as
+    // perpendicular ladder strokes across the setback gap.
+    const asIs = insetPerEdge(SIMSBROOK_280239, simsbrookAsIsFeet());
+    expect(asIs.ring).not.toBeNull();
+    expect(ringHasReversalSpike(asIs.ring!)).toBe(false);
+
+    const uniform = insetPerEdge(
+      SIMSBROOK_280239,
+      Array.from({ length: 11 }, () => 7.5),
+    );
+    expect(uniform.ring).not.toBeNull();
+    expect(ringHasReversalSpike(uniform.ring!)).toBe(false);
   });
 });
 
