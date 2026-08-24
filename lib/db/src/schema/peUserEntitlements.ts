@@ -5,6 +5,16 @@ import { users } from "./users";
 export type PeAccessTier = "free" | "paid";
 
 /**
+ * Which rung of the LOCKED 2026-08-10 Smart Site ladder a paid subscription
+ * is on (doc_repo `_inbox/2026-08-10_smartsite_pricing_and_gtm_LOCKED.md`).
+ * `null` for free users and for users whose only entitlement is a
+ * per-property unlock. `access_tier` stays the binary is-a-subscriber flag
+ * every existing gate reads; this column carries the rung so Studio-only
+ * surfaces (CAD, terrain, owner data) can gate on studio|team.
+ */
+export type PeSubscriptionTier = "solo" | "studio" | "team";
+
+/**
  * Provenance of a paid entitlement (WDLL 2026-08-05 item 1). `null` for
  * free-tier rows. `stripe_unlock` is informational — the row of record for
  * a per-property unlock is `pe_property_unlocks.source`, not this column.
@@ -44,6 +54,13 @@ export const peUserEntitlements = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * Ladder rung for `access_tier = 'paid'` subscribers (migration 0083).
+     * Written only by the Stripe webhook. `null` = free, unlock-only, or a
+     * legacy pre-ladder subscription (treated as solo at read time by the
+     * entitlement snapshot, never silently upgraded to studio/team).
+     */
+    subscriptionTier: text("subscription_tier").$type<PeSubscriptionTier>(),
   },
   (t) => [index("pe_user_entitlements_tenant_idx").on(t.tenantId)],
 );

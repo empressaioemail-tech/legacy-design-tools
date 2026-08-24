@@ -1240,7 +1240,8 @@ CREATE TABLE @@SCHEMA@@.pe_property_unlocks (
     tenant_id text DEFAULT 'default'::text NOT NULL,
     parcel_node_id text NOT NULL,
     unlocked_at timestamp with time zone DEFAULT now() NOT NULL,
-    source text DEFAULT 'stub'::text NOT NULL
+    source text DEFAULT 'stub'::text NOT NULL,
+    expires_at timestamp with time zone
 );
 
 
@@ -1267,7 +1268,8 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
     dev_role boolean DEFAULT false NOT NULL,
     entitlement_source text,
     stripe_customer_id text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    subscription_tier text
 );
 
 
