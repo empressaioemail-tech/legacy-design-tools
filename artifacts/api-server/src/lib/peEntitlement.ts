@@ -3,12 +3,13 @@
  */
 
 import type { Request, Response, NextFunction, RequestHandler } from "express";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
   db,
   peUserEntitlements,
   pePropertyUnlocks,
   peChatMessageCounts,
+  type PeSubscriptionTier,
 } from "@workspace/db";
 import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
@@ -19,6 +20,15 @@ export const PE_FREE_CHAT_MESSAGE_LIMIT = 3;
 
 export type PeEntitlementSnapshot = {
   tier: "free" | "paid";
+  /**
+   * Ladder rung (LOCKED 2026-08-10) for paid subscribers: solo | studio |
+   * team. `null` for free users and unlock-only users. Legacy pre-ladder
+   * paid rows (no stored rung) read as "solo" — never silently studio/team.
+   * Dev-role users read as "team" so operator accounts clear every gate.
+   * The PE BFF gates Studio-only surfaces (CAD, terrain, owner data) on
+   * {@link subscriptionTierGrantsStudio} over this field.
+   */
+  subscriptionTier: PeSubscriptionTier | null;
   tenantId: string;
   userId: string | null;
   authenticated: boolean;
@@ -32,6 +42,17 @@ export type PeEntitlementSnapshot = {
     | "dev"
     | null;
 };
+
+/**
+ * Does a ladder rung include the Studio deliverables (site-plan CAD,
+ * terrain export, owner data)? Solo deliberately does NOT — "Owner data is
+ * Studio, not Solo" is an operator ruling in the LOCKED 2026-08-10 doc.
+ */
+export function subscriptionTierGrantsStudio(
+  tier: PeSubscriptionTier | null,
+): boolean {
+  return tier === "studio" || tier === "team";
+}
 
 export function resolvePeOwnerUserId(req: Request): string | null {
   const userId = req.session.requestor?.kind === "user"
@@ -53,6 +74,7 @@ export async function resolvePeEntitlement(
   if (!userId) {
     return {
       tier: "free",
+      subscriptionTier: null,
       tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
       userId: null,
       authenticated: false,
@@ -67,8 +89,17 @@ export async function resolvePeEntitlement(
   // "paid" here, not just clear the separate route-level bypass).
   const tier: "free" | "paid" =
     row.accessTier === "paid" || row.devRole ? "paid" : "free";
+  // Ladder rung: dev role reads as team (operator accounts clear every
+  // gate); a paid row without a stored rung is a legacy pre-ladder
+  // subscription and reads as solo, never silently studio/team.
+  const subscriptionTier: PeSubscriptionTier | null = row.devRole
+    ? "team"
+    : row.accessTier === "paid"
+      ? (row.subscriptionTier ?? "solo")
+      : null;
   return {
     tier,
+    subscriptionTier,
     tenantId: req.session.tenantId ?? DEFAULT_TENANT_ID,
     userId,
     authenticated: true,
@@ -118,7 +149,12 @@ export const requirePePaidDeep: RequestHandler = async (
   next();
 };
 
-/** True when a per-property unlock row exists for this user + parcel. */
+/**
+ * True when an UNEXPIRED per-property unlock row exists for this user +
+ * parcel. `expires_at` null = unbounded (legacy/dev rows); a Stripe-sourced
+ * unlock carries the 30-day bound from the LOCKED 2026-08-10 ladder and an
+ * expired row is treated as absent.
+ */
 export async function hasPePropertyUnlock(
   userId: string,
   parcelNodeId: string,
@@ -130,6 +166,10 @@ export async function hasPePropertyUnlock(
       and(
         eq(pePropertyUnlocks.ownerUserId, userId),
         eq(pePropertyUnlocks.parcelNodeId, parcelNodeId),
+        or(
+          isNull(pePropertyUnlocks.expiresAt),
+          gt(pePropertyUnlocks.expiresAt, new Date()),
+        ),
       ),
     )
     .limit(1);
@@ -154,17 +194,22 @@ export async function isPePropertyEntitled(
 }
 
 /**
- * Stub unlock WRITER (interface, not payments). Everything that grants a
- * per-property unlock funnels through here: today the operator dev-unlock
- * route (`source: "dev"`), later the Stripe one-time checkout webhook calls
- * this same function with `source: "stripe"` — no live charging in this
- * wave (auth-orphan lesson: the payment flip ships isolated).
+ * Unlock WRITER. Everything that grants a per-property unlock funnels
+ * through here: the operator dev-unlock route (`source: "dev"`, no expiry)
+ * and the Stripe one-time checkout webhook (`source: "stripe"`, 30-day
+ * `expiresAt` per the LOCKED 2026-08-10 ladder).
+ *
+ * Upsert semantics: a repurchase RENEWS an existing row (fresh unlockedAt /
+ * expiresAt / source) — with the old insert-or-ignore a re-bought unlock on
+ * an expired row would take the customer's $15 and grant nothing.
  */
 export async function createPePropertyUnlock(input: {
   ownerUserId: string;
   parcelNodeId: string;
   tenantId?: string;
   source?: string;
+  /** `null`/absent = no expiry (dev/legacy paths); Stripe passes now + 30 days. */
+  expiresAt?: Date | null;
 }): Promise<void> {
   await db
     .insert(pePropertyUnlocks)
@@ -173,8 +218,20 @@ export async function createPePropertyUnlock(input: {
       tenantId: input.tenantId ?? DEFAULT_TENANT_ID,
       parcelNodeId: input.parcelNodeId,
       source: input.source ?? "stub",
+      expiresAt: input.expiresAt ?? null,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [
+        pePropertyUnlocks.ownerUserId,
+        pePropertyUnlocks.tenantId,
+        pePropertyUnlocks.parcelNodeId,
+      ],
+      set: {
+        unlockedAt: new Date(),
+        source: input.source ?? "stub",
+        expiresAt: input.expiresAt ?? null,
+      },
+    });
 }
 
 /** Free chat messages already consumed on this property by this user. */

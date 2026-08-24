@@ -34,6 +34,7 @@ import {
   createPePropertyUnlockCheckoutSession,
   defaultPeCheckoutCancelUrl,
   defaultPeCheckoutSuccessUrl,
+  PeCheckoutConfigError,
 } from "../lib/pePaywallStripe";
 
 const router: IRouter = Router();
@@ -223,6 +224,9 @@ router.get("/property-explorer/v1/entitlement", async (req: Request, res: Respon
   const base = {
     authenticated: snap.authenticated,
     tier: snap.tier,
+    /** Ladder rung (LOCKED 2026-08-10) — the PE BFF gates Studio-only
+     *  surfaces (CAD, terrain, owner data) on studio|team, never bare tier. */
+    subscriptionTier: snap.subscriptionTier,
     tenantId: snap.tenantId,
     userId: snap.userId,
     devRole: snap.devRole,
@@ -783,17 +787,52 @@ router.post(
   },
 );
 
-const PeCheckoutBodySchema = z.object({
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
-});
+const PeCheckoutBodySchema = z
+  .object({
+    successUrl: z.string().url().optional(),
+    cancelUrl: z.string().url().optional(),
+    /**
+     * Ladder rung (LOCKED 2026-08-10): solo $49 / studio $129 / team $299.
+     * Unknown strings are rejected by the enum (fail closed — never mapped
+     * to another tier). ABSENT defaults to solo: the deployed PE client
+     * (hauska-map billingClient.ts) predates the tier field and its only
+     * subscription button semantic was Solo; tighten to required once the
+     * tier-passing client ships (see PE handoff note, 2026-08-24).
+     */
+    tier: z.enum(["solo", "studio", "team"]).optional(),
+    /**
+     * Billing interval (2026-08-24 annual ruling: Solo $490 / Studio $1,290 /
+     * Team $2,990 per year). ABSENT defaults to month. Unknown strings are
+     * rejected 400 by the enum — never coerced to a different interval than
+     * the one the customer was shown.
+     */
+    interval: z.enum(["month", "year"]).optional(),
+    /** Team only: TOTAL seats desired. Base price covers 10; +$25/mo each above. */
+    seats: z.number().int().min(1).max(500).optional(),
+  })
+  .refine((body) => body.seats === undefined || body.tier === "team", {
+    message: "seats is only valid with tier=team",
+  })
+  .refine(
+    (body) =>
+      body.interval !== "year" ||
+      body.seats === undefined ||
+      body.seats <= 10,
+    {
+      // No annual extra-seat price exists (seats stay monthly $25, ruled
+      // 2026-08-24) and Stripe cannot mix intervals in one subscription.
+      message:
+        "annual Team billing covers at most the 10 included seats; extra seats bill monthly only",
+    },
+  );
 
 /**
- * User-authenticated Pro subscription checkout (WDLL 2026-08-05 items 2, 3).
- * Distinct from the install-scoped `propertyExplorerBillingRouter` seam:
- * this is the signed-in PE user's own checkout, carries `pe_user_id` in
- * Stripe metadata so the webhook can flip THIS user's
- * `pe_user_entitlements.access_tier`, and allows Stripe promotion codes at
+ * User-authenticated subscription checkout (WDLL 2026-08-05 items 2, 3;
+ * tier-aware per the LOCKED 2026-08-10 ladder). Distinct from the
+ * install-scoped `propertyExplorerBillingRouter` seam: this is the
+ * signed-in PE user's own checkout, carries `pe_user_id` +
+ * `subscription_tier` in Stripe metadata so the webhook can set THIS
+ * user's `pe_user_entitlements` rung, and allows Stripe promotion codes at
  * checkout so a tester can apply a 100%-off code and land in the same paid
  * path as a real payment.
  */
@@ -814,6 +853,9 @@ router.post(
     try {
       const session = await createPeSubscriptionCheckoutSession({
         userId,
+        tier: parsed.data.tier ?? "solo",
+        interval: parsed.data.interval ?? "month",
+        seats: parsed.data.seats,
         installId: installIdFromRequest(req),
         successUrl: parsed.data.successUrl ?? defaultPeCheckoutSuccessUrl(),
         cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
@@ -826,6 +868,17 @@ router.post(
           : "Stripe credentials not configured on cortex — simulated checkout only",
       });
     } catch (err) {
+      if (err instanceof PeCheckoutConfigError) {
+        // FAIL CLOSED, declared: this tier's price is not configured.
+        // Refuse rather than charge any other tier's price.
+        res.status(503).json({
+          error: "checkout_unavailable",
+          message: err.message,
+          missing: err.missing,
+          stripeConfigured: isStripeConfigured(),
+        });
+        return;
+      }
       res.status(502).json({
         error: "checkout_failed",
         message: String((err as Error).message || err),
@@ -884,9 +937,18 @@ router.post(
         stripeConfigured: isStripeConfigured(),
         honestNote: isStripeConfigured()
           ? undefined
-          : "Stripe credentials or STRIPE_PE_UNLOCK_PRICE_ID not configured — simulated checkout only",
+          : "Stripe credentials not configured — simulated checkout only",
       });
     } catch (err) {
+      if (err instanceof PeCheckoutConfigError) {
+        res.status(503).json({
+          error: "checkout_unavailable",
+          message: err.message,
+          missing: err.missing,
+          stripeConfigured: isStripeConfigured(),
+        });
+        return;
+      }
       res.status(502).json({
         error: "checkout_failed",
         message: String((err as Error).message || err),

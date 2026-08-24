@@ -11,12 +11,19 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, brokerageWallets } from "@workspace/db";
+import { db, brokerageWallets, type PeSubscriptionTier } from "@workspace/db";
 import { logger } from "./logger";
 import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
 import { setPeAccessTierFromStripe } from "./peIdentity";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
+
+/** 30-day unlock bound (LOCKED 2026-08-10 ladder: "$15, 30 days — not forever"). */
+const PE_UNLOCK_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isPeSubscriptionTierValue(v: unknown): v is PeSubscriptionTier {
+  return v === "solo" || v === "studio" || v === "team";
+}
 
 export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
@@ -58,6 +65,10 @@ export type StripeCheckoutResult = {
   mode: "live" | "simulated";
   publishableKey: string | null;
   tier?: SubscriptionCheckoutTier;
+  /** Smart Site ladder tier for PE user-scoped checkouts (LOCKED 2026-08-10). */
+  peTier?: PeSubscriptionTier;
+  /** Billing interval for PE user-scoped subscription checkouts (2026-08-24 annual ruling). */
+  peInterval?: "month" | "year";
   note?: string;
 };
 
@@ -254,15 +265,21 @@ export type StripeWebhookHandleResult =
   | { handled: true; eventType: string; installId?: string; peUserId?: string }
   | { handled: false; reason: string };
 
-/** `metadata.pe_user_id` / `metadata.checkout_kind` set by `pePaywallStripe.ts`. */
+/** `metadata.pe_user_id` / `metadata.checkout_kind` / `metadata.subscription_tier` set by `pePaywallStripe.ts`. */
 function peMetadataFromObject(obj: Record<string, unknown>): {
   peUserId: string | null;
   checkoutKind: string | null;
   parcelNodeId: string | null;
+  subscriptionTierRaw: string | null;
 } {
   const meta = obj.metadata;
   if (!meta || typeof meta !== "object") {
-    return { peUserId: null, checkoutKind: null, parcelNodeId: null };
+    return {
+      peUserId: null,
+      checkoutKind: null,
+      parcelNodeId: null,
+      subscriptionTierRaw: null,
+    };
   }
   const record = meta as Record<string, unknown>;
   return {
@@ -271,7 +288,41 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       typeof record.checkout_kind === "string" ? record.checkout_kind : null,
     parcelNodeId:
       typeof record.parcel_node_id === "string" ? record.parcel_node_id : null,
+    subscriptionTierRaw:
+      typeof record.subscription_tier === "string"
+        ? record.subscription_tier
+        : null,
   };
+}
+
+/**
+ * Resolve the ladder tier a completed PE subscription checkout grants.
+ *
+ *  - `metadata.subscription_tier` valid            -> that tier
+ *  - absent + legacy `checkout_kind: "pro_sub"`    -> "solo" (pre-ladder
+ *    sessions carried no tier and charged the Solo-named price; never
+ *    mapped to studio/team)
+ *  - present but UNKNOWN value                     -> null: FAIL CLOSED,
+ *    grant nothing, return unhandled so Stripe retries and the miss is
+ *    visible in the webhook dashboard rather than silently granting a tier
+ */
+function resolvePeGrantTier(meta: {
+  checkoutKind: string | null;
+  subscriptionTierRaw: string | null;
+}): PeSubscriptionTier | null {
+  if (meta.subscriptionTierRaw !== null) {
+    return isPeSubscriptionTierValue(meta.subscriptionTierRaw)
+      ? meta.subscriptionTierRaw
+      : null;
+  }
+  if (meta.checkoutKind === "pro_sub") {
+    logger.warn(
+      {},
+      "stripe: legacy pro_sub checkout without subscription_tier — granting solo",
+    );
+    return "solo";
+  }
+  return null;
 }
 
 /**
@@ -329,13 +380,15 @@ export async function handleStripeWebhook(
 
     // PE property-unlock (WDLL 2026-08-05 item 4): one-time $15 checkout
     // opened by `pePaywallStripe.ts`. Writes through the SAME unlock writer
-    // the operator dev-unlock route uses, with `source: "stripe"`.
+    // the operator dev-unlock route uses, with `source: "stripe"` and the
+    // 30-day bound from the LOCKED 2026-08-10 ladder.
     if (peMeta.peUserId && peMeta.checkoutKind === "property_unlock") {
       if (peMeta.parcelNodeId) {
         await createPePropertyUnlock({
           ownerUserId: peMeta.peUserId,
           parcelNodeId: peMeta.parcelNodeId,
           source: "stripe",
+          expiresAt: new Date(Date.now() + PE_UNLOCK_DURATION_MS),
         });
       } else {
         logger.warn(
@@ -354,18 +407,37 @@ export async function handleStripeWebhook(
       };
     }
 
-    // PE Pro subscription (WDLL 2026-08-05 items 2, 5): sets the PE
-    // user-scoped entitlement (`pe_user_entitlements.access_tier`), NOT the
+    // PE subscription (WDLL 2026-08-05 items 2, 5; tier-aware per the
+    // LOCKED 2026-08-10 ladder): sets the PE user-scoped entitlement
+    // (`pe_user_entitlements.access_tier` + `subscription_tier`), NOT the
     // install-scoped `brokerage_wallets` row the branch below writes. Promo
     // vs full-price is recorded in `entitlement_source` for the pinned
     // `/entitlement` contract's `source` field.
     if (peMeta.peUserId) {
+      const grantTier = resolvePeGrantTier(peMeta);
+      if (!grantTier) {
+        // FAIL CLOSED: an unknown subscription_tier grants nothing. The
+        // non-2xx response makes Stripe retry and surfaces the miss.
+        logger.error(
+          {
+            peUserId: peMeta.peUserId,
+            subscriptionTier: peMeta.subscriptionTierRaw,
+            checkoutKind: peMeta.checkoutKind,
+          },
+          "stripe: PE checkout completed with unknown subscription_tier — refusing to grant",
+        );
+        return {
+          handled: false,
+          reason: `unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        };
+      }
       const source = checkoutSessionHadDiscount(obj)
         ? "stripe_promo"
         : "stripe_sub";
       await setPeAccessTierFromStripe({
         userId: peMeta.peUserId,
         tier: "paid",
+        subscriptionTier: grantTier,
         source,
         stripeCustomerId: customerId,
       });
@@ -399,6 +471,39 @@ export async function handleStripeWebhook(
   }
 
   if (type === "customer.subscription.updated") {
+    // PE user-scoped subscription lifecycle (subscription_data metadata set
+    // by pePaywallStripe.ts): keep `pe_user_entitlements` in step so a
+    // cancelled or past-due subscription actually downgrades — before the
+    // 2026-08 ladder work a PE user stayed "paid" forever after one payment.
+    const peMeta = peMetadataFromObject(obj);
+    if (peMeta.peUserId) {
+      const status = typeof obj.status === "string" ? obj.status : "";
+      const active = status === "active" || status === "trialing";
+      const grantTier = resolvePeGrantTier(peMeta);
+      if (active && !grantTier) {
+        logger.error(
+          { peUserId: peMeta.peUserId, subscriptionTier: peMeta.subscriptionTierRaw },
+          "stripe: PE subscription active with unknown subscription_tier — refusing to grant",
+        );
+        return {
+          handled: false,
+          reason: `unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        };
+      }
+      await setPeAccessTierFromStripe({
+        userId: peMeta.peUserId,
+        tier: active ? "paid" : "free",
+        subscriptionTier: active ? grantTier : null,
+        source: "stripe_sub",
+        stripeCustomerId: typeof obj.customer === "string" ? obj.customer : null,
+      });
+      return {
+        handled: true,
+        eventType: active ? "pe_subscription_active" : "pe_churned",
+        peUserId: peMeta.peUserId,
+      };
+    }
+
     const installId = await installIdFromStripeSubscription(obj);
     const status = typeof obj.status === "string" ? obj.status : "";
     const active = status === "active" || status === "trialing";
@@ -427,6 +532,17 @@ export async function handleStripeWebhook(
   }
 
   if (type === "customer.subscription.deleted") {
+    const peMeta = peMetadataFromObject(obj);
+    if (peMeta.peUserId) {
+      await setPeAccessTierFromStripe({
+        userId: peMeta.peUserId,
+        tier: "free",
+        subscriptionTier: null,
+        source: "stripe_sub",
+      });
+      return { handled: true, eventType: "pe_churned", peUserId: peMeta.peUserId };
+    }
+
     const installId = await installIdFromStripeSubscription(obj);
     if (installId) {
       await setSubscriptionEntitlement({

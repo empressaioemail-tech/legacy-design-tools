@@ -10,6 +10,7 @@ import {
   peUserEntitlements,
   users,
   type PeOidcProvider,
+  type PeSubscriptionTier,
 } from "@workspace/db";
 import { ensureUserProfile } from "./userProfiles";
 import { newUserId } from "./sessionToken";
@@ -131,6 +132,8 @@ export async function getPeAccessTier(
 
 export type PeEntitlementRow = {
   accessTier: "free" | "paid";
+  /** Ladder rung for paid subscribers (LOCKED 2026-08-10); null = free / unlock-only / legacy pre-ladder. */
+  subscriptionTier: PeSubscriptionTier | null;
   devRole: boolean;
   entitlementSource: "stripe_sub" | "stripe_promo" | "stripe_unlock" | "dev" | null;
   stripeCustomerId: string | null;
@@ -143,6 +146,7 @@ export async function getPeEntitlementRow(
   const [row] = await db
     .select({
       accessTier: peUserEntitlements.accessTier,
+      subscriptionTier: peUserEntitlements.subscriptionTier,
       devRole: peUserEntitlements.devRole,
       entitlementSource: peUserEntitlements.entitlementSource,
       stripeCustomerId: peUserEntitlements.stripeCustomerId,
@@ -152,6 +156,7 @@ export async function getPeEntitlementRow(
     .limit(1);
   return {
     accessTier: row?.accessTier === "paid" ? "paid" : "free",
+    subscriptionTier: row?.subscriptionTier ?? null,
     devRole: row?.devRole === true,
     entitlementSource: row?.entitlementSource ?? null,
     stripeCustomerId: row?.stripeCustomerId ?? null,
@@ -206,6 +211,12 @@ export async function findPeUserIdByStripeCustomerId(
 export async function setPeAccessTierFromStripe(input: {
   userId: string;
   tier: "free" | "paid";
+  /**
+   * Ladder rung (LOCKED 2026-08-10) for `tier: "paid"`. Required on paid
+   * writes so a Solo payment can never silently read as Studio; cleared on
+   * `tier: "free"` (churn).
+   */
+  subscriptionTier: PeSubscriptionTier | null;
   source: "stripe_sub" | "stripe_promo";
   stripeCustomerId?: string | null;
 }): Promise<void> {
@@ -214,6 +225,7 @@ export async function setPeAccessTierFromStripe(input: {
     .update(peUserEntitlements)
     .set({
       accessTier: input.tier,
+      subscriptionTier: input.tier === "paid" ? input.subscriptionTier : null,
       entitlementSource: input.tier === "paid" ? input.source : null,
       ...(input.stripeCustomerId
         ? { stripeCustomerId: input.stripeCustomerId }
