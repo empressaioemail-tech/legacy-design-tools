@@ -127,7 +127,11 @@ vi.mock("../lib/placeResolve", async () => {
 // `parcelNodeId()` helper. When null (default), the feature carries NO
 // `parcel_node_id` property, exactly as the dormant Cotality fallback path
 // leaves it — so the route must surface a null id, never fabricate one.
-function rectParcel(zoningCode: string | null, parcelNodeId: string | null = null) {
+function rectParcel(
+  zoningCode: string | null,
+  parcelNodeId: string | null = null,
+  situsAddress = "1209 Main St",
+) {
   const mPerDegLat = (Math.PI / 180) * 6_378_137;
   const mPerDegLng = mPerDegLat * Math.cos((BASTROP_LAT * Math.PI) / 180);
   const halfW = feetToMeters(100) / 2 / mPerDegLng;
@@ -151,7 +155,7 @@ function rectParcel(zoningCode: string | null, parcelNodeId: string | null = nul
         },
         properties: {
           apn: "R123456",
-          situsAddress: "1209 Main St",
+          situsAddress,
           zoningCode,
           ...(parcelNodeId ? { parcel_node_id: parcelNodeId } : {}),
         },
@@ -164,6 +168,7 @@ let parcelZoning: string | null = "R-MD";
 // Set per-test to simulate the provider having (or not having) stamped a
 // tile-matching `parcel_node_id` on the resolved feature.
 let parcelNodeIdStamped: string | null = null;
+let parcelSitusAddress = "1209 Main St";
 // Per-test control over the pin-query path: set to an AdapterRunError to
 // simulate a provider failure vs. an empty-coverage (no parcel) throw,
 // or record the point it was called with.
@@ -188,7 +193,11 @@ vi.mock("../lib/brokerageGisLayers", async () => {
           provider: "Test County GIS",
           adapterKey: "test:parcels",
           serviceUrl: "https://example/parcels",
-          geojson: rectParcel(parcelZoning, parcelNodeIdStamped),
+          geojson: rectParcel(
+            parcelZoning,
+            parcelNodeIdStamped,
+            parcelSitusAddress,
+          ),
           featureCount: 1,
           queryMode: "pin" as const,
           notSurveyGrade: true,
@@ -322,6 +331,7 @@ beforeEach(() => {
   byPropIdResult = null;
   geocodeOverride = null;
   geocodeMiss = false;
+  parcelSitusAddress = "1209 Main St";
   resolveSpineZoningWhenGisAbsentMock.mockReset();
   resolveSpineZoningWhenGisAbsentMock.mockResolvedValue(null);
   fetchPropertyAtomChainMock.mockReset();
@@ -387,6 +397,84 @@ describe("POST /place/buildable-envelope", () => {
         expect(res.body.declineReason).toMatch(/no-zoning-stamp/);
       }
     }
+  });
+});
+
+describe("POST /place/buildable-envelope — parcel_node_id schema + city-less situs (WDLL 1-3)", () => {
+  const DASHWOOD_SITUS = "17006 DASHWOOD CREEK DR , TX 78660";
+  const DASHWOOD_NODE = "48453:280210";
+
+  it("400 unrecognized_keys when an extra field is present", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    const res = await post({
+      address: "1209 Main St, Bastrop, TX 78602",
+      extra_field: true,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_body");
+    const codes = (res.body.issues as Array<{ code?: string; keys?: string[] }>)
+      .map((i) => i.code);
+    expect(codes).toContain("unrecognized_keys");
+    const keys = (res.body.issues as Array<{ keys?: string[] }>).flatMap(
+      (i) => i.keys ?? [],
+    );
+    expect(keys).toContain("extra_field");
+  });
+
+  it("accepts parcel_node_id (no longer unrecognized_keys)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48021:34137";
+    const res = await post({
+      address: "908 PINE , BASTROP, TX 78602",
+      parcel_node_id: "48021:34137",
+    });
+    expect(res.status).not.toBe(400);
+    expect(res.body.error).not.toBe("invalid_body");
+    const issues = (res.body.issues ?? []) as Array<{ keys?: string[] }>;
+    expect(issues.flatMap((i) => i.keys ?? [])).not.toContain("parcel_node_id");
+  });
+
+  it("Dashwood city-less situs + node 48453:280210 yields Pflugerville setbacks", async () => {
+    parcelZoning = "SF-S";
+    parcelNodeIdStamped = DASHWOOD_NODE;
+    parcelSitusAddress = DASHWOOD_SITUS;
+    // Live Nominatim leaves city empty on this CAD line; do not invent Bastrop.
+    geocodeOverride = {
+      lat: BASTROP_LAT,
+      lng: BASTROP_LNG,
+      city: "",
+      state: "TX",
+      matchRung: "street",
+    };
+    const res = await post({
+      address: DASHWOOD_SITUS,
+      parcel_node_id: DASHWOOD_NODE,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.parcel_node_id).toBe(DASHWOOD_NODE);
+    expect(res.body.setbacks).toEqual({
+      front_ft: 25,
+      side_ft: 7.5,
+      rear_ft: 20,
+      side_corner_ft: 15,
+      district: "SF-S",
+    });
+  });
+
+  it("Wainee-class no stamp still honest-declines (node does not invent a district)", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = "48021:35772";
+    parcelSitusAddress = "195 WAINEE DR, BASTROP, TX 78602";
+    const res = await post({
+      address: "195 Wainee Dr, Bastrop, TX 78602",
+      parcel_node_id: "48021:35772",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("no-zoning-stamp");
+    expect(res.body.setbacks).toBeUndefined();
   });
 });
 
