@@ -440,8 +440,8 @@ export interface BakedNodeFacetSnapshot {
   facets: unknown;
   snapshotAt: string | null;
   tier2: Tier2Overlay | null;
-  /** Bake coord index. Null when missing, non-finite, or the 0,0 degenerate. */
-  queryPoint: { longitude: number; latitude: number } | null;
+  /** Bake coord index. Absent/null when missing, non-finite, or 0,0. */
+  queryPoint?: { longitude: number; latitude: number } | null;
 }
 
 export function extractTier2Overlay(
