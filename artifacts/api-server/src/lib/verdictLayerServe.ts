@@ -117,6 +117,33 @@ export function buildStructuralLookupFailedAbsence(
   };
 }
 
+/**
+ * P-77: map node exists but no cad_property row at declared vintage (join miss).
+ * Not absent-verified — we did not verify absence of a parcel record globally.
+ */
+export function buildCadPropertyJoinMissLookupFailed(
+  countyFips: string,
+  parcelNodeId: string,
+  taxYear: number | undefined,
+  tier: string,
+  asOf: string = new Date().toISOString(),
+): LayerAbsenceWire {
+  const authority = structuralLookupFailedAuthority(countyFips);
+  const classification = absenceClassificationForEntityType("cad-parcel-roll");
+  const vintageLabel = `${taxYear ?? "unknown"}/${tier}`;
+  return {
+    status: "absent",
+    verdict: "lookup-failed",
+    authority,
+    scopeSearched: `cad_property declared vintage ${vintageLabel}`,
+    asOf,
+    basis: `No cad_property row at declared vintage for ${parcelNodeId}`,
+    ...classification,
+    entityType: "cad-parcel-roll",
+    provenanceClass: classification.provenanceClass ?? "Record",
+  };
+}
+
 export function countyHasUnzonedUnincorporatedDoctrine(countyFips: string): boolean {
   return UNZONED_UNINCORPORATED_FIPS.has(countyFips.trim());
 }
