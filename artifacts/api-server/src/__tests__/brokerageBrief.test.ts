@@ -112,14 +112,25 @@ const { __resetServiceApiKeyCacheForTests } = await import(
   "../lib/serviceToken"
 );
 const { setBriefingLlmClient } = await import("../lib/briefingLlmClient");
+const {
+  setResearchChatCivicHttpForTests,
+  resetResearchChatCivicHttpForTests,
+  assertLabeledWebSearchCitation,
+} = await import("../lib/brokerageResearchChatWebSearch");
 const { brokerageBriefRuns } = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
 const { SubstrateRetrievalError } = await import("@workspace/codes");
 
+const hasDb =
+  Boolean(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL) &&
+  process.env.VITEST_DATABASE_STUB !== "1";
+
 let getApp: () => Express;
-setupRouteTests((g) => {
-  getApp = g;
-});
+if (hasDb) {
+  setupRouteTests((g) => {
+    getApp = g;
+  });
+}
 
 const authHeaders = {
   Authorization: `Bearer ${TEST_API_KEY}`,
@@ -233,6 +244,9 @@ beforeEach(() => {
     kind: "grok",
     client: { completeChat: completeChatMock },
   });
+  setResearchChatCivicHttpForTests(async () => {
+    throw new Error("civic fetch disabled in brief suite unless a test injects");
+  });
 });
 
 afterEach(() => {
@@ -242,9 +256,10 @@ afterEach(() => {
   resetBrokerageApiKeysForTests();
   __resetServiceApiKeyCacheForTests();
   setBriefingLlmClient(null);
+  resetResearchChatCivicHttpForTests();
 });
 
-describe("GET /api/brief-coverage", () => {
+describe.skipIf(!hasDb)("GET /api/brief-coverage", () => {
   it("serves static coverage HTML without auth", async () => {
     const res = await request(getApp()).get("/api/brief-coverage");
     expect(res.status).toBe(200);
@@ -253,7 +268,7 @@ describe("GET /api/brief-coverage", () => {
   });
 });
 
-describe("POST /api/brokerage/v1/brief", () => {
+describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
   it("returns 401 without API key", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
@@ -366,7 +381,7 @@ describe("POST /api/brokerage/v1/brief", () => {
   });
 });
 
-describe("GET /api/brokerage/v1/brief/:runId", () => {
+describe.skipIf(!hasDb)("GET /api/brokerage/v1/brief/:runId", () => {
   it("returns persisted brief run for service token", async () => {
     const briefRes = await request(getApp())
       .post("/api/brokerage/v1/brief")
@@ -392,7 +407,7 @@ describe("GET /api/brokerage/v1/brief/:runId", () => {
   });
 });
 
-describe("POST /api/brokerage/v1/brief/summarize", () => {
+describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief/summarize", () => {
   it("returns grok summary with citations", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief/summarize")
@@ -417,7 +432,7 @@ describe("POST /api/brokerage/v1/brief/summarize", () => {
   });
 });
 
-describe("POST /api/brokerage/v1/research/chat", () => {
+describe.skipIf(!hasDb)("POST /api/brokerage/v1/research/chat", () => {
   it("returns 404 for unknown runId", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/research/chat")
@@ -634,5 +649,77 @@ describe("POST /api/brokerage/v1/research/chat", () => {
       starterPromptId: "adu",
       personaBucket: "owner_buyer",
     });
+  });
+
+  it("corpus-miss school question cites websearch: and not unlabeled web text", async () => {
+    retrieveAtomsForQuestionMock.mockResolvedValue([]);
+    setResearchChatCivicHttpForTests(async (url) => ({
+      status: 200,
+      body: "<html><body>Bastrop ISD attendance zones.</body></html>",
+      finalUrl: url,
+    }));
+    completeChatMock.mockResolvedValueOnce(
+      JSON.stringify({
+        answer: "School assignment is published by Bastrop ISD as a web-search backup.",
+      }),
+    );
+
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address: "906 Chestnut St, Bastrop, TX 78602" });
+    expect(briefRes.status).toBe(200);
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        runId: briefRes.body.runId,
+        message: "What school assignment is this parcel in?",
+        history: [],
+      });
+
+    expect(chatRes.status).toBe(200);
+    const web = (chatRes.body.sources as Array<{ atomDid: string; label?: string; snippet?: string; disclosure?: string; source?: string }>).filter(
+      (s) => s.atomDid.startsWith("websearch:"),
+    );
+    expect(web.length).toBeGreaterThan(0);
+    for (const s of web) {
+      assertLabeledWebSearchCitation(s);
+    }
+    expect(
+      (chatRes.body.sources as Array<{ atomDid: string }>).some((s) =>
+        s.atomDid.startsWith("websearch:"),
+      ),
+    ).toBe(true);
+  });
+
+  it("corpus-hit ADU chat does not add a websearch: citation", async () => {
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+    expect(briefRes.status).toBe(200);
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        runId: briefRes.body.runId,
+        message: "Can the buyer add an ADU?",
+        history: [],
+      });
+
+    expect(chatRes.status).toBe(200);
+    expect(
+      (chatRes.body.sources as Array<{ atomDid: string }>).some((s) =>
+        s.atomDid.startsWith("websearch:"),
+      ),
+    ).toBe(false);
+    expect(
+      (chatRes.body.sources as Array<{ atomDid: string }>).some((s) =>
+        s.atomDid === mockAtom.id,
+      ),
+    ).toBe(true);
   });
 });

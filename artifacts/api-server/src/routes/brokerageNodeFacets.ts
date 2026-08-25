@@ -76,18 +76,21 @@
  * txgio_parcel / bake ring. Never SELECT bake / place_layer_snapshots /
  * CAD / GIS / txgio_parcel for this field.
  *
- * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22).
- * `ownerFact` is read from owner-fact atoms. Writer keys
- * entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year family as
- * land-use-fact). Dual grammar is LIKE prefix:% on both parcel prefixes;
- * taxYear is the writer suffix. S7 is identified-session only. Anonymous
- * GET returns a typed refusal with no ownerName and no mailing, and does
- * not query atoms. Identified uses the existing brokerage session
- * signal (`authenticatedBrokerageUserId` after `verifySessionToken` on
- * a dotted Bearer). Operator / extension API keys are not a session.
- * Never SELECT cad-parcel-roll / bake / cad_property / GIS
- * ParcelCardData.owner for this field. Do not run sanitizeNodeFacetPayload
- * on identified ownerFact (it would strip ownerName).
+ * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
+ * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
+ * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
+ * family as land-use-fact). Dual grammar is LIKE prefix:% on both
+ * parcel prefixes; taxYear is the writer suffix. Owner name and mailing
+ * leave this route only when PE entitlement is studio or team
+ * (`subscriptionTierGrantsStudio` on `pe_user_entitlements`). Anonymous,
+ * free, Solo, $15 unlock, and identified-only brokerage sessions receive
+ * a typed `studio-gated` refusal with no ownerName and no mailing, and
+ * do not query atoms. Identified session is not the gate. Operator /
+ * extension API keys are not a session. Share-loop full-fidelity is a
+ * locked exception on the share path, not this read. Never SELECT
+ * cad-parcel-roll / bake / cad_property / GIS ParcelCardData.owner for
+ * this field. Do not run sanitizeNodeFacetPayload on a granted
+ * ownerFact (it would strip ownerName).
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -105,9 +108,13 @@ import { loadWellFactAtom } from "../lib/wellFactRead";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
-  anonymousOwnerFactRefusal,
+  studioGatedOwnerFactRefusal,
   loadOwnerFactAtom,
 } from "../lib/ownerFactRead";
+import {
+  resolvePeEntitlement,
+  subscriptionTierGrantsStudio,
+} from "../lib/peEntitlement";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
 import {
@@ -165,6 +172,22 @@ export function isIdentifiedOwnerFactCaller(req: Request): boolean {
 }
 
 /**
+ * Studio|Team PE entitlement is the owner-name gate. Identified session
+ * alone is not enough (2026-08-24). Unlock and Solo refuse.
+ */
+export async function callerGrantsOwnerFact(req: Request): Promise<boolean> {
+  applyExistingIdentifiedBrokerageSession(req);
+  if (authenticatedBrokerageUserId(req) == null) return false;
+  const snap = await resolvePeEntitlement(req);
+  return subscriptionTierGrantsStudio(snap.subscriptionTier);
+}
+
+function isOwnerIshKey(key: string): boolean {
+  if (/^owner(?![a-z])/i.test(key) || /^owner[_A-Z]/.test(key)) return true;
+  return /^(cad|gis|txgio)[_-]?owner/i.test(key);
+}
+
+/**
  * Defense-in-depth owner strip. The bake never writes an owner, so this is a
  * belt-and-suspenders guard against a malformed or legacy row: recursively
  * drop any object key whose name looks owner-ish (owner, ownerName,
@@ -178,9 +201,9 @@ export function sanitizeNodeFacetPayload(value: unknown): unknown {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
-      // Match `owner`, `ownerName`, `owner_name`, `ownerOccupancy`, etc. —
-      // any key whose leading token (case-insensitive) is "owner".
-      if (/^owner(?![a-z])/i.test(key) || /^owner[_A-Z]/.test(key)) {
+      // Match `owner`, `ownerName`, `owner_name`, `cadOwner`, `gisOwner`,
+      // `txgioOwner` — any key that can paint a CAD/GIS owner name.
+      if (isOwnerIshKey(key)) {
         continue;
       }
       out[key] = sanitizeNodeFacetPayload(v);
@@ -195,7 +218,7 @@ export function payloadHasOwnerKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some((v) => payloadHasOwnerKey(v));
   if (value && typeof value === "object") {
     for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
-      if (/^owner(?![a-z])/i.test(key) || /^owner[_A-Z]/.test(key)) return true;
+      if (isOwnerIshKey(key)) return true;
       if (payloadHasOwnerKey(v)) return true;
     }
   }
@@ -530,7 +553,7 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const identifiedOwnerCaller = isIdentifiedOwnerFactCaller(req);
+    const grantsOwnerFact = await callerGrantsOwnerFact(req);
     const [snapshot, floodHazardFact, landUseFactRaw, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact, ownerFactLoaded, structuralFact] =
       await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
@@ -541,13 +564,13 @@ brokerageNodeFacetsRouter.get(
         loadWellFactAtom(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
         loadBoundaryEdgeFactAtom(parcelNodeId),
-        identifiedOwnerCaller
+        grantsOwnerFact
           ? loadOwnerFactAtom(parcelNodeId)
           : Promise.resolve(null),
         loadStructuralFactAtom(parcelNodeId),
       ]);
     const ownerFact =
-      ownerFactLoaded ?? anonymousOwnerFactRefusal(parcelNodeId);
+      ownerFactLoaded ?? studioGatedOwnerFactRefusal(parcelNodeId);
     const landUseFact = enrichLandUseFactWithZoningVerdict(
       landUseFactRaw,
       parcelNodeId,
@@ -614,9 +637,9 @@ brokerageNodeFacetsRouter.get(
       // GIS parcel outline / txgio_parcel / bake ring.
       boundaryEdgeFact,
       // owner-fact atom. Dual grammar on the parcel PREFIX only; taxYear
-      // is the writer suffix. Identified session only. Anonymous is a
-      // typed refusal with no ownerName / mailing and no atoms SELECT.
-      // Never copied off cad-parcel-roll / bake / cad_property / GIS.
+      // is the writer suffix. Studio|Team only. Everyone else is a typed
+      // studio-gated refusal with no ownerName / mailing and no atoms
+      // SELECT. Never copied off cad-parcel-roll / bake / cad_property / GIS.
       ownerFact,
       // Structural/CAMA layer (living_area_sqft, year_built). bulk_primary
       // counties on stratmap-roll tier return lookup-failed; populated
