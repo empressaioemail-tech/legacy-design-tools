@@ -349,6 +349,10 @@ describe("lib/db schema integration", () => {
         // tile cache keyed (tile_key, county_fips); neutral of (and
         // parallel to) the dormant Cotality spatial-tile cache tables.
         "tx_parcel_tile_cache",
+        // 0076 / P-75 — L22 utility who-serves staging. Sorts after
+        // `tx_parcel_tile_cache` and before `txgio_address` (`_utility` <
+        // `txgio`) per `ORDER BY tablename`.
+        "tx_utility_territory_staging",
         // feat/txgio-address-points (0056) — self-hosted TxGIO/StratMap
         // address-POINT store (open paginated ArcGIS REST); point sibling
         // of txgio_parcel, keyed (county_fips, full_addr, unit).
