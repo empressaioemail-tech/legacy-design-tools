@@ -76,6 +76,13 @@
  * txgio_parcel / bake ring. Never SELECT bake / place_layer_snapshots /
  * CAD / GIS / txgio_parcel for this field.
  *
+ * CITY LIMITS IS A ROOT SIBLING (lane P-76, 2026-08-24).
+ * `cityLimitsFact` is PIP against `tx_city_boundary`, not an atom.
+ * Status is incorporated | unincorporated | unmeasured. ETJ is
+ * `etjStatus: unresolved` — no buffer, no offset ring. Empty table
+ * is unmeasured, never unincorporated. Query point is the bake
+ * lat/lng index. Never copy situs city as incorporated place.
+ *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
  * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
  * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
@@ -116,6 +123,8 @@ import {
   subscriptionTierGrantsStudio,
 } from "../lib/peEntitlement";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
+import { loadCityLimitsFact } from "../lib/cityLimitsFactRead";
+import { usableCityLimitsQueryPoint } from "@workspace/cad-ingest/city-limits";
 import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
 import {
   attachVerdictLayersToFacets,
@@ -431,6 +440,8 @@ export interface BakedNodeFacetSnapshot {
   facets: unknown;
   snapshotAt: string | null;
   tier2: Tier2Overlay | null;
+  /** Bake coord index. Null when missing, non-finite, or the 0,0 degenerate. */
+  queryPoint: { longitude: number; latitude: number } | null;
 }
 
 export function extractTier2Overlay(
@@ -495,6 +506,8 @@ export async function loadBakedNodeFacetSnapshot(
       adapterKey: placeLayerSnapshots.adapterKey,
       payloadJson: placeLayerSnapshots.payloadJson,
       snapshotAt: placeLayerSnapshots.snapshotAt,
+      latRounded: placeLayerSnapshots.latRounded,
+      lngRounded: placeLayerSnapshots.lngRounded,
     })
     .from(placeLayerSnapshots)
     .where(
@@ -528,6 +541,10 @@ export async function loadBakedNodeFacetSnapshot(
       tier2Raw != null
         ? (sanitizeNodeFacetPayload(tier2Raw) as Tier2Overlay)
         : null,
+    queryPoint: usableCityLimitsQueryPoint(
+      Number(row.lngRounded),
+      Number(row.latRounded),
+    ),
   };
 }
 
@@ -575,6 +592,9 @@ brokerageNodeFacetsRouter.get(
       landUseFactRaw,
       parcelNodeId,
       snapshot?.facets ?? null,
+    );
+    const cityLimitsFact = await loadCityLimitsFact(
+      snapshot?.queryPoint ?? null,
     );
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -645,6 +665,9 @@ brokerageNodeFacetsRouter.get(
       // counties on stratmap-roll tier return lookup-failed; populated
       // counties return present. Never upgrades lookup-failed in transit.
       structuralFact,
+      // City limits PIP against tx_city_boundary. Not an atom. Empty
+      // index is unmeasured. ETJ is unresolved, never a buffer.
+      cityLimitsFact,
       }),
     );
   },

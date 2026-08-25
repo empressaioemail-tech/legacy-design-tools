@@ -215,7 +215,18 @@ export type {
   CountyBoundaryIndexEntry,
   CityContainmentResult,
   CountyContainmentResult,
+  EtjStatus,
 } from "./boundary/containment";
+export {
+  CITY_LIMITS_SOURCE,
+  cityLimitsFactFromContainment,
+  unmeasuredCityLimitsFact,
+  usableCityLimitsQueryPoint,
+} from "./boundary/cityLimitsFact";
+export type {
+  CityLimitsFact,
+  CityLimitsStatus,
+} from "./boundary/cityLimitsFact";
 export {
   NFHL_DEFAULT_SOURCE,
   NFHL_DEFAULT_VINTAGE,
