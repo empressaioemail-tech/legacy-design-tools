@@ -52,6 +52,16 @@ export interface BriefAtomInput {
   score?: number;
   /** "vector" | "lexical", mirrors RetrievedAtom.retrievalMode when known. */
   retrievalMode?: string;
+  /**
+   * Labeled web-search backup (PE chat civic miss). Asserted, never earned
+   * corpus. Presence means atomDid must be `websearch:` / `reasoning:`.
+   */
+  webSearchBackup?: {
+    disclosure: string;
+    confidence: number;
+    retrievedAt: string;
+    verificationState: "unverified";
+  };
 }
 
 export interface NumberedCitation {
@@ -64,6 +74,10 @@ export interface NumberedCitation {
   entityId?: string;
   /** See BriefAtomInput.did. */
   did?: string;
+  disclosure?: string;
+  source?: "corpus" | "websearch";
+  confidence?: number;
+  retrievedAt?: string;
 }
 
 export interface ReasoningSummaryResult {
@@ -175,6 +189,14 @@ function buildGroundingRecord(atoms: BriefAtomInput[]): {
     ...(a.sourceUrl ? { sourceUrl: a.sourceUrl } : {}),
     ...(a.entityId ? { entityId: a.entityId } : {}),
     ...(a.did ? { did: a.did } : {}),
+    ...(a.webSearchBackup
+      ? {
+          disclosure: a.webSearchBackup.disclosure,
+          source: "websearch" as const,
+          confidence: a.webSearchBackup.confidence,
+          retrievedAt: a.webSearchBackup.retrievedAt,
+        }
+      : {}),
   }));
   return {
     sources,
@@ -234,6 +256,16 @@ const RULES_V1_FALLBACK_CONFIDENCE_WITH_ATOMS = 0.4;
 const RULES_V1_FALLBACK_CONFIDENCE_NO_ATOMS = 0.1;
 
 function computeGroundingConfidence(atoms: BriefAtomInput[]): number {
+  const webOnly =
+    atoms.length > 0 &&
+    atoms.every(
+      (a) =>
+        a.webSearchBackup != null ||
+        a.atomDid.startsWith("websearch:") ||
+        a.atomDid.startsWith("reasoning:"),
+    );
+  if (webOnly) return 0.35;
+
   if (atoms.length === 0) return CONFIDENCE_BASE_NO_GROUNDING;
 
   let confidence = CONFIDENCE_BASE_WITH_GROUNDING;
@@ -594,6 +626,14 @@ export async function generateResearchChat(input: {
       : "Answer for a real estate professional. Cite with [n] inline matching source numbers.",
     hasArea
       ? "When map/area context lists multiple visible parcels, answer portfolio or neighborhood questions (rent strength, likely sellers, filter matches) using ONLY the parcel rows and filters provided — do not invent listings."
+      : null,
+    atoms.some(
+      (a) =>
+        a.webSearchBackup != null ||
+        a.atomDid.startsWith("websearch:") ||
+        a.atomDid.startsWith("reasoning:"),
+    )
+      ? "Sources whose id starts with websearch: or that carry a web-search disclosure are a labeled web-search backup, not a Hauska catalog atom. Do not present them as verified corpus. Never fabricate ICC or code body."
       : null,
     hasPrivate
       ? "Use numbered code sources and private recorded-restriction excerpts (P1, P2, …) when the question touches HOA/CC&R/deed limits. Private restrictions are not municipal code."

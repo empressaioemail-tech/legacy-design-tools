@@ -17,9 +17,10 @@
  * route's drizzle `db` is the deployment store. DATABASE_URL in api-server
  * means deployment, not atoms — this module does not read that name.
  *
- * Identified vs anonymous is decided by the route using the existing
- * brokerage session signal (`authenticatedBrokerageUserId`). This module
- * is the atom read. Anonymous callers must not receive ownerName or mailing.
+ * Studio|Team vs everyone else is decided by the route using PE
+ * entitlement (`subscriptionTierGrantsStudio`). This module is the atom
+ * read. Anonymous, free, Solo, unlock, and identified-only callers must
+ * not receive ownerName or mailing.
  */
 
 import pg from "pg";
@@ -96,6 +97,7 @@ export type OwnerFactRefusal = {
     | "bind-conflict"
     | "atoms-store-not-configured"
     | "malformed-atom"
+    | "studio-gated"
     | "identified-session-required";
   source: typeof OWNER_FACT_SOURCE;
   tried: OwnerFactBindPrefixes | [];
@@ -381,18 +383,25 @@ export function interpretOwnerFactRows(
   return interpretBody(chosen.entity_id, chosen.body, tried, maxYear);
 }
 
-export function anonymousOwnerFactRefusal(
+export function studioGatedOwnerFactRefusal(
   parcelNodeId: string,
 ): OwnerFactRefusal {
   const tried = ownerFactBindPrefixes(parcelNodeId);
   return {
     state: "refused",
-    code: "identified-session-required",
+    code: "studio-gated",
     source: OWNER_FACT_SOURCE,
     tried,
     reason:
-      "owner-fact is identified-session only. Anonymous GET has no owner body.",
+      "owner-fact is Studio or Team only. Anonymous, free, Solo, unlock, and identified-only GET have no owner body.",
   };
+}
+
+/** @deprecated Use {@link studioGatedOwnerFactRefusal}. Same refusal; old name. */
+export function anonymousOwnerFactRefusal(
+  parcelNodeId: string,
+): OwnerFactRefusal {
+  return studioGatedOwnerFactRefusal(parcelNodeId);
 }
 
 export async function loadOwnerFactAtom(

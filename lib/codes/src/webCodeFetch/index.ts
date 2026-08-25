@@ -36,13 +36,17 @@ export type {
   HttpFetcher,
 } from "./types";
 
-const defaultHttp: HttpFetcher = async (url) => {
-  const host = new URL(url).hostname.replace(/^www\./, "");
-  const allowed = WEB_CODE_ALLOWLIST_HOSTS.some((h) => {
-    const norm = h.replace(/^www\./, "");
+export function isAllowlistedWebHost(hostname: string): boolean {
+  const host = hostname.replace(/^www\./, "").toLowerCase();
+  return WEB_CODE_ALLOWLIST_HOSTS.some((h) => {
+    const norm = h.replace(/^www\./, "").toLowerCase();
     return host === norm || host.endsWith(`.${norm}`) || host.includes(norm);
   });
-  if (!allowed) {
+}
+
+const defaultHttp: HttpFetcher = async (url) => {
+  const host = new URL(url).hostname.replace(/^www\./, "");
+  if (!isAllowlistedWebHost(host)) {
     throw new Error(`web_code_fetch: host not on allowlist: ${host}`);
   }
   const res = await fetch(url, {
@@ -52,6 +56,18 @@ const defaultHttp: HttpFetcher = async (url) => {
   const body = await res.text();
   return { status: res.status, body, finalUrl: res.url };
 };
+
+/** Same allowlist fetch the brief / review path uses. Civic chat reuses this. */
+export async function fetchAllowlistedUrl(
+  url: string,
+  http?: HttpFetcher,
+): Promise<{ status: number; body: string; finalUrl: string }> {
+  const host = new URL(url).hostname;
+  if (!isAllowlistedWebHost(host)) {
+    throw new Error(`web_code_fetch: host not on allowlist: ${host}`);
+  }
+  return (http ?? defaultHttp)(url);
+}
 
 /** Synthetic atom id for web-sourced sections (distinct from corpus UUIDs). */
 export function websearchAtomId(editionSlug: string, codeRef: string): string {

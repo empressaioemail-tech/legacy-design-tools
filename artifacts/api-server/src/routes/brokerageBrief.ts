@@ -160,6 +160,7 @@ import {
   BRIEF_WEB_SCRAPED_DISCLOSURE,
   resolveBriefLocalCodeLayer,
 } from "../lib/brokerageBriefLocalCode";
+import { resolveResearchChatWebSearchBackup } from "../lib/brokerageResearchChatWebSearch";
 import {
   isBrokerageBriefViaGateEnabled,
 } from "../lib/brokerageSpineGate";
@@ -175,7 +176,7 @@ export const BROKERAGE_ADU_RESEARCH_QUERIES = [
 ] as const;
 
 const ADU_TOPIC_RE =
-  /\b(adu|accessory dwelling|guest house|backyard cottage|secondary unit|granny flat)\b/i;
+  /\b(adu|accessory dwelling|guest house|backyard cottage|secondary unit|additional unit|granny flat|subdivision)\b/i;
 
 const presentationModeSchema = z.enum(["consumer", "pro"]).default("consumer");
 
@@ -1399,6 +1400,18 @@ brokerageV1.post(
           "brokerage: research chat retrieval degraded",
         );
       }
+    }
+
+    const webBackup = await resolveResearchChatWebSearchBackup({
+      jurisdictionKey,
+      message,
+      existingAtoms: [...atomMap.values()],
+    });
+    for (const a of webBackup.atoms) {
+      if (!atomMap.has(a.atomDid)) atomMap.set(a.atomDid, a);
+    }
+    for (const reason of webBackup.degradedReasons) {
+      if (!degradedReasons.includes(reason)) degradedReasons.push(reason);
     }
 
     const atoms = [...atomMap.values()];

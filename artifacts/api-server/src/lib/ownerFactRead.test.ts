@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   anonymousOwnerFactRefusal,
+  studioGatedOwnerFactRefusal,
   interpretOwnerFactRows,
   loadOwnerFactAtom,
   memoryOwnerFactAtoms,
@@ -260,16 +261,22 @@ describe("interpretOwnerFactRows", () => {
   });
 });
 
-describe("anonymousOwnerFactRefusal", () => {
+describe("studioGatedOwnerFactRefusal", () => {
   it("names owner-fact and carries no PII", () => {
-    const read = anonymousOwnerFactRefusal(GOLD);
+    const read = studioGatedOwnerFactRefusal(GOLD);
     expect(read.state).toBe("refused");
-    expect(read.code).toBe("identified-session-required");
+    expect(read.code).toBe("studio-gated");
     expect(read.source).toBe("owner-fact");
     expect(read.tried).toEqual([GOLD, GOLD_PADDED]);
     expect(read).not.toHaveProperty("ownerName");
     expect(read).not.toHaveProperty("ownerMailingAddress");
     expect(JSON.stringify(read)).not.toMatch(/FIXTURE OWNER/);
+  });
+
+  it("anonymousOwnerFactRefusal is the same studio-gated refusal", () => {
+    const read = anonymousOwnerFactRefusal(GOLD);
+    expect(read.code).toBe("studio-gated");
+    expect(read).not.toHaveProperty("ownerName");
   });
 });
 

@@ -125,6 +125,9 @@ describe("brokerageNodeFacets helpers (pure)", () => {
       owner: "SHOULD NOT LEAK",
       ownerName: "SHOULD NOT LEAK",
       owner_name: "SHOULD NOT LEAK",
+      cadOwner: "SHOULD NOT LEAK",
+      gisOwner: "SHOULD NOT LEAK",
+      txgioOwner: "SHOULD NOT LEAK",
       baseFacts: {
         apn: "10068",
         owner: { name: "SHOULD NOT LEAK", mailing: "x" },
@@ -539,6 +542,9 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).toMatch(/loadOwnerFactAtom/);
     expect(routeSrc).toMatch(/ownerFact/);
     expect(routeSrc).toMatch(/authenticatedBrokerageUserId/);
+    expect(routeSrc).toMatch(/subscriptionTierGrantsStudio/);
+    expect(routeSrc).toMatch(/resolvePeEntitlement/);
+    expect(routeSrc).toMatch(/studio-gated|studioGatedOwnerFactRefusal/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad-parcel-roll[^"']*["']/i);
     expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*place_layer_snapshots/);
@@ -562,7 +568,8 @@ const hasDb =
 // module scope would invoke the getter too early. `placeLayerSnapshots` is a
 // plain export, safe to destructure; `db` is read lazily inside the hooks.
 const dbMod = await import("@workspace/db");
-const { placeLayerSnapshots } = dbMod;
+const { placeLayerSnapshots, peUserEntitlements, pePropertyUnlocks, users } =
+  dbMod;
 const { setupRouteTests } = await import("./setup");
 const { truncateAll } = await import("@workspace/db/testing");
 
@@ -758,7 +765,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body.facets)).not.toMatch(/SHOULD NOT LEAK/);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
     expect(res.body.ownerFact.state).toBe("refused");
-    expect(res.body.ownerFact.code).toBe("identified-session-required");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
     expect(res.body.ownerFact.source).toBe("owner-fact");
     expect(res.body.ownerFact.ownerName).toBeUndefined();
     expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
@@ -1996,7 +2003,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body.ownerFact.state).toBe("refused");
-    expect(res.body.ownerFact.code).toBe("identified-session-required");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
     expect(res.body.ownerFact.source).toBe("owner-fact");
     expect(res.body.ownerFact.ownerName).toBeUndefined();
     expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
@@ -2005,8 +2012,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body.facets)).not.toContain("CAD ROLL MUST NOT LEAK");
   });
 
-  it("identified GET serves gold 48021:34137:2025 from owner-fact, not CAD-roll", async () => {
-    const gold = "48021:34137";
+  async function seedOwnerGoldSnapshot(gold: string, contentHash: string) {
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -2021,10 +2027,14 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
           ...bakedPayload.baseFacts,
           apn: "34137",
           owner_name: "CAD ROLL MUST NOT LEAK",
+          cadOwner: "CAD ROLL MUST NOT LEAK",
         },
       },
-      contentHash: "test-hash-owner-ident",
+      contentHash,
     });
+  }
+
+  function goldOwnerFixture(gold: string) {
     setOwnerFactAtomQueryableForTests(
       memoryOwnerFactAtoms([
         {
@@ -2040,10 +2050,101 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
         },
       ]),
     );
+  }
+
+  async function seedPeUser(
+    userId: string,
+    row: {
+      accessTier: "free" | "paid";
+      subscriptionTier?: "solo" | "studio" | "team" | null;
+    },
+  ) {
+    await dbMod.db.insert(users).values({ id: userId, displayName: userId });
+    await dbMod.db.insert(peUserEntitlements).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: row.accessTier,
+      subscriptionTier: row.subscriptionTier ?? null,
+    });
+  }
+
+  it("identified-only GET with an owner atom MUST refuse — identified is not Studio", async () => {
+    const gold = "48021:34137";
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-ident-only");
+    goldOwnerFixture(gold);
     const token = mintSessionToken({
       audience: "user",
       tenantId: DEFAULT_TENANT_ID,
-      requestor: { kind: "user", id: "user_owner_fact_p54" },
+      requestor: { kind: "user", id: "user_owner_fact_identified_only" },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
+    expect(JSON.stringify(res.body)).not.toContain("CAD ROLL MUST NOT LEAK");
+  });
+
+  it("signed-in Solo GET with an owner atom MUST refuse ownerName", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_solo";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "solo" });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-solo");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
+  });
+
+  it("unlock-only GET with an owner atom MUST refuse ownerName", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_unlock";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("Studio GET serves gold 48021:34137:2025 from owner-fact, not CAD-roll", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_studio";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-studio");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
     });
     const res = await request(getApp())
       .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
@@ -2060,31 +2161,16 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
   });
 
-  it("identified GET with empty owner-fact atoms is atom-miss, not a copied CAD-roll owner", async () => {
+  it("Studio GET with empty owner-fact atoms is atom-miss, not a copied CAD-roll owner", async () => {
     const gold = "48021:34137";
-    await dbMod.db.insert(placeLayerSnapshots).values({
-      placeKey: placeKeyForNode(gold),
-      adapterKey: TIER1_ADAPTER_KEY,
-      latRounded: "30.11000",
-      lngRounded: "-97.31500",
-      payloadJson: {
-        ...bakedPayload,
-        parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
-        baseFacts: {
-          ...bakedPayload.baseFacts,
-          apn: "34137",
-          owner_name: "CAD ROLL MUST NOT LEAK",
-        },
-      },
-      contentHash: "test-hash-owner-ident-miss",
-    });
+    const userId = "user_owner_fact_studio_miss";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-studio-miss");
     setOwnerFactAtomQueryableForTests(memoryOwnerFactAtoms([]));
     const token = mintSessionToken({
       audience: "user",
       tenantId: DEFAULT_TENANT_ID,
-      requestor: { kind: "user", id: "user_owner_fact_p54" },
+      requestor: { kind: "user", id: userId },
     });
     const res = await request(getApp())
       .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
