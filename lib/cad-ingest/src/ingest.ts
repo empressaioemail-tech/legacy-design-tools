@@ -3,7 +3,7 @@
  *
  * ON CONFLICT (county_fips, prop_id, tax_year) DO UPDATE — re-running
  * an ingest for the same export (or a fresher drop of the same roll
- * year) is idempotent: attribute columns are overwritten, and
+ * year) merges per P-78: COALESCE on most attributes, CAMA-wins CASE on year_built and living_area_sqft, and
  * `ingested_at` is bumped so row age tracks the latest load.
  *
  * Callers pass a drizzle handle so the CLI (own pool from
@@ -14,6 +14,7 @@ import { sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { cadProperty } from "@workspace/db/schema";
 import type { CadPropertyRecord, UpsertSummary } from "./types";
+import { parseYearBuilt } from "./p78Merge";
 
 /**
  * Minimal structural slice of a drizzle node-postgres database — only
@@ -40,7 +41,7 @@ function toInsertRow(rec: CadPropertyRecord, sourceFile: string, sourceVintage: 
     improvementValue: rec.improvementValue,
     marketValue: rec.marketValue,
     assessedValue: rec.assessedValue,
-    yearBuilt: rec.yearBuilt,
+    yearBuilt: parseYearBuilt(rec.yearBuilt),
     livingAreaSqft: rec.livingAreaSqft,
     landAcres: rec.landAcres,
     propertyUseCode: rec.propertyUseCode,
@@ -83,21 +84,33 @@ export async function upsertCadProperties(
       .onConflictDoUpdate({
         target: [cadProperty.countyFips, cadProperty.propId, cadProperty.taxYear],
         set: {
-          ownerName: sql`excluded.owner_name`,
-          ownerMailingAddress: sql`excluded.owner_mailing_address`,
-          situsAddress: sql`excluded.situs_address`,
-          situsCity: sql`excluded.situs_city`,
-          situsZip: sql`excluded.situs_zip`,
-          legalDescription: sql`excluded.legal_description`,
-          exemptionCodes: sql`excluded.exemption_codes`,
-          landValue: sql`excluded.land_value`,
-          improvementValue: sql`excluded.improvement_value`,
-          marketValue: sql`excluded.market_value`,
-          assessedValue: sql`excluded.assessed_value`,
-          yearBuilt: sql`excluded.year_built`,
-          livingAreaSqft: sql`excluded.living_area_sqft`,
-          landAcres: sql`excluded.land_acres`,
-          propertyUseCode: sql`excluded.property_use_code`,
+          ownerName: sql`COALESCE(excluded.owner_name, ${cadProperty.ownerName})`,
+          ownerMailingAddress: sql`COALESCE(excluded.owner_mailing_address, ${cadProperty.ownerMailingAddress})`,
+          situsAddress: sql`COALESCE(excluded.situs_address, ${cadProperty.situsAddress})`,
+          situsCity: sql`COALESCE(excluded.situs_city, ${cadProperty.situsCity})`,
+          situsZip: sql`COALESCE(excluded.situs_zip, ${cadProperty.situsZip})`,
+          legalDescription: sql`COALESCE(excluded.legal_description, ${cadProperty.legalDescription})`,
+          exemptionCodes: sql`COALESCE(excluded.exemption_codes, ${cadProperty.exemptionCodes})`,
+          landValue: sql`COALESCE(excluded.land_value, ${cadProperty.landValue})`,
+          improvementValue: sql`COALESCE(excluded.improvement_value, ${cadProperty.improvementValue})`,
+          marketValue: sql`COALESCE(excluded.market_value, ${cadProperty.marketValue})`,
+          assessedValue: sql`COALESCE(excluded.assessed_value, ${cadProperty.assessedValue})`,
+          landAcres: sql`COALESCE(excluded.land_acres, ${cadProperty.landAcres})`,
+          propertyUseCode: sql`COALESCE(excluded.property_use_code, ${cadProperty.propertyUseCode})`,
+          yearBuilt: sql`CASE
+            WHEN NULLIF(excluded.year_built, 0) IS NULL THEN NULLIF(${cadProperty.yearBuilt}, 0)
+            WHEN NULLIF(${cadProperty.yearBuilt}, 0) IS NULL THEN NULLIF(excluded.year_built, 0)
+            WHEN excluded.source_vintage LIKE 'tier:cad-export;%' THEN NULLIF(excluded.year_built, 0)
+            WHEN ${cadProperty.sourceVintage} LIKE 'tier:cad-export;%' THEN NULLIF(${cadProperty.yearBuilt}, 0)
+            ELSE NULLIF(excluded.year_built, 0)
+          END`,
+          livingAreaSqft: sql`CASE
+            WHEN excluded.living_area_sqft IS NULL THEN ${cadProperty.livingAreaSqft}
+            WHEN ${cadProperty.livingAreaSqft} IS NULL THEN excluded.living_area_sqft
+            WHEN excluded.source_vintage LIKE 'tier:cad-export;%' THEN excluded.living_area_sqft
+            WHEN ${cadProperty.sourceVintage} LIKE 'tier:cad-export;%' THEN ${cadProperty.livingAreaSqft}
+            ELSE excluded.living_area_sqft
+          END`,
           sourceFile: sql`excluded.source_file`,
           sourceVintage: sql`excluded.source_vintage`,
           ingestedAt: sql`now()`,
