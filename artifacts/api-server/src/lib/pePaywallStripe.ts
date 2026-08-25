@@ -137,13 +137,29 @@ export function defaultPeCheckoutCancelUrl(): string {
   return `${peWebAppBaseUrl()}/?checkout=cancel`;
 }
 
-/** Checkout chrome: hosted is today's redirect; custom/embedded mount in-app. */
-export type PeCheckoutUiMode = "hosted" | "custom" | "embedded";
+/**
+ * Checkout chrome. Stripe 2026-03-25 retired `custom` / `hosted` /
+ * `embedded` on the Session. We still accept those PE aliases and map
+ * them: custom|elements → `elements`, embedded → `embedded_page`.
+ * Hosted / absent omits ui_mode (Stripe default `hosted_page`).
+ */
+export type PeCheckoutUiMode = "hosted" | "custom" | "embedded" | "elements";
 
 export function isCustomPeCheckoutUiMode(
   uiMode: PeCheckoutUiMode | undefined,
 ): boolean {
-  return uiMode === "custom" || uiMode === "embedded";
+  return (
+    uiMode === "custom" || uiMode === "elements" || uiMode === "embedded"
+  );
+}
+
+/** Value posted to Stripe. Never the retired `custom` / `hosted` / `embedded`. */
+export function stripeUiModeForPe(
+  uiMode: PeCheckoutUiMode | undefined,
+): "elements" | "embedded_page" | null {
+  if (uiMode === "custom" || uiMode === "elements") return "elements";
+  if (uiMode === "embedded") return "embedded_page";
+  return null;
 }
 
 /**
@@ -167,8 +183,9 @@ function applyPeCheckoutUiMode(
     cancelUrl: string;
   },
 ): boolean {
-  if (isCustomPeCheckoutUiMode(input.uiMode)) {
-    params.ui_mode = input.uiMode!;
+  const stripeUiMode = stripeUiModeForPe(input.uiMode);
+  if (stripeUiMode) {
+    params.ui_mode = stripeUiMode;
     params.return_url = peCustomCheckoutReturnUrl(input.returnUrl);
     return true;
   }

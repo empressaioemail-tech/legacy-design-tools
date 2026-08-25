@@ -814,7 +814,7 @@ const PeCheckoutBodySchema = z
      * (checkoutUrl). "custom" and "embedded" return clientSecret and omit
      * checkoutUrl. Unknown strings are 400 — never coerced to hosted.
      */
-    uiMode: z.enum(["hosted", "custom", "embedded"]).optional(),
+    uiMode: z.enum(["hosted", "custom", "embedded", "elements"]).optional(),
     /** Custom / Embedded return URL. Ignored on the hosted path. */
     returnUrl: z.string().url().optional(),
   })
@@ -903,7 +903,7 @@ const PePropertyUnlockCheckoutBodySchema = z.object({
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
   returnUrl: z.string().url().optional(),
-  uiMode: z.enum(["hosted", "custom", "embedded"]).optional(),
+  uiMode: z.enum(["hosted", "custom", "embedded", "elements"]).optional(),
 });
 
 /**

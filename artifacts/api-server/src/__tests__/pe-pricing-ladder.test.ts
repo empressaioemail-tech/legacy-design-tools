@@ -367,6 +367,16 @@ describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
     expect(res.body.checkoutUrl).toBeUndefined();
   });
 
+  it("uiMode elements posts Stripe ui_mode=elements (custom is a retired alias)", async () => {
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "studio", uiMode: "elements" });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toMatch(/_secret_sim$/);
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
   it("embedded is the custom-path fallback: secret, no hosted URL", async () => {
     const res = await asUser(
       request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
@@ -459,7 +469,7 @@ describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
     expect(res.body.checkoutUrl).toBeUndefined();
     expect(checkoutBodies).toHaveLength(1);
     const form = checkoutBodies[0]!;
-    expect(form.get("ui_mode")).toBe("custom");
+    expect(form.get("ui_mode")).toBe("elements");
     expect(form.get("return_url")).toContain("{CHECKOUT_SESSION_ID}");
     expect(form.get("return_url")).toContain("https://smartsite.cloud/checkout/return");
     expect(form.get("success_url")).toBeNull();
