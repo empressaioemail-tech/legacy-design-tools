@@ -25,7 +25,16 @@ import {
   serveWhoServesAtPoint,
   unmeasuredWhoServesSection,
   type WhoServesCandidate,
+  type WhoServesMeasured,
+  type WhoServesSection,
 } from "./whoServesRead";
+
+function asMeasured(section: WhoServesSection): WhoServesMeasured {
+  if (section.status !== "measured") {
+    throw new Error(`expected measured who-serves section, got ${section.status}`);
+  }
+  return section;
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -84,18 +93,17 @@ describe("assembleWhoServesFromHits", () => {
       }),
     ]);
     expect(section).not.toEqual({});
-    expect(section.status).toBe("measured");
-    expect(section.holders).toEqual([]);
-    expect(section.residual).toBe(WHO_SERVES_RESIDUAL);
-    expect(assertWhoServesSection(section).holders).toEqual([]);
+    const measured = asMeasured(section);
+    expect(measured.holders).toEqual([]);
+    expect(measured.residual).toBe(WHO_SERVES_RESIDUAL);
+    expect(assertWhoServesSection(measured).holders).toEqual([]);
   });
 
   it("zero candidates still returns residual, never {}", () => {
-    const section = assembleWhoServesFromHits(30.11, -97.32, []);
-    expect(section.status).toBe("measured");
-    expect(section.holders).toEqual([]);
-    expect(section.residual).toBe(WHO_SERVES_RESIDUAL);
-    expect(section.asOf).toBeNull();
+    const measured = asMeasured(assembleWhoServesFromHits(30.11, -97.32, []));
+    expect(measured.holders).toEqual([]);
+    expect(measured.residual).toBe(WHO_SERVES_RESIDUAL);
+    expect(measured.asOf).toBeNull();
   });
 
   it("a hit still carries the residual sentence", () => {
@@ -113,7 +121,8 @@ describe("assembleWhoServesFromHits", () => {
         territoryName: "Aqua Sewer",
       }),
     ]);
-    expect(section.holders).toEqual([
+    const measured = asMeasured(section);
+    expect(measured.holders).toEqual([
       {
         source_key: "puct-water-ccn",
         service_kind: "water",
@@ -127,9 +136,8 @@ describe("assembleWhoServesFromHits", () => {
         territory_name: "Aqua Sewer",
       },
     ]);
-    expect(section.status).toBe("measured");
-    expect(section.residual).toBe(WHO_SERVES_RESIDUAL);
-    expect(section.asOf).toBe(FETCHED);
+    expect(measured.residual).toBe(WHO_SERVES_RESIDUAL);
+    expect(measured.asOf).toBe(FETCHED);
   });
 
   it("TCEQ additive rows stay water-district, not water CCN", () => {
