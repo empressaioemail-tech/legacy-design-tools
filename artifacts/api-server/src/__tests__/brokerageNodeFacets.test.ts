@@ -81,6 +81,11 @@ import {
 } from "../lib/ownerFactRead";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import {
+  resetCityLimitsIndexForTests,
+  setCityLimitsIndexForTests,
+} from "../lib/cityLimitsFactRead";
+import { buildCityBoundaryIndex } from "@workspace/cad-ingest/boundary";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -553,6 +558,20 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/Clerk/);
     expect(routeSrc).not.toMatch(/stripe/i);
   });
+
+  it("the route source wires cityLimitsFact from tx_city_boundary PIP, not an atom or ETJ buffer", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/cityLimitsFactRead["']/);
+    expect(routeSrc).toMatch(/loadCityLimitsFact/);
+    expect(routeSrc).toMatch(/cityLimitsFact/);
+    expect(routeSrc).not.toMatch(/cityLimitsFact\s*=\s*.*situsCity/);
+    expect(routeSrc).not.toMatch(/offset\s*2\s*miles/i);
+    expect(routeSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
+    expect(routeSrc).not.toMatch(/--apply/);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -700,6 +719,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
     setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
     setOwnerFactAtomQueryableForTests(memoryOwnerFactAtoms([]));
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -738,6 +758,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     resetBuildingFootprintFactAtomQueryableForTests();
     resetBoundaryEdgeFactAtomQueryableForTests();
     resetOwnerFactAtomQueryableForTests();
+    resetCityLimitsIndexForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -769,6 +790,78 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.ownerFact.source).toBe("owner-fact");
     expect(res.body.ownerFact.ownerName).toBeUndefined();
     expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
+
+    // Empty city-limits index is unmeasured, never unincorporated.
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    expect(res.body.cityLimitsFact.source).toBe("tx_city_boundary");
+    expect(res.body.cityLimitsFact.cityName).toBeUndefined();
+  });
+
+  it("serves incorporated cityLimitsFact when the bake point sits in a fixture city", async () => {
+    setCityLimitsIndexForTests({
+      tablePopulated: true,
+      entries: buildCityBoundaryIndex([
+        {
+          geoId: "4805820",
+          cityName: "Bastrop",
+          gnis: null,
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [-97.70, 30.02],
+                [-97.65, 30.02],
+                [-97.65, 30.06],
+                [-97.70, 30.06],
+                [-97.70, 30.02],
+              ],
+            ],
+          },
+        },
+      ]),
+    });
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("incorporated");
+    expect(res.body.cityLimitsFact.cityName).toBe("Bastrop");
+    expect(res.body.cityLimitsFact.geoId).toBe("4805820");
+    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    expect(res.body.cityLimitsFact.source).toBe("tx_city_boundary");
+  });
+
+  it("serves unincorporated + etj unresolved when the bake point misses every city", async () => {
+    setCityLimitsIndexForTests({
+      tablePopulated: true,
+      entries: buildCityBoundaryIndex([
+        {
+          geoId: "4805000",
+          cityName: "Austin",
+          gnis: "1389879",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [-97.78, 30.24],
+                [-97.72, 30.24],
+                [-97.72, 30.28],
+                [-97.78, 30.28],
+                [-97.78, 30.24],
+              ],
+            ],
+          },
+        },
+      ]),
+    });
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
+    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
   it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {

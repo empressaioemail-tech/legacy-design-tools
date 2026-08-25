@@ -5,6 +5,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   normalizeCityBoundaryFeature,
   normalizeCountyBoundaryFeature,
@@ -16,6 +19,9 @@ import {
   resolveCityContainmentAtPoint,
   resolveCountyContainmentAtPoint,
 } from "../boundary/containment";
+import {
+  cityLimitsFactFromContainment,
+} from "../boundary/cityLimitsFact";
 import {
   upsertCityBoundaries,
   deleteAllCityBoundaries,
@@ -96,7 +102,13 @@ describe("city containment helper", () => {
       expect(result.cityName).toBe("Austin");
       expect(result.geoId).toBe("4805000");
       expect(result.basis).toContain("geo_id=4805000");
+      expect(result.etjStatus).toBe("unresolved");
     }
+    const fact = cityLimitsFactFromContainment(result);
+    expect(fact.status).toBe("incorporated");
+    expect(fact.cityName).toBe("Austin");
+    expect(fact.etjStatus).toBe("unresolved");
+    expect(fact.source).toBe("tx_city_boundary");
   });
 
   it("returns explicit unincorporated for rural West Texas (not failure)", () => {
@@ -109,7 +121,54 @@ describe("city containment helper", () => {
     if (result.status === "unincorporated") {
       expect(result.basis).toContain("unincorporated");
       expect(result.basis).not.toContain("error");
+      expect(result.etjStatus).toBe("unresolved");
     }
+    const fact = cityLimitsFactFromContainment(result);
+    expect(fact.status).toBe("unincorporated");
+    expect(fact.cityName).toBeUndefined();
+    expect(fact.etjStatus).toBe("unresolved");
+  });
+
+  it("returns unmeasured for an empty index (not unincorporated)", () => {
+    const result = resolveCityContainmentAtPoint(
+      FIXTURE_AUSTIN_INTERIOR_LNG,
+      FIXTURE_AUSTIN_INTERIOR_LAT,
+      [],
+    );
+    expect(result.status).toBe("unmeasured");
+    if (result.status === "unmeasured") {
+      expect(result.basis).toContain("unmeasured");
+      expect(result.basis).not.toContain("unincorporated is the honest answer");
+      expect(result.etjStatus).toBe("unresolved");
+    }
+    expect(cityLimitsFactFromContainment(result).status).toBe("unmeasured");
+  });
+
+  it("does not treat a 2-mile offset ring as ETJ", () => {
+    // Austin fixture east edge is -97.72. ~2 miles ≈ 0.033 deg lon at lat 30.
+    // A point 0.04 deg east sits outside the city polygon and inside a
+    // fabricated 2-mile buffer. That buffer is the defect this test violates.
+    const offsetLng = -97.72 + 0.04;
+    const offsetLat = 30.26;
+    const result = resolveCityContainmentAtPoint(
+      offsetLng,
+      offsetLat,
+      cityIndex,
+    );
+    expect(result.status).toBe("unincorporated");
+    expect(result.etjStatus).toBe("unresolved");
+    expect(result).not.toHaveProperty("cityName");
+    const wire = JSON.stringify(cityLimitsFactFromContainment(result));
+    expect(wire).not.toMatch(/"status":"etj/i);
+    expect(wire).not.toMatch(/etj_buffer|offset.*etj|buffer.*etj/i);
+
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../boundary/containment.ts"),
+      "utf8",
+    );
+    expect(src).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
+    expect(src).not.toMatch(/offset\s*2\s*miles/i);
+    expect(src).not.toMatch(/derive\w*\s+etj/i);
   });
 
   it("resolves from parcel geometry via representative point", () => {

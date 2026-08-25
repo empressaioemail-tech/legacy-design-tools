@@ -10,8 +10,10 @@
  * `zoning-stamp.ts`.
  *
  * Unincorporated territory is the CORRECT answer for most of Texas by
- * area — returned as `{ status: 'unincorporated', basis: ... }`, never
- * as null, blank, or a guessed city name.
+ * area when the incorporated-place index is populated — returned as
+ * `{ status: 'unincorporated', basis: ... }`, never as null, blank, or
+ * a guessed city name. An empty index is a different state: unmeasured.
+ * This helper never derives an ETJ ring or offset buffer.
  */
 
 import {
@@ -37,16 +39,26 @@ export interface CountyBoundaryIndexEntry {
   bbox: GeoBbox;
 }
 
+/** v1 never claims ETJ. Typed absence, not a dest column. */
+export type EtjStatus = "unresolved";
+
 export type CityContainmentResult =
   | {
       status: "incorporated";
       cityName: string;
       geoId: string;
       gnis: string | null;
+      etjStatus: EtjStatus;
       basis: string;
     }
   | {
       status: "unincorporated";
+      etjStatus: EtjStatus;
+      basis: string;
+    }
+  | {
+      status: "unmeasured";
+      etjStatus: EtjStatus;
       basis: string;
     };
 
@@ -176,12 +188,24 @@ export function representativePoint(
   return best[0] ?? null;
 }
 
+function etjUnresolved(): EtjStatus {
+  return "unresolved";
+}
+
 /** Resolve city containment for a WGS84 point against an in-memory index. */
 export function resolveCityContainmentAtPoint(
   longitude: number,
   latitude: number,
   index: CityBoundaryIndexEntry[],
 ): CityContainmentResult {
+  if (index.length === 0) {
+    return {
+      status: "unmeasured",
+      etjStatus: etjUnresolved(),
+      basis:
+        "tx_city_boundary index is empty; city limits are unmeasured, not unincorporated",
+    };
+  }
   const queryBbox: GeoBbox = {
     westLng: longitude,
     southLat: latitude,
@@ -196,12 +220,14 @@ export function resolveCityContainmentAtPoint(
         cityName: entry.cityName,
         geoId: entry.geoId,
         gnis: entry.gnis,
+        etjStatus: etjUnresolved(),
         basis: `point-in-polygon against tx_city_boundary geo_id=${entry.geoId}`,
       };
     }
   }
   return {
     status: "unincorporated",
+    etjStatus: etjUnresolved(),
     basis:
       "no incorporated-place polygon contains the query point " +
       "(tx_city_boundary statewide index; unincorporated is the honest answer)",
@@ -217,9 +243,10 @@ export function resolveCityContainment(
     const pt = representativePoint(query);
     if (pt === null) {
       return {
-        status: "unincorporated",
+        status: "unmeasured",
+        etjStatus: etjUnresolved(),
         basis:
-          "parcel geometry yielded no representative point; cannot prove incorporation",
+          "parcel geometry yielded no representative point; city limits are unmeasured",
       };
     }
     return resolveCityContainmentAtPoint(pt[0], pt[1], index);
