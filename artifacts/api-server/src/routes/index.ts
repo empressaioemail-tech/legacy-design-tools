@@ -54,6 +54,12 @@ import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import { countyLedgerRouter } from "./countyLedger";
 import { servingSweepRouter } from "./servingSweep";
+import { db } from "@workspace/db";
+import {
+  countWhoServesStaging,
+  loadWhoServesCandidatesAtPoint,
+} from "../lib/whoServesRead";
+import { createWhoServesRouter } from "./whoServes";
 import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
 import { onboardingLedgerEventsRouter } from "./onboardingLedgerEvents";
 import { countyRailScoreRouter } from "./countyRailScore";
@@ -118,6 +124,16 @@ router.use("/county-ledger", countyLedgerRouter);
 // catch-all and answer HTML 200, which is what made the missing route look
 // like missing data.
 router.use("/serving-sweep", servingSweepRouter);
+// P-75 who-serves read over L22 staging. Mount required: unmatched /api/*
+// falls through to the SPA catch-all and answers HTML 200.
+router.use(
+  "/who-serves",
+  createWhoServesRouter(
+    (longitude, latitude) =>
+      loadWhoServesCandidatesAtPoint(longitude, latitude, db),
+    () => countWhoServesStaging(db),
+  ),
+);
 // Onboarding ledger ingest, OPS-9 S1 write path for hauska-engine's report
 // wrappers. Reachable at POST /api/onboarding-ledger/ingest (pinned contract).
 router.use("/onboarding-ledger", onboardingLedgerIngestRouter);
