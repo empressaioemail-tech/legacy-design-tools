@@ -79,6 +79,7 @@ export * from "./txgioAddress";
 export * from "./txCityBoundary";
 export * from "./txCountyBoundary";
 export * from "./txFemaNfhlFloodZone";
+export * from "./txUtilityTerritoryStaging";
 export * from "./reportRun";
 export * from "./permitRecord";
 export * from "./terrainGenerationJobs";
