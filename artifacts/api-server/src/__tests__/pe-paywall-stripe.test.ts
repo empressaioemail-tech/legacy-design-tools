@@ -13,7 +13,7 @@
  */
 
 import { createHmac } from "node:crypto";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq, and } from "drizzle-orm";
@@ -141,6 +141,136 @@ describe("PE checkout routes (WDLL item 3) — simulated mode (no Stripe keys)",
     expect(ok.status).toBe(200);
     expect(ok.body.mode).toBe("simulated");
     expect(ok.body.parcelNodeId).toBe("48055:10068");
+  });
+});
+
+function mockStripeCheckoutSession(payload: Record<string, unknown>): {
+  checkoutBodies: URLSearchParams[];
+} {
+  const checkoutBodies: URLSearchParams[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const path = String(url);
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    if (path.includes("/customers")) {
+      return new Response(JSON.stringify({ id: "cus_test_unlock_3b" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (path.includes("/checkout/sessions")) {
+      checkoutBodies.push(body);
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({ error: { message: `unexpected stripe path ${path}` } }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  return { checkoutBodies };
+}
+
+describe("unlock custom / hosted checkout chrome (WDLL 3b item 2)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("entitlement/checkout custom: secret + sessionId, no checkoutUrl; body still parcelNodeId + returnUrl", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({
+      parcelNodeId: "48055:10068",
+      uiMode: "custom",
+      returnUrl: "https://smartsite.cloud/?checkout=success",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe("simulated");
+    expect(res.body.parcelNodeId).toBe("48055:10068");
+    expect(res.body.sessionId).toMatch(/^cs_test_/);
+    expect(res.body.clientSecret).toMatch(/^cs_test_.*_secret_sim$/);
+    expect(res.body).toHaveProperty("publishableKey");
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
+  it("property-unlock alias custom is the same contract", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    const res = await asUser(
+      request(getApp()).post(
+        "/api/property-explorer/v1/billing/property-unlock/checkout",
+      ),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toMatch(/_secret_sim$/);
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
+  it("unlock hosted path still returns checkoutUrl (absent and hosted)", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    const absent = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068" });
+    expect(absent.status).toBe(200);
+    expect(absent.body.checkoutUrl).toContain("unlock=1");
+    expect(absent.body.clientSecret).toBeUndefined();
+
+    const hosted = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", uiMode: "hosted" });
+    expect(hosted.status).toBe(200);
+    expect(hosted.body.checkoutUrl).toContain("unlock=1");
+  });
+
+  it("VIOLATION: live unlock custom without client_secret is refused", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { createPePropertyUnlockCheckoutSession } = await import(
+      "../lib/pePaywallStripe"
+    );
+    mockStripeCheckoutSession({
+      id: "cs_test_unlock_nosecret",
+      url: "https://checkout.stripe.com/c/pay/cs_test_unlock_nosecret",
+    });
+    await expect(
+      createPePropertyUnlockCheckoutSession({
+        userId: USER_A,
+        parcelNodeId: "48055:10068",
+        uiMode: "custom",
+        successUrl: "https://x.example/?ok",
+        cancelUrl: "https://x.example/?no",
+      }),
+    ).rejects.toThrow(/client_secret/);
+  });
+
+  it("live unlock custom keeps property_unlock + parcel_node_id metadata; no hosted URL", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_unlock";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_unlock_ok",
+      client_secret: "cs_test_unlock_ok_secret_live",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toBe("cs_test_unlock_ok_secret_live");
+    expect(res.body.checkoutUrl).toBeUndefined();
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get("ui_mode")).toBe("custom");
+    expect(form.get("return_url")).toContain("{CHECKOUT_SESSION_ID}");
+    expect(form.get("success_url")).toBeNull();
+    expect(form.get("cancel_url")).toBeNull();
+    expect(form.get("metadata[checkout_kind]")).toBe("property_unlock");
+    expect(form.get("metadata[parcel_node_id]")).toBe("48055:10068");
   });
 });
 

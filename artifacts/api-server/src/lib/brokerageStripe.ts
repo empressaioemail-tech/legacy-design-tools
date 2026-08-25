@@ -60,7 +60,17 @@ export function stripeWebhookPath(): string {
 }
 
 export type StripeCheckoutResult = {
-  checkoutUrl: string;
+  /**
+   * Hosted Checkout redirect. Required on the hosted path. Omitted on
+   * Custom / Embedded Checkout (`ui_mode: custom|embedded`) — those
+   * return `clientSecret` instead and must not carry a hosted URL.
+   */
+  checkoutUrl?: string;
+  /**
+   * Checkout Session client secret for Custom / Embedded Checkout.
+   * Absent on the hosted path.
+   */
+  clientSecret?: string;
   sessionId: string;
   mode: "live" | "simulated";
   publishableKey: string | null;
