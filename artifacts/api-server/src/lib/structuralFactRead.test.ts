@@ -71,4 +71,23 @@ describe("resolveStructuralFactRead", () => {
     });
     expect(read).toMatchObject({ verdict: "lookup-failed" });
   });
+
+  it("P-77: join miss at declared vintage is lookup-failed (48453:280238 class)", () => {
+    const read = resolveStructuralFactRead({
+      parcelNodeId: "48453:280238",
+      lookupFailed: false,
+      cadRow: null,
+      asOf: "2026-08-25T14:00:00.000Z",
+    });
+    expect(read).toMatchObject({
+      status: "absent",
+      verdict: "lookup-failed",
+      source: "structural-fact",
+      scopeSearched: expect.stringContaining("cad_property declared vintage"),
+    });
+    expect("basis" in read && read.basis).toBe(
+      "No cad_property row at declared vintage for 48453:280238",
+    );
+    expect(read).not.toMatchObject({ verdict: "absent-verified" });
+  });
 });

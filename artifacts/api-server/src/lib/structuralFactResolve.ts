@@ -5,6 +5,7 @@
 import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import {
   BULK_PRIMARY_COUNTY_FIPS,
+  buildCadPropertyJoinMissLookupFailed,
   buildStructuralLookupFailedAbsence,
   countyFipsFromParcelNodeId,
   type LayerAbsenceWire,
@@ -98,12 +99,16 @@ export function resolveStructuralFactRead(opts: {
     const vintage = tryResolveDeclaredCadVintage(countyFips);
     const tier = vintage?.tier ?? "undeclared";
     const year = vintage?.taxYear;
-    return structuralFactAbsentVerified(
-      countyFips,
-      `cad_property declared vintage ${year ?? "unknown"}/${tier}`,
-      `No cad_property row at declared vintage for ${opts.parcelNodeId}`,
-      opts.asOf,
-    );
+    return {
+      ...buildCadPropertyJoinMissLookupFailed(
+        countyFips,
+        opts.parcelNodeId,
+        year,
+        tier,
+        opts.asOf,
+      ),
+      source: STRUCTURAL_FACT_SOURCE,
+    };
   }
   if (
     opts.cadRow.livingAreaSqft == null &&
