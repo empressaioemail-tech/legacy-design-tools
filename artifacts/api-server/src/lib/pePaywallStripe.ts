@@ -137,6 +137,91 @@ export function defaultPeCheckoutCancelUrl(): string {
   return `${peWebAppBaseUrl()}/?checkout=cancel`;
 }
 
+/** Checkout chrome: hosted is today's redirect; custom/embedded mount in-app. */
+export type PeCheckoutUiMode = "hosted" | "custom" | "embedded";
+
+export function isCustomPeCheckoutUiMode(
+  uiMode: PeCheckoutUiMode | undefined,
+): boolean {
+  return uiMode === "custom" || uiMode === "embedded";
+}
+
+/**
+ * Stripe Custom / Embedded Checkout requires `return_url` and the
+ * `{CHECKOUT_SESSION_ID}` placeholder. Hosted success/cancel URLs are
+ * unchanged; this helper is only used on the custom path.
+ */
+export function peCustomCheckoutReturnUrl(returnUrl?: string): string {
+  const base = returnUrl?.trim() || defaultPeCheckoutSuccessUrl();
+  if (base.includes("{CHECKOUT_SESSION_ID}")) return base;
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}session_id={CHECKOUT_SESSION_ID}`;
+}
+
+function applyPeCheckoutUiMode(
+  params: Record<string, string>,
+  input: {
+    uiMode?: PeCheckoutUiMode;
+    returnUrl?: string;
+    successUrl: string;
+    cancelUrl: string;
+  },
+): boolean {
+  if (isCustomPeCheckoutUiMode(input.uiMode)) {
+    params.ui_mode = input.uiMode!;
+    params.return_url = peCustomCheckoutReturnUrl(input.returnUrl);
+    return true;
+  }
+  params.success_url = input.successUrl;
+  params.cancel_url = input.cancelUrl;
+  return false;
+}
+
+function livePeCheckoutFromSession(
+  session: Record<string, unknown>,
+  opts: {
+    custom: boolean;
+    publishableKey: string | null;
+    peTier?: PeSubscriptionCheckoutTier;
+    peInterval?: PeBillingInterval;
+  },
+): StripeCheckoutResult {
+  if (opts.custom) {
+    const sessionId =
+      typeof session.id === "string" && session.id.trim() ? session.id : "";
+    const clientSecret =
+      typeof session.client_secret === "string" && session.client_secret.trim()
+        ? session.client_secret
+        : "";
+    if (!sessionId || !clientSecret) {
+      throw new Error("Stripe checkout session missing id or client_secret");
+    }
+    return {
+      mode: "live",
+      sessionId,
+      clientSecret,
+      publishableKey: opts.publishableKey,
+      ...(opts.peTier
+        ? { peTier: opts.peTier, peInterval: opts.peInterval }
+        : {}),
+    };
+  }
+  const sessionId = String(session.id);
+  const checkoutUrl = String(session.url);
+  if (!sessionId || !checkoutUrl) {
+    throw new Error("Stripe checkout session missing id or url");
+  }
+  return {
+    mode: "live",
+    sessionId,
+    checkoutUrl,
+    publishableKey: opts.publishableKey,
+    ...(opts.peTier
+      ? { peTier: opts.peTier, peInterval: opts.peInterval }
+      : {}),
+  };
+}
+
 async function getOrCreatePeStripeCustomer(input: {
   userId: string;
   email?: string | null;
@@ -187,6 +272,9 @@ export async function createPeSubscriptionCheckoutSession(input: {
   installId?: string | null;
   successUrl: string;
   cancelUrl: string;
+  returnUrl?: string;
+  /** Absent defaults to hosted (today's checkoutUrl redirect). */
+  uiMode?: PeCheckoutUiMode;
 }): Promise<StripeCheckoutResult> {
   const { tier } = input;
   const interval: PeBillingInterval = input.interval ?? "month";
@@ -217,14 +305,27 @@ export async function createPeSubscriptionCheckoutSession(input: {
   }
 
   const publishableKey = stripePublishableKey();
+  const custom = isCustomPeCheckoutUiMode(input.uiMode);
 
   if (!isStripeConfigured()) {
     // Keyless dev/test seam only — a configured deployment never lands here.
-    const sessionId = `sim_cs_${input.userId.slice(0, 8)}_${Date.now()}`;
     logger.info(
-      { userId: input.userId.slice(0, 8), tier, interval },
+      { userId: input.userId.slice(0, 8), tier, interval, custom },
       "pe-stripe: simulated subscription checkout (no STRIPE_SECRET_KEY)",
     );
+    if (custom) {
+      const sessionId = `cs_test_sim_${input.userId.slice(0, 8)}_${Date.now()}`;
+      return {
+        mode: "simulated",
+        sessionId,
+        clientSecret: `${sessionId}_secret_sim`,
+        publishableKey,
+        peTier: tier,
+        peInterval: interval,
+        note: `Stripe credentials not configured — simulated PE ${tier} ${interval} checkout`,
+      };
+    }
+    const sessionId = `sim_cs_${input.userId.slice(0, 8)}_${Date.now()}`;
     const sep = input.successUrl.includes("?") ? "&" : "?";
     return {
       mode: "simulated",
@@ -257,8 +358,6 @@ export async function createPeSubscriptionCheckoutSession(input: {
   const params: Record<string, string> = {
     mode: "subscription",
     customer: customerId,
-    success_url: input.successUrl,
-    cancel_url: input.cancelUrl,
     allow_promotion_codes: "true",
     "metadata[pe_user_id]": input.userId,
     "metadata[checkout_kind]": "pe_sub" satisfies PeCheckoutKind,
@@ -272,6 +371,7 @@ export async function createPeSubscriptionCheckoutSession(input: {
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   };
+  applyPeCheckoutUiMode(params, input);
   if (extraSeats > 0 && seatPriceId) {
     params["line_items[1][price]"] = seatPriceId;
     params["line_items[1][quantity]"] = String(extraSeats);
@@ -280,20 +380,12 @@ export async function createPeSubscriptionCheckoutSession(input: {
     params["metadata[install_id]"] = input.installId;
   }
   const session = await stripePostForm("/checkout/sessions", params);
-
-  const sessionId = String(session.id);
-  const checkoutUrl = String(session.url);
-  if (!sessionId || !checkoutUrl) {
-    throw new Error("Stripe checkout session missing id or url");
-  }
-  return {
-    mode: "live",
-    sessionId,
-    checkoutUrl,
+  return livePeCheckoutFromSession(session, {
+    custom,
     publishableKey,
     peTier: tier,
     peInterval: interval,
-  };
+  });
 }
 
 /**
@@ -311,16 +403,34 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   installId?: string | null;
   successUrl: string;
   cancelUrl: string;
+  returnUrl?: string;
+  /** Absent defaults to hosted (today's checkoutUrl redirect). */
+  uiMode?: PeCheckoutUiMode;
 }): Promise<StripeCheckoutResult> {
   const publishableKey = stripePublishableKey();
+  const custom = isCustomPeCheckoutUiMode(input.uiMode);
 
   if (!isStripeConfigured()) {
     // Keyless dev/test seam only.
-    const sessionId = `sim_cs_unlock_${input.userId.slice(0, 8)}_${Date.now()}`;
     logger.info(
-      { userId: input.userId.slice(0, 8), parcelNodeId: input.parcelNodeId },
+      {
+        userId: input.userId.slice(0, 8),
+        parcelNodeId: input.parcelNodeId,
+        custom,
+      },
       "pe-stripe: simulated property-unlock checkout (no STRIPE_SECRET_KEY)",
     );
+    if (custom) {
+      const sessionId = `cs_test_sim_unlock_${input.userId.slice(0, 8)}_${Date.now()}`;
+      return {
+        mode: "simulated",
+        sessionId,
+        clientSecret: `${sessionId}_secret_sim`,
+        publishableKey,
+        note: "Stripe credentials not configured — simulated unlock checkout",
+      };
+    }
+    const sessionId = `sim_cs_unlock_${input.userId.slice(0, 8)}_${Date.now()}`;
     const sep = input.successUrl.includes("?") ? "&" : "?";
     return {
       mode: "simulated",
@@ -340,23 +450,16 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   const params: Record<string, string> = {
     mode: "payment",
     customer: customerId,
-    success_url: input.successUrl,
-    cancel_url: input.cancelUrl,
     "metadata[pe_user_id]": input.userId,
     "metadata[parcel_node_id]": input.parcelNodeId,
     "metadata[checkout_kind]": "property_unlock" satisfies PeCheckoutKind,
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   };
+  applyPeCheckoutUiMode(params, input);
   if (input.installId) {
     params["metadata[install_id]"] = input.installId;
   }
   const session = await stripePostForm("/checkout/sessions", params);
-
-  const sessionId = String(session.id);
-  const checkoutUrl = String(session.url);
-  if (!sessionId || !checkoutUrl) {
-    throw new Error("Stripe checkout session missing id or url");
-  }
-  return { mode: "live", sessionId, checkoutUrl, publishableKey };
+  return livePeCheckoutFromSession(session, { custom, publishableKey });
 }

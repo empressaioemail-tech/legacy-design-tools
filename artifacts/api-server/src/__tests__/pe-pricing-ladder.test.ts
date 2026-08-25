@@ -25,7 +25,7 @@
  */
 
 import { createHmac } from "node:crypto";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq, and } from "drizzle-orm";
@@ -314,6 +314,182 @@ describe("checkout route tier handling", () => {
     expect(res.status).toBe(503);
     expect(res.body.error).toBe("checkout_unavailable");
     expect(res.body.missing).toBe("STRIPE_PE_UNLOCK_PRICE_ID");
+  });
+});
+
+function mockStripeCheckoutSession(payload: Record<string, unknown>): {
+  spy: ReturnType<typeof vi.spyOn>;
+  checkoutBodies: URLSearchParams[];
+} {
+  const checkoutBodies: URLSearchParams[] = [];
+  const spy = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url, init) => {
+      const path = String(url);
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      if (path.includes("/customers")) {
+        return new Response(JSON.stringify({ id: "cus_test_3b" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        checkoutBodies.push(body);
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ error: { message: `unexpected stripe path ${path}` } }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    });
+  return { spy, checkoutBodies };
+}
+
+describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("simulated custom returns clientSecret + sessionId and NO checkoutUrl", async () => {
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "studio", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe("simulated");
+    expect(res.body.peTier).toBe("studio");
+    expect(res.body.sessionId).toMatch(/^cs_test_/);
+    expect(res.body.clientSecret).toMatch(/^cs_test_.*_secret_sim$/);
+    expect(res.body).toHaveProperty("publishableKey");
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
+  it("embedded is the custom-path fallback: secret, no hosted URL", async () => {
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "solo", uiMode: "embedded" });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toMatch(/_secret_sim$/);
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
+  it("hosted path still returns checkoutUrl when uiMode is absent", async () => {
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "studio" });
+    expect(res.status).toBe(200);
+    expect(res.body.checkoutUrl).toContain("tier=studio");
+    expect(res.body.clientSecret).toBeUndefined();
+  });
+
+  it("hosted path still returns checkoutUrl when uiMode is hosted", async () => {
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "solo", uiMode: "hosted" });
+    expect(res.status).toBe(200);
+    expect(res.body.checkoutUrl).toContain("checkout=success");
+    expect(res.body.clientSecret).toBeUndefined();
+  });
+
+  it("unknown uiMode is 400 — never coerced to hosted", async () => {
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "solo", uiMode: "payment_intent" });
+    expect(res.status).toBe(400);
+  });
+
+  it("custom + missing price ID is still 503 checkout_unavailable", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "studio", uiMode: "custom" });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("checkout_unavailable");
+    expect(res.body.missing).toBe("STRIPE_STUDIO_PRICE_ID");
+  });
+
+  it("VIOLATION: live custom session without client_secret is refused", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    mockStripeCheckoutSession({
+      id: "cs_test_nosecret",
+      url: "https://checkout.stripe.com/c/pay/cs_test_nosecret",
+    });
+    await expect(
+      createPeSubscriptionCheckoutSession({
+        userId: USER,
+        tier: "solo",
+        uiMode: "custom",
+        successUrl: "https://x.example/?ok",
+        cancelUrl: "https://x.example/?no",
+      }),
+    ).rejects.toThrow(/client_secret/);
+  });
+
+  it("live custom posts ui_mode + return_url, not success_url/cancel_url; 200 has secret and no checkoutUrl", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_custom_ok",
+      client_secret: "cs_test_custom_ok_secret_live",
+      url: "https://checkout.stripe.com/c/pay/cs_test_custom_ok",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({
+      tier: "solo",
+      uiMode: "custom",
+      returnUrl: "https://smartsite.cloud/checkout/return",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.sessionId).toBe("cs_test_custom_ok");
+    expect(res.body.clientSecret).toBe("cs_test_custom_ok_secret_live");
+    expect(res.body.publishableKey).toBe("pk_test_3b");
+    expect(res.body.checkoutUrl).toBeUndefined();
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get("ui_mode")).toBe("custom");
+    expect(form.get("return_url")).toContain("{CHECKOUT_SESSION_ID}");
+    expect(form.get("return_url")).toContain("https://smartsite.cloud/checkout/return");
+    expect(form.get("success_url")).toBeNull();
+    expect(form.get("cancel_url")).toBeNull();
+    expect(form.get("metadata[subscription_tier]")).toBe("solo");
+  });
+
+  it("live hosted still posts success_url + cancel_url and returns checkoutUrl", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_hosted_ok",
+      url: "https://checkout.stripe.com/c/pay/cs_test_hosted_ok",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER,
+    ).send({ tier: "solo", uiMode: "hosted" });
+    expect(res.status).toBe(200);
+    expect(res.body.checkoutUrl).toBe(
+      "https://checkout.stripe.com/c/pay/cs_test_hosted_ok",
+    );
+    expect(res.body.clientSecret).toBeUndefined();
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get("success_url")).toBeTruthy();
+    expect(form.get("cancel_url")).toBeTruthy();
+    expect(form.get("ui_mode")).toBeNull();
+    expect(form.get("return_url")).toBeNull();
   });
 });
 

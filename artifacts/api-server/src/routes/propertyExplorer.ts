@@ -809,6 +809,14 @@ const PeCheckoutBodySchema = z
     interval: z.enum(["month", "year"]).optional(),
     /** Team only: TOTAL seats desired. Base price covers 10; +$25/mo each above. */
     seats: z.number().int().min(1).max(500).optional(),
+    /**
+     * Checkout chrome. Absent / "hosted" keeps today's hosted redirect
+     * (checkoutUrl). "custom" and "embedded" return clientSecret and omit
+     * checkoutUrl. Unknown strings are 400 — never coerced to hosted.
+     */
+    uiMode: z.enum(["hosted", "custom", "embedded"]).optional(),
+    /** Custom / Embedded return URL. Ignored on the hosted path. */
+    returnUrl: z.string().url().optional(),
   })
   .refine((body) => body.seats === undefined || body.tier === "team", {
     message: "seats is only valid with tier=team",
@@ -859,6 +867,8 @@ router.post(
         installId: installIdFromRequest(req),
         successUrl: parsed.data.successUrl ?? defaultPeCheckoutSuccessUrl(),
         cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
+        returnUrl: parsed.data.returnUrl,
+        uiMode: parsed.data.uiMode,
       });
       res.json({
         ...session,
@@ -892,6 +902,8 @@ const PePropertyUnlockCheckoutBodySchema = z.object({
   parcelNodeId: z.string().min(1).max(128),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
+  returnUrl: z.string().url().optional(),
+  uiMode: z.enum(["hosted", "custom", "embedded"]).optional(),
 });
 
 /**
@@ -930,6 +942,8 @@ router.post(
         installId: installIdFromRequest(req),
         successUrl: parsed.data.successUrl ?? defaultPeCheckoutSuccessUrl(),
         cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
+        returnUrl: parsed.data.returnUrl,
+        uiMode: parsed.data.uiMode,
       });
       res.json({
         ...session,
