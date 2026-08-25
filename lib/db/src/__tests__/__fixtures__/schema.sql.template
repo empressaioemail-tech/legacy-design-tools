@@ -2022,6 +2022,35 @@ CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
 );
 
 
+-- Name: tx_utility_territory_staging; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_utility_territory_staging (
+    staging_row_id text NOT NULL,
+    source_key text NOT NULL,
+    service_kind text NOT NULL,
+    territory_id text NOT NULL,
+    territory_name text,
+    county_name text,
+    county_fips text,
+    geometry jsonb NOT NULL,
+    geometry_crs text NOT NULL,
+    source_url text NOT NULL,
+    source_layer_id text NOT NULL,
+    fetched_at timestamp with time zone NOT NULL,
+    source_tiers jsonb NOT NULL,
+    source_tier_satisfied jsonb NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    passthrough_attributes jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    object_id text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: txgio_address; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.txgio_address (
@@ -2890,6 +2919,12 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_fema_nfhl_flood_zone
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_parcel_tile_cache
     ADD CONSTRAINT tx_parcel_tile_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: tx_utility_territory_staging tx_utility_territory_staging_staging_row_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_utility_territory_staging
+    ADD CONSTRAINT tx_utility_territory_staging_staging_row_id_pk PRIMARY KEY (staging_row_id);
 
 
 -- Name: txgio_address txgio_address_county_fips_full_addr_unit_pk; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3842,6 +3877,21 @@ CREATE INDEX tx_parcel_tile_cache_expires_idx ON @@SCHEMA@@.tx_parcel_tile_cache
 -- Name: tx_parcel_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX tx_parcel_tile_cache_uniq ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (tile_key, county_fips);
+
+
+-- Name: tx_utility_territory_staging_bbox_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_utility_territory_staging_bbox_idx ON @@SCHEMA@@.tx_utility_territory_staging USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_utility_territory_staging_county_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_utility_territory_staging_county_idx ON @@SCHEMA@@.tx_utility_territory_staging USING btree (county_fips);
+
+
+-- Name: tx_utility_territory_staging_source_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_utility_territory_staging_source_idx ON @@SCHEMA@@.tx_utility_territory_staging USING btree (source_key);
 
 
 -- Name: txgio_address_tile_idx; Type: INDEX; Schema: public; Owner: -
