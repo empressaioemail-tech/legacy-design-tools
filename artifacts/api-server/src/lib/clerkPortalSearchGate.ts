@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db, clerkPortalTerms, type ClerkPortalAutomatedSearch } from "@workspace/db";
+import { clerkPortalsForCounty } from "./p85ClerkPortalRegistry";
 
 export type PortalSearchGateResult =
   | { ok: true; automatedSearch: Exclude<ClerkPortalAutomatedSearch, "unknown" | "prohibited"> }
@@ -62,4 +63,44 @@ export function portalGateToNeedsHumanReason(
   gate: Extract<PortalSearchGateResult, { ok: false }>,
 ): string {
   return `${gate.code}: ${gate.message}`;
+}
+
+export type CountyPortalGateResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code:
+        | "PORTAL_TERMS_UNKNOWN"
+        | "PORTAL_AUTOMATED_SEARCH_PROHIBITED"
+        | "PORTAL_TERMS_MISSING"
+        | "COUNTY_OUT_OF_SCOPE";
+      portalId: string;
+      message: string;
+    };
+
+/**
+ * P-85 item 1 + 5 — refuse when any clerk portal for the county is not
+ * permitted for automated search. All portals for the county must pass.
+ */
+export async function assertCountyPortalsAllowAutomatedSearch(
+  countyFips: string,
+): Promise<CountyPortalGateResult> {
+  const portals = clerkPortalsForCounty(countyFips);
+  if (portals.length === 0) {
+    return {
+      ok: false,
+      code: "COUNTY_OUT_OF_SCOPE",
+      portalId: countyFips,
+      message: `No P-85 clerk portals registered for county_fips=${countyFips}`,
+    };
+  }
+
+  for (const portal of portals) {
+    const gate = await assertPortalAllowsAutomatedSearch(portal.portalId);
+    if (!gate.ok) {
+      return gate;
+    }
+  }
+
+  return { ok: true };
 }

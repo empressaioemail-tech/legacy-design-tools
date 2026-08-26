@@ -68,4 +68,32 @@ describe("clerkPortalSearchGate", () => {
     const result = await assertPortalAllowsAutomatedSearch("hays-erss");
     expect(result).toEqual({ ok: true, automatedSearch: "permitted" });
   });
+
+  it("assertCountyPortalsAllowAutomatedSearch refuses when any portal fails", async () => {
+    mockRow({ portalId: "williamson-tylerhost", automatedSearch: "permitted" });
+    const { assertCountyPortalsAllowAutomatedSearch } = await import(
+      "../clerkPortalSearchGate"
+    );
+
+    const chain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi
+        .fn()
+        .mockResolvedValueOnce([
+          { portalId: "williamson-tylerhost", automatedSearch: "permitted" },
+        ])
+        .mockResolvedValueOnce([
+          { portalId: "williamson-publicsearch", automatedSearch: "unknown" },
+        ]),
+    };
+    selectMock.mockReturnValue(chain);
+
+    const result = await assertCountyPortalsAllowAutomatedSearch("48491");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("PORTAL_TERMS_UNKNOWN");
+      expect(result.portalId).toBe("williamson-publicsearch");
+    }
+  });
 });
