@@ -124,6 +124,8 @@ describe("lib/db schema integration", () => {
         "canva_design_pushes",
         "canva_oauth_states",
         "canva_push_jobs",
+        // P-85 WDLL item 1 — clerk portal terms and operator ruling per portal.
+        "clerk_portal_terms",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
@@ -253,6 +255,8 @@ describe("lib/db schema integration", () => {
         "reasoning_atoms",
         // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
         "recorded_instruments",
+        // P-85 WDLL item 4 — Records Request async jobs.
+        "records_request_jobs",
         "render_outputs",
         // feat/durable-report-run-state — cross-instance plan-review
         // report-run STATE (replaces three instance-local Maps in
