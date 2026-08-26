@@ -18,13 +18,11 @@ import { requireGateEngineServiceAuth } from "../middlewares/gateEngineServiceAu
 import { verifyGateContext } from "../middlewares/gateContextVerification";
 import { assertEngagementServiceTenantScope } from "../lib/gateFrontSeamEngagement";
 import { resolvePeOwnerUserId } from "../lib/peEntitlement";
-import { isP85CountyFips } from "../lib/p85ClerkPortalRegistry";
-import { assertCountyPortalsAllowAutomatedSearch } from "../lib/clerkPortalSearchGate";
-import { queryLiveEasementGisForParcel } from "../lib/liveEasementGisQuery";
-import { resolveParcelInput } from "../lib/siteTopographyIngest";
 import {
-  enqueueRecordsRequestJob,
-  listRecordsRequestJobsForEngagement,
+  createRecordsRequestJob,
+  listRecordsRequestJobsWire,
+} from "../lib/recordsRequestService";
+import {
   loadRecordsRequestJobById,
   recordsRequestJobToWire,
 } from "../lib/recordsRequestJobWorker";
@@ -54,13 +52,6 @@ function reqLog(req: Request): typeof logger {
 
 function resolveRequestUserId(req: Request): string | null {
   return resolvePeOwnerUserId(req);
-}
-
-function parcelKeyCountyFips(parcelKey: string): string | null {
-  if (!parcelKey.startsWith("apn:")) return null;
-  const parts = parcelKey.split(":");
-  const fips = parts[1]?.trim();
-  return fips && /^\d{5}$/.test(fips) ? fips : null;
 }
 
 router.post(
@@ -100,101 +91,15 @@ router.post(
 
     const { parcelKey, countyFips, placeKey } = bodyParse.data;
 
-    if (!isP85CountyFips(countyFips)) {
-      res.status(422).json({
-        error: "county_out_of_scope",
-        countyFips,
-        message: "Records Request is limited to the six P-85 Central Texas counties",
-      });
-      return;
-    }
-
-    const keyCounty = parcelKeyCountyFips(parcelKey);
-    if (keyCounty && keyCounty !== countyFips) {
-      res.status(422).json({
-        error: "parcel_key_county_mismatch",
-        parcelKey,
-        countyFips,
-        keyCounty,
-      });
-      return;
-    }
-
-    const portalGate = await assertCountyPortalsAllowAutomatedSearch(countyFips);
-    if (!portalGate.ok) {
-      res.status(403).json({
-        error: "portal_automated_search_refused",
-        code: portalGate.code,
-        portalId: portalGate.portalId,
-        message: portalGate.message,
-      });
-      return;
-    }
-
-    const parcel = await resolveParcelInput(engagementId);
-    if (!parcel?.geometry) {
-      res.status(422).json({
-        error: "no_parcel_geometry",
-        message:
-          "Engagement has no derivable parcel polygon; run Generate Layers first",
-      });
-      return;
-    }
-
-    let liveInstantGis;
-    try {
-      liveInstantGis = await queryLiveEasementGisForParcel({
-        parcelKey,
-        countyFips,
-        parcelGeometryGeojson: parcel.geometry,
-      });
-    } catch (err) {
-      log.error(
-        { err, engagementId, parcelKey, countyFips },
-        "records request: live GIS query failed",
-      );
-      res.status(502).json({
-        error: "live_gis_query_failed",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-
-    let enqueued: Awaited<ReturnType<typeof enqueueRecordsRequestJob>>;
-    try {
-      enqueued = await enqueueRecordsRequestJob({
-        engagementId,
-        userId,
-        userEmail: null,
-        parcelKey,
-        countyFips,
-        placeKey: placeKey ?? null,
-        liveInstantGis,
-        requestPayload: {
-          parcelOrigin: parcel.origin,
-          briefingSourceId: parcel.briefingSourceId,
-          layerKind: parcel.layerKind,
-        },
-        log,
-      });
-    } catch (err) {
-      log.error(
-        { err, engagementId, parcelKey, countyFips },
-        "records request: enqueue failed",
-      );
-      res.status(500).json({
-        error: "internal_worker_error",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-
-    res.status(202).json({
-      status: enqueued.alreadyInFlight ? "in-progress" : "accepted",
-      jobId: enqueued.jobId,
-      jobStatus: enqueued.alreadyInFlight ? "running" : "queued",
-      liveInstantGis,
+    const result = await createRecordsRequestJob({
+      engagementId,
+      userId,
+      parcelKey,
+      countyFips,
+      placeKey: placeKey ?? null,
+      log,
     });
+    res.status(result.status).json(result.body);
   },
 );
 
@@ -223,10 +128,8 @@ router.get(
       return;
     }
 
-    const jobs = await listRecordsRequestJobsForEngagement(engagementId, userId);
-    res.status(200).json({
-      jobs: jobs.map(recordsRequestJobToWire),
-    });
+    const body = await listRecordsRequestJobsWire(engagementId, userId);
+    res.status(200).json(body);
   },
 );
 
