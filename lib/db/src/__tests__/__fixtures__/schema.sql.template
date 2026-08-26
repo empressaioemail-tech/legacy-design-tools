@@ -472,6 +472,26 @@ CREATE TABLE @@SCHEMA@@.canva_push_jobs (
 );
 
 
+-- Name: clerk_portal_terms; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.clerk_portal_terms (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    county_fips text NOT NULL,
+    portal_id text NOT NULL,
+    portal_url text NOT NULL,
+    terms_url text,
+    terms_text text NOT NULL,
+    terms_fetched_at timestamp with time zone NOT NULL,
+    automated_search text DEFAULT 'unknown'::text NOT NULL,
+    login_required boolean DEFAULT false NOT NULL,
+    image_purchase jsonb DEFAULT '{}'::jsonb NOT NULL,
+    operator_ruled_at timestamp with time zone,
+    operator_ruling_notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
@@ -1531,6 +1551,30 @@ CREATE TABLE @@SCHEMA@@.recorded_instruments (
 );
 
 
+-- Name: records_request_jobs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.records_request_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    place_key text,
+    user_id text NOT NULL,
+    user_email text,
+    parcel_key text NOT NULL,
+    county_fips text NOT NULL,
+    status text NOT NULL,
+    request_payload jsonb,
+    scope_searched jsonb,
+    live_instant_gis jsonb,
+    run_cost jsonb,
+    recipe_version text,
+    error_code text,
+    error_message text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone
+);
+
+
 -- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.render_outputs (
@@ -2357,6 +2401,12 @@ ALTER TABLE ONLY @@SCHEMA@@.canva_push_jobs
     ADD CONSTRAINT canva_push_jobs_pkey PRIMARY KEY (id);
 
 
+-- Name: clerk_portal_terms clerk_portal_terms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.clerk_portal_terms
+    ADD CONSTRAINT clerk_portal_terms_pkey PRIMARY KEY (id);
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -2739,6 +2789,12 @@ ALTER TABLE ONLY @@SCHEMA@@.reasoning_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_pkey PRIMARY KEY (id);
+
+
+-- Name: records_request_jobs records_request_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
+    ADD CONSTRAINT records_request_jobs_pkey PRIMARY KEY (id);
 
 
 -- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3157,6 +3213,21 @@ CREATE INDEX canva_oauth_states_created_idx ON @@SCHEMA@@.canva_oauth_states USI
 -- Name: canva_push_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX canva_push_jobs_engagement_created_idx ON @@SCHEMA@@.canva_push_jobs USING btree (engagement_id, created_at);
+
+
+-- Name: clerk_portal_terms_county_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX clerk_portal_terms_county_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (county_fips);
+
+
+-- Name: clerk_portal_terms_county_portal_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX clerk_portal_terms_county_portal_uniq ON @@SCHEMA@@.clerk_portal_terms USING btree (county_fips, portal_id);
+
+
+-- Name: clerk_portal_terms_portal_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX clerk_portal_terms_portal_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (portal_id);
 
 
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
@@ -3637,6 +3708,26 @@ CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instrume
 -- Name: recorded_instruments_listing_install_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX recorded_instruments_listing_install_idx ON @@SCHEMA@@.recorded_instruments USING btree (install_id, listing_key);
+
+
+-- Name: records_request_jobs_active_per_engagement_user_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX records_request_jobs_active_per_engagement_user_uniq ON @@SCHEMA@@.records_request_jobs USING btree (engagement_id, user_id) WHERE (status = ANY (ARRAY['queued'::text, 'running'::text, 'awaiting-purchase-approval'::text]));
+
+
+-- Name: records_request_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_jobs_engagement_created_idx ON @@SCHEMA@@.records_request_jobs USING btree (engagement_id, created_at);
+
+
+-- Name: records_request_jobs_place_key_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_jobs_place_key_idx ON @@SCHEMA@@.records_request_jobs USING btree (place_key);
+
+
+-- Name: records_request_jobs_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_jobs_status_idx ON @@SCHEMA@@.records_request_jobs USING btree (status);
 
 
 -- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -
@@ -4248,6 +4339,12 @@ ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
 
 ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: records_request_jobs records_request_jobs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
+    ADD CONSTRAINT records_request_jobs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
