@@ -491,26 +491,6 @@ CREATE TABLE @@SCHEMA@@.clerk_portal_terms (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
--- Name: clerk_portal_terms; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.clerk_portal_terms (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    county_fips text NOT NULL,
-    portal_id text NOT NULL,
-    portal_url text NOT NULL,
-    terms_url text,
-    terms_text text NOT NULL,
-    terms_fetched_at timestamp with time zone NOT NULL,
-    automated_search text DEFAULT 'unknown'::text NOT NULL,
-    login_required boolean DEFAULT false NOT NULL,
-    image_purchase jsonb DEFAULT '{}'::jsonb NOT NULL,
-    operator_ruled_at timestamp with time zone,
-    operator_ruling_notes text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
@@ -1594,30 +1574,6 @@ CREATE TABLE @@SCHEMA@@.records_request_jobs (
     completed_at timestamp with time zone
 );
 
--- Name: records_request_jobs; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.records_request_jobs (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    engagement_id uuid NOT NULL,
-    place_key text,
-    user_id text NOT NULL,
-    user_email text,
-    parcel_key text NOT NULL,
-    county_fips text NOT NULL,
-    status text NOT NULL,
-    request_payload jsonb,
-    scope_searched jsonb,
-    live_instant_gis jsonb,
-    run_cost jsonb,
-    recipe_version text,
-    error_code text,
-    error_message text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone
-);
-
-
 
 -- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
 
@@ -2450,12 +2406,6 @@ ALTER TABLE ONLY @@SCHEMA@@.canva_push_jobs
 ALTER TABLE ONLY @@SCHEMA@@.clerk_portal_terms
     ADD CONSTRAINT clerk_portal_terms_pkey PRIMARY KEY (id);
 
--- Name: clerk_portal_terms clerk_portal_terms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.clerk_portal_terms
-    ADD CONSTRAINT clerk_portal_terms_pkey PRIMARY KEY (id);
-
-
 
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
@@ -2845,12 +2795,6 @@ ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
 
 ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
     ADD CONSTRAINT records_request_jobs_pkey PRIMARY KEY (id);
-
--- Name: records_request_jobs records_request_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
-    ADD CONSTRAINT records_request_jobs_pkey PRIMARY KEY (id);
-
 
 
 -- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3284,21 +3228,6 @@ CREATE UNIQUE INDEX clerk_portal_terms_county_portal_uniq ON @@SCHEMA@@.clerk_po
 -- Name: clerk_portal_terms_portal_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX clerk_portal_terms_portal_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (portal_id);
-
--- Name: clerk_portal_terms_county_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX clerk_portal_terms_county_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (county_fips);
-
-
--- Name: clerk_portal_terms_county_portal_uniq; Type: INDEX; Schema: public; Owner: -
-
-CREATE UNIQUE INDEX clerk_portal_terms_county_portal_uniq ON @@SCHEMA@@.clerk_portal_terms USING btree (county_fips, portal_id);
-
-
--- Name: clerk_portal_terms_portal_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX clerk_portal_terms_portal_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (portal_id);
-
 
 
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -

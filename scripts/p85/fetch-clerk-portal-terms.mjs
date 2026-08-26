@@ -1,86 +1,17 @@
-/**
+﻿/**
  * P-85 WDLL item 1 — fetch verbatim clerk portal terms into neondb.
  *
  * Usage:
  *   node scripts/p85/fetch-clerk-portal-terms.mjs
- *   node scripts/p85/fetch-clerk-portal-terms.mjs --portal hays-erss
+ *   node scripts/p85/fetch-clerk-portal-terms.mjs --portal=hays-erss
+ *   node scripts/p85/fetch-clerk-portal-terms.mjs --apply-permitted-ruling
  *
- * Does not set automated_search; rows land as unknown until operator rules.
+ * Does not set automated_search unless --apply-permitted-ruling (operator go 2026-08-26).
  */
 
 import pg from "pg";
-
-const PORTALS = [
-  {
-    countyFips: "48021",
-    portalId: "bastrop-aumentum",
-    portalUrl: "https://cc.co.bastrop.tx.us/RealEstate",
-    termsUrl: "https://cc.co.bastrop.tx.us/RealEstate/SearchTerms.aspx",
-    loginRequired: true,
-    imagePurchase: {
-      method: "portal per-page purchase",
-      notes: "Aumentum; login required",
-    },
-  },
-  {
-    countyFips: "48453",
-    portalId: "travis-tccsearch",
-    portalUrl: "https://www.tccsearch.org",
-    termsUrl: "https://www.tccsearch.org/RealEstate/Disclaimer.aspx",
-    loginRequired: false,
-    imagePurchase: { pricePerPage: "$1.00", method: "emailed copies" },
-  },
-  {
-    countyFips: "48491",
-    portalId: "williamson-tylerhost",
-    portalUrl: "https://williamsoncountytx-web.tylerhost.net/web/",
-    termsUrl: "https://williamsoncountytx-web.tylerhost.net/web/user/disclaimer",
-    loginRequired: false,
-    imagePurchase: { method: "Tyler self-service cart" },
-  },
-  {
-    countyFips: "48491",
-    portalId: "williamson-publicsearch",
-    portalUrl: "https://williamson.tx.publicsearch.us/",
-    termsUrl: "https://williamson.tx.publicsearch.us/terms",
-    loginRequired: false,
-    imagePurchase: { method: "publicsearch.us per-page" },
-  },
-  {
-    countyFips: "48209",
-    portalId: "hays-erss",
-    portalUrl: "https://erss.co.hays.tx.us",
-    termsUrl: "https://erss.co.hays.tx.us/web/user/disclaimer",
-    loginRequired: false,
-    imagePurchase: {
-      pricePerPage: "$1.00",
-      method: "Tyler self-service",
-      notes: "24x36 plat $5.00",
-    },
-  },
-  {
-    countyFips: "48055",
-    portalId: "caldwell-clerk-web",
-    portalUrl: "https://www.co.caldwell.tx.us/page/caldwell.county.clerk",
-    termsUrl: "https://www.co.caldwell.tx.us/page/caldwell.county.clerk",
-    loginRequired: false,
-    imagePurchase: {
-      method: "verify with clerk",
-      notes: "vendor unconfirmed at recon",
-    },
-  },
-  {
-    countyFips: "48309",
-    portalId: "mclennan-online-records",
-    portalUrl: "https://www.mclennan.gov/166/County-Clerk",
-    termsUrl: "https://www.mclennan.gov/166/County-Clerk",
-    loginRequired: false,
-    imagePurchase: {
-      method: "Online Records Search",
-      notes: "electronic from 1996-01-01",
-    },
-  },
-];
+import { P85_CLERK_PORTAL_SEED } from "./p85-clerk-portals.mjs";
+import { applyOperatorPermittedRulingsPg } from "./apply-operator-portal-rulings.mjs";
 
 function stripHtml(html) {
   return html
@@ -146,6 +77,7 @@ async function upsertPortalTerms(client, portal, fetched) {
 async function main() {
   const filterArg = process.argv.find((a) => a.startsWith("--portal="));
   const filter = filterArg?.split("=")[1];
+  const applyRuling = process.argv.includes("--apply-permitted-ruling");
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.error("DATABASE_URL required");
@@ -153,8 +85,8 @@ async function main() {
   }
 
   const targets = filter
-    ? PORTALS.filter((p) => p.portalId === filter)
-    : PORTALS;
+    ? P85_CLERK_PORTAL_SEED.filter((p) => p.portalId === filter)
+    : P85_CLERK_PORTAL_SEED;
 
   if (targets.length === 0) {
     console.error(`No portal matches --portal=${filter}`);
@@ -188,8 +120,12 @@ async function main() {
     );
   }
 
+  if (applyRuling) {
+    await applyOperatorPermittedRulingsPg(client);
+  }
+
   await client.end();
-  console.log(JSON.stringify({ ok: true, count: results.length, results }, null, 2));
+  console.log(JSON.stringify({ ok: true, count: results.length, results, applyRuling }, null, 2));
 }
 
 main().catch((err) => {
