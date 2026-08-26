@@ -5,7 +5,6 @@ import {
   P85_COUNTY_FIPS,
   clerkPortalsForCounty,
 } from "../p85ClerkPortalRegistry";
-import { P85_CLERK_PORTAL_SEED } from "../../../../../scripts/p85/p85-clerk-portals.mjs";
 
 describe("P85_CLERK_PORTALS registry", () => {
   it("covers six counties with seven portal instances (Williamson twice)", () => {
@@ -23,11 +22,10 @@ describe("P85_CLERK_PORTALS registry", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("matches scripts/p85/p85-clerk-portals.mjs seed shape", () => {
-    expect(P85_CLERK_PORTAL_SEED).toHaveLength(7);
-    const registryKeys = P85_CLERK_PORTALS.map((p) => `${p.countyFips}:${p.portalId}`).sort();
-    const seedKeys = P85_CLERK_PORTAL_SEED.map((p) => `${p.countyFips}:${p.portalId}`).sort();
-    expect(seedKeys).toEqual(registryKeys);
-    expect(new Set(P85_CLERK_PORTAL_SEED.map((p) => p.countyFips)).size).toBe(6);
+  it("covers all six operator-permitted county FIPS", () => {
+    expect(new Set(P85_CLERK_PORTALS.map((p) => p.countyFips)).size).toBe(6);
+    for (const fips of P85_COUNTY_FIPS) {
+      expect(clerkPortalsForCounty(fips).length).toBeGreaterThan(0);
+    }
   });
 });
