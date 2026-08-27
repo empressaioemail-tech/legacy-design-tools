@@ -1279,6 +1279,19 @@ CREATE TABLE @@SCHEMA@@.pe_saved_properties (
 );
 
 
+-- Name: pe_share_grants; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_share_grants (
+    id text NOT NULL,
+    grantor_user_id text NOT NULL,
+    grantor_tenant_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone
+);
+
+
 -- Name: pe_user_entitlements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
@@ -2695,6 +2708,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
     ADD CONSTRAINT pe_saved_properties_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_share_grants pe_share_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
+    ADD CONSTRAINT pe_share_grants_pkey PRIMARY KEY (id);
+
+
 -- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
@@ -3610,6 +3629,16 @@ CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USI
 CREATE UNIQUE INDEX pe_saved_properties_owner_parcel_uidx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, parcel_node_id);
 
 
+-- Name: pe_share_grants_grantor_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_grants_grantor_idx ON @@SCHEMA@@.pe_share_grants USING btree (grantor_user_id, created_at);
+
+
+-- Name: pe_share_grants_parcel_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_grants_parcel_idx ON @@SCHEMA@@.pe_share_grants USING btree (parcel_node_id);
+
+
 -- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_user_entitlements_tenant_idx ON @@SCHEMA@@.pe_user_entitlements USING btree (tenant_id);
@@ -4303,6 +4332,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
     ADD CONSTRAINT pe_property_unlocks_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_share_grants pe_share_grants_grantor_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
+    ADD CONSTRAINT pe_share_grants_grantor_user_id_users_id_fk FOREIGN KEY (grantor_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
