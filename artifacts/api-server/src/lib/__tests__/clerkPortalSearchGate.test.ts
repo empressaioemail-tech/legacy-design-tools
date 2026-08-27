@@ -69,6 +69,28 @@ describe("clerkPortalSearchGate", () => {
     expect(result).toEqual({ ok: true, automatedSearch: "permitted" });
   });
 
+  it("refuses when canary_status is lookup-failed", async () => {
+    mockRow({
+      portalId: "williamson-publicsearch",
+      automatedSearch: "permitted",
+      canaryStatus: "lookup-failed",
+      canaryCheckedAt: new Date("2026-08-27T12:00:00.000Z"),
+      canaryFailureReason: "canary selector drift: none matched",
+      canaryRecipeVersion: "p85-publicsearch-v1",
+    });
+    const { assertPortalAllowsAutomatedSearch } = await import(
+      "../clerkPortalSearchGate"
+    );
+    const result = await assertPortalAllowsAutomatedSearch(
+      "williamson-publicsearch",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("PORTAL_CANARY_LOOKUP_FAILED");
+      expect(result.message).toContain("canary selector drift");
+    }
+  });
+
   it("assertCountyPortalsAllowAutomatedSearch refuses when any portal fails", async () => {
     mockRow({ portalId: "williamson-tylerhost", automatedSearch: "permitted" });
     const { assertCountyPortalsAllowAutomatedSearch } = await import(

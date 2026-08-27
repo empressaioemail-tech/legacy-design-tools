@@ -17,7 +17,19 @@ Reads `jobId` from:
 
 Requires `DATABASE_URL`. Transitions `records_request_jobs` status
 `queued → running → complete|failed|needs-human` with honest errors when the portal is
-unreachable or login is required.
+unreachable, login is required, or the daily canary marks the portal `lookup-failed`.
+
+## Run cost (item 14)
+
+Every terminal transition writes `run_cost` jsonb with `imageFeesCents`, `computeCents`,
+`humanMinutes`, `instrumentCount`, `totalCents`, and `derivedAt`. Values derive from
+`scope_searched.acquisition` metadata and worker wall time.
+
+## Portal canary (item 14)
+
+Daily selector drift check via `scripts/p85/run-records-portal-canary.mjs` (Cloud Scheduler
+stub). Failing versioned recipe selectors set `clerk_portal_terms.canary_status=lookup-failed`,
+blocking new enqueues and worker runs until the next passing canary.
 
 ## api-server integration
 

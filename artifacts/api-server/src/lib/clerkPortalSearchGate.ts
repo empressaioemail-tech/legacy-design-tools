@@ -6,7 +6,11 @@ export type PortalSearchGateResult =
   | { ok: true; automatedSearch: Exclude<ClerkPortalAutomatedSearch, "unknown" | "prohibited"> }
   | {
       ok: false;
-      code: "PORTAL_TERMS_UNKNOWN" | "PORTAL_AUTOMATED_SEARCH_PROHIBITED" | "PORTAL_TERMS_MISSING";
+      code:
+        | "PORTAL_TERMS_UNKNOWN"
+        | "PORTAL_AUTOMATED_SEARCH_PROHIBITED"
+        | "PORTAL_TERMS_MISSING"
+        | "PORTAL_CANARY_LOOKUP_FAILED";
       portalId: string;
       message: string;
     };
@@ -52,6 +56,17 @@ export async function assertPortalAllowsAutomatedSearch(
     };
   }
 
+  if (row.canaryStatus === "lookup-failed") {
+    const checked = row.canaryCheckedAt?.toISOString() ?? "unknown";
+    const reason = row.canaryFailureReason ?? "canary selector drift";
+    return {
+      ok: false,
+      code: "PORTAL_CANARY_LOOKUP_FAILED",
+      portalId,
+      message: `Portal ${portalId} canary lookup-failed (recipe=${row.canaryRecipeVersion ?? "unknown"}, checked=${checked}): ${reason}`,
+    };
+  }
+
   return {
     ok: true,
     automatedSearch: row.automatedSearch as "permitted" | "tolerated",
@@ -73,6 +88,7 @@ export type CountyPortalGateResult =
         | "PORTAL_TERMS_UNKNOWN"
         | "PORTAL_AUTOMATED_SEARCH_PROHIBITED"
         | "PORTAL_TERMS_MISSING"
+        | "PORTAL_CANARY_LOOKUP_FAILED"
         | "COUNTY_OUT_OF_SCOPE";
       portalId: string;
       message: string;
