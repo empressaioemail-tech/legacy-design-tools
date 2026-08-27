@@ -8,6 +8,7 @@ import {
   portalConfigById,
   type P85PortalConfig,
 } from "./p85Portals.js";
+import { runAumentumIndexSearch } from "./aumentumIndexSearch.js";
 import { runPublicsearchRecipe } from "./publicsearchSearch.js";
 import { runPortalReachabilityRecipe } from "./portalReachability.js";
 import {
@@ -21,6 +22,10 @@ import type {
   RecordsRecipeResult,
 } from "./types.js";
 
+const AUMENTUM_SEARCH_PORTAL_IDS = new Set([
+  "bastrop-aumentum",
+  "travis-tccsearch",
+]);
 const TYLER_SEARCH_PORTAL_IDS = new Set(["williamson-tylerhost", "hays-erss"]);
 const PUBLICSEARCH_PORTAL_IDS = new Set(["williamson-publicsearch"]);
 
@@ -46,6 +51,9 @@ async function runRecipeForPortalConfig(
       tylerSurfaceFromPortal(portal),
       browser,
     );
+  }
+  if (AUMENTUM_SEARCH_PORTAL_IDS.has(portal.portalId)) {
+    return runAumentumIndexSearch(ctx, portal, browser);
   }
   if (PUBLICSEARCH_PORTAL_IDS.has(portal.portalId)) {
     return runPublicsearchRecipe(ctx, portal, browser);
