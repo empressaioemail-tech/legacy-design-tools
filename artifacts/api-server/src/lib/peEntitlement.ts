@@ -13,6 +13,7 @@ import {
 } from "@workspace/db";
 import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
+import { resolvePeUserIdFromTrustedServiceCall } from "./peServiceUserId";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
 /** Signed-in-free chat allowance per property (LOCK ruling 2026-07-29). */
@@ -55,6 +56,9 @@ export function subscriptionTierGrantsStudio(
 }
 
 export function resolvePeOwnerUserId(req: Request): string | null {
+  const serviceUserId = resolvePeUserIdFromTrustedServiceCall(req);
+  if (serviceUserId) return serviceUserId;
+
   const userId = req.session.requestor?.kind === "user"
     ? req.session.requestor.id
     : undefined;

@@ -115,4 +115,29 @@ describe("PE saved property isolation", () => {
       process.env["NODE_ENV"] = prev;
     }
   });
+
+  it("SERVICE_API_KEY + X-PE-User-Id lists that user's saved properties", async () => {
+    const prevEnv = process.env["NODE_ENV"];
+    const prevKey = process.env.SERVICE_API_KEY;
+    process.env["NODE_ENV"] = "production";
+    process.env.SERVICE_API_KEY = "mcp-service-key-test";
+    const { __resetServiceApiKeyCacheForTests } = await import(
+      "../lib/serviceToken"
+    );
+    __resetServiceApiKeyCacheForTests();
+    try {
+      const res = await request(getApp())
+        .get("/api/property-explorer/v1/saved-properties")
+        .set("Authorization", "Bearer mcp-service-key-test")
+        .set("X-PE-User-Id", "user-a");
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].parcelNodeId).toBe("48055:10068");
+    } finally {
+      process.env["NODE_ENV"] = prevEnv;
+      if (prevKey === undefined) delete process.env.SERVICE_API_KEY;
+      else process.env.SERVICE_API_KEY = prevKey;
+      __resetServiceApiKeyCacheForTests();
+    }
+  });
 });
