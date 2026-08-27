@@ -8,6 +8,8 @@ export interface RecordsRecipeContext {
   parcelKey: string;
   portalId: string;
   requestPayload: Record<string, unknown>;
+  /** Prior run scope — used for acquisition-only resume after fee approve. */
+  scopeSearched?: Record<string, unknown>;
 }
 
 export interface PortalNavigationResult {

@@ -94,4 +94,29 @@ describe("acquireIndexHits", () => {
       );
     }
   });
+
+  it("routes fee-approved purchase walls to human clerk without re-pausing", async () => {
+    const browser = mockBrowser({
+      pageIncludes: vi.fn().mockResolvedValue(true),
+    });
+    const result = await acquireIndexHits({
+      jobId: "job-1",
+      portalId: "bastrop-aumentum",
+      hits: [
+        {
+          recordingRef: "2024-1",
+          documentType: "DEED",
+          recordingDate: null,
+          parties: "A",
+          detailUrl: "https://portal/doc/1",
+        },
+      ],
+      browser,
+      purchaseApproved: true,
+    });
+    expect(result.kind).toBe("needs-human");
+    if (result.kind === "needs-human") {
+      expect(result.reason).toContain("approved county fees");
+    }
+  });
 });

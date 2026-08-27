@@ -29,6 +29,7 @@ export async function acquireIndexHits(
     portalId: string;
     hits: IndexSearchHit[];
     browser: RecordsRecipeBrowser;
+    purchaseApproved?: boolean;
   },
 ): Promise<
   | { kind: "acquired"; summary: AcquisitionSummary }
@@ -62,6 +63,10 @@ export async function acquireIndexHits(
       (await input.browser.pageIncludes("pay"));
 
     if (purchaseRequired) {
+      if (input.purchaseApproved) {
+        summary.pendingHuman.push(hit);
+        continue;
+      }
       summary.pendingPurchase.push(hit);
       summary.purchaseCostCents += 350; // per-page placeholder until portal price parse lands
       continue;
@@ -110,6 +115,18 @@ export async function acquireIndexHits(
       summary,
       reason:
         "Portal purchase path detected; bot does not drive checkout on this card",
+    };
+  }
+
+  if (
+    input.purchaseApproved &&
+    summary.pendingHuman.length > 0 &&
+    summary.acquired === 0
+  ) {
+    return {
+      kind: "needs-human",
+      summary,
+      reason: `User approved county fees; human clerk purchase required for ${summary.pendingHuman.length} instrument(s)`,
     };
   }
 
