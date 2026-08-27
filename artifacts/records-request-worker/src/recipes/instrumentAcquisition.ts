@@ -93,6 +93,7 @@ export async function acquireIndexHits(
       detailUrl: hit.detailUrl,
       metadata: {
         captureLabel: capture.label,
+        captureMimeType: "image/png",
         ...(capture.pngBase64 ? { capturePngBase64: capture.pngBase64 } : {}),
       },
     };
