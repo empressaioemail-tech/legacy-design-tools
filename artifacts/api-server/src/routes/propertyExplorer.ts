@@ -1117,6 +1117,41 @@ router.post(
 );
 
 /**
+ * P-85 item 9 — corridor geometry derivation for classified clauses.
+ */
+router.post(
+  "/property-explorer/v1/internal/records-request/corridor-derive",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const jobId =
+      typeof req.body?.jobId === "string" ? req.body.jobId.trim() : "";
+    if (!jobId) {
+      res.status(400).json({ error: "missing_job_id" });
+      return;
+    }
+    try {
+      const { processRecordsRequestCorridorDerivations } = await import(
+        "../lib/recordsRequestCorridorWrite"
+      );
+      const corridors = await processRecordsRequestCorridorDerivations(jobId);
+      res.status(200).json({ jobId, corridors });
+    } catch (err) {
+      peReqLog(req).error({ err, jobId }, "records request corridor derive failed");
+      const message = err instanceof Error ? err.message : String(err);
+      const status =
+        message === "records_request_job_not_found" ||
+        message === "records_request_job_missing_parcel_geometry"
+          ? 422
+          : 500;
+      res.status(status).json({
+        error: "corridor_derive_failed",
+        detail: message,
+      });
+    }
+  },
+);
+
+/**
  * P-85 item 11 — worker/service hook to send completion email via Resend.
  */
 router.post(
