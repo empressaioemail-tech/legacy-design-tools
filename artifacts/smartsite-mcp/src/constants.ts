@@ -25,7 +25,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "run_report",
     title: "Run a report",
     description:
-      "Start an async report job for a parcel. Returns started plus a job id when work is not immediate.",
+      "Read the R1 property intelligence report for a parcel from the baked facet snapshot. Returns synchronously; no async job is started.",
     readiness: "live" as const,
   },
   {
@@ -48,8 +48,9 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "export_instrument",
     title: "Export an instrument",
     description:
-      "Export a site plan, terrain model, dossier, or brief artifact the caller's tier allows.",
-    readiness: "live" as const,
+      "Export a site plan, terrain model, dossier, or brief artifact the caller's tier allows. Not available until cortex export routes exist for Smart Site MCP.",
+    readiness: "blocked" as const,
+    blockedReason: "P-87 export honesty — no parcel export endpoint",
   },
   {
     name: "ask_the_map",

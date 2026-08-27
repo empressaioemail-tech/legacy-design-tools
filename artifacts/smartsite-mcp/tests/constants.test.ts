@@ -13,10 +13,11 @@ describe("smartsite-mcp constants", () => {
     expect(SERVER_NAME).toBe("Smart Site");
   });
 
-  it("marks records tools blocked pending P-85", () => {
+  it("marks records and export tools blocked pending backend", () => {
     const records = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked");
     expect(records.map((t) => t.name).sort()).toEqual([
       "check_request",
+      "export_instrument",
       "request_records",
     ]);
   });

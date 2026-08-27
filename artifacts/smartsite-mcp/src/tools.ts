@@ -8,6 +8,7 @@ import {
   type CortexClientConfig,
 } from "./cortex-client.js";
 import { requireAuthContext } from "./request-context.js";
+import { buildRunReportEnvelope } from "./tool-honesty.js";
 
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
@@ -157,37 +158,12 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const body = await res.text();
-              return {
-                content: [{ type: "text" as const, text: body }],
-                isError: !res.ok,
-              };
-            });
-          }
-          case "export_instrument": {
-            const { parcelNodeId, kind } = args as {
-              parcelNodeId: string;
-              kind: string;
-            };
-            return withCortex(async (config) => {
-              const res = await cortexFetch(
-                config,
-                `/api/property-explorer/v1/entitlement?parcelNodeId=${encodeURIComponent(parcelNodeId)}`,
-                { userId: auth.userId },
-              );
-              const entitlement = await res.text();
+              const envelope = buildRunReportEnvelope(parcelNodeId, body);
               return {
                 content: [
-                  {
-                    type: "text" as const,
-                    text: JSON.stringify({
-                      status: "started",
-                      parcelNodeId,
-                      kind,
-                      entitlementProbe: entitlement,
-                      note: "Export job started; entitlement checked via cortex property-explorer.",
-                    }),
-                  },
+                  { type: "text" as const, text: JSON.stringify(envelope) },
                 ],
+                isError: !res.ok,
               };
             });
           }
