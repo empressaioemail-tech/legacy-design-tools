@@ -105,6 +105,7 @@ import { db, placeLayerSnapshots } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
+import { refusePayloadAtServe } from "../lib/serveGuards";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
@@ -532,6 +533,12 @@ export async function loadBakedNodeFacetSnapshot(
 
   const row = rows.find((r) => r.adapterKey === TIER1_ADAPTER_KEY);
   if (!row) return null;
+  try {
+    refusePayloadAtServe(row.payloadJson);
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "SERVE_REFUSED";
+    throw Object.assign(new Error(String((err as Error).message)), { code });
+  }
   const tier2Row = rows.find((r) => r.adapterKey === TIER2_ADAPTER_KEY);
   const tier2Raw = tier2Row
     ? extractTier2Overlay(tier2Row.payloadJson, tier2Row.snapshotAt)
@@ -581,8 +588,29 @@ brokerageNodeFacetsRouter.get(
     }
 
     const grantsOwnerFact = await callerGrantsOwnerFact(req);
-    const [snapshot, floodHazardFact, landUseFactRaw, specialDistrictFact, pipelineFact, wellFact, buildingFootprintFact, boundaryEdgeFact, ownerFactLoaded, structuralFact] =
-      await Promise.all([
+    let snapshot;
+    let floodHazardFact;
+    let landUseFactRaw;
+    let specialDistrictFact;
+    let pipelineFact;
+    let wellFact;
+    let buildingFootprintFact;
+    let boundaryEdgeFact;
+    let ownerFactLoaded;
+    let structuralFact;
+    try {
+      [
+        snapshot,
+        floodHazardFact,
+        landUseFactRaw,
+        specialDistrictFact,
+        pipelineFact,
+        wellFact,
+        buildingFootprintFact,
+        boundaryEdgeFact,
+        ownerFactLoaded,
+        structuralFact,
+      ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
@@ -596,6 +624,16 @@ brokerageNodeFacetsRouter.get(
           : Promise.resolve(null),
         loadStructuralFactAtom(parcelNodeId),
       ]);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "ACCESS_NOT_DEFAULTED" || code === "SITUS_PUNCTUATION_ONLY") {
+        res.status(422).json(
+          gtmErrorBody("serve_refused", code, (err as Error).message),
+        );
+        return;
+      }
+      throw err;
+    }
     const ownerFact =
       ownerFactLoaded ?? studioGatedOwnerFactRefusal(parcelNodeId);
     const landUseFact = enrichLandUseFactWithZoningVerdict(
