@@ -89,16 +89,17 @@ describe("smartsite-mcp tool honesty", () => {
     });
   });
 
-  it("run_report wraps brief with synchronous honesty envelope", async () => {
-    const briefPayload = {
+  it("run_report flattens brief with synchronous honesty fields", async () => {
+    const cortexBody = {
       runId: "r1-test",
       reportFamily: "R1",
       mode: "baked-facet-intel-v1",
       parcelNodeId: "4813500100100100100",
+      brief: { sections: [], disclosure: [] },
       source: "baked-snapshot",
     };
     mockCortexFetch.mockResolvedValue(
-      new Response(JSON.stringify(briefPayload), { status: 200 }),
+      new Response(JSON.stringify(cortexBody), { status: 200 }),
     );
 
     await withTestClient(async (client) => {
@@ -111,11 +112,49 @@ describe("smartsite-mcp tool honesty", () => {
       const parsed = JSON.parse((text as { text: string }).text);
       expect(parsed).toMatchObject({
         reportKind: "R1-baked-snapshot",
-        mode: "baked-snapshot-read",
+        reportReadMode: "baked-snapshot-read",
         async: false,
         parcelNodeId: "4813500100100100100",
-        brief: briefPayload,
+        runId: "r1-test",
+        mode: "baked-facet-intel-v1",
+        brief: { sections: [], disclosure: [] },
       });
+      expect(parsed.brief).not.toHaveProperty("brief");
+    });
+  });
+
+  it("list_my_properties strips snapshot chat blobs", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            id: "saved-1",
+            parcelNodeId: "48021:34137",
+            label: "908 PINE",
+            updatedAt: "2026-08-27T12:00:00.000Z",
+            snapshot: { chatThreads: [{ messages: ["secret"] }] },
+          },
+        ]),
+        { status: 200 },
+      ),
+    );
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "list_my_properties",
+        arguments: {},
+      });
+      expect(result.isError).toBe(false);
+      const text = result.content?.[0];
+      const parsed = JSON.parse((text as { text: string }).text);
+      expect(parsed).toEqual([
+        {
+          id: "saved-1",
+          parcelNodeId: "48021:34137",
+          label: "908 PINE",
+          updatedAt: "2026-08-27T12:00:00.000Z",
+        },
+      ]);
     });
   });
 

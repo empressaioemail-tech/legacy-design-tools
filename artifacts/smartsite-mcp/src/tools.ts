@@ -8,7 +8,7 @@ import {
   type CortexClientConfig,
 } from "./cortex-client.js";
 import { requireAuthContext } from "./request-context.js";
-import { buildRunReportEnvelope } from "./tool-honesty.js";
+import { buildRunReportEnvelope, stripSavedPropertiesForExternal } from "./tool-honesty.js";
 
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
@@ -139,9 +139,27 @@ export function registerTools(server: McpServer): void {
                 { userId: auth.userId },
               );
               const body = await res.text();
+              if (!res.ok) {
+                return {
+                  content: [{ type: "text" as const, text: body }],
+                  isError: true,
+                };
+              }
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(body);
+              } catch {
+                return {
+                  content: [{ type: "text" as const, text: body }],
+                  isError: true,
+                };
+              }
+              const summary = stripSavedPropertiesForExternal(parsed);
               return {
-                content: [{ type: "text" as const, text: body }],
-                isError: !res.ok,
+                content: [
+                  { type: "text" as const, text: JSON.stringify(summary) },
+                ],
+                isError: false,
               };
             });
           }
