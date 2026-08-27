@@ -41,9 +41,16 @@ function buildRecipeContext(job: RecordsRequestJobRow, portalId: string) {
 function triggerVisionReads(jobId: string): void {
   const url = process.env.RECORDS_REQUEST_VISION_URL?.trim();
   if (!url) return;
+  const serviceKey = process.env.SERVICE_API_KEY?.trim();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (serviceKey) {
+    headers.Authorization = `Bearer ${serviceKey}`;
+  }
   void fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ jobId }),
   }).catch(() => {});
 }
