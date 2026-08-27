@@ -34,7 +34,11 @@ import type {
   RecordsRecipeResult,
 } from "./types.js";
 
-export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v1";
+export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v2";
+
+function isBastropSearchEntryPortal(portal: P85PortalConfig): boolean {
+  return portal.portalId === "bastrop-aumentum";
+}
 
 const GRANTOR_ENTRY_SELECTORS = [
   'a:has-text("Grantor")',
@@ -78,8 +82,12 @@ const SUBDIVISION_INPUT_SELECTORS = [
 ] as const;
 
 function searchTermsUrlForPortal(portal: P85PortalConfig): string {
+  const base = portal.portalUrl.replace(/\/$/, "");
   if (portal.portalId === "travis-tccsearch") {
-    return `${portal.portalUrl.replace(/\/$/, "")}/RealEstate/SearchTerms.aspx`;
+    return `${base}/RealEstate/SearchTerms.aspx`;
+  }
+  if (isBastropSearchEntryPortal(portal)) {
+    return `${base}/SearchEntry.aspx`;
   }
   return portal.entryUrl;
 }
@@ -88,7 +96,14 @@ function disclaimerUrlForPortal(portal: P85PortalConfig): string | null {
   if (portal.portalId === "travis-tccsearch") {
     return portal.entryUrl;
   }
+  if (isBastropSearchEntryPortal(portal)) {
+    return portal.portalUrl;
+  }
   return null;
+}
+
+function bastropSearchEntryUrl(portal: P85PortalConfig): string {
+  return `${portal.portalUrl.replace(/\/$/, "")}/SearchEntry.aspx`;
 }
 
 export function aumentumIndexSearchScope(
@@ -140,27 +155,52 @@ async function openSearchTermsSurface(
       };
     }
     stepsReached.push("open-disclaimer");
-    if (await tryClickFirst(browser, TERMS_ACCEPT_SELECTORS)) {
-      stepsReached.push("accept-disclaimer");
+    if (!(await tryClickFirst(browser, TERMS_ACCEPT_SELECTORS))) {
+      return {
+        ok: false,
+        result: {
+          status: "failed",
+          errorCode: "portal-unreachable",
+          errorMessage: "Aumentum disclaimer accept control not found",
+        },
+      };
     }
+    stepsReached.push("accept-disclaimer");
   }
 
-  const searchTermsUrl = searchTermsUrlForPortal(portal);
-  const nav = await browser.goto(searchTermsUrl);
-  if (!nav.ok) {
-    return {
-      ok: false,
-      result: {
-        status: "failed",
-        errorCode: "portal-unreachable",
-        errorMessage: `Aumentum search terms unreachable (${searchTermsUrl}): ${nav.errorMessage ?? "navigation failed"}`,
-      },
-    };
-  }
-  stepsReached.push("open-search-terms");
-
-  if (await tryClickFirst(browser, TERMS_ACCEPT_SELECTORS)) {
-    stepsReached.push("accept-search-terms");
+  if (isBastropSearchEntryPortal(portal)) {
+    let url = await browser.currentUrl();
+    if (!url.includes("SearchEntry.aspx")) {
+      const entryNav = await browser.goto(bastropSearchEntryUrl(portal));
+      if (!entryNav.ok) {
+        return {
+          ok: false,
+          result: {
+            status: "failed",
+            errorCode: "portal-unreachable",
+            errorMessage: `Bastrop search entry unreachable: ${entryNav.errorMessage ?? "navigation failed"}`,
+          },
+        };
+      }
+    }
+    stepsReached.push("open-search-entry");
+  } else {
+    const searchTermsUrl = searchTermsUrlForPortal(portal);
+    const nav = await browser.goto(searchTermsUrl);
+    if (!nav.ok) {
+      return {
+        ok: false,
+        result: {
+          status: "failed",
+          errorCode: "portal-unreachable",
+          errorMessage: `Aumentum search terms unreachable (${searchTermsUrl}): ${nav.errorMessage ?? "navigation failed"}`,
+        },
+      };
+    }
+    stepsReached.push("open-search-terms");
+    if (await tryClickFirst(browser, TERMS_ACCEPT_SELECTORS)) {
+      stepsReached.push("accept-search-terms");
+    }
   }
 
   const url = await browser.currentUrl();
@@ -188,6 +228,132 @@ async function openSearchTermsSurface(
   return { ok: true };
 }
 
+const BASTROP_SEPARATE_NAME_RADIO = "#cphNoMargin_f_rdoSep";
+const BASTROP_GRANTOR_INPUT = "#cphNoMargin_f_txtGrantor";
+const BASTROP_LEGAL_INPUT = "#cphNoMargin_f_txtLDFreeForm";
+const BASTROP_LOT_INPUT = "#cphNoMargin_f_txtLDLot";
+const BASTROP_SEARCH_BUTTON = "#cphNoMargin_SearchButtons1_btnSearch";
+
+async function prepareBastropSearchForm(
+  portal: P85PortalConfig,
+  browser: RecordsRecipeBrowser,
+): Promise<{ ok: true } | { ok: false; result: RecordsRecipeResult }> {
+  const url = await browser.currentUrl();
+  if (url.includes("SearchResults.aspx")) {
+    if (await tryClickFirst(browser, ['a:has-text("New Search")'])) {
+      return { ok: true };
+    }
+  }
+  if (url.includes("SearchEntry.aspx")) {
+    return { ok: true };
+  }
+  const nav = await browser.goto(bastropSearchEntryUrl(portal));
+  if (!nav.ok) {
+    return {
+      ok: false,
+      result: {
+        status: "failed",
+        errorCode: "portal-unreachable",
+        errorMessage: `Bastrop search entry unreachable: ${nav.errorMessage ?? "navigation failed"}`,
+      },
+    };
+  }
+  return { ok: true };
+}
+
+async function runBastropSearchEntryQuery(
+  portal: P85PortalConfig,
+  browser: RecordsRecipeBrowser,
+  planned: PlannedSearchQuery,
+): Promise<
+  | {
+      ok: true;
+      queryRecord: Record<string, unknown>;
+      capture: Record<string, unknown>;
+      hits: IndexSearchHit[];
+    }
+  | { ok: false; result: RecordsRecipeResult }
+> {
+  const prepared = await prepareBastropSearchForm(portal, browser);
+  if (!prepared.ok) {
+    return prepared;
+  }
+
+  let filled = false;
+  if (planned.kind === "owner-name") {
+    if (!(await browser.click(BASTROP_SEPARATE_NAME_RADIO)).ok) {
+      return {
+        ok: false,
+        result: {
+          status: "needs-human",
+          errorCode: "search-ui-not-found",
+          errorMessage: `Could not select separate name search on ${portal.portalId}`,
+        },
+      };
+    }
+    filled = await tryFillFirst(browser, [BASTROP_GRANTOR_INPUT], planned.query);
+  } else if (planned.kind === "legal-description") {
+    filled = await tryFillFirst(browser, [BASTROP_LEGAL_INPUT], planned.query);
+  } else {
+    filled = await tryFillFirst(browser, [BASTROP_LOT_INPUT], planned.query);
+  }
+
+  if (!filled) {
+    return {
+      ok: false,
+      result: {
+        status: "needs-human",
+        errorCode: "search-ui-not-found",
+        errorMessage: `Could not fill ${planned.kind} search on ${portal.portalId}`,
+      },
+    };
+  }
+
+  if (!(await browser.click(BASTROP_SEARCH_BUTTON)).ok) {
+    return {
+      ok: false,
+      result: {
+        status: "failed",
+        errorCode: "search-submit-failed",
+        errorMessage: `${planned.kind} search could not be submitted on ${portal.portalId}`,
+      },
+    };
+  }
+
+  const pageCapture = await browser.captureFullPage(planned.captureLabel);
+  if (!pageCapture.ok || !pageCapture.sha256) {
+    return {
+      ok: false,
+      result: {
+        status: "failed",
+        errorCode: "capture-failed",
+        errorMessage:
+          pageCapture.errorMessage ??
+          `Failed to capture ${planned.kind} results on ${portal.portalId}`,
+      },
+    };
+  }
+
+  const hits = await extractIndexHitsFromPage(browser);
+
+  return {
+    ok: true,
+    queryRecord: {
+      kind: planned.kind,
+      query: planned.query,
+      timestamp: new Date().toISOString(),
+      resultCount: hits.length,
+    },
+    capture: {
+      label: pageCapture.label,
+      sha256: pageCapture.sha256,
+      byteLength: pageCapture.byteLength,
+      timestamp: new Date().toISOString(),
+    },
+    hits,
+  };
+}
+
 async function runSingleQuery(
   portal: P85PortalConfig,
   browser: RecordsRecipeBrowser,
@@ -202,6 +368,10 @@ async function runSingleQuery(
     }
   | { ok: false; result: RecordsRecipeResult }
 > {
+  if (isBastropSearchEntryPortal(portal)) {
+    return runBastropSearchEntryQuery(portal, browser, planned);
+  }
+
   await browser.goto(searchTermsUrl);
 
   let entryOk = false;

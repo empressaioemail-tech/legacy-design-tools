@@ -40,13 +40,17 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
         return {
           ok,
           status,
-          finalUrl: response.url(),
+          finalUrl: page.url(),
           errorMessage: ok ? undefined : `HTTP ${status}`,
         };
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("ERR_ABORTED") && page.url() && page.url() !== "about:blank") {
+          return { ok: true, finalUrl: page.url() };
+        }
         return {
           ok: false,
-          errorMessage: err instanceof Error ? err.message : String(err),
+          errorMessage: message,
         };
       }
     },

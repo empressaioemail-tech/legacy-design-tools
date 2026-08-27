@@ -22,11 +22,43 @@ export function normalizeIndexHit(raw: {
   const cells = raw.cells?.filter((c) => c.trim()) ?? [];
   if (cells.length === 0) return null;
 
+  const instrumentCell =
+    cells.find((c) => /^[\d-]{5,}$/.test(c.trim()) && /\d/.test(c)) ??
+    cells.find((c) => /\d{5,}/.test(c)) ??
+    null;
+  if (!instrumentCell) return null;
+
+  const ref = instrumentCell.trim();
+  const dateCell = cells.find((c) =>
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.trim()) ||
+    /^\d{4}-\d{2}-\d{2}$/.test(c.trim()),
+  );
+  const typeCell = cells.find(
+    (c) =>
+      c.trim().length > 3 &&
+      c.trim() !== ref &&
+      c.trim() !== dateCell &&
+      !/^\d+$/.test(c.trim()) &&
+      !/^view$/i.test(c.trim()),
+  );
+
   return {
-    recordingRef: cells[0] ?? null,
-    documentType: cells.length > 1 ? cells[1]! : null,
-    recordingDate: cells.length > 2 ? cells[2]! : null,
-    parties: cells.length > 3 ? cells.slice(3).join(" | ") : null,
+    recordingRef: ref,
+    documentType: typeCell?.trim() ?? null,
+    recordingDate: dateCell?.trim() ?? null,
+    parties:
+      cells.length > 3
+        ? cells
+            .filter(
+              (c) =>
+                c.trim() !== ref &&
+                c.trim() !== dateCell &&
+                c.trim() !== typeCell &&
+                !/^\d+$/.test(c.trim()) &&
+                !/^view$/i.test(c.trim()),
+            )
+            .join(" | ")
+        : null,
     detailUrl: raw.link ?? null,
   };
 }
