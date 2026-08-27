@@ -66,3 +66,28 @@ gcloud run jobs execute records-request-worker \
 | mclennan-online-records | 48309 | scaffold      |
 
 Index-search recipes require `searchTerms.ownerName` on the job payload (cortex enriches at enqueue from TxGIO). Login walls route to `needs-human`.
+
+## Williamson publicsearch grading (P-85 W1 item 5)
+
+Default portal for county `48491`. Grading fixture parcel: `apn:48491:R062578` with owner `PURVIS MICHAEL`.
+
+Unit fixture and expected `scopeSearched` shape: `src/recipes/publicsearchSearch.test.ts`.
+
+Operator live run (production portal — manual only):
+
+```bash
+cd artifacts/records-request-worker
+pnpm install
+pnpm exec playwright install chromium
+pnpm exec vitest run src/recipes/publicsearchSearch.live.test.ts
+```
+
+Pass criteria on job `scope_searched`:
+
+- `mode` is `index-search`
+- `portalId` is `williamson-publicsearch`
+- `recipeVersion` is `p85-publicsearch-v1`
+- `stepsReached` includes `open-entry`, `open-portal`, `fill-owner-query`, `submit-search`
+- `captures[0].sha256` is a 64-char hex digest
+- `queries[0].kind` is `owner-name` matching CAD owner
+- Terminal status is `complete`, `needs-human`, or `awaiting-purchase-approval`
