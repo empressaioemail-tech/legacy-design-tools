@@ -14,6 +14,7 @@ import {
   loadRecordsRequestJobById,
   recordsRequestJobToWire,
 } from "./recordsRequestJobWorker";
+import { notifyRecordsRequestCompletion } from "./recordsRequestCompletionEmail";
 
 const FEE_PAUSE_STATUSES: ReadonlyArray<RecordsRequestJobStatus> = [
   "awaiting-purchase-approval",
@@ -167,6 +168,11 @@ export async function declineRecordsRequestPurchase(args: {
   if (!updated) {
     return { ok: false, status: 500, body: { error: "job_reload_failed" } };
   }
+
+  void notifyRecordsRequestCompletion({
+    jobId: args.jobId,
+    kind: "complete",
+  }).catch(() => {});
 
   return {
     ok: true,
