@@ -164,9 +164,10 @@ export function normalizeR1BodyForExternal(
           : undefined;
     return {
       ...section,
+      data: section.data ?? null,
       disposition,
       ...(agentGuidance ? { agentGuidance } : {}),
-    };
+    } as ExternalBriefSection;
   });
   return {
     ...body,
