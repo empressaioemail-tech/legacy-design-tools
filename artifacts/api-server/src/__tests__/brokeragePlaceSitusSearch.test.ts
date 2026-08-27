@@ -2,7 +2,7 @@
  * Route test for GET /api/brokerage/v1/place/situs-search (router only).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
 import { brokeragePlaceSitusSearchRouter } from "../routes/brokeragePlaceSitusSearch";
@@ -30,6 +30,10 @@ function buildApp() {
 }
 
 describe("GET /api/brokerage/v1/place/situs-search", () => {
+  beforeEach(() => {
+    searchMock.mockClear();
+  });
+
   it("returns situs hits", async () => {
     const res = await request(buildApp())
       .get("/api/brokerage/v1/place/situs-search")
@@ -57,5 +61,17 @@ describe("GET /api/brokerage/v1/place/situs-search", () => {
       .query({ q: "6026 Marsh", limit: 99 });
 
     expect(res.status).toBe(400);
+  });
+
+  it("returns a direct hit when q is a parcel node id", async () => {
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "48021:34137" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.hits).toEqual([
+      { parcelNodeId: "48021:34137", source: "parcel-node-id" },
+    ]);
+    expect(searchMock).not.toHaveBeenCalled();
   });
 });

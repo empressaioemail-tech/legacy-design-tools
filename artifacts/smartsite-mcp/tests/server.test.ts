@@ -8,8 +8,8 @@ describe("smartsite-mcp HTTP surface", () => {
   const app = createSmartsiteMcpApp({
     authConfig: {
       workosClientId: "client_test",
-      workosIssuer: "https://happy-asteroid-216.authkit.app",
-      jwksUri: "https://happy-asteroid-216.authkit.app/oauth2/jwks",
+      workosIssuer: "https://happy-asteroid-26.authkit.app",
+      jwksUri: "https://happy-asteroid-26.authkit.app/oauth2/jwks",
       devMode: false,
     },
   });
@@ -53,7 +53,7 @@ describe("smartsite-mcp HTTP surface", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         resource: "https://mcp.smartsite.cloud/mcp",
-        authorization_servers: ["https://happy-asteroid-216.authkit.app"],
+        authorization_servers: ["https://happy-asteroid-26.authkit.app"],
         bearer_methods_supported: ["header"],
       });
     });

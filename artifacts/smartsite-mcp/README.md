@@ -64,8 +64,8 @@ pnpm --filter @workspace/smartsite-mcp test
 | Variable / secret | Purpose |
 |---|---|
 | `WORKOS_CLIENT_ID` (secret) | AuthKit OAuth client id; JWT audience verification uses `SMARTSITE_MCP_RESOURCE` |
-| `WORKOS_ISSUER` | `https://happy-asteroid-216.authkit.app` |
-| `WORKOS_JWKS_URI` | `https://happy-asteroid-216.authkit.app/oauth2/jwks` |
+| `WORKOS_ISSUER` | `https://happy-asteroid-26.authkit.app` |
+| `WORKOS_JWKS_URI` | `https://happy-asteroid-26.authkit.app/oauth2/jwks` |
 | `SMARTSITE_MCP_RESOURCE` | `https://mcp.smartsite.cloud/mcp` (JWT audience) |
 | `SMARTSITE_MCP_PUBLIC_URL` | `https://mcp.smartsite.cloud` (llms.txt + OAuth metadata) |
 | `DATABASE_URL` (secret) | Neon cortex-prod for `pe_user_identities` join |

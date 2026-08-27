@@ -12,6 +12,8 @@ import { z } from "zod";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { searchPlaceByPrefix } from "../lib/txgioAddressResolve";
 
+const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 export const brokeragePlaceSitusSearchRouter: IRouter = Router();
 
 const QUERY = z.object({
@@ -34,8 +36,16 @@ brokeragePlaceSitusSearchRouter.get(
       return;
     }
 
+    const query = parsed.data.q;
+    if (PARCEL_NODE_ID_RE.test(query)) {
+      res.json({
+        hits: [{ parcelNodeId: query, source: "parcel-node-id" }],
+      });
+      return;
+    }
+
     const hits = await searchPlaceByPrefix({
-      query: parsed.data.q,
+      query,
       limit: parsed.data.limit,
     });
     res.json({ hits });
