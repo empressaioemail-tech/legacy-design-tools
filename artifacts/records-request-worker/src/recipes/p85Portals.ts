@@ -17,8 +17,8 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
     portalId: "bastrop-aumentum",
     countyFips: "48021",
     portalUrl: "https://cc.co.bastrop.tx.us/RealEstate",
-    entryUrl: "https://cc.co.bastrop.tx.us/RealEstate/SearchTerms.aspx",
-    recipeVersion: "p85-bastrop-aumentum-v1",
+    entryUrl: "https://cc.co.bastrop.tx.us/RealEstate",
+    recipeVersion: "p85-bastrop-aumentum-v2",
   },
   {
     portalId: "travis-tccsearch",
