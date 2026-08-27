@@ -15,7 +15,7 @@ vi.mock("../recordsRequestJobWorker", () => ({
 
 vi.mock("@workspace/db", () => ({
   db: {
-    update: (...args: unknown[]) => mockUpdate(...args),
+    update: () => mockUpdate(),
   },
   recordsRequestJobs: { id: "id" },
 }));
