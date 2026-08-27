@@ -50,6 +50,10 @@ import {
   createRecordsRequestJob,
   listRecordsRequestJobsWire,
 } from "../lib/recordsRequestService";
+import {
+  approveRecordsRequestPurchase,
+  declineRecordsRequestPurchase,
+} from "../lib/recordsRequestPurchaseDecision";
 import { processRecordsRequestJobVisionReads } from "../lib/recordsRequestVisionRead";
 import { logger } from "../lib/logger";
 
@@ -1198,6 +1202,54 @@ router.get(
       parcelNodeId,
       ...body,
     });
+  },
+);
+
+const RecordsRequestJobIdParamsSchema = z.object({
+  jobId: z.string().uuid(),
+});
+
+router.post(
+  "/property-explorer/v1/records-request/:jobId/approve-purchase",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = RecordsRequestJobIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_job_id" });
+      return;
+    }
+    const result = await approveRecordsRequestPurchase({
+      jobId: parsed.data.jobId,
+      userId: scope.ownerUserId,
+    });
+    res.status(result.status).json(result.body);
+  },
+);
+
+router.post(
+  "/property-explorer/v1/records-request/:jobId/decline-purchase",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = RecordsRequestJobIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_job_id" });
+      return;
+    }
+    const result = await declineRecordsRequestPurchase({
+      jobId: parsed.data.jobId,
+      userId: scope.ownerUserId,
+    });
+    res.status(result.status).json(result.body);
   },
 );
 

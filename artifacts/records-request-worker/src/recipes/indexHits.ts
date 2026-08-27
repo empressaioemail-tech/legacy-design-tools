@@ -89,3 +89,28 @@ export function dedupeIndexHits(hits: IndexSearchHit[]): IndexSearchHit[] {
   }
   return out;
 }
+
+/** Rehydrate index hits stored on scope_searched for acquisition-only resume. */
+export function parseIndexHitsFromScope(
+  scope: Record<string, unknown> | null | undefined,
+): IndexSearchHit[] {
+  if (!scope || typeof scope !== "object") return [];
+  const raw = scope.indexHits;
+  if (!Array.isArray(raw)) return [];
+  const hits: IndexSearchHit[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    hits.push({
+      recordingRef:
+        typeof o.recordingRef === "string" ? o.recordingRef : null,
+      documentType:
+        typeof o.documentType === "string" ? o.documentType : null,
+      recordingDate:
+        typeof o.recordingDate === "string" ? o.recordingDate : null,
+      parties: typeof o.parties === "string" ? o.parties : null,
+      detailUrl: typeof o.detailUrl === "string" ? o.detailUrl : null,
+    });
+  }
+  return dedupeIndexHits(hits);
+}

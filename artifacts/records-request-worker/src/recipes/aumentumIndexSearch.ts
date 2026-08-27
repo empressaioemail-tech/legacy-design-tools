@@ -15,6 +15,7 @@ import {
 import {
   dedupeIndexHits,
   extractIndexHitsFromPage,
+  parseIndexHitsFromScope,
   type IndexSearchHit,
 } from "./indexHits.js";
 import {
@@ -130,6 +131,8 @@ export function aumentumIndexSearchScope(
       recordingRef: h.recordingRef,
       documentType: h.documentType,
       recordingDate: h.recordingDate,
+      parties: h.parties,
+      detailUrl: h.detailUrl,
     })),
     documentTypes: "all",
     dateRange: "portal-default",
@@ -469,6 +472,57 @@ export async function runAumentumIndexSearch(
   portal: P85PortalConfig,
   browser: RecordsRecipeBrowser,
 ): Promise<RecordsRecipeResult> {
+  const purchaseApproved = ctx.requestPayload.purchaseApproved === true;
+  const resumeHits =
+    purchaseApproved && ctx.scopeSearched
+      ? parseIndexHitsFromScope(ctx.scopeSearched)
+      : [];
+
+  if (resumeHits.length > 0) {
+    const priorScope =
+      ctx.scopeSearched && typeof ctx.scopeSearched === "object"
+        ? ctx.scopeSearched
+        : {};
+    const acquisition = await acquireIndexHits({
+      jobId: ctx.jobId,
+      portalId: portal.portalId,
+      hits: resumeHits,
+      browser,
+      purchaseApproved: true,
+    });
+    const scopeBase = {
+      ...priorScope,
+      portalId: portal.portalId,
+      countyFips: portal.countyFips,
+      acquisitionResume: true,
+    };
+    if (acquisition.kind === "failed") {
+      return {
+        status: "failed",
+        errorCode: acquisition.errorCode,
+        errorMessage: acquisition.errorMessage,
+      };
+    }
+    if (acquisition.kind === "awaiting-purchase") {
+      return acquisitionAwaitingPurchaseResult(
+        scopeBase,
+        acquisition.summary,
+        acquisition.reason,
+      );
+    }
+    if (acquisition.kind === "needs-human") {
+      return acquisitionNeedsHumanResult(
+        scopeBase,
+        acquisition.summary,
+        acquisition.reason,
+      );
+    }
+    return {
+      status: "complete",
+      scopeSearched: mergeAcquisitionIntoScope(scopeBase, acquisition.summary),
+    };
+  }
+
   const stepsReached: string[] = [];
   const queries: Array<Record<string, unknown>> = [];
   const captures: Array<Record<string, unknown>> = [];

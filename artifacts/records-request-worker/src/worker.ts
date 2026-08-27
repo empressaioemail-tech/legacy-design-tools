@@ -34,6 +34,7 @@ function buildRecipeContext(job: RecordsRequestJobRow, portalId: string) {
     parcelKey: job.parcelKey,
     portalId,
     requestPayload: job.requestPayload ?? {},
+    scopeSearched: job.scopeSearched ?? undefined,
   };
 }
 
