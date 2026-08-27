@@ -257,9 +257,9 @@ describe("lib/db schema integration", () => {
         "reasoning_atoms",
         // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
         "recorded_instruments",
-        // P-85 WDLL item 4 — Records Request async jobs.
-        "records_request_jobs",
+        // P-85 WDLL item 4/6 — Records Request async jobs + acquired artifacts.
         "records_request_artifacts",
+        "records_request_jobs",
         "render_outputs",
         // feat/durable-report-run-state — cross-instance plan-review
         // report-run STATE (replaces three instance-local Maps in
