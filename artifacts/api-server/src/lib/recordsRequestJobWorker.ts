@@ -1,9 +1,8 @@
 /**
  * P-85 WDLL item 4 — Records Request async jobs (terrainJobWorker pattern).
  *
- * Scaffold: enqueue, load, and list. Playwright portal worker (item 5) lands
- * in a follow-on card; launch defaults to a no-op so routes compile and test
- * without firing a browser job.
+ * Scaffold: enqueue, load, and list. Playwright portal worker (item 5) is
+ * optional via RECORDS_REQUEST_WORKER_URL; launch defaults to no-op when unset.
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -43,7 +42,7 @@ export interface EnqueueRecordsRequestJobArgs {
   liveInstantGis: LiveEasementGisQueryAudit;
   requestPayload?: Record<string, unknown>;
   log?: typeof defaultLogger;
-  /** Test seam. Defaults to no-op until the Playwright worker ships. */
+  /** Test seam. Defaults to POST RECORDS_REQUEST_WORKER_URL or no-op when unset. */
   launch?: (jobId: string) => void;
 }
 
@@ -51,10 +50,33 @@ export type EnqueueRecordsRequestJobResult =
   | { kind: "queued"; jobId: string; alreadyInFlight: false }
   | { kind: "already_in_flight"; jobId: string; alreadyInFlight: true };
 
-const defaultLaunch = (_jobId: string): void => {
-  // Playwright worker (WDLL item 5) void-fires here. Scaffold leaves this
-  // empty so enqueue can be tested without a browser run.
-};
+function createDefaultLaunch(): (jobId: string) => void {
+  const workerUrl = process.env.RECORDS_REQUEST_WORKER_URL?.trim();
+  if (!workerUrl) {
+    return (_jobId: string): void => {
+      // No worker deployed — enqueue remains testable without a browser run.
+    };
+  }
+  return (jobId: string): void => {
+    void fetch(workerUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId }),
+    }).catch((err) => {
+      defaultLogger.error(
+        { err, jobId, workerUrl },
+        "records request job: worker URL invoke failed",
+      );
+    });
+  };
+}
+
+const defaultLaunch = createDefaultLaunch();
+
+/** Test seam — rebuild launch handler after env changes. */
+export function buildRecordsRequestWorkerLaunch(): (jobId: string) => void {
+  return createDefaultLaunch();
+}
 
 export async function loadActiveRecordsRequestJob(
   engagementId: string,

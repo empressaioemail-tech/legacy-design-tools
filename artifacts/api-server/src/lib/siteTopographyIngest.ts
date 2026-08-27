@@ -130,6 +130,7 @@ const MAX_CONTOUR_GEOJSON_BYTES = 1_048_576;
 
 /** Layer kinds the parcel resolver inspects, in priority order. */
 const PARCEL_LAYER_KINDS_BY_PRIORITY: ReadonlyArray<string> = [
+  "pe-records-parcel", // P-85 PE Records Request bridge (peRecordsEngagement.ts)
   "grand-county-ut-parcels", // County-GIS for partner cities (Bastrop is partner-only on the parcels side; Grand County gated off baseline)
   "ugrc-parcels", // State-tier UGRC fallback for Utah
 ];

@@ -1,0 +1,22 @@
+{
+  "name": "@workspace/records-request-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/run.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.20.0",
+    "playwright": "^1.59.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pg": "^8.18.0",
+    "tsx": "catalog:",
+    "typescript": "~5.9.2",
+    "vitest": "catalog:"
+  }
+}

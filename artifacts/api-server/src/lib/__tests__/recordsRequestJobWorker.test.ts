@@ -103,6 +103,50 @@ describe("recordsRequestJobWorker", () => {
     expect(launch).toHaveBeenCalledWith("job-inserted");
   });
 
+  it("default launch is no-op when RECORDS_REQUEST_WORKER_URL is unset", async () => {
+    vi.stubEnv("RECORDS_REQUEST_WORKER_URL", "");
+    vi.resetModules();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { enqueueRecordsRequestJob } = await import("../recordsRequestJobWorker");
+
+    await enqueueRecordsRequestJob({
+      engagementId: "eng-1",
+      userId: "user-1",
+      parcelKey: "apn:48453:TEST",
+      countyFips: "48453",
+      liveInstantGis: LIVE_GIS_AUDIT,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("POSTs jobId to RECORDS_REQUEST_WORKER_URL when set", async () => {
+    vi.stubEnv("RECORDS_REQUEST_WORKER_URL", "https://worker.example/run");
+    vi.resetModules();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}"));
+    const { enqueueRecordsRequestJob } = await import("../recordsRequestJobWorker");
+
+    await enqueueRecordsRequestJob({
+      engagementId: "eng-1",
+      userId: "user-1",
+      parcelKey: "apn:48491:TEST",
+      countyFips: "48491",
+      liveInstantGis: LIVE_GIS_AUDIT,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith("https://worker.example/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: "job-inserted" }),
+    });
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
   it("returns the active job on single-flight loss", async () => {
     fakeState.insertShouldThrowUnique = true;
     fakeState.selectRows = [

@@ -36,6 +36,17 @@ import {
   defaultPeCheckoutSuccessUrl,
   PeCheckoutConfigError,
 } from "../lib/pePaywallStripe";
+import { countyFipsFromParcelNodeId } from "../lib/verdictLayerServe";
+import { isP85CountyFips } from "../lib/p85ClerkPortalRegistry";
+import {
+  ensurePeRecordsEngagement,
+  findPeRecordsEngagement,
+} from "../lib/peRecordsEngagement";
+import {
+  createRecordsRequestJob,
+  listRecordsRequestJobsWire,
+} from "../lib/recordsRequestService";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -997,6 +1008,138 @@ router.post(
     const { userId, devRole } = parsed.data;
     await setPeDevRole(userId, devRole);
     res.json({ ok: true, userId, devRole });
+  },
+);
+
+const PeRecordsRequestPostSchema = z
+  .object({
+    parcelNodeId: z.string().min(1).max(128),
+    countyFips: z.string().regex(/^\d{5}$/).optional(),
+    placeKey: z.string().min(1).optional(),
+  })
+  .strict();
+
+function peReqLog(req: Request): typeof logger {
+  return (req as unknown as { log?: typeof logger }).log ?? logger;
+}
+
+/**
+ * P-85 PE bridge — start Records Request by parcelNodeId (no engagementId
+ * in the browser). Resolves or creates a PE-scoped engagement with briefing
+ * geometry, then enqueues the same job worker as the engagement routes.
+ */
+router.post(
+  "/property-explorer/v1/records-request",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+
+    const parsed = PeRecordsRequestPostSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+
+    const parcelNodeId = parsed.data.parcelNodeId.trim();
+    if (!isValidParcelNodeId(parcelNodeId)) {
+      res.status(400).json({ error: "invalid_parcel_node_id" });
+      return;
+    }
+
+    const countyFips =
+      parsed.data.countyFips?.trim() ??
+      countyFipsFromParcelNodeId(parcelNodeId);
+    if (!countyFips) {
+      res.status(400).json({ error: "county_fips_required" });
+      return;
+    }
+    if (!isP85CountyFips(countyFips)) {
+      res.status(422).json({
+        error: "county_out_of_scope",
+        countyFips,
+      });
+      return;
+    }
+
+    const parcelKey = `apn:${parcelNodeId}`;
+    const ensured = await ensurePeRecordsEngagement(
+      scope.ownerUserId,
+      scope.tenantId,
+      parcelNodeId,
+      parcelKey,
+      countyFips,
+    );
+    if (!ensured.ok) {
+      res.status(ensured.status).json(ensured.body);
+      return;
+    }
+
+    const result = await createRecordsRequestJob({
+      engagementId: ensured.engagementId,
+      userId: scope.ownerUserId,
+      parcelKey,
+      countyFips,
+      placeKey: parsed.data.placeKey ?? null,
+      log: peReqLog(req),
+    });
+    res.status(result.status).json({
+      ...result.body,
+      parcelNodeId,
+      peEngagementCreated: ensured.created,
+    });
+  },
+);
+
+router.get(
+  "/property-explorer/v1/records-request",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+
+    const parcelNodeIdRaw = req.query.parcelNodeId;
+    const parcelNodeIdUntyped = Array.isArray(parcelNodeIdRaw)
+      ? parcelNodeIdRaw[0]
+      : parcelNodeIdRaw;
+    if (typeof parcelNodeIdUntyped !== "string") {
+      res.status(400).json({ error: "invalid_parcel_node_id" });
+      return;
+    }
+    const parcelNodeId = parcelNodeIdUntyped.trim();
+    if (!parcelNodeId || !isValidParcelNodeId(parcelNodeId)) {
+      res.status(400).json({ error: "invalid_parcel_node_id" });
+      return;
+    }
+
+    const found = await findPeRecordsEngagement(
+      scope.ownerUserId,
+      scope.tenantId,
+      parcelNodeId,
+    );
+    if (!found.ok) {
+      res.status(200).json({
+        parcelNodeId,
+        engagementId: null,
+        jobs: [],
+      });
+      return;
+    }
+
+    const body = await listRecordsRequestJobsWire(
+      found.engagementId,
+      scope.ownerUserId,
+    );
+    res.status(200).json({
+      parcelNodeId,
+      ...body,
+    });
   },
 );
 
