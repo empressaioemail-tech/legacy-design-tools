@@ -55,6 +55,7 @@ import {
   declineRecordsRequestPurchase,
 } from "../lib/recordsRequestPurchaseDecision";
 import { processRecordsRequestJobVisionReads } from "../lib/recordsRequestVisionRead";
+import { notifyRecordsRequestCompletion } from "../lib/recordsRequestCompletionEmail";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -1079,6 +1080,39 @@ router.post(
       peReqLog(req).error({ err, jobId }, "records request vision-read failed");
       res.status(500).json({
         error: "vision_read_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+/**
+ * P-85 item 11 — worker/service hook to send completion email via Resend.
+ */
+router.post(
+  "/property-explorer/v1/internal/records-request/notify",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const jobId =
+      typeof req.body?.jobId === "string" ? req.body.jobId.trim() : "";
+    if (!jobId) {
+      res.status(400).json({ error: "missing_job_id" });
+      return;
+    }
+    const kindRaw =
+      typeof req.body?.kind === "string" ? req.body.kind.trim() : undefined;
+    try {
+      const event = await notifyRecordsRequestCompletion({
+        jobId,
+        ...(kindRaw
+          ? { kind: kindRaw as Parameters<typeof notifyRecordsRequestCompletion>[0]["kind"] }
+          : {}),
+      });
+      res.status(200).json({ jobId, event });
+    } catch (err) {
+      peReqLog(req).error({ err, jobId }, "records request notify failed");
+      res.status(500).json({
+        error: "notify_failed",
         detail: err instanceof Error ? err.message : String(err),
       });
     }

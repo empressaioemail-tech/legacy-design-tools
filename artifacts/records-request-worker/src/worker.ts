@@ -56,6 +56,31 @@ function triggerVisionReads(jobId: string): void {
   }).catch(() => {});
 }
 
+/** Fire-and-forget completion email (cortex internal notify route). */
+function triggerCompletionNotify(
+  jobId: string,
+  kind:
+    | "complete"
+    | "failed"
+    | "needs-human"
+    | "awaiting-purchase-approval",
+): void {
+  const url = process.env.RECORDS_REQUEST_NOTIFY_URL?.trim();
+  if (!url) return;
+  const serviceKey = process.env.SERVICE_API_KEY?.trim();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (serviceKey) {
+    headers.Authorization = `Bearer ${serviceKey}`;
+  }
+  void fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jobId, kind }),
+  }).catch(() => {});
+}
+
 async function executeRecipe(
   job: RecordsRequestJobRow,
   portalId: string,
@@ -82,6 +107,7 @@ async function executeRecipe(
     if (acquired > 0) {
       triggerVisionReads(job.id);
     }
+    triggerCompletionNotify(job.id, "complete");
     return { jobId: job.id, outcome: "complete" };
   }
 
@@ -102,6 +128,10 @@ async function executeRecipe(
             }
           : null,
     });
+    triggerCompletionNotify(
+      job.id,
+      isPurchase ? "awaiting-purchase-approval" : "needs-human",
+    );
     return {
       jobId: job.id,
       outcome: isPurchase ? "awaiting-purchase-approval" : "needs-human",
@@ -115,6 +145,7 @@ async function executeRecipe(
     errorCode: recipeResult.errorCode ?? "recipe-failed",
     errorMessage: recipeResult.errorMessage ?? "Records recipe failed",
   });
+  triggerCompletionNotify(job.id, "failed");
   return {
     jobId: job.id,
     outcome: "failed",
