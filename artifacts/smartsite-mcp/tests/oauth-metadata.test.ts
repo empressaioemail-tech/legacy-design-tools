@@ -14,7 +14,7 @@ describe("oauth metadata", () => {
     const meta = oauthProtectedResourceMetadata();
     expect(meta).toEqual({
       resource: "https://mcp.smartsite.cloud/mcp",
-      authorization_servers: ["https://happy-asteroid-216.authkit.app"],
+      authorization_servers: ["https://happy-asteroid-26.authkit.app"],
       bearer_methods_supported: ["header"],
     });
     expect(wwwAuthenticateHeader()).toContain(

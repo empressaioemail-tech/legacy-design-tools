@@ -1,5 +1,5 @@
 const DEFAULT_RESOURCE = "https://mcp.smartsite.cloud/mcp";
-const DEFAULT_AUTHKIT = "https://happy-asteroid-216.authkit.app";
+const DEFAULT_AUTHKIT = "https://happy-asteroid-26.authkit.app";
 
 export function mcpResourceUrl(): string {
   const base = process.env.SMARTSITE_MCP_PUBLIC_URL?.trim().replace(/\/$/, "");

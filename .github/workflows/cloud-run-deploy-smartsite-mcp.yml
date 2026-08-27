@@ -135,7 +135,7 @@ jobs:
             --timeout=120 \
             --service-account="${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
-            --set-env-vars="NODE_ENV=production,WORKOS_ISSUER=https://happy-asteroid-216.authkit.app,WORKOS_JWKS_URI=https://happy-asteroid-216.authkit.app/oauth2/jwks,SMARTSITE_MCP_PUBLIC_URL=https://mcp.smartsite.cloud,SMARTSITE_MCP_RESOURCE=https://mcp.smartsite.cloud/mcp,CORTEX_API_BASE_URL=https://cortex-api-tds7av26va-uc.a.run.app" \
+            --set-env-vars="NODE_ENV=production,WORKOS_ISSUER=https://happy-asteroid-26.authkit.app,WORKOS_JWKS_URI=https://happy-asteroid-26.authkit.app/oauth2/jwks,SMARTSITE_MCP_PUBLIC_URL=https://mcp.smartsite.cloud,SMARTSITE_MCP_RESOURCE=https://mcp.smartsite.cloud/mcp,CORTEX_API_BASE_URL=https://cortex-api-tds7av26va-uc.a.run.app" \
             --set-secrets="DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,WORKOS_CLIENT_ID=WORKOS_CLIENT_ID:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest"
 
       - name: Show canary smoke URL
