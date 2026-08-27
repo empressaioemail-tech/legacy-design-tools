@@ -12,13 +12,13 @@ import {
   type RestrictionClause,
 } from "@workspace/db";
 import { resolveParcelInput } from "./siteTopographyIngest";
+import type { Ring } from "./buildableEnvelope/geometry";
 import {
   assertCorridorDerivationWritable,
   deriveCorridorFromClause,
   type CorridorConstrainsRef,
   type DeriveCorridorResult,
   type GeoJSONPolygon,
-  type Ring,
 } from "./recordsRequestCorridorDerive";
 
 export type { CorridorConstrainsRef, DeriveCorridorResult } from "./recordsRequestCorridorDerive";
