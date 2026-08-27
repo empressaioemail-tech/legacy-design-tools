@@ -7,7 +7,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
 import { and, desc, eq } from "drizzle-orm";
-import { db, peSavedProperties, peWorkbenchState } from "@workspace/db";
+import { db, peSavedProperties, peShareGrants, peWorkbenchState } from "@workspace/db";
 import {
   PE_FREE_CHAT_MESSAGE_LIMIT,
   createPePropertyUnlock,
@@ -996,6 +996,134 @@ const DevRoleBodySchema = z.object({
  * closes every gate on the very next entitlement read since
  * {@link hasPeDevPaidBypass} and `/entitlement` both read the row live.
  */
+const ShareGrantIdSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    "grant id must be a UUID",
+  );
+
+const ShareGrantInsertSchema = z.object({
+  id: ShareGrantIdSchema,
+  grantorUserId: z.string().trim().min(1).max(128),
+  grantorTenantId: z.string().trim().min(1).max(128),
+  parcelNodeId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .refine(isValidParcelNodeId, { message: "invalid parcelNodeId" }),
+  createdAt: z.string().trim().min(1),
+  expiresAt: z.string().trim().min(1),
+  revokedAt: z.string().trim().min(1).nullable().optional(),
+});
+
+function shareGrantJson(row: typeof peShareGrants.$inferSelect) {
+  return {
+    id: row.id,
+    grantorUserId: row.grantorUserId,
+    grantorTenantId: row.grantorTenantId,
+    parcelNodeId: row.parcelNodeId,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+    revokedAt: row.revokedAt ? row.revokedAt.toISOString() : null,
+  };
+}
+
+/**
+ * P-86 share grant registry. Service-key only. The PE BFF writes a row
+ * before minting /s/{id}; the view BFF resolves that row. HMAC never stored.
+ */
+router.post(
+  "/property-explorer/v1/internal/share-grants",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const parsed = ShareGrantInsertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const createdAt = new Date(parsed.data.createdAt);
+    const expiresAt = new Date(parsed.data.expiresAt);
+    if (Number.isNaN(createdAt.getTime()) || Number.isNaN(expiresAt.getTime())) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const inserted = await db
+      .insert(peShareGrants)
+      .values({
+        id: parsed.data.id,
+        grantorUserId: parsed.data.grantorUserId,
+        grantorTenantId: parsed.data.grantorTenantId,
+        parcelNodeId: parsed.data.parcelNodeId,
+        createdAt,
+        expiresAt,
+        revokedAt: parsed.data.revokedAt ? new Date(parsed.data.revokedAt) : null,
+      })
+      .returning();
+    const row = inserted[0];
+    if (!row || row.id !== parsed.data.id) {
+      res.status(503).json({ error: "grant_persist_failed" });
+      return;
+    }
+    res.status(200).json(shareGrantJson(row));
+  },
+);
+
+router.get(
+  "/property-explorer/v1/internal/share-grants/:id",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const parsed = ShareGrantIdSchema.safeParse(req.params.id);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const rows = await db
+      .select()
+      .from(peShareGrants)
+      .where(eq(peShareGrants.id, parsed.data))
+      .limit(1);
+    const row = rows[0];
+    if (!row) {
+      res.status(404).json({ error: "share_grant_not_found" });
+      return;
+    }
+    res.status(200).json(shareGrantJson(row));
+  },
+);
+
+router.post(
+  "/property-explorer/v1/internal/share-grants/:id/revoke",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const parsed = ShareGrantIdSchema.safeParse(req.params.id);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const revokedAtRaw =
+      typeof req.body?.revokedAt === "string" ? req.body.revokedAt : "";
+    const revokedAt = revokedAtRaw ? new Date(revokedAtRaw) : new Date();
+    if (Number.isNaN(revokedAt.getTime())) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const updated = await db
+      .update(peShareGrants)
+      .set({ revokedAt })
+      .where(eq(peShareGrants.id, parsed.data))
+      .returning();
+    const row = updated[0];
+    if (!row) {
+      res.status(404).json({ error: "share_grant_not_found" });
+      return;
+    }
+    res.status(200).json(shareGrantJson(row));
+  },
+);
+
 router.post(
   "/property-explorer/v1/internal/dev-role",
   requireServiceToken,
