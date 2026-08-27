@@ -42,3 +42,18 @@ export async function extractIndexHitsFromPage(
   }
   return hits.slice(0, MAX_INSTRUMENTS_PER_RUN);
 }
+
+export function dedupeIndexHits(hits: IndexSearchHit[]): IndexSearchHit[] {
+  const seen = new Set<string>();
+  const out: IndexSearchHit[] = [];
+  for (const hit of hits) {
+    const key =
+      hit.recordingRef?.trim() ||
+      [hit.documentType, hit.recordingDate, hit.parties].filter(Boolean).join("|");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(hit);
+    if (out.length >= MAX_INSTRUMENTS_PER_RUN) break;
+  }
+  return out;
+}

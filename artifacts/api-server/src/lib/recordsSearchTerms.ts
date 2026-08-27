@@ -3,7 +3,9 @@
  */
 
 import { queryTxgioParcelByPropId } from "./txgioParcelStore";
+import { makeCadPropertyLookup } from "./cadPropertyLookup";
 import { P85_CLERK_PORTALS } from "./p85ClerkPortalRegistry";
+import { parseSubdivisionLotBlockFromLegal } from "./recordsSearchQueryPlan";
 
 function countyNameForFips(countyFips: string): string {
   const hit = P85_CLERK_PORTALS.find((p) => p.countyFips === countyFips);
@@ -42,6 +44,9 @@ export async function resolveRecordsSearchTerms(input: {
     return null;
   }
 
+  const cadLookup = makeCadPropertyLookup();
+  const cad = await cadLookup(parsed.countyFips, parsed.propId);
+
   const txgio = await queryTxgioParcelByPropId({
     countyFips: parsed.countyFips,
     countyName: countyNameForFips(parsed.countyFips),
@@ -55,20 +60,24 @@ export async function resolveRecordsSearchTerms(input: {
       : {};
 
   const ownerName =
+    cad?.ownerName?.trim() ||
     (typeof props.owner === "string" && props.owner.trim()) ||
     (typeof props.ownerName === "string" && props.ownerName.trim()) ||
     null;
   const situsAddress =
+    cad?.situsAddress?.trim() ||
     (typeof props.situsAddress === "string" && props.situsAddress.trim()) ||
     null;
+  const legalDescription = cad?.legalDescription?.trim() ?? null;
+  const parsedLegal = parseSubdivisionLotBlockFromLegal(legalDescription);
 
   return {
     propId: parsed.propId,
     ownerName,
     situsAddress,
-    legalDescription: null,
-    subdivision: null,
-    block: null,
-    lot: null,
+    legalDescription,
+    subdivision: parsedLegal.subdivision,
+    block: parsedLegal.block,
+    lot: parsedLegal.lot,
   };
 }

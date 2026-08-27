@@ -4,6 +4,7 @@ Playwright Cloud Run worker for clerk portal records search.
 
 - **Williamson default:** `williamson-publicsearch` (TylerHost returns HTTP 403 to headless bots).
 - **Tyler counties (Hays, Williamson TylerHost):** disclaimer → owner-name search → results capture with SHA-256.
+- **Aumentum counties (Bastrop, Travis tccsearch):** SearchTerms → grantor / legal / subdivision queries → per-query results capture with SHA-256.
 - **Other counties:** reachability scaffold until search recipes land.
 
 ## Job contract
@@ -56,8 +57,8 @@ gcloud run jobs execute records-request-worker \
 
 | portalId              | county | status        |
 | --------------------- | ------ | ------------- |
-| bastrop-aumentum      | 48021  | scaffold      |
-| travis-tccsearch      | 48453  | scaffold      |
+| bastrop-aumentum      | 48021  | index-search  |
+| travis-tccsearch      | 48453  | index-search  |
 | williamson-tylerhost  | 48491  | index-search  |
 | williamson-publicsearch | 48491 | index-search (default) |
 | hays-erss             | 48209  | index-search  |

@@ -49,21 +49,34 @@ describe("P-85 portal registry", () => {
   });
 });
 
-describe("runRecipeForJob — reachability scaffold", () => {
+describe("runRecipeForJob — Aumentum index search", () => {
   const bastropCtx: RecordsRecipeContext = {
     jobId: "job-bastrop",
     countyFips: "48021",
     parcelKey: "apn:48021:34161",
     portalId: "bastrop-aumentum",
-    requestPayload: {},
+    requestPayload: {
+      searchTerms: {
+        ownerName: "SMITH JOHN",
+        legalDescription: "LOT 1 BLK 2 PECAN GROVE",
+      },
+    },
   };
 
-  it("completes Bastrop when entry surface is reachable", async () => {
-    const browser = mockBrowser();
+  it("completes Bastrop index search when queries submit", async () => {
+    const browser = mockBrowser({
+      fill: vi.fn().mockResolvedValue({ ok: true }),
+      click: vi.fn().mockResolvedValue({ ok: true }),
+    });
     const result = await runRecipeForJob(bastropCtx, browser);
     expect(result.status).toBe("complete");
     expect(result.scopeSearched?.portalId).toBe("bastrop-aumentum");
-    expect(result.scopeSearched?.mode).toBe("scaffold");
+    expect(result.scopeSearched?.mode).toBe("index-search");
+    expect(result.scopeSearched?.queries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "owner-name" }),
+      ]),
+    );
   });
 
   it("fails closed when entry navigation fails", async () => {
@@ -73,6 +86,16 @@ describe("runRecipeForJob — reachability scaffold", () => {
     const result = await runRecipeForJob(bastropCtx, browser);
     expect(result.status).toBe("failed");
     expect(result.errorCode).toBe("portal-unreachable");
+  });
+
+  it("routes to needs-human when search terms are absent", async () => {
+    const browser = mockBrowser();
+    const result = await runRecipeForJob(
+      { ...bastropCtx, requestPayload: {} },
+      browser,
+    );
+    expect(result.status).toBe("needs-human");
+    expect(result.errorCode).toBe("search-terms-missing");
   });
 });
 
