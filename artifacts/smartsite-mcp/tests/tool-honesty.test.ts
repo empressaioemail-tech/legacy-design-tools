@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildRunReportEnvelope,
+  normalizeR1BodyForExternal,
   stripEntitlementForExternal,
   stripSavedPropertiesForExternal,
 } from "../src/tool-honesty.js";
@@ -51,7 +52,18 @@ describe("buildRunReportEnvelope", () => {
     expect(envelope.reportReadMode).toBe("baked-snapshot-read");
     expect(envelope.runId).toBe("r1-node-abc");
     expect(envelope.mode).toBe("baked-facet-intel-v1");
-    expect(envelope.brief).toEqual(cortexBody.brief);
+    expect(envelope.brief).toEqual({
+      sections: [
+        {
+          id: "zoning",
+          title: "Zoning",
+          data: null,
+          citations: [],
+          disposition: "absent",
+        },
+      ],
+      disclosure: [],
+    });
     const brief = envelope.brief as { sections: unknown[] };
     expect(brief.sections).toHaveLength(1);
   });
@@ -90,5 +102,40 @@ describe("stripSavedPropertiesForExternal", () => {
 
   it("returns empty array for non-array input", () => {
     expect(stripSavedPropertiesForExternal(null)).toEqual([]);
+  });
+});
+
+describe("normalizeR1BodyForExternal", () => {
+  it("adds disposition refused when section carries refusal", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [
+          {
+            id: "setbacks-envelope",
+            data: null,
+            refusal: {
+              state: "refused",
+              code: "not-in-bake",
+              reason: "No envelope facet",
+            },
+          },
+        ],
+      },
+    });
+    const sections = (body.brief as { sections: Array<{ disposition: string; agentGuidance?: string }> })
+      .sections;
+    expect(sections[0]?.disposition).toBe("refused");
+    expect(sections[0]?.agentGuidance).toContain("Do not invent");
+  });
+
+  it("adds disposition present when section has data", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [{ id: "zoning", data: { district: "SF-3" } }],
+      },
+    });
+    const sections = (body.brief as { sections: Array<{ disposition: string }> })
+      .sections;
+    expect(sections[0]?.disposition).toBe("present");
   });
 });

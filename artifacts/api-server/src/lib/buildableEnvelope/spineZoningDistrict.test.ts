@@ -15,6 +15,8 @@ const loadBaked = vi.mocked(loadBakedNodeFacetSnapshot);
 const testEnvelopeBriefRefusal = {
   state: "refused" as const,
   code: "not-in-bake" as const,
+  producer: "baked-envelope-facet" as const,
+  supersededBy: "buildable-envelope" as const,
   reason: "test fixture",
 };
 
