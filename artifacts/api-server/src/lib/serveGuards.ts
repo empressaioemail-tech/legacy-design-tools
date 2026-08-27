@@ -1,24 +1,23 @@
 /**
  * F-06 serve guards (BP-ACCESS-01, BP-ADDRESS-01).
  */
+import {
+  parseAccessPair,
+  AccessParseError,
+  type AccessPair,
+} from "@empressaio/atom-contract/access";
+
 const PUNCTUATION_ONLY_RE = /^[\s,.\-;:'"`]+$/;
 
-export function assertAccessPair(access: unknown): { discoverability: string; entitlement: string } {
-  if (!access || typeof access !== "object") {
-    throw Object.assign(new Error("access pair missing"), { code: "ACCESS_NOT_DEFAULTED" });
+export function assertAccessPair(input: unknown): AccessPair {
+  try {
+    return parseAccessPair(input);
+  } catch (err) {
+    if (err instanceof AccessParseError) {
+      throw Object.assign(new Error(err.message), { code: "ACCESS_NOT_DEFAULTED" });
+    }
+    throw err;
   }
-  const a = access as Record<string, unknown>;
-  const discoverability = a.discoverability;
-  const entitlement = a.entitlement;
-  if (
-    typeof discoverability !== "string" ||
-    discoverability.trim() === "" ||
-    typeof entitlement !== "string" ||
-    entitlement.trim() === ""
-  ) {
-    throw Object.assign(new Error("access field defaulted or empty"), { code: "ACCESS_NOT_DEFAULTED" });
-  }
-  return { discoverability, entitlement };
 }
 
 export function assertSitusNotPunctuationOnly(situs: unknown): string | null {

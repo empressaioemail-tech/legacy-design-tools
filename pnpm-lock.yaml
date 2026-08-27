@@ -177,6 +177,9 @@ importers:
 
   artifacts/api-server:
     dependencies:
+      '@empressaio/atom-contract':
+        specifier: ^1.30.0
+        version: 1.30.0(@types/pg@8.18.0)(pg@8.20.0)
       '@empressaio/cortex-client':
         specifier: workspace:*
         version: link:../../packages/cortex-client
@@ -186,9 +189,6 @@ importers:
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
-      '@hauska/atom-contract':
-        specifier: file:../../vendor/hauska-atom-contract-1.6.0.tgz
-        version: file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -1816,9 +1816,9 @@ importers:
 
   lib/engine-core:
     dependencies:
-      '@hauska/atom-contract':
-        specifier: file:../../vendor/hauska-atom-contract-1.6.0.tgz
-        version: file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
+      '@empressaio/atom-contract':
+        specifier: ^1.30.0
+        version: 1.30.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/codes':
         specifier: workspace:*
         version: link:../codes
@@ -1955,9 +1955,9 @@ importers:
 
   lib/knowledge-atoms:
     dependencies:
-      '@hauska/atom-contract':
-        specifier: file:../../vendor/hauska-atom-contract-1.6.0.tgz
-        version: file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
+      '@empressaio/atom-contract':
+        specifier: ^1.30.0
+        version: 1.30.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/db':
         specifier: workspace:*
         version: link:../db
@@ -2042,9 +2042,9 @@ importers:
 
   lib/portal-ui:
     dependencies:
-      '@hauska/atom-contract':
-        specifier: file:../../vendor/hauska-atom-contract-1.6.0.tgz
-        version: file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
+      '@empressaio/atom-contract':
+        specifier: ^1.30.0
+        version: 1.30.0(@types/pg@8.18.0)(pg@8.20.0)
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.90.21(react@19.1.0)
@@ -2152,9 +2152,9 @@ importers:
 
   lib/submission-classifier:
     dependencies:
-      '@hauska/atom-contract':
-        specifier: ^1.1.0
-        version: 1.1.0(@types/pg@8.18.0)(pg@8.20.0)
+      '@empressaio/atom-contract':
+        specifier: ^1.30.0
+        version: 1.30.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../api-zod
@@ -2311,12 +2311,12 @@ importers:
 
   scripts:
     dependencies:
+      '@empressaio/atom-contract':
+        specifier: ^1.30.0
+        version: 1.30.0(@types/pg@8.18.0)(pg@8.20.0)
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
-      '@hauska/atom-contract':
-        specifier: ^1.1.0
-        version: 1.1.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../lib/api-zod
@@ -2467,6 +2467,10 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
+  '@empressaio/atom-contract@1.30.0':
+    resolution: {integrity: sha512-wily3+xTQD+zBCU7yPu30h6w7S/cmXDir+1hEL2QNixuwJ4jobEgGW/o234JvThPnB/Q5EB3Aja8q8GuY0xXvQ==}
+    engines: {node: '>=18.18.0'}
+
   '@esbuild/linux-x64@0.27.3':
     resolution: {integrity: sha512-Czi8yzXUWIQYAtL/2y6vogER8pvcsOsk5cpwL4Gk5nJqH5UZiVByIY8Eorm5R13gq+DQKYg0+JyQoytLQas4dA==}
     engines: {node: '>=18'}
@@ -2516,17 +2520,8 @@ packages:
     resolution: {integrity: sha512-n2FjE7NAOYyshogdc7KQOl/VZb4sneqPjWouSyia9CMDdMhRX5+RIbqalNmC7LOLzuLAN89VlF2HvG8na9G+zQ==}
     engines: {node: '>=14'}
 
-  '@hauska/atom-contract@1.1.0':
-    resolution: {integrity: sha512-vhJdXwlhf0finvxzfvqXQ1bAJx3zwDSEO1m3SNXkVuD68IziibfMTWwNWabvl7DuEBZkaEGIJM02ZXnG+F2eUg==}
-    engines: {node: '>=18.18.0'}
-
   '@hauska/atom-contract@1.5.0':
     resolution: {integrity: sha512-nW9QYAnjxrihmjU4iTEoDdFr6hEI0tnB2yD8KkzcIHDi6sUJVZukxSDXe1dctbAhYaq4eRFY4oFvRyDy9/Irew==}
-    engines: {node: '>=18.18.0'}
-
-  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.6.0.tgz':
-    resolution: {integrity: sha512-A5A+go44Rsq9M/r5ojQf5lHArVbyLAHAsabthNRdrtbjg3krl8ps/09HAb7YgsRsRIjtYnGc5z+pqNRgoVs98g==, tarball: file:vendor/hauska-atom-contract-1.6.0.tgz}
-    version: 1.6.0
     engines: {node: '>=18.18.0'}
 
   '@hauska/map-renderer@0.1.2':
@@ -7302,6 +7297,41 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
+  '@empressaio/atom-contract@1.30.0(@types/pg@8.18.0)(pg@8.20.0)':
+    dependencies:
+      drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@cloudflare/workers-types'
+      - '@electric-sql/pglite'
+      - '@libsql/client'
+      - '@libsql/client-wasm'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@prisma/client'
+      - '@tidbcloud/serverless'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/sql.js'
+      - '@upstash/redis'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - better-sqlite3
+      - bun-types
+      - expo-sqlite
+      - gel
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - postgres
+      - prisma
+      - sql.js
+      - sqlite3
+
   '@esbuild/linux-x64@0.27.3':
     optional: true
 
@@ -7367,76 +7397,7 @@ snapshots:
       - encoding
       - supports-color
 
-  '@hauska/atom-contract@1.1.0(@types/pg@8.18.0)(pg@8.20.0)':
-    dependencies:
-      drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
-    transitivePeerDependencies:
-      - '@aws-sdk/client-rds-data'
-      - '@cloudflare/workers-types'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@libsql/client-wasm'
-      - '@neondatabase/serverless'
-      - '@op-engineering/op-sqlite'
-      - '@opentelemetry/api'
-      - '@planetscale/database'
-      - '@prisma/client'
-      - '@tidbcloud/serverless'
-      - '@types/better-sqlite3'
-      - '@types/pg'
-      - '@types/sql.js'
-      - '@upstash/redis'
-      - '@vercel/postgres'
-      - '@xata.io/client'
-      - better-sqlite3
-      - bun-types
-      - expo-sqlite
-      - gel
-      - knex
-      - kysely
-      - mysql2
-      - pg
-      - postgres
-      - prisma
-      - sql.js
-      - sqlite3
-
   '@hauska/atom-contract@1.5.0(@types/pg@8.18.0)(pg@8.20.0)':
-    dependencies:
-      drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
-      zod: 3.25.76
-    transitivePeerDependencies:
-      - '@aws-sdk/client-rds-data'
-      - '@cloudflare/workers-types'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@libsql/client-wasm'
-      - '@neondatabase/serverless'
-      - '@op-engineering/op-sqlite'
-      - '@opentelemetry/api'
-      - '@planetscale/database'
-      - '@prisma/client'
-      - '@tidbcloud/serverless'
-      - '@types/better-sqlite3'
-      - '@types/pg'
-      - '@types/sql.js'
-      - '@upstash/redis'
-      - '@vercel/postgres'
-      - '@xata.io/client'
-      - better-sqlite3
-      - bun-types
-      - expo-sqlite
-      - gel
-      - knex
-      - kysely
-      - mysql2
-      - pg
-      - postgres
-      - prisma
-      - sql.js
-      - sqlite3
-
-  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.6.0.tgz(@types/pg@8.18.0)(pg@8.20.0)':
     dependencies:
       drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
       zod: 3.25.76

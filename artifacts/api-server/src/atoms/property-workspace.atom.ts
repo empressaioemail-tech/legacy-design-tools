@@ -1,6 +1,6 @@
 /**
  * Property Brief `property-workspace` atom — shape-only until workspace DB
- * lookup ships. Event vocabulary matches @hauska/atom-contract/workspace 1.3.
+ * lookup ships. Event vocabulary matches @empressaio/atom-contract/workspace 1.3.
  */
 
 import {
@@ -8,7 +8,7 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 
 export const PROPERTY_WORKSPACE_SUPPORTED_MODES = [
   "inline",

@@ -11,7 +11,7 @@ import {
   legacyHonestyToReadContract,
   readContractForWire,
 } from "@workspace/engine-core";
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
 import type { ArcGisGeoJsonFeatureCollection } from "@workspace/adapters/arcgis";
 import type { GisLayerBbox } from "./brokerageGisLayers";
 import { queryGisLayerGeoJson } from "./brokerageGisLayers";

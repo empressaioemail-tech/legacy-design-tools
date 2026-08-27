@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db, engagements as engagementsTable } from "@workspace/db";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import {
   rainfallForcingDepthMm,
   type BboxWgs84,

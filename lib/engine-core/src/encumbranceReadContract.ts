@@ -6,12 +6,12 @@
 import type {
   ReadContract,
   WidthedConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import {
   createReadContract,
   createThreeAxisConfidence,
   createWidthedConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import {
   intervalWidthFromSignalCount,
   routineConsequenceAxis,

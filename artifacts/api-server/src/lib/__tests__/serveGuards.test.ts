@@ -3,7 +3,7 @@ import { assertAccessPair, assertSitusNotPunctuationOnly } from "../serveGuards"
 
 describe("serveGuards", () => {
   it("refuses access without both fields", () => {
-    expect(() => assertAccessPair({ entitlement: "anonymous" })).toThrow(
+    expect(() => assertAccessPair({ entitlement: "anyone-free" })).toThrow(
       expect.objectContaining({ code: "ACCESS_NOT_DEFAULTED" }),
     );
   });
@@ -15,9 +15,11 @@ describe("serveGuards", () => {
   });
 
   it("accepts valid access pair", () => {
-    expect(assertAccessPair({ discoverability: "public", entitlement: "anonymous" })).toEqual({
-      discoverability: "public",
-      entitlement: "anonymous",
+    expect(
+      assertAccessPair({ discoverability: "catalog-listed", entitlement: "anyone-free" }),
+    ).toEqual({
+      discoverability: "catalog-listed",
+      entitlement: "anyone-free",
     });
   });
 });

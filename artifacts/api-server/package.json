@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
-    "@hauska/atom-contract": "file:../../vendor/hauska-atom-contract-1.6.0.tgz",
+    "@empressaio/atom-contract": "^1.30.0",
     "@empressaio/cortex-client": "workspace:*",
     "@workspace/codes-sources": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",

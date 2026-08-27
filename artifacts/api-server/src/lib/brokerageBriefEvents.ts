@@ -2,7 +2,7 @@
  * Best-effort atom_events for Property Brief — mirrors parcelBriefings.ts.
  */
 
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import { getHistoryService } from "../atoms/registry";
 import { logger } from "./logger";
 import {

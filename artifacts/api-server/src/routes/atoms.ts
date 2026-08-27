@@ -7,7 +7,7 @@
  * The endpoint resolves the atom through the process-wide registry, so
  * adding a new atom (registered in `src/atoms/registry.ts`) automatically
  * surfaces here without touching this file. Mirrors the URL shape baked
- * into `httpContextSummary` from `@hauska/atom-contract`:
+ * into `httpContextSummary` from `@empressaio/atom-contract`:
  *   GET /atoms/:slug/:id/summary?scope=<urlencoded JSON>
  *
  * Scope handling: the body of the `scope` query param is decoded as
@@ -18,7 +18,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { defaultScope, type Scope } from "@hauska/atom-contract";
+import { defaultScope, type Scope } from "@empressaio/atom-contract";
 import { getAtomRegistry, getHistoryService } from "../atoms/registry";
 import { hydrateActors } from "../lib/userLookup";
 import { logger } from "../lib/logger";

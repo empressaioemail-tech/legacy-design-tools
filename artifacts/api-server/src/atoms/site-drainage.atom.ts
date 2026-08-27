@@ -22,7 +22,7 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 
 export const SITE_DRAINAGE_PROSE_MAX_CHARS = 400;
 

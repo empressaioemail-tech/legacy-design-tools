@@ -7,7 +7,7 @@
 
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, materializableElements } from "@workspace/db";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import { logger as defaultLogger } from "./logger";
 import type { SiteDrainageEventPayload } from "./siteDrainageIngest";
 

@@ -30,8 +30,12 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
+      - name: Install ripgrep (retirement gate + import-boundary tests)
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: check-no-hauska-atom-contract
+        run: node scripts/check-no-hauska-atom-contract.mjs
       - name: Typecheck
         run: pnpm run typecheck
   test:
