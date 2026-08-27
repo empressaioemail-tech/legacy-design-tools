@@ -1,8 +1,10 @@
 # Records Request worker (P-85 item 5)
 
-Playwright Cloud Run worker for clerk portal records search. Scaffold only:
-Williamson TylerHost disclaimer reachability is verified; login and search are
-placeholders.
+Playwright Cloud Run worker for clerk portal records search.
+
+- **Williamson default:** `williamson-publicsearch` (TylerHost returns HTTP 403 to headless bots).
+- **Tyler counties (Hays, Williamson TylerHost):** disclaimer → owner-name search → results capture with SHA-256.
+- **Other counties:** reachability scaffold until search recipes land.
 
 ## Job contract
 
@@ -13,8 +15,8 @@ Reads `jobId` from:
 - HTTP `POST /run` with `{ "jobId": "..." }` when `PORT` is set (Cloud Run Service)
 
 Requires `DATABASE_URL`. Transitions `records_request_jobs` status
-`queued → running → complete|failed` with honest errors when the portal is
-unreachable.
+`queued → running → complete|failed|needs-human` with honest errors when the portal is
+unreachable or login is required.
 
 ## api-server integration
 
@@ -52,8 +54,14 @@ gcloud run jobs execute records-request-worker \
 
 ## Recipes
 
-| portalId              | county | status   |
-| --------------------- | ------ | -------- |
-| williamson-tylerhost  | 48491  | scaffold |
+| portalId              | county | status        |
+| --------------------- | ------ | ------------- |
+| bastrop-aumentum      | 48021  | scaffold      |
+| travis-tccsearch      | 48453  | scaffold      |
+| williamson-tylerhost  | 48491  | index-search  |
+| williamson-publicsearch | 48491 | index-search (default) |
+| hays-erss             | 48209  | index-search  |
+| caldwell-clerk-web    | 48055  | scaffold      |
+| mclennan-online-records | 48309 | scaffold      |
 
-Other P-85 counties fail closed with `portal-unresolved` until recipes land.
+Index-search recipes require `searchTerms.ownerName` on the job payload (cortex enriches at enqueue from TxGIO). Login walls route to `needs-human`.

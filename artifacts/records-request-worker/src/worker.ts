@@ -17,7 +17,7 @@ import { withPlaywrightBrowser } from "./playwrightBrowser.js";
 
 export interface RunRecordsRequestJobResult {
   jobId: string;
-  outcome: "complete" | "failed" | "refused";
+  outcome: "complete" | "failed" | "needs-human" | "refused";
   errorCode?: string;
   errorMessage?: string;
 }
@@ -49,6 +49,21 @@ async function executeRecipe(
       errorMessage: null,
     });
     return { jobId: job.id, outcome: "complete" };
+  }
+
+  if (recipeResult.status === "needs-human") {
+    await markRecordsRequestJobTerminal(job.id, {
+      status: "needs-human",
+      scopeSearched: recipeResult.scopeSearched ?? null,
+      errorCode: recipeResult.errorCode ?? "needs-human",
+      errorMessage: recipeResult.errorMessage ?? "Portal requires human clerk",
+    });
+    return {
+      jobId: job.id,
+      outcome: "needs-human",
+      errorCode: recipeResult.errorCode,
+      errorMessage: recipeResult.errorMessage,
+    };
   }
 
   await markRecordsRequestJobTerminal(job.id, {

@@ -103,7 +103,7 @@ export async function markRecordsRequestJobRunning(jobId: string): Promise<void>
 }
 
 export interface TerminalJobUpdate {
-  status: "complete" | "failed";
+  status: "complete" | "failed" | "needs-human";
   scopeSearched?: Record<string, unknown> | null;
   errorCode?: string | null;
   errorMessage?: string | null;
