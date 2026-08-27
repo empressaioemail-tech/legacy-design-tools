@@ -1,9 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { SERVER_NAME, SMARTSITE_MCP_TOOLS } from "../src/constants.js";
+import type { SmartsiteAuthContext } from "../src/request-context.js";
 import { registerTools } from "../src/tools.js";
 
 const mockCortexFetch = vi.fn();
@@ -15,17 +16,21 @@ vi.mock("../src/cortex-client.js", () => ({
   cortexFetch: (...args: unknown[]) => mockCortexFetch(...args),
 }));
 
+const defaultAuth: SmartsiteAuthContext = {
+  userId: "user-test-1",
+  email: "test@example.com",
+  accessTier: "paid",
+  subscriptionTier: "studio",
+  devRole: false,
+};
+
+let mockAuth: SmartsiteAuthContext = { ...defaultAuth };
+
 vi.mock("../src/request-context.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/request-context.js")>();
   return {
     ...actual,
-    requireAuthContext: () => ({
-      userId: "user-test-1",
-      email: "test@example.com",
-      accessTier: "paid" as const,
-      subscriptionTier: "studio" as const,
-      devRole: false,
-    }),
+    requireAuthContext: () => mockAuth,
   };
 });
 
@@ -63,8 +68,21 @@ describe("smartsite-mcp tools/list", () => {
 });
 
 describe("smartsite-mcp tool honesty", () => {
+  const originalHauskaUrl = process.env.HAUSKA_MCP_BASE_URL;
+
   beforeEach(() => {
+    mockAuth = { ...defaultAuth };
     mockCortexFetch.mockReset();
+    delete process.env.HAUSKA_MCP_BASE_URL;
+  });
+
+  afterEach(() => {
+    if (originalHauskaUrl === undefined) {
+      delete process.env.HAUSKA_MCP_BASE_URL;
+    } else {
+      process.env.HAUSKA_MCP_BASE_URL = originalHauskaUrl;
+    }
+    vi.restoreAllMocks();
   });
 
   it("export_instrument returns not_ready without fake started status", async () => {
@@ -85,6 +103,36 @@ describe("smartsite-mcp tool honesty", () => {
         tool: "export_instrument",
       });
       expect(parsed).not.toHaveProperty("entitlementProbe");
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("export_instrument returns degraded (not server-down) when Hauska MCP is down", async () => {
+    process.env.HAUSKA_MCP_BASE_URL = "https://hauska-mcp.test";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("hauska-mcp.test/health")) {
+        throw new Error("ECONNREFUSED");
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "export_instrument",
+        arguments: {
+          parcelNodeId: "4813500100100100100",
+          kind: "brief",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toMatchObject({
+        status: "degraded",
+        tool: "export_instrument",
+        reason: "hauska_mcp_unavailable",
+        dependency: "hauska-mcp",
+      });
       expect(mockCortexFetch).not.toHaveBeenCalled();
     });
   });
@@ -163,5 +211,99 @@ describe("smartsite-mcp tool honesty", () => {
     const desc = runReport?.description.toLowerCase() ?? "";
     expect(desc).not.toMatch(/start an async|job id when|returns started/);
     expect(desc).toContain("synchron");
+  });
+});
+
+describe("smartsite-mcp tier gates (P-87 item 11)", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+  });
+
+  it("free session cannot run run_report (deep gate)", async () => {
+    mockAuth = {
+      userId: "user-free",
+      email: "free@example.com",
+      accessTier: "free",
+      subscriptionTier: null,
+      devRole: false,
+    };
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "run_report",
+        arguments: { parcelNodeId: "4813500100100100100" },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toMatchObject({
+        status: "upgrade_required",
+        reason: "deep_report",
+        tier: "free",
+      });
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("studio session can run run_report", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ runId: "r1", brief: {} }), { status: 200 }),
+    );
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "run_report",
+        arguments: { parcelNodeId: "4813500100100100100" },
+      });
+      expect(result.isError).toBe(false);
+      expect(mockCortexFetch).toHaveBeenCalled();
+    });
+  });
+
+  it("free session cannot run a Studio export (siteplan)", async () => {
+    mockAuth = {
+      userId: "user-free",
+      email: "free@example.com",
+      accessTier: "free",
+      subscriptionTier: null,
+      devRole: false,
+    };
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "export_instrument",
+        arguments: {
+          parcelNodeId: "4813500100100100100",
+          kind: "siteplan",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toMatchObject({
+        status: "upgrade_required",
+        reason: "studio_report",
+        tier: "free",
+      });
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("studio session passes studio gate but export remains not_ready", async () => {
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "export_instrument",
+        arguments: {
+          parcelNodeId: "4813500100100100100",
+          kind: "terrain",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toMatchObject({
+        status: "not_ready",
+        tool: "export_instrument",
+      });
+      expect(parsed.reason).not.toBe("studio_report");
+    });
   });
 });

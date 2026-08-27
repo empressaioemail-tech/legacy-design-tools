@@ -7,8 +7,19 @@ import {
   loadCortexClientConfig,
   type CortexClientConfig,
 } from "./cortex-client.js";
+import {
+  canRunDeepReport,
+  canRunStudioReport,
+  isStudioExportKind,
+  refuseDeepReport,
+  refuseStudioReport,
+  snapshotFromAuth,
+} from "./entitlement.js";
 import { requireAuthContext } from "./request-context.js";
+import { executeExportInstrument } from "./export-instrument.js";
+import { loadHauskaMcpConfig } from "./hauska-client.js";
 import { buildRunReportEnvelope, stripSavedPropertiesForExternal } from "./tool-honesty.js";
+import type { ToolResult } from "./tools-types.js";
 
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
@@ -19,11 +30,6 @@ function notReadyMessage(tool: string, reason: string): string {
   });
 }
 
-type ToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-};
-
 function degradedResult(reason: string, message: string): ToolResult {
   return {
     content: [
@@ -32,6 +38,15 @@ function degradedResult(reason: string, message: string): ToolResult {
         text: JSON.stringify({ status: "degraded", reason, message }),
       },
     ],
+    isError: true,
+  };
+}
+
+function upgradeRequiredResult(
+  refusal: ReturnType<typeof refuseDeepReport>,
+): ToolResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify(refusal) }],
     isError: true,
   };
 }
@@ -82,6 +97,9 @@ export function registerTools(server: McpServer): void {
         inputSchema: inputSchemaFor(tool.name),
       },
       async (args) => {
+        const auth = requireAuthContext();
+        const entitlement = snapshotFromAuth(auth);
+
         if (tool.readiness === "blocked") {
           return {
             content: [
@@ -93,8 +111,6 @@ export function registerTools(server: McpServer): void {
             isError: true,
           };
         }
-
-        const auth = requireAuthContext();
 
         switch (tool.name) {
           case "find_parcel": {
@@ -165,6 +181,9 @@ export function registerTools(server: McpServer): void {
           }
           case "run_report": {
             const { parcelNodeId } = args as { parcelNodeId: string };
+            if (!canRunDeepReport(entitlement)) {
+              return upgradeRequiredResult(refuseDeepReport(entitlement));
+            }
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -184,6 +203,30 @@ export function registerTools(server: McpServer): void {
                 isError: !res.ok,
               };
             });
+          }
+          case "export_instrument": {
+            const { parcelNodeId, kind } = args as {
+              parcelNodeId: string;
+              kind: "brief" | "siteplan" | "terrain" | "dossier";
+            };
+            if (isStudioExportKind(kind) && !canRunStudioReport(entitlement)) {
+              return upgradeRequiredResult(refuseStudioReport(entitlement));
+            }
+            if (!loadHauskaMcpConfig()) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: notReadyMessage(
+                      "export_instrument",
+                      "P-87 export honesty — Hauska MCP export proxy not configured",
+                    ),
+                  },
+                ],
+                isError: true,
+              };
+            }
+            return executeExportInstrument({ parcelNodeId, kind });
           }
           case "ask_the_map": {
             const { parcelNodeId, message } = args as {

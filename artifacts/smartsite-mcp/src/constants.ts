@@ -48,9 +48,8 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "export_instrument",
     title: "Export an instrument",
     description:
-      "Export a site plan, terrain model, dossier, or brief artifact the caller's tier allows. Not available until cortex export routes exist for Smart Site MCP.",
-    readiness: "blocked" as const,
-    blockedReason: "P-87 export honesty — no parcel export endpoint",
+      "Export a site plan, terrain model, dossier, or brief artifact the caller's tier allows. Proxies Hauska MCP when configured; returns degraded (not server-down) if Hauska is unreachable.",
+    readiness: "live" as const,
   },
   {
     name: "ask_the_map",
