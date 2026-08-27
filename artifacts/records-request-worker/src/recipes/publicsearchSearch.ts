@@ -15,6 +15,20 @@ import type {
 
 export const PUBLICSEARCH_RECIPE_VERSION = "p85-publicsearch-v1";
 
+/** Grading fixture — Williamson R-account with TxGIO owner (joinIntegrityGate.test). */
+export const WILLIAMSON_GRADING_PARCEL: RecordsRecipeContext = {
+  jobId: "job-williamson-grade",
+  countyFips: "48491",
+  parcelKey: "apn:48491:R062578",
+  portalId: "williamson-publicsearch",
+  requestPayload: {
+    searchTerms: {
+      ownerName: "PURVIS MICHAEL",
+      propId: "R062578",
+    },
+  },
+};
+
 const TERMS_ACCEPT_SELECTORS = [
   'button:has-text("Accept")',
   'button:has-text("I Agree")',
@@ -34,6 +48,41 @@ const SEARCH_SUBMIT_SELECTORS = [
   'button[type="submit"]',
   'input[type="submit"]',
 ] as const;
+
+/** Expected scopeSearched shape for a successful Williamson publicsearch index search. */
+export function publicsearchIndexSearchScope(
+  ctx: RecordsRecipeContext,
+  portal: Pick<P85PortalConfig, "portalId" | "countyFips">,
+  details: {
+    stepsReached: string[];
+    queries: Array<Record<string, unknown>>;
+    captures: Array<Record<string, unknown>>;
+    resultCount: number | null;
+    indexHits?: Array<Record<string, unknown>>;
+    acquisition?: Record<string, unknown>;
+  },
+): Record<string, unknown> {
+  const scope: Record<string, unknown> = {
+    portalId: portal.portalId,
+    countyFips: portal.countyFips,
+    parcelKey: ctx.parcelKey,
+    recipeVersion: PUBLICSEARCH_RECIPE_VERSION,
+    mode: "index-search",
+    stepsReached: details.stepsReached,
+    queries: details.queries,
+    captures: details.captures,
+    resultCount: details.resultCount,
+    documentTypes: "all",
+    dateRange: "portal-default",
+  };
+  if (details.indexHits) {
+    scope.indexHits = details.indexHits;
+  }
+  if (details.acquisition) {
+    scope.acquisition = details.acquisition;
+  }
+  return scope;
+}
 
 export async function runPublicsearchRecipe(
   ctx: RecordsRecipeContext,
@@ -174,19 +223,12 @@ export async function runPublicsearchRecipe(
     ctx,
     portalId: portal.portalId,
     browser,
-    scope: {
-      portalId: portal.portalId,
-      countyFips: portal.countyFips,
-      parcelKey: ctx.parcelKey,
-      recipeVersion: PUBLICSEARCH_RECIPE_VERSION,
-      mode: "index-search",
+    scope: publicsearchIndexSearchScope(ctx, portal, {
       stepsReached,
       queries,
       captures,
       resultCount: null,
-      documentTypes: "all",
-      dateRange: "portal-default",
-    },
+    }),
     resultCount: null,
   });
 }
