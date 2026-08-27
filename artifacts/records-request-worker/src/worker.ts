@@ -14,7 +14,7 @@ import {
   portalCanaryBlocksRun,
 } from "./portalCanaryStore.js";
 import { portalCanaryBlockMessage } from "./portalCanary.js";
-import { deriveRunCostFromScope } from "./runCost.js";
+import { deriveRunCostFromScope, runCostToRecord } from "./runCost.js";
 import {
   resolvePortalIdForJob,
   runRecipeForJob,
@@ -95,11 +95,13 @@ function terminalUpdateWithRunCost(
 ): TerminalJobUpdate {
   return {
     ...update,
-    runCost: deriveRunCostFromScope({
-      scopeSearched,
-      computeMs,
-      terminalStatus: update.status,
-    }) as Record<string, unknown>,
+    runCost: runCostToRecord(
+      deriveRunCostFromScope({
+        scopeSearched,
+        computeMs,
+        terminalStatus: update.status,
+      }),
+    ),
   };
 }
 
@@ -270,11 +272,13 @@ export async function runRecordsRequestJob(
       status: "failed",
       errorCode: "portal-lookup-failed",
       errorMessage: blockMessage,
-      runCost: deriveRunCostFromScope({
-        scopeSearched: null,
-        computeMs: 0,
-        terminalStatus: "failed",
-      }) as Record<string, unknown>,
+      runCost: runCostToRecord(
+        deriveRunCostFromScope({
+          scopeSearched: null,
+          computeMs: 0,
+          terminalStatus: "failed",
+        }),
+      ),
     });
     triggerCompletionNotify(trimmed, "failed");
     return {

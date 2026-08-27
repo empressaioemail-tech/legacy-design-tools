@@ -118,3 +118,8 @@ export function deriveRunCostFromScope(input: DeriveRunCostInput): RecordsReques
     derivedAt: new Date().toISOString(),
   };
 }
+
+/** Persist run_cost jsonb (TerminalJobUpdate expects Record<string, unknown>). */
+export function runCostToRecord(cost: RecordsRequestRunCost): Record<string, unknown> {
+  return { ...cost };
+}
