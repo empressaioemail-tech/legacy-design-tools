@@ -195,7 +195,10 @@ describe("buildR1Brief composition", () => {
     expect(envelopeSection?.refusal).toMatchObject({
       code: "declined-in-bake",
       declineReason: "no-zoning-stamp",
+      producer: "baked-envelope-facet",
+      supersededBy: "buildable-envelope",
     });
+    expect(envelopeSection?.agentGuidance).toContain("Do not invent");
     expect(envelopeSection?.citations).toEqual([]);
   });
 

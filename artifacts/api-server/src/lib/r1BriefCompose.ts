@@ -8,6 +8,7 @@ import type {
   FloodHazardFactRead,
 } from "./floodHazardFactRead";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
+import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -23,6 +24,8 @@ export type R1BriefSection = {
   citationsDegraded?: boolean;
   /** Flood-only: clarifies Zone X + outside-SFHA misreads. */
   zoneExposureSummary?: string | null;
+  /** Setbacks-envelope-only: MCP guard when data is refused. */
+  agentGuidance?: string | null;
 };
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -170,7 +173,13 @@ export function summarizeFloodZoneExposure(
 
 type BriefSectionParts = Pick<
   R1BriefSection,
-  "data" | "refusal" | "citations" | "asOf" | "citationsDegraded" | "zoneExposureSummary"
+  | "data"
+  | "refusal"
+  | "citations"
+  | "asOf"
+  | "citationsDegraded"
+  | "zoneExposureSummary"
+  | "agentGuidance"
 >;
 
 function withCitationPosture(
@@ -257,6 +266,7 @@ function composeSetbacksEnvelopeBriefSection(
       refusal: envelopeBriefRefusal,
       citations: [],
       asOf: bakedAt ?? null,
+      agentGuidance: envelopeAgentGuidance(envelopeBriefRefusal),
     };
   }
   return withCitationPosture({
@@ -315,6 +325,9 @@ export function buildR1Brief(
       citations: envelopeSection.citations,
       asOf: envelopeSection.asOf,
       ...(envelopeSection.citationsDegraded ? { citationsDegraded: true } : {}),
+      ...(envelopeSection.agentGuidance != null
+        ? { agentGuidance: envelopeSection.agentGuidance }
+        : {}),
     },
     {
       id: "flood",

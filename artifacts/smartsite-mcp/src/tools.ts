@@ -18,7 +18,7 @@ import {
 import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
-import { buildRunReportEnvelope, stripSavedPropertiesForExternal } from "./tool-honesty.js";
+import { buildRunReportEnvelope, normalizeR1ResponseText, stripSavedPropertiesForExternal } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
 
 function notReadyMessage(tool: string, reason: string): string {
@@ -141,8 +141,9 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const body = await res.text();
+              const normalized = normalizeR1ResponseText(body);
               return {
-                content: [{ type: "text" as const, text: body }],
+                content: [{ type: "text" as const, text: normalized }],
                 isError: !res.ok,
               };
             });

@@ -3,24 +3,16 @@
  * envelope is not served (anti-zombie strip) or was never derived.
  */
 
-export type EnvelopeBriefRefusal =
-  | {
-      state: "refused";
-      code: "not-in-bake";
-      reason: string;
-    }
-  | {
-      state: "refused";
-      code: "declined-in-bake";
-      declineReason: string | null;
-      reason: string;
-    }
-  | {
-      state: "refused";
-      code: "baked-envelope-not-served";
-      bakeStatus: string | null;
-      reason: string;
-    };
+/** SS-W16 parallel: typed refusal so MCP clients do not treat null data as absence. */
+export type EnvelopeBriefRefusal = {
+  state: "refused";
+  code: "not-in-bake" | "declined-in-bake" | "baked-envelope-not-served";
+  producer: "baked-envelope-facet";
+  supersededBy: "buildable-envelope";
+  reason: string;
+  declineReason?: string | null;
+  bakeStatus?: string | null;
+};
 
 function asBriefRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -41,6 +33,8 @@ export function extractEnvelopeBriefRefusal(
     return {
       state: "refused",
       code: "not-in-bake",
+      producer: "baked-envelope-facet",
+      supersededBy: "buildable-envelope",
       reason: "No Tier-1 facet payload exists for this node.",
     };
   }
@@ -51,6 +45,8 @@ export function extractEnvelopeBriefRefusal(
       return {
         state: "refused",
         code: "not-in-bake",
+        producer: "baked-envelope-facet",
+        supersededBy: "buildable-envelope",
         reason:
           "The bake marks envelope as not derived (facetCoverage.envelope false).",
       };
@@ -58,6 +54,8 @@ export function extractEnvelopeBriefRefusal(
     return {
       state: "refused",
       code: "not-in-bake",
+      producer: "baked-envelope-facet",
+      supersededBy: "buildable-envelope",
       reason: "No envelope facet in the baked snapshot.",
     };
   }
@@ -69,6 +67,8 @@ export function extractEnvelopeBriefRefusal(
     return {
       state: "refused",
       code: "declined-in-bake",
+      producer: "baked-envelope-facet",
+      supersededBy: "buildable-envelope",
       declineReason,
       reason: declineReason
         ? `Buildable envelope was declined in bake: ${declineReason}.`
@@ -80,8 +80,31 @@ export function extractEnvelopeBriefRefusal(
   return {
     state: "refused",
     code: "baked-envelope-not-served",
+    producer: "baked-envelope-facet",
+    supersededBy: "buildable-envelope",
     bakeStatus,
     reason:
       "A baked envelope exists but is not served on this read path; use the atom buildable-envelope route.",
   };
+}
+
+/** One-line MCP guard — parallel to flood zoneExposureSummary. */
+export function envelopeAgentGuidance(refusal: EnvelopeBriefRefusal): string {
+  switch (refusal.code) {
+    case "declined-in-bake":
+      return (
+        "Setbacks and buildable envelope were declined in the bake. " +
+        "Do not invent setback distances or a buildable polygon."
+      );
+    case "baked-envelope-not-served":
+      return (
+        "A baked envelope exists but is not on this read path. " +
+        "Do not invent setback distances; use the workbench map or buildable-envelope route."
+      );
+    default:
+      return (
+        "No setbacks or buildable envelope in the baked snapshot. " +
+        "Do not invent setback distances or buildable area."
+      );
+  }
 }

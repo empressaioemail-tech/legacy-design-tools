@@ -96,10 +96,99 @@ export function buildRunReportEnvelope(
   try {
     const parsed: unknown = JSON.parse(cortexBodyText);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return { ...honesty, ...(parsed as Record<string, unknown>) };
+      return {
+        ...honesty,
+        ...normalizeR1BodyForExternal(parsed as Record<string, unknown>),
+      };
     }
   } catch {
     // Non-JSON error bodies stay under `brief`.
   }
   return { ...honesty, brief: cortexBodyText };
+}
+
+export type ExternalBriefSectionDisposition =
+  | "present"
+  | "refused"
+  | "absent";
+
+export type ExternalBriefSection = {
+  id?: string;
+  title?: string;
+  data: unknown;
+  refusal?: unknown;
+  disposition: ExternalBriefSectionDisposition;
+  agentGuidance?: string | null;
+  [key: string]: unknown;
+};
+
+function sectionDisposition(section: Record<string, unknown>): ExternalBriefSectionDisposition {
+  if (section.refusal != null) return "refused";
+  if (section.data !== null && section.data !== undefined) return "present";
+  return "absent";
+}
+
+/**
+ * Ensures MCP clients never see bare null section data without a disposition.
+ * Mirrors flood SS-W16 honesty for setbacks-envelope refusals on the wire.
+ */
+export function normalizeR1BodyForExternal(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const brief = body.brief;
+  if (!brief || typeof brief !== "object" || Array.isArray(brief)) {
+    return body;
+  }
+  const briefRecord = brief as Record<string, unknown>;
+  const sections = briefRecord.sections;
+  if (!Array.isArray(sections)) {
+    return body;
+  }
+  const normalizedSections: ExternalBriefSection[] = sections.map((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {
+        data: raw,
+        disposition: "absent",
+      };
+    }
+    const section = raw as Record<string, unknown>;
+    const disposition = sectionDisposition(section);
+    const agentGuidance =
+      typeof section.agentGuidance === "string"
+        ? section.agentGuidance
+        : disposition === "refused" &&
+            section.id === "setbacks-envelope" &&
+            section.refusal &&
+            typeof section.refusal === "object"
+          ? "Setbacks and buildable envelope are refused on this read path. Do not invent distances or polygons."
+          : undefined;
+    return {
+      ...section,
+      data: section.data ?? null,
+      disposition,
+      ...(agentGuidance ? { agentGuidance } : {}),
+    } as ExternalBriefSection;
+  });
+  return {
+    ...body,
+    brief: {
+      ...briefRecord,
+      sections: normalizedSections,
+    },
+  };
+}
+
+/** Parse cortex R1 JSON and normalize for get_smart_site / run_report. */
+export function normalizeR1ResponseText(cortexBodyText: string): string {
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify(
+        normalizeR1BodyForExternal(parsed as Record<string, unknown>),
+      );
+    }
+  } catch {
+    // pass through non-JSON errors
+  }
+  return cortexBodyText;
 }
