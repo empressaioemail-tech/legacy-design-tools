@@ -2831,7 +2831,6 @@ ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_pkey PRIMARY KEY (id);
 
 
-
 -- Name: records_request_artifacts records_request_artifacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.records_request_artifacts
@@ -3767,7 +3766,6 @@ CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instrume
 CREATE INDEX recorded_instruments_listing_install_idx ON @@SCHEMA@@.recorded_instruments USING btree (install_id, listing_key);
 
 
-
 -- Name: records_request_artifacts_job_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX records_request_artifacts_job_idx ON @@SCHEMA@@.records_request_artifacts USING btree (job_id, created_at);
@@ -4413,7 +4411,6 @@ ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
 
 ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
-
 
 
 -- Name: records_request_artifacts records_request_artifacts_job_id_records_request_jobs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
