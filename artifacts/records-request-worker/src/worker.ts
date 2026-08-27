@@ -17,7 +17,12 @@ import { withPlaywrightBrowser } from "./playwrightBrowser.js";
 
 export interface RunRecordsRequestJobResult {
   jobId: string;
-  outcome: "complete" | "failed" | "needs-human" | "refused";
+  outcome:
+    | "complete"
+    | "failed"
+    | "needs-human"
+    | "awaiting-purchase-approval"
+    | "refused";
   errorCode?: string;
   errorMessage?: string;
 }
@@ -52,15 +57,25 @@ async function executeRecipe(
   }
 
   if (recipeResult.status === "needs-human") {
+    const isPurchase =
+      recipeResult.errorCode === "awaiting-purchase-approval";
     await markRecordsRequestJobTerminal(job.id, {
-      status: "needs-human",
+      status: isPurchase ? "awaiting-purchase-approval" : "needs-human",
       scopeSearched: recipeResult.scopeSearched ?? null,
       errorCode: recipeResult.errorCode ?? "needs-human",
       errorMessage: recipeResult.errorMessage ?? "Portal requires human clerk",
+      runCost:
+        typeof recipeResult.scopeSearched?.acquisition === "object"
+          ? {
+              purchaseCostCents: (
+                recipeResult.scopeSearched.acquisition as Record<string, unknown>
+              ).purchaseCostCents,
+            }
+          : null,
     });
     return {
       jobId: job.id,
-      outcome: "needs-human",
+      outcome: isPurchase ? "awaiting-purchase-approval" : "needs-human",
       errorCode: recipeResult.errorCode,
       errorMessage: recipeResult.errorMessage,
     };

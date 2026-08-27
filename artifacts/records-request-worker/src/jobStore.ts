@@ -103,10 +103,11 @@ export async function markRecordsRequestJobRunning(jobId: string): Promise<void>
 }
 
 export interface TerminalJobUpdate {
-  status: "complete" | "failed" | "needs-human";
+  status: "complete" | "failed" | "needs-human" | "awaiting-purchase-approval";
   scopeSearched?: Record<string, unknown> | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  runCost?: Record<string, unknown> | null;
 }
 
 export async function markRecordsRequestJobTerminal(
@@ -120,6 +121,7 @@ export async function markRecordsRequestJobTerminal(
        scope_searched = COALESCE($3, scope_searched),
        error_code = $4,
        error_message = $5,
+       run_cost = COALESCE($6, run_cost),
        updated_at = NOW(),
        completed_at = NOW()
      WHERE id = $1 AND status = 'running'`,
@@ -129,6 +131,7 @@ export async function markRecordsRequestJobTerminal(
       update.scopeSearched ?? null,
       update.errorCode ?? null,
       update.errorMessage ?? null,
+      update.runCost ?? null,
     ],
   );
   if (result.rowCount !== 1) {

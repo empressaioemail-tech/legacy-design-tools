@@ -108,6 +108,35 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
     async currentUrl(): Promise<string> {
       return page.url();
     },
+
+    async extractResultRows(): Promise<
+      import("./recipes/types.js").ResultRowExtract[]
+    > {
+      return page.evaluate(() => {
+        const rows: { cells: string[]; link: string | null }[] = [];
+        const selectors = [
+          "table tbody tr",
+          ".search-results tr",
+          '[role="row"]',
+          ".results-table tr",
+        ];
+        const seen = new Set<Element>();
+        for (const sel of selectors) {
+          for (const tr of document.querySelectorAll(sel)) {
+            if (seen.has(tr)) continue;
+            seen.add(tr);
+            const cells = [...tr.querySelectorAll("td, [role=cell]")].map(
+              (c) => c.textContent?.trim() ?? "",
+            );
+            if (cells.length < 2) continue;
+            const anchor = tr.querySelector("a[href]");
+            const link = anchor instanceof HTMLAnchorElement ? anchor.href : null;
+            rows.push({ cells, link });
+          }
+        }
+        return rows;
+      });
+    },
   };
 }
 
