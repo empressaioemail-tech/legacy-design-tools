@@ -10,7 +10,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { searchPlaceByPrefix } from "../lib/txgioAddressResolve";
+import {
+  lookupSitusByParcelNodeId,
+  searchPlaceByPrefix,
+} from "../lib/txgioAddressResolve";
 
 const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -38,8 +41,13 @@ brokeragePlaceSitusSearchRouter.get(
 
     const query = parsed.data.q;
     if (PARCEL_NODE_ID_RE.test(query)) {
+      const txgioHit = await lookupSitusByParcelNodeId({ parcelNodeId: query });
       res.json({
-        hits: [{ parcelNodeId: query, source: "parcel-node-id" }],
+        hits: [
+          txgioHit
+            ? { ...txgioHit, source: "parcel-node-id" as const }
+            : { parcelNodeId: query, source: "parcel-node-id" as const },
+        ],
       });
       return;
     }
