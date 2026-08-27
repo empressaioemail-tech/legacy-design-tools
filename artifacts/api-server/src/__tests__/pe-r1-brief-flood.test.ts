@@ -8,7 +8,7 @@ import {
   type FloodHazardFactPresent,
   type FloodHazardFactRefusal,
 } from "../lib/floodHazardFactRead";
-import { buildR1Brief } from "../lib/r1BriefCompose";
+import { buildR1Brief, summarizeFloodZoneExposure } from "../lib/r1BriefCompose";
 
 const tier2RetiredFloodDisposition = {
   state: "refused" as const,
@@ -32,8 +32,27 @@ const atomPresentFixture: FloodHazardFactPresent = {
   baseFloodElevation: null,
   sourceAdapter: "fema-nfhl-bulk-v1",
   sourceVintage: "NFHL_48_20260101",
+  sourceCitation: null,
   evaluatedAt: "2026-08-11T23:13:43.774Z",
 };
+
+const zoneXShadedFixture: FloodHazardFactPresent = {
+  ...atomPresentFixture,
+  boundAs: "48021:34137",
+  tried: ["48021:34137", "48021:34137.00000000"],
+  entityId: "48021:34137",
+  inSpecialFloodHazardArea: false,
+  floodZone: "X",
+  zoneSubtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+};
+
+const zoneXUnsubtypedFixture: FloodHazardFactPresent = {
+  ...zoneXShadedFixture,
+  zoneSubtype: null,
+};
+
+const femaCitation =
+  "https://hazards.fema.gov/nfhlv2/output/State/NFHL_48_20260101.zip";
 
 const atomMissFixture: FloodHazardFactRefusal = {
   state: "refused",
@@ -61,7 +80,66 @@ describe("buildR1Brief composition", () => {
     const floodSection = brief.sections.find((section) => section.id === "flood");
     expect(floodSection?.data).toEqual(atomPresentFixture);
     expect(floodSection?.refusal).toBeUndefined();
+    expect(floodSection?.asOf).toBe(atomPresentFixture.evaluatedAt);
+    expect(floodSection?.citationsDegraded).toBe(true);
+    expect(floodSection?.zoneExposureSummary).toMatch(/Special Flood Hazard Area/);
     expect(JSON.stringify(brief)).not.toContain("FLOODWAY");
+  });
+
+  it("atom-present with sourceCitation surfaces flood citations", () => {
+    const cited = {
+      ...atomPresentFixture,
+      sourceCitation: femaCitation,
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: cited },
+    );
+    const floodSection = brief.sections.find((section) => section.id === "flood");
+    expect(floodSection?.citations).toEqual([femaCitation]);
+    expect(floodSection?.citationsDegraded).toBeUndefined();
+    expect(brief.citations).toContain(femaCitation);
+  });
+
+  it("Zone X outside SFHA with 0.2% subtype warns against minimal-risk misread", () => {
+    const summary = summarizeFloodZoneExposure(zoneXShadedFixture);
+    expect(summary).toMatch(/0\.2%/);
+    expect(summary).toMatch(/not minimal risk/i);
+
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: zoneXShadedFixture },
+    );
+    const floodSection = brief.sections.find((section) => section.id === "flood");
+    expect(floodSection?.zoneExposureSummary).toBe(summary);
+  });
+
+  it("Zone X outside SFHA without subtype names the misread explicitly", () => {
+    const summary = summarizeFloodZoneExposure(zoneXUnsubtypedFixture);
+    expect(summary).toMatch(/misread/i);
+    expect(summary).toMatch(/subtype was not recorded/i);
+  });
+
+  it("sections carry asOf from baked facets when present", () => {
+    const brief = buildR1Brief(
+      {
+        bakedAt: "2026-07-22T00:00:00.000Z",
+        baseFacts: {
+          landUse: { code: "A1", vintage: "2025-caldwell-cad-export" },
+        },
+        zoning: { district: "MU", asOf: "2026-08-01T12:00:00.000Z" },
+      },
+      null,
+      { floodHazardFact: atomPresentFixture },
+    );
+    expect(
+      brief.sections.find((section) => section.id === "zoning")?.asOf,
+    ).toBe("2026-08-01T12:00:00.000Z");
+    expect(
+      brief.sections.find((section) => section.id === "land-use")?.asOf,
+    ).toBe("2025-caldwell-cad-export");
   });
 
   it("atom-miss keeps the SS-W16 tier2 floodDisposition refusal", () => {
@@ -162,5 +240,6 @@ describe("buildR1Brief composition", () => {
     expect(envelopeSection?.data).toEqual(envelope);
     expect(envelopeSection?.refusal).toBeUndefined();
     expect(envelopeSection?.citations).toContain("https://example.test/setbacks");
+    expect(envelopeSection?.asOf).toBeNull();
   });
 });
