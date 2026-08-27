@@ -21,10 +21,10 @@ Streamable HTTP MCP at `POST /mcp` with OAuth 2.1 bearer (WorkOS AuthKit). No pu
 | `find_parcel` | live | `GET /api/brokerage/v1/place/situs-search` |
 | `get_smart_site` | live | `POST /api/property-explorer/v1/research/brief` |
 | `list_my_properties` | live | `GET /api/property-explorer/v1/saved-properties` |
-| `run_report` | live | `POST /api/property-explorer/v1/research/brief` |
+| `run_report` | live | `POST /api/property-explorer/v1/research/brief` (sync R1 read; honesty envelope) |
 | `request_records` | **not_ready** | P-85 blocked |
 | `check_request` | **not_ready** | P-85 blocked |
-| `export_instrument` | live | entitlement probe via property-explorer |
+| `export_instrument` | **not_ready** | P-87 blocked — no parcel export endpoint |
 | `ask_the_map` | live | `POST /api/brokerage/v1/research/chat` |
 
 Core tools call **cortex-api** with `SERVICE_API_KEY` only (A-039: no engine-api, no hauska-mcp-server).
