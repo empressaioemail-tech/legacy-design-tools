@@ -84,7 +84,7 @@ export type EngagementDetail = Engagement
 // 'accepted' | 'overridden' (with revisionOf) — not the idealized union.
 // Rather than invent fields the wire does not carry, Finding is typed to the
 // shape the app can actually assert, with confidence inlined (no hard
-// @hauska/atom-contract runtime dep). Consumers that need the raw wire use
+// @empressaio/atom-contract runtime dep). Consumers that need the raw wire use
 // SubmissionFindings (opaque) below.
 export type FindingDetermination = 'pass' | 'fail' | 'advisory'
 export type FindingConfidenceKind = 'calibrated' | 'asserted' | 'deterministic'

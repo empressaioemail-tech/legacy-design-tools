@@ -16,7 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hauska/atom-contract": "file:../../vendor/hauska-atom-contract-1.6.0.tgz",
+    "@empressaio/atom-contract": "^1.30.0",
     "@tanstack/react-query": "catalog:",
     "@workspace/engine-core": "workspace:*",
     "@workspace/adapters": "workspace:*",

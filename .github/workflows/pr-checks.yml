@@ -32,6 +32,8 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: check-no-hauska-atom-contract
+        run: node scripts/check-no-hauska-atom-contract.mjs
       - name: Typecheck
         run: pnpm run typecheck
   test:

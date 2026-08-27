@@ -53,10 +53,10 @@ const { createTestSchema, dropTestSchema, truncateAll } = await import(
 const dbModule = await import("@workspace/db");
 const { engagements, snapshots, submissions } = dbModule;
 const { runAtomContractTests, createInMemoryEventService } = await import(
-  "@hauska/atom-contract/testing"
+  "@empressaio/atom-contract/testing"
 );
 const { createAtomRegistry, defaultScope } = await import(
-  "@hauska/atom-contract"
+  "@empressaio/atom-contract"
 );
 const { makeEngagementAtom } = await import("../atoms/engagement.atom");
 const { makeSnapshotAtom } = await import("../atoms/snapshot.atom");

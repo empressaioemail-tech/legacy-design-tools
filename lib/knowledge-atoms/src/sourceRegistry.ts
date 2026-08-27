@@ -1,4 +1,4 @@
-import type { AccessPolicy } from "@hauska/atom-contract";
+import type { AccessPolicy } from "@empressaio/atom-contract";
 
 /** Registered adapter / data source — only these may emit verified-absence atoms. */
 export interface RegisteredKnowledgeSource {

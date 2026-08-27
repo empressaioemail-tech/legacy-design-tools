@@ -45,8 +45,7 @@ async function main() {
     );
     if (cadRows.length === 0) continue;
     const body = cadRows[0].body ?? {};
-    const access = body.access ?? { discoverability: "public", entitlement: "anonymous" };
-    assertAccessPair(access);
+    const access = assertAccessPair(body.access);
     const situs = body.claim?.situsAddress ?? body.situsAddress ?? null;
     assertSitusNotPunctuationOnly(situs);
     const payload = {

@@ -1,4 +1,4 @@
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
 import {
   readContractFromExtractConfidence,
   readContractForWire,
@@ -10,7 +10,7 @@ import {
   RESTRICTION_CLAUSE_SCHEMA,
   type RecordedInstrumentAtomInstance,
   type RestrictionClauseAtomInstance,
-} from "@hauska/atom-contract/encumbrances";
+} from "@empressaio/atom-contract/encumbrances";
 import type { RecordedInstrument, RestrictionClause } from "@workspace/db";
 
 export interface EncumbranceInstrumentWire {

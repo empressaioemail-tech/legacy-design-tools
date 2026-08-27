@@ -66,11 +66,11 @@ import {
 } from "@workspace/site-context/server";
 import { EngineSpineError } from "./engineSpineClient";
 import { routeFetchUsgs3depDem } from "./engineSpineHydrology";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import {
   createWidthedConfidence,
   type WidthedConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import { SITE_TOPOGRAPHY_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { ObjectStorageService } from "./objectStorage";
 import { logger as defaultLogger } from "./logger";

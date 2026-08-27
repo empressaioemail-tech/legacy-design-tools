@@ -68,7 +68,7 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 
 /** Hard cap on the prose summary so the rendered card respects token budget. */
 export const SITE_TOPOGRAPHY_PROSE_MAX_CHARS = 400;

@@ -61,7 +61,7 @@ export default defineConfig({
           "@workspace/db",
           "@workspace/codes",
           "@workspace/codes-sources",
-          "@hauska/atom-contract",
+          "@empressaio/atom-contract",
           "@empressaio/cortex-client",
           "@workspace/codes-sources",
           "@workspace/integrations-anthropic-ai",

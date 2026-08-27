@@ -30,7 +30,7 @@ import {
   materializableElements,
   atomEvents as atomEventsTable,
 } from "@workspace/db";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import { logger as defaultLogger } from "./logger";
 import type { SiteTopographyEventPayload } from "./siteTopographyIngest";
 

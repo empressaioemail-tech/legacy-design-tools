@@ -10,7 +10,7 @@ import {
   atomEvents,
 } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
-import type { Scope } from "@hauska/atom-contract";
+import type { Scope } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
 import {
   WORKSPACE_CHAT_TOOLS,

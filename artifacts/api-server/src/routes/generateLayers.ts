@@ -55,7 +55,7 @@ import { GenerateEngagementLayersParams } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import { emitVerifiedAbsenceFromAdapterOutcomes } from "../lib/knowledgeAtomIngest";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
 import { createAdapterResponseCache } from "../lib/adapterCache";
 import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";

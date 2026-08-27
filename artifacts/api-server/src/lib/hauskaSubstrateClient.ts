@@ -33,7 +33,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { logger } from "./logger";
 
 /**
- * ADR-017 atom access tier, per `@hauska/atom-contract@^1.1.0`. The
+ * ADR-017 atom access tier, per `@empressaio/atom-contract@^1.1.0`. The
  * substrate stamps this on each `jurisdiction-corpus` atom; surfaces
  * that gate on visibility branch on it. A jurisdiction that omits the
  * field on the wire is treated as `"public-free"`.
@@ -236,7 +236,7 @@ function snapshotToJurisdiction(raw: RawSnapshot): SubstrateJurisdiction | null 
         : key,
     atomCount: typeof raw.atomCount === "number" ? raw.atomCount : 0,
     // ADR-017: an absent accessPolicy is treated as public-free, matching
-    // the engine docstring and `@hauska/atom-contract` semantics.
+    // the engine docstring and `@empressaio/atom-contract` semantics.
     accessPolicy: isAccessPolicy(raw.accessPolicy)
       ? raw.accessPolicy
       : "public-free",

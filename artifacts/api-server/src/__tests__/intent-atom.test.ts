@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   runAtomContractTests,
   createInMemoryEventService,
-} from "@hauska/atom-contract/testing";
+} from "@empressaio/atom-contract/testing";
 import {
   makeIntentAtom,
   INTENT_EVENT_TYPES,

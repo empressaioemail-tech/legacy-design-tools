@@ -10,7 +10,7 @@ import {
   architectNotificationReads,
 } from "@workspace/db";
 import { desc, eq, sql, and, gt, inArray } from "drizzle-orm";
-import type { Scope } from "@hauska/atom-contract";
+import type { Scope } from "@empressaio/atom-contract";
 import type { AgentToolDefinition } from "./chatAgentTools";
 import { logger } from "../lib/logger";
 

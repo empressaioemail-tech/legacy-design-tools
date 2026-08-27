@@ -39,10 +39,10 @@ const { createTestSchema, dropTestSchema } = await import(
 const dbModule = await import("@workspace/db");
 const { engagements, snapshots, sheets } = dbModule;
 const { runAtomContractTests, createTestRegistry } = await import(
-  "@hauska/atom-contract/testing"
+  "@empressaio/atom-contract/testing"
 );
 const { createAtomRegistry, PostgresEventAnchoringService } = await import(
-  "@hauska/atom-contract"
+  "@empressaio/atom-contract"
 );
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
 const { makeSnapshotAtom, SNAPSHOT_EVENT_TYPES } = await import(

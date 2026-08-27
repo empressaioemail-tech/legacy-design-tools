@@ -36,7 +36,7 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 
 /** Hard cap on the prose summary. */
 export const INTENT_PROSE_MAX_CHARS = 400;
