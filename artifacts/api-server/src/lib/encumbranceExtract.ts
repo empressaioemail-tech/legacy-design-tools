@@ -65,6 +65,14 @@ export async function extractEncumbranceClausesFromPdf(
   };
 }
 
+/** Shared plain-text clause splitter (R4 upload + P-85 records request). */
+export function extractClauseCandidatesFromPlainText(
+  text: string,
+  pageCount: number,
+): ExtractedClauseCandidate[] {
+  return splitClauseCandidates(text, pageCount);
+}
+
 function splitClauseCandidates(
   text: string,
   pageCount: number,

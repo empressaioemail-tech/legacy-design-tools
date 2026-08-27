@@ -1061,7 +1061,7 @@ function peReqLog(req: Request): typeof logger {
 }
 
 /**
- * P-85 item 7 — service-token hook for worker to trigger vision reads after capture.
+ * P-85 item 7+8 — service-token hook: vision read then classify/write instruments.
  */
 router.post(
   "/property-explorer/v1/internal/records-request/vision-read",
@@ -1074,12 +1074,42 @@ router.post(
       return;
     }
     try {
-      const results = await processRecordsRequestJobVisionReads(jobId);
-      res.status(200).json({ jobId, results });
+      const { vision, classification } =
+        await processRecordsRequestJobVisionReads(jobId);
+      res.status(200).json({ jobId, results: vision, classification });
     } catch (err) {
       peReqLog(req).error({ err, jobId }, "records request vision-read failed");
       res.status(500).json({
         error: "vision_read_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+/**
+ * P-85 item 8 — classify/write only (when vision text already on artifact metadata).
+ */
+router.post(
+  "/property-explorer/v1/internal/records-request/classify",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const jobId =
+      typeof req.body?.jobId === "string" ? req.body.jobId.trim() : "";
+    if (!jobId) {
+      res.status(400).json({ error: "missing_job_id" });
+      return;
+    }
+    try {
+      const { processRecordsRequestJobClassification } = await import(
+        "../lib/recordsRequestClassifyWrite"
+      );
+      const classification = await processRecordsRequestJobClassification(jobId);
+      res.status(200).json({ jobId, classification });
+    } catch (err) {
+      peReqLog(req).error({ err, jobId }, "records request classify failed");
+      res.status(500).json({
+        error: "classify_failed",
         detail: err instanceof Error ? err.message : String(err),
       });
     }

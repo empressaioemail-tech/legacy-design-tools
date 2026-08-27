@@ -27,6 +27,27 @@ describe("readRecordsRequestArtifactVision", () => {
     expect(result.visionApplied).toBe(false);
   });
 
+  it("records failed read for blank page PNG fixture (WDLL item 7)", async () => {
+    const blankPagePng = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    vi.mocked(enrichExtractedTextWithVision).mockResolvedValue({
+      visionApplied: false,
+      extractedText: "",
+    });
+    const result = await readRecordsRequestArtifactVision({
+      artifactId: "art-blank-page",
+      title: "DEED",
+      fileBytes: blankPagePng,
+      mimeType: "image/png",
+      visionClient: {} as never,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.failureReason).toBe("vision_read_produced_no_text");
+    expect(result.visionApplied).toBe(false);
+  });
+
   it("records complete read with headers when vision succeeds", async () => {
     vi.mocked(enrichExtractedTextWithVision).mockResolvedValue({
       visionApplied: true,
