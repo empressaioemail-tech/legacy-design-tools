@@ -28,6 +28,9 @@ export async function tryFillFirst(
 }
 
 export const TERMS_ACCEPT_SELECTORS = [
+  "#cph1_lnkAccept",
+  'a:has-text("Click here to acknowledge")',
+  'a:has-text("acknowledge the disclaimer")',
   'input[type="submit"][value*="Accept" i]',
   'button:has-text("I Accept")',
   'button:has-text("Accept")',

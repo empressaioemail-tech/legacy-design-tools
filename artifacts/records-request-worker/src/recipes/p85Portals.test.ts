@@ -89,7 +89,9 @@ describe("runRecipeForJob — Aumentum index search", () => {
   });
 
   it("routes to needs-human when search terms are absent", async () => {
-    const browser = mockBrowser();
+    const browser = mockBrowser({
+      click: vi.fn().mockResolvedValue({ ok: true }),
+    });
     const result = await runRecipeForJob(
       { ...bastropCtx, requestPayload: {} },
       browser,
