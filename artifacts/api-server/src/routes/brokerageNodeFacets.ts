@@ -135,6 +135,13 @@ import {
   extractBrokerageApiKey,
 } from "../middlewares/brokerageAuth";
 import { verifySessionToken } from "../lib/sessionToken";
+import {
+  extractEnvelopeBriefRefusal,
+  type EnvelopeBriefRefusal,
+} from "../lib/envelopeBriefRefusal";
+
+export type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
+export { extractEnvelopeBriefRefusal };
 
 /** The place_key form the bake writes for a parcel node. */
 export function placeKeyForNode(parcelNodeId: string): string {
@@ -440,6 +447,8 @@ export interface BakedNodeFacetSnapshot {
   facets: unknown;
   snapshotAt: string | null;
   tier2: Tier2Overlay | null;
+  /** Honest envelope refusal derived from raw Tier-1 payload before strip. */
+  envelopeBriefRefusal: EnvelopeBriefRefusal;
   /** Bake coord index. Absent/null when missing, non-finite, or 0,0. */
   queryPoint?: { longitude: number; latitude: number } | null;
 }
@@ -541,6 +550,7 @@ export async function loadBakedNodeFacetSnapshot(
       tier2Raw != null
         ? (sanitizeNodeFacetPayload(tier2Raw) as Tier2Overlay)
         : null,
+    envelopeBriefRefusal: extractEnvelopeBriefRefusal(row.payloadJson),
     queryPoint: usableCityLimitsQueryPoint(
       Number(row.lngRounded),
       Number(row.latRounded),

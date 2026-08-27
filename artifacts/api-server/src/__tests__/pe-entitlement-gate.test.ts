@@ -2,7 +2,7 @@
  * WDLL item 14 — deep-route tier gate (free vs paid vs anonymous).
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
@@ -16,6 +16,11 @@ import {
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
+import {
+  memoryFloodHazardAtoms,
+  resetFloodHazardAtomQueryableForTests,
+  setFloodHazardAtomQueryableForTests,
+} from "../lib/floodHazardFactRead";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -56,6 +61,7 @@ function exchangeAuth(req: Test): Test {
 
 describe("PE entitlement gate", () => {
   beforeEach(async () => {
+    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     await db.insert(users).values([
       { id: USER_FREE, displayName: "Free User" },
       { id: USER_PAID, displayName: "Paid User" },
@@ -72,6 +78,10 @@ describe("PE entitlement gate", () => {
         accessTier: "paid",
       },
     ]);
+  });
+
+  afterEach(() => {
+    resetFloodHazardAtomQueryableForTests();
   });
 
   it("anonymous GET entitlement shows unauthenticated free tier", async () => {
@@ -211,6 +221,12 @@ describe("PE entitlement gate", () => {
     expect(floodSection.data).toBeNull();
     expect(floodSection.refusal.state).toBe("refused");
     expect(floodSection.refusal.code).toBe("unrecognised-producer");
+
+    const envelopeSection = res.body.brief.sections.find(
+      (section: { id: string }) => section.id === "setbacks-envelope",
+    );
+    expect(envelopeSection.data).toBeNull();
+    expect(envelopeSection.refusal.code).toBe("baked-envelope-not-served");
 
     // Disclosure may be empty when envelope is stripped; brief still 200 cited.
     expect(Array.isArray(res.body.brief.disclosure)).toBe(true);
