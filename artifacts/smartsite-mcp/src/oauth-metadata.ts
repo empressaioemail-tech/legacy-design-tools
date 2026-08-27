@@ -19,11 +19,18 @@ export function oauthProtectedResourceMetadata() {
   };
 }
 
+/** Host base for RFC 9728 metadata (no /mcp suffix). */
+export function mcpPublicBaseUrl(): string {
+  const base = process.env.SMARTSITE_MCP_PUBLIC_URL?.trim().replace(/\/$/, "");
+  if (base) return base;
+  return mcpResourceUrl().replace(/\/mcp$/, "") || "https://mcp.smartsite.cloud";
+}
+
 export function wwwAuthenticateHeader(): string {
-  const resource = mcpResourceUrl();
+  const base = mcpPublicBaseUrl();
   return [
     'Bearer error="unauthorized"',
     'error_description="Authorization needed"',
-    `resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+    `resource_metadata="${base}/.well-known/oauth-protected-resource"`,
   ].join(", ");
 }
