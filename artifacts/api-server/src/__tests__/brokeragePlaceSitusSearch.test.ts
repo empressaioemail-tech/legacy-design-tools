@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
 import { brokeragePlaceSitusSearchRouter } from "../routes/brokeragePlaceSitusSearch";
+import type { SitusSearchHit } from "../lib/txgioAddressResolve";
 
 const { searchMock, lookupMock } = vi.hoisted(() => ({
   searchMock: vi.fn(async (_input: { query: string; limit?: number }) => [
@@ -16,7 +17,10 @@ const { searchMock, lookupMock } = vi.hoisted(() => ({
       source: "parcel-situs",
     },
   ]),
-  lookupMock: vi.fn(async (_input: { parcelNodeId: string }) => null),
+  lookupMock: vi.fn(
+    async (_input: { parcelNodeId: string }): Promise<SitusSearchHit | null> =>
+      null,
+  ),
 }));
 
 vi.mock("../lib/txgioAddressResolve", () => ({
