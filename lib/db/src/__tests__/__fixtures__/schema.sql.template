@@ -1564,6 +1564,27 @@ CREATE TABLE @@SCHEMA@@.recorded_instruments (
 );
 
 
+-- Name: records_request_artifacts; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.records_request_artifacts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    job_id uuid NOT NULL,
+    portal_id text NOT NULL,
+    recording_ref text,
+    document_type text,
+    recording_date text,
+    parties text,
+    acquisition_method text NOT NULL,
+    content_sha256 text NOT NULL,
+    byte_size integer,
+    purchase_cost_cents integer,
+    detail_url text,
+    storage_path text,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: records_request_jobs; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.records_request_jobs (
@@ -2810,6 +2831,13 @@ ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_pkey PRIMARY KEY (id);
 
 
+
+-- Name: records_request_artifacts records_request_artifacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_artifacts
+    ADD CONSTRAINT records_request_artifacts_pkey PRIMARY KEY (id);
+
+
 -- Name: records_request_jobs records_request_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
@@ -3739,6 +3767,17 @@ CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instrume
 CREATE INDEX recorded_instruments_listing_install_idx ON @@SCHEMA@@.recorded_instruments USING btree (install_id, listing_key);
 
 
+
+-- Name: records_request_artifacts_job_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_artifacts_job_idx ON @@SCHEMA@@.records_request_artifacts USING btree (job_id, created_at);
+
+
+-- Name: records_request_artifacts_sha256_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_artifacts_sha256_idx ON @@SCHEMA@@.records_request_artifacts USING btree (content_sha256);
+
+
 -- Name: records_request_jobs_active_per_engagement_user_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX records_request_jobs_active_per_engagement_user_uniq ON @@SCHEMA@@.records_request_jobs USING btree (engagement_id, user_id) WHERE (status = ANY (ARRAY['queued'::text, 'running'::text, 'awaiting-purchase-approval'::text]));
@@ -4374,6 +4413,13 @@ ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
 
 ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+
+-- Name: records_request_artifacts records_request_artifacts_job_id_records_request_jobs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_artifacts
+    ADD CONSTRAINT records_request_artifacts_job_id_records_request_jobs_id_fk FOREIGN KEY (job_id) REFERENCES @@SCHEMA@@.records_request_jobs(id) ON DELETE CASCADE;
 
 
 -- Name: records_request_jobs records_request_jobs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

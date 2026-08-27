@@ -59,6 +59,7 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
           sha256: sha256Hex(buffer),
           byteLength: buffer.byteLength,
           label,
+          pngBase64: buffer.toString("base64"),
         };
       } catch (err) {
         return {

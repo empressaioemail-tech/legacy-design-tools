@@ -37,6 +37,17 @@ function buildRecipeContext(job: RecordsRequestJobRow, portalId: string) {
   };
 }
 
+/** Fire-and-forget vision read after successful capture (cortex api-server). */
+function triggerVisionReads(jobId: string): void {
+  const url = process.env.RECORDS_REQUEST_VISION_URL?.trim();
+  if (!url) return;
+  void fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobId }),
+  }).catch(() => {});
+}
+
 async function executeRecipe(
   job: RecordsRequestJobRow,
   portalId: string,
@@ -53,6 +64,16 @@ async function executeRecipe(
       errorCode: null,
       errorMessage: null,
     });
+    const acquired =
+      typeof recipeResult.scopeSearched?.acquisition === "object"
+        ? Number(
+            (recipeResult.scopeSearched.acquisition as Record<string, unknown>)
+              .acquired,
+          )
+        : 0;
+    if (acquired > 0) {
+      triggerVisionReads(job.id);
+    }
     return { jobId: job.id, outcome: "complete" };
   }
 

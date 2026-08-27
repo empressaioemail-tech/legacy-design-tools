@@ -259,6 +259,7 @@ describe("lib/db schema integration", () => {
         "recorded_instruments",
         // P-85 WDLL item 4 — Records Request async jobs.
         "records_request_jobs",
+        "records_request_artifacts",
         "render_outputs",
         // feat/durable-report-run-state — cross-instance plan-review
         // report-run STATE (replaces three instance-local Maps in

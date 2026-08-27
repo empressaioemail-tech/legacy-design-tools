@@ -22,6 +22,7 @@ export interface PageCaptureResult {
   sha256?: string;
   byteLength?: number;
   label?: string;
+  pngBase64?: string;
   errorMessage?: string;
 }
 

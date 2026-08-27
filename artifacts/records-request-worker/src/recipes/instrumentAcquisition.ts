@@ -86,7 +86,10 @@ export async function acquireIndexHits(
       contentSha256: capture.sha256,
       byteSize: capture.byteLength ?? null,
       detailUrl: hit.detailUrl,
-      metadata: { captureLabel: capture.label },
+      metadata: {
+        captureLabel: capture.label,
+        ...(capture.pngBase64 ? { capturePngBase64: capture.pngBase64 } : {}),
+      },
     };
     await insertRecordsRequestArtifact(row);
 
