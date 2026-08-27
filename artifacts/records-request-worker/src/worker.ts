@@ -7,7 +7,14 @@ import {
   markRecordsRequestJobRunning,
   markRecordsRequestJobTerminal,
   type RecordsRequestJobRow,
+  type TerminalJobUpdate,
 } from "./jobStore.js";
+import {
+  loadPortalCanaryStatus,
+  portalCanaryBlocksRun,
+} from "./portalCanaryStore.js";
+import { portalCanaryBlockMessage } from "./portalCanary.js";
+import { deriveRunCostFromScope } from "./runCost.js";
 import {
   resolvePortalIdForJob,
   runRecipeForJob,
@@ -81,22 +88,46 @@ function triggerCompletionNotify(
   }).catch(() => {});
 }
 
+function terminalUpdateWithRunCost(
+  update: TerminalJobUpdate,
+  scopeSearched: Record<string, unknown> | null | undefined,
+  computeMs: number,
+): TerminalJobUpdate {
+  return {
+    ...update,
+    runCost: deriveRunCostFromScope({
+      scopeSearched,
+      computeMs,
+      terminalStatus: update.status,
+    }),
+  };
+}
+
 async function executeRecipe(
   job: RecordsRequestJobRow,
   portalId: string,
   browserFactory: (fn: (b: RecordsRecipeBrowser) => Promise<unknown>) => Promise<unknown>,
 ): Promise<RunRecordsRequestJobResult> {
+  const startedAt = Date.now();
   const recipeResult = (await browserFactory(async (browser) =>
     runRecipeForJob(buildRecipeContext(job, portalId), browser),
   )) as Awaited<ReturnType<typeof runRecipeForJob>>;
+  const computeMs = Date.now() - startedAt;
 
   if (recipeResult.status === "complete") {
-    await markRecordsRequestJobTerminal(job.id, {
-      status: "complete",
-      scopeSearched: recipeResult.scopeSearched ?? null,
-      errorCode: null,
-      errorMessage: null,
-    });
+    await markRecordsRequestJobTerminal(
+      job.id,
+      terminalUpdateWithRunCost(
+        {
+          status: "complete",
+          scopeSearched: recipeResult.scopeSearched ?? null,
+          errorCode: null,
+          errorMessage: null,
+        },
+        recipeResult.scopeSearched,
+        computeMs,
+      ),
+    );
     const acquired =
       typeof recipeResult.scopeSearched?.acquisition === "object"
         ? Number(
@@ -114,20 +145,23 @@ async function executeRecipe(
   if (recipeResult.status === "needs-human") {
     const isPurchase =
       recipeResult.errorCode === "awaiting-purchase-approval";
-    await markRecordsRequestJobTerminal(job.id, {
-      status: isPurchase ? "awaiting-purchase-approval" : "needs-human",
-      scopeSearched: recipeResult.scopeSearched ?? null,
-      errorCode: recipeResult.errorCode ?? "needs-human",
-      errorMessage: recipeResult.errorMessage ?? "Portal requires human clerk",
-      runCost:
-        typeof recipeResult.scopeSearched?.acquisition === "object"
-          ? {
-              purchaseCostCents: (
-                recipeResult.scopeSearched.acquisition as Record<string, unknown>
-              ).purchaseCostCents,
-            }
-          : null,
-    });
+    const terminalStatus = isPurchase
+      ? "awaiting-purchase-approval"
+      : "needs-human";
+    await markRecordsRequestJobTerminal(
+      job.id,
+      terminalUpdateWithRunCost(
+        {
+          status: terminalStatus,
+          scopeSearched: recipeResult.scopeSearched ?? null,
+          errorCode: recipeResult.errorCode ?? "needs-human",
+          errorMessage:
+            recipeResult.errorMessage ?? "Portal requires human clerk",
+        },
+        recipeResult.scopeSearched,
+        computeMs,
+      ),
+    );
     triggerCompletionNotify(
       job.id,
       isPurchase ? "awaiting-purchase-approval" : "needs-human",
@@ -140,11 +174,19 @@ async function executeRecipe(
     };
   }
 
-  await markRecordsRequestJobTerminal(job.id, {
-    status: "failed",
-    errorCode: recipeResult.errorCode ?? "recipe-failed",
-    errorMessage: recipeResult.errorMessage ?? "Records recipe failed",
-  });
+  await markRecordsRequestJobTerminal(
+    job.id,
+    terminalUpdateWithRunCost(
+      {
+        status: "failed",
+        scopeSearched: recipeResult.scopeSearched ?? null,
+        errorCode: recipeResult.errorCode ?? "recipe-failed",
+        errorMessage: recipeResult.errorMessage ?? "Records recipe failed",
+      },
+      recipeResult.scopeSearched,
+      computeMs,
+    ),
+  );
   triggerCompletionNotify(job.id, "failed");
   return {
     jobId: job.id,
@@ -209,6 +251,37 @@ export async function runRecordsRequestJob(
       outcome: "failed",
       errorCode: "portal-unresolved",
       errorMessage: `No portal recipe for countyFips=${job.countyFips}`,
+    };
+  }
+
+  const canaryRow = await loadPortalCanaryStatus(portalId).catch(() => null);
+  if (portalCanaryBlocksRun(canaryRow)) {
+    await markRecordsRequestJobRunning(trimmed);
+    const blockMessage = portalCanaryBlockMessage(
+      canaryRow ?? {
+        portalId,
+        canaryStatus: "lookup-failed",
+        canaryCheckedAt: null,
+        canaryFailureReason: null,
+        canaryRecipeVersion: null,
+      },
+    );
+    await markRecordsRequestJobTerminal(trimmed, {
+      status: "failed",
+      errorCode: "portal-lookup-failed",
+      errorMessage: blockMessage,
+      runCost: deriveRunCostFromScope({
+        scopeSearched: null,
+        computeMs: 0,
+        terminalStatus: "failed",
+      }),
+    });
+    triggerCompletionNotify(trimmed, "failed");
+    return {
+      jobId: trimmed,
+      outcome: "failed",
+      errorCode: "portal-lookup-failed",
+      errorMessage: blockMessage,
     };
   }
 

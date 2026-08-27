@@ -487,6 +487,10 @@ CREATE TABLE @@SCHEMA@@.clerk_portal_terms (
     image_purchase jsonb DEFAULT '{}'::jsonb NOT NULL,
     operator_ruled_at timestamp with time zone,
     operator_ruling_notes text,
+    canary_status text,
+    canary_checked_at timestamp with time zone,
+    canary_failure_reason text,
+    canary_recipe_version text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
