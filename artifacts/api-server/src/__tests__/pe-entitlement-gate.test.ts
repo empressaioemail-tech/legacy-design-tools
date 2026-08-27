@@ -2,7 +2,7 @@
  * WDLL item 14 — deep-route tier gate (free vs paid vs anonymous).
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
