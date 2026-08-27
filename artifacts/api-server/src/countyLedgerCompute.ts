@@ -152,6 +152,8 @@ export interface CountyLedgerPayload {
   railCapabilities: unknown;
   railCapabilitiesProbeReason?: string;
   summary: CountyLedgerSummary;
+  /** Set when a county publish run stamps freshness; absent on pre-publish snapshots. */
+  published_at?: string | null;
 }
 
 /** Drizzle handle from the route singleton or the CLI's own pool. */

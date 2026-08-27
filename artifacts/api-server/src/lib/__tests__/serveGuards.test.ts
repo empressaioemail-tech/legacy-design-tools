@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertAccessPair, assertSitusNotPunctuationOnly } from "./serveGuards";
+import { assertAccessPair, assertSitusNotPunctuationOnly } from "../serveGuards";
 
 describe("serveGuards", () => {
   it("refuses access without both fields", () => {

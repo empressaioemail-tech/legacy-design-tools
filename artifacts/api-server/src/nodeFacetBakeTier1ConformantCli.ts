@@ -3,8 +3,8 @@
  * F-06 Tier-1 facet bake from conformant-v1 hauska_mcp atoms (Bastrop publish).
  */
 import pg from "pg";
-import { TIER1_ADAPTER_KEY } from "./nodeFacetTier1Constants.js";
-import { assertAccessPair, assertSitusNotPunctuationOnly } from "./serveGuards.js";
+import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
+import { assertAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
 
 function placeKeyForNode(parcelNodeId: string): string {
   return `node:${parcelNodeId}`;

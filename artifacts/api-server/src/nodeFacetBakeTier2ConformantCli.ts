@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** F-06 Tier-2 conformant bake stub for publish lane. */
 import pg from "pg";
-import { TIER2_ADAPTER_KEY } from "./nodeFacetTier2Constants.js";
+import { TIER2_ADAPTER_KEY } from "./lib/nodeFacetTier2Constants.js";
 
 function parseArgs(argv: string[]) {
   const county = argv.find((a) => a.startsWith("--county="))?.split("=")[1] ?? "48021";
