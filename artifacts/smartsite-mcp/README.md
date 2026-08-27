@@ -20,8 +20,8 @@ Streamable HTTP MCP at `POST /mcp` with OAuth 2.1 bearer (WorkOS AuthKit). No pu
 |---|---|---|
 | `find_parcel` | live | `GET /api/brokerage/v1/place/situs-search` |
 | `get_smart_site` | live | `POST /api/property-explorer/v1/research/brief` |
-| `list_my_properties` | live | `GET /api/property-explorer/v1/saved-properties` |
-| `run_report` | live | `POST /api/property-explorer/v1/research/brief` (sync R1 read; honesty envelope) |
+| `list_my_properties` | live | Summary list only (no snapshot/chat); sourced from saved-properties |
+| `run_report` | live | `POST /api/property-explorer/v1/research/brief` (sync R1; flattened + `reportReadMode`) |
 | `request_records` | **not_ready** | P-85 blocked |
 | `check_request` | **not_ready** | P-85 blocked |
 | `export_instrument` | **not_ready** | P-87 blocked — no parcel export endpoint |

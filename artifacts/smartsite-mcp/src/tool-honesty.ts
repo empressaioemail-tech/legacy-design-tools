@@ -32,29 +32,74 @@ export function stripEntitlementForExternal(
   };
 }
 
-export type RunReportEnvelope = {
+/** Summary row safe for third-party MCP assistants — no chat snapshots. */
+export type ExternalSavedPropertySummary = {
+  id: string;
+  parcelNodeId: string;
+  label: string | null;
+  updatedAt: string;
+};
+
+export function stripSavedPropertiesForExternal(
+  raw: unknown,
+): ExternalSavedPropertySummary[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const rows: ExternalSavedPropertySummary[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id : "";
+    const parcelNodeId =
+      typeof record.parcelNodeId === "string" ? record.parcelNodeId : "";
+    if (!id || !parcelNodeId) continue;
+    const label =
+      typeof record.label === "string"
+        ? record.label
+        : record.label === null
+          ? null
+          : null;
+    const updatedAt =
+      typeof record.updatedAt === "string"
+        ? record.updatedAt
+        : record.updatedAt != null
+          ? String(record.updatedAt)
+          : "";
+    rows.push({ id, parcelNodeId, label, updatedAt });
+  }
+  return rows;
+}
+
+export type RunReportHonestyFields = {
   reportKind: "R1-baked-snapshot";
-  mode: "baked-snapshot-read";
+  /** How the MCP server delivered the report (sync read). Distinct from cortex `mode`. */
+  reportReadMode: "baked-snapshot-read";
   async: false;
   parcelNodeId: string;
-  brief: unknown;
 };
+
+/** Flattened cortex R1 body plus honesty fields — same `brief.sections` path as get_smart_site. */
+export type RunReportEnvelope = RunReportHonestyFields &
+  Record<string, unknown>;
 
 export function buildRunReportEnvelope(
   parcelNodeId: string,
   cortexBodyText: string,
 ): RunReportEnvelope {
-  let brief: unknown = cortexBodyText;
-  try {
-    brief = JSON.parse(cortexBodyText);
-  } catch {
-    // Non-JSON error bodies stay as raw text under `brief`.
-  }
-  return {
+  const honesty: RunReportHonestyFields = {
     reportKind: "R1-baked-snapshot",
-    mode: "baked-snapshot-read",
+    reportReadMode: "baked-snapshot-read",
     async: false,
     parcelNodeId,
-    brief,
   };
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { ...honesty, ...(parsed as Record<string, unknown>) };
+    }
+  } catch {
+    // Non-JSON error bodies stay under `brief`.
+  }
+  return { ...honesty, brief: cortexBodyText };
 }

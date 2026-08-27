@@ -18,7 +18,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "list_my_properties",
     title: "List my properties",
     description:
-      "List parcels the signed-in user has saved or unlocked in Smart Site.",
+      "List parcels the signed-in user has saved in Smart Site (id, parcel node id, label, updatedAt only — no chat or notes).",
     readiness: "live" as const,
   },
   {
