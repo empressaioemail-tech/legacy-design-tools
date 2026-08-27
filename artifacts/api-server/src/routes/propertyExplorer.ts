@@ -1105,9 +1105,14 @@ router.get(
     }
 
     const parcelNodeIdRaw = req.query.parcelNodeId;
-    const parcelNodeId = (
-      Array.isArray(parcelNodeIdRaw) ? parcelNodeIdRaw[0] : parcelNodeIdRaw
-    )?.trim();
+    const parcelNodeIdUntyped = Array.isArray(parcelNodeIdRaw)
+      ? parcelNodeIdRaw[0]
+      : parcelNodeIdRaw;
+    if (typeof parcelNodeIdUntyped !== "string") {
+      res.status(400).json({ error: "invalid_parcel_node_id" });
+      return;
+    }
+    const parcelNodeId = parcelNodeIdUntyped.trim();
     if (!parcelNodeId || !isValidParcelNodeId(parcelNodeId)) {
       res.status(400).json({ error: "invalid_parcel_node_id" });
       return;
