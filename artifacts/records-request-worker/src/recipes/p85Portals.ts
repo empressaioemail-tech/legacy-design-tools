@@ -40,14 +40,14 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
     countyFips: "48491",
     portalUrl: "https://williamson.tx.publicsearch.us/",
     entryUrl: "https://williamson.tx.publicsearch.us/terms",
-    recipeVersion: "p85-williamson-publicsearch-scaffold-v0",
+    recipeVersion: "p85-williamson-publicsearch-v1",
   },
   {
     portalId: "hays-erss",
     countyFips: "48209",
     portalUrl: "https://erss.co.hays.tx.us",
     entryUrl: "https://erss.co.hays.tx.us/web/user/disclaimer",
-    recipeVersion: "p85-hays-erss-scaffold-v0",
+    recipeVersion: "p85-hays-erss-v1",
   },
   {
     portalId: "caldwell-clerk-web",
@@ -69,7 +69,7 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
 export const P85_DEFAULT_PORTAL_BY_COUNTY: Readonly<Record<string, string>> = {
   "48021": "bastrop-aumentum",
   "48453": "travis-tccsearch",
-  "48491": "williamson-tylerhost",
+  "48491": "williamson-publicsearch",
   "48209": "hays-erss",
   "48055": "caldwell-clerk-web",
   "48309": "mclennan-online-records",

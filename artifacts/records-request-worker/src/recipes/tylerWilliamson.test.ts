@@ -9,6 +9,19 @@ import {
 } from "./tylerWilliamson.js";
 import type { RecordsRecipeBrowser, RecordsRecipeContext } from "./types.js";
 
+function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsRecipeBrowser {
+  return {
+    goto: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+    captureFullPage: vi.fn().mockResolvedValue({ ok: true, sha256: "x", byteLength: 1, label: "t" }),
+    click: vi.fn().mockResolvedValue({ ok: false }),
+    fill: vi.fn().mockResolvedValue({ ok: false }),
+    pressEnter: vi.fn().mockResolvedValue({ ok: false }),
+    pageIncludes: vi.fn().mockResolvedValue(false),
+    currentUrl: vi.fn().mockResolvedValue("https://example.test"),
+    ...overrides,
+  };
+}
+
 const BASE_CTX: RecordsRecipeContext = {
   jobId: "job-1",
   countyFips: "48491",
@@ -29,7 +42,7 @@ describe("tylerWilliamsonRecipeSteps", () => {
 describe("runTylerWilliamsonRecipe", () => {
   it("completes with scaffold scope when disclaimer is reachable", async () => {
     const goto = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const browser: RecordsRecipeBrowser = { goto };
+    const browser = mockBrowser({ goto });
 
     const result = await runTylerWilliamsonRecipe(BASE_CTX, browser);
 
@@ -43,9 +56,9 @@ describe("runTylerWilliamsonRecipe", () => {
 
   it("fails closed when disclaimer navigation is unreachable", async () => {
     const nav = { ok: false, status: 503, errorMessage: "HTTP 503" };
-    const browser: RecordsRecipeBrowser = {
+    const browser = mockBrowser({
       goto: vi.fn().mockResolvedValue(nav),
-    };
+    });
 
     const result = await runTylerWilliamsonRecipe(BASE_CTX, browser);
 
@@ -56,7 +69,7 @@ describe("runTylerWilliamsonRecipe", () => {
 
   it("does not attempt login in scaffold mode", async () => {
     const goto = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    await runTylerWilliamsonRecipe(BASE_CTX, { goto });
+    await runTylerWilliamsonRecipe(BASE_CTX, mockBrowser({ goto }));
 
     const loginStep = tylerWilliamsonRecipeSteps().find(
       (s) => s.kind === "login-placeholder",

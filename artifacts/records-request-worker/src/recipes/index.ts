@@ -8,13 +8,21 @@ import {
   portalConfigById,
   type P85PortalConfig,
 } from "./p85Portals.js";
+import { runPublicsearchRecipe } from "./publicsearchSearch.js";
 import { runPortalReachabilityRecipe } from "./portalReachability.js";
+import {
+  runTylerSelfServiceSearch,
+  tylerSurfaceFromPortal,
+} from "./tylerSelfServiceSearch.js";
 import type {
   RecordsRecipeBrowser,
   RecordsRecipeContext,
   RecordsRecipeDefinition,
   RecordsRecipeResult,
 } from "./types.js";
+
+const TYLER_SEARCH_PORTAL_IDS = new Set(["williamson-tylerhost", "hays-erss"]);
+const PUBLICSEARCH_PORTAL_IDS = new Set(["williamson-publicsearch"]);
 
 function recipeForPortalConfig(
   portal: P85PortalConfig,
@@ -23,9 +31,26 @@ function recipeForPortalConfig(
     portalId: portal.portalId,
     countyFips: portal.countyFips,
     recipeVersion: portal.recipeVersion,
-    run: (ctx, browser) =>
-      runPortalReachabilityRecipe(ctx, portal, browser),
+    run: (ctx, browser) => runRecipeForPortalConfig(ctx, portal, browser),
   };
+}
+
+async function runRecipeForPortalConfig(
+  ctx: RecordsRecipeContext,
+  portal: P85PortalConfig,
+  browser: RecordsRecipeBrowser,
+): Promise<RecordsRecipeResult> {
+  if (TYLER_SEARCH_PORTAL_IDS.has(portal.portalId)) {
+    return runTylerSelfServiceSearch(
+      ctx,
+      tylerSurfaceFromPortal(portal),
+      browser,
+    );
+  }
+  if (PUBLICSEARCH_PORTAL_IDS.has(portal.portalId)) {
+    return runPublicsearchRecipe(ctx, portal, browser);
+  }
+  return runPortalReachabilityRecipe(ctx, portal, browser);
 }
 
 const REGISTRY: readonly RecordsRecipeDefinition[] = P85_PORTALS.map(

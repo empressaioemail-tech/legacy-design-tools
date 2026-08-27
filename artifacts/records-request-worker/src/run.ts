@@ -76,7 +76,7 @@ async function startHttpServer(port: number): Promise<void> {
     }
 
     const result = await runRecordsRequestJob(jobId);
-    const status = result.outcome === "complete" ? 200 : result.outcome === "refused" ? 409 : 500;
+    const status = result.outcome === "complete" ? 200 : result.outcome === "refused" ? 409 : result.outcome === "needs-human" ? 202 : 500;
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
   });
