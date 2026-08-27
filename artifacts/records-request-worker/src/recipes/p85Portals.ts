@@ -18,14 +18,14 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
     countyFips: "48021",
     portalUrl: "https://cc.co.bastrop.tx.us/RealEstate",
     entryUrl: "https://cc.co.bastrop.tx.us/RealEstate/SearchTerms.aspx",
-    recipeVersion: "p85-bastrop-aumentum-scaffold-v0",
+    recipeVersion: "p85-bastrop-aumentum-v1",
   },
   {
     portalId: "travis-tccsearch",
     countyFips: "48453",
     portalUrl: "https://www.tccsearch.org",
     entryUrl: "https://www.tccsearch.org/RealEstate/Disclaimer.aspx",
-    recipeVersion: "p85-travis-tccsearch-scaffold-v0",
+    recipeVersion: "p85-travis-tccsearch-v1",
   },
   {
     portalId: "williamson-tylerhost",
