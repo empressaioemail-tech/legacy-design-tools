@@ -99,7 +99,7 @@ function terminalUpdateWithRunCost(
       scopeSearched,
       computeMs,
       terminalStatus: update.status,
-    }),
+    }) as Record<string, unknown>,
   };
 }
 
@@ -274,7 +274,7 @@ export async function runRecordsRequestJob(
         scopeSearched: null,
         computeMs: 0,
         terminalStatus: "failed",
-      }),
+      }) as Record<string, unknown>,
     });
     triggerCompletionNotify(trimmed, "failed");
     return {

@@ -49,7 +49,7 @@ export async function runPortalCanaryForPortal(
       portalId,
       ok: check.ok,
       recipeVersion: check.recipeVersion,
-      reason: check.reason,
+      reason: check.ok ? undefined : check.reason,
     });
   }
 
