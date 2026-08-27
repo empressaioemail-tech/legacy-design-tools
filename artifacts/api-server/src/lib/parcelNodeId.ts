@@ -63,3 +63,18 @@ export function parcelNodeId(
   if (!normalized) return null;
   return `${fips}:${normalized}`;
 }
+
+const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** Parse a canonical parcel node id into county FIPS + prop-id suffix. */
+export function parseParcelNodeId(
+  nodeId: string,
+): { countyFips: string; propId: string } | null {
+  const trimmed = nodeId.trim();
+  if (!PARCEL_NODE_ID_RE.test(trimmed)) return null;
+  const idx = trimmed.indexOf(":");
+  return {
+    countyFips: trimmed.slice(0, idx),
+    propId: trimmed.slice(idx + 1),
+  };
+}

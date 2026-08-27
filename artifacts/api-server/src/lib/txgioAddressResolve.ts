@@ -63,7 +63,7 @@ import {
   pointInGeometry,
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
-import { parcelNodeId } from "./parcelNodeId";
+import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
 import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
@@ -434,6 +434,53 @@ export interface SitusSearchHit {
   parcelNodeId: string;
   situsAddress: string;
   countyFips: string;
+}
+
+/**
+ * Resolve situs label for a typed parcel node id (`48021:34137`). Returns a
+ * prefix-search hit shape when the store row carries a non-empty situs;
+ * null when the parcel is absent or situs is honestly empty (never a
+ * fabricated address).
+ */
+export async function lookupSitusByParcelNodeId(input: {
+  parcelNodeId: string;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit | null> {
+  const parsed = parseParcelNodeId(input.parcelNodeId);
+  if (!parsed) return null;
+
+  const database = input.database ?? defaultDb;
+  const rows = (await database
+    .select({
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, parsed.countyFips),
+        eq(txgioParcel.propId, parsed.propId),
+      ),
+    )
+    .limit(8)) as {
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  for (const r of rows) {
+    const rawPropId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!rawPropId || !situs) continue;
+    const nodeId = parcelNodeId(parsed.countyFips, rawPropId);
+    if (nodeId !== input.parcelNodeId.trim()) continue;
+    return {
+      parcelNodeId: nodeId,
+      situsAddress: situs,
+      countyFips: parsed.countyFips,
+    };
+  }
+
+  return null;
 }
 
 const SITUS_SEARCH_MAX_LIMIT = 10;
