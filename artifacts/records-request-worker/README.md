@@ -54,6 +54,13 @@ gcloud run jobs execute records-request-worker \
 
 | portalId              | county | status   |
 | --------------------- | ------ | -------- |
+| bastrop-aumentum      | 48021  | scaffold |
+| travis-tccsearch      | 48453  | scaffold |
 | williamson-tylerhost  | 48491  | scaffold |
+| williamson-publicsearch | 48491 | scaffold |
+| hays-erss             | 48209  | scaffold |
+| caldwell-clerk-web    | 48055  | scaffold |
+| mclennan-online-records | 48309 | scaffold |
 
-Other P-85 counties fail closed with `portal-unresolved` until recipes land.
+Reachability scaffold only: opens the portal entry surface. Login, search, and
+document purchase are follow-on cards.

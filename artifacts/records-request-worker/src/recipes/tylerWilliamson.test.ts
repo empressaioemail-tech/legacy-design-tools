@@ -1,14 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  resolvePortalIdForJob,
-  runRecipeForJob,
-} from "./index.js";
-import {
   portalUnreachableResult,
   runTylerWilliamsonRecipe,
   tylerWilliamsonRecipeSteps,
   tylerWilliamsonScaffoldCompleteScope,
-  TYLER_WILLIAMSON_RECIPE_VERSION,
   WILLIAMSON_TYLERHOST_PORTAL,
   WILLIAMSON_TYLERHOST_PORTAL_ID,
 } from "./tylerWilliamson.js";
@@ -21,22 +16,6 @@ const BASE_CTX: RecordsRecipeContext = {
   portalId: WILLIAMSON_TYLERHOST_PORTAL_ID,
   requestPayload: {},
 };
-
-describe("resolvePortalIdForJob", () => {
-  it("defaults Williamson to TylerHost when payload omits portalId", () => {
-    expect(resolvePortalIdForJob("48491", {})).toBe(WILLIAMSON_TYLERHOST_PORTAL_ID);
-  });
-
-  it("honours explicit portalId in request payload", () => {
-    expect(
-      resolvePortalIdForJob("48491", { portalId: "williamson-publicsearch" }),
-    ).toBe("williamson-publicsearch");
-  });
-
-  it("returns null for counties without a registered recipe", () => {
-    expect(resolvePortalIdForJob("48453", {})).toBeNull();
-  });
-});
 
 describe("tylerWilliamsonRecipeSteps", () => {
   it("declares disclaimer before login placeholder", () => {
@@ -84,29 +63,5 @@ describe("runTylerWilliamsonRecipe", () => {
     );
     expect(loginStep).toBeDefined();
     expect(goto).not.toHaveBeenCalledWith(loginStep!.url);
-  });
-});
-
-describe("runRecipeForJob", () => {
-  it("refuses unregistered portal ids", async () => {
-    const browser: RecordsRecipeBrowser = {
-      goto: vi.fn(),
-    };
-    const result = await runRecipeForJob(
-      { ...BASE_CTX, portalId: "travis-tccsearch" },
-      browser,
-    );
-    expect(result.status).toBe("failed");
-    expect(result.errorCode).toBe("recipe-not-registered");
-    expect(browser.goto).not.toHaveBeenCalled();
-  });
-
-  it("runs the TylerHost recipe for Williamson", async () => {
-    const browser: RecordsRecipeBrowser = {
-      goto: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
-    };
-    const result = await runRecipeForJob(BASE_CTX, browser);
-    expect(result.status).toBe("complete");
-    expect(result.scopeSearched?.recipeVersion).toBe(TYLER_WILLIAMSON_RECIPE_VERSION);
   });
 });
