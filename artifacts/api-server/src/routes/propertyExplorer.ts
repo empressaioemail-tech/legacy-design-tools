@@ -26,6 +26,10 @@ import {
   isValidParcelNodeId,
   loadBakedNodeFacetSnapshot,
 } from "./brokerageNodeFacets";
+import {
+  loadFloodHazardFactAtom,
+} from "../lib/floodHazardFactRead";
+import { buildR1Brief } from "../lib/r1BriefCompose";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
@@ -53,72 +57,10 @@ const router: IRouter = Router();
 
 type JsonRecord = Record<string, unknown>;
 
-type BriefSection = {
-  id: "zoning" | "setbacks-envelope" | "flood" | "land-use";
-  title: string;
-  data: unknown;
-  /**
-   * Present when the section has no data BECAUSE a source was refused, rather
-   * than because nothing was ever measured. Carries the refusal verbatim so a
-   * reader can tell the two apart (SS-W16: absent, zero and refused are three
-   * different states and must never collapse into one empty section).
-   */
-  refusal?: unknown;
-  citations: string[];
-};
-
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : null;
-}
-
-function urlsFrom(value: unknown): string[] {
-  const urls = new Set<string>();
-  const visit = (candidate: unknown, key?: string): void => {
-    if (typeof candidate === "string") {
-      if (
-        key &&
-        /(?:citation|source).*url|url.*(?:citation|source)/i.test(key) &&
-        /^https?:\/\//i.test(candidate)
-      ) {
-        urls.add(candidate);
-      }
-      return;
-    }
-    if (Array.isArray(candidate)) {
-      candidate.forEach((item) => visit(item, key));
-      return;
-    }
-    const record = asRecord(candidate);
-    if (record) {
-      Object.entries(record).forEach(([nestedKey, nestedValue]) =>
-        visit(nestedValue, nestedKey),
-      );
-    }
-  };
-  visit(value);
-  return [...urls];
-}
-
-function verbatimValues(value: unknown, keys: ReadonlySet<string>): string[] {
-  const values = new Set<string>();
-  const visit = (candidate: unknown): void => {
-    if (Array.isArray(candidate)) {
-      candidate.forEach(visit);
-      return;
-    }
-    const record = asRecord(candidate);
-    if (!record) return;
-    for (const [key, nested] of Object.entries(record)) {
-      if (keys.has(key) && typeof nested === "string" && nested.trim()) {
-        values.add(nested);
-      }
-      visit(nested);
-    }
-  };
-  visit(value);
-  return [...values];
 }
 
 function buildR1RunId(parcelNodeId: string, bakedAt: string | null): string {
@@ -136,51 +78,6 @@ function parcelNodeIdFromR1RunId(runId: string): string | null {
   } catch {
     return null;
   }
-}
-
-function buildR1Brief(facets: unknown, tier2: unknown): {
-  sections: BriefSection[];
-  disclosure: string[];
-  citations: string[];
-} {
-  const root = asRecord(facets) ?? {};
-  const baseFacts = asRecord(root.baseFacts) ?? {};
-  const envelope = root.envelope ?? null;
-  const sections: BriefSection[] = [
-    { id: "zoning", title: "Zoning", data: root.zoning ?? null, citations: urlsFrom(root.zoning) },
-    {
-      id: "setbacks-envelope",
-      title: "Setbacks and buildable envelope",
-      data: envelope,
-      citations: urlsFrom(envelope),
-    },
-    {
-      // The baked Tier-2 flood facet is retired at the read path (SS-W16), so
-      // `tier2.flood` is structurally null. The R1 brief must not render that
-      // as a silent empty section — it carries the refusal instead, so a paid
-      // reader sees "this determination was withdrawn and why", never a blank.
-      id: "flood",
-      title: "Flood",
-      data: null,
-      refusal: asRecord(tier2)?.floodDisposition ?? null,
-      citations: [],
-    },
-    {
-      id: "land-use",
-      title: "Land use",
-      data: baseFacts.landUse ?? null,
-      citations: urlsFrom(baseFacts.landUse),
-    },
-  ];
-  const disclosures = verbatimValues(
-    { facets, tier2 },
-    new Set(["districtNote", "disclosure", "emptyReason"]),
-  );
-  return {
-    sections,
-    disclosure: disclosures,
-    citations: [...new Set(sections.flatMap((section) => section.citations))],
-  };
 }
 
 function manifestLayers(facets: unknown, tier2: unknown): {
@@ -639,7 +536,10 @@ router.post(
       res.status(400).json({ error: "invalid_parcel_node_id" });
       return;
     }
-    const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+    const [snapshot, floodHazardFact] = await Promise.all([
+      loadBakedNodeFacetSnapshot(parcelNodeId),
+      loadFloodHazardFactAtom(parcelNodeId),
+    ]);
     if (!snapshot) {
       res.status(404).json({
         error: "baked_snapshot_not_found",
@@ -651,7 +551,10 @@ router.post(
     const root = asRecord(snapshot.facets);
     const bakedAt =
       typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
-    const brief = buildR1Brief(snapshot.facets, snapshot.tier2);
+    const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
+      floodHazardFact,
+      envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    });
     res.json({
       runId: buildR1RunId(parcelNodeId, bakedAt),
       reportFamily: "R1",
