@@ -5,10 +5,10 @@ steps:
       - -f
       - artifacts/records-request-worker/Dockerfile
       - -t
-      - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/records-request-worker:p85-v5
+      - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/records-request-worker:p85-v6
       - -t
       - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/records-request-worker:latest
       - .
 images:
-  - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/records-request-worker:p85-v5
+  - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/records-request-worker:p85-v6
   - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/records-request-worker:latest

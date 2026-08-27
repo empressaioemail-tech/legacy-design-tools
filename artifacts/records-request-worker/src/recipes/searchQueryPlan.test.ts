@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSearchQueryPlan,
+  normalizeOwnerNameForClerkSearch,
   parseSubdivisionLotBlockFromLegal,
 } from "./searchQueryPlan.js";
 
@@ -34,6 +35,37 @@ describe("buildSearchQueryPlan", () => {
         lot: null,
       }),
     ).toEqual([]);
+  });
+
+  it("strips leading THE from owner-name clerk query", () => {
+    const plan = buildSearchQueryPlan({
+      propId: "34161",
+      ownerName: "THE DIOCESE OF AUSTIN",
+      situsAddress: null,
+      legalDescription: null,
+      subdivision: null,
+      block: null,
+      lot: null,
+    });
+    expect(plan).toEqual([
+      {
+        kind: "owner-name",
+        query: "DIOCESE OF AUSTIN",
+        captureLabel: "owner-name-results",
+      },
+    ]);
+  });
+});
+
+describe("normalizeOwnerNameForClerkSearch", () => {
+  it("removes leading THE", () => {
+    expect(normalizeOwnerNameForClerkSearch("THE DIOCESE OF AUSTIN")).toBe(
+      "DIOCESE OF AUSTIN",
+    );
+  });
+
+  it("leaves names without THE unchanged", () => {
+    expect(normalizeOwnerNameForClerkSearch("JANE DOE")).toBe("JANE DOE");
   });
 });
 
