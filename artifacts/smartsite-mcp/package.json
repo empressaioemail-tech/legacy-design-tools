@@ -17,6 +17,7 @@
     "drizzle-orm": "catalog:",
     "express": "^4.21.0",
     "jose": "^6.0.11",
+    "pg": "^8.20.0",
     "zod": "catalog:"
   },
   "devDependencies": {

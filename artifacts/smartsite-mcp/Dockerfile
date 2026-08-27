@@ -1,4 +1,4 @@
-# Smart Site MCP — Cloud Run (Node 22 for pnpm 11 via corepack)
+# Smart Site MCP — Cloud Run (Node 22 for pnpm 10 via corepack)
 FROM node:22-bookworm-slim
 
 WORKDIR /app
@@ -18,12 +18,10 @@ RUN corepack enable && corepack prepare pnpm@10.28.0 --activate && pnpm install 
 COPY artifacts/smartsite-mcp ./artifacts/smartsite-mcp
 COPY tsconfig.base.json ./
 
-RUN cd /app/lib/db && pnpm exec tsc -p tsconfig.json
-
 WORKDIR /app/artifacts/smartsite-mcp
-RUN pnpm build
+RUN pnpm add -D esbuild && pnpm exec esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.mjs --external:dotenv --external:express --external:jose --external:drizzle-orm --external:pg --external:zod --external:"@modelcontextprotocol/*"
 
 ENV NODE_ENV=production
 EXPOSE 8080
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/server.mjs"]
