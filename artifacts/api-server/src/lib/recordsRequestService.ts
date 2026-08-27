@@ -12,6 +12,7 @@ import {
   listRecordsRequestJobsForEngagement,
   recordsRequestJobToWire,
 } from "./recordsRequestJobWorker";
+import { resolveRecordsSearchTerms } from "./recordsSearchTerms";
 
 export function parcelKeyCountyFips(parcelKey: string): string | null {
   if (!parcelKey.startsWith("apn:")) return null;
@@ -125,6 +126,11 @@ export async function createRecordsRequestJob(
   }
 
   try {
+    const searchTerms = await resolveRecordsSearchTerms({
+      parcelKey,
+      countyFips,
+    });
+
     const enqueued = await enqueueRecordsRequestJob({
       engagementId,
       userId,
@@ -137,6 +143,7 @@ export async function createRecordsRequestJob(
         parcelOrigin: parcel.origin,
         briefingSourceId: parcel.briefingSourceId,
         layerKind: parcel.layerKind,
+        ...(searchTerms ? { searchTerms } : {}),
       },
       log,
     });

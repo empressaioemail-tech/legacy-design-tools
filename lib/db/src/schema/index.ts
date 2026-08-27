@@ -111,4 +111,5 @@ export * from "./railEngineBinding";
 export * from "./countyRailStatic";
 export * from "./clerkPortalTerms";
 export * from "./recordsRequestJobs";
+export * from "./recordsRequestArtifacts";
 // smartFiles.ts stays on disk until G-58b drops the tables. Do not re-export.

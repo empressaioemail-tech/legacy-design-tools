@@ -17,7 +17,12 @@ import { withPlaywrightBrowser } from "./playwrightBrowser.js";
 
 export interface RunRecordsRequestJobResult {
   jobId: string;
-  outcome: "complete" | "failed" | "refused";
+  outcome:
+    | "complete"
+    | "failed"
+    | "needs-human"
+    | "awaiting-purchase-approval"
+    | "refused";
   errorCode?: string;
   errorMessage?: string;
 }
@@ -30,6 +35,17 @@ function buildRecipeContext(job: RecordsRequestJobRow, portalId: string) {
     portalId,
     requestPayload: job.requestPayload ?? {},
   };
+}
+
+/** Fire-and-forget vision read after successful capture (cortex api-server). */
+function triggerVisionReads(jobId: string): void {
+  const url = process.env.RECORDS_REQUEST_VISION_URL?.trim();
+  if (!url) return;
+  void fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobId }),
+  }).catch(() => {});
 }
 
 async function executeRecipe(
@@ -48,7 +64,42 @@ async function executeRecipe(
       errorCode: null,
       errorMessage: null,
     });
+    const acquired =
+      typeof recipeResult.scopeSearched?.acquisition === "object"
+        ? Number(
+            (recipeResult.scopeSearched.acquisition as Record<string, unknown>)
+              .acquired,
+          )
+        : 0;
+    if (acquired > 0) {
+      triggerVisionReads(job.id);
+    }
     return { jobId: job.id, outcome: "complete" };
+  }
+
+  if (recipeResult.status === "needs-human") {
+    const isPurchase =
+      recipeResult.errorCode === "awaiting-purchase-approval";
+    await markRecordsRequestJobTerminal(job.id, {
+      status: isPurchase ? "awaiting-purchase-approval" : "needs-human",
+      scopeSearched: recipeResult.scopeSearched ?? null,
+      errorCode: recipeResult.errorCode ?? "needs-human",
+      errorMessage: recipeResult.errorMessage ?? "Portal requires human clerk",
+      runCost:
+        typeof recipeResult.scopeSearched?.acquisition === "object"
+          ? {
+              purchaseCostCents: (
+                recipeResult.scopeSearched.acquisition as Record<string, unknown>
+              ).purchaseCostCents,
+            }
+          : null,
+    });
+    return {
+      jobId: job.id,
+      outcome: isPurchase ? "awaiting-purchase-approval" : "needs-human",
+      errorCode: recipeResult.errorCode,
+      errorMessage: recipeResult.errorMessage,
+    };
   }
 
   await markRecordsRequestJobTerminal(job.id, {

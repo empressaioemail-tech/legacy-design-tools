@@ -1366,23 +1366,23 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
       playwright:
-        specifier: ^1.59.1
+        specifier: 1.59.1
         version: 1.59.1
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^25.3.3
         version: 25.3.5
       '@types/pg':
         specifier: ^8.18.0
         version: 8.18.0
       tsx:
-        specifier: 'catalog:'
+        specifier: ^4.21.0
         version: 4.21.0
       typescript:
         specifier: ~5.9.2
         version: 5.9.3
       vitest:
-        specifier: 'catalog:'
+        specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@16.8.1)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
 
   artifacts/smartsite-mcp:
