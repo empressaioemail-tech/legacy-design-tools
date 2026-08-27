@@ -9,6 +9,15 @@ export type SearchQueryKind =
   | "legal-description"
   | "subdivision-lot-block";
 
+/** Clerk "begins with" searches often miss when CAD owner includes a leading THE. */
+export function normalizeOwnerNameForClerkSearch(ownerName: string): string {
+  let name = ownerName.trim().replace(/\s+/g, " ");
+  if (/^the\s+/i.test(name)) {
+    name = name.replace(/^the\s+/i, "").trim();
+  }
+  return name;
+}
+
 export interface PlannedSearchQuery {
   kind: SearchQueryKind;
   query: string;
@@ -46,11 +55,14 @@ export function buildSearchQueryPlan(
   const lot = terms.lot ?? parsed.lot;
 
   if (terms.ownerName?.trim()) {
-    plan.push({
-      kind: "owner-name",
-      query: terms.ownerName.trim(),
-      captureLabel: "owner-name-results",
-    });
+    const ownerQuery = normalizeOwnerNameForClerkSearch(terms.ownerName);
+    if (ownerQuery) {
+      plan.push({
+        kind: "owner-name",
+        query: ownerQuery,
+        captureLabel: "owner-name-results",
+      });
+    }
   }
 
   if (subdivision || (block && lot)) {
