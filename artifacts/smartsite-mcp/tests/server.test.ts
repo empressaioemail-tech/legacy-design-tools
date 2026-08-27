@@ -22,8 +22,20 @@ describe("smartsite-mcp HTTP surface", () => {
       expect(body).toMatchObject({
         service: "smartsite-mcp",
         name: "Smart Site",
+        failureDomain: "smartsite-mcp",
       });
       expect(body.status).toMatch(/^(ok|degraded)$/);
+      expect(body).not.toHaveProperty("dependencies");
+    });
+  });
+
+  it("GET /health/dependencies exposes Hauska MCP separately", async () => {
+    await withHttpServer(app, async (base) => {
+      const res = await fetch(`${base}/health/dependencies`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.service).toBe("smartsite-mcp-dependencies");
+      expect(body.dependencies).toHaveProperty("hauska_mcp");
     });
   });
 

@@ -54,6 +54,7 @@ export type FloodHazardFactPresent = {
   baseFloodElevation: number | null;
   sourceAdapter: string | null;
   sourceVintage: string | null;
+  sourceCitation: string | null;
   evaluatedAt: string | null;
 };
 
@@ -225,6 +226,7 @@ function interpretBody(
     baseFloodElevation: asNullableNumber(rec.baseFloodElevation),
     sourceAdapter: asNullableString(rec.sourceAdapter),
     sourceVintage: asNullableString(rec.sourceVintage),
+    sourceCitation: asNullableString(rec.sourceCitation),
     evaluatedAt: asNullableString(rec.evaluatedAt),
   };
 }

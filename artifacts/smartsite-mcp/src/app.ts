@@ -9,7 +9,11 @@ import {
   type AuthConfig,
 } from "./auth.js";
 import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
-import { buildHealthReport, renderLlmsTxt } from "./health.js";
+import {
+  buildDependenciesHealthReport,
+  buildHealthReport,
+  renderLlmsTxt,
+} from "./health.js";
 import {
   authkitIssuer,
   mcpResourceUrl,
@@ -56,6 +60,10 @@ export function createSmartsiteMcpApp(
 
   app.get("/health", (_req, res) => {
     res.json(buildHealthReport());
+  });
+
+  app.get("/health/dependencies", async (_req, res) => {
+    res.json(await buildDependenciesHealthReport());
   });
 
   app.get("/llms.txt", (_req, res) => {

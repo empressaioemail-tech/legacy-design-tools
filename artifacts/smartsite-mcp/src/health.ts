@@ -1,4 +1,9 @@
 import { SERVER_NAME, SERVER_VERSION, SMARTSITE_MCP_TOOLS } from "./constants.js";
+import {
+  loadHauskaMcpConfig,
+  probeHauskaMcpHealth,
+  type HauskaDepHealth,
+} from "./hauska-client.js";
 
 export type HealthReport = {
   status: "ok" | "degraded";
@@ -8,6 +13,15 @@ export type HealthReport = {
   authConfigured: boolean;
   cortexConfigured: boolean;
   revision: string;
+  /** Smart Site liveness only; Hauska MCP is on GET /health/dependencies. */
+  failureDomain: "smartsite-mcp";
+};
+
+export type DependenciesHealthReport = {
+  service: "smartsite-mcp-dependencies";
+  dependencies: {
+    hauska_mcp: HauskaDepHealth;
+  };
 };
 
 export function buildHealthReport(): HealthReport {
@@ -26,6 +40,16 @@ export function buildHealthReport(): HealthReport {
     authConfigured,
     cortexConfigured,
     revision: process.env.K_REVISION ?? "local",
+    failureDomain: "smartsite-mcp",
+  };
+}
+
+export async function buildDependenciesHealthReport(): Promise<DependenciesHealthReport> {
+  const hauskaConfig = loadHauskaMcpConfig();
+  const hauska_mcp = await probeHauskaMcpHealth(hauskaConfig);
+  return {
+    service: "smartsite-mcp-dependencies",
+    dependencies: { hauska_mcp },
   };
 }
 
