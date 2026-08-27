@@ -18,6 +18,7 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
     pressEnter: vi.fn().mockResolvedValue({ ok: false }),
     pageIncludes: vi.fn().mockResolvedValue(false),
     currentUrl: vi.fn().mockResolvedValue("https://example.test"),
+    extractResultRows: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }

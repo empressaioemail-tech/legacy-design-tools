@@ -7,6 +7,7 @@
 
 import type { P85PortalConfig } from "./p85Portals.js";
 import { resolveSearchTerms } from "./searchTerms.js";
+import { finalizeIndexSearchWithAcquisition } from "./searchPostProcess.js";
 import type {
   RecordsRecipeBrowser,
   RecordsRecipeContext,
@@ -240,13 +241,16 @@ export async function runTylerSelfServiceSearch(
   });
   stepsReached.push("capture-results");
 
-  return {
-    status: "complete",
-    scopeSearched: tylerSearchCompleteScope(ctx, portal, {
+  return finalizeIndexSearchWithAcquisition({
+    ctx,
+    portalId: portal.portalId,
+    browser,
+    scope: tylerSearchCompleteScope(ctx, portal, {
       queries,
       captures,
       resultCount: null,
       stepsReached,
     }),
-  };
+    resultCount: null,
+  });
 }

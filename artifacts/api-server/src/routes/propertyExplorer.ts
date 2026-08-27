@@ -46,6 +46,7 @@ import {
   createRecordsRequestJob,
   listRecordsRequestJobsWire,
 } from "../lib/recordsRequestService";
+import { processRecordsRequestJobVisionReads } from "../lib/recordsRequestVisionRead";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -1150,6 +1151,32 @@ const PeRecordsRequestPostSchema = z
 function peReqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
 }
+
+/**
+ * P-85 item 7 — service-token hook for worker to trigger vision reads after capture.
+ */
+router.post(
+  "/property-explorer/v1/internal/records-request/vision-read",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const jobId =
+      typeof req.body?.jobId === "string" ? req.body.jobId.trim() : "";
+    if (!jobId) {
+      res.status(400).json({ error: "missing_job_id" });
+      return;
+    }
+    try {
+      const results = await processRecordsRequestJobVisionReads(jobId);
+      res.status(200).json({ jobId, results });
+    } catch (err) {
+      peReqLog(req).error({ err, jobId }, "records request vision-read failed");
+      res.status(500).json({
+        error: "vision_read_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 /**
  * P-85 PE bridge — start Records Request by parcelNodeId (no engagementId

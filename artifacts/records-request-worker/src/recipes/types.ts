@@ -22,12 +22,18 @@ export interface PageCaptureResult {
   sha256?: string;
   byteLength?: number;
   label?: string;
+  pngBase64?: string;
   errorMessage?: string;
 }
 
 export interface BrowserActionResult {
   ok: boolean;
   errorMessage?: string;
+}
+
+export interface ResultRowExtract {
+  cells: string[];
+  link: string | null;
 }
 
 /** Minimal browser seam — real Playwright adapter in run.ts; mocks in unit tests. */
@@ -39,6 +45,7 @@ export interface RecordsRecipeBrowser {
   pressEnter(): Promise<BrowserActionResult>;
   pageIncludes(text: string): Promise<boolean>;
   currentUrl(): Promise<string>;
+  extractResultRows(): Promise<ResultRowExtract[]>;
 }
 
 export interface RecordsRecipeResult {

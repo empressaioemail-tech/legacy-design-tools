@@ -6,6 +6,7 @@
 
 import type { P85PortalConfig } from "./p85Portals.js";
 import { resolveSearchTerms } from "./searchTerms.js";
+import { finalizeIndexSearchWithAcquisition } from "./searchPostProcess.js";
 import type {
   RecordsRecipeBrowser,
   RecordsRecipeContext,
@@ -169,9 +170,11 @@ export async function runPublicsearchRecipe(
     timestamp: new Date().toISOString(),
   });
 
-  return {
-    status: "complete",
-    scopeSearched: {
+  return finalizeIndexSearchWithAcquisition({
+    ctx,
+    portalId: portal.portalId,
+    browser,
+    scope: {
       portalId: portal.portalId,
       countyFips: portal.countyFips,
       parcelKey: ctx.parcelKey,
@@ -184,7 +187,8 @@ export async function runPublicsearchRecipe(
       documentTypes: "all",
       dateRange: "portal-default",
     },
-  };
+    resultCount: null,
+  });
 }
 
 async function tryClickFirst(
