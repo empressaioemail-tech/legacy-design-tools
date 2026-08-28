@@ -19,8 +19,10 @@ import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
 import {
+  askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
   normalizeGetSmartSiteResponseText,
+  sanitizeAskTheMapErrorBody,
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
@@ -80,10 +82,12 @@ function inputSchemaFor(name: SmartsiteToolName) {
     case "check_request":
       return z.object({ jobId: z.string().min(1) });
     case "ask_the_map":
-      return z.object({
-        parcelNodeId: z.string().min(1),
-        message: z.string().min(1),
-      });
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          message: z.string().min(1),
+        })
+        .passthrough();
     case "export_instrument":
       return z.object({
         parcelNodeId: z.string().min(1),
@@ -296,7 +300,25 @@ export function registerTools(server: McpServer): void {
             return executeExportInstrument({ parcelNodeId, kind });
           }
           case "ask_the_map": {
-            const { parcelNodeId, message } = args as {
+            const record = args as Record<string, unknown>;
+            if (askTheMapArgsLeakInternalFields(record)) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: sanitizeAskTheMapErrorBody(
+                      JSON.stringify({
+                        status: "invalid_request",
+                        message:
+                          "ask_the_map accepts parcelNodeId and message.",
+                      }),
+                    ),
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const { parcelNodeId, message } = record as {
               parcelNodeId: string;
               message: string;
             };
@@ -311,8 +333,11 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const body = await res.text();
+              const text = res.ok
+                ? body
+                : sanitizeAskTheMapErrorBody(body);
               return {
-                content: [{ type: "text" as const, text: body }],
+                content: [{ type: "text" as const, text }],
                 isError: !res.ok,
               };
             });

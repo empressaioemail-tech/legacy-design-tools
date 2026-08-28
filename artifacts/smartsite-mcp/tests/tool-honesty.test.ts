@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASK_THE_MAP_INTERNAL_FIELD_NAMES,
+  askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
   normalizeR1BodyForExternal,
+  sanitizeAskTheMapErrorBody,
   stripEntitlementForExternal,
   stripSavedPropertiesForExternal,
 } from "../src/tool-honesty.js";
@@ -224,7 +227,89 @@ describe("normalizeR1BodyForExternal", () => {
     });
     expect(JSON.stringify(body.draw)).toBe(JSON.stringify(GOLD_DRAW_A3));
   });
+});
 
+describe("sanitizeAskTheMapErrorBody (P-91 item 10)", () => {
+  const cortex400 = {
+    error: "invalid_request",
+    message: "Invalid research chat body",
+    details: {
+      formErrors: [],
+      fieldErrors: {
+        runId: [
+          "Provide runId, address, workspaceDid, or areaContext (scope=area or visibleParcels)",
+        ],
+      },
+    },
+    accepted: {
+      required: ["message"],
+      runSelector:
+        "runId (uuid) OR address OR workspaceDid OR areaContext (scope=area or visibleParcels)",
+      optional: [
+        "history",
+        "presentationMode",
+        "starterPromptId",
+        "personaBucket",
+        "mls_id",
+        "areaContext",
+        "purpose",
+      ],
+    },
+  };
+
+  const mcpZodError = {
+    code: "invalid_arguments",
+    message:
+      "Unrecognized keys: workspaceDid, personaBucket, starterPromptId, mls_id, presentationMode",
+  };
+
+  it("fixture still contains the leak tokens (falsifier)", () => {
+    const raw = JSON.stringify(cortex400);
+    for (const token of ASK_THE_MAP_INTERNAL_FIELD_NAMES) {
+      expect(raw).toContain(token);
+    }
+    expect(JSON.stringify(mcpZodError)).toContain("workspaceDid");
+  });
+
+  it("strips cortex validation 400 and MCP zod text", () => {
+    const cortex = sanitizeAskTheMapErrorBody(JSON.stringify(cortex400));
+    const mcp = sanitizeAskTheMapErrorBody(JSON.stringify(mcpZodError));
+    for (const token of ASK_THE_MAP_INTERNAL_FIELD_NAMES) {
+      expect(cortex).not.toContain(token);
+      expect(mcp).not.toContain(token);
+    }
+    const parsed = JSON.parse(cortex);
+    expect(parsed.accepted.optional).toEqual([
+      "history",
+      "areaContext",
+      "purpose",
+    ]);
+    expect(parsed.details.fieldErrors.runId).toEqual([
+      "Provide runId, address, or areaContext (scope=area or visibleParcels)",
+    ]);
+    expect(parsed.accepted.runSelector).toBe(
+      "runId (uuid) OR address OR areaContext (scope=area or visibleParcels)",
+    );
+  });
+
+  it("detects leak fields on raw ask_the_map args", () => {
+    expect(
+      askTheMapArgsLeakInternalFields({
+        parcelNodeId: "48021:34137",
+        message: "flood?",
+        workspaceDid: "did:leak",
+      }),
+    ).toBe(true);
+    expect(
+      askTheMapArgsLeakInternalFields({
+        parcelNodeId: "48021:34137",
+        message: "flood?",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("normalizeR1BodyForExternal remainder", () => {
   it("omits unlabeled unknown hatch rather than leaking a bad stub", () => {
     const body = normalizeR1BodyForExternal({
       brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
