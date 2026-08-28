@@ -2,7 +2,12 @@
  * Playwright browser adapter for recipe runners.
  */
 
-import { chromium, type Browser, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "playwright";
 import { sha256Hex } from "./lib/captureHash.js";
 import type {
   BrowserActionResult,
@@ -145,13 +150,40 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
   };
 }
 
+/** Major version aligned with Playwright's bundled Chromium (see playwrightBrowser.test.ts). */
+const CHROME_MAJOR = "147";
+
+export const CHROME_USER_AGENT =
+  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_MAJOR}.0.0.0 Safari/537.36`;
+
+/** Client hint headers that match CHROME_USER_AGENT for WAF-sensitive portals (e.g. Travis tccsearch). */
+export const CHROME_CLIENT_HINTS_HEADERS: Readonly<Record<string, string>> = {
+  "sec-ch-ua": `"Google Chrome";v="${CHROME_MAJOR}", "Chromium";v="${CHROME_MAJOR}", "Not_A Brand";v="24"`,
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+};
+
+export async function createChromeBrowserContext(
+  browser: Browser,
+): Promise<BrowserContext> {
+  return browser.newContext({
+    userAgent: CHROME_USER_AGENT,
+    extraHTTPHeaders: { ...CHROME_CLIENT_HINTS_HEADERS },
+    locale: "en-US",
+    viewport: { width: 1920, height: 1080 },
+  });
+}
+
 export async function withPlaywrightBrowser<T>(
   fn: (browser: RecordsRecipeBrowser) => Promise<T>,
 ): Promise<T> {
   let browser: Browser | null = null;
   try {
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    const context = await createChromeBrowserContext(browser);
+    const page = await context.newPage();
     const adapter = createPlaywrightBrowser(page);
     return await fn(adapter);
   } finally {

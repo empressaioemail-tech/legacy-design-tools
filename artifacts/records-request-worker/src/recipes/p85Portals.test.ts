@@ -38,6 +38,12 @@ describe("P-85 portal registry", () => {
     expect(resolvePortalIdForJob("48491", {})).toBe("williamson-publicsearch");
   });
 
+  it("Williamson publicsearch entryUrl is portal root (not /terms — prod 404)", () => {
+    const portal = P85_PORTALS.find((p) => p.portalId === "williamson-publicsearch");
+    expect(portal?.entryUrl).toBe("https://williamson.tx.publicsearch.us/");
+    expect(portal?.entryUrl).not.toMatch(/\/terms/);
+  });
+
   it("honours explicit portalId in request payload", () => {
     expect(
       resolvePortalIdForJob("48491", { portalId: "williamson-tylerhost" }),
@@ -101,6 +107,28 @@ describe("runRecipeForJob — Aumentum index search", () => {
   });
 });
 
+describe("runRecipeForJob — Caldwell reachability scaffold", () => {
+  const caldwellCtx: RecordsRecipeContext = {
+    jobId: "job-caldwell",
+    countyFips: "48055",
+    parcelKey: "apn:48055:10001",
+    portalId: "caldwell-clerk-web",
+    requestPayload: {},
+  };
+
+  it("completes reachability when entry navigation succeeds", async () => {
+    const browser = mockBrowser({
+      goto: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+    });
+    const result = await runRecipeForJob(caldwellCtx, browser);
+    expect(result.status).toBe("complete");
+    expect(result.scopeSearched?.recipeVersion).toBe("p85-caldwell-clerk-scaffold-v1");
+    expect(browser.goto).toHaveBeenCalledWith(
+      "https://www.co.caldwell.tx.us/page/County.Clerk",
+    );
+  });
+});
+
 describe("runRecipeForJob — Tyler index search", () => {
   const haysCtx: RecordsRecipeContext = {
     jobId: "job-hays",
@@ -116,6 +144,7 @@ describe("runRecipeForJob — Tyler index search", () => {
     const browser = mockBrowser({
       fill: vi.fn().mockResolvedValue({ ok: true }),
       click: vi.fn().mockResolvedValue({ ok: true }),
+      currentUrl: vi.fn().mockResolvedValue("https://erss.co.hays.tx.us/web/search/DOCSEARCH149S1"),
     });
     const result = await runRecipeForJob(haysCtx, browser);
     expect(result.status).toBe("complete");
