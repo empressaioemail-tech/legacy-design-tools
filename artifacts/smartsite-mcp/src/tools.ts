@@ -26,6 +26,7 @@ import {
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
+import { appMetaFor, registerMcpApp } from "./mcp-app.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 const GET_SMART_SITE_DEPTHS = ["stub", "node", "hop1", "subgraph"] as const;
@@ -161,7 +162,9 @@ function annotationsFor(name: SmartsiteToolName) {
 }
 
 export function registerTools(server: McpServer): void {
+  registerMcpApp(server);
   for (const tool of SMARTSITE_MCP_TOOLS) {
+    const uiMeta = appMetaFor(tool.name);
     server.registerTool(
       tool.name,
       {
@@ -169,6 +172,7 @@ export function registerTools(server: McpServer): void {
         description: tool.description,
         inputSchema: inputSchemaFor(tool.name),
         annotations: annotationsFor(tool.name),
+        ...(uiMeta ? { _meta: uiMeta } : {}),
       },
       async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();

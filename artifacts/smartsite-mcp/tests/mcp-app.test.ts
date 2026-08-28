@@ -1,0 +1,140 @@
+import { describe, expect, it } from "vitest";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
+import { SERVER_NAME } from "../src/constants.js";
+import {
+  APP_HOST_TOOLS,
+  APP_MIME,
+  APP_RESOURCE_URI,
+  buildAppHtml,
+  glyphClass,
+  htmlContractViolations,
+  listingHistoryClick,
+  parseToolResult,
+  panelFingerprint,
+} from "../src/mcp-app.js";
+import { registerTools } from "../src/tools.js";
+
+describe("mcp-app contracts", () => {
+  it("unread and unknown do not share a glyph class", () => {
+    expect(glyphClass("unread")).toBe("g-unread");
+    expect(glyphClass("unknown")).toBe("g-unknown");
+    expect(glyphClass("unread")).not.toBe(glyphClass("unknown"));
+  });
+
+  it("HTML fails when a private origin or invented percent is planted", () => {
+    const clean = buildAppHtml();
+    expect(htmlContractViolations(clean)).toEqual([]);
+    expect(htmlContractViolations(clean + "https://fonts.googleapis.com")).toContain(
+      "private_or_font_origin",
+    );
+    expect(htmlContractViolations(clean + " column total 12 coverage %")).toContain(
+      "aggregate_or_invented_pct",
+    );
+  });
+
+  it("does not treat list_my_properties as a board source", () => {
+    const model = parseToolResult(
+      JSON.stringify({
+        savedProperties: [{ id: "x", parcelNodeId: "48021:34137", label: "gold" }],
+      }),
+    );
+    expect(model.kind).toBe("empty");
+    expect(model.rows).toEqual([]);
+  });
+
+  it("keeps unresolved query verbatim on a screen", () => {
+    const model = parseToolResult(
+      JSON.stringify({
+        id: "screen-1",
+        rows: [
+          {
+            query: "zzzz-not-a-situs-99999",
+            parcelNodeId: null,
+            resolution: "unresolved",
+          },
+          {
+            query: "48021:34137",
+            parcelNodeId: "48021:34137",
+            resolution: "resolved",
+            stub: { situs: "present", envelope: "refused" },
+          },
+        ],
+      }),
+    );
+    expect(model.kind).toBe("board");
+    expect(model.rows[0]?.query).toBe("zzzz-not-a-situs-99999");
+    expect(model.rows[0]?.resolution).toBe("unresolved");
+    expect(model.rows[1]?.rails.envelope).toBe("refused");
+    expect(model.rows[1]?.rails.flood).toBe("unread");
+  });
+
+  it("parcel panel keeps envelope refused and listing history does not mutate the fingerprint", () => {
+    const model = parseToolResult(
+      JSON.stringify({
+        parcelNodeId: "48021:33223",
+        draw: {
+          label: "927 MAIN ST , BASTROP, TX 78602",
+          overlays: [
+            {
+              id: "envelope",
+              state: "refused",
+              reason: "atom_path_pending",
+              label: "Buildable envelope not computed",
+            },
+          ],
+        },
+      }),
+    );
+    expect(model.kind).toBe("parcel");
+    expect(model.overlays[0]?.state).toBe("refused");
+    expect(model.overlays[0]?.reason).toBe("atom_path_pending");
+    expect(JSON.stringify(model)).not.toMatch(/42\s*%/);
+    const click = listingHistoryClick(model);
+    expect(click.fingerprintAfter).toBe(click.fingerprintBefore);
+    expect(click.fingerprintAfter).toBe(panelFingerprint(model));
+    expect(click.message).toMatch(/transcript/);
+    expect(click.message).not.toMatch(/42/);
+  });
+});
+
+describe("mcp-app registration", () => {
+  it("tools/list stays 13 and only the three host tools carry the ui resource", async () => {
+    const server = new McpServer({ name: SERVER_NAME, version: "0.0.1" });
+    registerTools(server);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(13);
+    for (const tool of tools) {
+      const meta = (tool as { _meta?: { ui?: { resourceUri?: string } } })._meta;
+      if ((APP_HOST_TOOLS as readonly string[]).includes(tool.name)) {
+        expect(meta?.ui?.resourceUri, `${tool.name} missing _meta.ui.resourceUri`).toBe(
+          APP_RESOURCE_URI,
+        );
+      } else {
+        expect(meta?.ui?.resourceUri).toBeUndefined();
+      }
+    }
+    const resources = await client.listResources();
+    const uris = resources.resources.map((r) => r.uri);
+    expect(uris).toContain(APP_RESOURCE_URI);
+    const read = await client.readResource({ uri: APP_RESOURCE_URI });
+    const body = read.contents[0];
+    expect(body?.mimeType).toBe(APP_MIME);
+    if (body && "text" in body && typeof body.text === "string") {
+      expect(htmlContractViolations(body.text)).toEqual([]);
+      expect(body.text).toContain("g-unread");
+      expect(body.text).toContain("g-unknown");
+      expect(body.text).not.toContain("list_my_properties");
+    } else {
+      throw new Error("resource text missing");
+    }
+    await client.close();
+    await server.close();
+  });
+});
