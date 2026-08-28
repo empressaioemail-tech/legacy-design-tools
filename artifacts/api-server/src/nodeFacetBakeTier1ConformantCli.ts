@@ -25,6 +25,11 @@ function parseArgs(argv: string[]) {
   return { county, dryRun, propIds };
 }
 
+function publishRunIdFromEnv(): string | undefined {
+  const id = process.env.PUBLISH_RUN_ID?.trim();
+  return id || undefined;
+}
+
 function parcelNodeIdFromBody(body: Record<string, unknown>, countyFips: string): string | null {
   const nodeId = body?.nodeId ?? (body?.claim as Record<string, unknown> | undefined)?.nodeId;
   if (typeof nodeId === "string" && nodeId.includes(":")) return nodeId;
@@ -99,11 +104,13 @@ async function main() {
       skippedBadSitus += 1;
       continue;
     }
+    const publishRunId = publishRunIdFromEnv();
     const payload = {
       shapeSource: "conformant-v1",
       baked: true,
       source: "conformant-v1-cad-parcel-roll",
       access,
+      ...(publishRunId ? { publishRunId } : {}),
       facets: {
         base: {
           parcelNodeId,
