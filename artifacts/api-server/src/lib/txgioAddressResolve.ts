@@ -523,6 +523,121 @@ export async function lookupSitusByParcelNodeId(input: {
 
 const SITUS_SEARCH_MAX_LIMIT = 10;
 
+/**
+ * Wall-clock budget for one `searchPlaceByPrefix` call. Under the 25 s
+ * HTTP contract and the 30 s MCP `cortexFetch` abort. A miss that
+ * exhausts ILIKE across the store (Rainmaker Cv/Cove on warm cortex)
+ * must return `hits: []` inside this window rather than hang.
+ */
+export const SITUS_SEARCH_BUDGET_MS = 20_000;
+
+/** Named refuse when a situs-search query is canceled for budget. */
+export const SITUS_SEARCH_BUDGET_ERROR = "situs-search-budget-exceeded";
+
+export class SitusSearchBudgetExceededError extends Error {
+  readonly code = SITUS_SEARCH_BUDGET_ERROR;
+  constructor() {
+    super(SITUS_SEARCH_BUDGET_ERROR);
+    this.name = "SitusSearchBudgetExceededError";
+  }
+}
+
+function isBudgetAbort(err: unknown): boolean {
+  if (err instanceof SitusSearchBudgetExceededError) return true;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "57014") return true;
+  const message = e.message ?? "";
+  return /statement timeout|canceling statement/i.test(message);
+}
+
+type TxgioTxHandle = TxgioAddressResolveDb & {
+  execute?: (query: unknown) => Promise<unknown>;
+};
+
+type TxgioDbWithTransaction = TxgioAddressResolveDb & {
+  transaction: (fn: (tx: TxgioTxHandle) => Promise<unknown>) => Promise<unknown>;
+};
+
+function hasTransaction(db: TxgioAddressResolveDb): db is TxgioDbWithTransaction {
+  return typeof (db as { transaction?: unknown }).transaction === "function";
+}
+
+/**
+ * Race `work` against `budgetMs`. Timeout fail-closes to `onTimeout`
+ * (empty hits). Does not cancel a mock; production pairs this with
+ * `SET LOCAL statement_timeout` so the SQL dies too.
+ */
+export async function withSitusSearchBudget<T>(
+  work: () => Promise<T>,
+  opts: { budgetMs: number; onTimeout: T },
+): Promise<T> {
+  const budgetMs = opts.budgetMs;
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+    return opts.onTimeout;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve(opts.onTimeout);
+    }, budgetMs);
+  });
+
+  try {
+    return await Promise.race([
+      work().catch((err: unknown) => {
+        if (timedOut || isBudgetAbort(err)) return opts.onTimeout;
+        throw err;
+      }),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function startSitusQuery<T>(
+  db: TxgioAddressResolveDb,
+  timeoutMs: number,
+  query: (db: TxgioAddressResolveDb) => Promise<T>,
+): Promise<T> {
+  if (!hasTransaction(db)) {
+    return query(db);
+  }
+  return db.transaction(async (tx) => {
+    if (typeof tx.execute === "function") {
+      await tx.execute(
+        sql.raw(
+          "SET LOCAL statement_timeout = " +
+            String(Math.max(1, Math.floor(timeoutMs))),
+        ),
+      );
+    }
+    return query(tx);
+  }) as Promise<T>;
+}
+
+async function runBoundedSitusQuery<T>(
+  remainingMs: number,
+  database: TxgioAddressResolveDb | undefined,
+  query: (db: TxgioAddressResolveDb) => Promise<T>,
+  onTimeout: T,
+): Promise<T> {
+  if (remainingMs <= 0) return onTimeout;
+  const db = database ?? defaultDb;
+  try {
+    return await withSitusSearchBudget(
+      () => startSitusQuery(db, remainingMs, query),
+      { budgetMs: remainingMs, onTimeout },
+    );
+  } catch (err) {
+    if (isBudgetAbort(err)) return onTimeout;
+    throw err;
+  }
+}
+
 /** Escape `%` and `_` for a literal ILIKE prefix pattern. */
 function escapeIlikeLiteral(prefix: string): string {
   return prefix.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -850,36 +965,60 @@ export async function searchAddressPointsByPrefix(input: {
 /**
  * Merge parcel-situs prefix hits with authoritative address-point hits for PE
  * typeahead. Parcel situs wins ordering; address points fill gaps (Travis Simsbrook).
+ *
+ * Each store query is raced against the remaining {@link SITUS_SEARCH_BUDGET_MS}
+ * (20 s, under the 25 s HTTP / 30 s MCP abort). A miss fail-closes to `[]`
+ * rather than hanging on ILIKE. Hits already found are kept if a later query
+ * times out (Pine must still resolve). Production also `SET LOCAL
+ * statement_timeout` so the SQL dies; `allStoreCounties()` is not used as a
+ * county bound because it still tags Bastrop as ArcGIS and would drop 48021.
  */
 export async function searchPlaceByPrefix(input: {
   query: string;
   limit?: number;
   database?: TxgioAddressResolveDb;
+  /** Test override. Production uses {@link SITUS_SEARCH_BUDGET_MS}. */
+  budgetMs?: number;
 }): Promise<PlaceSearchHit[]> {
   const limit = Math.min(
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
+  const budgetMs = input.budgetMs ?? SITUS_SEARCH_BUDGET_MS;
+  const started = Date.now();
+  const remainingMs = () => Math.max(0, budgetMs - (Date.now() - started));
 
   const locality = parsePlaceSearchLocality(input.query);
   if (hasPlaceSearchLocality(locality)) {
     const keys = situsSearchStreetKeys(input.query);
     let situsHitsRaw =
       keys.length > 0
-        ? await searchSitusByStreetKeys({
-            keys,
-            limit,
-            locality,
-            database: input.database,
-          })
+        ? await runBoundedSitusQuery(
+            remainingMs(),
+            input.database,
+            (database) =>
+              searchSitusByStreetKeys({
+                keys,
+                limit,
+                locality,
+                database,
+              }),
+            [],
+          )
         : [];
     if (situsHitsRaw.length === 0) {
-      situsHitsRaw = await searchSitusByPrefixWithLocality({
-        query: input.query,
-        limit,
-        locality,
-        database: input.database,
-      });
+      situsHitsRaw = await runBoundedSitusQuery(
+        remainingMs(),
+        input.database,
+        (database) =>
+          searchSitusByPrefixWithLocality({
+            query: input.query,
+            limit,
+            locality,
+            database,
+          }),
+        [],
+      );
     }
     const situsHits = situsHitsRaw.map((h) => ({
       ...h,
@@ -892,11 +1031,18 @@ export async function searchPlaceByPrefix(input: {
     const remaining = Math.max(limit - situsHits.length, 0);
     const addressHits =
       remaining > 0
-        ? await searchAddressPointsByPrefix({
-            ...input,
-            limit: remaining,
-            locality,
-          })
+        ? await runBoundedSitusQuery(
+            remainingMs(),
+            input.database,
+            (database) =>
+              searchAddressPointsByPrefix({
+                ...input,
+                limit: remaining,
+                locality,
+                database,
+              }),
+            [],
+          )
         : [];
 
     const merged: PlaceSearchHit[] = [...situsHits];
@@ -911,7 +1057,12 @@ export async function searchPlaceByPrefix(input: {
   }
 
   const situsHits = (
-    await searchSitusByPrefix({ ...input, limit })
+    await runBoundedSitusQuery(
+      remainingMs(),
+      input.database,
+      (database) => searchSitusByPrefix({ ...input, limit, database }),
+      [],
+    )
   ).map((h) => ({ ...h, source: "parcel-situs" as const }));
 
   const seenLookup = new Set(
@@ -920,7 +1071,17 @@ export async function searchPlaceByPrefix(input: {
   const remaining = Math.max(limit - situsHits.length, 0);
   const addressHits =
     remaining > 0
-      ? await searchAddressPointsByPrefix({ ...input, limit: remaining })
+      ? await runBoundedSitusQuery(
+          remainingMs(),
+          input.database,
+          (database) =>
+            searchAddressPointsByPrefix({
+              ...input,
+              limit: remaining,
+              database,
+            }),
+          [],
+        )
       : [];
 
   const merged: PlaceSearchHit[] = [...situsHits];
@@ -997,4 +1158,10 @@ export async function resolveRooftopAcrossCounties(input: {
 }
 
 /** Exposed for unit tests. */
-export const __internal = { normalizedColumnExpr, escapeIlikeLiteral };
+export const __internal = {
+  normalizedColumnExpr,
+  escapeIlikeLiteral,
+  withSitusSearchBudget,
+  isBudgetAbort,
+  runBoundedSitusQuery,
+};
