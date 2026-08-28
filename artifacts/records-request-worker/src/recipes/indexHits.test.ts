@@ -56,6 +56,20 @@ describe("normalizeIndexHit header bind", () => {
     });
   });
 
+  it("binds Aumentum Date Filed to recordingDate", () => {
+    const hit = normalizeIndexHit(
+      {
+        headers: ["Instrument #", "Date Filed", "Document Type", "Name"],
+        cells: ["202008880", "06/05/2020", "DEED", "PALMS PROPERTIES LLC"],
+        link: null,
+      },
+      "aumentum",
+    );
+    expect(hit?.recordingRef).toBe("202008880");
+    expect(hit?.recordingDate).toBe("06/05/2020");
+    expect(hit?.documentType).toBe("DEED");
+  });
+
   it("does not take the name column as documentType when name precedes type", () => {
     const hit = normalizeIndexHit({
       headers: ["Grantor", "Document Type", "Instrument Number", "Date"],
