@@ -40,6 +40,21 @@
  * `assertNoOwnerKey` refuses any owner-shaped key before a write, with the
  * same key predicate the serve strip uses.
  *
+ * BODY PLACEMENT (CTX card F, 2026-08-28). The Factory's stage E spreads the
+ * six-field candidate into the atom body (hauska-factory
+ * `src/stages/write/index.mjs` `stageRows`: `{ ...c, atomId, atomDid, ... }`),
+ * so on the production store the claim fields sit at the body ROOT beside
+ * `provenance`, `confidence`, `citation`, `time`, `access` and a minted
+ * `nodeId` (`nid_...`); there is no `body.claim`. Read 2026-08-28 19:54Z on
+ * hauska_mcp: 120 of 120 sampled conformant bodies across the six counties are
+ * flat. Until this card `readConformantCadClaim` took `situsCity`, `situsZip`,
+ * `landAcres` and `propertyUseCode` from `body.claim` only, so every one of
+ * them baked null (1,498,010 conformant rows, 0 with a land use, 0 with a
+ * situs city; the golds' stored bodies carry AUSTIN 78756, TAYLOR 76574,
+ * KYLE 78640, BASTROP 78602). The reader now resolves the claim record as
+ * `body.claim` when present, else the body itself, and reads every field from
+ * that one record.
+ *
  * DB-free: the CLI owns I/O; tests import this module directly.
  */
 
@@ -65,6 +80,18 @@ const SQFT_PER_ACRE = 43_560;
 // ---------------------------------------------------------------------------
 // Claim reading (by name, never defaulted, never the owner).
 // ---------------------------------------------------------------------------
+
+/**
+ * The claim record of a stored body: `body.claim` when the body nests it, else
+ * the body itself (the Factory's flat six-field placement). Exported so a
+ * caller can see which placement a body used.
+ */
+export function conformantClaimRecord(
+  body: Record<string, unknown>,
+): { claim: Record<string, unknown>; placement: "nested" | "flat" } {
+  const nested = asRecord(body.claim);
+  return nested ? { claim: nested, placement: "nested" } : { claim: body, placement: "flat" };
+}
 
 /** The subset of a `cad-parcel-roll` claim the bake maps. No owner field. */
 export interface ConformantCadClaim {
@@ -100,22 +127,21 @@ function finiteOrNull(v: unknown): number | null {
 }
 
 /**
- * Read the claim fields the bake maps. Reads `body.claim` (the Factory's
- * `stageRows` body) with `body.sourceIdentifiers` as the older placement.
- * Every field is the claim's value or null; nothing is defaulted, and
- * `ownerName` is never read.
+ * Read the claim fields the bake maps from the claim record (`body.claim`
+ * when nested, else the flat body the Factory actually stores; see BODY
+ * PLACEMENT above). Every field is the claim's value or null; nothing is
+ * defaulted, and `ownerName` is never read.
  */
 export function readConformantCadClaim(
   body: Record<string, unknown>,
 ): ConformantCadClaim {
-  const claim = asRecord(body.claim) ?? {};
-  const src =
-    asRecord(claim.sourceIdentifiers) ?? asRecord(body.sourceIdentifiers) ?? {};
+  const { claim } = conformantClaimRecord(body);
+  const src = asRecord(claim.sourceIdentifiers) ?? {};
   return {
-    countyFips: strOrNull(claim.countyFips) ?? strOrNull(body.countyFips),
+    countyFips: strOrNull(claim.countyFips),
     propId: strOrNull(src.prop_id),
     taxYear: finiteOrNull(src.taxYear),
-    situsAddress: strOrNull(claim.situsAddress) ?? strOrNull(body.situsAddress),
+    situsAddress: strOrNull(claim.situsAddress),
     situsCity: strOrNull(claim.situsCity),
     situsZip: strOrNull(claim.situsZip),
     landAcres: finiteOrNull(claim.landAcres),
@@ -263,6 +289,7 @@ export function buildConformantTier1Payload(
     situsAddress: input.situsAddress,
     situsCity: claim.situsCity,
     situsState: row?.situs_state ?? null,
+    situsZip: claim.situsZip,
     landUse,
     landUseAddressRecovered: false,
     // The land-use is the claim's own field, not a join; the join gate is
@@ -486,6 +513,7 @@ export const REQUIRED_TIER1_FACET_PATHS: readonly string[] = [
   "baseFacts.situsAddress",
   "baseFacts.situsCity",
   "baseFacts.situsState",
+  "baseFacts.situsZip",
   "baseFacts.landUse",
   "baseFacts.acreage",
   "zoning",

@@ -79,6 +79,14 @@ export interface BaseFacts {
   situsAddress: string | null;
   situsCity: string | null;
   situsState: string | null;
+  /**
+   * Situs (postal) ZIP as the source carries it: the conformant claim's
+   * `situsZip`, the txgio row's `situs_zip`. Explicit null when the source
+   * has none (CTX card F, 2026-08-28). Like `situsCity` this is a postal
+   * fact and is never read as incorporation; the serve derives that from
+   * city-limits containment.
+   */
+  situsZip: string | null;
   landUse: {
     code: string;
     description: string | null;
@@ -217,6 +225,8 @@ export interface Tier1AssemblyInput {
   situsAddress: string | null | undefined;
   situsCity: string | null | undefined;
   situsState: string | null | undefined;
+  /** Source-carried situs ZIP; null bakes an explicit null (never omitted). */
+  situsZip: string | null | undefined;
   /** Already-resolved land-use facet (the caller owns the join or the claim). */
   landUse: BaseFacts["landUse"];
   landUseAddressRecovered: boolean;
@@ -265,6 +275,7 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
     situsAddress: str(input.situsAddress),
     situsCity: str(input.situsCity),
     situsState: str(input.situsState),
+    situsZip: str(input.situsZip),
     landUse: input.landUse,
     acreage,
   };

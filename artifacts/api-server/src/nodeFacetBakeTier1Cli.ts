@@ -404,6 +404,8 @@ interface ParcelRow {
   situs_address: string | null;
   situs_city: string | null;
   situs_state: string | null;
+  /** Selected by `parcelSelectList` (both parcel tables carry it); optional for fixtures. */
+  situs_zip?: string | null;
   zoning_district: string | null;
   zoning_jurisdiction: string | null;
   source_vintage: string | null;
@@ -515,6 +517,7 @@ export function buildTier1Payload(
     situsAddress: str(row.situs_address),
     situsCity: str(row.situs_city),
     situsState: str(row.situs_state),
+    situsZip: str(row.situs_zip),
     landUse: luFacet,
     landUseAddressRecovered,
     landUseGateBlocked,

@@ -8,6 +8,10 @@
 import { absenceClassificationForEntityType } from "@workspace/instrument-registry";
 import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { NO_ZONING_STAMP_REASON } from "./buildableEnvelope/absentZoningHonesty";
+import type {
+  CityLimitsFact,
+  CityLimitsStatus,
+} from "@workspace/cad-ingest/city-limits";
 import texasCountyRoster from "../../data/texas_county_roster_v1.json";
 
 type CadSourceTier = "cad-export" | "stratmap-roll";
@@ -16,6 +20,17 @@ export const LAYER_ABSENCE_VERDICTS = [
   "absent-verified",
   "lookup-failed",
   "not-applicable",
+  /**
+   * CTX card F (2026-08-28): the parcel sits inside an incorporated place and
+   * carries no zoning stamp. The stamp is missing; authority is not absent.
+   */
+  "stamp-missing",
+  /**
+   * CTX card F: whether municipal zoning authority applies could not be
+   * measured (no usable query point, empty city-limits index, or a county with
+   * no declared unincorporated doctrine). Never collapsed into not-applicable.
+   */
+  "unmeasured",
 ] as const;
 
 export type LayerAbsenceVerdict = (typeof LAYER_ABSENCE_VERDICTS)[number];
@@ -37,6 +52,8 @@ export interface LayerAbsenceWire {
   chainAnchoring: LayerChainAnchoring;
   serveLayer: string;
   entityType?: string;
+  /** Present on zoning verdicts derived from city-limits containment (card F). */
+  derivation?: ZoningVerdictDerivation;
 }
 
 /** Counties with bulk_primary=true in tx_cad_source_registry.json (2026-08-22). */
@@ -149,8 +166,9 @@ export function countyHasUnzonedUnincorporatedDoctrine(countyFips: string): bool
 }
 
 /**
- * Shape predicate: parcel baked without a zoning stamp in a county whose
- * unincorporated territory has no municipal zoning authority.
+ * Stamp predicate: the baked parcel carries NO zoning stamp (no district, no
+ * jurisdictionKey, envelope declined for no-zoning-stamp, or coverage false).
+ * This says nothing about incorporation; it only says the stamp is absent.
  */
 export function parcelShapeLacksZoningAuthority(facets: unknown): boolean {
   if (!facets || typeof facets !== "object") return false;
@@ -180,41 +198,168 @@ export function parcelShapeLacksZoningAuthority(facets: unknown): boolean {
   return false;
 }
 
-/** Parcel-level unincorporated: no zoning stamp and no incorporated situs city. */
-export function parcelIsUnincorporatedShape(facets: unknown): boolean {
-  if (!parcelShapeLacksZoningAuthority(facets)) return false;
-  const root = facets as Record<string, unknown>;
-  const baseFacts = root.baseFacts;
-  if (baseFacts && typeof baseFacts === "object" && !Array.isArray(baseFacts)) {
-    const situsCity = (baseFacts as Record<string, unknown>).situsCity;
-    if (typeof situsCity === "string" && situsCity.trim()) return false;
-  }
-  return true;
-}
+/**
+ * CTX card F (2026-08-28): unincorporated is a finding about a boundary,
+ * never about a null.
+ *
+ * Until this card the serve decided "unincorporated" from a null
+ * baseFacts.situsCity (parcelIsUnincorporatedShape, removed). The conformant
+ * bake wrote that field null for every parcel in the six Central Texas
+ * counties (1,498,010 rows measured 2026-08-28 19:48Z), so a parcel in
+ * central Austin was served "not-applicable: no zoning authority exists for
+ * unincorporated land". Incorporation is now the city-limits containment fact
+ * and nothing else: loadCityLimitsFact (PIP against tx_city_boundary at the
+ * bake query point) returns incorporated with the place, unincorporated only
+ * when the index is populated and the point sits outside every polygon, or
+ * unmeasured (empty index or no usable point). A postal, mailing, or situs
+ * city is never an input here.
+ */
+export type CityLimitsContainment = CityLimitsFact & {
+  /** The WGS84 point the containment was evaluated at; null when unmeasured for lack of one. */
+  queryPoint: { longitude: number; latitude: number } | null;
+};
 
+/**
+ * True only when the parcel carries no zoning stamp, the county's
+ * unincorporated territory is unzoned (texas_county_roster_v1), AND the
+ * city-limits index is populated with the parcel point outside every
+ * incorporated place. Anything else is false: an incorporated place, an
+ * unmeasured index, a missing point, or a county with no declared doctrine.
+ */
 export function isUnincorporatedNoZoningAuthorityShape(
   parcelNodeId: string,
   bakedFacets: unknown,
+  cityLimits: Pick<CityLimitsContainment, "status"> | null | undefined,
 ): boolean {
   const fips = countyFipsFromParcelNodeId(parcelNodeId);
   if (!fips || !countyHasUnzonedUnincorporatedDoctrine(fips)) return false;
-  return parcelIsUnincorporatedShape(bakedFacets);
+  if (!parcelShapeLacksZoningAuthority(bakedFacets)) return false;
+  return cityLimits?.status === "unincorporated";
 }
 
-export function buildZoningNotApplicableAbsence(
+/** How a zoning verdict was derived: the containment fact it rests on. */
+export interface ZoningVerdictDerivation {
+  method: "city-limits-containment";
+  source: "tx_city_boundary";
+  cityLimitsStatus: CityLimitsStatus;
+  queryPoint: { longitude: number; latitude: number } | null;
+  place: { cityName: string; geoId: string; gnis: string | null } | null;
+  countyDoctrine: "unzoned-unincorporated" | "undeclared";
+}
+
+function pointText(qp: { longitude: number; latitude: number } | null): string {
+  return qp
+    ? `query point lng ${qp.longitude} lat ${qp.latitude}`
+    : "no usable query point";
+}
+
+/**
+ * The served zoning layer for a parcel WITHOUT a zoning stamp, derived from
+ * the city-limits containment fact. Null when the parcel carries a stamp
+ * (the stamp is served as-is). Three states, never collapsed:
+ *
+ *   incorporated   -> stamp-missing: the parcel sits inside a named place and
+ *                     the stamp is missing; zoning authority is NOT absent.
+ *   unincorporated -> not-applicable when the county's unincorporated
+ *                     territory is unzoned (texas_county_roster_v1), with the
+ *                     city-limits basis and source named; unmeasured when the
+ *                     county declares no doctrine (not-applicable is never
+ *                     asserted from silence).
+ *   unmeasured     -> unmeasured, carrying the reason the index gave (empty
+ *                     table or no usable query point).
+ *
+ * The returned wire carries derivation so a reader can see the point and the
+ * containment status the verdict rests on.
+ */
+export function zoningVerdictFromCityLimits(
+  parcelNodeId: string,
+  bakedFacets: unknown,
+  cityLimits: CityLimitsContainment,
   asOf: string = new Date().toISOString(),
-): LayerAbsenceWire {
+): LayerAbsenceWire | null {
+  if (!parcelShapeLacksZoningAuthority(bakedFacets)) return null;
+  const fips = countyFipsFromParcelNodeId(parcelNodeId);
+  const countyDoctrine: ZoningVerdictDerivation["countyDoctrine"] =
+    fips && countyHasUnzonedUnincorporatedDoctrine(fips)
+      ? "unzoned-unincorporated"
+      : "undeclared";
   const classification = absenceClassificationForEntityType("zoning-fact");
-  return {
-    status: "absent",
-    verdict: "not-applicable",
-    authority: "none",
-    scopeSearched: "municipal zoning authority for parcel shape=unincorporated",
+  const queryPoint = cityLimits.queryPoint ?? null;
+  const place =
+    cityLimits.status === "incorporated" && cityLimits.cityName && cityLimits.geoId
+      ? {
+          cityName: cityLimits.cityName,
+          geoId: cityLimits.geoId,
+          gnis: cityLimits.gnis ?? null,
+        }
+      : null;
+  const derivation: ZoningVerdictDerivation = {
+    method: "city-limits-containment",
+    source: "tx_city_boundary",
+    cityLimitsStatus: cityLimits.status,
+    queryPoint,
+    place,
+    countyDoctrine,
+  };
+  const common = {
+    status: "absent" as const,
     asOf,
-    basis: "shape predicate: no zoning authority exists for unincorporated land",
     ...classification,
     entityType: "zoning-fact",
-    provenanceClass: classification.provenanceClass ?? "Record",
+    provenanceClass: classification.provenanceClass ?? ("Record" as const),
+    derivation,
+  };
+  const countyLabel = fips ?? "unknown";
+
+  if (cityLimits.status === "incorporated") {
+    const cityName = place?.cityName ?? cityLimits.cityName ?? "incorporated place";
+    const geoId = place?.geoId ?? cityLimits.geoId ?? "unknown";
+    return {
+      ...common,
+      verdict: "stamp-missing",
+      authority: cityName,
+      scopeSearched:
+        `municipal zoning stamp for ${cityName} (tx_city_boundary geo_id=${geoId}) ` +
+        `on parcel ${parcelNodeId}; ${pointText(queryPoint)}`,
+      basis:
+        `${cityLimits.basis}; the parcel sits inside the incorporated place ${cityName} ` +
+        "and carries no zoning stamp, so the stamp is missing; zoning authority is not absent",
+    };
+  }
+
+  if (cityLimits.status === "unincorporated") {
+    const scopeSearched =
+      `incorporated-place polygons in tx_city_boundary at the parcel ${pointText(queryPoint)}; ` +
+      `texas_county_roster_v1 zoning_regime.unincorporated for county ${countyLabel}`;
+    if (countyDoctrine === "unzoned-unincorporated") {
+      return {
+        ...common,
+        verdict: "not-applicable",
+        authority: "none",
+        scopeSearched,
+        basis:
+          `${cityLimits.basis}; county ${countyLabel} unincorporated territory is unzoned ` +
+          "(texas_county_roster_v1), so no municipal zoning authority applies",
+      };
+    }
+    return {
+      ...common,
+      verdict: "unmeasured",
+      authority: "unresolved",
+      scopeSearched,
+      basis:
+        `${cityLimits.basis}; county ${countyLabel} does not declare ` +
+        "zoning_regime.unincorporated=unzoned in texas_county_roster_v1, so whether " +
+        "zoning authority applies is unmeasured",
+    };
+  }
+
+  return {
+    ...common,
+    verdict: "unmeasured",
+    authority: "unresolved",
+    scopeSearched: `incorporated-place polygons in tx_city_boundary; ${pointText(queryPoint)}`,
+    basis: cityLimits.basis,
   };
 }
 
