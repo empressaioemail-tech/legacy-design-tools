@@ -63,9 +63,15 @@ async function main() {
   await mcp.connect();
   await neondb.connect();
   const where = conformantCadCountyWhere(1);
+  const params: Array<string | string[]> = [county];
+  let propFilter = "";
+  if (propIds?.length) {
+    propFilter = ` AND body->'sourceIdentifiers'->>'prop_id' = ANY($2::text[])`;
+    params.push(propIds);
+  }
   const { rows: cadRows } = await mcp.query(
-    `SELECT entity_id, body FROM atoms WHERE ${where}`,
-    [county],
+    `SELECT entity_id, body FROM atoms WHERE ${where}${propFilter}`,
+    params,
   );
   let written = 0;
   let skippedNoNode = 0;
