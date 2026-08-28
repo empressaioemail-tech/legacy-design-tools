@@ -11,7 +11,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "get_smart_site",
     title: "Get its smart site",
     description:
-      "Return the signed-in user's smart site analysis. parcelNodeId is a string or an array (cap 50; over cap refuses). depth stub is label, node id, url, and five-state rails; depth node is today's full brief and draw. hop1 and subgraph refuse as not_implemented.",
+      "Return the signed-in user's smart site analysis and open the parcel panel in the MCP App. parcelNodeId is a string or an array (cap 50; over cap refuses). depth stub is label, node id, url, and five-state rails; depth node is today's full brief and draw. hop1 and subgraph refuse as not_implemented. A bare node id draws without a save.",
     readiness: "live" as const,
   },
   {
@@ -62,7 +62,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "create_screen",
     title: "Create a screen",
     description:
-      "Create a named intake screen from pasted queries. v1 source is pasted only. Does not write a save.",
+      "Create a named intake screen from pasted queries and open the screening board in the MCP App. v1 source is pasted only. Does not write a save. Unresolved rows keep the original query.",
     readiness: "live" as const,
   },
   {
@@ -76,7 +76,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "list_screens",
     title: "List screens",
     description:
-      "List the caller's screens, or reopen one screen's rows when screenId is set. Soft-deleted screens are omitted.",
+      "List the caller's screens, or reopen one screen's rows when screenId is set, and open the screening board in the MCP App. Soft-deleted screens are omitted. The board reads this screen, not list_my_properties.",
     readiness: "live" as const,
   },
   {
