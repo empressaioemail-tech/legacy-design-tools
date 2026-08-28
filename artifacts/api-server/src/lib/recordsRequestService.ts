@@ -10,6 +10,8 @@ import { resolveParcelInput } from "./siteTopographyIngest";
 import {
   enqueueRecordsRequestJob,
   listRecordsRequestJobsForEngagement,
+  listRecordsRequestJobsForUser,
+  parcelNodeIdFromParcelKey,
   recordsRequestJobToWire,
 } from "./recordsRequestJobWorker";
 import { resolveRecordsSearchTerms } from "./recordsSearchTerms";
@@ -182,5 +184,28 @@ export async function listRecordsRequestJobsWire(
   return {
     engagementId,
     jobs: jobs.map(recordsRequestJobToWire),
+  };
+}
+
+export async function listRecordsRequestInboxWire(
+  userId: string,
+): Promise<Record<string, unknown>> {
+  const jobs = await listRecordsRequestJobsForUser(userId, 25);
+  return {
+    jobs: jobs.map((job) => {
+      const wire = recordsRequestJobToWire(job);
+      const scope =
+        job.scopeSearched && typeof job.scopeSearched === "object"
+          ? (job.scopeSearched as Record<string, unknown>)
+          : null;
+      const indexHits = scope?.indexHits;
+      return {
+        ...wire,
+        parcelNodeId: parcelNodeIdFromParcelKey(job.parcelKey),
+        finishReason:
+          typeof scope?.finishReason === "string" ? scope.finishReason : null,
+        indexHitsCount: Array.isArray(indexHits) ? indexHits.length : 0,
+      };
+    }),
   };
 }

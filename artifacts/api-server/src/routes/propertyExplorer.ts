@@ -48,6 +48,7 @@ import {
 } from "../lib/peRecordsEngagement";
 import {
   createRecordsRequestJob,
+  listRecordsRequestInboxWire,
   listRecordsRequestJobsWire,
 } from "../lib/recordsRequestService";
 import {
@@ -1301,6 +1302,20 @@ router.get(
       parcelNodeId,
       ...body,
     });
+  },
+);
+
+router.get(
+  "/property-explorer/v1/records-request/inbox",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const body = await listRecordsRequestInboxWire(scope.ownerUserId);
+    res.status(200).json(body);
   },
 );
 
