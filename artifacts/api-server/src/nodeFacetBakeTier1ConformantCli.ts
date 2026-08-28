@@ -7,7 +7,7 @@ import pg from "pg";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
-import { assertF06BakeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
+import { normalizeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
 
 const PLACE_COORD_SENTINEL = "0.00000";
 
@@ -93,8 +93,9 @@ async function main() {
       continue;
     }
     let access: { discoverability: string; entitlement: string };
+    let accessNormalizedFrom: string | null = null;
     try {
-      access = assertF06BakeAccessPair(body.access);
+      ({ access, normalizedFrom: accessNormalizedFrom } = normalizeAccessPair(body.access));
     } catch {
       skippedBadAccess += 1;
       continue;
@@ -110,6 +111,7 @@ async function main() {
       baked: true,
       source: "conformant-v1-cad-parcel-roll",
       access,
+      ...(accessNormalizedFrom ? { accessNormalizedFrom } : {}),
       ...(publishRunId ? { publishRunId } : {}),
       facets: {
         base: {

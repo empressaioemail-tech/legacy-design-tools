@@ -20,7 +20,30 @@ export function assertAccessPair(input: unknown): AccessPair {
   }
 }
 
-/** F-06 conformant writer pairs (public/anonymous) for tier bake; not atom-contract enum validation. */
+/**
+ * Legacy F-06 writer pairs and their canonical (19_the_instrument_contract, contract 1.30.0) value.
+ * The conformant writer stamped every atom `public / anonymous` before 2026-08-28; the bake copied it
+ * and the serve guard refused it (ACCESS_NOT_DEFAULTED "unknown discoverability" on every Bastrop
+ * facet in production). The translation is declared in the served and baked payload as
+ * `accessNormalizedFrom`; anything not in this table and not a canonical pair still refuses.
+ */
+export const LEGACY_ACCESS_PAIRS: Readonly<Record<string, AccessPair>> = Object.freeze({
+  "public/anonymous": { discoverability: "catalog-listed", entitlement: "anyone-free" },
+});
+
+export function normalizeAccessPair(input: unknown): { access: AccessPair; normalizedFrom: string | null } {
+  if (input && typeof input === "object") {
+    const { discoverability, entitlement } = input as Record<string, unknown>;
+    if (typeof discoverability === "string" && typeof entitlement === "string") {
+      const key = `${discoverability}/${entitlement}`;
+      const legacy = LEGACY_ACCESS_PAIRS[key];
+      if (legacy) return { access: { ...legacy }, normalizedFrom: key };
+    }
+  }
+  return { access: assertAccessPair(input), normalizedFrom: null };
+}
+
+/** @deprecated use normalizeAccessPair; kept for the F-06 bake tests until they move. */
 export function assertF06BakeAccessPair(input: unknown): { discoverability: string; entitlement: string } {
   if (!input || typeof input !== "object") {
     throw Object.assign(new Error("access pair missing"), { code: "ACCESS_NOT_DEFAULTED" });
@@ -49,7 +72,13 @@ export function assertSitusNotPunctuationOnly(situs: unknown): string | null {
 export function refusePayloadAtServe(payload: unknown): void {
   if (!payload || typeof payload !== "object") return;
   const p = payload as Record<string, unknown>;
-  if (p.access) assertAccessPair(p.access);
+  if (p.access) {
+    const { access, normalizedFrom } = normalizeAccessPair(p.access);
+    if (normalizedFrom) {
+      p.access = access;
+      p.accessNormalizedFrom = normalizedFrom;
+    }
+  }
   const facets = p.facets as Record<string, unknown> | undefined;
   const base = facets?.base as Record<string, unknown> | undefined;
   if (base?.situsAddress != null) assertSitusNotPunctuationOnly(base.situsAddress);
