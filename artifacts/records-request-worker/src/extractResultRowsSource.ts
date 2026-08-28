@@ -63,20 +63,38 @@ export const EXTRACT_RESULT_ROWS_SOURCE = `(() => {
     return null;
   };
 
+  const publishedIndexHeaders = (root) => {
+    const headers = headersIn(root);
+    if (!headers) return null;
+    const joined = headers.join(" ").toLowerCase();
+    if (joined.includes("instrument") || joined.includes("document type")) {
+      return headers;
+    }
+    return null;
+  };
+
   const headersForRow = (rowEl) => {
     const table = rowEl.closest("table");
-    const fromTable = headersIn(table);
-    if (fromTable && fromTable.length > 0) return fromTable;
+    const fromTable = publishedIndexHeaders(table);
+    if (fromTable) return fromTable;
 
     const grid = rowEl.closest(
       ".RadGrid, [class*='RadGrid'], [role='grid'], [role='table'], .search-results, .results-table, .dx-datagrid",
     );
-    const fromGrid = headersIn(grid);
-    if (fromGrid && fromGrid.length > 0) return fromGrid;
+    const fromGrid = publishedIndexHeaders(grid);
+    if (fromGrid) return fromGrid;
 
-    const parent = table?.parentElement ?? rowEl.parentElement;
-    const fromParent = headersIn(parent);
-    if (fromParent && fromParent.length > 0) return fromParent;
+    let node = table?.parentElement ?? rowEl.parentElement;
+    for (let i = 0; i < 12 && node; i++) {
+      const fromAncestor = publishedIndexHeaders(node);
+      if (fromAncestor) return fromAncestor;
+      const prev = node.previousElementSibling;
+      if (prev) {
+        const fromPrev = publishedIndexHeaders(prev);
+        if (fromPrev) return fromPrev;
+      }
+      node = node.parentElement;
+    }
 
     return null;
   };
