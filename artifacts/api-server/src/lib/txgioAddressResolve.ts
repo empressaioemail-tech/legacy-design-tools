@@ -74,6 +74,7 @@ import {
   placeSearchLocalityMatches,
   hasPlaceSearchLocality,
   situsSearchPrefixVariants,
+  situsSearchStreetKeys,
   type PlaceSearchLocality,
 } from "./txgioAddressNormalize";
 import { allStoreCounties } from "./brokerageTxParcels";
@@ -88,6 +89,8 @@ export {
   localityFromStoredAddress,
   placeSearchLocalityMatches,
   hasPlaceSearchLocality,
+  situsSearchPrefixVariants,
+  situsSearchStreetKeys,
 };
 export type { PlaceSearchLocality };
 
@@ -174,6 +177,27 @@ interface SitusCandidate {
  */
 function normalizedColumnExpr(columnName: string) {
   return sql.raw(buildNormalizedStreetSql(columnName));
+}
+
+/**
+ * Push city/ZIP into SQL before LIMIT. JS locality filter after an
+ * unfiltered window is how a real row (Bastrop 48021:34137) can exist
+ * in the table and still return []. Registry `allStoreCounties()` is
+ * not used here: Bastrop is still live-ArcGIS in that list while
+ * 74k rows sit in `txgio_parcel`; node-id lookup already ignores the
+ * tag. The table is the second derivation.
+ */
+function storedSitusLocalitySql(locality: PlaceSearchLocality) {
+  const filters: ReturnType<typeof sql>[] = [];
+  if (locality.zip) {
+    filters.push(sql`${txgioParcel.situsAddress} ~ ${`\\m${locality.zip}\\M`}`);
+  }
+  if (locality.city) {
+    filters.push(
+      sql`strpos(upper(${txgioParcel.situsAddress}), ${locality.city}) > 0`,
+    );
+  }
+  return filters;
 }
 
 /**
@@ -522,8 +546,6 @@ export async function searchSitusByStreetKeys(input: {
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
-  const fipsList = allStoreCounties().map((c) => c.fips);
-  if (fipsList.length === 0) return [];
 
   const database = input.database ?? defaultDb;
   const locality = input.locality ?? { city: null, state: null, zip: null };
@@ -537,8 +559,8 @@ export async function searchSitusByStreetKeys(input: {
     .from(txgioParcel)
     .where(
       and(
-        inArray(txgioParcel.countyFips, fipsList),
         inArray(normalizedColumnExpr("situs_address"), keys),
+        ...storedSitusLocalitySql(locality),
       ),
     )
     .limit(limit * 16)) as {
@@ -591,8 +613,6 @@ export async function searchSitusByPrefix(input: {
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
-  const fipsList = allStoreCounties().map((c) => c.fips);
-  if (fipsList.length === 0) return [];
 
   const database = input.database ?? defaultDb;
   const pattern = `${escapeIlikeLiteral(prefix)}%`;
@@ -604,12 +624,7 @@ export async function searchSitusByPrefix(input: {
       situsAddress: txgioParcel.situsAddress,
     })
     .from(txgioParcel)
-    .where(
-      and(
-        inArray(txgioParcel.countyFips, fipsList),
-        sql`${normalizedColumnExpr("situs_address")} ILIKE ${pattern}`,
-      ),
-    )
+    .where(sql`${normalizedColumnExpr("situs_address")} ILIKE ${pattern}`)
     .limit(limit * 8)) as {
     countyFips: string | null;
     propId: string | null;
@@ -655,8 +670,6 @@ async function searchSitusByPrefixWithLocality(input: {
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
-  const fipsList = allStoreCounties().map((c) => c.fips);
-  if (fipsList.length === 0) return [];
 
   const database = input.database ?? defaultDb;
   const patterns = prefixes.map(
@@ -672,8 +685,8 @@ async function searchSitusByPrefixWithLocality(input: {
     .from(txgioParcel)
     .where(
       and(
-        inArray(txgioParcel.countyFips, fipsList),
         patterns.length === 1 ? patterns[0]! : or(...patterns),
+        ...storedSitusLocalitySql(input.locality),
       ),
     )
     .limit(limit * 8)) as {
@@ -757,8 +770,6 @@ export async function searchAddressPointsByPrefix(input: {
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
-  const fipsList = allStoreCounties().map((c) => c.fips);
-  if (fipsList.length === 0) return [];
 
   const database = input.database ?? defaultDb;
   const pattern = `${escapeIlikeLiteral(prefix)}%`;
@@ -794,7 +805,6 @@ export async function searchAddressPointsByPrefix(input: {
     .from(txgioAddress)
     .where(
       and(
-        inArray(txgioAddress.countyFips, fipsList),
         sql`${normalizedColumnExpr("full_addr")} ILIKE ${pattern}`,
         ...localityFilters,
       ),
@@ -853,7 +863,7 @@ export async function searchPlaceByPrefix(input: {
 
   const locality = parsePlaceSearchLocality(input.query);
   if (hasPlaceSearchLocality(locality)) {
-    const keys = normalizeStreetLineCandidates(input.query);
+    const keys = situsSearchStreetKeys(input.query);
     let situsHitsRaw =
       keys.length > 0
         ? await searchSitusByStreetKeys({

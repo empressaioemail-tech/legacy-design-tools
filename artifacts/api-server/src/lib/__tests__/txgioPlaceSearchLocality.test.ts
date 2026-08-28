@@ -25,10 +25,9 @@ vi.mock("@workspace/db", () => ({
 }));
 
 vi.mock("../brokerageTxParcels", () => ({
-  allStoreCounties: () => [
-    { fips: "48021", name: "Bastrop", source: "txgio-store" },
-    { fips: "48491", name: "Williamson", source: "txgio-store" },
-  ],
+  // Live registry tags Bastrop as ArcGIS, not txgio-store. Search must
+  // not fail-closed when this list is empty or omits 48021.
+  allStoreCounties: () => [],
 }));
 
 const { searchPlaceByPrefix } = await import("../txgioAddressResolve");
@@ -70,6 +69,27 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.parcelNodeId).toBe("48021:34137");
     expect(hits[0]?.situsAddress).toContain("BASTROP");
+  });
+
+  it("returns gold 48021:34137 on the exact-key path when CAD omits ST", async () => {
+    const hits = await searchPlaceByPrefix({
+      query: "908 Pine St, Bastrop TX 78602",
+      database: mockDb([
+        {
+          countyFips: "48491",
+          propId: "999999",
+          situsAddress: "908 PINE ST, GEORGETOWN, TX 78626",
+        },
+        {
+          countyFips: "48021",
+          propId: "34137",
+          situsAddress: "908 PINE , BASTROP, TX 78602",
+        },
+      ]) as never,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits[0]?.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
   });
 
   it("returns Bastrop 908 Pine when CAD situs omits street-type suffix", async () => {
