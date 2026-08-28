@@ -18,8 +18,15 @@ import {
 import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
-import { buildRunReportEnvelope, normalizeR1ResponseText, stripSavedPropertiesForExternal } from "./tool-honesty.js";
+import {
+  buildRunReportEnvelope,
+  normalizeGetSmartSiteResponseText,
+  stripSavedPropertiesForExternal,
+} from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
+
+const SMARTSITE_BATCH_CAP = 50;
+const GET_SMART_SITE_DEPTHS = ["stub", "node", "hop1", "subgraph"] as const;
 
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
@@ -82,6 +89,14 @@ function inputSchemaFor(name: SmartsiteToolName) {
         parcelNodeId: z.string().min(1),
         kind: z.enum(["brief", "siteplan", "terrain", "dossier"]),
       });
+    case "get_smart_site":
+      return z.object({
+        parcelNodeId: z.union([
+          z.string().min(1),
+          z.array(z.string().min(1)).min(1),
+        ]),
+        depth: z.enum(GET_SMART_SITE_DEPTHS).optional(),
+      });
     default:
       return z.object({ parcelNodeId: z.string().min(1) });
   }
@@ -129,7 +144,45 @@ export function registerTools(server: McpServer): void {
             });
           }
           case "get_smart_site": {
-            const { parcelNodeId } = args as { parcelNodeId: string };
+            const { parcelNodeId, depth } = args as {
+              parcelNodeId: string | string[];
+              depth?: (typeof GET_SMART_SITE_DEPTHS)[number];
+            };
+            if (depth === "hop1" || depth === "subgraph") {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      status: "not_implemented",
+                      depth,
+                    }),
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const ids = Array.isArray(parcelNodeId)
+              ? parcelNodeId
+              : [parcelNodeId];
+            if (ids.length > SMARTSITE_BATCH_CAP) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      status: "refused",
+                      reason: "parcel_batch_cap",
+                      cap: SMARTSITE_BATCH_CAP,
+                      received: ids.length,
+                    }),
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const briefBody: Record<string, unknown> = { parcelNodeId };
+            if (depth) briefBody.depth = depth;
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -137,11 +190,15 @@ export function registerTools(server: McpServer): void {
                 {
                   method: "POST",
                   userId: auth.userId,
-                  body: JSON.stringify({ parcelNodeId }),
+                  body: JSON.stringify(briefBody),
                 },
               );
               const body = await res.text();
-              const normalized = normalizeR1ResponseText(body);
+              const mode =
+                Array.isArray(parcelNodeId) || depth === "stub"
+                  ? "stub-or-batch"
+                  : "single-node";
+              const normalized = normalizeGetSmartSiteResponseText(body, mode);
               return {
                 content: [{ type: "text" as const, text: normalized }],
                 isError: !res.ok,

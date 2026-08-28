@@ -11,14 +11,14 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "get_smart_site",
     title: "Get its smart site",
     description:
-      "Return the signed-in user's smart site analysis for a parcel: verdicts, citations, and stored artifacts at the caller's tier.",
+      "Return the signed-in user's smart site analysis. parcelNodeId is a string or an array (cap 50; over cap refuses). depth stub is label, node id, url, and five-state rails; depth node is today's full brief and draw. hop1 and subgraph refuse as not_implemented.",
     readiness: "live" as const,
   },
   {
     name: "list_my_properties",
     title: "List my properties",
     description:
-      "List parcels the signed-in user has saved in Smart Site (id, parcel node id, label, updatedAt only — no chat or notes).",
+      "List parcels the signed-in user has saved in Smart Site (id, parcel node id, label, situs disposition, updatedAt only — no chat or notes). A punctuation-only situs falls back to the node id with situs unknown.",
     readiness: "live" as const,
   },
   {

@@ -32,11 +32,20 @@ export function stripEntitlementForExternal(
   };
 }
 
+const PUNCTUATION_ONLY_SITUS_RE = /^[\s,.\-;:'"`]+$/;
+
+export function isPunctuationOnlySitusLabel(value: unknown): boolean {
+  if (value == null) return true;
+  const s = String(value).trim();
+  return s === "" || PUNCTUATION_ONLY_SITUS_RE.test(s);
+}
+
 /** Summary row safe for third-party MCP assistants — no chat snapshots. */
 export type ExternalSavedPropertySummary = {
   id: string;
   parcelNodeId: string;
-  label: string | null;
+  label: string;
+  situs: "present" | "unknown";
   updatedAt: string;
 };
 
@@ -54,19 +63,23 @@ export function stripSavedPropertiesForExternal(
     const parcelNodeId =
       typeof record.parcelNodeId === "string" ? record.parcelNodeId : "";
     if (!id || !parcelNodeId) continue;
-    const label =
-      typeof record.label === "string"
-        ? record.label
-        : record.label === null
-          ? null
-          : null;
+    const storedLabel =
+      typeof record.label === "string" ? record.label : null;
+    const situsUnknown = isPunctuationOnlySitusLabel(storedLabel);
+    const label = situsUnknown ? parcelNodeId : storedLabel!.trim();
     const updatedAt =
       typeof record.updatedAt === "string"
         ? record.updatedAt
         : record.updatedAt != null
           ? String(record.updatedAt)
           : "";
-    rows.push({ id, parcelNodeId, label, updatedAt });
+    rows.push({
+      id,
+      parcelNodeId,
+      label,
+      situs: situsUnknown ? "unknown" : "present",
+      updatedAt,
+    });
   }
   return rows;
 }
@@ -214,6 +227,33 @@ export function normalizeR1BodyForExternal(
       sections: normalizedSections,
     },
   };
+}
+
+/** Batch node rows keep per-parcel brief honesty; stubs pass through. */
+export function normalizeGetSmartSiteResponseText(
+  cortexBodyText: string,
+  mode: "single-node" | "stub-or-batch",
+): string {
+  if (mode === "single-node") return normalizeR1ResponseText(cortexBodyText);
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return cortexBodyText;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (!Array.isArray(record.parcels)) return cortexBodyText;
+    return JSON.stringify({
+      ...record,
+      parcels: record.parcels.map((row) => {
+        if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+        const parcel = row as Record<string, unknown>;
+        if (!parcel.brief) return parcel;
+        return normalizeR1BodyForExternal(parcel);
+      }),
+    });
+  } catch {
+    return cortexBodyText;
+  }
 }
 
 /** Parse cortex R1 JSON and normalize for get_smart_site / run_report. */
