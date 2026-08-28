@@ -20,7 +20,7 @@ function parseArgs(argv: string[]) {
   const dryRun = argv.includes("--dry-run");
   const propIdsRaw = argv.find((a) => a.startsWith("--prop-ids="))?.split("=")[1];
   const propIds = propIdsRaw
-    ? propIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    ? propIdsRaw.split(/[.|+]/).map((s) => s.trim()).filter(Boolean)
     : null;
   return { county, dryRun, propIds };
 }
