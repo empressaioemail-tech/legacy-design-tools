@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertAccessPair, assertSitusNotPunctuationOnly } from "../serveGuards";
+import { assertAccessPair, assertF06BakeAccessPair, assertSitusNotPunctuationOnly } from "../serveGuards";
 
 describe("serveGuards", () => {
   it("refuses access without both fields", () => {
@@ -20,6 +20,15 @@ describe("serveGuards", () => {
     ).toEqual({
       discoverability: "catalog-listed",
       entitlement: "anyone-free",
+    });
+  });
+
+  it("accepts F-06 legacy bake access pair", () => {
+    expect(
+      assertF06BakeAccessPair({ discoverability: "public", entitlement: "anonymous" }),
+    ).toEqual({
+      discoverability: "public",
+      entitlement: "anonymous",
     });
   });
 });

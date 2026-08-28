@@ -20,6 +20,23 @@ export function assertAccessPair(input: unknown): AccessPair {
   }
 }
 
+/** F-06 conformant writer pairs (public/anonymous) for tier bake; not atom-contract enum validation. */
+export function assertF06BakeAccessPair(input: unknown): { discoverability: string; entitlement: string } {
+  if (!input || typeof input !== "object") {
+    throw Object.assign(new Error("access pair missing"), { code: "ACCESS_NOT_DEFAULTED" });
+  }
+  const { discoverability, entitlement } = input as Record<string, unknown>;
+  if (
+    typeof discoverability !== "string" ||
+    discoverability.trim() === "" ||
+    typeof entitlement !== "string" ||
+    entitlement.trim() === ""
+  ) {
+    throw Object.assign(new Error("access field defaulted or empty"), { code: "ACCESS_NOT_DEFAULTED" });
+  }
+  return { discoverability, entitlement };
+}
+
 export function assertSitusNotPunctuationOnly(situs: unknown): string | null {
   if (situs == null || situs === "") return null;
   const s = String(situs).trim();
