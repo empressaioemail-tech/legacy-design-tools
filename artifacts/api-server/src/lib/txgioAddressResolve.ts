@@ -69,13 +69,26 @@ import {
   normalizeStreetLineCandidates,
   normalizeSitusSearchPrefix,
   buildNormalizedStreetSql,
+  parsePlaceSearchLocality,
+  localityFromStoredAddress,
+  placeSearchLocalityMatches,
+  hasPlaceSearchLocality,
+  type PlaceSearchLocality,
 } from "./txgioAddressNormalize";
 import { allStoreCounties } from "./brokerageTxParcels";
 
 /** Re-exported so existing import sites keep working; defined in the
  *  dependency-free `./txgioAddressNormalize` so its pure logic can be
  *  unit-tested without pulling in `@workspace/db`. */
-export { normalizeStreetLine, normalizeSitusSearchPrefix };
+export {
+  normalizeStreetLine,
+  normalizeSitusSearchPrefix,
+  parsePlaceSearchLocality,
+  localityFromStoredAddress,
+  placeSearchLocalityMatches,
+  hasPlaceSearchLocality,
+};
+export type { PlaceSearchLocality };
 
 /** Narrow db surface — injectable for tests (mirrors TxgioStoreDb). */
 export type TxgioAddressResolveDb = Pick<
@@ -491,6 +504,76 @@ function escapeIlikeLiteral(prefix: string): string {
 }
 
 /**
+ * Exact street-key situs lookup across store counties, optionally filtered by
+ * parsed city/state/ZIP. Used when the MCP/FE sends a full address so prefix
+ * ILIKE does not return the wrong county's homonym street.
+ */
+export async function searchSitusByStreetKeys(input: {
+  keys: string[];
+  limit?: number;
+  locality?: PlaceSearchLocality;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit[]> {
+  const keys = [...new Set(input.keys.map((k) => k.trim()).filter(Boolean))];
+  if (keys.length === 0) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+  const fipsList = allStoreCounties().map((c) => c.fips);
+  if (fipsList.length === 0) return [];
+
+  const database = input.database ?? defaultDb;
+  const locality = input.locality ?? { city: null, state: null, zip: null };
+
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        inArray(txgioParcel.countyFips, fipsList),
+        inArray(normalizedColumnExpr("situs_address"), keys),
+      ),
+    )
+    .limit(limit * 16)) as {
+    countyFips: string | null;
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const byParcel = new Map<string, SitusSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!fips || !propId || !situs) continue;
+    if (
+      hasPlaceSearchLocality(locality) &&
+      !placeSearchLocalityMatches(localityFromStoredAddress(situs), locality)
+    ) {
+      continue;
+    }
+    const nodeId = parcelNodeId(fips, propId);
+    if (!nodeId) continue;
+    if (!byParcel.has(nodeId)) {
+      byParcel.set(nodeId, {
+        parcelNodeId: nodeId,
+        situsAddress: situs,
+        countyFips: fips,
+      });
+    }
+    if (byParcel.size >= limit) break;
+  }
+
+  return [...byParcel.values()];
+}
+
+/**
  * Prefix search over store-backed situs addresses for PE typeahead.
  * Matches the normalized first-comma segment of `situs_address` across
  * every `txgio-store` county. Dedupes tile-cell duplicates per parcel.
@@ -589,6 +672,7 @@ function formatAddressPointLabel(row: {
 export async function searchAddressPointsByPrefix(input: {
   query: string;
   limit?: number;
+  locality?: PlaceSearchLocality;
   database?: TxgioAddressResolveDb;
 }): Promise<AddressPointSearchHit[]> {
   const prefix = normalizeSitusSearchPrefix(input.query);
@@ -603,6 +687,24 @@ export async function searchAddressPointsByPrefix(input: {
 
   const database = input.database ?? defaultDb;
   const pattern = `${escapeIlikeLiteral(prefix)}%`;
+  const locality = input.locality ?? { city: null, state: null, zip: null };
+
+  const localityFilters: ReturnType<typeof sql>[] = [];
+  if (locality.zip) {
+    localityFilters.push(
+      sql`trim(${txgioAddress.postCode}) = ${locality.zip}`,
+    );
+  }
+  if (locality.city) {
+    localityFilters.push(
+      sql`upper(trim(${txgioAddress.postComm})) = ${locality.city}`,
+    );
+  }
+  if (locality.state) {
+    localityFilters.push(
+      sql`upper(trim(${txgioAddress.state})) = ${locality.state}`,
+    );
+  }
 
   const rows = (await database
     .select({
@@ -619,6 +721,7 @@ export async function searchAddressPointsByPrefix(input: {
       and(
         inArray(txgioAddress.countyFips, fipsList),
         sql`${normalizedColumnExpr("full_addr")} ILIKE ${pattern}`,
+        ...localityFilters,
       ),
     )
     .limit(limit * 8)) as {
@@ -672,6 +775,45 @@ export async function searchPlaceByPrefix(input: {
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
+
+  const locality = parsePlaceSearchLocality(input.query);
+  if (hasPlaceSearchLocality(locality)) {
+    const keys = normalizeStreetLineCandidates(input.query);
+    const situsHits =
+      keys.length > 0
+        ? (
+            await searchSitusByStreetKeys({
+              keys,
+              limit,
+              locality,
+              database: input.database,
+            })
+          ).map((h) => ({ ...h, source: "parcel-situs" as const }))
+        : [];
+
+    const seenLookup = new Set(
+      situsHits.map((h) => h.situsAddress.trim().toLowerCase()),
+    );
+    const remaining = Math.max(limit - situsHits.length, 0);
+    const addressHits =
+      remaining > 0
+        ? await searchAddressPointsByPrefix({
+            ...input,
+            limit: remaining,
+            locality,
+          })
+        : [];
+
+    const merged: PlaceSearchHit[] = [...situsHits];
+    for (const hit of addressHits) {
+      const key = hit.situsAddress.trim().toLowerCase();
+      if (seenLookup.has(key)) continue;
+      seenLookup.add(key);
+      merged.push(hit);
+      if (merged.length >= limit) break;
+    }
+    return merged;
+  }
 
   const situsHits = (
     await searchSitusByPrefix({ ...input, limit })

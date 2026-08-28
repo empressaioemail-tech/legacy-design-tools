@@ -12,6 +12,10 @@ import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
   normalizeSitusSearchPrefix,
+  parsePlaceSearchLocality,
+  localityFromStoredAddress,
+  placeSearchLocalityMatches,
+  hasPlaceSearchLocality,
 } from "../txgioAddressNormalize";
 
 describe("normalizeStreetLine", () => {
@@ -213,5 +217,55 @@ describe("normalizeSitusSearchPrefix", () => {
 
   it("rejects bare street names without a house number", () => {
     expect(normalizeSitusSearchPrefix("Marsh Lane")).toBeNull();
+  });
+});
+
+describe("place search locality (B1 find_parcel homonym guard)", () => {
+  it("parses city/state/ZIP from a comma-delimited MCP query", () => {
+    expect(parsePlaceSearchLocality("908 Pine St, Bastrop TX 78602")).toEqual({
+      city: "BASTROP",
+      state: "TX",
+      zip: "78602",
+    });
+  });
+
+  it("parses locality from a comma-less full address", () => {
+    expect(parsePlaceSearchLocality("908 Pine St Bastrop TX 78602")).toEqual({
+      city: "BASTROP",
+      state: "TX",
+      zip: "78602",
+    });
+  });
+
+  it("extracts locality from stored situs labels", () => {
+    expect(
+      localityFromStoredAddress("908 PINE ST, BASTROP, TX 78602"),
+    ).toEqual({
+      city: "BASTROP",
+      state: "TX",
+      zip: "78602",
+    });
+    expect(
+      localityFromStoredAddress("908 PINE ST, GEORGETOWN, TX 78626"),
+    ).toEqual({
+      city: "GEORGETOWN",
+      state: "TX",
+      zip: "78626",
+    });
+  });
+
+  it("rejects a Georgetown situs when Bastrop+78602 was requested", () => {
+    const query = parsePlaceSearchLocality("908 Pine St, Bastrop TX 78602");
+    const georgetown = localityFromStoredAddress(
+      "908 PINE ST, GEORGETOWN, TX 78626",
+    );
+    expect(hasPlaceSearchLocality(query)).toBe(true);
+    expect(placeSearchLocalityMatches(georgetown, query)).toBe(false);
+    expect(
+      placeSearchLocalityMatches(
+        localityFromStoredAddress("908 PINE ST, BASTROP, TX 78602"),
+        query,
+      ),
+    ).toBe(true);
   });
 });
