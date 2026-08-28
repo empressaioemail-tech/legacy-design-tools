@@ -30,9 +30,10 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
 }
 
 describe("normalizeIndexHit", () => {
-  it("maps table cells to index fields", () => {
+  it("maps named header columns to index fields", () => {
     expect(
       normalizeIndexHit({
+        headers: ["Instrument Number", "Document Type", "Date", "Grantor"],
         cells: ["2024-12345", "DEED", "2024-01-02", "SMITH JOHN"],
         link: "https://portal/doc/1",
       }),

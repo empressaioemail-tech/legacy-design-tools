@@ -45,6 +45,39 @@ describe("classifyRecordsRequestDocumentType", () => {
     expect(route.instrumentType).toBe("lien");
     expect(route.extractsClauses).toBe(false);
   });
+
+  it("refuses when the document type is absent", () => {
+    for (const label of [null, "", "   "]) {
+      try {
+        classifyRecordsRequestDocumentType(label);
+        throw new Error(`expected refuse for ${JSON.stringify(label)}`);
+      } catch (err) {
+        expect(err).toBeInstanceOf(RecordsRequestClassifyRefuseError);
+        expect((err as RecordsRequestClassifyRefuseError).code).toBe(
+          "unclassifiable_document_type",
+        );
+      }
+    }
+  });
+
+  it("writes unclassified for a resolved label that matches no known kind", () => {
+    const route = classifyRecordsRequestDocumentType("ASSIGNMENT");
+    expect(route.instrumentType).toBe("other");
+    expect(route.documentKind).toBe("unclassified");
+    expect(route.sourceDocumentType).toBe("ASSIGNMENT");
+    expect(route.extractsClauses).toBe(false);
+  });
+
+  it("does not invent deed unless the label is a deed", () => {
+    const assignment = classifyRecordsRequestDocumentType("ASSIGNMENT");
+    expect(assignment.documentKind).toBe("unclassified");
+    expect(assignment.documentKind).not.toBe("deed");
+    const grantorSittingInType = classifyRecordsRequestDocumentType("SMITH JOHN A");
+    expect(grantorSittingInType.documentKind).toBe("unclassified");
+    expect(grantorSittingInType.documentKind).not.toBe("deed");
+    const deed = classifyRecordsRequestDocumentType("WARRANTY DEED");
+    expect(deed.documentKind).toBe("deed");
+  });
 });
 
 describe("records request classify refuse fixtures (WDLL item 8)", () => {

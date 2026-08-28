@@ -2,7 +2,10 @@
  * P-85 items 5+6 — post-search hit extraction and instrument acquisition.
  */
 
-import { extractIndexHitsFromPage } from "./indexHits.js";
+import {
+  extractIndexHitsFromPage,
+  vendorFamilyFromPortalId,
+} from "./indexHits.js";
 import {
   acquireIndexHits,
   acquisitionAwaitingPurchaseResult,
@@ -22,7 +25,17 @@ export async function finalizeIndexSearchWithAcquisition(input: {
   scope: Record<string, unknown>;
   resultCount: number | null;
 }): Promise<RecordsRecipeResult> {
-  const hits = await extractIndexHitsFromPage(input.browser);
+  const extracted = await extractIndexHitsFromPage(input.browser, {
+    vendorFamily: vendorFamilyFromPortalId(input.portalId),
+  });
+  if (!extracted.ok) {
+    return {
+      status: "failed",
+      errorCode: extracted.errorCode,
+      errorMessage: extracted.errorMessage,
+    };
+  }
+  const hits = extracted.hits;
 
   const scopeWithHits = {
     ...input.scope,
