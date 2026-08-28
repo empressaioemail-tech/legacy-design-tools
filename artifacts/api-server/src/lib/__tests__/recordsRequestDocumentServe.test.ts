@@ -73,6 +73,8 @@ describe("recordsRequestDocumentServe", () => {
         acquisitionMethod: "capture",
         classifyStatus: null,
         refuseCode: null,
+        documentKind: null,
+        sourceDocumentType: null,
       },
     ]);
   });
@@ -110,9 +112,77 @@ describe("recordsRequestDocumentServe", () => {
       acquisitionMethod: "capture",
       classifyStatus: "refused",
       refuseCode: "unclassifiable_document_type",
+      documentKind: null,
+      sourceDocumentType: null,
     });
     expect(artifacts[0]?.classifyStatus).not.toBeNull();
     expect(artifacts[0]?.classifyStatus).not.toBe("written");
+  });
+
+  it("exposes unclassified as documentKind beside written, not as classifyStatus", () => {
+    const wire = enrichRecordsRequestJobWire(
+      {
+        jobId: "job-1",
+        scopeSearched: {
+          indexHits: [{ recordingRef: "202008880", documentType: "MEMORANDUM" }],
+        },
+      },
+      [
+        {
+          id: "art-memo",
+          recordingRef: "202008880",
+          acquisitionMethod: "capture",
+          storagePath: null,
+          metadata: {
+            capturePngBase64: PNG_B64,
+            classify: {
+              status: "written",
+              documentKind: "unclassified",
+              sourceDocumentType: "MEMORANDUM",
+              instrumentId: "inst-memo",
+            },
+          },
+        },
+      ],
+    );
+    const artifacts = wire.artifacts as Array<Record<string, unknown>>;
+    expect(artifacts[0]).toEqual({
+      artifactId: "art-memo",
+      recordingRef: "202008880",
+      documentUrl:
+        "/api/property-explorer/v1/records-request/artifacts/art-memo/document",
+      acquisitionMethod: "capture",
+      classifyStatus: "written",
+      refuseCode: null,
+      documentKind: "unclassified",
+      sourceDocumentType: "MEMORANDUM",
+    });
+    expect(artifacts[0]?.classifyStatus).not.toBe("unclassified");
+  });
+
+  it("does not expose skipped as a GET classifyStatus", () => {
+    const wire = enrichRecordsRequestJobWire(
+      { jobId: "job-1", scopeSearched: { indexHits: [] } },
+      [
+        {
+          id: "art-skip",
+          recordingRef: "2024-8",
+          acquisitionMethod: "capture",
+          storagePath: null,
+          metadata: {
+            classify: {
+              status: "skipped",
+              refuseCode: "already_classified",
+              instrumentId: "inst-old",
+            },
+          },
+        },
+      ],
+    );
+    const artifacts = wire.artifacts as Array<Record<string, unknown>>;
+    expect(artifacts[0]?.classifyStatus).toBeNull();
+    expect(artifacts[0]?.classifyStatus).not.toBe("skipped");
+    expect(artifacts[0]?.refuseCode).toBe("already_classified");
   });
 
   it("reads the persisted capture bytes", () => {
