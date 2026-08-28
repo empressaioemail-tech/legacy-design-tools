@@ -235,6 +235,11 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
       state: "TX",
       zip: "78602",
     });
+    expect(parsePlaceSearchLocality("908 Pine St Bastrop")).toEqual({
+      city: "BASTROP",
+      state: null,
+      zip: null,
+    });
   });
 
   it("extracts locality from stored situs labels", () => {

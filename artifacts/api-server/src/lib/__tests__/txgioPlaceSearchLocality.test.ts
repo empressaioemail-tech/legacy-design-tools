@@ -42,8 +42,7 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
           where: () => ({
             limit: async () => {
               call += 1;
-              // First query: street-key situs lookup (searchSitusByStreetKeys).
-              // Second query: address-point prefix (searchAddressPointsByPrefix).
+              // 1: street-key situs; 2+: prefix situs / address-point.
               return call === 1 ? parcelRows : addressRows;
             },
           }),
@@ -67,6 +66,41 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
           situsAddress: "908 PINE ST, BASTROP, TX 78602",
         },
       ]) as never,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits[0]?.situsAddress).toContain("BASTROP");
+  });
+
+  it("returns Bastrop 908 Pine when CAD situs omits street-type suffix", async () => {
+    let call = 0;
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => {
+              call += 1;
+              if (call === 1) return [];
+              return [
+                {
+                  countyFips: "48491",
+                  propId: "999999",
+                  situsAddress: "908 PINE ST, GEORGETOWN, TX 78626",
+                },
+                {
+                  countyFips: "48021",
+                  propId: "34137",
+                  situsAddress: "908 PINE , BASTROP, TX 78602",
+                },
+              ];
+            },
+          }),
+        }),
+      }),
+    };
+    const hits = await searchPlaceByPrefix({
+      query: "908 Pine St, Bastrop TX 78602",
+      database: db as never,
     });
     expect(hits).toHaveLength(1);
     expect(hits[0]?.parcelNodeId).toBe("48021:34137");
