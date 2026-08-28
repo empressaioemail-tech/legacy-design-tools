@@ -231,6 +231,71 @@ describe("extractResultRows header seam", () => {
     ]);
   });
 
+  it("reads Instrument # headers from an ancestor when the data table has none", async () => {
+    document.body.innerHTML = `
+      <div>
+        <div class="headerWrap">
+          <table>
+            <tbody>
+              <tr>
+                <th>#</th>
+                <th>Image</th>
+                <th>Item Select</th>
+                <th>Instrument #</th>
+                <th>Date Filed</th>
+                <th>Document Type</th>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="dataWrap">
+          <table>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td><a href="/Image/202008880">View</a></td>
+                <td></td>
+                <td>202008880</td>
+                <td>06/05/2020</td>
+                <td>DEED</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    const rows = await createPlaywrightBrowser(
+      pageWithStringEvaluate(),
+    ).extractResultRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.headers).toEqual([
+      "#",
+      "Image",
+      "Item Select",
+      "Instrument #",
+      "Date Filed",
+      "Document Type",
+    ]);
+    expect(rows[0]?.cells[3]).toBe("202008880");
+  });
+
+  it("drops 0-record chrome whose only signal is a date", async () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr>
+            <td>Criteria: Freeform Legal begins with BUILDING BLOCK 49 E W ST, ACRES 1.280</td>
+            <td>0 records found as of 08/28/2026 04:26:33 PM</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const rows = await createPlaywrightBrowser(
+      pageWithStringEvaluate(),
+    ).extractResultRows();
+    expect(rows).toHaveLength(0);
+  });
+
   it("returns null headers when the grid has no header row", async () => {
     document.body.innerHTML = `
       <table>

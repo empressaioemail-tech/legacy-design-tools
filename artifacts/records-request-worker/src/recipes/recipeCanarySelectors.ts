@@ -43,8 +43,8 @@ const AUMENTUM_TERMS_SELECTORS = TERMS_ACCEPT_SELECTORS;
 /** Registry keyed by probeId; portal lookup is many-to-one. */
 export const RECIPE_CANARY_PROBES: readonly RecipeCanaryProbe[] = [
   {
-    probeId: "aumentum-index-v2",
-    recipeVersion: "p85-aumentum-index-search-v2",
+    probeId: "aumentum-index-v3",
+    recipeVersion: "p85-aumentum-index-search-v3",
     portalIds: ["bastrop-aumentum", "travis-tccsearch"],
     driftSelectors: AUMENTUM_TERMS_SELECTORS,
   },

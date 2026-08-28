@@ -8,6 +8,7 @@ import {
   type BrowserContext,
   type Page,
 } from "playwright";
+import { applyInfragisticsValueSource } from "./applyInfragisticsValueSource.js";
 import { EXTRACT_RESULT_ROWS_SOURCE } from "./extractResultRowsSource.js";
 import { INSPECT_DOCUMENT_PURCHASE_SOURCE } from "./inspectDocumentPurchaseSource.js";
 import { sha256Hex } from "./lib/captureHash.js";
@@ -95,6 +96,15 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
     async fill(selector: string, value: string): Promise<BrowserActionResult> {
       try {
         await page.fill(selector, value, { timeout: ACTION_TIMEOUT_MS });
+        const applied = (await page.evaluate(
+          applyInfragisticsValueSource(selector, value),
+        )) as { ok?: boolean; read?: string | null };
+        if (!applied?.ok) {
+          return {
+            ok: false,
+            errorMessage: `fill did not stick on ${selector}: read=${applied?.read ?? "null"}`,
+          };
+        }
         return { ok: true };
       } catch (err) {
         return actionError(err);

@@ -13,6 +13,7 @@ import {
   tryFillFirst,
 } from "./browserSelectors.js";
 import {
+  UNRESOLVED_RESULT_ROW_HEADER,
   dedupeIndexHits,
   extractIndexHitsFromPage,
   parseIndexHitsFromScope,
@@ -25,6 +26,7 @@ import {
   acquisitionNeedsHumanResult,
   mergeAcquisitionIntoScope,
 } from "./instrumentAcquisition.js";
+import { assertBastropSearchSettled } from "./searchOutcome.js";
 import { resolveSearchTerms } from "./searchTerms.js";
 import {
   buildSearchQueryPlan,
@@ -36,7 +38,7 @@ import type {
   RecordsRecipeResult,
 } from "./types.js";
 
-export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v2";
+export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v3";
 
 function isBastropSearchEntryPortal(portal: P85PortalConfig): boolean {
   return portal.portalId === "bastrop-aumentum";
@@ -324,6 +326,11 @@ async function runBastropSearchEntryQuery(
     };
   }
 
+  const settled = await assertBastropSearchSettled(browser, planned.kind);
+  if (!settled.ok) {
+    return settled;
+  }
+
   const pageCapture = await browser.captureFullPage(planned.captureLabel);
   if (!pageCapture.ok || !pageCapture.sha256) {
     return {
@@ -590,6 +597,19 @@ export async function runAumentumIndexSearch(
   for (const planned of plan) {
     const result = await runSingleQuery(portal, browser, planned, searchTermsUrl);
     if (!result.ok) {
+      if (
+        allHits.length > 0 &&
+        result.result.errorCode === UNRESOLVED_RESULT_ROW_HEADER
+      ) {
+        stepsReached.push(`search-${planned.kind}-header-unresolved-skipped`);
+        queries.push({
+          kind: planned.kind,
+          query: planned.query,
+          skipped: result.result.errorCode,
+          errorMessage: result.result.errorMessage,
+        });
+        continue;
+      }
       return result.result;
     }
     queries.push(result.queryRecord);
