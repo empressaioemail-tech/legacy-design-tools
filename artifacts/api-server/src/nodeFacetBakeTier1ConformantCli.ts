@@ -21,10 +21,30 @@ function parseArgs(argv: string[]) {
   return { county, dryRun };
 }
 
-function parcelNodeIdFromBody(body: Record<string, unknown>): string | null {
+function parcelNodeIdFromBody(body: Record<string, unknown>, countyFips: string): string | null {
   const nodeId = body?.nodeId ?? (body?.claim as Record<string, unknown> | undefined)?.nodeId;
   if (typeof nodeId === "string" && nodeId.includes(":")) return nodeId;
+  const src =
+    (body?.sourceIdentifiers as Record<string, unknown> | undefined) ??
+    ((body?.claim as Record<string, unknown> | undefined)?.sourceIdentifiers as
+      | Record<string, unknown>
+      | undefined);
+  const propId = src?.prop_id;
+  if (typeof propId === "string" && propId.trim() !== "") return `${countyFips}:${propId.trim()}`;
+  if (typeof propId === "number" && Number.isFinite(propId)) return `${countyFips}:${propId}`;
   return null;
+}
+
+function situsForBake(body: Record<string, unknown>): { situs: string | null; refuse: boolean } {
+  const claim = body.claim as Record<string, unknown> | undefined;
+  const raw =
+    (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
+  if (raw == null || raw === "") return { situs: null, refuse: false };
+  try {
+    return { situs: assertSitusNotPunctuationOnly(raw), refuse: false };
+  } catch {
+    return { situs: null, refuse: true };
+  }
 }
 
 async function main() {
@@ -44,19 +64,21 @@ async function main() {
     [county],
   );
   let written = 0;
-    let skippedNoNode = 0;
+  let skippedNoNode = 0;
+  let skippedBadSitus = 0;
   for (const { body: rawBody } of cadRows) {
     const body = (rawBody ?? {}) as Record<string, unknown>;
-    const parcelNodeId = parcelNodeIdFromBody(body);
+    const parcelNodeId = parcelNodeIdFromBody(body, county);
     if (!parcelNodeId) {
       skippedNoNode += 1;
       continue;
     }
     const access = assertAccessPair(body.access);
-    const claim = body.claim as Record<string, unknown> | undefined;
-    const situs =
-      (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
-    assertSitusNotPunctuationOnly(situs);
+    const { situs, refuse: refuseSitus } = situsForBake(body);
+    if (refuseSitus) {
+      skippedBadSitus += 1;
+      continue;
+    }
     const payload = {
       shapeSource: "conformant-v1",
       baked: true,
@@ -100,6 +122,7 @@ async function main() {
       conformantCadRows: cadRows.length,
       written,
       skippedNoNode,
+      skippedBadSitus,
     }),
   );
   await mcp.end();
