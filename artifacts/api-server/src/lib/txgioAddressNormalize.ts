@@ -210,6 +210,35 @@ export function normalizeSitusSearchPrefix(raw: string): string | null {
   return tokens.join(" ");
 }
 
+/** Canonical street-type suffix tokens (USPS abbreviations). */
+const STREET_TYPE_SUFFIXES = new Set(Object.values(STREET_TYPE_ABBR));
+
+/**
+ * Prefix variants for locality-filtered situs search. When the typed query
+ * includes a street-type suffix ("908 Pine St") but the CAD situs omits it
+ * ("908 PINE , BASTROP, TX 78602"), exact street-key lookup misses; prefix
+ * ILIKE on the stripped form recovers the hit while locality still blocks
+ * homonyms in other counties.
+ */
+export function situsSearchPrefixVariants(raw: string): string[] {
+  const streetOnly = raw.split(",")[0] ?? raw;
+  const primary = normalizeSitusSearchPrefix(streetOnly);
+  if (!primary) return [];
+
+  const variants: string[] = [primary];
+  const tokens = primary.split(" ").filter(Boolean);
+  if (tokens.length >= 3) {
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) {
+      const stripped = tokens.slice(0, -1).join(" ");
+      if (stripped.length > 0 && !variants.includes(stripped)) {
+        variants.push(stripped);
+      }
+    }
+  }
+  return variants;
+}
+
 /** City / state / ZIP constraints parsed from a typeahead or MCP find query. */
 export type PlaceSearchLocality = {
   city: string | null;
@@ -274,7 +303,25 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
   if (tokens.length < 4) return { city: null, state: null, zip: null };
 
   const last = tokens[tokens.length - 1]!;
-  if (!ZIP_RE.test(last)) return { city: null, state: null, zip: null };
+  if (!ZIP_RE.test(last)) {
+    // Comma-less "<street> <city>" without state/zip — e.g. "908 Pine St Bastrop".
+    for (let i = tokens.length - 2; i >= 1; i--) {
+      const t = tokens[i]!;
+      const canonical = STREET_TYPE_ABBR[t] ?? t;
+      if (STREET_TYPE_SUFFIXES.has(canonical)) {
+        const cityTokens = tokens.slice(i + 1);
+        if (cityTokens.length >= 1 && cityTokens.length <= 3) {
+          return {
+            city: normalizeLocalityToken(cityTokens.join(" ")),
+            state: null,
+            zip: null,
+          };
+        }
+        break;
+      }
+    }
+    return { city: null, state: null, zip: null };
+  }
   const zip = last;
   const maybeState = tokens[tokens.length - 2]!;
   if (!STATE_RE.test(maybeState)) {

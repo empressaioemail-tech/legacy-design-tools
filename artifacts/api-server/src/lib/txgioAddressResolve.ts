@@ -56,7 +56,7 @@
  * county) and consistent with what we store.
  */
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db as defaultDb, txgioParcel, txgioAddress } from "@workspace/db";
 import {
@@ -73,6 +73,7 @@ import {
   localityFromStoredAddress,
   placeSearchLocalityMatches,
   hasPlaceSearchLocality,
+  situsSearchPrefixVariants,
   type PlaceSearchLocality,
 } from "./txgioAddressNormalize";
 import { allStoreCounties } from "./brokerageTxParcels";
@@ -636,6 +637,80 @@ export async function searchSitusByPrefix(input: {
   return [...byParcel.values()];
 }
 
+/**
+ * Prefix situs search with city/state/ZIP filter — used when exact street-key
+ * lookup misses (CAD situs often omits the street-type suffix the user typed).
+ * Still fail-closed: never falls back to an unfiltered cross-county prefix.
+ */
+async function searchSitusByPrefixWithLocality(input: {
+  query: string;
+  limit?: number;
+  locality: PlaceSearchLocality;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit[]> {
+  const prefixes = situsSearchPrefixVariants(input.query);
+  if (prefixes.length === 0) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+  const fipsList = allStoreCounties().map((c) => c.fips);
+  if (fipsList.length === 0) return [];
+
+  const database = input.database ?? defaultDb;
+  const patterns = prefixes.map(
+    (p) => sql`${normalizedColumnExpr("situs_address")} ILIKE ${`${escapeIlikeLiteral(p)}%`}`,
+  );
+
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        inArray(txgioParcel.countyFips, fipsList),
+        patterns.length === 1 ? patterns[0]! : or(...patterns),
+      ),
+    )
+    .limit(limit * 8)) as {
+    countyFips: string | null;
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const byParcel = new Map<string, SitusSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!fips || !propId || !situs) continue;
+    if (
+      !placeSearchLocalityMatches(
+        localityFromStoredAddress(situs),
+        input.locality,
+      )
+    ) {
+      continue;
+    }
+    const nodeId = parcelNodeId(fips, propId);
+    if (!nodeId) continue;
+    if (!byParcel.has(nodeId)) {
+      byParcel.set(nodeId, {
+        parcelNodeId: nodeId,
+        situsAddress: situs,
+        countyFips: fips,
+      });
+    }
+    if (byParcel.size >= limit) break;
+  }
+
+  return [...byParcel.values()];
+}
+
 export interface AddressPointSearchHit {
   parcelNodeId: null;
   situsAddress: string;
@@ -779,17 +854,27 @@ export async function searchPlaceByPrefix(input: {
   const locality = parsePlaceSearchLocality(input.query);
   if (hasPlaceSearchLocality(locality)) {
     const keys = normalizeStreetLineCandidates(input.query);
-    const situsHits =
+    let situsHitsRaw =
       keys.length > 0
-        ? (
-            await searchSitusByStreetKeys({
-              keys,
-              limit,
-              locality,
-              database: input.database,
-            })
-          ).map((h) => ({ ...h, source: "parcel-situs" as const }))
+        ? await searchSitusByStreetKeys({
+            keys,
+            limit,
+            locality,
+            database: input.database,
+          })
         : [];
+    if (situsHitsRaw.length === 0) {
+      situsHitsRaw = await searchSitusByPrefixWithLocality({
+        query: input.query,
+        limit,
+        locality,
+        database: input.database,
+      });
+    }
+    const situsHits = situsHitsRaw.map((h) => ({
+      ...h,
+      source: "parcel-situs" as const,
+    }));
 
     const seenLookup = new Set(
       situsHits.map((h) => h.situsAddress.trim().toLowerCase()),
