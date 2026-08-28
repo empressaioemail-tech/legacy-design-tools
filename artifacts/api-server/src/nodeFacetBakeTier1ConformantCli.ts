@@ -18,17 +18,41 @@ function placeKeyForNode(parcelNodeId: string): string {
 function parseArgs(argv: string[]) {
   const county = argv.find((a) => a.startsWith("--county="))?.split("=")[1] ?? "48021";
   const dryRun = argv.includes("--dry-run");
-  return { county, dryRun };
+  const propIdsRaw = argv.find((a) => a.startsWith("--prop-ids="))?.split("=")[1];
+  const propIds = propIdsRaw
+    ? propIdsRaw.split(/[.|+]/).map((s) => s.trim()).filter(Boolean)
+    : null;
+  return { county, dryRun, propIds };
 }
 
-function parcelNodeIdFromBody(body: Record<string, unknown>): string | null {
+function parcelNodeIdFromBody(body: Record<string, unknown>, countyFips: string): string | null {
   const nodeId = body?.nodeId ?? (body?.claim as Record<string, unknown> | undefined)?.nodeId;
   if (typeof nodeId === "string" && nodeId.includes(":")) return nodeId;
+  const src =
+    (body?.sourceIdentifiers as Record<string, unknown> | undefined) ??
+    ((body?.claim as Record<string, unknown> | undefined)?.sourceIdentifiers as
+      | Record<string, unknown>
+      | undefined);
+  const propId = src?.prop_id;
+  if (typeof propId === "string" && propId.trim() !== "") return `${countyFips}:${propId.trim()}`;
+  if (typeof propId === "number" && Number.isFinite(propId)) return `${countyFips}:${propId}`;
   return null;
 }
 
+function situsForBake(body: Record<string, unknown>): { situs: string | null; refuse: boolean } {
+  const claim = body.claim as Record<string, unknown> | undefined;
+  const raw =
+    (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
+  if (raw == null || raw === "") return { situs: null, refuse: false };
+  try {
+    return { situs: assertSitusNotPunctuationOnly(raw), refuse: false };
+  } catch {
+    return { situs: null, refuse: true };
+  }
+}
+
 async function main() {
-  const { county, dryRun } = parseArgs(process.argv.slice(2));
+  const { county, dryRun, propIds } = parseArgs(process.argv.slice(2));
   const mcpUrl = process.env.HAUSKA_MCP_DATABASE_URL;
   const neondbUrl = process.env.DATABASE_URL ?? process.env.DEPLOYMENT_DATABASE_URL;
   if (!mcpUrl || !neondbUrl) {
@@ -39,24 +63,35 @@ async function main() {
   await mcp.connect();
   await neondb.connect();
   const where = conformantCadCountyWhere(1);
+  const params: Array<string | string[]> = [county];
+  let propFilter = "";
+  if (propIds?.length) {
+    propFilter = ` AND body->'sourceIdentifiers'->>'prop_id' = ANY($2::text[])`;
+    params.push(propIds);
+  }
   const { rows: cadRows } = await mcp.query(
-    `SELECT entity_id, body FROM atoms WHERE ${where}`,
-    [county],
+    `SELECT entity_id, body FROM atoms WHERE ${where}${propFilter}`,
+    params,
   );
   let written = 0;
-    let skippedNoNode = 0;
+  let skippedNoNode = 0;
+  let skippedBadSitus = 0;
   for (const { body: rawBody } of cadRows) {
     const body = (rawBody ?? {}) as Record<string, unknown>;
-    const parcelNodeId = parcelNodeIdFromBody(body);
+    const parcelNodeId = parcelNodeIdFromBody(body, county);
     if (!parcelNodeId) {
       skippedNoNode += 1;
       continue;
     }
+    if (propIds && !propIds.includes(parcelNodeId.split(":")[1] ?? "")) {
+      continue;
+    }
     const access = assertAccessPair(body.access);
-    const claim = body.claim as Record<string, unknown> | undefined;
-    const situs =
-      (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
-    assertSitusNotPunctuationOnly(situs);
+    const { situs, refuse: refuseSitus } = situsForBake(body);
+    if (refuseSitus) {
+      skippedBadSitus += 1;
+      continue;
+    }
     const payload = {
       shapeSource: "conformant-v1",
       baked: true,
@@ -97,9 +132,11 @@ async function main() {
     JSON.stringify({
       county,
       dryRun,
+      propIds,
       conformantCadRows: cadRows.length,
       written,
       skippedNoNode,
+      skippedBadSitus,
     }),
   );
   await mcp.end();
