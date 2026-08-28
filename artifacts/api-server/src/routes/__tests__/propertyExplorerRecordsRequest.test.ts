@@ -15,6 +15,7 @@ const mockEnsure = vi.fn();
 const mockFind = vi.fn();
 const mockCreateJob = vi.fn();
 const mockListJobs = vi.fn();
+const mockListInbox = vi.fn();
 const mockResolveUser = vi.fn();
 
 vi.mock("@workspace/db", () => ({
@@ -45,6 +46,7 @@ vi.mock("../../lib/peRecordsEngagement", () => ({
 vi.mock("../../lib/recordsRequestService", () => ({
   createRecordsRequestJob: (...args: unknown[]) => mockCreateJob(...args),
   listRecordsRequestJobsWire: (...args: unknown[]) => mockListJobs(...args),
+  listRecordsRequestInboxWire: (...args: unknown[]) => mockListInbox(...args),
 }));
 
 const propertyExplorerRouter = (await import("../propertyExplorer")).default;
@@ -84,6 +86,18 @@ beforeEach(() => {
   mockListJobs.mockResolvedValue({
     engagementId: ENGAGEMENT_ID,
     jobs: [{ jobId: JOB_ID, status: "queued" }],
+  });
+  mockListInbox.mockResolvedValue({
+    jobs: [
+      {
+        jobId: JOB_ID,
+        jobStatus: "running",
+        parcelNodeId: PARCEL_NODE,
+        indexHitsCount: 0,
+        finishReason: null,
+        updatedAt: "2026-08-27T12:00:00.000Z",
+      },
+    ],
   });
 });
 
@@ -168,5 +182,19 @@ describe("GET /property-explorer/v1/records-request", () => {
     expect(res.body.jobs).toEqual([]);
     expect(res.body.engagementId).toBeNull();
     expect(mockListJobs).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /property-explorer/v1/records-request/inbox", () => {
+  it("lists recent jobs across parcels for the signed-in user", async () => {
+    const app = buildApp();
+    const res = await request(app).get(
+      "/api/property-explorer/v1/records-request/inbox",
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.jobs).toHaveLength(1);
+    expect(res.body.jobs[0].parcelNodeId).toBe(PARCEL_NODE);
+    expect(mockListInbox).toHaveBeenCalledWith(USER_ID);
   });
 });

@@ -124,6 +124,25 @@ export async function listRecordsRequestJobsForEngagement(
     .orderBy(desc(recordsRequestJobs.createdAt));
 }
 
+/** Cross-parcel inbox for PE My reports — latest jobs for this user. */
+export async function listRecordsRequestJobsForUser(
+  userId: string,
+  limit = 25,
+): Promise<RecordsRequestJob[]> {
+  return db
+    .select()
+    .from(recordsRequestJobs)
+    .where(eq(recordsRequestJobs.userId, userId))
+    .orderBy(desc(recordsRequestJobs.updatedAt))
+    .limit(limit);
+}
+
+export function parcelNodeIdFromParcelKey(parcelKey: string): string | null {
+  if (!parcelKey.startsWith("apn:")) return null;
+  const rest = parcelKey.slice("apn:".length).trim();
+  return rest.length > 0 ? rest : null;
+}
+
 export function recordsRequestJobToWire(job: RecordsRequestJob): Record<string, unknown> {
   return {
     jobId: job.id,
