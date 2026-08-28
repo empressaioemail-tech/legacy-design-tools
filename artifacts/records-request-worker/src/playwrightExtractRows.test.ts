@@ -1,21 +1,27 @@
-import { chromium } from "playwright";
-import { afterEach, describe, expect, it } from "vitest";
+/// <reference lib="dom" />
+/**
+ * @vitest-environment happy-dom
+ *
+ * Runs the page.evaluate callback in-process. CI Test does not install
+ * Playwright Chromium, so a live launch is not a gate here.
+ */
+import { beforeEach, describe, expect, it } from "vitest";
+import type { Page } from "playwright";
 import { createPlaywrightBrowser } from "./playwrightBrowser.js";
 
-describe("extractResultRows header seam", () => {
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+function pageWithInProcessEvaluate(): Page {
+  return {
+    evaluate: async <T>(fn: () => T): Promise<T> => fn(),
+  } as unknown as Page;
+}
 
-  afterEach(async () => {
-    if (browser) {
-      await browser.close();
-      browser = undefined;
-    }
+describe("extractResultRows header seam", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
   });
 
   it("reads the published grid header onto each result row", async () => {
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setContent(`
+    document.body.innerHTML = `
       <table>
         <thead>
           <tr>
@@ -34,8 +40,10 @@ describe("extractResultRows header seam", () => {
           </tr>
         </tbody>
       </table>
-    `);
-    const rows = await createPlaywrightBrowser(page).extractResultRows();
+    `;
+    const rows = await createPlaywrightBrowser(
+      pageWithInProcessEvaluate(),
+    ).extractResultRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.headers).toEqual([
       "Instrument Number",
@@ -47,9 +55,7 @@ describe("extractResultRows header seam", () => {
   });
 
   it("returns null headers when the grid has no header row", async () => {
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setContent(`
+    document.body.innerHTML = `
       <table>
         <tbody>
           <tr>
@@ -59,8 +65,10 @@ describe("extractResultRows header seam", () => {
           </tr>
         </tbody>
       </table>
-    `);
-    const rows = await createPlaywrightBrowser(page).extractResultRows();
+    `;
+    const rows = await createPlaywrightBrowser(
+      pageWithInProcessEvaluate(),
+    ).extractResultRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.headers).toBeNull();
   });
