@@ -200,6 +200,16 @@ jobs:
         # G-60 PLAN_REVIEW_BACKEND_URL + PLAN_REVIEW_API_KEY: same replace
         # trap. Bake both here so the remount proxy cannot silently fall
         # off the next canary. Do not remove.
+        #
+        # --min-instances=1: REGRESSION GUARD (2026-08 Connect B1 abort).
+        # A prior serving revision (00565-min1) already had minScale=1.
+        # This workflow baked --min-instances=0, so every later canary
+        # recreated a scale-to-zero revision. gcloud services update
+        # --min-instances only writes the template; the serving
+        # revision keeps a null minScale until a new revision is
+        # created and traffic is shifted. Verify
+        # autoscaling.knative.dev/minScale on the serving revision,
+        # not the service template. Do not set this back to 0.
         run: |
           set -euo pipefail
           IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
@@ -221,7 +231,7 @@ jobs:
             --port=8080 \
             --cpu=2 \
             --memory=8Gi \
-            --min-instances=0 \
+            --min-instances=1 \
             --max-instances=10 \
             --concurrency=80 \
             --timeout=300 \
