@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** F-06 Tier-2 conformant bake stub for publish lane. */
+/** F-06 Tier-2 conformant bake for publish lane (prop_id pages). */
 import pg from "pg";
 import { TIER2_ADAPTER_KEY } from "./lib/nodeFacetTier2Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
@@ -9,28 +9,45 @@ const PLACE_COORD_SENTINEL = "0.00000";
 function parseArgs(argv: string[]) {
   const county = argv.find((a) => a.startsWith("--county="))?.split("=")[1] ?? "48021";
   const dryRun = argv.includes("--dry-run");
-  return { county, dryRun };
+  const propIdsRaw = argv.find((a) => a.startsWith("--prop-ids="))?.split("=")[1];
+  const propIds = propIdsRaw
+    ? propIdsRaw.split(/[.|+]/).map((s) => s.trim()).filter(Boolean)
+    : null;
+  return { county, dryRun, propIds };
+}
+
+function publishRunIdFromEnv(): string | undefined {
+  const id = process.env.PUBLISH_RUN_ID?.trim();
+  return id || undefined;
 }
 
 async function main() {
-  const { county, dryRun } = parseArgs(process.argv.slice(2));
+  const { county, dryRun, propIds } = parseArgs(process.argv.slice(2));
   const neondbUrl = process.env.DATABASE_URL ?? process.env.DEPLOYMENT_DATABASE_URL;
   if (!neondbUrl) throw new Error("DATABASE_URL required");
   const neondb = new pg.Client({ connectionString: neondbUrl, ssl: { rejectUnauthorized: true } });
   await neondb.connect();
+  const params: Array<string | string[]> = [`node:${county}:%`];
+  let propFilter = "";
+  if (propIds?.length) {
+    propFilter = ` AND split_part(place_key, ':', 3) = ANY($2::text[])`;
+    params.push(propIds);
+  }
   const { rows } = await neondb.query(
     `SELECT place_key FROM place_layer_snapshots
       WHERE adapter_key = 'node-facets:tier1'
         AND place_key LIKE $1
-        AND coalesce(payload_json->>'shapeSource', '') = 'conformant-v1'`,
-    [`node:${county}:%`],
+        AND coalesce(payload_json->>'shapeSource', '') = 'conformant-v1'${propFilter}`,
+    params,
   );
+  const publishRunId = publishRunIdFromEnv();
   let written = 0;
   for (const { place_key: placeKey } of rows) {
     const payload = {
       shapeSource: "conformant-v1",
       baked: true,
       source: "conformant-v1-tier2-stub",
+      ...(publishRunId ? { publishRunId } : {}),
       flood: null,
       envelope: null,
       bakedAt: new Date().toISOString(),
@@ -50,11 +67,11 @@ async function main() {
     }
     written += 1;
   }
-  console.log(JSON.stringify({ county, dryRun, written }));
+  console.log(JSON.stringify({ county, dryRun, propIds, written, tier1Rows: rows.length }));
   await neondb.end();
 }
 
 main().catch((err) => {
-  console.error(err.message);
+  console.error(err.code || err.message);
   process.exit(1);
 });
