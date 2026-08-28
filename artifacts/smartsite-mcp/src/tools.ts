@@ -124,7 +124,7 @@ export function registerTools(server: McpServer): void {
         inputSchema: inputSchemaFor(tool.name),
         annotations: annotationsFor(tool.name),
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();
         const entitlement = snapshotFromAuth(auth);
 
