@@ -141,9 +141,23 @@ function sectionDisposition(section: Record<string, unknown>): ExternalBriefSect
   return "absent";
 }
 
+function isHttpCitation(value: unknown): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
+}
+
+function presentCitationDishonest(rail: Record<string, unknown>): boolean {
+  if (rail.state !== "present") return false;
+  const citations = Array.isArray(rail.citations)
+    ? rail.citations.filter(isHttpCitation)
+    : [];
+  return citations.length === 0 && rail.citationsDegraded !== true;
+}
+
 /**
- * Pass cortex `draw` through. Omit on unlabeled unknown hatch or seed float.
- * Fail closed: a bad stub is not a silent empty ring.
+ * Pass cortex `draw` through. Omit on unlabeled unknown hatch, seed float,
+ * or a present flood/landUse rail with empty citations and no
+ * citationsDegraded (P-91 item 9). Fail closed: a bad stub is not a silent
+ * empty ring, and present without a citation is not silently complete.
  */
 export function sanitizeExternalDraw(raw: unknown): unknown | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -161,7 +175,23 @@ export function sanitizeExternalDraw(raw: unknown): unknown | undefined {
       ) {
         return undefined;
       }
+      if (overlay.id === "flood" && presentCitationDishonest(overlay)) {
+        return undefined;
+      }
     }
+  }
+  const attrs =
+    draw.attrs && typeof draw.attrs === "object" && !Array.isArray(draw.attrs)
+      ? (draw.attrs as Record<string, unknown>)
+      : null;
+  const landUse =
+    attrs?.landUse &&
+    typeof attrs.landUse === "object" &&
+    !Array.isArray(attrs.landUse)
+      ? (attrs.landUse as Record<string, unknown>)
+      : null;
+  if (landUse && presentCitationDishonest(landUse)) {
+    return undefined;
   }
   const blob = JSON.stringify(draw);
   if (

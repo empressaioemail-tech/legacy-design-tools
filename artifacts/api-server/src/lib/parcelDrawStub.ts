@@ -26,6 +26,8 @@ export type DrawOverlay = {
   reason?: string;
   provenance?: string;
   vintage?: string;
+  citations?: string[];
+  citationsDegraded?: boolean;
 };
 
 export type DrawEdge = {
@@ -97,6 +99,7 @@ export type AssembleParcelDrawInput = {
         floodZone: string | null;
         zoneSubtype: string | null;
         inSpecialFloodHazardArea: boolean;
+        citations?: string[];
       }
     | { state: "refused" | "absent" };
   envelopeRefusalReason: string | null;
@@ -123,6 +126,69 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function isHttpCitation(value: unknown): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
+}
+
+/** Http citation URLs only. Prose sourceCitation strings are not citations. */
+export function httpCitationUrls(value: unknown): string[] {
+  const urls = new Set<string>();
+  const visit = (candidate: unknown, key?: string): void => {
+    if (typeof candidate === "string") {
+      if (
+        key &&
+        (key === "sourceCitation" ||
+          key === "citationUrl" ||
+          key === "sourceUrl" ||
+          /(?:citation|source).*url|url.*(?:citation|source)/i.test(key)) &&
+        isHttpCitation(candidate)
+      ) {
+        urls.add(candidate.trim());
+      }
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      if (key === "citations") {
+        for (const item of candidate) {
+          if (isHttpCitation(item)) urls.add(item.trim());
+        }
+        return;
+      }
+      candidate.forEach((item) => visit(item, key));
+      return;
+    }
+    const record = asRecord(candidate);
+    if (record) {
+      Object.entries(record).forEach(([nestedKey, nestedValue]) =>
+        visit(nestedValue, nestedKey),
+      );
+    }
+  };
+  visit(value);
+  return [...urls];
+}
+
+function citationPosture(citations: string[]): {
+  citations: string[];
+  citationsDegraded?: boolean;
+} {
+  const http = citations.filter(isHttpCitation).map((url) => url.trim());
+  if (http.length > 0) return { citations: http };
+  return { citations: [], citationsDegraded: true };
+}
+
+function presentCitationDishonest(rail: {
+  state?: unknown;
+  citations?: unknown;
+  citationsDegraded?: unknown;
+}): boolean {
+  if (rail.state !== "present") return false;
+  const citations = Array.isArray(rail.citations)
+    ? rail.citations.filter(isHttpCitation)
+    : [];
+  return citations.length === 0 && rail.citationsDegraded !== true;
 }
 
 function parseEndpoints(
@@ -204,11 +270,13 @@ function landUseAttrs(landUse: unknown): Record<string, unknown> | null {
       : typeof rec.taxYear === "string" && /^\d{4}$/.test(rec.taxYear)
         ? Number(rec.taxYear)
         : null;
+  const citations = citationPosture(httpCitationUrls(landUse));
   return {
     v: code,
     ...(desc ? { desc } : {}),
     ...(taxYear != null ? { taxYear } : {}),
     state: "present",
+    ...citations,
   };
 }
 
@@ -229,6 +297,9 @@ function floodOverlay(
   const label = subtype
     ? `Zone ${zone} ${subtype}`
     : `Zone ${zone}`;
+  const citations = citationPosture(
+    flood.citations?.filter(isHttpCitation) ?? httpCitationUrls(flood),
+  );
   return {
     id: "flood",
     label,
@@ -237,6 +308,7 @@ function floodOverlay(
     geom: "none",
     draw: "tint-ring",
     state: "present",
+    ...citations,
   };
 }
 
@@ -251,6 +323,17 @@ export function assertDrawStub(draw: ParcelDrawStub): void {
         "unknown hatch-interior overlay requires a non-empty in-region label",
       );
     }
+    if (overlay.id === "flood" && presentCitationDishonest(overlay)) {
+      throw new Error(
+        "present flood overlay ships an empty citation array; set citationsDegraded or attach an http citation",
+      );
+    }
+  }
+  const landUse = asRecord(draw.attrs.landUse);
+  if (landUse && presentCitationDishonest(landUse)) {
+    throw new Error(
+      "present landUse ships an empty citation array; set citationsDegraded or attach an http citation",
+    );
   }
   const blob = JSON.stringify(draw);
   if (

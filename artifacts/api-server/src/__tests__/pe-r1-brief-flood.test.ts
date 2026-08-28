@@ -223,6 +223,29 @@ describe("buildR1Brief composition", () => {
     });
   });
 
+  it("P-91 item 9: present land-use with empty citations is citationsDegraded", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+    );
+    const landUse = brief.sections.find((section) => section.id === "land-use");
+    expect(landUse?.data).toEqual({ code: "A1" });
+    expect(landUse?.citations).toEqual([]);
+    expect(landUse?.citationsDegraded).toBe(true);
+  });
+
+  it("P-91 item 9: present flood with empty citations is citationsDegraded", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: zoneXShadedFixture },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toMatchObject({ state: "present", floodZone: "X" });
+    expect(flood?.citations).toEqual([]);
+    expect(flood?.citationsDegraded).toBe(true);
+  });
+
   it("present wire envelope keeps data and citations", () => {
     const envelope = {
       status: "ok",

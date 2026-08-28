@@ -38,6 +38,8 @@ const GOLD_DRAW_A3 = {
       label: "Zone X shaded, 0.2% annual chance",
       draw: "tint-ring",
       state: "present",
+      citations: [],
+      citationsDegraded: true,
     },
   ],
   confidence: "seed",
@@ -318,5 +320,56 @@ describe("normalizeR1BodyForExternal remainder", () => {
       },
     });
     expect(body).not.toHaveProperty("draw");
+  });
+
+  it("P-91 item 9: omits draw when present flood has empty citations and no citationsDegraded", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "flood", data: { floodZone: "X" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [
+          {
+            id: "flood",
+            label: "Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+            draw: "tint-ring",
+            state: "present",
+          },
+        ],
+      },
+    });
+    expect(body).not.toHaveProperty("draw");
+  });
+
+  it("P-91 item 9: omits draw when present landUse has empty citations and no citationsDegraded", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "land-use", data: { code: "A1" } }] },
+      draw: {
+        node: "48021:34137",
+        attrs: { landUse: { v: "A1", state: "present" } },
+        overlays: [],
+      },
+    });
+    expect(body).not.toHaveProperty("draw");
+  });
+
+  it("P-91 item 9: passes draw when present flood is labelled citationsDegraded", () => {
+    const draw = {
+      node: "48021:34137",
+      overlays: [
+        {
+          id: "flood",
+          label: "Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+          draw: "tint-ring",
+          state: "present",
+          citations: [],
+          citationsDegraded: true,
+        },
+      ],
+    };
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "flood", data: { floodZone: "X" } }] },
+      draw,
+    });
+    expect(body.draw).toEqual(draw);
   });
 });

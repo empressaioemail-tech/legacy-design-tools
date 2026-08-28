@@ -12,6 +12,7 @@ import type { StructuralFactRead } from "./structuralFactResolve";
 import type { WellFactRead } from "./wellFactRead";
 import {
   assembleParcelDraw,
+  httpCitationUrls,
   type AssembleParcelDrawInput,
   type ParcelDrawStub,
 } from "./parcelDrawStub";
@@ -101,6 +102,7 @@ function floodInput(read: FloodHazardFactRead): AssembleParcelDrawInput["flood"]
       floodZone: read.floodZone,
       zoneSubtype: read.zoneSubtype,
       inSpecialFloodHazardArea: read.inSpecialFloodHazardArea,
+      citations: httpCitationUrls(read),
     };
   }
   return { state: read.state === "absent" ? "absent" : "refused" };
