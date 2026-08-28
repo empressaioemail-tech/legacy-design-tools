@@ -73,6 +73,7 @@ import {
 } from "../lib/recordsRequestPurchaseDecision";
 import { processRecordsRequestJobVisionReads } from "../lib/recordsRequestVisionRead";
 import { notifyRecordsRequestCompletion } from "../lib/recordsRequestCompletionEmail";
+import { loadRecordsRequestArtifactDocumentForUser } from "../lib/recordsRequestDocumentServe";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -1446,6 +1447,38 @@ router.get(
       parcelNodeId,
       ...body,
     });
+  },
+);
+
+const RecordsRequestArtifactIdParamsSchema = z.object({
+  artifactId: z.string().uuid(),
+});
+
+router.get(
+  "/property-explorer/v1/records-request/artifacts/:artifactId/document",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = RecordsRequestArtifactIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_artifact_id" });
+      return;
+    }
+    const result = await loadRecordsRequestArtifactDocumentForUser({
+      artifactId: parsed.data.artifactId,
+      userId: scope.ownerUserId,
+    });
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.status(200).send(result.bytes);
   },
 );
 

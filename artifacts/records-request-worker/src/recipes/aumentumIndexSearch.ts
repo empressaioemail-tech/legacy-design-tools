@@ -16,6 +16,7 @@ import {
   dedupeIndexHits,
   extractIndexHitsFromPage,
   parseIndexHitsFromScope,
+  vendorFamilyFromPortalId,
   type IndexSearchHit,
 } from "./indexHits.js";
 import {
@@ -337,7 +338,20 @@ async function runBastropSearchEntryQuery(
     };
   }
 
-  const hits = await extractIndexHitsFromPage(browser);
+  const extracted = await extractIndexHitsFromPage(browser, {
+    vendorFamily: vendorFamilyFromPortalId(portal.portalId),
+  });
+  if (!extracted.ok) {
+    return {
+      ok: false,
+      result: {
+        status: "failed",
+        errorCode: extracted.errorCode,
+        errorMessage: extracted.errorMessage,
+      },
+    };
+  }
+  const hits = extracted.hits;
 
   return {
     ok: true,
@@ -447,7 +461,20 @@ async function runSingleQuery(
     };
   }
 
-  const hits = await extractIndexHitsFromPage(browser);
+  const extracted = await extractIndexHitsFromPage(browser, {
+    vendorFamily: vendorFamilyFromPortalId(portal.portalId),
+  });
+  if (!extracted.ok) {
+    return {
+      ok: false,
+      result: {
+        status: "failed",
+        errorCode: extracted.errorCode,
+        errorMessage: extracted.errorMessage,
+      },
+    };
+  }
+  const hits = extracted.hits;
 
   return {
     ok: true,

@@ -1,8 +1,8 @@
 /**
- * P-85 item 5/6 — index search hit shape and generic table extraction.
+ * P-85 item 5/6 — index search hit shape and header-bound table extraction.
  */
 
-import type { RecordsRecipeBrowser } from "./types.js";
+import type { RecordsRecipeBrowser, ResultRowExtract } from "./types.js";
 
 export interface IndexSearchHit {
   recordingRef: string | null;
@@ -15,64 +15,217 @@ export interface IndexSearchHit {
 /** Max instruments acquired per run (fail closed on overflow). */
 export const MAX_INSTRUMENTS_PER_RUN = 25;
 
-export function normalizeIndexHit(raw: {
-  cells?: string[];
-  link?: string | null;
-}): IndexSearchHit | null {
-  const cells = raw.cells?.filter((c) => c.trim()) ?? [];
-  if (cells.length === 0) return null;
+export const UNRESOLVED_RESULT_ROW_HEADER = "unresolved_result_row_header";
 
-  const instrumentCell =
-    cells.find((c) => /^[\d-]{5,}$/.test(c.trim()) && /\d/.test(c)) ??
-    cells.find((c) => /\d{5,}/.test(c)) ??
-    null;
-  if (!instrumentCell) return null;
+export type VendorFamily = "aumentum" | "tyler" | "publicsearch" | "shared";
 
-  const ref = instrumentCell.trim();
-  const dateCell = cells.find((c) =>
-    /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.trim()) ||
-    /^\d{4}-\d{2}-\d{2}$/.test(c.trim()),
-  );
-  const typeCell = cells.find(
-    (c) =>
-      c.trim().length > 3 &&
-      c.trim() !== ref &&
-      c.trim() !== dateCell &&
-      !/^\d+$/.test(c.trim()) &&
-      !/^view$/i.test(c.trim()),
-  );
+export type ExtractIndexHitsResult =
+  | { ok: true; hits: IndexSearchHit[] }
+  | {
+      ok: false;
+      errorCode: typeof UNRESOLVED_RESULT_ROW_HEADER;
+      errorMessage: string;
+    };
+
+export class IndexHitHeaderRefuseError extends Error {
+  readonly code = UNRESOLVED_RESULT_ROW_HEADER;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "IndexHitHeaderRefuseError";
+  }
+}
+
+type BindField =
+  | "recordingRef"
+  | "documentType"
+  | "recordingDate"
+  | "parties"
+  | "grantor"
+  | "grantee";
+
+const SHARED_ALIASES: Record<BindField, readonly string[]> = {
+  recordingRef: [
+    "INSTRUMENT NUMBER",
+    "INSTRUMENT #",
+    "INSTRUMENT NO",
+    "INST #",
+    "INST NO",
+    "DOCUMENT NUMBER",
+    "DOCUMENT #",
+    "DOC NUMBER",
+    "DOC #",
+    "DOC NO",
+    "DOC NUM",
+    "FILE NUMBER",
+    "FILE #",
+    "RECORDING NUMBER",
+    "REC #",
+    "REC NO",
+    "INSTRUMENT",
+  ],
+  documentType: [
+    "DOCUMENT TYPE",
+    "DOC TYPE",
+    "INSTRUMENT TYPE",
+    "INST TYPE",
+    "TYPE",
+    "KIND",
+  ],
+  recordingDate: [
+    "RECORDING DATE",
+    "RECORD DATE",
+    "RECORDED DATE",
+    "DATE RECORDED",
+    "RECORDED",
+    "REC DATE",
+    "DATE",
+  ],
+  parties: ["PARTIES", "GRANTOR/GRANTEE", "GRANTOR / GRANTEE", "NAMES"],
+  grantor: ["GRANTOR", "GRANTORS", "FROM", "SELLER"],
+  grantee: ["GRANTEE", "GRANTEES", "TO", "BUYER"],
+};
+
+const VENDOR_ALIASES: Record<VendorFamily, Record<BindField, readonly string[]>> =
+  {
+    shared: SHARED_ALIASES,
+    aumentum: {
+      ...SHARED_ALIASES,
+      recordingRef: [...SHARED_ALIASES.recordingRef, "INSTR #", "INSTNUM"],
+    },
+    tyler: {
+      ...SHARED_ALIASES,
+      recordingRef: [...SHARED_ALIASES.recordingRef, "INSTRUMENT#"],
+    },
+    publicsearch: {
+      ...SHARED_ALIASES,
+      recordingRef: [...SHARED_ALIASES.recordingRef, "DOCUMENT NUMBER"],
+    },
+  };
+
+export function vendorFamilyFromPortalId(portalId: string): VendorFamily {
+  if (portalId.includes("aumentum") || portalId.includes("tccsearch")) {
+    return "aumentum";
+  }
+  if (portalId.includes("tyler") || portalId.includes("erss")) {
+    return "tyler";
+  }
+  if (portalId.includes("publicsearch")) {
+    return "publicsearch";
+  }
+  return "shared";
+}
+
+export function normalizeHeaderLabel(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[_.:]+/g, " ")
+    .replace(/#/g, " #")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fieldForHeader(
+  header: string,
+  vendorFamily: VendorFamily,
+): BindField | null {
+  const label = normalizeHeaderLabel(header);
+  if (!label) return null;
+  const table = VENDOR_ALIASES[vendorFamily];
+  for (const [field, aliases] of Object.entries(table) as Array<
+    [BindField, readonly string[]]
+  >) {
+    if (aliases.some((alias) => normalizeHeaderLabel(alias) === label)) {
+      return field;
+    }
+  }
+  return null;
+}
+
+function bindParties(bound: Partial<Record<BindField, string>>): string | null {
+  if (bound.parties?.trim()) return bound.parties.trim();
+  const grantor = bound.grantor?.trim() ?? "";
+  const grantee = bound.grantee?.trim() ?? "";
+  if (grantor && grantee) return `${grantor} / ${grantee}`;
+  if (grantor) return grantor;
+  if (grantee) return grantee;
+  return null;
+}
+
+export function normalizeIndexHit(
+  raw: {
+    cells?: string[];
+    link?: string | null;
+    headers?: string[] | null;
+  },
+  vendorFamily: VendorFamily = "shared",
+): IndexSearchHit | null {
+  const headers = raw.headers;
+  if (!headers || headers.length === 0) {
+    throw new IndexHitHeaderRefuseError(
+      "Result row has no published column header; refuse rather than guess by position",
+    );
+  }
+
+  const cells = raw.cells ?? [];
+  const bound: Partial<Record<BindField, string>> = {};
+  for (let i = 0; i < headers.length; i++) {
+    const field = fieldForHeader(headers[i] ?? "", vendorFamily);
+    if (!field) continue;
+    const value = (cells[i] ?? "").trim();
+    if (!value) continue;
+    if (!bound[field]) bound[field] = value;
+  }
+
+  const recordingRef = bound.recordingRef?.trim() ?? null;
+  if (!recordingRef) return null;
 
   return {
-    recordingRef: ref,
-    documentType: typeCell?.trim() ?? null,
-    recordingDate: dateCell?.trim() ?? null,
-    parties:
-      cells.length > 3
-        ? cells
-            .filter(
-              (c) =>
-                c.trim() !== ref &&
-                c.trim() !== dateCell &&
-                c.trim() !== typeCell &&
-                !/^\d+$/.test(c.trim()) &&
-                !/^view$/i.test(c.trim()),
-            )
-            .join(" | ")
-        : null,
+    recordingRef,
+    documentType: bound.documentType?.trim() ?? null,
+    recordingDate: bound.recordingDate?.trim() ?? null,
+    parties: bindParties(bound),
     detailUrl: raw.link ?? null,
   };
 }
 
 export async function extractIndexHitsFromPage(
   browser: RecordsRecipeBrowser,
-): Promise<IndexSearchHit[]> {
+  options?: { vendorFamily?: VendorFamily },
+): Promise<ExtractIndexHitsResult> {
+  const vendorFamily = options?.vendorFamily ?? "shared";
   const rawRows = await browser.extractResultRows();
+  if (rawRows.length === 0) {
+    return { ok: true, hits: [] };
+  }
+  if (rawRows.some((row) => !row.headers || row.headers.length === 0)) {
+    return {
+      ok: false,
+      errorCode: UNRESOLVED_RESULT_ROW_HEADER,
+      errorMessage:
+        "Result grid header could not be read; refuse rather than guess columns by position",
+    };
+  }
+
   const hits: IndexSearchHit[] = [];
   for (const row of rawRows) {
-    const hit = normalizeIndexHit(row);
+    let hit: IndexSearchHit | null;
+    try {
+      hit = normalizeIndexHit(row, vendorFamily);
+    } catch (err) {
+      if (err instanceof IndexHitHeaderRefuseError) {
+        return {
+          ok: false,
+          errorCode: UNRESOLVED_RESULT_ROW_HEADER,
+          errorMessage: err.message,
+        };
+      }
+      throw err;
+    }
     if (hit) hits.push(hit);
   }
-  return hits.slice(0, MAX_INSTRUMENTS_PER_RUN);
+  return { ok: true, hits: hits.slice(0, MAX_INSTRUMENTS_PER_RUN) };
 }
 
 export function dedupeIndexHits(hits: IndexSearchHit[]): IndexSearchHit[] {
@@ -113,4 +266,8 @@ export function parseIndexHitsFromScope(
     });
   }
   return dedupeIndexHits(hits);
+}
+
+export function resultRowHasHeader(row: ResultRowExtract): boolean {
+  return Array.isArray(row.headers) && row.headers.length > 0;
 }

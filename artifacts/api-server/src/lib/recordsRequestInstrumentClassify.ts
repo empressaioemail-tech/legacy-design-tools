@@ -16,7 +16,8 @@ export type RecordsRequestDocumentKind =
   | "affidavit"
   | "memorandum-of-lease"
   | "mineral-or-royalty"
-  | "power-of-attorney";
+  | "power-of-attorney"
+  | "unclassified";
 
 export type RecordsRequestInstrumentType =
   | "easement"
@@ -28,10 +29,12 @@ export type RecordsRequestInstrumentType =
 
 export interface RecordsRequestTypeRoute {
   instrumentType: RecordsRequestInstrumentType;
-  /** Required when instrumentType is `other`. */
+  /** Required when instrumentType is `other`. Includes `unclassified`. */
   documentKind?: RecordsRequestDocumentKind;
   /** When true, restriction_clauses rows are written from extracted text. */
   extractsClauses: boolean;
+  /** Portal label as published, never normalized. Set when a kind is written. */
+  sourceDocumentType?: string;
 }
 
 export class RecordsRequestClassifyRefuseError extends Error {
@@ -52,14 +55,15 @@ function normalizeDocType(raw: string | null | undefined): string {
 export function classifyRecordsRequestDocumentType(
   documentType: string | null | undefined,
 ): RecordsRequestTypeRoute {
+  const sourceDocumentType =
+    typeof documentType === "string" ? documentType.trim() : "";
   const dt = normalizeDocType(documentType);
 
   if (!dt) {
-    return {
-      instrumentType: "other",
-      documentKind: "deed",
-      extractsClauses: false,
-    };
+    throw new RecordsRequestClassifyRefuseError(
+      "unclassifiable_document_type",
+      "Document type is absent; refuse rather than invent a kind",
+    );
   }
 
   if (/EASEMENT|RIGHT.?OF.?WAY|ROW\b|UTILITY/.test(dt)) {
@@ -131,13 +135,15 @@ export function classifyRecordsRequestDocumentType(
       instrumentType: "other",
       documentKind: "deed",
       extractsClauses: false,
+      sourceDocumentType,
     };
   }
 
   return {
     instrumentType: "other",
-    documentKind: "deed",
+    documentKind: "unclassified",
     extractsClauses: false,
+    sourceDocumentType,
   };
 }
 

@@ -36,6 +36,8 @@ export interface BrowserActionResult {
 export interface ResultRowExtract {
   cells: string[];
   link: string | null;
+  /** Column names the portal published. Null when the grid header cannot be read. */
+  headers: string[] | null;
 }
 
 /** Minimal browser seam — real Playwright adapter in run.ts; mocks in unit tests. */
