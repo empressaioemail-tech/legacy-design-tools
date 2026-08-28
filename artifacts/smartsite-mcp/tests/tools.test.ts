@@ -76,13 +76,18 @@ const READ_ONLY_BY_NAME: Record<string, boolean> = {
   ask_the_map: true,
   export_instrument: true,
   request_records: false,
+  create_screen: false,
+  add_to_screen: false,
+  list_screens: true,
+  save_property: false,
+  set_property_status: false,
 };
 
 describe("smartsite-mcp tools/list", () => {
-  it("registers exactly eight tools with Smart Site server name", async () => {
+  it("registers exactly thirteen tools with Smart Site server name", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(8);
+      expect(tools).toHaveLength(13);
       expect(tools.map((t) => t.name).sort()).toEqual(
         SMARTSITE_MCP_TOOLS.map((t) => t.name).sort(),
       );
@@ -101,7 +106,7 @@ describe("smartsite-mcp tool annotations (P-91 item 1)", () => {
     ]);
   });
 
-  it("accepts a complete eight-tool fixture", () => {
+  it("accepts a complete thirteen-tool fixture", () => {
     const fixture: ListedTool[] = SMARTSITE_MCP_TOOLS.map((tool) => ({
       name: tool.name,
       annotations: { readOnlyHint: READ_ONLY_BY_NAME[tool.name] },
@@ -112,7 +117,7 @@ describe("smartsite-mcp tool annotations (P-91 item 1)", () => {
   it("listTools exposes annotations.readOnlyHint on every registered tool", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(8);
+      expect(tools).toHaveLength(13);
       expect(namesMissingReadOnlyHint(tools)).toEqual([]);
       for (const tool of tools) {
         expect(tool.annotations?.readOnlyHint).toBe(READ_ONLY_BY_NAME[tool.name]);
@@ -258,6 +263,16 @@ describe("smartsite-mcp tool honesty", () => {
           parcelNodeId: "48021:34137",
           label: "908 PINE",
           situs: "present",
+          stub: {
+            situs: "unread",
+            zoning: "unread",
+            landUse: "unread",
+            flood: "unread",
+            drainage: "unread",
+            envelope: "unread",
+          },
+          status: null,
+          note: null,
           updatedAt: "2026-08-27T12:00:00.000Z",
         },
       ]);
@@ -291,6 +306,16 @@ describe("smartsite-mcp tool honesty", () => {
           parcelNodeId: "48021:25420",
           label: "48021:25420",
           situs: "unknown",
+          stub: {
+            situs: "unread",
+            zoning: "unread",
+            landUse: "unread",
+            flood: "unread",
+            drainage: "unread",
+            envelope: "unread",
+          },
+          status: null,
+          note: null,
           updatedAt: "2026-08-27T12:00:00.000Z",
         },
       ]);
@@ -756,6 +781,97 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
       expect(row.flood).toBe("unknown");
       expect(row.drainage).toBe("unread");
       expect(row.flood).not.toBe(row.drainage);
+    });
+  });
+});
+
+describe("P-91 Wave B screen/save tools", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+  });
+
+  it("tools/list is 13 and omits get_screen, unsave_property, delete_screen", async () => {
+    await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(13);
+      const names = tools.map((t) => t.name);
+      expect(names).toContain("create_screen");
+      expect(names).toContain("add_to_screen");
+      expect(names).toContain("list_screens");
+      expect(names).toContain("save_property");
+      expect(names).toContain("set_property_status");
+      expect(names).not.toContain("get_screen");
+      expect(names).not.toContain("unsave_property");
+      expect(names).not.toContain("delete_screen");
+    });
+  });
+
+  it("list_my_properties accepting screenId refuses screen_id_not_accepted", async () => {
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "list_my_properties",
+        arguments: { screenId: "should-refuse" },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toEqual({ error: "screen_id_not_accepted" });
+    });
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("save_property POSTs /save and never PUTs snapshot", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          parcelNodeId: "48021:34137",
+          status: "Watching",
+          note: "keep",
+        }),
+        { status: 200 },
+      ),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "save_property",
+        arguments: {
+          parcelNodeId: "48021:34137",
+          status: "Watching",
+          note: "keep",
+        },
+      });
+      expect(result.isError).toBe(false);
+    });
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    const [config, path, init] = mockCortexFetch.mock.calls[0] as [
+      unknown,
+      string,
+      { method?: string; body?: string },
+    ];
+    void config;
+    expect(path).toContain("/saved-properties/48021%3A34137/save");
+    expect(init.method).toBe("POST");
+    expect(path).not.toMatch(/saved-properties\/48021%3A34137$/);
+    expect(JSON.parse(init.body ?? "{}")).not.toHaveProperty("snapshot");
+  });
+
+  it("create_screen chrome refuses intake_not_implemented without writing", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ error: "intake_not_implemented" }), {
+        status: 400,
+      }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "create_screen",
+        arguments: {
+          queries: ["111 Rainmaker Cv, Bastrop TX"],
+          source: "chrome",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed.error).toBe("intake_not_implemented");
     });
   });
 });

@@ -1,4 +1,4 @@
-/** WDLL P-87 item 12 — exactly eight tools, property-written names. */
+/** WDLL P-91 / P-92 — eight live tools plus five screen/save tools (13). */
 export const SMARTSITE_MCP_TOOLS = [
   {
     name: "find_parcel",
@@ -18,7 +18,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "list_my_properties",
     title: "List my properties",
     description:
-      "List parcels the signed-in user has saved in Smart Site (id, parcel node id, label, situs disposition, updatedAt only — no chat or notes). A punctuation-only situs falls back to the node id with situs unknown.",
+      "List parcels the signed-in user has saved in Smart Site. Input is {}. screenId is refused. Returns saved rows only (id, parcel node id, label, situs, stub rails, CRM status, note, updatedAt). A punctuation-only situs falls back to the node id with situs unknown.",
     readiness: "live" as const,
   },
   {
@@ -56,6 +56,41 @@ export const SMARTSITE_MCP_TOOLS = [
     title: "Ask the map",
     description:
       "Ask a natural-language question about the current parcel and visible map context.",
+    readiness: "live" as const,
+  },
+  {
+    name: "create_screen",
+    title: "Create a screen",
+    description:
+      "Create a named intake screen from pasted queries. v1 source is pasted only. Does not write a save.",
+    readiness: "live" as const,
+  },
+  {
+    name: "add_to_screen",
+    title: "Add to a screen",
+    description:
+      "Append a resolved parcel to an existing screen (walk, saved, or pasted). Idempotent on the same node. Does not write a save.",
+    readiness: "live" as const,
+  },
+  {
+    name: "list_screens",
+    title: "List screens",
+    description:
+      "List the caller's screens, or reopen one screen's rows when screenId is set. Soft-deleted screens are omitted.",
+    readiness: "live" as const,
+  },
+  {
+    name: "save_property",
+    title: "Save a property",
+    description:
+      "Upsert a CRM save for a parcel. Sets crm status and note columns only. Does not write a screen row and does not replace snapshot.",
+    readiness: "live" as const,
+  },
+  {
+    name: "set_property_status",
+    title: "Set property status",
+    description:
+      "Update CRM status on an existing save. Refuses if the parcel is not saved. Does not touch snapshot or screens.",
     readiness: "live" as const,
   },
 ] as const;

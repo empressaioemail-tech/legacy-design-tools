@@ -4,9 +4,9 @@ import { SMARTSITE_MCP_TOOLS, SERVER_NAME } from "../src/constants.js";
 import { renderLlmsTxt } from "../src/health.js";
 
 describe("smartsite-mcp constants", () => {
-  it("lists exactly eight tools", () => {
-    expect(SMARTSITE_MCP_TOOLS).toHaveLength(8);
-    expect(new Set(SMARTSITE_MCP_TOOLS.map((t) => t.name)).size).toBe(8);
+  it("lists exactly thirteen tools", () => {
+    expect(SMARTSITE_MCP_TOOLS).toHaveLength(13);
+    expect(new Set(SMARTSITE_MCP_TOOLS.map((t) => t.name)).size).toBe(13);
   });
 
   it("names the server Smart Site", () => {
@@ -23,7 +23,7 @@ describe("smartsite-mcp constants", () => {
 });
 
 describe("llms.txt", () => {
-  it("includes hostname and eight tool names", () => {
+  it("includes hostname and thirteen tool names", () => {
     const txt = renderLlmsTxt("https://mcp.smartsite.cloud");
     expect(txt).toContain("mcp.smartsite.cloud");
     for (const tool of SMARTSITE_MCP_TOOLS) {

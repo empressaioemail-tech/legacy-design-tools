@@ -17,6 +17,8 @@ vi.mock("@workspace/db", () => ({
   peSavedProperties: {},
   peWorkbenchState: {},
   peShareGrants: {},
+  peScreens: {},
+  peScreenRows: {},
 }));
 
 vi.mock("../../lib/peEntitlement", async (importOriginal) => {
@@ -33,6 +35,22 @@ vi.mock("../../lib/peEntitlement", async (importOriginal) => {
 vi.mock("../../lib/peRecordsEngagement", () => ({
   ensurePeRecordsEngagement: vi.fn(),
   findPeRecordsEngagement: vi.fn(),
+}));
+
+vi.mock("../../lib/peScreenSave", () => ({
+  addToScreen: vi.fn(),
+  createScreen: vi.fn(),
+  listScreens: vi.fn(),
+  saveProperty: vi.fn(),
+  setPropertyStatus: vi.fn(),
+}));
+
+vi.mock("../../lib/peScreenSaveDb", () => ({
+  createDrizzleScreenSaveStore: vi.fn(),
+}));
+
+vi.mock("../../lib/peScreenSaveResolve", () => ({
+  cortexQueryResolver: vi.fn(),
 }));
 
 vi.mock("../../lib/recordsRequestService", () => ({

@@ -40,12 +40,60 @@ export function isPunctuationOnlySitusLabel(value: unknown): boolean {
   return s === "" || PUNCTUATION_ONLY_SITUS_RE.test(s);
 }
 
+const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
+export type ExternalCrmStatus = (typeof CRM_STATUSES)[number];
+
+const STUB_RAILS = [
+  "situs",
+  "zoning",
+  "landUse",
+  "flood",
+  "drainage",
+  "envelope",
+] as const;
+
+export type ExternalStubRails = {
+  situs: string;
+  zoning: string;
+  landUse: string;
+  flood: string;
+  drainage: string;
+  envelope: string;
+};
+
+function asCrmStatus(value: unknown): ExternalCrmStatus | null {
+  return typeof value === "string" &&
+    (CRM_STATUSES as readonly string[]).includes(value)
+    ? (value as ExternalCrmStatus)
+    : null;
+}
+
+function asStub(value: unknown): ExternalStubRails {
+  const rec =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const rail = (key: (typeof STUB_RAILS)[number]) =>
+    typeof rec[key] === "string" ? rec[key] : "unread";
+  return {
+    situs: rail("situs"),
+    zoning: rail("zoning"),
+    landUse: rail("landUse"),
+    flood: rail("flood"),
+    drainage: rail("drainage"),
+    envelope: rail("envelope"),
+  };
+}
+
 /** Summary row safe for third-party MCP assistants — no chat snapshots. */
 export type ExternalSavedPropertySummary = {
   id: string;
   parcelNodeId: string;
   label: string;
   situs: "present" | "unknown";
+  stub: ExternalStubRails;
+  status: ExternalCrmStatus | null;
+  note: string | null;
   updatedAt: string;
 };
 
@@ -73,11 +121,16 @@ export function stripSavedPropertiesForExternal(
         : record.updatedAt != null
           ? String(record.updatedAt)
           : "";
+    const status = asCrmStatus(record.crmStatus ?? record.status);
+    const note = typeof record.note === "string" ? record.note : null;
     rows.push({
       id,
       parcelNodeId,
       label,
       situs: situsUnknown ? "unknown" : "present",
+      stub: asStub(record.stub),
+      status,
+      note,
       updatedAt,
     });
   }
