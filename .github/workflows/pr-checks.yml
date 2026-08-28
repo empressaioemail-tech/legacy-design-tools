@@ -549,3 +549,25 @@ jobs:
             exit 1
           fi
           echo "ci-vintage-predicate: clean (${#hits[@]} candidate file(s) checked)"
+
+  cortex-daily-limit-bake:
+    name: cortex daily limit bake
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-cortex-daily-limit-50000
+        run: |
+          # --set-env-vars is authoritative-replace. 10000 locked the operator
+          # out twice on 2026-08-28. The bake must stay 50000.
+          if rg -n 'CORTEX_USER_DAILY_API_LIMIT=10000' .github/workflows/cloud-run-deploy.yml; then
+            echo "FAIL ci-cortex-daily-limit-50000: bake is 10000; a deploy will lock the operator out"
+            exit 1
+          fi
+          if ! rg -q -- '--set-env-vars=.*CORTEX_USER_DAILY_API_LIMIT=50000' .github/workflows/cloud-run-deploy.yml; then
+            echo "FAIL ci-cortex-daily-limit-50000: --set-env-vars bake is missing CORTEX_USER_DAILY_API_LIMIT=50000"
+            exit 1
+          fi
+          echo "ci-cortex-daily-limit-50000: clean"
