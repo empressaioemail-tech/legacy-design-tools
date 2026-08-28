@@ -14,8 +14,10 @@
  * Infragistics, not RadGrid. Walking every tbody tr also scoops login,
  * sort, and banner chrome. Those chrome rows have null headers, and
  * extractIndexHitsFromPage refuses the whole page. A row is kept only
- * when a cell publishes instrument-shaped or date-shaped text. Wrapper
- * rows that dump the whole grid into one 800-cell tr are dropped.
+ * when a cell publishes instrument-shaped text (6+ digits or YYYY-n).
+ * Date-only text is not enough: a 0-record legal page publishes
+ * "as of 08/28/2026" in chrome and that must not become a result row.
+ * Wrapper rows that dump the whole grid into one 800-cell tr are dropped.
  */
 export const EXTRACT_RESULT_ROWS_SOURCE = `(() => {
   const headerTexts = (nodes) =>
@@ -47,11 +49,7 @@ export const EXTRACT_RESULT_ROWS_SOURCE = `(() => {
   const looksLikeIndexData = (cells) =>
     cells.some((c) => {
       const t = (c || "").trim();
-      return (
-        /^\\d{6,}$/.test(t) ||
-        /^\\d{4}-\\d+$/.test(t) ||
-        /\\d{1,2}\\/\\d{1,2}\\/\\d{4}/.test(t)
-      );
+      return /^\\d{6,}$/.test(t) || /^\\d{4}-\\d+$/.test(t);
     });
 
   const headersIn = (root) => {

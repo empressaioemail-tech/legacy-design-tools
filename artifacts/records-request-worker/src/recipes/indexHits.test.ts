@@ -165,6 +165,8 @@ describe("extractIndexHitsFromPage", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errorCode).toBe(UNRESOLVED_RESULT_ROW_HEADER);
+      expect(result.errorMessage).toContain("nullHeaderRows=1/1");
+      expect(result.errorMessage).toContain("2024-12345");
     }
   });
 

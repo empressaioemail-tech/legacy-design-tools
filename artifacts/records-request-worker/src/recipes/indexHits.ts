@@ -17,6 +17,18 @@ export const MAX_INSTRUMENTS_PER_RUN = 25;
 
 export const UNRESOLVED_RESULT_ROW_HEADER = "unresolved_result_row_header";
 
+/** Compact dump of rows that triggered a header refuse. Lives on the job error. */
+export function nullHeaderRowDump(rows: ResultRowExtract[]): string {
+  const nulls = rows.filter((row) => !row.headers || row.headers.length === 0);
+  const dump = nulls.slice(0, 6).map((row) => ({
+    n: (row.cells ?? []).length,
+    c: (row.cells ?? []).slice(0, 4).map((cell) =>
+      String(cell).replace(/\s+/g, " ").slice(0, 48),
+    ),
+  }));
+  return `nullHeaderRows=${nulls.length}/${rows.length} dump=${JSON.stringify(dump)}`;
+}
+
 export type VendorFamily = "aumentum" | "tyler" | "publicsearch" | "shared";
 
 export type ExtractIndexHitsResult =
@@ -206,7 +218,7 @@ export async function extractIndexHitsFromPage(
       ok: false,
       errorCode: UNRESOLVED_RESULT_ROW_HEADER,
       errorMessage:
-        "Result grid header could not be read; refuse rather than guess columns by position",
+        `Result grid header could not be read; refuse rather than guess columns by position; ${nullHeaderRowDump(rawRows)}`,
     };
   }
 

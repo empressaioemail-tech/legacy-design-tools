@@ -231,6 +231,23 @@ describe("extractResultRows header seam", () => {
     ]);
   });
 
+  it("drops 0-record chrome whose only signal is a date", async () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr>
+            <td>Criteria: Freeform Legal begins with BUILDING BLOCK 49 E W ST, ACRES 1.280</td>
+            <td>0 records found as of 08/28/2026 04:26:33 PM</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const rows = await createPlaywrightBrowser(
+      pageWithStringEvaluate(),
+    ).extractResultRows();
+    expect(rows).toHaveLength(0);
+  });
+
   it("returns null headers when the grid has no header row", async () => {
     document.body.innerHTML = `
       <table>

@@ -13,6 +13,7 @@ import {
   tryFillFirst,
 } from "./browserSelectors.js";
 import {
+  UNRESOLVED_RESULT_ROW_HEADER,
   dedupeIndexHits,
   extractIndexHitsFromPage,
   parseIndexHitsFromScope,
@@ -590,6 +591,19 @@ export async function runAumentumIndexSearch(
   for (const planned of plan) {
     const result = await runSingleQuery(portal, browser, planned, searchTermsUrl);
     if (!result.ok) {
+      if (
+        allHits.length > 0 &&
+        result.result.errorCode === UNRESOLVED_RESULT_ROW_HEADER
+      ) {
+        stepsReached.push(`search-${planned.kind}-header-unresolved-skipped`);
+        queries.push({
+          kind: planned.kind,
+          query: planned.query,
+          skipped: result.result.errorCode,
+          errorMessage: result.result.errorMessage,
+        });
+        continue;
+      }
       return result.result;
     }
     queries.push(result.queryRecord);
