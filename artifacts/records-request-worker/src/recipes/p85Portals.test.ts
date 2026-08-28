@@ -5,6 +5,7 @@ import {
   runRecipeForJob,
 } from "./index.js";
 import { P85_DEFAULT_PORTAL_BY_COUNTY, P85_PORTALS } from "./p85Portals.js";
+import { SEARCH_FILL_DID_NOT_SUBMIT } from "./searchOutcome.js";
 import type { RecordsRecipeBrowser, RecordsRecipeContext } from "./types.js";
 
 function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsRecipeBrowser {
@@ -78,6 +79,14 @@ describe("runRecipeForJob — Aumentum index search", () => {
     const browser = mockBrowser({
       fill: vi.fn().mockResolvedValue({ ok: true }),
       click: vi.fn().mockResolvedValue({ ok: true }),
+      currentUrl: vi
+        .fn()
+        .mockResolvedValue(
+          "https://cc.co.bastrop.tx.us/RealEstate/SearchResults.aspx",
+        ),
+      pageIncludes: vi.fn(async (text: string) =>
+        text.toLowerCase().includes("records found"),
+      ),
     });
     const result = await runRecipeForJob(bastropCtx, browser);
     expect(result.status).toBe("complete");
@@ -88,6 +97,25 @@ describe("runRecipeForJob — Aumentum index search", () => {
         expect.objectContaining({ kind: "owner-name" }),
       ]),
     );
+  });
+
+  it("fails closed when owner search stays on SearchEntry after submit", async () => {
+    const browser = mockBrowser({
+      fill: vi.fn().mockResolvedValue({ ok: true }),
+      click: vi.fn().mockResolvedValue({ ok: true }),
+      currentUrl: vi
+        .fn()
+        .mockResolvedValue(
+          "https://cc.co.bastrop.tx.us/RealEstate/SearchEntry.aspx",
+        ),
+      pageIncludes: vi.fn(async (text: string) =>
+        text.toLowerCase().includes("please enter search criteria"),
+      ),
+    });
+    const result = await runRecipeForJob(bastropCtx, browser);
+    expect(result.status).toBe("failed");
+    expect(result.errorCode).toBe(SEARCH_FILL_DID_NOT_SUBMIT);
+    expect(result.status).not.toBe("complete");
   });
 
   it("fails closed when entry navigation fails", async () => {

@@ -26,6 +26,7 @@ import {
   acquisitionNeedsHumanResult,
   mergeAcquisitionIntoScope,
 } from "./instrumentAcquisition.js";
+import { assertBastropSearchSettled } from "./searchOutcome.js";
 import { resolveSearchTerms } from "./searchTerms.js";
 import {
   buildSearchQueryPlan,
@@ -37,7 +38,7 @@ import type {
   RecordsRecipeResult,
 } from "./types.js";
 
-export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v2";
+export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v3";
 
 function isBastropSearchEntryPortal(portal: P85PortalConfig): boolean {
   return portal.portalId === "bastrop-aumentum";
@@ -323,6 +324,11 @@ async function runBastropSearchEntryQuery(
         errorMessage: `${planned.kind} search could not be submitted on ${portal.portalId}`,
       },
     };
+  }
+
+  const settled = await assertBastropSearchSettled(browser, planned.kind);
+  if (!settled.ok) {
+    return settled;
   }
 
   const pageCapture = await browser.captureFullPage(planned.captureLabel);
