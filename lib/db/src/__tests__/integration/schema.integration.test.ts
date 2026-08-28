@@ -222,6 +222,9 @@ describe("lib/db schema integration", () => {
         "pe_chat_message_counts",
         "pe_property_unlocks",
         "pe_saved_properties",
+        // P-91 / P-92 Wave B — screens are a different table from saves.
+        "pe_screen_rows",
+        "pe_screens",
         // P-86 — share grant registry. Resolvable URL is /s/{id}.
         "pe_share_grants",
         "pe_user_entitlements",

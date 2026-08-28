@@ -1278,8 +1278,44 @@ CREATE TABLE @@SCHEMA@@.pe_saved_properties (
     parcel_node_id text NOT NULL,
     label text,
     snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    crm_status text,
+    note text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_saved_properties_crm_status_chk CHECK (((crm_status IS NULL) OR (crm_status = ANY (ARRAY['New'::text, 'Watching'::text, 'Chasing'::text, 'Passed'::text]))))
+);
+
+
+-- Name: pe_screen_rows; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_screen_rows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    screen_id uuid NOT NULL,
+    ordinal integer NOT NULL,
+    query text NOT NULL,
+    parcel_node_id text,
+    resolution text NOT NULL,
+    source text NOT NULL,
+    candidates jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_screen_rows_ambiguous_candidates_chk CHECK (((resolution = 'ambiguous'::text) = ((candidates IS NOT NULL) AND (jsonb_typeof(candidates) = 'array'::text) AND (jsonb_array_length(candidates) > 0)))),
+    CONSTRAINT pe_screen_rows_query_present_chk CHECK ((char_length(btrim(query)) > 0)),
+    CONSTRAINT pe_screen_rows_resolution_chk CHECK ((resolution = ANY (ARRAY['resolved'::text, 'ambiguous'::text, 'unresolved'::text]))),
+    CONSTRAINT pe_screen_rows_resolved_node_chk CHECK (((resolution = 'resolved'::text) = (parcel_node_id IS NOT NULL))),
+    CONSTRAINT pe_screen_rows_source_chk CHECK ((source = ANY (ARRAY['pasted'::text, 'chrome'::text, 'gmail'::text, 'file'::text, 'walk'::text, 'saved'::text])))
+);
+
+
+-- Name: pe_screens; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_screens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    owner_user_id text NOT NULL,
+    name text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    deleted_at timestamp with time zone
 );
 
 
@@ -2733,6 +2769,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
     ADD CONSTRAINT pe_saved_properties_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_screen_rows pe_screen_rows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
+    ADD CONSTRAINT pe_screen_rows_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_screens pe_screens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screens
+    ADD CONSTRAINT pe_screens_pkey PRIMARY KEY (id);
+
+
 -- Name: pe_share_grants pe_share_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
@@ -3660,6 +3708,21 @@ CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USI
 CREATE UNIQUE INDEX pe_saved_properties_owner_parcel_uidx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, parcel_node_id);
 
 
+-- Name: pe_screen_rows_screen_node_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_screen_rows_screen_node_uidx ON @@SCHEMA@@.pe_screen_rows USING btree (screen_id, parcel_node_id) WHERE (parcel_node_id IS NOT NULL);
+
+
+-- Name: pe_screen_rows_screen_ordinal_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_screen_rows_screen_ordinal_idx ON @@SCHEMA@@.pe_screen_rows USING btree (screen_id, ordinal);
+
+
+-- Name: pe_screens_owner_updated_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_screens_owner_updated_idx ON @@SCHEMA@@.pe_screens USING btree (tenant_id, owner_user_id, updated_at);
+
+
 -- Name: pe_share_grants_grantor_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_share_grants_grantor_idx ON @@SCHEMA@@.pe_share_grants USING btree (grantor_user_id, created_at);
@@ -4373,6 +4436,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
     ADD CONSTRAINT pe_property_unlocks_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_screen_rows pe_screen_rows_screen_id_pe_screens_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
+    ADD CONSTRAINT pe_screen_rows_screen_id_pe_screens_id_fk FOREIGN KEY (screen_id) REFERENCES @@SCHEMA@@.pe_screens(id) ON DELETE CASCADE;
 
 
 -- Name: pe_share_grants pe_share_grants_grantor_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

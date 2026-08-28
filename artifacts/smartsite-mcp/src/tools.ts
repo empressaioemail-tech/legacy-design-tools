@@ -78,7 +78,44 @@ function inputSchemaFor(name: SmartsiteToolName) {
     case "find_parcel":
       return z.object({ query: z.string().min(1) });
     case "list_my_properties":
-      return z.object({});
+      return z.object({}).passthrough();
+    case "create_screen":
+      return z
+        .object({
+          name: z.string().optional(),
+          queries: z.array(z.string()),
+          source: z.string(),
+        })
+        .strict();
+    case "add_to_screen":
+      return z
+        .object({
+          screenId: z.string().min(1),
+          parcelNodeId: z.string().min(1),
+          source: z.string(),
+        })
+        .strict();
+    case "list_screens":
+      return z
+        .object({
+          screenId: z.string().min(1).optional(),
+        })
+        .strict();
+    case "save_property":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          status: z.string().optional(),
+          note: z.string().optional(),
+        })
+        .strict();
+    case "set_property_status":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          status: z.string(),
+        })
+        .strict();
     case "check_request":
       return z.object({ jobId: z.string().min(1) });
     case "ask_the_map":
@@ -106,9 +143,18 @@ function inputSchemaFor(name: SmartsiteToolName) {
   }
 }
 
-/** P-91 item 1. request_records starts a job; the other seven are reads. */
+/** P-91 item 1 plus Wave B writes. Reads keep readOnlyHint true. */
 function annotationsFor(name: SmartsiteToolName) {
-  if (name === "request_records") {
+  if (name === "list_screens") {
+    return { readOnlyHint: true };
+  }
+  if (
+    name === "request_records" ||
+    name === "create_screen" ||
+    name === "add_to_screen" ||
+    name === "save_property" ||
+    name === "set_property_status"
+  ) {
     return { readOnlyHint: false, destructiveHint: false };
   }
   return { readOnlyHint: true };
@@ -219,6 +265,18 @@ export function registerTools(server: McpServer): void {
             });
           }
           case "list_my_properties": {
+            const raw = args as Record<string, unknown>;
+            if (Object.prototype.hasOwnProperty.call(raw, "screenId")) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({ error: "screen_id_not_accepted" }),
+                  },
+                ],
+                isError: true,
+              };
+            }
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -298,6 +356,116 @@ export function registerTools(server: McpServer): void {
               };
             }
             return executeExportInstrument({ parcelNodeId, kind });
+          }
+          case "create_screen": {
+            const body = args as {
+              name?: string;
+              queries: string[];
+              source: string;
+            };
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/screens`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify(body),
+                },
+              );
+              const text = await res.text();
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: !res.ok,
+              };
+            });
+          }
+          case "add_to_screen": {
+            const { screenId, parcelNodeId, source } = args as {
+              screenId: string;
+              parcelNodeId: string;
+              source: string;
+            };
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/screens/${encodeURIComponent(screenId)}/rows`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify({ parcelNodeId, source }),
+                },
+              );
+              const text = await res.text();
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: !res.ok,
+              };
+            });
+          }
+          case "list_screens": {
+            const { screenId } = args as { screenId?: string };
+            const path = screenId
+              ? `/api/property-explorer/v1/screens/${encodeURIComponent(screenId)}`
+              : `/api/property-explorer/v1/screens`;
+            return withCortex(async (config) => {
+              const res = await cortexFetch(config, path, {
+                userId: auth.userId,
+              });
+              const text = await res.text();
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: !res.ok,
+              };
+            });
+          }
+          case "save_property": {
+            const { parcelNodeId, status, note } = args as {
+              parcelNodeId: string;
+              status?: string;
+              note?: string;
+            };
+            const body: Record<string, string> = {};
+            if (status !== undefined) body.status = status;
+            if (note !== undefined) body.note = note;
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/saved-properties/${encodeURIComponent(parcelNodeId)}/save`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify(body),
+                },
+              );
+              const text = await res.text();
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: !res.ok,
+              };
+            });
+          }
+          case "set_property_status": {
+            const { parcelNodeId, status } = args as {
+              parcelNodeId: string;
+              status: string;
+            };
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/saved-properties/${encodeURIComponent(parcelNodeId)}/status`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify({ status }),
+                },
+              );
+              const text = await res.text();
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: !res.ok,
+              };
+            });
           }
           case "ask_the_map": {
             const record = args as Record<string, unknown>;

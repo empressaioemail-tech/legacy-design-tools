@@ -133,6 +133,16 @@ describe("stripSavedPropertiesForExternal", () => {
         parcelNodeId: "48021:34137",
         label: "908 PINE",
         situs: "present",
+        stub: {
+          situs: "unread",
+          zoning: "unread",
+          landUse: "unread",
+          flood: "unread",
+          drainage: "unread",
+          envelope: "unread",
+        },
+        status: null,
+        note: null,
         updatedAt: "2026-08-27T12:00:00.000Z",
       },
     ]);
@@ -154,6 +164,16 @@ describe("stripSavedPropertiesForExternal", () => {
         parcelNodeId: "48021:25420",
         label: "48021:25420",
         situs: "unknown",
+        stub: {
+          situs: "unread",
+          zoning: "unread",
+          landUse: "unread",
+          flood: "unread",
+          drainage: "unread",
+          envelope: "unread",
+        },
+        status: null,
+        note: null,
         updatedAt: "2026-08-27T12:00:00.000Z",
       },
     ]);

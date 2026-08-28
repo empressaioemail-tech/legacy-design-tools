@@ -39,12 +39,12 @@ describe("smartsite-mcp HTTP surface", () => {
     });
   });
 
-  it("GET /llms.txt lists exactly eight tools", async () => {
+  it("GET /llms.txt lists exactly thirteen tools", async () => {
     await withHttpServer(app, async (base) => {
       const res = await fetch(`${base}/llms.txt`);
       expect(res.status).toBe(200);
       const text = await res.text();
-      expect(text).toContain("Tools (exactly eight):");
+      expect(text).toContain("Tools (13):");
       for (const tool of SMARTSITE_MCP_TOOLS) {
         expect(text).toContain(tool.name);
       }
@@ -55,7 +55,7 @@ describe("smartsite-mcp HTTP surface", () => {
         listedNames.filter((n) =>
           catalogNames.includes(n as (typeof catalogNames)[number]),
         ),
-      ).toHaveLength(8);
+      ).toHaveLength(13);
     });
   });
 

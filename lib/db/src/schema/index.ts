@@ -86,6 +86,7 @@ export * from "./terrainGenerationJobs";
 export * from "./peUserIdentities";
 export * from "./peUserEntitlements";
 export * from "./peSavedProperties";
+export * from "./peScreens";
 export * from "./pePropertyUnlocks";
 export * from "./peChatMessageCounts";
 export * from "./peWorkbenchState";

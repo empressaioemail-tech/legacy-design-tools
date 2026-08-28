@@ -9,6 +9,15 @@ import { z } from "zod/v4";
 import { and, desc, eq } from "drizzle-orm";
 import { db, peSavedProperties, peShareGrants, peWorkbenchState } from "@workspace/db";
 import {
+  addToScreen,
+  createScreen,
+  listScreens,
+  saveProperty,
+  setPropertyStatus,
+} from "../lib/peScreenSave";
+import { createDrizzleScreenSaveStore } from "../lib/peScreenSaveDb";
+import { cortexQueryResolver } from "../lib/peScreenSaveResolve";
+import {
   PE_FREE_CHAT_MESSAGE_LIMIT,
   createPePropertyUnlock,
   getPeFreeChatMessagesUsed,
@@ -285,6 +294,8 @@ router.get(
         parcelNodeId: peSavedProperties.parcelNodeId,
         label: peSavedProperties.label,
         snapshot: peSavedProperties.snapshot,
+        crmStatus: peSavedProperties.crmStatus,
+        note: peSavedProperties.note,
         updatedAt: peSavedProperties.updatedAt,
       })
       .from(peSavedProperties)
@@ -295,13 +306,29 @@ router.get(
         ),
       )
       .orderBy(desc(peSavedProperties.updatedAt));
+    const stubs = await Promise.all(
+      rows.map(async (row) => {
+        const stub = await assembleStubBody(row.parcelNodeId);
+        return {
+          situs: stub?.situs ?? "unread",
+          zoning: stub?.zoning ?? "unread",
+          landUse: stub?.landUse ?? "unread",
+          flood: stub?.flood ?? "unread",
+          drainage: stub?.drainage ?? "unread",
+          envelope: stub?.envelope ?? "unread",
+        };
+      }),
+    );
     res.json(
-      rows.map((row) => {
+      rows.map((row, i) => {
         const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label);
         return {
           ...row,
           label: composed.label,
           situs: composed.situs,
+          status: row.crmStatus,
+          note: row.note,
+          stub: stubs[i],
         };
       }),
     );
@@ -394,6 +421,204 @@ router.delete(
       return;
     }
     res.json({ ok: true });
+  },
+);
+
+function screenSaveHttpStatus(error: string): number {
+  if (error === "not_found" || error === "saved_property_not_found") return 404;
+  if (error === "authentication_required") return 401;
+  return 400;
+}
+
+const CreateScreenBodySchema = z.object({
+  name: z.string().optional(),
+  queries: z.array(z.string()),
+  source: z.string(),
+});
+
+const AddScreenRowBodySchema = z.object({
+  parcelNodeId: z.string(),
+  source: z.string(),
+});
+
+const McpSaveBodySchema = z.object({
+  status: z.string().optional(),
+  note: z.string().optional(),
+});
+
+const McpStatusBodySchema = z.object({
+  status: z.string(),
+});
+
+router.post(
+  "/property-explorer/v1/screens",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = CreateScreenBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await createScreen(
+      createDrizzleScreenSaveStore(),
+      scope,
+      parsed.data,
+      cortexQueryResolver(),
+    );
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    res.json({ screen: result.screen });
+  },
+);
+
+router.get(
+  "/property-explorer/v1/screens",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const result = await listScreens(createDrizzleScreenSaveStore(), scope);
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    if ("screens" in result) {
+      res.json({ screens: result.screens });
+      return;
+    }
+    res.json({ screen: result.screen });
+  },
+);
+
+router.get(
+  "/property-explorer/v1/screens/:screenId",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const screenIdRaw = req.params.screenId;
+    const screenId = Array.isArray(screenIdRaw) ? screenIdRaw[0] : screenIdRaw;
+    const result = await listScreens(
+      createDrizzleScreenSaveStore(),
+      scope,
+      screenId,
+    );
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    if ("screen" in result) {
+      res.json({ screen: result.screen });
+      return;
+    }
+    res.json({ screens: result.screens });
+  },
+);
+
+router.post(
+  "/property-explorer/v1/screens/:screenId/rows",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const screenIdRaw = req.params.screenId;
+    const screenId = Array.isArray(screenIdRaw) ? screenIdRaw[0] : screenIdRaw;
+    const parsed = AddScreenRowBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success || !screenId) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await addToScreen(createDrizzleScreenSaveStore(), scope, {
+      screenId,
+      parcelNodeId: parsed.data.parcelNodeId,
+      source: parsed.data.source,
+    });
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    res.json({ screenId: result.screenId, row: result.row });
+  },
+);
+
+router.post(
+  "/property-explorer/v1/saved-properties/:parcelNodeId/save",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parcelNodeIdRaw = req.params.parcelNodeId;
+    const parcelNodeId = (Array.isArray(parcelNodeIdRaw)
+      ? parcelNodeIdRaw[0]
+      : parcelNodeIdRaw)?.trim();
+    const parsed = McpSaveBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success || !parcelNodeId) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await saveProperty(createDrizzleScreenSaveStore(), scope, {
+      parcelNodeId,
+      status: parsed.data.status,
+      note: parsed.data.note,
+    });
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    res.json({
+      parcelNodeId: result.parcelNodeId,
+      status: result.status,
+      note: result.note,
+    });
+  },
+);
+
+router.post(
+  "/property-explorer/v1/saved-properties/:parcelNodeId/status",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parcelNodeIdRaw = req.params.parcelNodeId;
+    const parcelNodeId = (Array.isArray(parcelNodeIdRaw)
+      ? parcelNodeIdRaw[0]
+      : parcelNodeIdRaw)?.trim();
+    const parsed = McpStatusBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success || !parcelNodeId) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await setPropertyStatus(createDrizzleScreenSaveStore(), scope, {
+      parcelNodeId,
+      status: parsed.data.status,
+    });
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    res.json({ parcelNodeId: result.parcelNodeId, status: result.status });
   },
 );
 
