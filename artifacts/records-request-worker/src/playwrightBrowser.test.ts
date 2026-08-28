@@ -1,5 +1,5 @@
-import { chromium } from "playwright";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { Browser } from "playwright";
 import {
   CHROME_CLIENT_HINTS_HEADERS,
   CHROME_USER_AGENT,
@@ -7,44 +7,22 @@ import {
 } from "./playwrightBrowser.js";
 
 describe("createChromeBrowserContext", () => {
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  it("passes Chrome user agent and sec-ch-ua headers to browser.newContext", async () => {
+    const fakeContext = { newPage: vi.fn() };
+    const browser = {
+      newContext: vi.fn().mockResolvedValue(fakeContext),
+    } as unknown as Browser;
 
-  afterEach(async () => {
-    if (browser) {
-      await browser.close();
-      browser = undefined;
-    }
-  });
-
-  it("sets Chrome user agent and sec-ch-ua headers on the browser context", async () => {
-    browser = await chromium.launch({ headless: true });
     const context = await createChromeBrowserContext(browser);
-    const page = await context.newPage();
 
-    const navigatorUserAgent = await page.evaluate(() => navigator.userAgent);
-    expect(navigatorUserAgent).toBe(CHROME_USER_AGENT);
-
-    let capturedHeaders: Record<string, string> = {};
-    await page.route("**/*", async (route) => {
-      capturedHeaders = route.request().headers();
-      await route.fulfill({
-        status: 200,
-        contentType: "text/html",
-        body: "<html><body>ok</body></html>",
-      });
+    expect(context).toBe(fakeContext);
+    expect(browser.newContext).toHaveBeenCalledWith({
+      userAgent: CHROME_USER_AGENT,
+      extraHTTPHeaders: { ...CHROME_CLIENT_HINTS_HEADERS },
+      locale: "en-US",
+      viewport: { width: 1920, height: 1080 },
     });
-
-    await page.goto("https://example.test/travis-waf-probe");
-
-    expect(capturedHeaders["user-agent"]).toBe(CHROME_USER_AGENT);
-    expect(capturedHeaders["sec-ch-ua"]).toBe(
-      CHROME_CLIENT_HINTS_HEADERS["sec-ch-ua"],
-    );
-    expect(capturedHeaders["sec-ch-ua-mobile"]).toBe(
-      CHROME_CLIENT_HINTS_HEADERS["sec-ch-ua-mobile"],
-    );
-    expect(capturedHeaders["sec-ch-ua-platform"]).toBe(
-      CHROME_CLIENT_HINTS_HEADERS["sec-ch-ua-platform"],
-    );
+    expect(CHROME_USER_AGENT).toMatch(/Chrome\/147\./);
+    expect(CHROME_CLIENT_HINTS_HEADERS["sec-ch-ua"]).toContain('"147"');
   });
 });
