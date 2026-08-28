@@ -547,6 +547,8 @@ const GOLD_DRAW = {
       label: "Zone X",
       draw: "tint-ring",
       state: "present",
+      citations: [],
+      citationsDegraded: true,
     },
     {
       id: "envelope",

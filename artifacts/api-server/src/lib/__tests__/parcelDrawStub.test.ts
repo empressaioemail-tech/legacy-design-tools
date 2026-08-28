@@ -232,3 +232,99 @@ describe("typed well absence", () => {
     });
   });
 });
+
+function presentCitationDishonest(rail: {
+  state?: unknown;
+  citations?: unknown;
+  citationsDegraded?: unknown;
+}): boolean {
+  if (rail.state !== "present") return false;
+  const citations = Array.isArray(rail.citations)
+    ? rail.citations.filter(
+        (item) => typeof item === "string" && /^https?:\/\//i.test(item),
+      )
+    : [];
+  return citations.length === 0 && rail.citationsDegraded !== true;
+}
+
+describe("assembleParcelDraw citation honesty (P-91 item 9)", () => {
+  it("fails the empty-present shape: gold flood and landUse cannot be present with empty citations and no citationsDegraded", () => {
+    const draw = assembleParcelDraw(goldInput());
+    const flood = draw.overlays.find((o) => o.id === "flood");
+    const landUse = draw.attrs.landUse as {
+      state?: unknown;
+      citations?: unknown;
+      citationsDegraded?: unknown;
+    } | undefined;
+    expect(flood?.state).toBe("present");
+    expect(landUse?.state).toBe("present");
+    expect(presentCitationDishonest(flood ?? {})).toBe(false);
+    expect(presentCitationDishonest(landUse ?? {})).toBe(false);
+  });
+
+  it("locks gold 48021:34137 ring and label from the item-27 probe", () => {
+    const draw = assembleParcelDraw(
+      goldInput({ label: "908 PINE , BASTROP, TX 78602" }),
+    );
+    expect(draw.node).toBe("48021:34137");
+    expect(draw.label).toBe("908 PINE , BASTROP, TX 78602");
+    expect(draw.ring).toEqual([
+      [48.6, 83.94],
+      [-50.37, 83.7],
+      [-49.07, -84.28],
+      [50.84, -83.36],
+    ]);
+    expect(draw.ringOrder).toBe("ccw");
+  });
+
+  it("attaches an http flood citation when the source carries one", () => {
+    const url = "https://hazards.fema.gov/nfhlv2/output/State/NFHL_48_20260101.zip";
+    const draw = assembleParcelDraw(
+      goldInput({
+        flood: {
+          state: "present",
+          floodZone: "X",
+          zoneSubtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+          inSpecialFloodHazardArea: false,
+          citations: [url],
+        },
+      }),
+    );
+    const flood = draw.overlays.find((o) => o.id === "flood");
+    expect(flood).toMatchObject({
+      state: "present",
+      citations: [url],
+    });
+    expect(flood).not.toHaveProperty("citationsDegraded");
+  });
+
+  it("attaches an http landUse citation when the source carries one", () => {
+    const url = "https://example.test/bastrop-cad";
+    const draw = assembleParcelDraw(
+      goldInput({
+        landUse: {
+          landUseCode: "A1",
+          sourceUrl: url,
+        },
+      }),
+    );
+    expect(draw.attrs.landUse).toMatchObject({
+      v: "A1",
+      state: "present",
+      citations: [url],
+    });
+    expect(draw.attrs.landUse).not.toHaveProperty("citationsDegraded");
+  });
+});
+
+describe("assertDrawStub present-citation fail-closed (P-91 item 9)", () => {
+  it("rejects present flood with empty citations and no citationsDegraded", () => {
+    const bad = assembleParcelDraw(goldInput()) as ParcelDrawStub;
+    const flood = bad.overlays.find((o) => o.id === "flood");
+    if (flood) {
+      delete (flood as { citations?: unknown }).citations;
+      delete (flood as { citationsDegraded?: unknown }).citationsDegraded;
+    }
+    expect(() => assertDrawStub(bad)).toThrow(/citationsDegraded|empty citation/i);
+  });
+});
