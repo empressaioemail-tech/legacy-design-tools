@@ -8,12 +8,14 @@ import {
   type BrowserContext,
   type Page,
 } from "playwright";
+import { EXTRACT_RESULT_ROWS_SOURCE } from "./extractResultRowsSource.js";
 import { sha256Hex } from "./lib/captureHash.js";
 import type {
   BrowserActionResult,
   PageCaptureResult,
   PortalNavigationResult,
   RecordsRecipeBrowser,
+  ResultRowExtract,
 } from "./recipes/types.js";
 
 const NAV_TIMEOUT_MS = 30_000;
@@ -119,64 +121,10 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
       return page.url();
     },
 
-    async extractResultRows(): Promise<
-      import("./recipes/types.js").ResultRowExtract[]
-    > {
-      return page.evaluate(() => {
-        const headerTexts = (nodes: Iterable<Element>): string[] =>
-          [...nodes].map((n) => n.textContent?.trim() ?? "");
-
-        const headersForRow = (rowEl: Element): string[] | null => {
-          const table = rowEl.closest("table");
-          if (table) {
-            const thead = table.querySelectorAll(
-              "thead th, thead [role=columnheader]",
-            );
-            if (thead.length > 0) return headerTexts(thead);
-            const firstRow = table.querySelector("tr");
-            const firstThs = firstRow?.querySelectorAll("th");
-            if (firstThs && firstThs.length > 0) return headerTexts(firstThs);
-          }
-          const grid = rowEl.closest(
-            '[role="grid"], [role="table"], .search-results, .results-table',
-          );
-          if (grid) {
-            const cols = grid.querySelectorAll('[role="columnheader"], th');
-            if (cols.length > 0) return headerTexts(cols);
-          }
-          return null;
-        };
-
-        const rows: {
-          cells: string[];
-          link: string | null;
-          headers: string[] | null;
-        }[] = [];
-        const selectors = [
-          "table tbody tr",
-          ".search-results tr",
-          '[role="row"]',
-          ".results-table tr",
-        ];
-        const seen = new Set<Element>();
-        for (const sel of selectors) {
-          for (const tr of document.querySelectorAll(sel)) {
-            if (seen.has(tr)) continue;
-            seen.add(tr);
-            if (tr.querySelectorAll("th").length > 0 && tr.querySelectorAll("td").length === 0) {
-              continue;
-            }
-            const cells = [...tr.querySelectorAll("td, [role=cell]")].map(
-              (c) => c.textContent?.trim() ?? "",
-            );
-            if (cells.length < 2) continue;
-            const anchor = tr.querySelector("a[href]");
-            const link = anchor instanceof HTMLAnchorElement ? anchor.href : null;
-            rows.push({ cells, link, headers: headersForRow(tr) });
-          }
-        }
-        return rows;
-      });
+    async extractResultRows(): Promise<ResultRowExtract[]> {
+      return page.evaluate(EXTRACT_RESULT_ROWS_SOURCE) as Promise<
+        ResultRowExtract[]
+      >;
     },
   };
 }

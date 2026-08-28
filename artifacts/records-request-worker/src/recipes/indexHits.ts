@@ -77,6 +77,8 @@ const SHARED_ALIASES: Record<BindField, readonly string[]> = {
     "RECORD DATE",
     "RECORDED DATE",
     "DATE RECORDED",
+    "DATE FILED",
+    "FILED DATE",
     "RECORDED",
     "REC DATE",
     "DATE",
