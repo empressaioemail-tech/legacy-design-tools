@@ -305,6 +305,126 @@ describe("smartsite-mcp tool honesty", () => {
   });
 });
 
+const ASK_THE_MAP_LEAK_TOKENS = [
+  "workspaceDid",
+  "personaBucket",
+  "starterPromptId",
+  "mls_id",
+  "presentationMode",
+] as const;
+
+/** Cortex RESEARCH_CHAT_BODY 400 — the live leak this boundary must strip. */
+const CORTEX_CHAT_VALIDATION_400 = {
+  error: "invalid_request",
+  message: "Invalid research chat body",
+  details: {
+    formErrors: [],
+    fieldErrors: {
+      runId: [
+        "Provide runId, address, workspaceDid, or areaContext (scope=area or visibleParcels)",
+      ],
+    },
+  },
+  accepted: {
+    required: ["message"],
+    runSelector:
+      "runId (uuid) OR address OR workspaceDid OR areaContext (scope=area or visibleParcels)",
+    optional: [
+      "history",
+      "presentationMode",
+      "starterPromptId",
+      "personaBucket",
+      "mls_id",
+      "areaContext",
+      "purpose",
+    ],
+  },
+};
+
+function assertNoAskTheMapLeakTokens(body: string): void {
+  for (const token of ASK_THE_MAP_LEAK_TOKENS) {
+    expect(body, `leak token ${token} must not appear`).not.toContain(token);
+  }
+}
+
+describe("ask_the_map leak closed (P-91 item 10)", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+  });
+
+  it("violated schema response body omits brokerage internals", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify(CORTEX_CHAT_VALIDATION_400), { status: 400 }),
+    );
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "ask_the_map",
+        arguments: {
+          parcelNodeId: "48021:34137",
+          message: "what is the flood zone",
+          workspaceDid: "did:hauska:property-workspace:leak",
+          personaBucket: "owner_buyer",
+          starterPromptId: "adu",
+          mls_id: "MLS-LEAK",
+          presentationMode: "consumer",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
+      const parsed = JSON.parse(text);
+      expect(parsed).toEqual({
+        status: "invalid_request",
+        message: "ask_the_map accepts parcelNodeId and message.",
+      });
+      assertNoAskTheMapLeakTokens(JSON.stringify(result));
+      assertNoAskTheMapLeakTokens(text);
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("MCP-side empty message plus leak fields still omits brokerage internals", async () => {
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "ask_the_map",
+        arguments: {
+          parcelNodeId: "48021:34137",
+          message: "",
+          workspaceDid: "did:hauska:property-workspace:leak",
+          personaBucket: "owner_buyer",
+          starterPromptId: "adu",
+          mls_id: "MLS-LEAK",
+          presentationMode: "consumer",
+        },
+      });
+      expect(result.isError).toBe(true);
+      assertNoAskTheMapLeakTokens(JSON.stringify(result));
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("forwards a sanitized cortex 400 when the MCP args are legal", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify(CORTEX_CHAT_VALIDATION_400), { status: 400 }),
+    );
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "ask_the_map",
+        arguments: {
+          parcelNodeId: "48021:34137",
+          message: "what is the flood zone",
+        },
+      });
+      expect(result.isError).toBe(true);
+      const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
+      assertNoAskTheMapLeakTokens(text);
+      expect(mockCortexFetch).toHaveBeenCalled();
+    });
+  });
+});
+
 describe("smartsite-mcp tier gates (P-87 item 11)", () => {
   beforeEach(() => {
     mockAuth = { ...defaultAuth };

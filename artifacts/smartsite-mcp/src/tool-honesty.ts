@@ -256,6 +256,85 @@ export function normalizeGetSmartSiteResponseText(
   }
 }
 
+/** Brokerage-internal names that must never appear in ask_the_map error text. */
+export const ASK_THE_MAP_INTERNAL_FIELD_NAMES = [
+  "workspaceDid",
+  "personaBucket",
+  "starterPromptId",
+  "mls_id",
+  "presentationMode",
+] as const;
+
+const ASK_THE_MAP_INTERNAL_FIELD_SET = new Set<string>(
+  ASK_THE_MAP_INTERNAL_FIELD_NAMES,
+);
+
+export function askTheMapArgsLeakInternalFields(
+  args: Record<string, unknown>,
+): boolean {
+  return ASK_THE_MAP_INTERNAL_FIELD_NAMES.some((name) =>
+    Object.prototype.hasOwnProperty.call(args, name),
+  );
+}
+
+function stripInternalFieldTokens(value: string): string {
+  let out = value;
+  for (const token of ASK_THE_MAP_INTERNAL_FIELD_NAMES) {
+    out = out.split(token).join("");
+  }
+  return out
+    .replace(/\s+OR\s+OR\s+/g, " OR ")
+    .replace(/\s+OR\s+,/g, ",")
+    .replace(/,\s+OR\s+/g, ", ")
+    .replace(/,\s*,+/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*$/g, "")
+    .replace(/^\s*,\s*/g, "")
+    .trim();
+}
+
+function sanitizeAskTheMapJsonValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return stripInternalFieldTokens(value);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter(
+        (item) =>
+          typeof item !== "string" || !ASK_THE_MAP_INTERNAL_FIELD_SET.has(item),
+      )
+      .map((item) => sanitizeAskTheMapJsonValue(item));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      if (ASK_THE_MAP_INTERNAL_FIELD_SET.has(key)) continue;
+      out[key] = sanitizeAskTheMapJsonValue(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * P-91 item 10. Strip brokerage-internal field names from MCP and cortex
+ * validation errors. Last line is a substring scrub so a nested string cannot
+ * keep a token the walk missed.
+ */
+export function sanitizeAskTheMapErrorBody(body: string): string {
+  let sanitized: string;
+  try {
+    sanitized = JSON.stringify(sanitizeAskTheMapJsonValue(JSON.parse(body)));
+  } catch {
+    sanitized = stripInternalFieldTokens(body);
+  }
+  if (ASK_THE_MAP_INTERNAL_FIELD_NAMES.some((token) => sanitized.includes(token))) {
+    return stripInternalFieldTokens(sanitized);
+  }
+  return sanitized;
+}
+
 /** Parse cortex R1 JSON and normalize for get_smart_site / run_report. */
 export function normalizeR1ResponseText(cortexBodyText: string): string {
   try {
