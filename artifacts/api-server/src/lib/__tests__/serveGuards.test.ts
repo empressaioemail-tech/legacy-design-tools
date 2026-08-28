@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertAccessPair, assertF06BakeAccessPair, assertSitusNotPunctuationOnly, normalizeAccessPair, refusePayloadAtServe } from "../serveGuards";
+import { assertAccessPair, assertF06BakeAccessPair, assertSitusNotPunctuationOnly, normalizeAccessPair, refusePayloadAtServe, LEGACY_ACCESS_PAIRS } from "../serveGuards";
 
 describe("serveGuards", () => {
   it("refuses access without both fields", () => {
@@ -23,11 +23,17 @@ describe("serveGuards", () => {
     });
   });
 
-  it("normalizes the legacy F-06 pair to the canonical pair and declares it", () => {
-    expect(normalizeAccessPair({ discoverability: "public", entitlement: "anonymous" })).toEqual({
-      access: { discoverability: "catalog-listed", entitlement: "anyone-free" },
-      normalizedFrom: "public/anonymous",
-    });
+  it("retirement (A-023 card C closed): the legacy table is empty and a legacy pair reaching serve refuses again", () => {
+    expect(Object.keys(LEGACY_ACCESS_PAIRS)).toEqual([]);
+    expect(() => normalizeAccessPair({ discoverability: "public", entitlement: "anonymous" })).toThrow(
+      expect.objectContaining({ code: "ACCESS_NOT_DEFAULTED" }),
+    );
+    expect(() => refusePayloadAtServe({ access: { discoverability: "public", entitlement: "anonymous" } })).toThrow(
+      expect.objectContaining({ code: "ACCESS_NOT_DEFAULTED" }),
+    );
+    const p: Record<string, unknown> = { access: { discoverability: "catalog-listed", entitlement: "anyone-free" } };
+    refusePayloadAtServe(p);
+    expect(p.accessNormalizedFrom).toBeUndefined();
   });
 
   it("passes a canonical pair through untouched with no marker", () => {
@@ -46,15 +52,7 @@ describe("serveGuards", () => {
     );
   });
 
-  it("refusePayloadAtServe rewrites a legacy pair on the served payload and marks it (the 2026-08-28 Bastrop 422)", () => {
-    const payload: Record<string, unknown> = {
-      shapeSource: "conformant-v1",
-      access: { discoverability: "public", entitlement: "anonymous" },
-      facets: { base: { situsAddress: "908 PINE , BASTROP, TX 78602" } },
-    };
-    refusePayloadAtServe(payload);
-    expect(payload.access).toEqual({ discoverability: "catalog-listed", entitlement: "anyone-free" });
-    expect(payload.accessNormalizedFrom).toBe("public/anonymous");
+  it("refusePayloadAtServe leaves a canonical pair untouched and refuses an unknown one", () => {
     const canonical: Record<string, unknown> = {
       access: { discoverability: "catalog-listed", entitlement: "anyone-free" },
     };

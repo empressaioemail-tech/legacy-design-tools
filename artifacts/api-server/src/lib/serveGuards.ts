@@ -28,7 +28,9 @@ export function assertAccessPair(input: unknown): AccessPair {
  * `accessNormalizedFrom`; anything not in this table and not a canonical pair still refuses.
  */
 export const LEGACY_ACCESS_PAIRS: Readonly<Record<string, AccessPair>> = Object.freeze({
-  "public/anonymous": { discoverability: "catalog-listed", entitlement: "anyone-free" },
+  // Retired 2026-08-28 (OPS-19 A-023 item 4): every conformant atom in the eight written counties
+  // was re-stamped to the canonical pair by factory-restamp-access with counts read back to zero,
+  // and the Bastrop production snapshots were re-baked. A legacy pair reaching serve refuses again.
 });
 
 export function normalizeAccessPair(input: unknown): { access: AccessPair; normalizedFrom: string | null } {
