@@ -15,6 +15,7 @@ import {
   type AssembleParcelDrawInput,
   type ParcelDrawStub,
 } from "./parcelDrawStub";
+import { firstPresentSitusLabel } from "./situsCompose";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -22,21 +23,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function situsLabel(facets: unknown): string | null {
+function situsLabel(parcelNodeId: string, facets: unknown): string {
   const root = asRecord(facets);
-  if (!root) return null;
-  const base = asRecord(root.baseFacts);
-  for (const candidate of [
-    root.situsAddress,
-    root.address,
-    base?.situsAddress,
-    base?.address,
-  ]) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return null;
+  const base = asRecord(root?.baseFacts);
+  return firstPresentSitusLabel(parcelNodeId, [
+    typeof root?.situsAddress === "string" ? root.situsAddress : null,
+    typeof root?.address === "string" ? root.address : null,
+    typeof base?.situsAddress === "string" ? base.situsAddress : null,
+    typeof base?.address === "string" ? base.address : null,
+  ]).label;
 }
 
 function yearBuiltFromBake(facets: unknown): number | null {
@@ -162,7 +157,7 @@ export function tryAssembleParcelDrawFromReads(args: {
   try {
     return assembleParcelDraw({
       parcelNodeId: args.parcelNodeId,
-      label: situsLabel(args.facets),
+      label: situsLabel(args.parcelNodeId, args.facets),
       bakedAt: args.bakedAt,
       countyFips: args.parcelNodeId.split(":")[0] ?? null,
       zoning: root.zoning ?? null,

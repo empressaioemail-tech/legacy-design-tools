@@ -36,6 +36,16 @@ import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
 import { buildR1Brief } from "../lib/r1BriefCompose";
+import {
+  isPunctuationOnlySitus,
+  projectSavedPropertyLabel,
+} from "../lib/situsCompose";
+import { parseSmartSiteBriefRequest } from "../lib/smartSiteBriefRequest";
+import {
+  composeSmartSiteStub,
+  type RailReadInput,
+} from "../lib/smartSiteStub";
+import type { FloodHazardFactRead } from "../lib/floodHazardFactRead";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
@@ -90,6 +100,84 @@ function parcelNodeIdFromR1RunId(runId: string): string | null {
   } catch {
     return null;
   }
+}
+
+function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
+  return {
+    attempted: true,
+    state: flood.state,
+    code: flood.state === "refused" ? flood.code : undefined,
+    kind: "flood",
+  };
+}
+
+async function assembleNodeBriefBody(
+  parcelNodeId: string,
+): Promise<Record<string, unknown> | null> {
+  const [
+    snapshot,
+    floodHazardFact,
+    boundaryFact,
+    pipelineFact,
+    wellFact,
+    structuralFact,
+    specialDistrictFact,
+  ] = await Promise.all([
+    loadBakedNodeFacetSnapshot(parcelNodeId),
+    loadFloodHazardFactAtom(parcelNodeId),
+    loadBoundaryEdgeFactAtom(parcelNodeId),
+    loadPipelineFactAtom(parcelNodeId),
+    loadWellFactAtom(parcelNodeId),
+    loadStructuralFactAtom(parcelNodeId),
+    loadSpecialDistrictFactAtom(parcelNodeId),
+  ]);
+  if (!snapshot) return null;
+  const root = asRecord(snapshot.facets);
+  const bakedAt =
+    typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
+  const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
+    floodHazardFact,
+    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+  });
+  const draw = tryAssembleParcelDrawFromReads({
+    parcelNodeId,
+    facets: snapshot.facets,
+    bakedAt,
+    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    boundary: boundaryFact,
+    flood: floodHazardFact,
+    pipeline: pipelineFact,
+    well: wellFact,
+    specialDistrict: specialDistrictFact,
+    structural: structuralFact,
+  });
+  return {
+    runId: buildR1RunId(parcelNodeId, bakedAt),
+    reportFamily: "R1",
+    mode: "baked-facet-intel-v1",
+    parcelNodeId,
+    brief: {
+      sections: brief.sections,
+      disclosure: brief.disclosure,
+    },
+    citations: brief.citations,
+    bakedAt,
+    source: "baked-snapshot",
+    ...(draw ? { draw } : {}),
+  };
+}
+
+async function assembleStubBody(parcelNodeId: string) {
+  const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+  if (!snapshot) return null;
+  const floodHazardFact = await loadFloodHazardFactAtom(parcelNodeId);
+  return composeSmartSiteStub({
+    parcelNodeId,
+    facets: snapshot.facets,
+    flood: floodReadToRail(floodHazardFact),
+    drainage: { attempted: false },
+    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+  });
 }
 
 function manifestLayers(facets: unknown, tier2: unknown): {
@@ -206,7 +294,16 @@ router.get(
         ),
       )
       .orderBy(desc(peSavedProperties.updatedAt));
-    res.json(rows);
+    res.json(
+      rows.map((row) => {
+        const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label);
+        return {
+          ...row,
+          label: composed.label,
+          situs: composed.situs,
+        };
+      }),
+    );
   },
 );
 
@@ -238,7 +335,9 @@ router.put(
       return;
     }
     const snapshot = parsed.data.snapshot ?? {};
-    const label = parsed.data.label ?? null;
+    const labelRaw = parsed.data.label ?? null;
+    const label =
+      labelRaw != null && isPunctuationOnlySitus(labelRaw) ? null : labelRaw;
     const now = new Date();
     await db
       .insert(peSavedProperties)
@@ -408,7 +507,11 @@ router.post(
         await db
           .update(peSavedProperties)
           .set({
-            label: existing.label ?? item.label ?? null,
+            label:
+              existing.label ??
+              (item.label != null && isPunctuationOnlySitus(item.label)
+                ? null
+                : item.label ?? null),
             snapshot: mergedSnapshot,
             updatedAt: now,
           })
@@ -424,7 +527,10 @@ router.post(
           tenantId: scope.tenantId,
           ownerUserId: scope.ownerUserId,
           parcelNodeId,
-          label: item.label ?? null,
+          label:
+            item.label != null && isPunctuationOnlySitus(item.label)
+              ? null
+              : item.label ?? null,
           snapshot: item.snapshot ?? {},
           updatedAt: now,
         });
@@ -540,72 +646,78 @@ router.post(
   requirePeAuthenticated,
   requirePePaidOrPropertyUnlocked(),
   async (req: Request, res: Response) => {
-    const parcelNodeId =
-      typeof req.body?.parcelNodeId === "string"
-        ? req.body.parcelNodeId.trim()
-        : "";
-    if (!parcelNodeId || !isValidParcelNodeId(parcelNodeId)) {
+    const parsed = parseSmartSiteBriefRequest(req.body ?? {});
+    if (!parsed.ok) {
+      if (parsed.error === "not_implemented") {
+        res.status(400).json({
+          error: "not_implemented",
+          depth: parsed.depth,
+        });
+        return;
+      }
+      if (parsed.error === "parcel_batch_cap") {
+        res.status(400).json({
+          error: "parcel_batch_cap",
+          cap: parsed.cap,
+          received: parsed.received,
+        });
+        return;
+      }
       res.status(400).json({ error: "invalid_parcel_node_id" });
       return;
     }
-    const [
-      snapshot,
-      floodHazardFact,
-      boundaryFact,
-      pipelineFact,
-      wellFact,
-      structuralFact,
-      specialDistrictFact,
-    ] = await Promise.all([
-      loadBakedNodeFacetSnapshot(parcelNodeId),
-      loadFloodHazardFactAtom(parcelNodeId),
-      loadBoundaryEdgeFactAtom(parcelNodeId),
-      loadPipelineFactAtom(parcelNodeId),
-      loadWellFactAtom(parcelNodeId),
-      loadStructuralFactAtom(parcelNodeId),
-      loadSpecialDistrictFactAtom(parcelNodeId),
-    ]);
-    if (!snapshot) {
-      res.status(404).json({
-        error: "baked_snapshot_not_found",
-        message: "No baked facet snapshot exists for this parcel node.",
-        parcelNodeId,
-      });
+
+    if (parsed.mode === "single") {
+      const parcelNodeId = parsed.ids[0]!;
+      if (!isValidParcelNodeId(parcelNodeId)) {
+        res.status(400).json({ error: "invalid_parcel_node_id" });
+        return;
+      }
+      if (parsed.depth === "stub") {
+        const stub = await assembleStubBody(parcelNodeId);
+        if (!stub) {
+          res.status(404).json({
+            error: "baked_snapshot_not_found",
+            message: "No baked facet snapshot exists for this parcel node.",
+            parcelNodeId,
+          });
+          return;
+        }
+        res.json(stub);
+        return;
+      }
+      const body = await assembleNodeBriefBody(parcelNodeId);
+      if (!body) {
+        res.status(404).json({
+          error: "baked_snapshot_not_found",
+          message: "No baked facet snapshot exists for this parcel node.",
+          parcelNodeId,
+        });
+        return;
+      }
+      res.json(body);
       return;
     }
-    const root = asRecord(snapshot.facets);
-    const bakedAt =
-      typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
-    const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
-      floodHazardFact,
-      envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-    });
-    const draw = tryAssembleParcelDrawFromReads({
-      parcelNodeId,
-      facets: snapshot.facets,
-      bakedAt,
-      envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-      boundary: boundaryFact,
-      flood: floodHazardFact,
-      pipeline: pipelineFact,
-      well: wellFact,
-      specialDistrict: specialDistrictFact,
-      structural: structuralFact,
-    });
-    res.json({
-      runId: buildR1RunId(parcelNodeId, bakedAt),
-      reportFamily: "R1",
-      mode: "baked-facet-intel-v1",
-      parcelNodeId,
-      brief: {
-        sections: brief.sections,
-        disclosure: brief.disclosure,
-      },
-      citations: brief.citations,
-      bakedAt,
-      source: "baked-snapshot",
-      ...(draw ? { draw } : {}),
-    });
+
+    const parcels: unknown[] = [];
+    const notFound: string[] = [];
+    const results = await Promise.all(
+      parsed.ids.map(async (id) => {
+        if (!isValidParcelNodeId(id)) {
+          return { id, row: null };
+        }
+        const row =
+          parsed.depth === "node"
+            ? await assembleNodeBriefBody(id)
+            : await assembleStubBody(id);
+        return { id, row };
+      }),
+    );
+    for (const item of results) {
+      if (item.row) parcels.push(item.row);
+      else notFound.push(item.id);
+    }
+    res.json({ parcels, notFound });
   },
 );
 

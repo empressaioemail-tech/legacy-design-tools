@@ -7,6 +7,39 @@ import {
   stripSavedPropertiesForExternal,
 } from "../src/tool-honesty.js";
 
+const GOLD_DRAW_A3 = {
+  node: "48021:34137",
+  kind: "parcel",
+  label: "908 PINE, BASTROP, TX 78602",
+  url: "https://smartsite.cloud/p/48021:34137",
+  asOf: "2026-08-04",
+  frame: {
+    units: "ft",
+    origin: "centroid",
+    yAxis: "true-north",
+    convertedFrom: "local-enu-m",
+    factor: "us-survey-foot",
+    quality: "gis-approximate",
+  },
+  ring: [
+    [48.6, 83.94],
+    [-50.37, 83.7],
+    [-49.07, -84.28],
+    [50.84, -83.36],
+  ],
+  ringOrder: "ccw",
+  attrs: { zoning: { v: "SF-1", state: "present" } },
+  overlays: [
+    {
+      id: "flood",
+      label: "Zone X shaded, 0.2% annual chance",
+      draw: "tint-ring",
+      state: "present",
+    },
+  ],
+  confidence: "seed",
+};
+
 describe("stripEntitlementForExternal", () => {
   it("returns minimal entitled shape and strips internal ids", () => {
     const summary = stripEntitlementForExternal({
@@ -94,10 +127,32 @@ describe("stripSavedPropertiesForExternal", () => {
         id: "row-1",
         parcelNodeId: "48021:34137",
         label: "908 PINE",
+        situs: "present",
         updatedAt: "2026-08-27T12:00:00.000Z",
       },
     ]);
     expect(rows[0]).not.toHaveProperty("snapshot");
+  });
+
+  it("rewrites a punctuation-only label to the node id with situs unknown", () => {
+    const rows = stripSavedPropertiesForExternal([
+      {
+        id: "row-junk",
+        parcelNodeId: "48021:25420",
+        label: ", ,",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+      },
+    ]);
+    expect(rows).toEqual([
+      {
+        id: "row-junk",
+        parcelNodeId: "48021:25420",
+        label: "48021:25420",
+        situs: "unknown",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+      },
+    ]);
+    expect(rows[0]?.label).not.toMatch(/^[\s,.\-;:'"`]+$/);
   });
 
   it("returns empty array for non-array input", () => {
@@ -160,6 +215,14 @@ describe("normalizeR1BodyForExternal", () => {
       node: "48021:34137",
       url: "https://smartsite.cloud/p/48021:34137",
     });
+  });
+
+  it("A3: gold draw is byte-identical after honesty normalize", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: GOLD_DRAW_A3,
+    });
+    expect(JSON.stringify(body.draw)).toBe(JSON.stringify(GOLD_DRAW_A3));
   });
 
   it("omits unlabeled unknown hatch rather than leaking a bad stub", () => {
