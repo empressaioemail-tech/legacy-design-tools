@@ -7,7 +7,7 @@ import pg from "pg";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
-import { assertAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
+import { assertF06BakeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
 
 const PLACE_COORD_SENTINEL = "0.00000";
 
@@ -76,6 +76,7 @@ async function main() {
   let written = 0;
   let skippedNoNode = 0;
   let skippedBadSitus = 0;
+  let skippedBadAccess = 0;
   for (const { body: rawBody } of cadRows) {
     const body = (rawBody ?? {}) as Record<string, unknown>;
     const parcelNodeId = parcelNodeIdFromBody(body, county);
@@ -86,7 +87,13 @@ async function main() {
     if (propIds && !propIds.includes(parcelNodeId.split(":")[1] ?? "")) {
       continue;
     }
-    const access = assertAccessPair(body.access);
+    let access: { discoverability: string; entitlement: string };
+    try {
+      access = assertF06BakeAccessPair(body.access);
+    } catch {
+      skippedBadAccess += 1;
+      continue;
+    }
     const { situs, refuse: refuseSitus } = situsForBake(body);
     if (refuseSitus) {
       skippedBadSitus += 1;
@@ -137,6 +144,7 @@ async function main() {
       written,
       skippedNoNode,
       skippedBadSitus,
+      skippedBadAccess,
     }),
   );
   await mcp.end();
