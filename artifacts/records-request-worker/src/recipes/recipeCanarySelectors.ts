@@ -49,8 +49,8 @@ export const RECIPE_CANARY_PROBES: readonly RecipeCanaryProbe[] = [
     driftSelectors: AUMENTUM_TERMS_SELECTORS,
   },
   {
-    probeId: "tyler-self-service-v1",
-    recipeVersion: "p85-tyler-self-service-v1",
+    probeId: "tyler-self-service-v2",
+    recipeVersion: "p85-tyler-self-service-v2",
     portalIds: ["williamson-tylerhost", "hays-erss"],
     driftSelectors: TYLER_ACCEPT_SELECTORS,
   },

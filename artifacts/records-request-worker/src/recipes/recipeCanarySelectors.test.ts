@@ -23,7 +23,7 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
 describe("recipeCanarySelectors", () => {
   it("registers versioned probes for index-search portals", () => {
     const probe = canaryProbeForPortal("hays-erss");
-    expect(probe?.recipeVersion).toBe("p85-tyler-self-service-v1");
+    expect(probe?.recipeVersion).toBe("p85-tyler-self-service-v2");
     expect(probe?.driftSelectors.length).toBeGreaterThan(0);
   });
 
@@ -38,7 +38,7 @@ describe("recipeCanarySelectors", () => {
     const result = await checkRecipeCanarySelectors("hays-erss", browser);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.recipeVersion).toBe("p85-tyler-self-service-v1");
+      expect(result.recipeVersion).toBe("p85-tyler-self-service-v2");
     }
   });
 

@@ -36,7 +36,7 @@ export const P85_CLERK_PORTAL_SEED = [
     countyFips: "48491",
     portalId: "williamson-publicsearch",
     portalUrl: "https://williamson.tx.publicsearch.us/",
-    termsUrl: "https://williamson.tx.publicsearch.us/terms",
+    termsUrl: "https://williamson.tx.publicsearch.us/",
     loginRequired: false,
     imagePurchase: { method: "publicsearch.us per-page" },
   },
@@ -55,8 +55,8 @@ export const P85_CLERK_PORTAL_SEED = [
   {
     countyFips: "48055",
     portalId: "caldwell-clerk-web",
-    portalUrl: "https://www.co.caldwell.tx.us/page/caldwell.county.clerk",
-    termsUrl: "https://www.co.caldwell.tx.us/page/caldwell.county.clerk",
+    portalUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
+    termsUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
     loginRequired: false,
     imagePurchase: {
       method: "verify with clerk; vendor unconfirmed at recon",

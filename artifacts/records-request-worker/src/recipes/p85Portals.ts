@@ -9,6 +9,8 @@ export interface P85PortalConfig {
   portalUrl: string;
   /** First surface the reachability recipe opens (terms/disclaimer/landing). */
   entryUrl: string;
+  /** Tyler ERSS post-disclaimer index search surface (county-specific action URL). */
+  searchEntryUrl?: string;
   recipeVersion: string;
 }
 
@@ -39,7 +41,7 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
     portalId: "williamson-publicsearch",
     countyFips: "48491",
     portalUrl: "https://williamson.tx.publicsearch.us/",
-    entryUrl: "https://williamson.tx.publicsearch.us/terms",
+    entryUrl: "https://williamson.tx.publicsearch.us/",
     recipeVersion: "p85-williamson-publicsearch-v1",
   },
   {
@@ -47,14 +49,15 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
     countyFips: "48209",
     portalUrl: "https://erss.co.hays.tx.us",
     entryUrl: "https://erss.co.hays.tx.us/web/user/disclaimer",
-    recipeVersion: "p85-hays-erss-v1",
+    searchEntryUrl: "https://erss.co.hays.tx.us/web/search/DOCSEARCH149S1",
+    recipeVersion: "p85-hays-erss-v2",
   },
   {
     portalId: "caldwell-clerk-web",
     countyFips: "48055",
-    portalUrl: "https://www.co.caldwell.tx.us/page/caldwell.county.clerk",
-    entryUrl: "https://www.co.caldwell.tx.us/page/caldwell.county.clerk",
-    recipeVersion: "p85-caldwell-clerk-scaffold-v0",
+    portalUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
+    entryUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
+    recipeVersion: "p85-caldwell-clerk-scaffold-v1",
   },
   {
     portalId: "mclennan-online-records",
