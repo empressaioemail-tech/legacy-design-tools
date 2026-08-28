@@ -20,6 +20,11 @@ function mockBrowser(
     pageIncludes: vi.fn(),
     currentUrl: vi.fn(),
     extractResultRows: vi.fn().mockResolvedValue(rows),
+    inspectDocumentPurchase: vi.fn().mockResolvedValue({
+      visibleMainText: "",
+      visibleMainControls: [],
+      rowPriceText: null,
+    }),
   };
 }
 

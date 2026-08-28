@@ -50,6 +50,10 @@ export interface RecordsRecipeBrowser {
   pageIncludes(text: string): Promise<boolean>;
   currentUrl(): Promise<string>;
   extractResultRows(): Promise<ResultRowExtract[]>;
+  /** Document-surface purchase signals. Never raw page HTML. */
+  inspectDocumentPurchase(): Promise<
+    import("./documentPurchase.js").DocumentPurchaseSignal
+  >;
 }
 
 export interface RecordsRecipeResult {
