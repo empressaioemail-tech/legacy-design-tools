@@ -29,6 +29,12 @@ import {
 import {
   loadFloodHazardFactAtom,
 } from "../lib/floodHazardFactRead";
+import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
+import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
+import { loadWellFactAtom } from "../lib/wellFactRead";
+import { loadStructuralFactAtom } from "../lib/structuralFactRead";
+import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
 import { buildR1Brief } from "../lib/r1BriefCompose";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
@@ -542,9 +548,22 @@ router.post(
       res.status(400).json({ error: "invalid_parcel_node_id" });
       return;
     }
-    const [snapshot, floodHazardFact] = await Promise.all([
+    const [
+      snapshot,
+      floodHazardFact,
+      boundaryFact,
+      pipelineFact,
+      wellFact,
+      structuralFact,
+      specialDistrictFact,
+    ] = await Promise.all([
       loadBakedNodeFacetSnapshot(parcelNodeId),
       loadFloodHazardFactAtom(parcelNodeId),
+      loadBoundaryEdgeFactAtom(parcelNodeId),
+      loadPipelineFactAtom(parcelNodeId),
+      loadWellFactAtom(parcelNodeId),
+      loadStructuralFactAtom(parcelNodeId),
+      loadSpecialDistrictFactAtom(parcelNodeId),
     ]);
     if (!snapshot) {
       res.status(404).json({
@@ -561,6 +580,18 @@ router.post(
       floodHazardFact,
       envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
     });
+    const draw = tryAssembleParcelDrawFromReads({
+      parcelNodeId,
+      facets: snapshot.facets,
+      bakedAt,
+      envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+      boundary: boundaryFact,
+      flood: floodHazardFact,
+      pipeline: pipelineFact,
+      well: wellFact,
+      specialDistrict: specialDistrictFact,
+      structural: structuralFact,
+    });
     res.json({
       runId: buildR1RunId(parcelNodeId, bakedAt),
       reportFamily: "R1",
@@ -573,6 +604,7 @@ router.post(
       citations: brief.citations,
       bakedAt,
       source: "baked-snapshot",
+      ...(draw ? { draw } : {}),
     });
   },
 );

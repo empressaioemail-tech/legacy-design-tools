@@ -21,6 +21,26 @@ import {
   resetFloodHazardAtomQueryableForTests,
   setFloodHazardAtomQueryableForTests,
 } from "../lib/floodHazardFactRead";
+import {
+  memoryBoundaryEdgeFactAtoms,
+  resetBoundaryEdgeFactAtomQueryableForTests,
+  setBoundaryEdgeFactAtomQueryableForTests,
+} from "../lib/boundaryEdgeFactRead";
+import {
+  memoryPipelineFactAtoms,
+  resetPipelineFactAtomQueryableForTests,
+  setPipelineFactAtomQueryableForTests,
+} from "../lib/pipelineFactRead";
+import {
+  memoryWellFactAtoms,
+  resetWellFactAtomQueryableForTests,
+  setWellFactAtomQueryableForTests,
+} from "../lib/wellFactRead";
+import {
+  memorySpecialDistrictFactAtoms,
+  resetSpecialDistrictFactAtomQueryableForTests,
+  setSpecialDistrictFactAtomQueryableForTests,
+} from "../lib/specialDistrictFactRead";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -62,6 +82,12 @@ function exchangeAuth(req: Test): Test {
 describe("PE entitlement gate", () => {
   beforeEach(async () => {
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([]),
+    );
     await db.insert(users).values([
       { id: USER_FREE, displayName: "Free User" },
       { id: USER_PAID, displayName: "Paid User" },
@@ -82,6 +108,10 @@ describe("PE entitlement gate", () => {
 
   afterEach(() => {
     resetFloodHazardAtomQueryableForTests();
+    resetBoundaryEdgeFactAtomQueryableForTests();
+    resetPipelineFactAtomQueryableForTests();
+    resetWellFactAtomQueryableForTests();
+    resetSpecialDistrictFactAtomQueryableForTests();
   });
 
   it("anonymous GET entitlement shows unauthenticated free tier", async () => {
@@ -230,6 +260,23 @@ describe("PE entitlement gate", () => {
 
     // Disclosure may be empty when envelope is stripped; brief still 200 cited.
     expect(Array.isArray(res.body.brief.disclosure)).toBe(true);
+
+    // P-87 WDLL 22/26: draw is on the brief; empty edge prefix does not invent a ring.
+    expect(res.body.draw).toMatchObject({
+      node: BAKED_NODE_ID,
+      kind: "parcel",
+      confidence: "seed",
+      url: `https://smartsite.cloud/p/${BAKED_NODE_ID}`,
+    });
+    expect(res.body.draw.ring).toBeUndefined();
+    expect(res.body.draw.attrs).not.toHaveProperty("setbacks");
+    expect(
+      res.body.draw.overlays.find((overlay: { id: string }) => overlay.id === "boundary"),
+    ).toMatchObject({
+      state: "unknown",
+      draw: "hatch-interior",
+      label: "Parcel boundary unmeasured",
+    });
 
     const manifest = await asUser(
       request(getApp()).get(

@@ -138,4 +138,37 @@ describe("normalizeR1BodyForExternal", () => {
       .sections;
     expect(sections[0]?.disposition).toBe("present");
   });
+
+  it("passes a valid draw stub through", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34137",
+        url: "https://smartsite.cloud/p/48021:34137",
+        confidence: "seed",
+        overlays: [
+          {
+            id: "footprint",
+            label: "Structure of record (1910), footprint unmeasured",
+            draw: "hatch-interior",
+            state: "unknown",
+          },
+        ],
+      },
+    });
+    expect(body.draw).toMatchObject({
+      node: "48021:34137",
+      url: "https://smartsite.cloud/p/48021:34137",
+    });
+  });
+
+  it("omits unlabeled unknown hatch rather than leaking a bad stub", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        overlays: [{ id: "x", label: "", draw: "hatch-interior", state: "unknown" }],
+      },
+    });
+    expect(body).not.toHaveProperty("draw");
+  });
 });

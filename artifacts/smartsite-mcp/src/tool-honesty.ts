@@ -129,20 +129,58 @@ function sectionDisposition(section: Record<string, unknown>): ExternalBriefSect
 }
 
 /**
+ * Pass cortex `draw` through. Omit on unlabeled unknown hatch or seed float.
+ * Fail closed: a bad stub is not a silent empty ring.
+ */
+export function sanitizeExternalDraw(raw: unknown): unknown | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const draw = raw as Record<string, unknown>;
+  const overlays = draw.overlays;
+  if (Array.isArray(overlays)) {
+    for (const item of overlays) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const overlay = item as Record<string, unknown>;
+      const label = typeof overlay.label === "string" ? overlay.label.trim() : "";
+      if (
+        overlay.state === "unknown" &&
+        overlay.draw === "hatch-interior" &&
+        !label
+      ) {
+        return undefined;
+      }
+    }
+  }
+  const blob = JSON.stringify(draw);
+  if (
+    blob.includes("calibratedConfidence") ||
+    blob.includes('"estimate":0.7') ||
+    blob.includes('"estimate":0.9')
+  ) {
+    return undefined;
+  }
+  return draw;
+}
+
+/**
  * Ensures MCP clients never see bare null section data without a disposition.
  * Mirrors flood SS-W16 honesty for setbacks-envelope refusals on the wire.
+ * `draw` is optional; invalid stubs are omitted (fail closed).
  */
 export function normalizeR1BodyForExternal(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
-  const brief = body.brief;
+  const draw = sanitizeExternalDraw(body.draw);
+  const withDraw: Record<string, unknown> = { ...body };
+  delete withDraw.draw;
+  if (draw) withDraw.draw = draw;
+  const brief = withDraw.brief;
   if (!brief || typeof brief !== "object" || Array.isArray(brief)) {
-    return body;
+    return withDraw;
   }
   const briefRecord = brief as Record<string, unknown>;
   const sections = briefRecord.sections;
   if (!Array.isArray(sections)) {
-    return body;
+    return withDraw;
   }
   const normalizedSections: ExternalBriefSection[] = sections.map((raw) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -170,7 +208,7 @@ export function normalizeR1BodyForExternal(
     } as ExternalBriefSection;
   });
   return {
-    ...body,
+    ...withDraw,
     brief: {
       ...briefRecord,
       sections: normalizedSections,
