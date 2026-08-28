@@ -87,6 +87,14 @@ function inputSchemaFor(name: SmartsiteToolName) {
   }
 }
 
+/** P-91 item 1. request_records starts a job; the other seven are reads. */
+function annotationsFor(name: SmartsiteToolName) {
+  if (name === "request_records") {
+    return { readOnlyHint: false, destructiveHint: false };
+  }
+  return { readOnlyHint: true };
+}
+
 export function registerTools(server: McpServer): void {
   for (const tool of SMARTSITE_MCP_TOOLS) {
     server.registerTool(
@@ -95,6 +103,7 @@ export function registerTools(server: McpServer): void {
         title: tool.title,
         description: tool.description,
         inputSchema: inputSchemaFor(tool.name),
+        annotations: annotationsFor(tool.name),
       },
       async (args) => {
         const auth = requireAuthContext();

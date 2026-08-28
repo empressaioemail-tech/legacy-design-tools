@@ -55,6 +55,29 @@ async function withTestClient(
   await server.close();
 }
 
+type ListedTool = {
+  name: string;
+  annotations?: { readOnlyHint?: unknown; destructiveHint?: unknown };
+};
+
+/** Returns names that omit a boolean annotations.readOnlyHint. */
+function namesMissingReadOnlyHint(tools: readonly ListedTool[]): string[] {
+  return tools
+    .filter((tool) => typeof tool.annotations?.readOnlyHint !== "boolean")
+    .map((tool) => tool.name);
+}
+
+const READ_ONLY_BY_NAME: Record<string, boolean> = {
+  find_parcel: true,
+  get_smart_site: true,
+  list_my_properties: true,
+  run_report: true,
+  check_request: true,
+  ask_the_map: true,
+  export_instrument: true,
+  request_records: false,
+};
+
 describe("smartsite-mcp tools/list", () => {
   it("registers exactly eight tools with Smart Site server name", async () => {
     await withTestClient(async (client) => {
@@ -63,6 +86,40 @@ describe("smartsite-mcp tools/list", () => {
       expect(tools.map((t) => t.name).sort()).toEqual(
         SMARTSITE_MCP_TOOLS.map((t) => t.name).sort(),
       );
+    });
+  });
+});
+
+describe("smartsite-mcp tool annotations (P-91 item 1)", () => {
+  it("fails when any of the eight tools omits annotations.readOnlyHint", () => {
+    const fixture: ListedTool[] = SMARTSITE_MCP_TOOLS.map((tool, index) => ({
+      name: tool.name,
+      annotations: index === 0 ? {} : { readOnlyHint: true },
+    }));
+    expect(namesMissingReadOnlyHint(fixture)).toEqual([
+      SMARTSITE_MCP_TOOLS[0].name,
+    ]);
+  });
+
+  it("accepts a complete eight-tool fixture", () => {
+    const fixture: ListedTool[] = SMARTSITE_MCP_TOOLS.map((tool) => ({
+      name: tool.name,
+      annotations: { readOnlyHint: READ_ONLY_BY_NAME[tool.name] },
+    }));
+    expect(namesMissingReadOnlyHint(fixture)).toEqual([]);
+  });
+
+  it("listTools exposes annotations.readOnlyHint on every registered tool", async () => {
+    await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(8);
+      expect(namesMissingReadOnlyHint(tools)).toEqual([]);
+      for (const tool of tools) {
+        expect(tool.annotations?.readOnlyHint).toBe(READ_ONLY_BY_NAME[tool.name]);
+        if (tool.name === "request_records") {
+          expect(tool.annotations?.destructiveHint).toBe(false);
+        }
+      }
     });
   });
 });
