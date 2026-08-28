@@ -18,7 +18,11 @@ function placeKeyForNode(parcelNodeId: string): string {
 function parseArgs(argv: string[]) {
   const county = argv.find((a) => a.startsWith("--county="))?.split("=")[1] ?? "48021";
   const dryRun = argv.includes("--dry-run");
-  return { county, dryRun };
+  const propIdsRaw = argv.find((a) => a.startsWith("--prop-ids="))?.split("=")[1];
+  const propIds = propIdsRaw
+    ? propIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : null;
+  return { county, dryRun, propIds };
 }
 
 function parcelNodeIdFromBody(body: Record<string, unknown>, countyFips: string): string | null {
@@ -48,7 +52,7 @@ function situsForBake(body: Record<string, unknown>): { situs: string | null; re
 }
 
 async function main() {
-  const { county, dryRun } = parseArgs(process.argv.slice(2));
+  const { county, dryRun, propIds } = parseArgs(process.argv.slice(2));
   const mcpUrl = process.env.HAUSKA_MCP_DATABASE_URL;
   const neondbUrl = process.env.DATABASE_URL ?? process.env.DEPLOYMENT_DATABASE_URL;
   if (!mcpUrl || !neondbUrl) {
@@ -71,6 +75,9 @@ async function main() {
     const parcelNodeId = parcelNodeIdFromBody(body, county);
     if (!parcelNodeId) {
       skippedNoNode += 1;
+      continue;
+    }
+    if (propIds && !propIds.includes(parcelNodeId.split(":")[1] ?? "")) {
       continue;
     }
     const access = assertAccessPair(body.access);
@@ -119,6 +126,7 @@ async function main() {
     JSON.stringify({
       county,
       dryRun,
+      propIds,
       conformantCadRows: cadRows.length,
       written,
       skippedNoNode,
