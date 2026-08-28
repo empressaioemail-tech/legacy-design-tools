@@ -23,43 +23,6 @@ export function structuralFactToLivingAreaWire(
   return absence;
 }
 
-function layerAbsenceFromRecord(
-  value: unknown,
-): LayerAbsenceWire | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const o = value as Record<string, unknown>;
-  if (o.status !== "absent" || typeof o.verdict !== "string") return null;
-  if (
-    typeof o.authority !== "string" ||
-    typeof o.scopeSearched !== "string" ||
-    typeof o.asOf !== "string" ||
-    typeof o.basis !== "string"
-  ) {
-    return null;
-  }
-  return {
-    status: "absent",
-    verdict: o.verdict as LayerAbsenceWire["verdict"],
-    authority: o.authority,
-    scopeSearched: o.scopeSearched,
-    asOf: o.asOf,
-    basis: o.basis,
-    provenanceClass:
-      o.provenanceClass === "Observation" ||
-      o.provenanceClass === "Derivation" ||
-      o.provenanceClass === "Synthesis"
-        ? o.provenanceClass
-        : "Record",
-    subjectKind:
-      o.subjectKind === "intensional" ? "intensional" : "extensional",
-    chainAnchoring:
-      o.chainAnchoring === "contemporaneous" ? "contemporaneous" : "backfill",
-    serveLayer: typeof o.serveLayer === "string" ? o.serveLayer : "cad",
-    entityType:
-      typeof o.entityType === "string" ? o.entityType : "cad-parcel-roll",
-  };
-}
-
 function bakedZoningHasDistrict(zoning: unknown): boolean {
   if (!zoning || typeof zoning !== "object" || Array.isArray(zoning)) return false;
   const district = (zoning as { district?: unknown }).district;
@@ -67,12 +30,20 @@ function bakedZoningHasDistrict(zoning: unknown): boolean {
 }
 
 /**
- * Attach P-63 verdict wires onto baked facets for inspect (livingAreaSqft + zoning N/A).
+ * Attach P-63 verdict wires onto baked facets for inspect (livingAreaSqft +
+ * the zoning verdict).
+ *
+ * CTX card F (2026-08-28): the zoning verdict is passed in, derived by the
+ * route from the city-limits containment fact (`zoningVerdictFromCityLimits`).
+ * It is attached whenever the baked zoning carries no district, for all three
+ * verdicts (`not-applicable`, `stamp-missing`, `unmeasured`). Before this card
+ * the zoning absence was read back off the land-use fact, which had been
+ * merged from a situsCity predicate; that coupling is gone.
  */
 export function attachVerdictLayersToFacets(
   facets: Record<string, unknown>,
   structuralFact: StructuralFactRead,
-  landUseFact: unknown,
+  zoningVerdict: LayerAbsenceWire | null | undefined,
 ): Record<string, unknown> {
   const out = { ...facets };
   const cov =
@@ -86,12 +57,8 @@ export function attachVerdictLayersToFacets(
     out.livingAreaSqft = livingWire;
   }
 
-  const zoningAbsence = layerAbsenceFromRecord(landUseFact);
-  if (
-    zoningAbsence?.verdict === "not-applicable" &&
-    !bakedZoningHasDistrict(out.zoning)
-  ) {
-    out.zoning = zoningAbsence;
+  if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
+    out.zoning = zoningVerdict;
     cov.zoning = false;
   }
 

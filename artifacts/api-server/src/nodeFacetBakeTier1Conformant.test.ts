@@ -19,6 +19,7 @@ import {
   assertNoOwnerKey,
   buildConformantTier1Payload,
   conformantAcreageFromClaim,
+  conformantClaimRecord,
   diffAgainstRequiredFacetPaths,
   diffTier1KeyPaths,
   DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES,
@@ -56,6 +57,7 @@ function txgioRow(overrides: Partial<ParcelJoinRow> = {}): ParcelJoinRow {
     situs_address: "908 PINE , BASTROP, TX 78602",
     situs_city: "BASTROP",
     situs_state: "TX",
+    situs_zip: "78602",
     zoning_district: "SF-1",
     zoning_jurisdiction: "bastrop-city-tx",
     source_vintage: "stratmap25-landparcels_48021_bastrop_202503",
@@ -135,6 +137,47 @@ function newPayload(
   });
 }
 
+/**
+ * The FLAT body the Factory's stage E stores (hauska-factory src/stages/write/index.mjs
+ * stageRows spreads the six-field candidate): claim fields at the root, a minted
+ * nid_ nodeId, no `claim` key. Field values are the production golds' as read on
+ * 2026-08-28 19:54Z and 20:00Z (owner redacted; the reader never touches it).
+ */
+function flatProductionBody(
+  countyFips: string,
+  propId: string,
+  taxYear: number,
+  fields: { situsAddress: string | null; situsCity: string | null; situsZip: string | null; landAcres?: number | null; propertyUseCode?: string | null },
+) {
+  return {
+    kind: "cad-parcel-roll",
+    time: { validTo: null, validFrom: `${taxYear}-01-01T00:00:00.000Z`, knowledgeAt: "2026-08-28T08:43:19.097Z" },
+    shape: "conformant-v1",
+    access: CANONICAL_ACCESS,
+    nodeId: "nid_df21d4edd33d1226597be35aec2df3bf",
+    centroid: null,
+    citation: { locator: "nid_df21d4edd33d1226597be35aec2df3bf", sourceId: "tx:cad-property" },
+    situsZip: fields.situsZip,
+    landAcres: fields.landAcres ?? null,
+    landValue: 0,
+    ownerName: "OWNER MUST NEVER BAKE",
+    situsCity: fields.situsCity,
+    yearBuilt: null,
+    confidence: { basis: "county-cad-roll", value: "asserted" },
+    countyFips,
+    provenance: { class: "Record", sourceId: "tx:cad-property" },
+    marketValue: 2120,
+    logicVersion: "cad-six-field/1",
+    situsAddress: fields.situsAddress,
+    assessedValue: null,
+    livingAreaSqft: null,
+    propertyUseCode: fields.propertyUseCode ?? null,
+    improvementValue: 0,
+    legalDescription: "LEGAL",
+    sourceIdentifiers: { prop_id: propId, taxYear },
+  } as Record<string, unknown>;
+}
+
 /** The literal thin row production served for 48021:34137 at 12:39Z on 2026-08-28. */
 const PRODUCTION_THIN_ROW_2026_08_28 = {
   baked: true,
@@ -171,7 +214,11 @@ describe("old versus new is a test: same fixture parcel through both bakes", () 
     expect(n.baseFacts.apn).toBe(o.baseFacts.apn);
     expect(n.baseFacts.situsAddress).toBe(o.baseFacts.situsAddress);
     expect(n.baseFacts.situsCity).toBe(o.baseFacts.situsCity);
+    expect(n.baseFacts.situsCity).toBe("BASTROP");
     expect(n.baseFacts.situsState).toBe(o.baseFacts.situsState);
+    // Card F: the two new base-fact paths agree in value as well as in presence.
+    expect(n.baseFacts.situsZip).toBe(o.baseFacts.situsZip);
+    expect(n.baseFacts.situsZip).toBe("78602");
     expect(n.baseFacts.landUse?.code).toBe("A1");
     expect(n.baseFacts.landUse?.description).toBe(o.baseFacts.landUse?.description);
     expect(n.baseFacts.landUse?.source).toBe("cad-roll");
@@ -415,6 +462,94 @@ describe("claim reading and node identity", () => {
       landAcres: null,
       propertyUseCode: null,
     });
+  });
+
+  it("card F: the FLAT body hauska_mcp actually stores (claim fields at the root, minted nid_ nodeId, no body.claim) is read by name; every field the nested reader read is read here", () => {
+    const flat = flatProductionBody("48453", "493738", 2026, { situsAddress: "4707 SHOALWOOD AVE", situsCity: "AUSTIN", situsZip: "78756" });
+    expect(flat).not.toHaveProperty("claim");
+    expect(conformantClaimRecord(flat).placement).toBe("flat");
+    expect(conformantClaimRecord(conformantBody()).placement).toBe("nested");
+    expect(readConformantCadClaim(flat)).toEqual({
+      countyFips: "48453",
+      propId: "493738",
+      taxYear: 2026,
+      situsAddress: "4707 SHOALWOOD AVE",
+      situsCity: "AUSTIN",
+      situsZip: "78756",
+      landAcres: null,
+      propertyUseCode: null,
+    });
+    // A flat body with a use code and acreage reaches the bake too (until card F both baked null on every production row).
+    const withUse = flatProductionBody("48021", "34137", 2025, { situsAddress: "908 PINE , BASTROP, TX 78602", situsCity: "BASTROP", situsZip: "78602", landAcres: 0.3815, propertyUseCode: "A1" });
+    expect(readConformantCadClaim(withUse)).toMatchObject({ landAcres: 0.3815, propertyUseCode: "A1", situsCity: "BASTROP", situsZip: "78602" });
+    // The nested placement reads identically: one reader, two placements, same values.
+    const nested = { claim: { ...withUse }, access: withUse.access };
+    expect(readConformantCadClaim(nested)).toEqual(readConformantCadClaim(withUse));
+    expect(parcelNodeIdFromBody(flat, "48453")).toBe("48453:493738");
+  });
+
+  it("card F: a claim with a city bakes a city and a zip (flat production bodies of the golds)", () => {
+    const travis = buildConformantTier1Payload({
+      body: flatProductionBody("48453", "493738", 2026, { situsAddress: "4707 SHOALWOOD AVE", situsCity: "AUSTIN", situsZip: "78756" }),
+      parcelNodeId: "48453:493738",
+      countyFips: "48453",
+      situsAddress: "4707 SHOALWOOD AVE",
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: null, gateBlocked: false },
+      nowIso: NOW,
+    });
+    expect(travis.baseFacts.situsCity).toBe("AUSTIN");
+    expect(travis.baseFacts.situsZip).toBe("78756");
+    expect(travis.provenance.parcelVintage).toBe("2026");
+    expect(travis.countyName).toBe("Travis");
+    const bastrop = buildConformantTier1Payload({
+      body: flatProductionBody("48021", "34137", 2025, { situsAddress: "908 PINE , BASTROP, TX 78602", situsCity: "BASTROP", situsZip: "78602" }),
+      parcelNodeId: "48021:34137",
+      countyFips: "48021",
+      situsAddress: "908 PINE , BASTROP, TX 78602",
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: txgioRow(), gateBlocked: false },
+      nowIso: NOW,
+    });
+    expect(bastrop.baseFacts.situsCity).toBe("BASTROP");
+    expect(bastrop.baseFacts.situsZip).toBe("78602");
+    expect(bastrop.zoning?.district).toBe("SF-1");
+    // Explicit null, never an omitted key, when the claim carries no city or zip
+    // (the literal 48021 prop 10090 body read 2026-08-28: situs ", ,", city and zip null).
+    const noCity = buildConformantTier1Payload({
+      body: flatProductionBody("48021", "10090", 2025, { situsAddress: null, situsCity: null, situsZip: null }),
+      parcelNodeId: "48021:10090",
+      countyFips: "48021",
+      situsAddress: null,
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: null, gateBlocked: false },
+      nowIso: NOW,
+    });
+    expect(noCity.baseFacts.situsCity).toBeNull();
+    expect(noCity.baseFacts.situsZip).toBeNull();
+    expect(hasKeyPath(noCity, "baseFacts.situsCity")).toBe(true);
+    expect(hasKeyPath(noCity, "baseFacts.situsZip")).toBe(true);
+    expect(JSON.stringify(noCity)).not.toMatch(/owner/i);
+  });
+
+  it("card F: the divergence test carries baseFacts.situsCity and baseFacts.situsZip (a thinned payload missing either is caught)", () => {
+    const o = oldPayload(txgioRow());
+    const n = newPayload(txgioRow()) as unknown as Record<string, unknown>;
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsCity");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsZip");
+    const thinned = { ...n, baseFacts: Object.fromEntries(Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "situsCity" && k !== "situsZip")) };
+    const diff = diffTier1KeyPaths(o, thinned);
+    expect(diff.missing).toEqual(["baseFacts.situsCity", "baseFacts.situsZip"]);
+    expect(diffAgainstRequiredFacetPaths(thinned).missing).toEqual(["baseFacts.situsCity", "baseFacts.situsZip"]);
+    // The literal 2026-08-28 production row for 48453:493738 (read 19:48Z) carried situsCity null and NO situsZip key.
+    const productionRow = { ...n, baseFacts: { apn: "493738", acreage: null, landUse: null, situsCity: null, situsState: null, situsAddress: "4707 SHOALWOOD AVE" } };
+    expect(diffAgainstRequiredFacetPaths(productionRow).missing).toEqual(["baseFacts.situsZip"]);
   });
 
   it("conformantAcreageFromClaim refuses zero, negative and non-finite (never a fabricated 0)", () => {

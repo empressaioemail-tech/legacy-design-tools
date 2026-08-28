@@ -47,6 +47,12 @@ export interface ParcelJoinRow {
   situs_address: string | null;
   situs_city: string | null;
   situs_state: string | null;
+  /**
+   * Both parcel tables carry `situs_zip` (production information_schema read
+   * 2026-08-28 19:56Z: txgio_parcel and txgio_parcel_staging), so it is
+   * selected unconditionally (CTX card F).
+   */
+  situs_zip: string | null;
   zoning_district: string | null;
   zoning_jurisdiction: string | null;
   source_vintage: string | null;
@@ -135,7 +141,7 @@ export function parcelSelectList(
   const ownerSelect = needsOwnerForGate
     ? "owner_name AS txgio_owner_for_gate"
     : "NULL::text AS txgio_owner_for_gate";
-  return `feature_index, prop_id, situs_address, situs_city, situs_state,
+  return `feature_index, prop_id, situs_address, situs_city, situs_state, situs_zip,
           ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
           source_vintage, geometry`;
 }
