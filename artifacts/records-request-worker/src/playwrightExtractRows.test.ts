@@ -133,6 +133,104 @@ describe("extractResultRows header seam", () => {
     expect(rows[0]?.headers).not.toBeNull();
   });
 
+  it("keeps Infragistics result rows and drops login chrome that has no header", async () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr><td></td><td>Bastrop CountyWeb Access</td></tr>
+        </tbody>
+      </table>
+      <table>
+        <tbody>
+          <tr><td></td><td>Login</td><td>View Basket</td></tr>
+        </tbody>
+      </table>
+      <table id="Table1">
+        <tbody>
+          <tr>
+            <td>Click here for Search Instructions</td>
+            <td>Criteria: Grantor Begins with PALMS PROPERTIES LLC</td>
+            <td>Showing Records 1 through 21</td>
+          </tr>
+          <tr>
+            <td>
+              <table>
+                <tbody>
+                  <tr class="ig_ElectricBlueHeader igg_ElectricBlueHeader">
+                    <th>#</th>
+                    <th>Image</th>
+                    <th>Item Select</th>
+                    <th>Instrument #</th>
+                    <th>Instrument # Book-Page</th>
+                    <th>Inst num</th>
+                    <th>Book</th>
+                    <th>Page</th>
+                    <th>Date Filed</th>
+                    <th>Document Type</th>
+                    <th>Name</th>
+                  </tr>
+                  <tr>
+                    <td>1</td>
+                    <td><a href="/Image/202008880">View</a></td>
+                    <td></td>
+                    <td>202008880</td>
+                    <td>202008880</td>
+                    <td>202008880</td>
+                    <td></td>
+                    <td></td>
+                    <td>06/05/2020</td>
+                    <td>DEED</td>
+                    <td>PALMS PROPERTIES LLC</td>
+                  </tr>
+                  <tr class="ig_ElectricBlueAlt igg_ElectricBlueAlt">
+                    <td>2</td>
+                    <td><a href="/Image/202018915">View</a></td>
+                    <td></td>
+                    <td>202018915</td>
+                    <td>202018915</td>
+                    <td>202018915</td>
+                    <td></td>
+                    <td></td>
+                    <td>10/29/2020</td>
+                    <td>DEED</td>
+                    <td>PALMS PROPERTIES LLC</td>
+                  </tr>
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <table id="LoginForm1_btnLogon__2">
+        <tbody>
+          <tr><td>Logon</td><td>Logon</td></tr>
+        </tbody>
+      </table>
+    `;
+    const rows = await createPlaywrightBrowser(
+      pageWithStringEvaluate(),
+    ).extractResultRows();
+    expect(rows.every((row) => row.headers && row.headers.length > 0)).toBe(
+      true,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.cells[3]).toBe("202008880");
+    expect(rows[0]?.cells[9]).toBe("DEED");
+    expect(rows[0]?.headers).toEqual([
+      "#",
+      "Image",
+      "Item Select",
+      "Instrument #",
+      "Instrument # Book-Page",
+      "Inst num",
+      "Book",
+      "Page",
+      "Date Filed",
+      "Document Type",
+      "Name",
+    ]);
+  });
+
   it("returns null headers when the grid has no header row", async () => {
     document.body.innerHTML = `
       <table>

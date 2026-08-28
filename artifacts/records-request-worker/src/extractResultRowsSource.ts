@@ -9,6 +9,13 @@
  * Aumentum/Telerik RadGrid splits header and data into sibling tables.
  * closest("table") on a data row finds the data table, which has no th.
  * Headers are read from the RadGrid ancestor, not from that table alone.
+ *
+ * Live Bastrop SearchResults (2026-08-28, PALMS PROPERTIES LLC) is
+ * Infragistics, not RadGrid. Walking every tbody tr also scoops login,
+ * sort, and banner chrome. Those chrome rows have null headers, and
+ * extractIndexHitsFromPage refuses the whole page. A row is kept only
+ * when a cell publishes instrument-shaped or date-shaped text. Wrapper
+ * rows that dump the whole grid into one 800-cell tr are dropped.
  */
 export const EXTRACT_RESULT_ROWS_SOURCE = `(() => {
   const headerTexts = (nodes) =>
@@ -35,6 +42,17 @@ export const EXTRACT_RESULT_ROWS_SOURCE = `(() => {
     if (rowEl.closest("thead")) return true;
     return false;
   };
+
+  const WRAPPER_CELL_LIMIT = 40;
+  const looksLikeIndexData = (cells) =>
+    cells.some((c) => {
+      const t = (c || "").trim();
+      return (
+        /^\\d{6,}$/.test(t) ||
+        /^\\d{4}-\\d+$/.test(t) ||
+        /\\d{1,2}\\/\\d{1,2}\\/\\d{4}/.test(t)
+      );
+    });
 
   const headersIn = (root) => {
     if (!root) return null;
@@ -79,14 +97,27 @@ export const EXTRACT_RESULT_ROWS_SOURCE = `(() => {
     for (const tr of document.querySelectorAll(sel)) {
       if (seen.has(tr)) continue;
       seen.add(tr);
-      if (tr.querySelectorAll("th").length > 0 && tr.querySelectorAll("td").length === 0) {
+      const directCells = [...tr.children].filter(
+        (c) =>
+          c.tagName === "TD" ||
+          c.tagName === "TH" ||
+          c.getAttribute?.("role") === "cell" ||
+          c.getAttribute?.("role") === "columnheader",
+      );
+      const directTh = directCells.filter(
+        (c) => c.tagName === "TH" || c.getAttribute?.("role") === "columnheader",
+      );
+      const directTd = directCells.filter(
+        (c) => c.tagName === "TD" || c.getAttribute?.("role") === "cell",
+      );
+      if (directTh.length > 0 && directTd.length === 0) {
         continue;
       }
-      const cells = [...tr.querySelectorAll("td, [role=cell]")].map(
-        (c) => c.textContent?.trim() ?? "",
-      );
+      const cells = directTd.map((c) => c.textContent?.trim() ?? "");
       if (cells.length < 2) continue;
+      if (cells.length > WRAPPER_CELL_LIMIT) continue;
       if (isChromeRow(tr, cells)) continue;
+      if (!looksLikeIndexData(cells)) continue;
       const anchor = tr.querySelector("a[href]");
       const link = anchor instanceof HTMLAnchorElement ? anchor.href : null;
       rows.push({ cells, link, headers: headersForRow(tr) });
