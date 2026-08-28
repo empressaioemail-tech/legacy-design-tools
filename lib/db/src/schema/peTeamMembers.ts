@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -5,6 +6,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
@@ -46,6 +48,10 @@ export const peTeamMembers = pgTable(
     ),
     uniqueIndex("pe_team_members_member_uidx").on(t.memberUserId),
     index("pe_team_members_account_idx").on(t.accountOwnerUserId),
+    check(
+      "pe_team_members_role_chk",
+      sql`${t.role} IN ('owner', 'member')`,
+    ),
   ],
 );
 

@@ -1,9 +1,11 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   index,
+  check,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import type { PeTeamRole } from "./peTeamMembers";
@@ -31,6 +33,10 @@ export const peTeamInvitations = pgTable(
       t.email,
     ),
     index("pe_team_invitations_account_idx").on(t.accountOwnerUserId),
+    check(
+      "pe_team_invitations_role_chk",
+      sql`${t.role} IN ('owner', 'member')`,
+    ),
   ],
 );
 
