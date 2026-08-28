@@ -58,7 +58,7 @@ export function capturePngBytesFromMetadata(metadata: unknown): Buffer | null {
   return Buffer.from(b64.trim(), "base64");
 }
 
-export type ArtifactClassifyStatusWire = "written" | "refused" | "skipped" | null;
+export type ArtifactClassifyStatusWire = "written" | "refused" | null;
 
 export type ArtifactDocumentWire = {
   artifactId: string;
@@ -67,27 +67,39 @@ export type ArtifactDocumentWire = {
   acquisitionMethod: string;
   classifyStatus: ArtifactClassifyStatusWire;
   refuseCode: string | null;
+  documentKind: string | null;
+  sourceDocumentType: string | null;
 };
+
+function trimmedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 function classifyFieldsFromMetadata(metadata: unknown): {
   classifyStatus: ArtifactClassifyStatusWire;
   refuseCode: string | null;
+  documentKind: string | null;
+  sourceDocumentType: string | null;
 } {
   const classify = metadataRecord(metadata)?.classify;
   if (!classify || typeof classify !== "object" || Array.isArray(classify)) {
-    return { classifyStatus: null, refuseCode: null };
+    return {
+      classifyStatus: null,
+      refuseCode: null,
+      documentKind: null,
+      sourceDocumentType: null,
+    };
   }
   const rec = classify as Record<string, unknown>;
   const status = rec.status;
   const classifyStatus: ArtifactClassifyStatusWire =
-    status === "written" || status === "refused" || status === "skipped"
-      ? status
-      : null;
-  const refuseCode =
-    typeof rec.refuseCode === "string" && rec.refuseCode.trim()
-      ? rec.refuseCode.trim()
-      : null;
-  return { classifyStatus, refuseCode };
+    status === "written" || status === "refused" ? status : null;
+  return {
+    classifyStatus,
+    refuseCode: trimmedString(rec.refuseCode),
+    documentKind: trimmedString(rec.documentKind),
+    sourceDocumentType: trimmedString(rec.sourceDocumentType),
+  };
 }
 
 export function artifactDocumentWire(artifact: {
@@ -105,6 +117,8 @@ export function artifactDocumentWire(artifact: {
     acquisitionMethod: artifact.acquisitionMethod,
     classifyStatus: classify.classifyStatus,
     refuseCode: classify.refuseCode,
+    documentKind: classify.documentKind,
+    sourceDocumentType: classify.sourceDocumentType,
   };
 }
 

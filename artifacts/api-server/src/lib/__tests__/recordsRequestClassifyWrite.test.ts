@@ -277,4 +277,25 @@ describe("classifyAndWriteRecordsRequestArtifact", () => {
     expect(result.refuseCode).toBe("missing_recording_ref_and_image");
     expect(fakeState.insertedInstruments).toHaveLength(0);
   });
+
+  it("returns skipped without writing classify metadata on the artifact", async () => {
+    fakeState.engagementInstruments = [
+      {
+        id: "inst-existing",
+        extractMetadata: { recordsRequestArtifactId: "art-1" },
+      },
+    ];
+    const { classifyAndWriteRecordsRequestArtifact } = await import(
+      "../recordsRequestClassifyWrite"
+    );
+    const result = await classifyAndWriteRecordsRequestArtifact({
+      artifact: baseArtifact(),
+      job: JOB,
+    });
+    expect(result.status).toBe("skipped");
+    expect(result.instrumentId).toBe("inst-existing");
+    expect(result.refuseCode).toBe("already_classified");
+    expect(fakeState.insertedInstruments).toHaveLength(0);
+    expect(fakeState.artifactUpdates).toHaveLength(0);
+  });
 });
