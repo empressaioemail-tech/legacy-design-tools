@@ -34,6 +34,11 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
     pageIncludes: vi.fn().mockResolvedValue(false),
     currentUrl: vi.fn().mockResolvedValue("https://erss.co.hays.tx.us/web/search/DOCSEARCH149S1"),
     extractResultRows: vi.fn().mockResolvedValue([]),
+    inspectDocumentPurchase: vi.fn().mockResolvedValue({
+      visibleMainText: "",
+      visibleMainControls: [],
+      rowPriceText: null,
+    }),
     ...overrides,
   };
 }

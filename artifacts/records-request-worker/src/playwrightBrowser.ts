@@ -9,7 +9,9 @@ import {
   type Page,
 } from "playwright";
 import { EXTRACT_RESULT_ROWS_SOURCE } from "./extractResultRowsSource.js";
+import { INSPECT_DOCUMENT_PURCHASE_SOURCE } from "./inspectDocumentPurchaseSource.js";
 import { sha256Hex } from "./lib/captureHash.js";
+import type { DocumentPurchaseSignal } from "./recipes/documentPurchase.js";
 import type {
   BrowserActionResult,
   PageCaptureResult,
@@ -108,6 +110,10 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
       }
     },
 
+    /**
+     * Raw HTML substring. Must not be used to decide document purchase.
+     * Use inspectDocumentPurchase for that.
+     */
     async pageIncludes(text: string): Promise<boolean> {
       try {
         const content = await page.content();
@@ -124,6 +130,12 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
     async extractResultRows(): Promise<ResultRowExtract[]> {
       return page.evaluate(EXTRACT_RESULT_ROWS_SOURCE) as Promise<
         ResultRowExtract[]
+      >;
+    },
+
+    async inspectDocumentPurchase(): Promise<DocumentPurchaseSignal> {
+      return page.evaluate(INSPECT_DOCUMENT_PURCHASE_SOURCE) as Promise<
+        DocumentPurchaseSignal
       >;
     },
   };
