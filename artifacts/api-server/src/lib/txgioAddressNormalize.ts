@@ -239,6 +239,22 @@ export function situsSearchPrefixVariants(raw: string): string[] {
   return variants;
 }
 
+/**
+ * Exact street-key set for situs lookup. Unions the resolver candidates
+ * with the street-type-stripped prefix variants so a typed "908 Pine St"
+ * matches a CAD situs whose first-comma segment is "908 PINE".
+ */
+export function situsSearchStreetKeys(raw: string): string[] {
+  const keys: string[] = [];
+  for (const key of normalizeStreetLineCandidates(raw)) {
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  for (const key of situsSearchPrefixVariants(raw)) {
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
 /** City / state / ZIP constraints parsed from a typeahead or MCP find query. */
 export type PlaceSearchLocality = {
   city: string | null;

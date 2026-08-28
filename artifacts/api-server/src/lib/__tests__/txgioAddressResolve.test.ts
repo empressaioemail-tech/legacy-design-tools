@@ -16,6 +16,8 @@ import {
   localityFromStoredAddress,
   placeSearchLocalityMatches,
   hasPlaceSearchLocality,
+  situsSearchPrefixVariants,
+  situsSearchStreetKeys,
 } from "../txgioAddressNormalize";
 
 describe("normalizeStreetLine", () => {
@@ -272,5 +274,27 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
         query,
       ),
     ).toBe(true);
+  });
+
+  it("parses the live gold CAD situs (space before the city comma)", () => {
+    const stored = localityFromStoredAddress("908 PINE , BASTROP, TX 78602");
+    const query = parsePlaceSearchLocality("908 Pine St, Bastrop TX 78602");
+    expect(stored).toEqual({
+      city: "BASTROP",
+      state: "TX",
+      zip: "78602",
+    });
+    expect(placeSearchLocalityMatches(stored, query)).toBe(true);
+  });
+});
+
+describe("situsSearchStreetKeys (CAD omits street type)", () => {
+  it("includes the stripped 908 PINE key the store actually holds", () => {
+    expect(
+      situsSearchPrefixVariants("908 Pine St, Bastrop TX 78602"),
+    ).toEqual(["908 PINE ST", "908 PINE"]);
+    const keys = situsSearchStreetKeys("908 Pine St, Bastrop TX 78602");
+    expect(keys).toContain("908 PINE ST");
+    expect(keys).toContain("908 PINE");
   });
 });
