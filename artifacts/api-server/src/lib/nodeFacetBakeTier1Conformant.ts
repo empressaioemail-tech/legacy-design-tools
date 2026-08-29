@@ -24,7 +24,8 @@
  *     `landAcres` only when there is no ring, under a distinct method;
  *   - facetCoverage / provenance / bakedAt: the same predicates and slots,
  *     plus `provenance.parcelJoin` naming what the join did (joined, no row,
- *     gate-blocked). Absent is a state the key carries, never an omission.
+ *     gate-blocked, joined-situs). Absent is a state the key carries, never
+ *     an omission.
  *
  * Kept from the conformant shape: `shapeSource`, `baked`, `source`, `access`
  * (canonical pair, A-023), `accessNormalizedFrom` when serve translation
@@ -58,6 +59,9 @@
  * DB-free: the CLI owns I/O; tests import this module directly.
  */
 
+import type { AddressLandUseEntry } from "./joinIntegrityGate";
+import { resolveAddressLandUse } from "./joinIntegrityGate";
+import { addressJoinKey, LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
 import {
   assembleTier1Payload,
   COUNTY_NAMES,
@@ -201,6 +205,13 @@ export type ParcelJoinRecord =
       /** The parcel table's own vintage (e.g. stratmap25-...). */
       sourceVintage: string | null;
     }
+  | {
+      table: string;
+      state: "joined-situs";
+      basis: string;
+      featureIndex: number | null;
+      sourceVintage: string | null;
+    }
   | { table: string; state: "no-row"; basis: string }
   | { table: string; state: "gate-blocked"; basis: string };
 
@@ -235,10 +246,26 @@ export interface ConformantTier1BuildInput {
   parcelJoin: {
     /** Table the join was (or would have been) read from. */
     table: string;
-    /** The joined row, or null when none matched. Ignored when gate-blocked. */
+    /** Prop_id-keyed row. Ignored when gate-blocked (a numbering collision). */
     row: ParcelJoinRow | null;
     /** True when the county's prop_id join is gate-blocked (never joined). */
     gateBlocked: boolean;
+    /**
+     * Situs-keyed recovered row. Used only when gate-blocked AND the owner
+     * gate accepts. A prop_id-keyed row in `row` is still ignored.
+     */
+    situsRow?: ParcelJoinRow | null;
+  };
+  /**
+   * Owner-gated situs recovery for a gate-blocked county. When present,
+   * land-use is resolved via `addressJoinKey` + `resolveAddressLandUse`
+   * (never the claim's propertyUseCode, never a prop_id join). The TxGIO
+   * owner is used only for the gate and is never copied into the payload.
+   */
+  situsRecovery?: {
+    addressLandUse: ReadonlyMap<string, AddressLandUseEntry>;
+    txgioOwner?: string | null;
+    blockedFips?: ReadonlySet<string>;
   };
   nowIso: string;
   onSitusFallback?: (info: {
@@ -253,10 +280,15 @@ export interface ConformantTier1BuildInput {
  * the claim + the parcel join; where a facet has no source the key is present
  * with an explicit absence in the shape the reader expects.
  *
- * FAIL CLOSED on the gate: a row offered for a gate-blocked county is not
- * used (zoning null, envelope null, acreage from the claim), because in a
- * blocked county the `(county_fips, prop_id)` match is a numbering collision
- * that would attach another parcel's stamp and ring.
+ * FAIL CLOSED on the gate: a prop_id-keyed row offered for a gate-blocked
+ * county is not used (a numbering collision would attach another parcel's
+ * stamp and ring). For those counties the owner-gated situs recovery may
+ * still fire: `addressJoinKey` + `resolveAddressLandUse` / `ownersAgree`.
+ * A recovered land-use carries `source: cad-roll-address-join`. A recovered
+ * situs-keyed row may write ring, centroid, and zoning stamp.
+ * `parcelJoin.state` is `joined-situs` on recovery, `gate-blocked` when
+ * recovery fails, `joined` on a legal prop_id join, `no-row` when the legal
+ * join finds nothing.
  */
 export function buildConformantTier1Payload(
   input: ConformantTier1BuildInput,
@@ -267,11 +299,13 @@ export function buildConformantTier1Payload(
   const countyName = input.countyName ?? COUNTY_NAMES[countyFips] ?? countyFips;
 
   const gateBlocked = input.parcelJoin.gateBlocked;
-  const row = gateBlocked ? null : input.parcelJoin.row;
-  const ring = row ? firstRing(row.geometry) : null;
+  // Prop_id row is never used on a blocked county (the collision).
+  let row: ParcelJoinRow | null = gateBlocked ? null : input.parcelJoin.row;
+  let landUseAddressRecovered = false;
+  let situsRecoveryAccepted = false;
 
   const code = claim.propertyUseCode;
-  const landUse: BaseFacts["landUse"] = code
+  let landUse: BaseFacts["landUse"] = code
     ? {
         code,
         description: ptadLandUseDescription(code) ?? null,
@@ -279,6 +313,41 @@ export function buildConformantTier1Payload(
         vintage: claim.taxYear != null ? String(claim.taxYear) : null,
       }
     : null;
+
+  if (gateBlocked && input.situsRecovery) {
+    const blocked =
+      input.situsRecovery.blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED;
+    const addrKey = addressJoinKey(countyFips, input.situsAddress, blocked);
+    const txgioOwner =
+      input.situsRecovery.txgioOwner ??
+      input.parcelJoin.situsRow?.txgio_owner_for_gate ??
+      null;
+    const hit = resolveAddressLandUse(
+      addrKey,
+      txgioOwner,
+      input.situsRecovery.addressLandUse,
+    );
+    if (hit) {
+      landUse = {
+        code: hit.code,
+        description: ptadLandUseDescription(hit.code) ?? null,
+        source: "cad-roll-address-join",
+        vintage: hit.vintage,
+      };
+      landUseAddressRecovered = true;
+      situsRecoveryAccepted = true;
+      row = input.parcelJoin.situsRow ?? null;
+    } else {
+      // Recovery attempted and refused (disagree, blank owner, blank situs,
+      // or no address match): honest null, never the claim code as a silent
+      // fallback, never the offered prop_id row.
+      landUse = null;
+      landUseAddressRecovered = false;
+      row = null;
+    }
+  }
+
+  const ring = row ? firstRing(row.geometry) : null;
 
   const tier1 = assembleTier1Payload({
     nodeId: parcelNodeId,
@@ -291,9 +360,9 @@ export function buildConformantTier1Payload(
     situsState: row?.situs_state ?? null,
     situsZip: claim.situsZip,
     landUse,
-    landUseAddressRecovered: false,
-    // The land-use is the claim's own field, not a join; the join gate is
-    // recorded on provenance.parcelJoin instead.
+    landUseAddressRecovered,
+    // The land-use is the claim's own field or a recovered address join;
+    // the prop_id join gate is recorded on provenance.parcelJoin instead.
     landUseGateBlocked: false,
     ring,
     acreageWithoutRing: conformantAcreageFromClaim(claim.landAcres),
@@ -306,27 +375,41 @@ export function buildConformantTier1Payload(
   });
 
   const table = input.parcelJoin.table;
+  const sourceVintageOf = (r: ParcelJoinRow): string | null =>
+    typeof r.source_vintage === "string" && r.source_vintage.trim()
+      ? r.source_vintage.trim()
+      : null;
   const parcelJoin: ParcelJoinRecord = gateBlocked
-    ? {
-        table,
-        state: "gate-blocked",
-        basis:
-          `prop_id join is gate-blocked for county ${countyFips} (coverage ` +
-          `ledger block verdict or LANDUSE_JOIN_DISABLED_FIPS_SEED): a CAD ` +
-          `prop_id joined into a divergent TxGIO numbering attaches another ` +
-          `parcel's zoning stamp and geometry, so zoning and geometry are ` +
-          `unmeasured here, not verified absent`,
-      }
+    ? situsRecoveryAccepted
+      ? {
+          table,
+          state: "joined-situs",
+          basis: row
+            ? `${table} row feature_index ${row.feature_index} matched on normalizeSitusAddress (situs-address recovery for county ${countyFips})`
+            : `situs-address recovery accepted for county ${countyFips} on normalizeSitusAddress; no ${table} row matched (zoning stamp and geometry unavailable)`,
+          featureIndex: row ? row.feature_index : null,
+          sourceVintage: row ? sourceVintageOf(row) : null,
+        }
+      : {
+          table,
+          state: "gate-blocked",
+          basis:
+            `prop_id join is gate-blocked for county ${countyFips} (coverage ` +
+            `ledger block verdict or LANDUSE_JOIN_DISABLED_FIPS_SEED): a CAD ` +
+            `prop_id joined into a divergent TxGIO numbering attaches another ` +
+            `parcel's zoning stamp and geometry, so zoning and geometry are ` +
+            `unmeasured here, not verified absent` +
+            (input.situsRecovery
+              ? "; situs-address recovery did not accept (owners disagree, blank owner, blank situs, or no address match)"
+              : ""),
+        }
     : row
       ? {
           table,
           state: "joined",
           basis: `${table} row feature_index ${row.feature_index} matched (county_fips, prop_id)`,
           featureIndex: row.feature_index,
-          sourceVintage:
-            typeof row.source_vintage === "string" && row.source_vintage.trim()
-              ? row.source_vintage.trim()
-              : null,
+          sourceVintage: sourceVintageOf(row),
         }
       : {
           table,
