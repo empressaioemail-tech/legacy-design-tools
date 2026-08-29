@@ -52,10 +52,14 @@ brokeragePlaceSitusSearchRouter.get(
       return;
     }
 
-    const hits = await searchPlaceByPrefix({
+    const result = await searchPlaceByPrefix({
       query,
       limit: parsed.data.limit,
     });
-    res.json({ hits });
+    res.json(
+      result.missClass
+        ? { hits: result.hits, missClass: result.missClass }
+        : { hits: result.hits },
+    );
   },
 );
