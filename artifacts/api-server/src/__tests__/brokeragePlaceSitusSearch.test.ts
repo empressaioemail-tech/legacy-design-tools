@@ -6,19 +6,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
 import { brokeragePlaceSitusSearchRouter } from "../routes/brokeragePlaceSitusSearch";
-import type { SitusSearchHit } from "../lib/txgioAddressResolve";
+import type {
+  PlaceSearchResult,
+  SitusSearchHit,
+} from "../lib/txgioAddressResolve";
 
 const { searchMock, lookupMock } = vi.hoisted(() => ({
-  searchMock: vi.fn(async (_input: { query: string; limit?: number }) => ({
-    hits: [
-      {
-        parcelNodeId: "48209:193340",
-        situsAddress: "6026 MARSH LN, BUDA, TX 78610",
-        countyFips: "48209",
-        source: "parcel-situs",
-      },
-    ],
-  })),
+  searchMock: vi.fn(
+    async (_input: { query: string; limit?: number }): Promise<PlaceSearchResult> => ({
+      hits: [
+        {
+          parcelNodeId: "48209:193340",
+          situsAddress: "6026 MARSH LN, BUDA, TX 78610",
+          countyFips: "48209",
+          source: "parcel-situs",
+        },
+      ],
+    }),
+  ),
   lookupMock: vi.fn(
     async (_input: { parcelNodeId: string }): Promise<SitusSearchHit | null> =>
       null,
