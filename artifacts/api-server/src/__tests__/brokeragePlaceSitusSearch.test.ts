@@ -9,14 +9,16 @@ import { brokeragePlaceSitusSearchRouter } from "../routes/brokeragePlaceSitusSe
 import type { SitusSearchHit } from "../lib/txgioAddressResolve";
 
 const { searchMock, lookupMock } = vi.hoisted(() => ({
-  searchMock: vi.fn(async (_input: { query: string; limit?: number }) => [
-    {
-      parcelNodeId: "48209:193340",
-      situsAddress: "6026 MARSH LN, BUDA, TX 78610",
-      countyFips: "48209",
-      source: "parcel-situs",
-    },
-  ]),
+  searchMock: vi.fn(async (_input: { query: string; limit?: number }) => ({
+    hits: [
+      {
+        parcelNodeId: "48209:193340",
+        situsAddress: "6026 MARSH LN, BUDA, TX 78610",
+        countyFips: "48209",
+        source: "parcel-situs",
+      },
+    ],
+  })),
   lookupMock: vi.fn(
     async (_input: { parcelNodeId: string }): Promise<SitusSearchHit | null> =>
       null,
@@ -107,5 +109,32 @@ describe("GET /api/brokerage/v1/place/situs-search", () => {
     ]);
     expect(lookupMock).toHaveBeenCalledWith({ parcelNodeId: "48021:34137" });
     expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("completed empty carries missClass no-hit", async () => {
+    searchMock.mockResolvedValueOnce({ hits: [], missClass: "no-hit" });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "zzzz-not-a-situs-99999" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
+  });
+
+  it("budget empty carries missClass situs-search-budget-exceeded", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "situs-search-budget-exceeded",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "908 Pine, Bastrop TX" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "situs-search-budget-exceeded",
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
   });
 });

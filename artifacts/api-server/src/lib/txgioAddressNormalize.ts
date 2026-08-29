@@ -620,3 +620,23 @@ export function buildNormalizedStreetSql(col: string): string {
   // (it never introduces spaces, but keep the contract identical).
   return `trim(${expr})`;
 }
+
+/**
+ * Every Texas county FIPS (254 codes). The situs functional index is
+ * `(county_fips, <normalized street>)`. A search that omits the leading
+ * column seq-scans `txgio_parcel` (16M rows / 18 GB) and hits the 20 s
+ * budget. `allStoreCounties()` cannot supply this list: it still tags
+ * Bastrop as live-ArcGIS and would drop 48021 while 74k situs rows sit
+ * in the table.
+ *
+ * The odd-number 001..507 assignment is the Census county-code scheme
+ * for Texas, verified 254-of-254 against the statewide roster. This
+ * function is the index bound, not a name directory.
+ */
+export function texasCountyFipsList(): string[] {
+  const out: string[] = [];
+  for (let n = 1; n <= 507; n += 2) {
+    out.push(`48${String(n).padStart(3, "0")}`);
+  }
+  return out;
+}

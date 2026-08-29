@@ -18,7 +18,21 @@ vi.mock("../brokerageTxParcels", () => ({
   allStoreCounties: () => [{ fips: "48209", name: "Hays", source: "txgio-store" }],
 }));
 
-const { searchSitusByPrefix } = await import("../txgioAddressResolve");
+const { searchSitusByPrefix, texasCountyFipsList } = await import(
+  "../txgioAddressResolve"
+);
+
+describe("texasCountyFipsList (situs index bound)", () => {
+  it("is the 254 Texas county codes and includes Bastrop 48021", () => {
+    const fips = texasCountyFipsList();
+    expect(fips).toHaveLength(254);
+    expect(fips).toContain("48021");
+    expect(fips).toContain("48507");
+    expect(fips).not.toContain("48000");
+    expect(fips).not.toContain("48002");
+    expect(new Set(fips).size).toBe(254);
+  });
+});
 
 describe("searchSitusByPrefix", () => {
   function mockDb(rows: unknown[]) {
