@@ -112,15 +112,18 @@ describe("situs-search miss budget (P-91 O7)", () => {
     expect(Date.now() - started).toBeGreaterThan(HTTP_BUDGET_STAND_IN_MS);
   });
 
-  it("bounded miss returns empty inside the HTTP budget", async () => {
+  it("bounded miss returns empty inside the HTTP budget with a declared class", async () => {
     const started = Date.now();
-    const hits = await searchPlaceByPrefix({
+    const result = await searchPlaceByPrefix({
       query: RAINMAKER,
       database: hangDb(UNBOUNDED_MISS_QUERY_MS) as never,
       budgetMs: HTTP_BUDGET_STAND_IN_MS,
     });
     const elapsed = Date.now() - started;
-    expect(hits).toEqual([]);
+    expect(result).toEqual({
+      hits: [],
+      missClass: "situs-search-budget-exceeded",
+    });
     expect(elapsed).toBeLessThan(UNBOUNDED_MISS_QUERY_MS);
     expect(elapsed).toBeLessThan(25_000);
     expect(SITUS_SEARCH_BUDGET_MS).toBeLessThan(25_000);
@@ -132,9 +135,10 @@ describe("situs-search miss budget (P-91 O7)", () => {
       database: pineHitDb() as never,
       budgetMs: HTTP_BUDGET_STAND_IN_MS,
     });
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
-    expect(hits[0]?.source).toBe("parcel-situs");
+    expect(hits.hits).toHaveLength(1);
+    expect(hits.hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits.hits[0]?.source).toBe("parcel-situs");
+    expect(hits.missClass).toBeUndefined();
   });
 
   it("does not drop an already-found Pine hit when a later query hangs", async () => {
@@ -143,7 +147,17 @@ describe("situs-search miss budget (P-91 O7)", () => {
       database: pineThenHangDb() as never,
       budgetMs: HTTP_BUDGET_STAND_IN_MS,
     });
-    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits.hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits.missClass).toBeUndefined();
+  });
+
+  it("completed empty is no-hit, not a budget miss", async () => {
+    const result = await searchPlaceByPrefix({
+      query: "zzzz-not-a-situs-99999",
+      database: hangDb(UNBOUNDED_MISS_QUERY_MS) as never,
+      budgetMs: HTTP_BUDGET_STAND_IN_MS,
+    });
+    expect(result).toEqual({ hits: [], missClass: "no-hit" });
   });
 
   it("withSitusSearchBudget fail-closes to empty when work never settles", async () => {
