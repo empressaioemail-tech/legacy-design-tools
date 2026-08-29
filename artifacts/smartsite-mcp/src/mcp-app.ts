@@ -365,12 +365,16 @@ tr.row:hover td{background:#1a1a1a}
 .btn:disabled{cursor:default;filter:none;opacity:.72}
 .ack{font:11px/1.3 ui-monospace,Consolas,monospace;color:var(--muted);padding:0 10px 10px;text-align:right}
 .empty{color:var(--muted);padding:12px}
+.boot{font:10px/1.2 ui-monospace,Consolas,monospace;color:var(--muted);padding:2px 10px;flex:0 0 auto}
 </style>
 </head>
 <body>
+<div id="boot" class="boot" data-script="off">script-off</div>
 <div id="root"><p class="empty">Waiting for a screen or a parcel.</p></div>
 <script>
 (function(){
+  var boot=document.getElementById("boot");
+  if(boot){boot.textContent="script-ran";boot.setAttribute("data-script","ran");}
   var RAILS=["situs","zoning","landUse","flood","drainage","envelope"];
   var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
   var model={kind:"empty",rows:[],overlays:[]};
@@ -433,70 +437,82 @@ tr.row:hover td{background:#1a1a1a}
         var bv=sortKey==="query"?b.query:(b.parcelNodeId||"");
         return av<bv?-sortDir:av>bv?sortDir:0;
       });
-      var head="<tr><th data-k=query>Query</th><th data-k=id>Node</th>"+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"</tr>";
+      var head="<tr><th data-k=query>Query</th><th data-k=id>Node</th>"+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
       var body=rows.map(function(r,i){
-        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn lime">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){return "<td>"+glyph(r.rails[k])+"</td>"}).join("")+"</tr>";
+        var open=r.parcelNodeId?'<button type="button" class="btn" data-act="open" data-node="'+esc(r.parcelNodeId)+'">Open</button>':"";
+        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn lime">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){return "<td>"+glyph(r.rails[k])+"</td>"}).join("")+"<td>"+open+"</td></tr>";
       }).join("");
-      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · screen board</div><div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
+      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · screen board <span data-script="ran">script-ran</span></div><div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
         '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div></div>";
-      root.querySelectorAll("th[data-k]").forEach(function(th){
-        th.addEventListener("click",function(){sortKey=th.getAttribute("data-k");sortDir*=-1;render();});
-      });
-      root.querySelectorAll("tr.row").forEach(function(tr){
-        tr.addEventListener("click",function(){
-          var r=rows[Number(tr.getAttribute("data-i"))];
-          if(!r||!r.parcelNodeId) return;
-          host.sendMessage("Open parcel "+r.parcelNodeId+" with get_smart_site depth node. Do not save it.");
-        });
-      });
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o){
         var refused=o.state==="refused"?" refused":"";
         var why=o.reason?'<span class="why"><span class="key">reason</span> <span class="val">'+esc(o.reason)+"</span></span>":"";
         return '<div class="ovl'+refused+'">'+glyph(o.state==="refused"?"refused":o.state==="unread"?"unread":"present")+' <span class="key">'+esc(o.id)+'</span> <span class="lbl">'+esc(o.label)+"</span>"+why+"</div>";
       }).join("")||'<p class="empty">No overlays on this draw.</p>';
-      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+esc(model.label||model.parcelNodeId||"parcel")+'</div><div class="well"><div class="req">Request</div>'+ov+"</div>"+
+      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+esc(model.label||model.parcelNodeId||"parcel")+' <span data-script="ran">script-ran</span></div><div class="well"><div class="req">Request</div>'+ov+"</div>"+
         '<div class="acts"><button type="button" class="btn" data-act="save">Save property</button><button type="button" class="btn primary" data-act="listing">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+listingAck.chars+'">Posted '+listingAck.chars+" chars</div>":"")+"</div>";
-    } else {
-      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · waiting</div><p class="empty">Waiting for a screen or a parcel.</p></div>';
-    }
-    var listing=root.querySelector('[data-act="listing"]');
-    if(listing){
-      if(listingAck){
+      var listing=root.querySelector('[data-act="listing"]');
+      if(listing&&listingAck){
         listing.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
         listing.disabled=true;
         listing.setAttribute("data-listing-ack","1");
         listing.setAttribute("data-listing-chars",String(listingAck.chars));
       }
-      listing.addEventListener("click",function(){
-        if(listing.disabled) return;
-        var text=listingHistoryMessage(model);
-        listingAck={chars:text.length};
-        listing.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
-        listing.disabled=true;
-        listing.setAttribute("data-listing-ack","1");
-        listing.setAttribute("data-listing-chars",String(text.length));
-        listing.setAttribute("title",text);
-        var acts=listing.parentNode;
-        if(acts&&acts.parentNode&&!acts.parentNode.querySelector(".ack")){
-          var note=document.createElement("div");
-          note.className="ack";
-          note.setAttribute("data-listing-chars",String(text.length));
-          note.textContent="Posted "+text.length+" chars";
-          acts.parentNode.appendChild(note);
-        }
-        var before=fingerprint(model);
-        host.sendMessage(text);
-        if(fingerprint(model)!==before) throw new Error("i5_panel_mutated");
-      });
-    }
-    var save=root.querySelector('[data-act="save"]');
-    if(save&&model.parcelNodeId){
-      save.addEventListener("click",function(){
-        host.sendMessage("Save property "+model.parcelNodeId+" with save_property. Do not change any screen.");
-      });
+    } else {
+      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · waiting <span data-script="ran">script-ran</span></div><p class="empty">Waiting for a screen or a parcel.</p></div>';
     }
   }
+  function armListing(btn){
+    if(!btn||btn.getAttribute("data-listing-ack")==="1") return null;
+    btn.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
+    btn.disabled=true;
+    btn.setAttribute("data-listing-ack","1");
+    var text=listingHistoryMessage(model);
+    listingAck={chars:text.length};
+    btn.setAttribute("data-listing-chars",String(text.length));
+    btn.setAttribute("title",text);
+    var acts=btn.parentNode;
+    if(acts&&acts.parentNode&&!acts.parentNode.querySelector(".ack")){
+      var note=document.createElement("div");
+      note.className="ack";
+      note.setAttribute("data-listing-chars",String(text.length));
+      note.textContent="Posted "+text.length+" chars";
+      acts.parentNode.appendChild(note);
+    }
+    return text;
+  }
+  document.body.addEventListener("click",function(ev){
+    var el=ev.target;
+    if(!el||!el.closest) return;
+    var listing=el.closest("[data-act=listing]");
+    if(listing){
+      ev.preventDefault();
+      var text=armListing(listing);
+      if(!text) return;
+      var before=fingerprint(model);
+      host.sendMessage(text);
+      if(fingerprint(model)!==before) throw new Error("i5_panel_mutated");
+      return;
+    }
+    var open=el.closest("[data-act=open]");
+    if(open){
+      var node=open.getAttribute("data-node");
+      if(node) host.sendMessage("Open parcel "+node+" with get_smart_site depth node. Do not save it.");
+      return;
+    }
+    var save=el.closest("[data-act=save]");
+    if(save&&model.parcelNodeId){
+      host.sendMessage("Save property "+model.parcelNodeId+" with save_property. Do not change any screen.");
+      return;
+    }
+    var th=el.closest("th[data-k]");
+    if(th){
+      sortKey=th.getAttribute("data-k");
+      sortDir*=-1;
+      render();
+    }
+  });
   function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
   function accept(result){
     var text="";
