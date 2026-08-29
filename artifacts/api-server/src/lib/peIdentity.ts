@@ -219,14 +219,25 @@ export async function setPeAccessTierFromStripe(input: {
   subscriptionTier: PeSubscriptionTier | null;
   source: "stripe_sub" | "stripe_promo";
   stripeCustomerId?: string | null;
+  /**
+   * Team seat count from billed Stripe items. Null on solo/studio, churn,
+   * or a Team grant whose items were not readable. Never omit the column
+   * on update — a leftover number after downgrade is a silent seat grant.
+   */
+  seatsPurchased?: number | null;
 }): Promise<void> {
   await ensurePeEntitlement(input.userId);
+  const seatsPurchased =
+    input.tier === "paid" && input.subscriptionTier === "team"
+      ? (input.seatsPurchased ?? null)
+      : null;
   await db
     .update(peUserEntitlements)
     .set({
       accessTier: input.tier,
       subscriptionTier: input.tier === "paid" ? input.subscriptionTier : null,
       entitlementSource: input.tier === "paid" ? input.source : null,
+      seatsPurchased,
       ...(input.stripeCustomerId
         ? { stripeCustomerId: input.stripeCustomerId }
         : {}),
