@@ -53,6 +53,13 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("host.sendMessage(text)");
     expect(html).toContain('id:rpcId++,method:"ui/message"');
     expect(html).not.toContain('{jsonrpc:"2.0",method:"ui/message"');
+    expect(html).toContain('id:initId,method:"ui/initialize"');
+    expect(html).toContain("function flushReady");
+    expect(html).toContain("String(d.id)===String(initId)");
+    expect(html).toContain("pending.push");
+    expect(html).toContain("data-handshake");
+    expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p544.html");
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeGreaterThan(0);
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeLessThan(html.indexOf("host.sendMessage(text)"));
     expect(html).toContain(LISTING_TURN_INSTRUCTION);
@@ -79,6 +86,15 @@ describe("mcp-app contracts", () => {
     expect(
       htmlContractViolations(clean.replace(/Do not call ask_the_map/g, "Do not call the map tool")),
     ).toContain("listing_missing_ask_the_map_guard");
+    expect(htmlContractViolations(clean.replace(/function flushReady/g, "function skipReady"))).toContain(
+      "handshake_no_wait",
+    );
+    expect(
+      htmlContractViolations(
+        clean +
+          'parent.postMessage({jsonrpc:"2.0",id:1,method:"ui/initialize",params:{}});parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*");',
+      ),
+    ).toContain("handshake_fire_before_reply");
   });
 
   it("does not treat list_my_properties as a board source", () => {
