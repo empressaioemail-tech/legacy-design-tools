@@ -382,9 +382,10 @@ tr.row:hover td{background:#1a1a1a}
   var sortKey="query";
   var sortDir=1;
   var listingAck=null;
+  var rpcId=1;
   var host={
     sendMessage:function(text){
-      parent.postMessage({jsonrpc:"2.0",method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
+      parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
     }
   };
   function listingHistoryMessage(m){
@@ -522,7 +523,7 @@ tr.row:hover td{background:#1a1a1a}
     if(d.method==="ui/notifications/tool-result"&&d.params) accept(d.params);
     if(d.result&&d.result.content) accept(d.result);
   });
-  parent.postMessage({jsonrpc:"2.0",id:1,method:"ui/initialize",params:{appInfo:{name:"SmartSiteBoard",version:"1"},appCapabilities:{}}},"*");
+  parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/initialize",params:{appInfo:{name:"SmartSiteBoard",version:"1"},appCapabilities:{}}},"*");
   parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*");
 })();
 </script>
