@@ -1,4 +1,4 @@
-/** P-91 Wave C — MCP App resource. I1/I5/I6. No fourteenth tool. */
+/** P-91 Wave D — listing click. I1/I5/I6. No fourteenth tool. */
 
 export const APP_RESOURCE_URI = "ui://smartsite/app.html";
 export const APP_MIME = "text/html;profile=mcp-app";
@@ -207,9 +207,53 @@ export function panelFingerprint(model: PanelModel): string {
   });
 }
 
+/** Unique opener. Absence of this turn in the transcript is host_drop. */
+export const LISTING_TURN_OPENER = "Find listing history for";
+/** Positive destination. Answer here is working. */
+export const LISTING_TURN_DESTINATION =
+  "Search the public web for prior sales, price cuts, and listing copy. Put the answer only in this transcript.";
+/** Paired guard. ask_the_map after this turn is guard_failed. */
+export const LISTING_TURN_GUARD =
+  "Do not call ask_the_map. Do not start Smart Site research. Do not write it into the Smart Site board or parcel panel.";
+
+export const LISTING_TURN_INSTRUCTION = `${LISTING_TURN_DESTINATION} ${LISTING_TURN_GUARD}`;
+
+export type ListingClickOutcome = "host_drop" | "guard_failed" | "working";
+
+export type ListingClickObservation = {
+  turnText: string | null;
+  toolsCalled: readonly string[];
+  answeredInTranscript: boolean;
+};
+
+export function listingHistoryWho(model: Pick<PanelModel, "label" | "parcelNodeId">): string {
+  return model.label || model.parcelNodeId || "this parcel";
+}
+
 export function listingHistoryMessage(model: PanelModel): string {
-  const who = model.label || model.parcelNodeId || "this parcel";
-  return `Find listing history for ${who}. Search the public web for prior sales, price cuts, and listing copy. Put the answer only in this transcript. Do not write it into the Smart Site board or parcel panel.`;
+  return `${LISTING_TURN_OPENER} ${listingHistoryWho(model)}. ${LISTING_TURN_INSTRUCTION}`;
+}
+
+export function listingTurnIsGuarded(text: string): boolean {
+  return (
+    text.includes(LISTING_TURN_OPENER) &&
+    text.includes("Do not call ask_the_map") &&
+    /public web/i.test(text) &&
+    /this transcript/i.test(text)
+  );
+}
+
+/**
+ * Three outcomes, not two. A turn that appeared without ask_the_map and
+ * without a transcript answer is incomplete; refuse rather than invent a fourth.
+ */
+export function classifyListingOutcome(obs: ListingClickObservation): ListingClickOutcome {
+  if (!obs.turnText) return "host_drop";
+  if (!listingTurnIsGuarded(obs.turnText) || obs.toolsCalled.includes("ask_the_map")) {
+    return "guard_failed";
+  }
+  if (obs.answeredInTranscript) return "working";
+  throw new Error("listing_outcome_unclassified");
 }
 
 export function listingHistoryClick(model: PanelModel): {
@@ -255,6 +299,12 @@ export function htmlContractViolations(html: string): string[] {
   if (!html.includes('data-theme="claude"') || !html.includes("btn primary")) {
     violations.push("missing_claude_chrome");
   }
+  if (/\bask_the_map\s*\(/.test(html)) {
+    violations.push("ask_the_map_call");
+  }
+  if (!/Do not call ask_the_map/.test(html)) {
+    violations.push("listing_missing_ask_the_map_guard");
+  }
   return violations;
 }
 
@@ -268,13 +318,13 @@ export function buildAppHtml(): string {
 <style>
 :root{--bg:#1c1c1c;--card:#262626;--well:#111111;--line:#3d3d3d;--ink:#ececec;--muted:#9a9a9a;--key:#e8c36a;--val:#8fde5d;--present:#3d9b7a;--refused:#b08ad4;--unknown:#7a7a7a;--unread:#6a6a6a;--alert:#d08a7a}
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
-#root{padding:2px}
-.card{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
-.hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--muted)}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+#root{height:100%;min-height:0;padding:2px;display:flex;flex-direction:column}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden;display:flex;flex-direction:column;flex:1;min-height:0;max-height:100%}
+.hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--muted);flex:0 0 auto}
 .mark{width:12px;height:12px;border:1.5px solid var(--muted);border-radius:50%;position:relative;flex:0 0 12px}
 .mark:after{content:"";position:absolute;inset:3px;border:1.5px solid var(--muted);border-radius:50%}
-.well{margin:0 10px 10px;background:var(--well);border-radius:8px;padding:10px 12px}
+.well{margin:0 10px 10px;background:var(--well);border-radius:8px;padding:10px 12px;flex:1 1 auto;min-height:0;overflow:auto}
 .req{font-size:11px;color:var(--muted);margin:0 0 8px}
 table{width:100%;border-collapse:collapse}
 th{font:10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.06em;text-transform:uppercase;text-align:left;padding:0 6px 8px;border-bottom:1px solid var(--line);color:var(--muted);cursor:pointer}
@@ -293,12 +343,12 @@ tr.row:hover td{background:#1a1a1a}
 .g-unknown{background:repeating-linear-gradient(45deg,var(--unknown),var(--unknown) 2px,transparent 2px,transparent 4px);border-color:var(--unknown)}
 .g-refused{background:transparent;border-style:dashed;border-color:var(--refused);background-image:linear-gradient(135deg,transparent 46%,var(--refused) 46%,var(--refused) 54%,transparent 54%)}
 .g-unread{background:transparent;border:none;border-top:2px solid var(--unread);height:0;width:12px;vertical-align:4px}
-.legend{display:flex;flex-wrap:wrap;gap:10px;padding:0 12px 10px;font:11px ui-monospace,Consolas,monospace;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:10px;padding:0 12px 10px;font:11px ui-monospace,Consolas,monospace;color:var(--muted);flex:0 0 auto}
 .ovl{padding:6px 0;border-bottom:1px solid #2a2a2a}
 .ovl:last-child{border-bottom:none}
 .ovl.refused .lbl{color:var(--refused);font-weight:600}
 .why{display:block;color:var(--muted);margin-top:2px}
-.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:0 10px 12px}
+.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:8px 10px 12px;flex:0 0 auto;position:sticky;bottom:0;background:var(--card);z-index:2}
 .btn{font:13px/1.2 ui-sans-serif,system-ui,sans-serif;border:1px solid var(--line);background:#2a2a2a;color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
 .btn.primary{background:#fff;color:#111;border-color:#fff}
 .btn:hover{filter:brightness(1.08)}
@@ -319,6 +369,10 @@ tr.row:hover td{background:#1a1a1a}
       parent.postMessage({jsonrpc:"2.0",method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
     }
   };
+  function listingHistoryMessage(m){
+    var who=m.label||m.parcelNodeId||"this parcel";
+    return ${JSON.stringify(LISTING_TURN_OPENER)}+" "+who+". "+${JSON.stringify(LISTING_TURN_INSTRUCTION)};
+  }
   function fingerprint(m){
     return JSON.stringify({kind:m.kind,screenId:m.screenId||null,rows:m.rows,parcelNodeId:m.parcelNodeId||null,overlays:m.overlays});
   }
@@ -397,7 +451,7 @@ tr.row:hover td{background:#1a1a1a}
     if(listing){
       listing.addEventListener("click",function(){
         var before=fingerprint(model);
-        host.sendMessage("Find listing history for "+(model.label||model.parcelNodeId||"this parcel")+". Search the public web. Put the answer only in this transcript. Do not write it into the Smart Site board or parcel panel.");
+        host.sendMessage(listingHistoryMessage(model));
         if(fingerprint(model)!==before) throw new Error("i5_panel_mutated");
       });
     }
