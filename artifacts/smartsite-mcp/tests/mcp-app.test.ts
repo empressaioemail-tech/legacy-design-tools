@@ -47,7 +47,12 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("script-ran");
     expect(html).toContain('document.body.addEventListener("click"');
     expect(html).toContain('data-act="open"');
+    expect(html).toContain("window.__ss&&window.__ss.open(this)");
+    expect(html).toContain("window.__ss&&window.__ss.listing(this)");
+    expect(html).toContain("window.__ss&&window.__ss.save()");
     expect(html).toContain("host.sendMessage(text)");
+    expect(html).toContain('id:rpcId++,method:"ui/message"');
+    expect(html).not.toContain('{jsonrpc:"2.0",method:"ui/message"');
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeGreaterThan(0);
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeLessThan(html.indexOf("host.sendMessage(text)"));
     expect(html).toContain(LISTING_TURN_INSTRUCTION);
