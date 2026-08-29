@@ -19,6 +19,6 @@ describe("resolveScreenQuery", () => {
     const search = vi.fn(async () => []);
     await expect(resolveScreenQuery(JUNK, search)).resolves.toEqual([]);
     expect(search).toHaveBeenCalledTimes(1);
-    expect(search.mock.calls[0]?.[0]).toEqual({ query: JUNK, limit: 10 });
+    expect(search).toHaveBeenCalledWith({ query: JUNK, limit: 10 });
   });
 });
