@@ -72,6 +72,7 @@ import {
   defaultPeCheckoutCancelUrl,
   defaultPeCheckoutSuccessUrl,
   PeCheckoutConfigError,
+  PE_TEAM_INCLUDED_SEATS,
 } from "../lib/pePaywallStripe";
 import { countyFipsFromParcelNodeId } from "../lib/verdictLayerServe";
 import { isP85CountyFips } from "../lib/p85ClerkPortalRegistry";
@@ -1106,7 +1107,7 @@ const PeCheckoutBodySchema = z
      * the one the customer was shown.
      */
     interval: z.enum(["month", "year"]).optional(),
-    /** Team only: TOTAL seats desired. Base price covers 10; +$25/mo each above. */
+    /** Team only: TOTAL seats desired. Base price covers PE_TEAM_INCLUDED_SEATS; +$25/mo each above. */
     seats: z.number().int().min(1).max(500).optional(),
     /**
      * Checkout chrome. Absent / "hosted" keeps today's hosted redirect
@@ -1124,12 +1125,12 @@ const PeCheckoutBodySchema = z
     (body) =>
       body.interval !== "year" ||
       body.seats === undefined ||
-      body.seats <= 10,
+      body.seats <= PE_TEAM_INCLUDED_SEATS,
     {
       // No annual extra-seat price exists (seats stay monthly $25, ruled
       // 2026-08-24) and Stripe cannot mix intervals in one subscription.
       message:
-        "annual Team billing covers at most the 10 included seats; extra seats bill monthly only",
+        `annual Team billing covers at most the ${PE_TEAM_INCLUDED_SEATS} included seats; extra seats bill monthly only`,
     },
   );
 

@@ -228,11 +228,11 @@ describe("annual billing (operator ruling 2026-08-24)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("annual Team within the 10 included seats is accepted", async () => {
+  it("annual Team within the included seats is accepted", async () => {
     const res = await asUser(
       request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
       USER,
-    ).send({ tier: "team", interval: "year", seats: 10 });
+    ).send({ tier: "team", interval: "year", seats: 3 });
     expect(res.status).toBe(200);
     expect(res.body.peTier).toBe("team");
     expect(res.body.peInterval).toBe("year");
@@ -502,7 +502,7 @@ describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
     expect(form.get("return_url")).toBeNull();
   });
 
-  it("team checkout declares seats_purchased = 10 + extras on session and subscription metadata", async () => {
+  it("team checkout declares seats_purchased = included + extras on session and subscription metadata", async () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_fake";
     process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
     process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
@@ -514,15 +514,15 @@ describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
     await createPeSubscriptionCheckoutSession({
       userId: USER,
       tier: "team",
-      seats: 12,
+      seats: 5,
       successUrl: "https://x.example/?ok",
       cancelUrl: "https://x.example/?no",
     });
     expect(checkoutBodies).toHaveLength(1);
     const form = checkoutBodies[0]!;
     expect(form.get("metadata[subscription_tier]")).toBe("team");
-    expect(form.get("metadata[seats_purchased]")).toBe("12");
-    expect(form.get("subscription_data[metadata][seats_purchased]")).toBe("12");
+    expect(form.get("metadata[seats_purchased]")).toBe("5");
+    expect(form.get("subscription_data[metadata][seats_purchased]")).toBe("5");
     expect(form.get("line_items[1][quantity]")).toBe("2");
   });
 
@@ -673,7 +673,7 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     expect(row?.seatsPurchased).toBeNull();
   });
 
-  it("team checkout with billed extras writes seats_purchased=12", async () => {
+  it("team checkout with billed extras writes seats_purchased=5", async () => {
     process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
     process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
     const { raw, signature } = signedWebhookPayload(
@@ -683,7 +683,7 @@ describe("webhook entitlement mapping (granular tiers)", () => {
           pe_user_id: USER,
           checkout_kind: "pe_sub",
           subscription_tier: "team",
-          seats_purchased: "12",
+          seats_purchased: "5",
         },
         line_items: {
           data: [
@@ -697,10 +697,10 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
     const row = await entitlementRow();
     expect(row?.subscriptionTier).toBe("team");
-    expect(row?.seatsPurchased).toBe(12);
+    expect(row?.seatsPurchased).toBe(5);
   });
 
-  it("VIOLATION: team grant with no billed items leaves seats_purchased null, not 10", async () => {
+  it("VIOLATION: team grant with no billed items leaves seats_purchased null, not 3", async () => {
     process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
     const { raw, signature } = signedWebhookPayload(
       checkoutCompletedEvent({
@@ -720,7 +720,7 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     expect(row?.seatsPurchased).toBeNull();
   });
 
-  it("VIOLATION: metadata 10 vs billed 12 refuses the seat write and still grants team", async () => {
+  it("VIOLATION: metadata 3 vs billed 5 refuses the seat write and still grants team", async () => {
     process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
     process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
     const { raw, signature } = signedWebhookPayload(
@@ -730,7 +730,7 @@ describe("webhook entitlement mapping (granular tiers)", () => {
           pe_user_id: USER,
           checkout_kind: "pe_sub",
           subscription_tier: "team",
-          seats_purchased: "10",
+          seats_purchased: "3",
         },
         line_items: {
           data: [
