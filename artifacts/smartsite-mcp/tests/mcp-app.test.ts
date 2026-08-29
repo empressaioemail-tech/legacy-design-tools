@@ -8,10 +8,17 @@ import {
   APP_HOST_TOOLS,
   APP_MIME,
   APP_RESOURCE_URI,
+  LISTING_TURN_DESTINATION,
+  LISTING_TURN_GUARD,
+  LISTING_TURN_INSTRUCTION,
+  LISTING_TURN_OPENER,
   buildAppHtml,
+  classifyListingOutcome,
   glyphClass,
   htmlContractViolations,
   listingHistoryClick,
+  listingHistoryMessage,
+  listingTurnIsGuarded,
   looksLikeParcelNodeId,
   parseToolResult,
   panelFingerprint,
@@ -34,6 +41,10 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("node unresolved");
     expect(html).not.toContain('data-act="listing" disabled');
     expect(html).not.toMatch(/#F3F5F1|#F5F5F0/);
+    expect(html).toContain("position:sticky");
+    expect(html).toContain("host.sendMessage(listingHistoryMessage(model))");
+    expect(html).toContain(LISTING_TURN_INSTRUCTION);
+    expect(html).not.toMatch(/\bask_the_map\s*\(/);
   });
 
   it("unread and unknown do not share a glyph class", () => {
@@ -52,6 +63,10 @@ describe("mcp-app contracts", () => {
       "aggregate_or_invented_pct",
     );
     expect(htmlContractViolations(clean + "#F3F5F1")).toContain("cream_host_theme");
+    expect(htmlContractViolations(clean + "ask_the_map({runId:1})")).toContain("ask_the_map_call");
+    expect(
+      htmlContractViolations(clean.replace(/Do not call ask_the_map/g, "Do not call the map tool")),
+    ).toContain("listing_missing_ask_the_map_guard");
   });
 
   it("does not treat list_my_properties as a board source", () => {
@@ -114,8 +129,52 @@ describe("mcp-app contracts", () => {
     const click = listingHistoryClick(model);
     expect(click.fingerprintAfter).toBe(click.fingerprintBefore);
     expect(click.fingerprintAfter).toBe(panelFingerprint(model));
+    expect(click.message).toBe(listingHistoryMessage(model));
+    expect(click.message).toBe(
+      `${LISTING_TURN_OPENER} 927 MAIN ST , BASTROP, TX 78602. ${LISTING_TURN_DESTINATION} ${LISTING_TURN_GUARD}`,
+    );
+    expect(listingTurnIsGuarded(click.message)).toBe(true);
     expect(click.message).toMatch(/transcript/);
+    expect(click.message).toContain("Do not call ask_the_map");
+    expect(click.message).toMatch(/public web/);
     expect(click.message).not.toMatch(/42/);
+  });
+
+  it("distinguishes host_drop, guard_failed, and working", () => {
+    const turn = listingHistoryMessage({
+      kind: "parcel",
+      rows: [],
+      overlays: [],
+      label: "908 PINE , BASTROP, TX 78602",
+      parcelNodeId: "48021:34137",
+    });
+    expect(classifyListingOutcome({
+      turnText: null,
+      toolsCalled: ["ask_the_map"],
+      answeredInTranscript: false,
+    })).toBe("host_drop");
+    expect(classifyListingOutcome({
+      turnText: turn,
+      toolsCalled: ["ask_the_map"],
+      answeredInTranscript: false,
+    })).toBe("guard_failed");
+    expect(classifyListingOutcome({
+      turnText: "Find listing history for this parcel. Search the public web.",
+      toolsCalled: [],
+      answeredInTranscript: true,
+    })).toBe("guard_failed");
+    expect(classifyListingOutcome({
+      turnText: turn,
+      toolsCalled: [],
+      answeredInTranscript: true,
+    })).toBe("working");
+    expect(() =>
+      classifyListingOutcome({
+        turnText: turn,
+        toolsCalled: [],
+        answeredInTranscript: false,
+      }),
+    ).toThrow(/listing_outcome_unclassified/);
   });
 });
 
