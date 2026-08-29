@@ -10,11 +10,11 @@ const TEAM_YR = "price_team_yr";
 const EXTRA = "price_seat";
 
 describe("resolveTeamSeatsPurchased", () => {
-  it("writes 10 + extras when the billed Team base is present", () => {
+  it("writes included + extras when the billed Team base is present", () => {
     expect(
       resolveTeamSeatsPurchased({
         grantTier: "team",
-        metadataSeats: 12,
+        metadataSeats: 5,
         items: [
           { priceId: TEAM, quantity: 1 },
           { priceId: EXTRA, quantity: 2 },
@@ -22,27 +22,27 @@ describe("resolveTeamSeatsPurchased", () => {
         teamPriceIds: [TEAM, TEAM_YR],
         extraSeatPriceId: EXTRA,
       }),
-    ).toBe(12);
+    ).toBe(5);
   });
 
-  it("VIOLATION: Team tier with no billed items does not invent 10", () => {
+  it("VIOLATION: Team tier with no billed items does not invent the included count", () => {
     expect(
       resolveTeamSeatsPurchased({
         grantTier: "team",
-        metadataSeats: 10,
+        metadataSeats: 3,
         items: [],
         teamPriceIds: [TEAM],
         extraSeatPriceId: EXTRA,
       }),
     ).toBeNull();
-    expect(PE_TEAM_INCLUDED_SEATS).toBe(10);
+    expect(PE_TEAM_INCLUDED_SEATS).toBe(3);
   });
 
-  it("VIOLATION: metadata 10 and billed 12 disagree — write nothing", () => {
+  it("VIOLATION: metadata 3 and billed 5 disagree — write nothing", () => {
     expect(
       resolveTeamSeatsPurchased({
         grantTier: "team",
-        metadataSeats: 10,
+        metadataSeats: 3,
         items: [
           { priceId: TEAM, quantity: 1 },
           { priceId: EXTRA, quantity: 2 },
@@ -67,7 +67,7 @@ describe("resolveTeamSeatsPurchased", () => {
     expect(
       resolveTeamSeatsPurchased({
         grantTier: "studio",
-        metadataSeats: 10,
+        metadataSeats: 3,
         items,
         teamPriceIds: [TEAM],
         extraSeatPriceId: EXTRA,
