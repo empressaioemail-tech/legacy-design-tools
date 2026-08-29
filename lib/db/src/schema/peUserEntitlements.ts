@@ -1,4 +1,11 @@
-import { boolean, pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  index,
+} from "drizzle-orm/pg-core";
 import { users } from "./users";
 
 /** Property Explorer access tier — distinct from brokerage install-scoped tiers. */
@@ -61,6 +68,12 @@ export const peUserEntitlements = pgTable(
      * entitlement snapshot, never silently upgraded to studio/team).
      */
     subscriptionTier: text("subscription_tier").$type<PeSubscriptionTier>(),
+    /**
+     * Checkout seat count on a Team subscription. NULL means unknown —
+     * omit the field on the wire. Never store 0 to mean "we did not read
+     * Stripe". A stored 0 is a fact (zero seats purchased).
+     */
+    seatsPurchased: integer("seats_purchased"),
   },
   (t) => [index("pe_user_entitlements_tenant_idx").on(t.tenantId)],
 );

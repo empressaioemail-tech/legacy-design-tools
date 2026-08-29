@@ -227,6 +227,8 @@ describe("lib/db schema integration", () => {
         "pe_screens",
         // P-86 — share grant registry. Resolvable URL is /s/{id}.
         "pe_share_grants",
+        "pe_team_invitations",
+        "pe_team_members",
         "pe_user_entitlements",
         "pe_user_identities",
         "pe_workbench_state",
