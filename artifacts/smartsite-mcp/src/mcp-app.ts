@@ -1,6 +1,6 @@
 /** P-91 Wave D — listing click. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p544.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p545.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_HOST_TOOLS = [
   "create_screen",
@@ -328,6 +328,12 @@ export function htmlContractViolations(html: string): string[] {
   ) {
     violations.push("handshake_fire_before_reply");
   }
+  if (html.includes('content:[{type:"text"')) {
+    violations.push("ui_message_content_array");
+  }
+  if (!html.includes('content:{type:"text",text:text}')) {
+    violations.push("ui_message_content_not_spec_object");
+  }
   return violations;
 }
 
@@ -403,7 +409,7 @@ tr.row:hover td{background:#1a1a1a}
     if(boot) boot.setAttribute("data-handshake",state);
   }
   function postMessage(text){
-    parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
+    parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/message",params:{role:"user",content:{type:"text",text:text}}},"*");
   }
   function flushReady(){
     if(ready) return;

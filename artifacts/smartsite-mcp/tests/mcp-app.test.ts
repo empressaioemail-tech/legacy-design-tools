@@ -52,6 +52,8 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("window.__ss&&window.__ss.save()");
     expect(html).toContain("host.sendMessage(text)");
     expect(html).toContain('id:rpcId++,method:"ui/message"');
+    expect(html).toContain('content:{type:"text",text:text}');
+    expect(html).not.toContain('content:[{type:"text"');
     expect(html).not.toContain('{jsonrpc:"2.0",method:"ui/message"');
     expect(html).toContain('id:initId,method:"ui/initialize"');
     expect(html).toContain("function flushReady");
@@ -59,7 +61,7 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("pending.push");
     expect(html).toContain("data-handshake");
     expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p544.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p545.html");
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeGreaterThan(0);
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeLessThan(html.indexOf("host.sendMessage(text)"));
     expect(html).toContain(LISTING_TURN_INSTRUCTION);
@@ -95,6 +97,14 @@ describe("mcp-app contracts", () => {
           'parent.postMessage({jsonrpc:"2.0",id:1,method:"ui/initialize",params:{}});parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*");',
       ),
     ).toContain("handshake_fire_before_reply");
+    expect(
+      htmlContractViolations(
+        clean.replace(
+          'content:{type:"text",text:text}',
+          'content:[{type:"text",text:text}]',
+        ),
+      ),
+    ).toContain("ui_message_content_array");
   });
 
   it("does not treat list_my_properties as a board source", () => {
