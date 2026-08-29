@@ -1,6 +1,6 @@
 /** P-91 Wave D — listing click. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p545.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p546.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_HOST_TOOLS = [
   "create_screen",
@@ -328,11 +328,20 @@ export function htmlContractViolations(html: string): string[] {
   ) {
     violations.push("handshake_fire_before_reply");
   }
-  if (html.includes('content:[{type:"text"')) {
-    violations.push("ui_message_content_array");
+  if (html.includes('params:{role:"user",content:{type:"text"')) {
+    violations.push("ui_message_content_object");
   }
-  if (!html.includes('content:{type:"text",text:text}')) {
-    violations.push("ui_message_content_not_spec_object");
+  if (!html.includes('content:[{type:"text",text:text}]')) {
+    violations.push("ui_message_content_not_array");
+  }
+  if (!html.includes("function paintBoot") || !html.includes("handshake=")) {
+    violations.push("handshake_not_visible");
+  }
+  if (!html.includes("hostCapabilities") || !html.includes("message=none")) {
+    violations.push("caps_unread");
+  }
+  if (!html.includes("pendingMsg") || !html.includes("reply=")) {
+    violations.push("message_reply_unread");
   }
   return violations;
 }
@@ -385,7 +394,7 @@ tr.row:hover td{background:#1a1a1a}
 .btn:disabled{cursor:default;filter:none;opacity:.72}
 .ack{font:11px/1.3 ui-monospace,Consolas,monospace;color:var(--muted);padding:0 10px 10px;text-align:right}
 .empty{color:var(--muted);padding:12px}
-.boot{font:10px/1.2 ui-monospace,Consolas,monospace;color:var(--muted);padding:2px 10px;flex:0 0 auto}
+.boot{font:10px/1.3 ui-monospace,Consolas,monospace;color:var(--muted);padding:2px 10px;flex:0 0 auto;white-space:normal;word-break:break-word}
 </style>
 </head>
 <body>
@@ -394,7 +403,21 @@ tr.row:hover td{background:#1a1a1a}
 <script>
 (function(){
   var boot=document.getElementById("boot");
-  if(boot){boot.textContent="script-ran";boot.setAttribute("data-script","ran");}
+  var handshake="off";
+  var capText="caps=unread";
+  var msgCap="message=unread";
+  var replyText="reply=none";
+  var pendingMsg={};
+  function paintBoot(){
+    if(!boot) return;
+    boot.setAttribute("data-script","ran");
+    boot.setAttribute("data-handshake",handshake);
+    boot.setAttribute("data-caps",capText);
+    boot.setAttribute("data-message-cap",msgCap);
+    boot.setAttribute("data-reply",replyText);
+    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText].join(" ");
+  }
+  paintBoot();
   var RAILS=["situs","zoning","landUse","flood","drainage","envelope"];
   var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
   var model={kind:"empty",rows:[],overlays:[]};
@@ -406,10 +429,36 @@ tr.row:hover td{background:#1a1a1a}
   var ready=false;
   var pending=[];
   function markHandshake(state){
-    if(boot) boot.setAttribute("data-handshake",state);
+    handshake=state;
+    paintBoot();
+  }
+  function summarizeCaps(result){
+    var hc=result&&result.hostCapabilities;
+    if(!hc||typeof hc!=="object"){
+      capText="caps=none";
+      msgCap="message=none";
+      return;
+    }
+    var keys=[];
+    for(var k in hc){if(Object.prototype.hasOwnProperty.call(hc,k)&&k!=="message") keys.push(k)}
+    capText="caps="+(keys.length?keys.join(","):"empty");
+    if(hc.message==null){
+      msgCap="message=none";
+    } else if(hc.message===true){
+      msgCap="message=yes";
+    } else if(typeof hc.message==="object"){
+      var mods=[];
+      for(var m in hc.message){if(hc.message[m]) mods.push(m)}
+      msgCap="message="+(mods.length?mods.join(","):"yes");
+    } else {
+      msgCap="message="+String(hc.message);
+    }
   }
   function postMessage(text){
-    parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/message",params:{role:"user",content:{type:"text",text:text}}},"*");
+    var id=rpcId++;
+    pendingMsg[id]=1;
+    pendingMsg[String(id)]=1;
+    parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
   }
   function flushReady(){
     if(ready) return;
@@ -556,8 +605,31 @@ tr.row:hover td{background:#1a1a1a}
     var d=ev.data;
     if(!d) return;
     if(String(d.id)===String(initId)&&(d.result!==undefined||d.error)){
-      markHandshake(d.error?"error":"ready");
+      if(d.error){
+        capText="caps=error";
+        msgCap="message=error";
+        markHandshake("error");
+      } else {
+        summarizeCaps(d.result);
+        markHandshake("ready");
+      }
       flushReady();
+      return;
+    }
+    if(d.id!=null&&pendingMsg[d.id]){
+      delete pendingMsg[d.id];
+      delete pendingMsg[String(d.id)];
+      if(d.error){
+        replyText="reply="+(d.error.code!=null?String(d.error.code):"error");
+      } else if(d.result&&d.result.isError){
+        replyText="reply=isError";
+      } else if(d.result!==undefined){
+        replyText="reply=ok";
+      } else {
+        replyText="reply=empty";
+      }
+      paintBoot();
+      return;
     }
     if(d.method==="ui/notifications/tool-result"&&d.params) accept(d.params);
     if(d.result&&d.result.content) accept(d.result);
