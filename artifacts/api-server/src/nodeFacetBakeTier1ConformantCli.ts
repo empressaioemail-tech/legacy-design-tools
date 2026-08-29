@@ -16,9 +16,13 @@
  * The parcel join is gated by the same effective block set the old bake
  * uses (coverage-ledger `block` verdicts UNION the seed): in a blocked
  * county a CAD prop_id matched into a divergent TxGIO numbering attaches
- * another parcel's stamp and ring, so the join is refused and recorded on
- * `provenance.parcelJoin`. Owner never enters a payload (`assertNoOwnerKey`
- * before every write).
+ * another parcel's stamp and ring, so the prop_id join is refused. Those
+ * counties recover on situs address plus the per-match owner gate
+ * (`addressJoinKey` + `resolveAddressLandUse`): a recovered land-use
+ * carries `source: cad-roll-address-join`, and a situs-keyed `txgio_parcel`
+ * row may write ring, centroid, and zoning stamp. `parcelJoin.state` is
+ * `joined-situs` on recovery. Owner never enters a payload
+ * (`assertNoOwnerKey` before every write). The seed is not lifted.
  *
  * Coordinates: the ring centroid is written when a ring exists; on conflict
  * the 0,0 sentinel never overwrites a real prior coordinate (the serve's
@@ -35,11 +39,17 @@ import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
 import { normalizeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
-import { loadLedgerBlockedFips } from "./lib/joinIntegrityGate.js";
+import {
+  fetchCountyLandUseByAddress,
+  loadLedgerBlockedFips,
+  resolveAddressLandUse,
+} from "./lib/joinIntegrityGate.js";
+import { addressJoinKey, normalizeSitusAddress } from "./lib/joinNormalize.js";
 import { ringCentroid } from "./lib/nodeFacetBakeTier1.js";
 import { COUNTY_NAMES, effectiveBlockedFips, firstRing } from "./lib/nodeFacetTier1Assemble.js";
 import {
   fetchParcelRowsByPropIds,
+  fetchParcelRowsBySitusKeys,
   resolveParcelTableForCounty,
   type ParcelJoinRow,
   type ParcelTableSource,
@@ -125,6 +135,34 @@ async function joinParcelRows(
   return { byPropId, multiFeature: seenMulti.size };
 }
 
+/**
+ * Join parcel rows for normalized situs keys. First feature_index wins on a
+ * colliding situs. Used only after the county's prop_id join is refused.
+ */
+async function joinParcelRowsBySitus(
+  neondb: pg.Pool,
+  county: string,
+  src: ParcelTableSource,
+  situsKeys: string[],
+  pageSize: number,
+): Promise<{ bySitus: Map<string, ParcelJoinRow>; multiFeature: number }> {
+  const bySitus = new Map<string, ParcelJoinRow>();
+  const seenMulti = new Set<string>();
+  for (const keys of chunk(situsKeys, pageSize)) {
+    const rows = await fetchParcelRowsBySitusKeys(neondb, county, src, keys);
+    for (const row of rows) {
+      const key = normalizeSitusAddress(row.situs_address);
+      if (!key) continue;
+      if (bySitus.has(key)) {
+        seenMulti.add(key);
+        continue;
+      }
+      bySitus.set(key, row);
+    }
+  }
+  return { bySitus, multiFeature: seenMulti.size };
+}
+
 async function main() {
   const { county, dryRun, propIds, pageSize } = parseArgs(process.argv.slice(2));
   const mcpUrl = process.env.HAUSKA_MCP_DATABASE_URL;
@@ -168,12 +206,39 @@ async function main() {
   }
 
   // The parcel join, gated exactly as the old bake gates its prop_id join.
+  // Blocked counties refuse prop_id and recover on situs + owner gate.
   const ledgerBlocked = await loadLedgerBlockedFips(neondb);
-  const joinGateBlocked = effectiveBlockedFips(ledgerBlocked).has(county);
-  const parcelTable = joinGateBlocked ? null : await resolveParcelTableForCounty(neondb, county);
+  const blockedSet = effectiveBlockedFips(ledgerBlocked);
+  const joinGateBlocked = blockedSet.has(county);
+  const parcelTable = await resolveParcelTableForCounty(neondb, county);
   let parcelRows = new Map<string, ParcelJoinRow>();
+  let situsRows = new Map<string, ParcelJoinRow>();
   let txgioMultiFeature = 0;
-  if (!joinGateBlocked && parcelTable) {
+  const addressLandUse = joinGateBlocked
+    ? await fetchCountyLandUseByAddress(neondb, county)
+    : null;
+  if (joinGateBlocked && parcelTable) {
+    const situsKeys = [
+      ...new Set(
+        work
+          .map((w) => {
+            const { situs, refuse } = situsForBake(w.body);
+            if (refuse) return null;
+            return addressJoinKey(county, situs, blockedSet);
+          })
+          .filter((k): k is string => k != null),
+      ),
+    ];
+    const joined = await joinParcelRowsBySitus(
+      neondb,
+      county,
+      parcelTable,
+      situsKeys,
+      pageSize,
+    );
+    situsRows = joined.bySitus;
+    txgioMultiFeature = joined.multiFeature;
+  } else if (!joinGateBlocked && parcelTable) {
     const ids = [...new Set(work.map((w) => w.parcelNodeId.split(":")[1] ?? "").filter(Boolean))];
     const joined = await joinParcelRows(neondb, county, parcelTable, ids, pageSize);
     parcelRows = joined.byPropId;
@@ -206,10 +271,25 @@ async function main() {
       continue;
     }
     const propId = parcelNodeId.split(":")[1] ?? "";
-    const row = joinGateBlocked ? null : (parcelRows.get(propId) ?? null);
-    if (!joinGateBlocked) {
-      if (row) txgioJoined += 1;
+    const propIdRow = joinGateBlocked ? null : (parcelRows.get(propId) ?? null);
+    let situsRow: ParcelJoinRow | null = null;
+    let txgioOwner: string | null = null;
+    if (joinGateBlocked && addressLandUse) {
+      const addrKey = addressJoinKey(county, situs, blockedSet);
+      const offered = addrKey ? (situsRows.get(addrKey) ?? null) : null;
+      txgioOwner = offered?.txgio_owner_for_gate ?? null;
+      // Pass the situs-keyed row ONLY after the owner gate accepts.
+      const hit = resolveAddressLandUse(addrKey, txgioOwner, addressLandUse);
+      situsRow = hit ? offered : null;
+    }
+    const row = joinGateBlocked ? situsRow : propIdRow;
+    if (joinGateBlocked) {
+      if (situsRow) txgioJoined += 1;
       else txgioNoRow += 1;
+    } else if (propIdRow) {
+      txgioJoined += 1;
+    } else {
+      txgioNoRow += 1;
     }
 
     const payload = buildConformantTier1Payload({
@@ -221,7 +301,21 @@ async function main() {
       access,
       accessNormalizedFrom,
       publishRunId,
-      parcelJoin: { table: joinTable, row, gateBlocked: joinGateBlocked },
+      parcelJoin: {
+        table: joinTable,
+        row: propIdRow,
+        gateBlocked: joinGateBlocked,
+        ...(joinGateBlocked ? { situsRow } : {}),
+      },
+      ...(joinGateBlocked && addressLandUse
+        ? {
+            situsRecovery: {
+              addressLandUse,
+              txgioOwner,
+              blockedFips: blockedSet,
+            },
+          }
+        : {}),
       nowIso,
       onSitusFallback: ({ cityKey, situsCity }) => {
         console.warn(

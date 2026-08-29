@@ -14,6 +14,13 @@
 import { describe, it, expect } from "vitest";
 import { buildTier1Payload } from "./nodeFacetBakeTier1Cli";
 import type { Ring } from "./lib/nodeFacetBakeTier1";
+import type { AddressLandUseEntry } from "./lib/joinIntegrityGate";
+import {
+  addressJoinKey,
+  LANDUSE_JOIN_DISABLED_FIPS_SEED,
+  landUseJoinKey,
+  normalizeSitusAddress,
+} from "./lib/joinNormalize";
 import type { ParcelJoinRow } from "./lib/nodeFacetTier1ParcelJoin";
 import {
   assertNoOwnerKey,
@@ -31,6 +38,7 @@ import {
   readConformantCadClaim,
   REQUIRED_TIER1_FACET_PATHS,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
+  type ConformantTier1BuildInput,
 } from "./lib/nodeFacetBakeTier1Conformant";
 
 // A ~100ft x 150ft rectangular lot near Bastrop, TX (same as the old test).
@@ -117,14 +125,23 @@ function oldPayload(row: ParcelJoinRow, landUseCode: string | null = "A1") {
 
 function newPayload(
   row: ParcelJoinRow | null,
-  opts: { gateBlocked?: boolean; body?: Record<string, unknown> } = {},
+  opts: {
+    gateBlocked?: boolean;
+    body?: Record<string, unknown>;
+    countyFips?: string;
+    countyName?: string;
+    parcelNodeId?: string;
+    situsAddress?: string | null;
+    situsRow?: ParcelJoinRow | null;
+    situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
+  } = {},
 ) {
   return buildConformantTier1Payload({
     body: opts.body ?? conformantBody(),
-    parcelNodeId: "48021:34137",
-    countyFips: "48021",
-    countyName: "Bastrop",
-    situsAddress: "908 PINE , BASTROP, TX 78602",
+    parcelNodeId: opts.parcelNodeId ?? "48021:34137",
+    countyFips: opts.countyFips ?? "48021",
+    countyName: opts.countyName ?? "Bastrop",
+    situsAddress: opts.situsAddress ?? "908 PINE , BASTROP, TX 78602",
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
     publishRunId: "8e7dc598-e079-41b9-88e1-df1e4c49e33d",
@@ -132,7 +149,9 @@ function newPayload(
       table: "txgio_parcel",
       row,
       gateBlocked: opts.gateBlocked ?? false,
+      ...(opts.situsRow !== undefined ? { situsRow: opts.situsRow } : {}),
     },
+    ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
     nowIso: NOW,
   });
 }
@@ -565,5 +584,331 @@ describe("claim reading and node identity", () => {
     expect(parcelNodeIdFromBody({ claim: { sourceIdentifiers: { prop_id: "34137" } } }, "48021")).toBe("48021:34137");
     expect(parcelNodeIdFromBody({ sourceIdentifiers: { prop_id: 34137 } }, "48021")).toBe("48021:34137");
     expect(parcelNodeIdFromBody({ claim: {} }, "48021")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CTX card H: owner-gated situs recovery on the conformant bake.
+// These fixtures fail on origin/main (gate-blocked drops the offered row;
+// landUseAddressRecovered is hardcoded false; no joined-situs state) and
+// pass only after the recovery is wired. The seed is not lifted.
+// ---------------------------------------------------------------------------
+
+const HAYS_SITUS = "275 CIBOLO CREEK DR, KYLE, TX 78640";
+const HAYS_ADDR_KEY = normalizeSitusAddress(HAYS_SITUS);
+const WILL_SITUS = "1804 DAVIS ST, TAYLOR, TX 76574";
+const WILL_ADDR_KEY = normalizeSitusAddress(WILL_SITUS);
+
+function addrLookup(key: string, owner: string | null, code = "A1"): Map<string, AddressLandUseEntry> {
+  return new Map([[key, { code, vintage: "2025", owner }]]);
+}
+
+function haysBody(overrides: Record<string, unknown> = {}) {
+  return conformantBody({
+    nodeId: "48209:135570",
+    claim: {
+      countyFips: "48209",
+      sourceIdentifiers: { prop_id: "135570", taxYear: 2025 },
+      situsAddress: HAYS_SITUS,
+      situsCity: "KYLE",
+      situsZip: "78640",
+      propertyUseCode: "A1",
+      ...overrides,
+    },
+  });
+}
+
+describe("CTX card H: situs recovery on blocked counties, never prop_id", () => {
+  it("seed is still {48209, 48491} and landUseJoinKey stays null for both", () => {
+    expect([...LANDUSE_JOIN_DISABLED_FIPS_SEED].sort()).toEqual(["48209", "48491"]);
+    expect(landUseJoinKey("48209", "135570")).toBeNull();
+    expect(landUseJoinKey("48209", "any")).toBeNull();
+    expect(landUseJoinKey("48491", "76149")).toBeNull();
+    expect(landUseJoinKey("48491", "R062578")).toBeNull();
+  });
+
+  it("blocked county: an offered prop_id txgio row is still unused (fail closed)", () => {
+    const colliding = txgioRow({
+      prop_id: "135570",
+      zoning_district: "FABRICATED",
+      zoning_jurisdiction: "wrong-city",
+      situs_state: "TX",
+    });
+    const n = newPayload(colliding, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+    });
+    expect(n.zoning).toBeNull();
+    expect(n.envelope).toBeNull();
+    expect(n.baseFacts.situsState).toBeNull();
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+  });
+
+  it("blocked county + owners AGREE: land-use recovered, source cad-roll-address-join", () => {
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: "PURVIS, MICHAEL J",
+      },
+    });
+    expect(n.baseFacts.landUse?.code).toBe("F1");
+    expect(n.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseSource).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseAddressRecovered).toBe(true);
+    expect(n.facetCoverage.landUse).toBe(true);
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(n.provenance.parcelJoin.basis).toMatch(/situs/i);
+    expect(n.provenance.parcelJoin.basis).not.toMatch(/prop_id/);
+  });
+
+  it("blocked county + owners DISAGREE: land-use null (never the mismatched code)", () => {
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: "BREM SARAH",
+      },
+    });
+    expect(n.baseFacts.landUse).toBeNull();
+    expect(n.facetCoverage.landUse).toBe(false);
+    expect(n.provenance.landUseSource).toBeNull();
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+  });
+
+  it("blocked county + blank owner: land-use null", () => {
+    const blankCad = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, null, "F1"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect(blankCad.baseFacts.landUse).toBeNull();
+    expect(blankCad.provenance.landUseAddressRecovered).toBe(false);
+
+    const blankTxgio = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: null,
+      },
+    });
+    expect(blankTxgio.baseFacts.landUse).toBeNull();
+    expect(blankTxgio.provenance.parcelJoin.state).toBe("gate-blocked");
+  });
+
+  it("blocked county + blank situs: land-use null (addressJoinKey is null)", () => {
+    expect(addressJoinKey("48209", null)).toBeNull();
+    expect(addressJoinKey("48209", "")).toBeNull();
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody({ situsAddress: null }),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: null,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect(n.baseFacts.landUse).toBeNull();
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+  });
+
+  it("situs-keyed row is used; prop_id-keyed row on the same blocked parcel is ignored", () => {
+    const propIdRow = txgioRow({
+      feature_index: 1,
+      prop_id: "135570",
+      zoning_district: "WRONG-PROP-ID",
+      zoning_jurisdiction: "fabricated-city",
+      situs_address: "999 COLLISION RD",
+      situs_state: "ZZ",
+      geometry: {
+        type: "Polygon",
+        coordinates: [[
+          [-98, 29],
+          [-98.001, 29],
+          [-98.001, 29.001],
+          [-98, 29.001],
+          [-98, 29],
+        ]],
+      },
+    });
+    const situsRow = txgioRow({
+      feature_index: 99,
+      prop_id: "TXGIO-OTHER",
+      situs_address: HAYS_SITUS,
+      situs_city: "KYLE",
+      situs_state: "TX",
+      situs_zip: "78640",
+      zoning_district: "SF-2",
+      zoning_jurisdiction: "kyle-city-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      txgio_owner_for_gate: "PURVIS MICHAEL",
+    });
+    const n = newPayload(propIdRow, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "A1"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect(n.zoning?.district).toBe("SF-2");
+    expect(n.zoning?.jurisdictionKey).toBe("kyle_city_tx");
+    expect(n.baseFacts.situsState).toBe("TX");
+    expect(n.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseAddressRecovered).toBe(true);
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(n.provenance.parcelJoin).toMatchObject({
+      table: "txgio_parcel",
+      state: "joined-situs",
+      featureIndex: 99,
+      sourceVintage: "stratmap25-landparcels_48209_hays_202503",
+    });
+    expect(n.provenance.parcelJoin.basis).toMatch(/situs/i);
+    expect(n.provenance.parcelJoin.basis).not.toMatch(/prop_id/);
+    expect(n.zoning?.district).not.toBe("WRONG-PROP-ID");
+    expect(n.envelope).not.toBeNull();
+  });
+
+  it("non-blocked county: addressJoinKey is null; prop_id join and cad-roll land-use stay", () => {
+    expect(addressJoinKey("48021", "908 PINE , BASTROP, TX 78602")).toBeNull();
+    expect(addressJoinKey("48453", WILL_SITUS)).toBeNull();
+    expect(addressJoinKey("48055", HAYS_SITUS)).toBeNull();
+    expect(addressJoinKey("48309", HAYS_SITUS)).toBeNull();
+    const situsRow = txgioRow({
+      zoning_district: "SHOULD-NOT-USE",
+      feature_index: 777,
+    });
+    const n = newPayload(txgioRow(), {
+      gateBlocked: false,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("908 PINE , BASTROP, TX 78602"),
+          "OWNER X",
+          "Z9",
+        ),
+        txgioOwner: "OWNER X",
+      },
+    });
+    expect(n.baseFacts.landUse?.code).toBe("A1");
+    expect(n.baseFacts.landUse?.source).toBe("cad-roll");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    expect(n.provenance.parcelJoin.state).toBe("joined");
+    expect(n.zoning?.district).toBe("SF-1");
+    expect(n.zoning?.district).not.toBe("SHOULD-NOT-USE");
+  });
+
+  it("Williamson gold shape recovers the same way (agree) and refuses a prop_id row", () => {
+    const propIdRow = txgioRow({
+      prop_id: "76149",
+      zoning_district: "COLLISION",
+    });
+    const situsRow = txgioRow({
+      feature_index: 42,
+      prop_id: "R-OTHER",
+      situs_address: WILL_SITUS,
+      situs_city: "TAYLOR",
+      situs_state: "TX",
+      zoning_district: "R-1",
+      zoning_jurisdiction: "taylor-city-tx",
+    });
+    const n = newPayload(propIdRow, {
+      gateBlocked: true,
+      body: conformantBody({
+        nodeId: "48491:76149",
+        claim: {
+          countyFips: "48491",
+          sourceIdentifiers: { prop_id: "76149", taxYear: 2026 },
+          situsAddress: WILL_SITUS,
+          situsCity: "TAYLOR",
+          situsZip: "76574",
+          propertyUseCode: "A1",
+        },
+      }),
+      countyFips: "48491",
+      countyName: "Williamson",
+      parcelNodeId: "48491:76149",
+      situsAddress: WILL_SITUS,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(WILL_ADDR_KEY, "ACME HOLDINGS LLC", "A1"),
+        txgioOwner: "ACME HOLDINGS INC",
+      },
+    });
+    expect(n.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseAddressRecovered).toBe(true);
+    expect(n.zoning?.district).toBe("R-1");
+    expect(n.zoning?.district).not.toBe("COLLISION");
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+  });
+
+  it("owner never on the wire on the recovery path; an injected owner key is refused", () => {
+    const situsRow = txgioRow({
+      situs_address: HAYS_SITUS,
+      txgio_owner_for_gate: "PURVIS MICHAEL MUST NEVER BAKE",
+    });
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "A1"),
+        txgioOwner: "PURVIS MICHAEL MUST NEVER BAKE",
+      },
+    });
+    expect(() => assertNoOwnerKey(n)).not.toThrow();
+    expect(JSON.stringify(n)).not.toMatch(/PURVIS|MUST NEVER BAKE/i);
+    expect(JSON.stringify(n)).not.toMatch(/"owner/i);
+    const poisoned = {
+      ...(n as unknown as Record<string, unknown>),
+      baseFacts: {
+        ...(n.baseFacts as unknown as Record<string, unknown>),
+        owner_name: "LEAK",
+      },
+    };
+    expect(() => assertNoOwnerKey(poisoned)).toThrow(
+      expect.objectContaining({ code: "OWNER_KEY_IN_PAYLOAD" }),
+    );
   });
 });
