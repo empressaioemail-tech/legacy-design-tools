@@ -1,6 +1,6 @@
 /** P-91 Wave D — listing click. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p543.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p544.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_HOST_TOOLS = [
   "create_screen",
@@ -315,6 +315,19 @@ export function htmlContractViolations(html: string): string[] {
   if (!/Do not call ask_the_map/.test(html)) {
     violations.push("listing_missing_ask_the_map_guard");
   }
+  if (
+    !html.includes("String(d.id)===String(initId)") ||
+    !html.includes("function flushReady")
+  ) {
+    violations.push("handshake_no_wait");
+  }
+  if (
+    /method:"ui\/initialize"[\s\S]{0,280}parent\.postMessage\(\{jsonrpc:"2\.0",method:"ui\/notifications\/initialized"\}/.test(
+      html,
+    )
+  ) {
+    violations.push("handshake_fire_before_reply");
+  }
   return violations;
 }
 
@@ -383,9 +396,25 @@ tr.row:hover td{background:#1a1a1a}
   var sortDir=1;
   var listingAck=null;
   var rpcId=1;
+  var initId=rpcId++;
+  var ready=false;
+  var pending=[];
+  function markHandshake(state){
+    if(boot) boot.setAttribute("data-handshake",state);
+  }
+  function postMessage(text){
+    parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
+  }
+  function flushReady(){
+    if(ready) return;
+    ready=true;
+    parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*");
+    while(pending.length) postMessage(pending.shift());
+  }
   var host={
     sendMessage:function(text){
-      parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
+      if(!ready){pending.push(text);return;}
+      postMessage(text);
     }
   };
   function listingHistoryMessage(m){
@@ -520,11 +549,18 @@ tr.row:hover td{background:#1a1a1a}
   window.addEventListener("message",function(ev){
     var d=ev.data;
     if(!d) return;
+    if(String(d.id)===String(initId)&&(d.result!==undefined||d.error)){
+      markHandshake(d.error?"error":"ready");
+      flushReady();
+    }
     if(d.method==="ui/notifications/tool-result"&&d.params) accept(d.params);
     if(d.result&&d.result.content) accept(d.result);
   });
-  parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/initialize",params:{appInfo:{name:"SmartSiteBoard",version:"1"},appCapabilities:{}}},"*");
-  parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*");
+  markHandshake("wait");
+  parent.postMessage({jsonrpc:"2.0",id:initId,method:"ui/initialize",params:{protocolVersion:"2026-01-26",appInfo:{name:"SmartSiteBoard",version:"1"},appCapabilities:{availableDisplayModes:["inline"]}}},"*");
+  setTimeout(function(){
+    if(!ready){markHandshake("timeout");flushReady();}
+  },2000);
 })();
 </script>
 </body>
