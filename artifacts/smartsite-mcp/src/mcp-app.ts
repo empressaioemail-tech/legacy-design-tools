@@ -59,6 +59,14 @@ export function glyphClass(state: CellState): string {
   return `g-${state}`;
 }
 
+export function looksLikeParcelNodeId(query: string): boolean {
+  return /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(query.trim());
+}
+
+export function unresolvedCaption(query: string): "node unresolved" | "situs unresolved" {
+  return looksLikeParcelNodeId(query) ? "node unresolved" : "situs unresolved";
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -241,44 +249,60 @@ export function htmlContractViolations(html: string): string[] {
   if (/fetch\(|XMLHttpRequest|WebSocket/.test(html)) {
     violations.push("direct_network");
   }
+  if (/#F3F5F1|#F5F5F0|#EAEEE7/i.test(html)) {
+    violations.push("cream_host_theme");
+  }
+  if (!html.includes('data-theme="claude"') || !html.includes("btn primary")) {
+    violations.push("missing_claude_chrome");
+  }
   return violations;
 }
 
 export function buildAppHtml(): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="claude">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Smart Site board</title>
 <style>
-:root{--paper:#F3F5F1;--ink:#171E23;--muted:#4A5760;--rule:#C6CDC4;--present:#1C6B57;--refused:#6B4A8F;--unknown:#7E857C;--unread:#B6BCB3;--alert:#A8451F}
+:root{--bg:#1c1c1c;--card:#262626;--well:#111111;--line:#3d3d3d;--ink:#ececec;--muted:#9a9a9a;--key:#e8c36a;--val:#8fde5d;--present:#3d9b7a;--refused:#b08ad4;--unknown:#7a7a7a;--unread:#6a6a6a;--alert:#d08a7a}
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,sans-serif}
-#root{padding:12px 14px 16px}
-.bar{font:11px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+#root{padding:2px}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+.hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--muted)}
+.mark{width:12px;height:12px;border:1.5px solid var(--muted);border-radius:50%;position:relative;flex:0 0 12px}
+.mark:after{content:"";position:absolute;inset:3px;border:1.5px solid var(--muted);border-radius:50%}
+.well{margin:0 10px 10px;background:var(--well);border-radius:8px;padding:10px 12px}
+.req{font-size:11px;color:var(--muted);margin:0 0 8px}
 table{width:100%;border-collapse:collapse}
-th{font:10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;text-align:left;padding:0 6px 6px;border-bottom:1px solid var(--rule);color:var(--muted);cursor:pointer}
-td{padding:6px;border-bottom:1px solid #DCE1D9;vertical-align:middle}
+th{font:10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.06em;text-transform:uppercase;text-align:left;padding:0 6px 8px;border-bottom:1px solid var(--line);color:var(--muted);cursor:pointer}
+td{padding:7px 6px;border-bottom:1px solid #2a2a2a;vertical-align:middle}
 tr.row{cursor:pointer}
-tr.row:hover td{background:#EAEEE7}
+tr.row:hover td{background:#1a1a1a}
 .pl{font-weight:500}
-.pn,.unres{font:11px ui-monospace,Consolas,monospace;color:var(--muted)}
+.pn,.unres,.why,.mono{font:12px/1.4 ui-monospace,Consolas,monospace}
+.pn,.mono{color:var(--muted)}
+.pn.lime,.val{color:var(--val)}
+.key{color:var(--key)}
 .unres{color:var(--alert)}
-.g{width:14px;height:14px;display:inline-block;vertical-align:-2px;border:1.4px solid currentColor}
+.g{width:12px;height:12px;display:inline-block;vertical-align:-1px;border:1.4px solid currentColor}
 .g-present{background:var(--present);border-color:var(--present)}
 .g-absent-verified{background:transparent;border-color:var(--muted)}
 .g-unknown{background:repeating-linear-gradient(45deg,var(--unknown),var(--unknown) 2px,transparent 2px,transparent 4px);border-color:var(--unknown)}
-.g-refused{background:transparent;border-style:dashed;border-color:var(--refused);box-shadow:inset 0 0 0 0 var(--refused);background-image:linear-gradient(135deg,transparent 46%,var(--refused) 46%,var(--refused) 54%,transparent 54%)}
-.g-unread{background:transparent;border:none;border-top:2px solid var(--unread);height:0;width:14px;vertical-align:4px}
-.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font:11px ui-monospace,Consolas,monospace;color:var(--muted)}
-.ovl{padding:6px 0;border-bottom:1px solid #E1E6DE;font-size:13px}
-.ovl.refused{color:var(--refused);font-weight:600}
-.why{display:block;font:11px ui-monospace,Consolas,monospace;color:var(--muted);margin-top:2px}
-.acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-button{font:11px ui-monospace,Consolas,monospace;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--muted);background:#fff;padding:6px 10px;cursor:pointer}
-button:hover{background:var(--ink);color:var(--paper)}
-.empty{color:var(--muted)}
+.g-refused{background:transparent;border-style:dashed;border-color:var(--refused);background-image:linear-gradient(135deg,transparent 46%,var(--refused) 46%,var(--refused) 54%,transparent 54%)}
+.g-unread{background:transparent;border:none;border-top:2px solid var(--unread);height:0;width:12px;vertical-align:4px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;padding:0 12px 10px;font:11px ui-monospace,Consolas,monospace;color:var(--muted)}
+.ovl{padding:6px 0;border-bottom:1px solid #2a2a2a}
+.ovl:last-child{border-bottom:none}
+.ovl.refused .lbl{color:var(--refused);font-weight:600}
+.why{display:block;color:var(--muted);margin-top:2px}
+.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:0 10px 12px}
+.btn{font:13px/1.2 ui-sans-serif,system-ui,sans-serif;border:1px solid var(--line);background:#2a2a2a;color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
+.btn.primary{background:#fff;color:#111;border-color:#fff}
+.btn:hover{filter:brightness(1.08)}
+.empty{color:var(--muted);padding:12px}
 </style>
 </head>
 <body>
@@ -286,6 +310,7 @@ button:hover{background:var(--ink);color:var(--paper)}
 <script>
 (function(){
   var RAILS=["situs","zoning","landUse","flood","drainage","envelope"];
+  var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
   var model={kind:"empty",rows:[],overlays:[]};
   var sortKey="query";
   var sortDir=1;
@@ -296,6 +321,13 @@ button:hover{background:var(--ink);color:var(--paper)}
   };
   function fingerprint(m){
     return JSON.stringify({kind:m.kind,screenId:m.screenId||null,rows:m.rows,parcelNodeId:m.parcelNodeId||null,overlays:m.overlays});
+  }
+  function looksNode(q){return NODE_RE.test(String(q||"").trim())}
+  function queryCell(r){
+    if(r.resolution!=="unresolved") return '<div class="pl">'+esc(r.query)+"</div>";
+    var cap=looksNode(r.query)?"node unresolved":"situs unresolved";
+    var cls=looksNode(r.query)?"pn lime":"pn";
+    return '<div class="unres">'+cap+'</div><div class="'+cls+'">'+esc(r.query)+"</div>";
   }
   function parse(text){
     var rec; try{rec=JSON.parse(text)}catch(e){return {kind:"empty",rows:[],overlays:[]}}
@@ -336,12 +368,10 @@ button:hover{background:var(--ink);color:var(--paper)}
       });
       var head="<tr><th data-k=query>Query</th><th data-k=id>Node</th>"+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"</tr>";
       var body=rows.map(function(r,i){
-        var label=r.resolution==="unresolved"?'<div class="unres">situs unresolved</div><div class="pn">'+esc(r.query)+"</div>":'<div class="pl">'+esc(r.query)+"</div>";
-        return '<tr class="row" data-i="'+i+'"><td>'+label+"</td><td class=pn>"+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){return "<td>"+glyph(r.rails[k])+"</td>"}).join("")+"</tr>";
+        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn lime">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){return "<td>"+glyph(r.rails[k])+"</td>"}).join("")+"</tr>";
       }).join("");
-      root.innerHTML='<div class="bar">Screen board · aggregates stay off</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+
-        '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>"+
-        '<div class="acts"><button type="button" data-act="listing" disabled>Find listing history</button></div>';
+      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · screen board</div><div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
+        '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div></div>";
       root.querySelectorAll("th[data-k]").forEach(function(th){
         th.addEventListener("click",function(){sortKey=th.getAttribute("data-k");sortDir*=-1;render();});
       });
@@ -355,13 +385,13 @@ button:hover{background:var(--ink);color:var(--paper)}
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o){
         var refused=o.state==="refused"?" refused":"";
-        var why=o.reason?'<span class="why">'+esc(o.reason)+"</span>":"";
-        return '<div class="ovl'+refused+'">'+glyph(o.state==="refused"?"refused":o.state==="unread"?"unread":"present")+" <b>"+esc(o.label)+"</b>"+why+"</div>";
+        var why=o.reason?'<span class="why"><span class="key">reason</span> <span class="val">'+esc(o.reason)+"</span></span>":"";
+        return '<div class="ovl'+refused+'">'+glyph(o.state==="refused"?"refused":o.state==="unread"?"unread":"present")+' <span class="key">'+esc(o.id)+'</span> <span class="lbl">'+esc(o.label)+"</span>"+why+"</div>";
       }).join("")||'<p class="empty">No overlays on this draw.</p>';
-      root.innerHTML='<div class="bar">Parcel · '+esc(model.label||model.parcelNodeId||"")+'</div>'+ov+
-        '<div class="acts"><button type="button" data-act="listing">Find listing history</button><button type="button" data-act="save">Save property</button></div>';
+      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+esc(model.label||model.parcelNodeId||"parcel")+'</div><div class="well"><div class="req">Request</div>'+ov+"</div>"+
+        '<div class="acts"><button type="button" class="btn" data-act="save">Save property</button><button type="button" class="btn primary" data-act="listing">Find listing history</button></div></div>';
     } else {
-      root.innerHTML='<p class="empty">Waiting for a screen or a parcel.</p>';
+      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · waiting</div><p class="empty">Waiting for a screen or a parcel.</p></div>';
     }
     var listing=root.querySelector('[data-act="listing"]');
     if(listing){
