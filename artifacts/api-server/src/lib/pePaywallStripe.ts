@@ -36,9 +36,9 @@ import {
   type StripeCheckoutResult,
 } from "./brokerageStripe";
 import { setPeStripeCustomerId } from "./peIdentity";
+import { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
-/** Seats included in the Team base price (LOCKED ladder: "$299/mo for up to 10 seats"). */
-export const PE_TEAM_INCLUDED_SEATS = 10;
+export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
 /** 30-day bound on the $15 per-property unlock (LOCKED ladder). */
 export const PE_PROPERTY_UNLOCK_DURATION_DAYS = 30;
@@ -388,6 +388,11 @@ export async function createPeSubscriptionCheckoutSession(input: {
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   };
+  if (tier === "team") {
+    const billedSeats = String(PE_TEAM_INCLUDED_SEATS + extraSeats);
+    params["metadata[seats_purchased]"] = billedSeats;
+    params["subscription_data[metadata][seats_purchased]"] = billedSeats;
+  }
   applyPeCheckoutUiMode(params, input);
   if (extraSeats > 0 && seatPriceId) {
     params["line_items[1][price]"] = seatPriceId;

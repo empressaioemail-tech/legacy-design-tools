@@ -501,6 +501,47 @@ describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
     expect(form.get("ui_mode")).toBeNull();
     expect(form.get("return_url")).toBeNull();
   });
+
+  it("team checkout declares seats_purchased = 10 + extras on session and subscription metadata", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_team_seats",
+      url: "https://checkout.stripe.com/c/pay/cs_test_team_seats",
+    });
+    await createPeSubscriptionCheckoutSession({
+      userId: USER,
+      tier: "team",
+      seats: 12,
+      successUrl: "https://x.example/?ok",
+      cancelUrl: "https://x.example/?no",
+    });
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get("metadata[subscription_tier]")).toBe("team");
+    expect(form.get("metadata[seats_purchased]")).toBe("12");
+    expect(form.get("subscription_data[metadata][seats_purchased]")).toBe("12");
+    expect(form.get("line_items[1][quantity]")).toBe("2");
+  });
+
+  it("solo checkout does not set seats_purchased metadata", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_solo_noseats",
+      url: "https://checkout.stripe.com/c/pay/cs_test_solo_noseats",
+    });
+    await createPeSubscriptionCheckoutSession({
+      userId: USER,
+      tier: "solo",
+      successUrl: "https://x.example/?ok",
+      cancelUrl: "https://x.example/?no",
+    });
+    expect(checkoutBodies[0]!.get("metadata[seats_purchased]")).toBeNull();
+  });
 });
 
 describe("webhook entitlement mapping (granular tiers)", () => {
@@ -525,6 +566,7 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     const row = await entitlementRow();
     expect(row?.accessTier).toBe("paid");
     expect(row?.subscriptionTier).toBe("studio");
+    expect(row?.seatsPurchased).toBeNull();
   });
 
   it("VIOLATION: solo checkout must NOT grant studio", async () => {
@@ -628,6 +670,107 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     const row = await entitlementRow();
     expect(row?.accessTier).toBe("free");
     expect(row?.subscriptionTier).toBeNull();
+    expect(row?.seatsPurchased).toBeNull();
+  });
+
+  it("team checkout with billed extras writes seats_purchased=12", async () => {
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_seats_12",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "team",
+          seats_purchased: "12",
+        },
+        line_items: {
+          data: [
+            { price: { id: TEAM_PRICE }, quantity: 1 },
+            { price: { id: "price_test_team_seat_25" }, quantity: 2 },
+          ],
+        },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.subscriptionTier).toBe("team");
+    expect(row?.seatsPurchased).toBe(12);
+  });
+
+  it("VIOLATION: team grant with no billed items leaves seats_purchased null, not 10", async () => {
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_seats_unknown",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "team",
+          seats_purchased: "10",
+        },
+      }),
+    );
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("paid");
+    expect(row?.subscriptionTier).toBe("team");
+    expect(row?.seatsPurchased).toBeNull();
+  });
+
+  it("VIOLATION: metadata 10 vs billed 12 refuses the seat write and still grants team", async () => {
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_seats_disagree",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "team",
+          seats_purchased: "10",
+        },
+        line_items: {
+          data: [
+            { price: { id: TEAM_PRICE }, quantity: 1 },
+            { price: { id: "price_test_team_seat_25" }, quantity: 2 },
+          ],
+        },
+      }),
+    );
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.subscriptionTier).toBe("team");
+    expect(row?.seatsPurchased).toBeNull();
+  });
+
+  it("churn clears a planted seats_purchased", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({
+        accessTier: "paid",
+        subscriptionTier: "team",
+        seatsPurchased: 12,
+      })
+      .where(eq(peUserEntitlements.ownerUserId, USER));
+
+    const { raw, signature } = signedWebhookPayload({
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_seats_clear",
+          object: "subscription",
+          status: "canceled",
+          metadata: { pe_user_id: USER, subscription_tier: "team" },
+        },
+      },
+    });
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("free");
+    expect(row?.seatsPurchased).toBeNull();
   });
 });
 
