@@ -8,6 +8,7 @@ import {
   APP_HOST_TOOLS,
   APP_MIME,
   APP_RESOURCE_URI,
+  LISTING_ACK_LABEL,
   LISTING_TURN_DESTINATION,
   LISTING_TURN_GUARD,
   LISTING_TURN_INSTRUCTION,
@@ -42,7 +43,9 @@ describe("mcp-app contracts", () => {
     expect(html).not.toContain('data-act="listing" disabled');
     expect(html).not.toMatch(/#F3F5F1|#F5F5F0/);
     expect(html).toContain("position:sticky");
-    expect(html).toContain("host.sendMessage(listingHistoryMessage(model))");
+    expect(html).toContain("host.sendMessage(text)");
+    expect(html.indexOf(LISTING_ACK_LABEL)).toBeGreaterThan(0);
+    expect(html.indexOf(LISTING_ACK_LABEL)).toBeLessThan(html.indexOf("host.sendMessage(text)"));
     expect(html).toContain(LISTING_TURN_INSTRUCTION);
     expect(html).not.toMatch(/\bask_the_map\s*\(/);
   });
@@ -140,7 +143,7 @@ describe("mcp-app contracts", () => {
     expect(click.message).not.toMatch(/42/);
   });
 
-  it("distinguishes host_drop, guard_failed, and working", () => {
+  it("distinguishes handler_unbound, host_drop, guard_failed, and working", () => {
     const turn = listingHistoryMessage({
       kind: "parcel",
       rows: [],
@@ -150,27 +153,38 @@ describe("mcp-app contracts", () => {
     });
     expect(classifyListingOutcome({
       turnText: null,
+      localAck: false,
       toolsCalled: ["ask_the_map"],
+      answeredInTranscript: false,
+    })).toBe("handler_unbound");
+    expect(classifyListingOutcome({
+      turnText: null,
+      localAck: true,
+      toolsCalled: [],
       answeredInTranscript: false,
     })).toBe("host_drop");
     expect(classifyListingOutcome({
       turnText: turn,
+      localAck: true,
       toolsCalled: ["ask_the_map"],
       answeredInTranscript: false,
     })).toBe("guard_failed");
     expect(classifyListingOutcome({
       turnText: "Find listing history for this parcel. Search the public web.",
+      localAck: true,
       toolsCalled: [],
       answeredInTranscript: true,
     })).toBe("guard_failed");
     expect(classifyListingOutcome({
       turnText: turn,
+      localAck: true,
       toolsCalled: [],
       answeredInTranscript: true,
     })).toBe("working");
     expect(() =>
       classifyListingOutcome({
         turnText: turn,
+        localAck: true,
         toolsCalled: [],
         answeredInTranscript: false,
       }),
