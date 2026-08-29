@@ -51,17 +51,23 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("window.__ss&&window.__ss.listing(this)");
     expect(html).toContain("window.__ss&&window.__ss.save()");
     expect(html).toContain("host.sendMessage(text)");
-    expect(html).toContain('id:rpcId++,method:"ui/message"');
-    expect(html).toContain('content:{type:"text",text:text}');
-    expect(html).not.toContain('content:[{type:"text"');
+    expect(html).toContain('id:id,method:"ui/message"');
+    expect(html).toContain('content:[{type:"text",text:text}]');
+    expect(html).not.toContain('params:{role:"user",content:{type:"text"');
     expect(html).not.toContain('{jsonrpc:"2.0",method:"ui/message"');
     expect(html).toContain('id:initId,method:"ui/initialize"');
     expect(html).toContain("function flushReady");
+    expect(html).toContain("function paintBoot");
+    expect(html).toContain("function summarizeCaps");
+    expect(html).toContain("hostCapabilities");
+    expect(html).toContain("pendingMsg");
+    expect(html).toContain("handshake=");
+    expect(html).toContain("message=none");
+    expect(html).toContain("reply=");
     expect(html).toContain("String(d.id)===String(initId)");
     expect(html).toContain("pending.push");
-    expect(html).toContain("data-handshake");
     expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p545.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p546.html");
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeGreaterThan(0);
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeLessThan(html.indexOf("host.sendMessage(text)"));
     expect(html).toContain(LISTING_TURN_INSTRUCTION);
@@ -100,11 +106,20 @@ describe("mcp-app contracts", () => {
     expect(
       htmlContractViolations(
         clean.replace(
-          'content:{type:"text",text:text}',
           'content:[{type:"text",text:text}]',
+          'content:{type:"text",text:text}',
         ),
       ),
-    ).toContain("ui_message_content_array");
+    ).toContain("ui_message_content_object");
+    expect(htmlContractViolations(clean.replace(/function paintBoot/g, "function skipBoot"))).toContain(
+      "handshake_not_visible",
+    );
+    expect(htmlContractViolations(clean.replace(/hostCapabilities/g, "hostInfo"))).toContain(
+      "caps_unread",
+    );
+    expect(htmlContractViolations(clean.replace(/pendingMsg/g, "sentMsg"))).toContain(
+      "message_reply_unread",
+    );
   });
 
   it("does not treat list_my_properties as a board source", () => {
