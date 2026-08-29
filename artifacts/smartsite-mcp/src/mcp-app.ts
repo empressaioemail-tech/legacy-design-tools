@@ -207,8 +207,10 @@ export function panelFingerprint(model: PanelModel): string {
   });
 }
 
-/** Unique opener. Absence of this turn in the transcript is host_drop. */
+/** Unique opener. A guarded turn with this prefix is the listing click. */
 export const LISTING_TURN_OPENER = "Find listing history for";
+/** Local-only ack. Visible before postMessage. Needs no host. */
+export const LISTING_ACK_LABEL = "Requesting listing history";
 /** Positive destination. Answer here is working. */
 export const LISTING_TURN_DESTINATION =
   "Search the public web for prior sales, price cuts, and listing copy. Put the answer only in this transcript.";
@@ -218,10 +220,16 @@ export const LISTING_TURN_GUARD =
 
 export const LISTING_TURN_INSTRUCTION = `${LISTING_TURN_DESTINATION} ${LISTING_TURN_GUARD}`;
 
-export type ListingClickOutcome = "host_drop" | "guard_failed" | "working";
+export type ListingClickOutcome =
+  | "handler_unbound"
+  | "host_drop"
+  | "guard_failed"
+  | "working";
 
 export type ListingClickObservation = {
   turnText: string | null;
+  /** True only when the button showed LISTING_ACK_LABEL before postMessage. */
+  localAck: boolean;
   toolsCalled: readonly string[];
   answeredInTranscript: boolean;
 };
@@ -244,10 +252,12 @@ export function listingTurnIsGuarded(text: string): boolean {
 }
 
 /**
- * Three outcomes, not two. A turn that appeared without ask_the_map and
- * without a transcript answer is incomplete; refuse rather than invent a fourth.
+ * Absence of a turn is not host_drop by itself. A dead handler, a dropped
+ * postMessage, and a discarded payload look the same in the transcript.
+ * localAck is the local-only split: no ack means the listener never ran.
  */
 export function classifyListingOutcome(obs: ListingClickObservation): ListingClickOutcome {
+  if (!obs.turnText && obs.localAck !== true) return "handler_unbound";
   if (!obs.turnText) return "host_drop";
   if (!listingTurnIsGuarded(obs.turnText) || obs.toolsCalled.includes("ask_the_map")) {
     return "guard_failed";
@@ -352,6 +362,8 @@ tr.row:hover td{background:#1a1a1a}
 .btn{font:13px/1.2 ui-sans-serif,system-ui,sans-serif;border:1px solid var(--line);background:#2a2a2a;color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
 .btn.primary{background:#fff;color:#111;border-color:#fff}
 .btn:hover{filter:brightness(1.08)}
+.btn:disabled{cursor:default;filter:none;opacity:.72}
+.ack{font:11px/1.3 ui-monospace,Consolas,monospace;color:var(--muted);padding:0 10px 10px;text-align:right}
 .empty{color:var(--muted);padding:12px}
 </style>
 </head>
@@ -364,6 +376,7 @@ tr.row:hover td{background:#1a1a1a}
   var model={kind:"empty",rows:[],overlays:[]};
   var sortKey="query";
   var sortDir=1;
+  var listingAck=null;
   var host={
     sendMessage:function(text){
       parent.postMessage({jsonrpc:"2.0",method:"ui/message",params:{role:"user",content:[{type:"text",text:text}]}},"*");
@@ -443,15 +456,37 @@ tr.row:hover td{background:#1a1a1a}
         return '<div class="ovl'+refused+'">'+glyph(o.state==="refused"?"refused":o.state==="unread"?"unread":"present")+' <span class="key">'+esc(o.id)+'</span> <span class="lbl">'+esc(o.label)+"</span>"+why+"</div>";
       }).join("")||'<p class="empty">No overlays on this draw.</p>';
       root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+esc(model.label||model.parcelNodeId||"parcel")+'</div><div class="well"><div class="req">Request</div>'+ov+"</div>"+
-        '<div class="acts"><button type="button" class="btn" data-act="save">Save property</button><button type="button" class="btn primary" data-act="listing">Find listing history</button></div></div>';
+        '<div class="acts"><button type="button" class="btn" data-act="save">Save property</button><button type="button" class="btn primary" data-act="listing">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+listingAck.chars+'">Posted '+listingAck.chars+" chars</div>":"")+"</div>";
     } else {
       root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · waiting</div><p class="empty">Waiting for a screen or a parcel.</p></div>';
     }
     var listing=root.querySelector('[data-act="listing"]');
     if(listing){
+      if(listingAck){
+        listing.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
+        listing.disabled=true;
+        listing.setAttribute("data-listing-ack","1");
+        listing.setAttribute("data-listing-chars",String(listingAck.chars));
+      }
       listing.addEventListener("click",function(){
+        if(listing.disabled) return;
+        var text=listingHistoryMessage(model);
+        listingAck={chars:text.length};
+        listing.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
+        listing.disabled=true;
+        listing.setAttribute("data-listing-ack","1");
+        listing.setAttribute("data-listing-chars",String(text.length));
+        listing.setAttribute("title",text);
+        var acts=listing.parentNode;
+        if(acts&&acts.parentNode&&!acts.parentNode.querySelector(".ack")){
+          var note=document.createElement("div");
+          note.className="ack";
+          note.setAttribute("data-listing-chars",String(text.length));
+          note.textContent="Posted "+text.length+" chars";
+          acts.parentNode.appendChild(note);
+        }
         var before=fingerprint(model);
-        host.sendMessage(listingHistoryMessage(model));
+        host.sendMessage(text);
         if(fingerprint(model)!==before) throw new Error("i5_panel_mutated");
       });
     }
