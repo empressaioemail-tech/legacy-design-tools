@@ -12,12 +12,30 @@ import {
   glyphClass,
   htmlContractViolations,
   listingHistoryClick,
+  looksLikeParcelNodeId,
   parseToolResult,
   panelFingerprint,
+  unresolvedCaption,
 } from "../src/mcp-app.js";
 import { registerTools } from "../src/tools.js";
 
 describe("mcp-app contracts", () => {
+  it("labels a node-id miss as a node, not a situs", () => {
+    expect(looksLikeParcelNodeId("48021:34137")).toBe(true);
+    expect(looksLikeParcelNodeId("zzzz-not-a-situs-99999")).toBe(false);
+    expect(unresolvedCaption("48021:34137")).toBe("node unresolved");
+    expect(unresolvedCaption("zzzz-not-a-situs-99999")).toBe("situs unresolved");
+  });
+
+  it("ships Claude chrome and keeps listing history off the board template", () => {
+    const html = buildAppHtml();
+    expect(html).toContain('data-theme="claude"');
+    expect(html).toContain("btn primary");
+    expect(html).toContain("node unresolved");
+    expect(html).not.toContain('data-act="listing" disabled');
+    expect(html).not.toMatch(/#F3F5F1|#F5F5F0/);
+  });
+
   it("unread and unknown do not share a glyph class", () => {
     expect(glyphClass("unread")).toBe("g-unread");
     expect(glyphClass("unknown")).toBe("g-unknown");
@@ -33,6 +51,7 @@ describe("mcp-app contracts", () => {
     expect(htmlContractViolations(clean + " column total 12 coverage %")).toContain(
       "aggregate_or_invented_pct",
     );
+    expect(htmlContractViolations(clean + "#F3F5F1")).toContain("cream_host_theme");
   });
 
   it("does not treat list_my_properties as a board source", () => {
