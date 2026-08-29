@@ -29,6 +29,14 @@ import {
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
 import { setPeDevRole } from "../lib/peIdentity";
+import {
+  cancelTeamInvitation,
+  createTeamInvitation,
+  patchTeamMemberRole,
+  readTeamRoster,
+  removeTeamMember,
+  teamErrorBody,
+} from "../lib/peTeamRoster";
 import { requireServiceToken } from "../middlewares/serviceAuth";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
@@ -1766,6 +1774,135 @@ router.post(
       userId: scope.ownerUserId,
     });
     res.status(result.status).json(result.body);
+  },
+);
+
+const PeTeamInviteBodySchema = z.object({
+  email: z.string().min(3).max(320),
+  role: z.enum(["owner", "member"]),
+});
+
+const PeTeamRoleBodySchema = z.object({
+  role: z.enum(["owner", "member"]),
+});
+
+function teamUserId(req: Request): string | null {
+  return resolvePeOwnerUserId(req);
+}
+
+router.get(
+  "/property-explorer/v1/team/members",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      const roster = await readTeamRoster(userId);
+      res.status(200).json(roster);
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.post(
+  "/property-explorer/v1/team/invitations",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = PeTeamInviteBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues.some((i) => i.path[0] === "role")
+          ? "invalid_role"
+          : "invalid_email",
+      });
+      return;
+    }
+    try {
+      const created = await createTeamInvitation(userId, parsed.data);
+      res.status(201).json(created);
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.delete(
+  "/property-explorer/v1/team/invitations/:id",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const id = typeof req.params.id === "string" ? req.params.id : "";
+    if (!id) {
+      res.status(400).json({ error: "invitation_not_found" });
+      return;
+    }
+    try {
+      await cancelTeamInvitation(userId, id);
+      res.status(204).end();
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.delete(
+  "/property-explorer/v1/team/members/:email",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const email = typeof req.params.email === "string" ? req.params.email : "";
+    try {
+      await removeTeamMember(userId, email);
+      res.status(204).end();
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.patch(
+  "/property-explorer/v1/team/members/:email",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = PeTeamRoleBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_role" });
+      return;
+    }
+    const email = typeof req.params.email === "string" ? req.params.email : "";
+    try {
+      await patchTeamMemberRole(userId, email, parsed.data.role);
+      res.status(204).end();
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
   },
 );
 

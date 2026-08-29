@@ -42,6 +42,8 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "saved_workspace_spaces",
   "pe_user_identities",
   "pe_user_entitlements",
+  "pe_team_members",
+  "pe_team_invitations",
   "pe_saved_properties",
   // P-91 / P-92 Wave B — screens are a different table from saves.
   "pe_screens",

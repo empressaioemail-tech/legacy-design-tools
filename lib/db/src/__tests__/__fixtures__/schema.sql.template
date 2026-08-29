@@ -1332,6 +1332,30 @@ CREATE TABLE @@SCHEMA@@.pe_share_grants (
 );
 
 
+-- Name: pe_team_invitations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_team_invitations (
+    id text NOT NULL,
+    account_owner_user_id text NOT NULL,
+    email text NOT NULL,
+    role text NOT NULL,
+    sent_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_team_invitations_role_chk CHECK ((role = ANY (ARRAY['owner'::text, 'member'::text])))
+);
+
+
+-- Name: pe_team_members; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_team_members (
+    account_owner_user_id text NOT NULL,
+    member_user_id text NOT NULL,
+    email text NOT NULL,
+    role text NOT NULL,
+    joined_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_team_members_role_chk CHECK ((role = ANY (ARRAY['owner'::text, 'member'::text])))
+);
+
+
 -- Name: pe_user_entitlements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
@@ -1342,7 +1366,8 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
     entitlement_source text,
     stripe_customer_id text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    subscription_tier text
+    subscription_tier text,
+    seats_purchased integer
 );
 
 
@@ -2787,6 +2812,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
     ADD CONSTRAINT pe_share_grants_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_team_invitations pe_team_invitations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
+    ADD CONSTRAINT pe_team_invitations_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_team_members pe_team_members_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
+    ADD CONSTRAINT pe_team_members_pkey PRIMARY KEY (account_owner_user_id, member_user_id);
+
+
 -- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
@@ -3733,6 +3770,36 @@ CREATE INDEX pe_share_grants_grantor_idx ON @@SCHEMA@@.pe_share_grants USING btr
 CREATE INDEX pe_share_grants_parcel_idx ON @@SCHEMA@@.pe_share_grants USING btree (parcel_node_id);
 
 
+-- Name: pe_team_invitations_account_email_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_invitations_account_email_uidx ON @@SCHEMA@@.pe_team_invitations USING btree (account_owner_user_id, email);
+
+
+-- Name: pe_team_invitations_account_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_team_invitations_account_idx ON @@SCHEMA@@.pe_team_invitations USING btree (account_owner_user_id);
+
+
+-- Name: pe_team_members_account_email_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_members_account_email_uidx ON @@SCHEMA@@.pe_team_members USING btree (account_owner_user_id, email);
+
+
+-- Name: pe_team_members_account_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_team_members_account_idx ON @@SCHEMA@@.pe_team_members USING btree (account_owner_user_id);
+
+
+-- Name: pe_team_members_account_member_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_members_account_member_uidx ON @@SCHEMA@@.pe_team_members USING btree (account_owner_user_id, member_user_id);
+
+
+-- Name: pe_team_members_member_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_members_member_uidx ON @@SCHEMA@@.pe_team_members USING btree (member_user_id);
+
+
 -- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_user_entitlements_tenant_idx ON @@SCHEMA@@.pe_user_entitlements USING btree (tenant_id);
@@ -4448,6 +4515,24 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
     ADD CONSTRAINT pe_share_grants_grantor_user_id_users_id_fk FOREIGN KEY (grantor_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_team_invitations pe_team_invitations_account_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
+    ADD CONSTRAINT pe_team_invitations_account_owner_user_id_users_id_fk FOREIGN KEY (account_owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_team_members pe_team_members_account_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
+    ADD CONSTRAINT pe_team_members_account_owner_user_id_users_id_fk FOREIGN KEY (account_owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_team_members pe_team_members_member_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
+    ADD CONSTRAINT pe_team_members_member_user_id_users_id_fk FOREIGN KEY (member_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
