@@ -43,6 +43,10 @@ describe("mcp-app contracts", () => {
     expect(html).not.toContain('data-act="listing" disabled');
     expect(html).not.toMatch(/#F3F5F1|#F5F5F0/);
     expect(html).toContain("position:sticky");
+    expect(html).toContain('id="boot"');
+    expect(html).toContain("script-ran");
+    expect(html).toContain('document.body.addEventListener("click"');
+    expect(html).toContain('data-act="open"');
     expect(html).toContain("host.sendMessage(text)");
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeGreaterThan(0);
     expect(html.indexOf(LISTING_ACK_LABEL)).toBeLessThan(html.indexOf("host.sendMessage(text)"));
