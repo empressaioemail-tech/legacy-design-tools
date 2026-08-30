@@ -5,6 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { SERVER_NAME, SMARTSITE_MCP_TOOLS } from "../src/constants.js";
 import type { SmartsiteAuthContext } from "../src/request-context.js";
+import { sanitizeAskTheMapErrorBody } from "../src/tool-honesty.js";
 import { registerTools } from "../src/tools.js";
 
 const mockCortexFetch = vi.fn();
@@ -372,17 +373,54 @@ function assertNoAskTheMapLeakTokens(body: string): void {
   }
 }
 
-describe("ask_the_map leak closed (P-91 item 10)", () => {
+describe("ask_the_map leak closed (P-91 item 10) and blocked (P-91 item 34)", () => {
   beforeEach(() => {
     mockAuth = { ...defaultAuth };
     mockCortexFetch.mockReset();
   });
 
-  it("violated schema response body omits brokerage internals", async () => {
-    mockCortexFetch.mockResolvedValue(
-      new Response(JSON.stringify(CORTEX_CHAT_VALIDATION_400), { status: 400 }),
-    );
+  it("falsifier: the synthetic cortex 400 still carries every leak token", () => {
+    const raw = JSON.stringify(CORTEX_CHAT_VALIDATION_400);
+    for (const token of ASK_THE_MAP_LEAK_TOKENS) {
+      expect(raw).toContain(token);
+    }
+  });
 
+  it("scrub on the synthetic cortex 400 stays proven while the path is blocked", () => {
+    const scrubbed = sanitizeAskTheMapErrorBody(
+      JSON.stringify(CORTEX_CHAT_VALIDATION_400),
+    );
+    assertNoAskTheMapLeakTokens(scrubbed);
+    expect(JSON.parse(scrubbed).accepted.optional).toEqual([
+      "history",
+      "areaContext",
+      "purpose",
+    ]);
+  });
+
+  it("publishes a strict two-field schema in tools/list", async () => {
+    await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      const tool = tools.find((t) => t.name === "ask_the_map");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as {
+        additionalProperties?: unknown;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(schema.additionalProperties).toBe(false);
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
+        "message",
+        "parcelNodeId",
+      ]);
+      expect([...(schema.required ?? [])].sort()).toEqual([
+        "message",
+        "parcelNodeId",
+      ]);
+    });
+  });
+
+  it("extra keys are refused at the schema without echoing their names", async () => {
     await withTestClient(async (client) => {
       const result = await client.callTool({
         name: "ask_the_map",
@@ -398,11 +436,7 @@ describe("ask_the_map leak closed (P-91 item 10)", () => {
       });
       expect(result.isError).toBe(true);
       const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
-      const parsed = JSON.parse(text);
-      expect(parsed).toEqual({
-        status: "invalid_request",
-        message: "ask_the_map accepts parcelNodeId and message.",
-      });
+      expect(text).toContain("ask_the_map accepts parcelNodeId and message.");
       assertNoAskTheMapLeakTokens(JSON.stringify(result));
       assertNoAskTheMapLeakTokens(text);
       expect(mockCortexFetch).not.toHaveBeenCalled();
@@ -429,7 +463,7 @@ describe("ask_the_map leak closed (P-91 item 10)", () => {
     });
   });
 
-  it("forwards a sanitized cortex 400 when the MCP args are legal", async () => {
+  it("a legal call returns not_ready and never reaches cortex", async () => {
     mockCortexFetch.mockResolvedValue(
       new Response(JSON.stringify(CORTEX_CHAT_VALIDATION_400), { status: 400 }),
     );
@@ -444,8 +478,19 @@ describe("ask_the_map leak closed (P-91 item 10)", () => {
       });
       expect(result.isError).toBe(true);
       const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
-      assertNoAskTheMapLeakTokens(text);
-      expect(mockCortexFetch).toHaveBeenCalled();
+      const parsed = JSON.parse(text);
+      expect(parsed).toMatchObject({ status: "not_ready", tool: "ask_the_map" });
+      expect(parsed.reason).toContain("P-91 item 34");
+      assertNoAskTheMapLeakTokens(JSON.stringify(result));
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("tools/list still returns thirteen names with ask_the_map listed", async () => {
+    await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(13);
+      expect(tools.map((t) => t.name)).toContain("ask_the_map");
     });
   });
 });
@@ -709,21 +754,26 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
     });
   });
 
-  it("refuses over-cap without calling cortex or truncating", async () => {
+  it("refuses over-cap at the published schema without calling cortex or truncating", async () => {
     const ids = Array.from({ length: 51 }, (_, i) => `48021:${10000 + i}`);
     await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      const tool = tools.find((t) => t.name === "get_smart_site");
+      const parcelNodeId = (tool?.inputSchema as {
+        properties?: { parcelNodeId?: { anyOf?: Array<Record<string, unknown>> } };
+      }).properties?.parcelNodeId;
+      const arrayBranch = parcelNodeId?.anyOf?.find((b) => b.type === "array");
+      expect(arrayBranch, "array branch published in tools/list").toBeDefined();
+      expect(arrayBranch?.maxItems).toBe(50);
+      expect(arrayBranch?.minItems).toBe(1);
+
       const result = await client.callTool({
         name: "get_smart_site",
         arguments: { parcelNodeId: ids, depth: "stub" },
       });
       expect(result.isError).toBe(true);
-      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(parsed).toEqual({
-        status: "refused",
-        reason: "parcel_batch_cap",
-        cap: 50,
-        received: 51,
-      });
+      const text = (result.content?.[0] as { text: string }).text;
+      expect(text).toContain("50");
       expect(mockCortexFetch).not.toHaveBeenCalled();
     });
   });
@@ -855,7 +905,7 @@ describe("P-91 Wave B screen/save tools", () => {
     expect(JSON.parse(init.body ?? "{}")).not.toHaveProperty("snapshot");
   });
 
-  it("create_screen chrome refuses intake_not_implemented without writing", async () => {
+  it("create_screen chrome is refused at the schema and never reaches cortex", async () => {
     mockCortexFetch.mockResolvedValue(
       new Response(JSON.stringify({ error: "intake_not_implemented" }), {
         status: 400,
@@ -870,8 +920,339 @@ describe("P-91 Wave B screen/save tools", () => {
         },
       });
       expect(result.isError).toBe(true);
+      const text = (result.content?.[0] as { text: string }).text;
+      expect(text).toContain("pasted");
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("get_smart_site non-OK wire contract (P-91 build plan 4.1)", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+  });
+
+  const ID = "48021:900099";
+
+  function expectMissShape(
+    text: string,
+    id: string,
+    reason: "parcel_not_found" | "baked_snapshot_not_found",
+    parcelExists: boolean | "unmeasured",
+  ): void {
+    const parsed = JSON.parse(text);
+    expect(parsed).toEqual({
+      parcels: [],
+      notFound: [id],
+      reason,
+      parcelExists,
+    });
+  }
+
+  async function callSingle(status: number, body: unknown, id = ID) {
+    mockCortexFetch.mockResolvedValue(
+      new Response(
+        typeof body === "string" ? body : JSON.stringify(body),
+        { status },
+      ),
+    );
+    let out: { isError?: boolean; text: string } | null = null;
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "get_smart_site",
+        arguments: { parcelNodeId: id },
+      });
+      out = {
+        isError: result.isError as boolean | undefined,
+        text: (result.content?.[0] as { text: string }).text,
+      };
+    });
+    return out!;
+  }
+
+  it("404 parcel_not_found is a declared absence with isError false", async () => {
+    const res = await callSingle(404, {
+      error: "parcel_not_found",
+      message: "No parcel record for this node.",
+      parcelNodeId: ID,
+      parcelExists: false,
+    });
+    expect(res.isError).toBe(false);
+    expectMissShape(res.text, ID, "parcel_not_found", false);
+  });
+
+  it("404 baked_snapshot_not_found carries cortex parcelExists when present", async () => {
+    const res = await callSingle(404, {
+      error: "baked_snapshot_not_found",
+      message: "No baked facet snapshot exists for this parcel node.",
+      parcelNodeId: ID,
+      parcelExists: true,
+    });
+    expect(res.isError).toBe(false);
+    expectMissShape(res.text, ID, "baked_snapshot_not_found", true);
+  });
+
+  it("404 baked_snapshot_not_found from an old cortex is parcelExists unmeasured, never a boolean", async () => {
+    const res = await callSingle(404, {
+      error: "baked_snapshot_not_found",
+      message: "No baked facet snapshot exists for this parcel node.",
+      parcelNodeId: ID,
+    });
+    expect(res.isError).toBe(false);
+    expectMissShape(res.text, ID, "baked_snapshot_not_found", "unmeasured");
+  });
+
+  it("402 upgrade_required on one id is a refused row with isError false", async () => {
+    const res = await callSingle(402, {
+      error: "upgrade_required",
+      message: "Unlock this property or go Pro to run this report",
+      tier: "free",
+      property: { parcelNodeId: ID, unlocked: false },
+    });
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.text)).toEqual({
+      parcels: [],
+      notFound: [],
+      refused: [{ parcelNodeId: ID, reason: "upgrade_required" }],
+    });
+    expect(res.text).not.toContain("go Pro");
+  });
+
+  it("402 upgrade_required on an array refuses every id", async () => {
+    const ids = ["48021:34137", "48021:34169", "48021:34121"];
+    mockCortexFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "upgrade_required",
+          message: "Paid deep access required for this route",
+          tier: "free",
+        }),
+        { status: 402 },
+      ),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "get_smart_site",
+        arguments: { parcelNodeId: ids, depth: "stub" },
+      });
+      expect(result.isError).toBe(false);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(parsed.error).toBe("intake_not_implemented");
+      expect(parsed).toEqual({
+        parcels: [],
+        notFound: [],
+        refused: ids.map((id) => ({ parcelNodeId: id, reason: "upgrade_required" })),
+      });
+    });
+  });
+
+  it("404 on an array is not rewritten into per-id absences", async () => {
+    const ids = ["48021:34137", "48021:900099"];
+    const body = {
+      error: "baked_snapshot_not_found",
+      message: "No baked facet snapshot exists for this parcel node.",
+    };
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 404 }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "get_smart_site",
+        arguments: { parcelNodeId: ids, depth: "stub" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toEqual(body);
+    });
+  });
+
+  it("any other non-OK passes the body through with isError true", async () => {
+    const res = await callSingle(500, { error: "internal", detail: "pool exhausted" });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.text)).toEqual({ error: "internal", detail: "pool exhausted" });
+
+    const html = await callSingle(502, "<html>bad gateway</html>");
+    expect(html.isError).toBe(true);
+    expect(html.text).toBe("<html>bad gateway</html>");
+
+    const auth = await callSingle(401, { error: "authentication_required" });
+    expect(auth.isError).toBe(true);
+    expect(JSON.parse(auth.text)).toEqual({ error: "authentication_required" });
+  });
+
+  it("falsifier: a fixture with reason stripped fails the shape check", () => {
+    const stripped = JSON.stringify({
+      parcels: [],
+      notFound: [ID],
+      parcelExists: false,
+    });
+    expect(() =>
+      expectMissShape(stripped, ID, "parcel_not_found", false),
+    ).toThrow();
+  });
+});
+
+describe("run_report honesty stamp only on res.ok (deep dive 4.1 row 4)", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+  });
+
+  it("cortex 402 returns status error with the upstream body and no read stamp", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "upgrade_required",
+          message: "Unlock this property or go Pro to run this report",
+          tier: "free",
+          property: { parcelNodeId: "48021:34137", unlocked: false },
+        }),
+        { status: 402 },
+      ),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "run_report",
+        arguments: { parcelNodeId: "48021:34137" },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed.status).toBe("error");
+      expect(parsed.error).toBe("upgrade_required");
+      expect(parsed.tier).toBe("free");
+      expect(parsed).not.toHaveProperty("reportKind");
+      expect(parsed).not.toHaveProperty("reportReadMode");
+      expect(parsed).not.toHaveProperty("async");
+    });
+  });
+
+  it("cortex 404 returns status error and no read stamp", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "baked_snapshot_not_found",
+          message: "No baked facet snapshot exists for this parcel node.",
+          parcelNodeId: "48021:900099",
+        }),
+        { status: 404 },
+      ),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "run_report",
+        arguments: { parcelNodeId: "48021:900099" },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toEqual({
+        status: "error",
+        error: "baked_snapshot_not_found",
+        message: "No baked facet snapshot exists for this parcel node.",
+        parcelNodeId: "48021:900099",
+      });
+    });
+  });
+
+  it("non-JSON non-OK body lands under brief with status error", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response("upstream unavailable", { status: 502 }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "run_report",
+        arguments: { parcelNodeId: "48021:34137" },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toEqual({ status: "error", brief: "upstream unavailable" });
+    });
+  });
+});
+
+describe("schemas as types (P-91 S2 item 5)", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+  });
+
+  function propertySchema(
+    tools: Array<{ name: string; inputSchema: unknown }>,
+    tool: string,
+    prop: string,
+  ): Record<string, unknown> | undefined {
+    const found = tools.find((t) => t.name === tool);
+    const props = (found?.inputSchema as { properties?: Record<string, Record<string, unknown>> })
+      ?.properties;
+    return props?.[prop];
+  }
+
+  it("tools/list publishes the enums", async () => {
+    await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      expect(propertySchema(tools, "create_screen", "source")?.enum).toEqual(["pasted"]);
+      expect(propertySchema(tools, "add_to_screen", "source")?.enum).toEqual([
+        "walk",
+        "saved",
+        "pasted",
+      ]);
+      expect(propertySchema(tools, "save_property", "status")?.enum).toEqual([
+        "New",
+        "Watching",
+        "Chasing",
+        "Passed",
+      ]);
+      expect(propertySchema(tools, "set_property_status", "status")?.enum).toEqual([
+        "New",
+        "Watching",
+        "Chasing",
+        "Passed",
+      ]);
+      const saveRequired = (tools.find((t) => t.name === "save_property")?.inputSchema as {
+        required?: string[];
+      }).required;
+      expect(saveRequired).not.toContain("status");
+    });
+  });
+
+  it("add_to_screen source outside walk|saved|pasted is refused at the schema", async () => {
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "add_to_screen",
+        arguments: { screenId: "scr-1", parcelNodeId: "48021:34137", source: "chrome" },
+      });
+      expect(result.isError).toBe(true);
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("save_property lowercase status is refused at the schema; omitted status passes", async () => {
+    await withTestClient(async (client) => {
+      const refused = await client.callTool({
+        name: "save_property",
+        arguments: { parcelNodeId: "48021:34137", status: "watching" },
+      });
+      expect(refused.isError).toBe(true);
+      expect(mockCortexFetch).not.toHaveBeenCalled();
+
+      const ok = await client.callTool({
+        name: "save_property",
+        arguments: { parcelNodeId: "48021:34137", note: "keep" },
+      });
+      expect(ok.isError).toBe(false);
+      expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("set_property_status outside the four statuses is refused at the schema", async () => {
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "set_property_status",
+        arguments: { parcelNodeId: "48021:34137", status: "Closed" },
+      });
+      expect(result.isError).toBe(true);
+      expect(mockCortexFetch).not.toHaveBeenCalled();
     });
   });
 });

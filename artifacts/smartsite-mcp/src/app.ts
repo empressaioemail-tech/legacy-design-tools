@@ -59,7 +59,9 @@ export function createSmartsiteMcpApp(
   const authkit = authkitIssuer();
 
   app.get("/health", (_req, res) => {
-    res.json(buildHealthReport());
+    // Same AuthConfig object the /mcp gate was built from, so /health and
+    // /mcp cannot disagree about authConfigured (P-91 deep dive 4.1 row 5).
+    res.json(buildHealthReport(authConfig));
   });
 
   app.get("/health/dependencies", async (_req, res) => {

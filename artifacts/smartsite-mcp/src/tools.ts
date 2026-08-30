@@ -19,10 +19,10 @@ import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
 import {
-  askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
+  buildRunReportErrorBody,
+  mapGetSmartSiteNonOk,
   normalizeGetSmartSiteResponseText,
-  sanitizeAskTheMapErrorBody,
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
@@ -30,6 +30,44 @@ import { appMetaFor, registerMcpApp } from "./mcp-app.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 const GET_SMART_SITE_DEPTHS = ["stub", "node", "hop1", "subgraph"] as const;
+const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
+const SCREEN_ROW_SOURCES = ["walk", "saved", "pasted"] as const;
+
+const ASK_THE_MAP_REFUSAL = "ask_the_map accepts parcelNodeId and message.";
+const ASK_THE_MAP_STRICT = z
+  .object({
+    parcelNodeId: z.string().min(1),
+    message: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Strict at the type: tools/list publishes additionalProperties false and
+ * the SDK refuses extra keys before the handler runs. The SDK prints every
+ * zod issue verbatim, and a strict object's unrecognized_keys issue names
+ * the extra keys, which is the P-91 item 10 leak on the MCP error path.
+ * This instance keeps the strict schema (same shape, same published JSON
+ * schema) and replaces only that issue with a fixed sentence.
+ */
+function askTheMapInputSchema(): typeof ASK_THE_MAP_STRICT {
+  const guarded: typeof ASK_THE_MAP_STRICT = Object.create(ASK_THE_MAP_STRICT);
+  guarded.safeParseAsync = async (data: unknown) => {
+    const result = await ASK_THE_MAP_STRICT.safeParseAsync(data);
+    if (
+      result.success ||
+      !result.error.issues.some((issue) => issue.code === "unrecognized_keys")
+    ) {
+      return result;
+    }
+    return {
+      success: false,
+      error: new z.ZodError([
+        { code: z.ZodIssueCode.custom, path: [], message: ASK_THE_MAP_REFUSAL },
+      ]),
+    };
+  };
+  return guarded;
+}
 
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
@@ -85,7 +123,7 @@ function inputSchemaFor(name: SmartsiteToolName) {
         .object({
           name: z.string().optional(),
           queries: z.array(z.string()),
-          source: z.string(),
+          source: z.enum(["pasted"]),
         })
         .strict();
     case "add_to_screen":
@@ -93,7 +131,7 @@ function inputSchemaFor(name: SmartsiteToolName) {
         .object({
           screenId: z.string().min(1),
           parcelNodeId: z.string().min(1),
-          source: z.string(),
+          source: z.enum(SCREEN_ROW_SOURCES),
         })
         .strict();
     case "list_screens":
@@ -106,7 +144,7 @@ function inputSchemaFor(name: SmartsiteToolName) {
       return z
         .object({
           parcelNodeId: z.string().min(1),
-          status: z.string().optional(),
+          status: z.enum(CRM_STATUSES).optional(),
           note: z.string().optional(),
         })
         .strict();
@@ -114,18 +152,13 @@ function inputSchemaFor(name: SmartsiteToolName) {
       return z
         .object({
           parcelNodeId: z.string().min(1),
-          status: z.string(),
+          status: z.enum(CRM_STATUSES),
         })
         .strict();
     case "check_request":
       return z.object({ jobId: z.string().min(1) });
     case "ask_the_map":
-      return z
-        .object({
-          parcelNodeId: z.string().min(1),
-          message: z.string().min(1),
-        })
-        .passthrough();
+      return askTheMapInputSchema();
     case "export_instrument":
       return z.object({
         parcelNodeId: z.string().min(1),
@@ -135,7 +168,7 @@ function inputSchemaFor(name: SmartsiteToolName) {
       return z.object({
         parcelNodeId: z.union([
           z.string().min(1),
-          z.array(z.string().min(1)).min(1),
+          z.array(z.string().min(1)).min(1).max(SMARTSITE_BATCH_CAP),
         ]),
         depth: z.enum(GET_SMART_SITE_DEPTHS).optional(),
       });
@@ -257,14 +290,27 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const body = await res.text();
+              if (!res.ok) {
+                // Wire contract 4.1: a declared miss or refusal is a result
+                // the host forwards to the panel; anything else is an error.
+                const declared = mapGetSmartSiteNonOk(res.status, body, ids);
+                return {
+                  content: [{ type: "text" as const, text: declared ?? body }],
+                  isError: declared === null,
+                };
+              }
               const mode =
                 Array.isArray(parcelNodeId) || depth === "stub"
                   ? "stub-or-batch"
                   : "single-node";
-              const normalized = normalizeGetSmartSiteResponseText(body, mode);
               return {
-                content: [{ type: "text" as const, text: normalized }],
-                isError: !res.ok,
+                content: [
+                  {
+                    type: "text" as const,
+                    text: normalizeGetSmartSiteResponseText(body, mode),
+                  },
+                ],
+                isError: false,
               };
             });
           }
@@ -328,12 +374,25 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const body = await res.text();
+              if (!res.ok) {
+                // No read happened, so no read stamp (reportKind /
+                // reportReadMode / async). The upstream body travels as is.
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: JSON.stringify(buildRunReportErrorBody(body)),
+                    },
+                  ],
+                  isError: true,
+                };
+              }
               const envelope = buildRunReportEnvelope(parcelNodeId, body);
               return {
                 content: [
                   { type: "text" as const, text: JSON.stringify(envelope) },
                 ],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
@@ -471,49 +530,11 @@ export function registerTools(server: McpServer): void {
               };
             });
           }
-          case "ask_the_map": {
-            const record = args as Record<string, unknown>;
-            if (askTheMapArgsLeakInternalFields(record)) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: sanitizeAskTheMapErrorBody(
-                      JSON.stringify({
-                        status: "invalid_request",
-                        message:
-                          "ask_the_map accepts parcelNodeId and message.",
-                      }),
-                    ),
-                  },
-                ],
-                isError: true,
-              };
-            }
-            const { parcelNodeId, message } = record as {
-              parcelNodeId: string;
-              message: string;
-            };
-            return withCortex(async (config) => {
-              const res = await cortexFetch(
-                config,
-                `/api/brokerage/v1/research/chat`,
-                {
-                  method: "POST",
-                  userId: auth.userId,
-                  body: JSON.stringify({ parcelNodeId, message }),
-                },
-              );
-              const body = await res.text();
-              const text = res.ok
-                ? body
-                : sanitizeAskTheMapErrorBody(body);
-              return {
-                content: [{ type: "text" as const, text }],
-                isError: !res.ok,
-              };
-            });
-          }
+          // ask_the_map has no handler while readiness is "blocked" (P-91
+          // item 34): the blocked branch above answers not_ready before the
+          // switch, the same as the records pair. Re-arming it means a case
+          // here that builds the chat subject from the bake and keeps
+          // sanitizeAskTheMapErrorBody on the cortex error path.
         }
       },
     );
