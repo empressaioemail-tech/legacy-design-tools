@@ -59,6 +59,27 @@ import {
   frameNoteHtml,
   scaleBarFt,
   zoneFamily,
+  ABSENCE_UNVERIFIED,
+  AS_OF_MISSING,
+  CITATION_DEGRADED,
+  BFE_NONE,
+  SAVE_STATUSES,
+  WHY_TURN_OPENER,
+  WHY_TURN_INSTRUCTION,
+  addToScreenMessage,
+  citationHtml,
+  dateOnly,
+  floodFactsHtml,
+  httpsCitations,
+  knownVintage,
+  overlayPaint,
+  overlayRowHtml,
+  reportHtml,
+  saveMessage,
+  sectionPaint,
+  sourceOf,
+  whyMessage,
+  whyQuestion,
 } from "../src/mcp-app.js";
 import { registerTools } from "../src/tools.js";
 
@@ -97,7 +118,9 @@ describe("mcp-app contracts", () => {
     expect(html).toContain('data-act="open"');
     expect(html).toContain("window.__ss&&window.__ss.open(this)");
     expect(html).toContain("window.__ss&&window.__ss.listing(this)");
-    expect(html).toContain("window.__ss&&window.__ss.save()");
+    /* C1: the Save control is a status chooser; the click carries its button */
+    expect(html).toContain("window.__ss&&window.__ss.save(this)");
+    expect(html).not.toContain("window.__ss&&window.__ss.save()");
     expect(html).toContain("host.sendMessage(text)");
     expect(html).toContain('id:id,method:"ui/message"');
     expect(html).toContain('content:[{type:"text",text:text}]');
@@ -894,6 +917,227 @@ describe("P-91 v2 drawing (exported twins)", () => {
     expect(drawn).toContain('data-zoning="SF-1"');
     expect(drawn).toContain('data-flood-tint="light"');
     expect(drawn).not.toContain("atom_path_pending");
+  });
+});
+
+/*
+ * P-91 v2 facts and actions, exported twins (S7). Section and overlay
+ * shapes as the p543/p558 wire carries them; every asOf, adapter, URL and
+ * elevation is a synthetic test input, never a parcel fact.
+ */
+const AS_OF_V2 = "2026-08-29T10:00:00.000Z";
+const ENVELOPE_REFUSAL_V2 = {
+  state: "refused",
+  code: "declined-in-bake",
+  producer: "baked-envelope-facet",
+  supersededBy: "buildable-envelope",
+  declineReason: "no-zoning-stamp",
+  reason: "Buildable envelope was declined in bake: no-zoning-stamp.",
+};
+const GOLD_FACTS_V2 = {
+  parcelNodeId: "48021:34137",
+  brief: {
+    sections: [
+      { id: "zoning", title: "Zoning", disposition: "present", data: { district: "SF-1", sourceAdapter: "adapter:zoning-test" }, citations: ["http://plain.example.test/first", ZONING_URL], asOf: AS_OF_V2 },
+      { id: "setbacks-envelope", title: "Setbacks and buildable envelope", disposition: "refused", data: null, refusal: ENVELOPE_REFUSAL_V2, citations: [], asOf: AS_OF_V2, agentGuidance: "Do not invent distances or polygons." },
+      {
+        id: "flood",
+        title: "Flood hazard",
+        disposition: "present",
+        data: { inSpecialFloodHazardArea: true, floodZone: "AE", zoneSubtype: "FLOODWAY", baseFloodElevation: 372.5, sourceAdapter: "adapter:flood-test", sourceVintage: "NFHL_48_20260101", evaluatedAt: AS_OF_V2 },
+        citations: [],
+        asOf: AS_OF_V2,
+        citationsDegraded: true,
+        zoneExposureSummary: null,
+      },
+      { id: "land-use", title: "Land use", disposition: "absent", data: { state: "absent", sourceAdapter: "adapter:landuse-test" }, citations: [], asOf: AS_OF_V2 },
+      { id: "drainage", title: "Drainage", disposition: "unread", data: null, citations: [], asOf: AS_OF_V2, reason: "drainage facet not produced for this parcel" },
+    ],
+  },
+  draw: {
+    ...GOLD_V2.draw,
+    overlays: [
+      ...GOLD_V2.draw.overlays,
+      { id: "pipeline", label: "No pipeline within 500 ft", geom: "none", draw: "legend-only", state: "absent-verified", provenance: "present", vintage: "2026-06", citations: ["https://rrc.example.test/p", "http://plain.example.test/p"] },
+      { id: "special-district", label: "No special district of record", geom: "none", draw: "legend-only", state: "absent-verified" },
+    ],
+  },
+};
+
+describe("P-91 v2 facts and actions (exported twins)", () => {
+  it("P1 C1 C2: the three drafts are literal, every slot a wire field or the fallback word", () => {
+    expect(
+      whyMessage({ field: "envelope", state: "refused", parcelNodeId: "48021:34137", label: "908 PINE , BASTROP, TX 78602", reason: "atom_path_pending", producer: "baked-envelope-facet", code: "declined-in-bake" }),
+    ).toBe(
+      "Why is envelope refused for 48021:34137 (908 PINE , BASTROP, TX 78602)? The record says: atom_path_pending; producer baked-envelope-facet; code declined-in-bake. Answer from the record and the atom path; do not invent a value.",
+    );
+    expect(whyMessage({ field: "drainage", state: "unread", parcelNodeId: "48021:1", label: null, reason: null, producer: null, code: null })).toBe(
+      "Why is drainage unread for 48021:1? The record says: no reason on the wire; producer unstated; code unstated. Answer from the record and the atom path; do not invent a value.",
+    );
+    expect(WHY_TURN_OPENER).toBe("Why is");
+    expect(WHY_TURN_INSTRUCTION).toBe("Answer from the record and the atom path; do not invent a value.");
+    expect(saveMessage("48021:34137", "Watching")).toBe("Save property 48021:34137 with save_property, status Watching. Do not change any screen.");
+    expect(SAVE_STATUSES).toEqual(["New", "Watching", "Chasing", "Passed"]);
+    expect(addToScreenMessage("48021:34169")).toBe("Add 48021:34169 to the screen this parcel was opened from with add_to_screen, source walk. Do not save it.");
+    expect(addToScreenMessage("48021:34169")).not.toMatch(/screenId|screen-/);
+  });
+
+  it("F5 F6: paint rules are earned, never asserted", () => {
+    expect(knownVintage("2026-06")).toBe("2026-06");
+    expect(knownVintage("UNKNOWN")).toBeNull();
+    expect(knownVintage("unknown ")).toBeNull();
+    expect(knownVintage("")).toBeNull();
+    expect(knownVintage(7)).toBeNull();
+    expect(overlayPaint({ state: "absent-verified", provenance: "present", vintage: "2026-06" })).toEqual({ paint: "absent-verified" });
+    expect(overlayPaint({ state: "absent-verified", vintage: "2026-06" })).toEqual({ paint: "absent-verified" });
+    expect(overlayPaint({ state: "absent-verified", provenance: "present" })).toEqual({ paint: "absent-verified" });
+    expect(overlayPaint({ state: "absent-verified" })).toEqual({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
+    expect(overlayPaint({ state: "absent-verified", provenance: "degraded", vintage: "UNKNOWN", reason: "provenance degraded; vintage unknown" })).toEqual({ paint: "unknown" });
+    expect(overlayPaint({ state: "absent", provenance: "nope" })).toEqual({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
+    expect(overlayPaint({ state: "present" })).toEqual({ paint: "present" });
+    expect(overlayPaint({ state: "refused", reason: "x" })).toEqual({ paint: "refused" });
+    expect(overlayPaint({ state: "pending" })).toEqual({ paint: "unread" });
+    expect(sectionPaint("present", AS_OF_V2, {})).toEqual({ paint: "present" });
+    expect(sectionPaint("present", null, { district: "SF-1" })).toEqual({ paint: "unknown", paintReason: AS_OF_MISSING });
+    expect(sectionPaint("refused", null, null)).toEqual({ paint: "refused" });
+    expect(sectionPaint("unread", AS_OF_V2, null)).toEqual({ paint: "unread" });
+    expect(sectionPaint("absent", AS_OF_V2, { sourceVintage: "2026-07" })).toEqual({ paint: "absent-verified" });
+    expect(sectionPaint("absent", AS_OF_V2, { sourceVintage: "UNKNOWN" })).toEqual({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
+    expect(sectionPaint("absent", AS_OF_V2, null)).toEqual({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
+    expect(sectionPaint("Present", AS_OF_V2, {}).paint).toBe("unread");
+    expect(sectionPaint("unstated", AS_OF_V2, {}).paint).toBe("unread");
+    expect(dateOnly(AS_OF_V2)).toBe("2026-08-29");
+    expect(dateOnly("2026-08-29")).toBe("2026-08-29");
+    expect(dateOnly("NFHL_48_20260101")).toBe("NFHL_48_20260101");
+    expect(dateOnly(null)).toBeNull();
+    expect(httpsCitations(["http://a.test/x", "https://b.test/y", 7, null, "", " https://c.test/z "])).toEqual(["https://b.test/y", "https://c.test/z"]);
+    expect(httpsCitations("https://b.test/y")).toEqual([]);
+  });
+
+  it("parses brief sections with paint, https-only citations, refusal fields and source; overlays carry provenance, vintage and citations", () => {
+    const model = parseToolResult(JSON.stringify(GOLD_FACTS_V2));
+    expect(model.kind).toBe("parcel");
+    const s = model.sections ?? [];
+    expect(s.map((x) => x.id)).toEqual(["zoning", "setbacks-envelope", "flood", "land-use", "drainage"]);
+    expect(s.map((x) => x.paint)).toEqual(["present", "refused", "present", "unknown", "unread"]);
+    expect(s[0]?.citations).toEqual([ZONING_URL]);
+    expect(s[0]?.citationsDegraded).toBe(false);
+    expect(s[0]?.asOf).toBe(AS_OF_V2);
+    expect(sourceOf(s[0]!)).toBe("adapter:zoning-test");
+    expect(s[1]?.refusal).toEqual({ code: "declined-in-bake", producer: "baked-envelope-facet", declineReason: "no-zoning-stamp", reason: ENVELOPE_REFUSAL_V2.reason });
+    expect(sourceOf(s[1]!)).toBe("baked-envelope-facet");
+    expect(s[1]?.agentGuidance).toBe("Do not invent distances or polygons.");
+    expect(s[2]?.citationsDegraded).toBe(true);
+    expect(s[2]?.zoneExposureSummary).toBeUndefined();
+    expect(s[3]?.paintReason).toBe(ABSENCE_UNVERIFIED);
+    expect(s[4]?.reason).toBe("drainage facet not produced for this parcel");
+    expect(sourceOf(s[4]!)).toBeNull();
+    const pipeline = model.overlays.find((o) => o.id === "pipeline");
+    expect(pipeline).toMatchObject({ provenance: "present", vintage: "2026-06", citations: ["https://rrc.example.test/p"], paint: "absent-verified" });
+    const sd = model.overlays.find((o) => o.id === "special-district");
+    expect(sd).toMatchObject({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
+    expect(sd?.provenance).toBeUndefined();
+    const flood = model.overlays.find((o) => o.id === "flood");
+    expect(flood).toMatchObject({ paint: "present", citationsDegraded: true });
+    expect(parseToolResult(JSON.stringify({ parcelNodeId: "48021:1", draw: GOLD_V2.draw })).sections).toBeUndefined();
+    const noId = parseToolResult(JSON.stringify({ ...GOLD_FACTS_V2, brief: { sections: [{ disposition: "present", data: {}, asOf: AS_OF_V2 }, "x", null] } }));
+    expect(noId.sections).toBeUndefined();
+    /* P1 lookups: present and verified cells are never questions; the overlay borrows its section's refusal */
+    expect(whyQuestion(model, "overlay", { i: "0" })).toBeNull();
+    expect(whyQuestion(model, "overlay", { i: "2" })).toBeNull();
+    expect(whyQuestion(model, "section", { i: "0" })).toBeNull();
+    expect(whyQuestion(model, "overlay", { i: "1" })).toEqual({
+      field: "envelope",
+      state: "refused",
+      parcelNodeId: "48021:34137",
+      label: "908 PINE , BASTROP, TX 78602",
+      reason: "atom_path_pending",
+      producer: "baked-envelope-facet",
+      code: "declined-in-bake",
+    });
+    expect(whyQuestion(model, "overlay", { i: "3" })).toMatchObject({ field: "special-district", state: "unknown", reason: null, producer: null, code: null });
+    expect(whyQuestion(model, "section", { i: "3" })).toMatchObject({ field: "land-use", state: "unknown", reason: null, producer: null, code: null });
+    expect(whyQuestion(model, "section", { i: "4" })).toMatchObject({ field: "drainage", state: "unread", reason: "drainage facet not produced for this parcel" });
+    expect(whyQuestion(model, "section", { i: "9" })).toBeNull();
+    expect(whyQuestion(model, "rail", { rail: "situs", node: "48021:34137" })).toBeNull();
+    const board = parseToolResult(JSON.stringify({ id: "s", rows: [{ query: "q", parcelNodeId: "48021:1", resolution: "resolved", stub: { situs: "present", zoning: "refused" } }] }));
+    expect(whyQuestion(board, "rail", { rail: "situs", node: "48021:1" })).toBeNull();
+    expect(whyQuestion(board, "rail", { rail: "zoning", node: "48021:1" })).toEqual({ field: "zoning", state: "refused", parcelNodeId: "48021:1", label: "q", reason: null, producer: null, code: null });
+    expect(whyQuestion(board, "rail", { rail: "flood", node: "48021:1" })).toMatchObject({ state: "unread" });
+    expect(whyQuestion(board, "rail", { rail: "owner", node: "48021:1" })).toBeNull();
+    expect(whyQuestion(board, "rail", { rail: "zoning", node: "48021:2" })).toBeNull();
+  });
+
+  it("F1 F2 R1 C2 renderers: citations link only https, degraded prints the text, flood facts read the data, the report lists sections without values, the door carries Add to screen", () => {
+    expect(citationHtml(["https://a.test/1"], false)).toBe('<button type="button" class="cite" data-act="cite" data-url="https://a.test/1" onclick="window.__ss&&window.__ss.cite(this)">citation</button>');
+    expect(citationHtml(["https://a.test/1", "https://a.test/2"], false)).toContain(">citation 2</button>");
+    expect(citationHtml(["http://a.test/1", 'https://a.test/"x'], false)).toBe('<button type="button" class="cite" data-act="cite" data-url="https://a.test/&quot;x" onclick="window.__ss&&window.__ss.cite(this)">citation</button>');
+    expect(citationHtml(["https://a.test/1"], true)).toBe(`<span class="cite-deg" data-cite-degraded="1">${CITATION_DEGRADED}</span>`);
+    expect(citationHtml([], false)).toBe("");
+    const model = parseToolResult(JSON.stringify(GOLD_FACTS_V2));
+    const flood = floodFactsHtml(model.sections![2]!, 2);
+    expect(flood).toContain('data-flood-state="present"');
+    expect(flood).toContain('data-fact-zone="AE"');
+    expect(flood).toContain('data-fact-subtype="FLOODWAY"');
+    expect(flood).toContain('data-fact-sfha="yes"');
+    expect(flood).toContain('data-fact-bfe="372.5"');
+    expect(flood).toContain('data-fact-adapter="adapter:flood-test"');
+    expect(flood).toContain('data-fact-vintage="NFHL_48_20260101"');
+    expect(flood).toContain('data-fact-evaluated="2026-08-29"');
+    expect(flood).toContain(CITATION_DEGRADED);
+    expect(flood).not.toContain("data-zone-exposure");
+    expect(flood).not.toContain('data-act="why"');
+    const noBfe = floodFactsHtml({ ...model.sections![2]!, data: { floodZone: "X" } }, 2);
+    expect(noBfe).toContain(`data-fact-bfe="${BFE_NONE}"`);
+    expect(noBfe).toContain('data-fact-sfha="unstated"');
+    expect(noBfe).toContain('data-fact-subtype="unstated"');
+    const unread = floodFactsHtml(model.sections![4]!, 4);
+    expect(unread).toContain('data-flood-state="unread"');
+    expect(unread).not.toContain("data-fact-zone");
+    expect(unread).toContain('data-act="why" data-why-kind="section" data-why-i="4"');
+    const report = reportHtml(model.sections!);
+    expect([...report.matchAll(/data-report-section="([^"]+)"/g)].map((m) => m[1])).toEqual(["zoning", "setbacks-envelope", "flood", "land-use", "drainage"]);
+    expect(report).toContain('data-agent-guidance="1"');
+    expect(report).toContain('data-as-of="2026-08-29"');
+    expect(report).toContain('data-source="baked-envelope-facet"');
+    expect(report).not.toContain("SF-1");
+    expect(report).not.toContain("372.5");
+    expect(report).not.toContain("atom_path_pending");
+    expect(reportHtml([])).toContain("No brief sections on this result");
+    /* overlays: 0 flood, 1 envelope, 2 pipeline, 3 special-district */
+    const pipe = overlayRowHtml(model.overlays[2]!, 2);
+    expect(pipe).toContain('data-paint="absent-verified"');
+    expect(pipe).toContain('data-url="https://rrc.example.test/p"');
+    expect(pipe).not.toContain("plain.example.test");
+    expect(pipe).not.toContain('data-act="why"');
+    const sd = overlayRowHtml(model.overlays[3]!, 3);
+    expect(sd).toContain('data-paint="unknown"');
+    expect(sd).toContain(`data-paint-reason="${ABSENCE_UNVERIFIED}"`);
+    expect(sd).toContain('data-act="why" data-why-kind="overlay" data-why-i="3"');
+    const env = overlayRowHtml(model.overlays[1]!, 1);
+    expect(env).toContain("Withheld, setbacks unruled");
+    expect(env).not.toContain("atom_path_pending");
+    expect(env).toContain('data-act="why"');
+    const drawn = renderParcelDraw(model);
+    expect(drawn).toContain('data-flood-state="present"');
+    expect(drawn).toContain('data-overlay="pipeline"');
+    expect(drawn).not.toContain('data-report="1"');
+    const door = edgeTipHtml(GOLD_V2_EDGES[1]!, 1);
+    expect(door).toContain('data-act="addscreen" data-node="48021:34169"');
+    expect(door).toContain("Add to screen");
+    expect(door.indexOf('data-act="open"')).toBeLessThan(door.indexOf('data-act="addscreen"'));
+    expect(edgeTipHtml(GOLD_V2_EDGES[2]!, 2)).not.toContain("addscreen");
+    expect(edgeTipHtml(GOLD_V2_EDGES[0]!, 0)).not.toContain("addscreen");
+  });
+
+  it("htmlContractViolations: the S7 checks fire on violated copies", () => {
+    const clean = buildAppHtml();
+    expect(htmlContractViolations(clean)).toEqual([]);
+    expect(htmlContractViolations(clean.replace('data-act="cite"', 'data-act="site"'))).toContain("citation_link_unbound");
+    expect(htmlContractViolations(clean.replace(WHY_TURN_INSTRUCTION, "Answer however you like."))).toContain("why_turn_unbound");
+    expect(htmlContractViolations(clean.replace('"Watching"', '"Following"'))).toContain("save_statuses_unbound");
+    expect(htmlContractViolations(clean.replace('data-act="report"', 'data-act="view"'))).toContain("report_toggle_unbound");
+    expect(htmlContractViolations(clean.replace(/add_to_screen/g, "add_to_list"))).toContain("add_to_screen_unbound");
   });
 });
 

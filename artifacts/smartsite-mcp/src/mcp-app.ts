@@ -40,6 +40,43 @@ export type OverlayRow = {
   /** D4: flood only; absent when the wire does not state it. */
   sfha?: boolean;
   draw?: string;
+  /** F5: as the wire carries them; absent when it does not. */
+  provenance?: string;
+  vintage?: string;
+  /** F1: https citations only; a non-https string is never kept. */
+  citations?: string[];
+  citationsDegraded?: boolean;
+  /** F5: what the panel paints. absent-verified only when earned; otherwise the wire's state, or unknown. */
+  paint?: CellState;
+  /** A client-side downgrade note; only when the wire carries no reason of its own. */
+  paintReason?: string;
+};
+
+/** The refusal object a brief section may carry, field by field; a missing field is null, never a default. */
+export type SectionRefusal = {
+  code: string | null;
+  producer: string | null;
+  declineReason: string | null;
+  reason: string | null;
+};
+
+/** One brief section as the p543/p558 wire carries it, plus what the panel paints for it (F5/F6). */
+export type BriefSection = {
+  id: string;
+  title: string;
+  /** The wire's word (present | refused | absent | unread) or "unstated" when it carries none. */
+  disposition: string;
+  asOf: string | null;
+  reason?: string;
+  refusal?: SectionRefusal;
+  data: Record<string, unknown> | null;
+  /** https only. */
+  citations: string[];
+  citationsDegraded: boolean;
+  zoneExposureSummary?: string;
+  agentGuidance?: string;
+  paint: CellState;
+  paintReason?: string;
 };
 
 export type RingPt = { x: number; y: number };
@@ -96,6 +133,8 @@ export type PanelModel = {
   stubsDegraded?: boolean;
   zoning?: DrawZoning;
   frame?: DrawFrame;
+  /** F1 F2 F6 R1: the brief's sections in wire order; absent when the result carries none. */
+  sections?: BriefSection[];
 };
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
@@ -325,6 +364,50 @@ export const ZONE_TINT: Record<ZoneFamily, string> = {
   public: "--ss-t5",
 };
 
+/** F1: a section or overlay that claims a fact without an https citation says so; the text, never a link. */
+export const CITATION_DEGRADED = "citation degraded";
+/** F6: a present claim with no as-of paints unknown and says why. Panel copy, not a wire field. */
+export const AS_OF_MISSING = "as-of missing";
+/** F5: an absence claim with neither provenance nor a known vintage paints unknown; only when the wire carries no reason of its own. */
+export const ABSENCE_UNVERIFIED = "absence unverified; no provenance on the wire";
+/** A section whose disposition is not one of the wire's four words paints unread and says why. */
+export const DISPOSITION_UNSTATED = "disposition not on the wire";
+/** F2: base flood elevation when the record carries null. */
+export const BFE_NONE = "none on record";
+/** P1 fallback words. Every other slot in the why turn is a field from the result. */
+export const UNSTATED = "unstated";
+export const WHY_NO_REASON = "no reason on the wire";
+/** Unique opener. A turn with this prefix is a P1 why click. */
+export const WHY_TURN_OPENER = "Why is";
+export const WHY_TURN_INSTRUCTION = "Answer from the record and the atom path; do not invent a value.";
+export const WHY_LABEL = "why";
+/** C1: the save_property status enum, verbatim (tools.ts CRM_STATUSES). */
+export const SAVE_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
+export const SAVE_LABEL = "Save property";
+/** C2: the door's second control. */
+export const ADD_TO_SCREEN_LABEL = "Add to screen";
+/** R1: the local toggle and the empty report. */
+export const REPORT_TOGGLE = "Report";
+export const NO_BRIEF = "No brief sections on this result.";
+/** The five-state legend words, one per paint state. */
+export const STATE_WORDS: Record<CellState, string> = {
+  present: "present",
+  "absent-verified": "absent, verified",
+  unknown: "unknown",
+  refused: "refused",
+  unread: "unread",
+};
+/** P1: an overlay borrows the refusal of the brief section on the same subject, when the wire carries one. */
+export const SECTION_FOR_OVERLAY: Record<string, string> = {
+  envelope: "setbacks-envelope",
+  "setbacks-envelope": "setbacks-envelope",
+  flood: "flood",
+  landUse: "land-use",
+  "land-use": "land-use",
+  drainage: "drainage",
+  zoning: "zoning",
+};
+
 export function edgeWord(value: string | null | undefined): string | null {
   if (!value) return null;
   const word = EDGE_WORDS[value];
@@ -365,8 +448,9 @@ export function edgeTipHtml(edge: DrawEdge, index: number): string {
     bits.push(roadBits);
   }
   const door = edgeDoor(edge);
+  /* C2: the door carries Add to screen beside Open; both name the neighbor the wire names and nothing else. */
   const open = door
-    ? `<button type="button" class="btn" data-act="open" data-node="${escapeHtml(door)}" onclick="window.__ss&&window.__ss.open(this)">Open</button>`
+    ? `<button type="button" class="btn" data-act="open" data-node="${escapeHtml(door)}" onclick="window.__ss&&window.__ss.open(this)">Open</button><button type="button" class="btn" data-act="addscreen" data-node="${escapeHtml(door)}" onclick="window.__ss&&window.__ss.addToScreen(this)">${ADD_TO_SCREEN_LABEL}</button>`
     : "";
   return `<span class="tipbody" data-edge-tip="${index}">${bits.join("")}${open}</span>`;
 }
@@ -506,8 +590,338 @@ export function frameNoteHtml(frame: DrawFrame | null | undefined): string {
   return `<div class="fnote" data-frame-quality="${escapeHtml(frame.quality)}">frame ${escapeHtml(frame.quality)}</div>`;
 }
 
+/*
+ * P-91 v2 facts and actions (S7). Everything below the drawing reads a field
+ * off the tool result or prints a literal fallback word; the panel never
+ * composes prose and never fills a slot the wire left empty. Every function
+ * here is embedded by source (INLINE_SHARED) so the served panel and the
+ * exported twin cannot drift; none may use object or array spread, because
+ * a transpiler helper would not exist in the served scope.
+ */
+
+/** F5: a vintage the record spells UNKNOWN, or does not carry, is not a known vintage. */
+export function knownVintage(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toUpperCase() === "UNKNOWN") return null;
+  return trimmed;
+}
+
+/** F1: https strings only, trimmed; anything else is dropped and never becomes a link. */
+export function httpsCitations(value: unknown): string[] {
+  const out: string[] = [];
+  for (const item of stringList(value)) {
+    const c = item.trim();
+    if (/^https:\/\//i.test(c)) out.push(c);
+  }
+  return out;
+}
+
+/** F5: absent-verified is earned by provenance present or a known vintage; a bare claim paints unknown. */
+export function overlayPaint(
+  o: Pick<OverlayRow, "state" | "provenance" | "vintage" | "reason">,
+): { paint: CellState; paintReason?: string } {
+  const s = railState(o.state);
+  if (s !== "absent-verified") return { paint: s };
+  if (o.provenance === "present" || knownVintage(o.vintage) !== null) return { paint: "absent-verified" };
+  if (o.reason) return { paint: "unknown" };
+  return { paint: "unknown", paintReason: ABSENCE_UNVERIFIED };
+}
+
+function refusalFrom(value: unknown): SectionRefusal | undefined {
+  const rec = asRecord(value);
+  if (!rec) return undefined;
+  return {
+    code: stringOrNull(rec.code),
+    producer: stringOrNull(rec.producer),
+    declineReason: stringOrNull(rec.declineReason),
+    reason: stringOrNull(rec.reason),
+  };
+}
+
+/** F6 and F5 for a section: present needs an as-of; absent needs a known vintage on its data; a word off the wire's four paints unread. */
+export function sectionPaint(
+  disposition: string,
+  asOf: string | null,
+  data: Record<string, unknown> | null,
+): { paint: CellState; paintReason?: string } {
+  if (disposition === "present") return asOf ? { paint: "present" } : { paint: "unknown", paintReason: AS_OF_MISSING };
+  if (disposition === "refused") return { paint: "refused" };
+  if (disposition === "unread") return { paint: "unread" };
+  if (disposition === "absent") {
+    const vintage = data ? (data.sourceVintage !== undefined ? data.sourceVintage : data.vintage) : null;
+    return knownVintage(vintage) !== null
+      ? { paint: "absent-verified" }
+      : { paint: "unknown", paintReason: ABSENCE_UNVERIFIED };
+  }
+  return { paint: "unread", paintReason: DISPOSITION_UNSTATED };
+}
+
+/** F6: data.sourceAdapter, else refusal.producer, else a string data.provenance; never a guess. */
+export function sourceOf(s: Pick<BriefSection, "data" | "refusal">): string | null {
+  const adapter = s.data ? stringOrNull(s.data.sourceAdapter) : null;
+  if (adapter) return adapter;
+  if (s.refusal && s.refusal.producer) return s.refusal.producer;
+  return s.data ? stringOrNull(s.data.provenance) : null;
+}
+
+/** Date only: the leading YYYY-MM-DD of an ISO instant; any other string prints as it arrived. */
+export function dateOnly(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(iso.trim());
+  return m && m[1] ? m[1] : iso.trim();
+}
+
+export function stateWord(state: CellState): string {
+  return STATE_WORDS[state];
+}
+
+/** F1: one control per https citation, posting ui/open-link on click; degraded prints the text and never a link. */
+export function citationHtml(citations: string[], degraded: boolean): string {
+  if (degraded) return `<span class="cite-deg" data-cite-degraded="1">${CITATION_DEGRADED}</span>`;
+  const safe: string[] = [];
+  for (const c of citations) if (typeof c === "string" && /^https:\/\//i.test(c)) safe.push(c);
+  return safe
+    .map(
+      (u, i) =>
+        `<button type="button" class="cite" data-act="cite" data-url="${escapeHtml(u)}" onclick="window.__ss&&window.__ss.cite(this)">citation${safe.length > 1 ? ` ${i + 1}` : ""}</button>`,
+    )
+    .join(" ");
+}
+
+/** P1: a control only on unknown, refused or unread; the draft is built on click from the model, never stored in the DOM. */
+export function whyControlHtml(
+  kind: "rail" | "overlay" | "section",
+  paint: CellState,
+  ref: Record<string, string>,
+  inner?: string,
+): string {
+  if (paint === "present" || paint === "absent-verified") return "";
+  let attrs = "";
+  for (const k of Object.keys(ref)) attrs += ` data-why-${k}="${escapeHtml(ref[k])}"`;
+  return `<button type="button" class="${inner ? "cell" : "ask"}" data-act="why" data-why-kind="${kind}"${attrs} onclick="window.__ss&&window.__ss.why(this)">${inner ? inner : WHY_LABEL}</button>`;
+}
+
+export function reasonLineHtml(key: string, text: string, attr?: string): string {
+  return `<span class="why"${attr ? ` ${attr}` : ""}><span class="key">${escapeHtml(key)}</span> <span class="reason">${escapeHtml(text)}</span></span>`;
+}
+
+/** F6: as-of (date only) and source when the wire carries them; vintage and provenance for an overlay. */
+export function metaHtml(
+  asOf: string | null,
+  source: string | null,
+  vintage?: string | null,
+  provenance?: string | null,
+): string {
+  const bits: string[] = [];
+  const d = dateOnly(asOf);
+  if (d) bits.push(`<span data-as-of="${escapeHtml(d)}"><span class="key">as of</span> ${escapeHtml(d)}</span>`);
+  if (source) bits.push(`<span data-source="${escapeHtml(source)}"><span class="key">source</span> ${escapeHtml(source)}</span>`);
+  if (vintage) bits.push(`<span data-vintage="${escapeHtml(vintage)}"><span class="key">vintage</span> ${escapeHtml(vintage)}</span>`);
+  if (provenance) bits.push(`<span data-provenance="${escapeHtml(provenance)}"><span class="key">provenance</span> ${escapeHtml(provenance)}</span>`);
+  return bits.length ? `<span class="meta">${bits.join(" ")}</span>` : "";
+}
+
+/** One overlay row: the paint state (F5), citations (F1), vintage and provenance, the why control (P1). Spans only, no nested div. */
+export function overlayRowHtml(o: OverlayRow, i: number): string {
+  const p = overlayPaint(o);
+  const extra = o.id === "flood" ? " flood" : p.paint === "refused" ? " refused" : "";
+  const shown = envelopeHuman(o.reason);
+  const why = shown ? reasonLineHtml("reason", shown) : "";
+  const note = p.paintReason ? reasonLineHtml("note", p.paintReason, `data-paint-reason="${escapeHtml(p.paintReason)}"`) : "";
+  const citations = o.citations ? o.citations : [];
+  const degraded = o.citationsDegraded === true || (p.paint === "present" && citations.length === 0);
+  const cites = citationHtml(citations, degraded);
+  const ask = whyControlHtml("overlay", p.paint, { i: String(i) });
+  return `<div class="ovl${extra}" data-overlay="${escapeHtml(o.id)}" data-paint="${p.paint}"><span class="g ${glyphClass(p.paint)}" title="${stateWord(p.paint)}"></span> <span class="key">${escapeHtml(o.id)}</span> <span class="lbl">${escapeHtml(o.label)}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(null, null, o.vintage, o.provenance)}${why}${note}</div>`;
+}
+
+/** F2: the flood row under the drawing, every value read off the flood section's data; a non-present section prints its state. */
+export function floodFactsHtml(s: BriefSection, i: number): string {
+  const head = `<span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="key">flood</span> <span class="lbl">${escapeHtml(s.title)}</span>`;
+  const meta = metaHtml(s.asOf, sourceOf(s));
+  const cites = citationHtml(s.citations, s.citationsDegraded);
+  const ask = whyControlHtml("section", s.paint, { i: String(i) });
+  const reason = s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+  const why = reason ? reasonLineHtml("reason", reason) : "";
+  const note = s.paintReason ? reasonLineHtml("note", s.paintReason, `data-paint-reason="${escapeHtml(s.paintReason)}"`) : "";
+  if (s.paint !== "present") {
+    return `<div class="facts flood" data-flood-state="${s.paint}">${head} <span class="sw">${stateWord(s.paint)}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${meta}${why}${note}</div>`;
+  }
+  const d: Record<string, unknown> = s.data ? s.data : {};
+  const str = (k: string): string => stringOrNull(d[k]) ?? UNSTATED;
+  const sfha = d.inSpecialFloodHazardArea === true ? "yes" : d.inSpecialFloodHazardArea === false ? "no" : UNSTATED;
+  const bfe = numberOrNull(d.baseFloodElevation);
+  /* data-fact-*, not data-flood-*: the drawing already owns data-flood-zone and data-flood-tint (D4) */
+  const kv = (k: string, v: string, attr: string): string =>
+    `<span class="kv" data-fact-${attr}="${escapeHtml(v)}"><span class="key">${k}</span> ${escapeHtml(v)}</span>`;
+  const rows = [
+    kv("zone", str("floodZone"), "zone"),
+    kv("subtype", str("zoneSubtype"), "subtype"),
+    kv("SFHA", sfha, "sfha"),
+    kv("base flood elevation", bfe === null ? BFE_NONE : String(bfe), "bfe"),
+    kv("source adapter", str("sourceAdapter"), "adapter"),
+    kv("source vintage", str("sourceVintage"), "vintage"),
+    kv("evaluated at", dateOnly(stringOrNull(d.evaluatedAt)) ?? UNSTATED, "evaluated"),
+  ].join(" ");
+  const summary = s.zoneExposureSummary
+    ? `<div class="fsum" data-zone-exposure="1">${escapeHtml(s.zoneExposureSummary)}</div>`
+    : "";
+  return `<div class="facts flood" data-flood-state="present">${head}${cites ? ` ${cites}` : ""}${meta}<div class="kvs">${rows}</div>${summary}${why}${note}</div>`;
+}
+
+/** R1 (fork 3.1 narrow): every section in wire order with title, glyph and word, as-of, source, citation control, guidance. No values, no prose. */
+export function reportHtml(sections: BriefSection[]): string {
+  if (sections.length === 0) return `<div class="report" data-report="1"><p class="empty">${NO_BRIEF}</p></div>`;
+  const rows = sections
+    .map((s, i) => {
+      const reason = s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+      const cites = citationHtml(s.citations, s.citationsDegraded);
+      const ask = whyControlHtml("section", s.paint, { i: String(i) });
+      const note = s.paintReason ? reasonLineHtml("note", s.paintReason, `data-paint-reason="${escapeHtml(s.paintReason)}"`) : "";
+      const guide = s.agentGuidance ? `<div class="guide" data-agent-guidance="1">${escapeHtml(s.agentGuidance)}</div>` : "";
+      return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${stateWord(s.paint)}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
+    })
+    .join("");
+  return `<div class="report" data-report="1"><div class="req">${REPORT_TOGGLE}</div>${rows}</div>`;
+}
+
+/** C1: the Save control is a chooser; each status is a button carrying the enum word. */
+export function saveChooserHtml(): string {
+  let buttons = "";
+  for (const s of SAVE_STATUSES) {
+    buttons += ` <button type="button" class="btn" data-act="save" data-status="${s}" onclick="window.__ss&&window.__ss.save(this)">${s}</button>`;
+  }
+  return `<span class="savegrp" data-save-chooser="1"><span class="key">${SAVE_LABEL}</span>${buttons}</span>`;
+}
+
+export function pairedSection(model: Pick<PanelModel, "sections">, overlayId: string): BriefSection | null {
+  const id = SECTION_FOR_OVERLAY[overlayId];
+  if (!id) return null;
+  for (const s of model.sections ? model.sections : []) if (s.id === id) return s;
+  return null;
+}
+
+export type WhyQuestion = {
+  field: string;
+  state: CellState;
+  parcelNodeId: string;
+  label: string | null;
+  reason: string | null;
+  producer: string | null;
+  code: string | null;
+};
+
+/**
+ * P1: the question behind a why click. Null for a present or verified cell,
+ * for a rail or node the board does not carry, and for an index off the
+ * model, so a forged control drafts nothing. Every slot is a field from the
+ * result or null; the fallback words live in whyMessage.
+ */
+export function whyQuestion(
+  model: PanelModel,
+  kind: string | null,
+  ref: { i?: string | null; rail?: string | null; node?: string | null },
+): WhyQuestion | null {
+  if (kind === "rail") {
+    const node = ref.node ? ref.node : null;
+    const rail = ref.rail ? ref.rail : null;
+    if (!node || !rail || (RAILS as readonly string[]).indexOf(rail) < 0) return null;
+    let row: BoardRow | null = null;
+    for (const r of model.rows) {
+      if (r.parcelNodeId === node) {
+        row = r;
+        break;
+      }
+    }
+    if (!row) return null;
+    const state = row.rails[rail as RailName];
+    if (state === "present" || state === "absent-verified") return null;
+    return { field: rail, state, parcelNodeId: node, label: row.query, reason: null, producer: null, code: null };
+  }
+  if (!model.parcelNodeId) return null;
+  const label = model.label && model.label !== model.parcelNodeId ? model.label : null;
+  const i = ref.i == null || ref.i === "" ? -1 : Number(ref.i);
+  if (kind === "overlay") {
+    const o = i >= 0 ? model.overlays[i] : undefined;
+    if (!o) return null;
+    const p = overlayPaint(o).paint;
+    if (p === "present" || p === "absent-verified") return null;
+    const sec = pairedSection(model, o.id);
+    const r = sec && sec.refusal ? sec.refusal : null;
+    const reason = o.reason ? o.reason : r && r.reason ? r.reason : null;
+    const producer = r && r.producer ? r.producer : o.provenance ? o.provenance : null;
+    const code = r && r.code ? r.code : r && r.declineReason ? r.declineReason : null;
+    return { field: o.id, state: p, parcelNodeId: model.parcelNodeId, label, reason, producer, code };
+  }
+  if (kind === "section") {
+    const sections = model.sections ? model.sections : [];
+    const s = i >= 0 ? sections[i] : undefined;
+    if (!s) return null;
+    if (s.paint === "present" || s.paint === "absent-verified") return null;
+    const r = s.refusal ? s.refusal : null;
+    const reason = s.reason ? s.reason : r && r.reason ? r.reason : null;
+    const producer = r && r.producer ? r.producer : null;
+    const code = r && r.code ? r.code : r && r.declineReason ? r.declineReason : null;
+    return { field: s.id, state: s.paint, parcelNodeId: model.parcelNodeId, label, reason, producer, code };
+  }
+  return null;
+}
+
+export function whyMessage(q: WhyQuestion): string {
+  const who = q.label ? `${q.parcelNodeId} (${q.label})` : q.parcelNodeId;
+  return `${WHY_TURN_OPENER} ${q.field} ${q.state} for ${who}? The record says: ${q.reason ? q.reason : WHY_NO_REASON}; producer ${q.producer ? q.producer : UNSTATED}; code ${q.code ? q.code : UNSTATED}. ${WHY_TURN_INSTRUCTION}`;
+}
+
+export function saveMessage(node: string, status: string): string {
+  return `${SAVE_LABEL} ${node} with save_property, status ${status}. Do not change any screen.`;
+}
+
+export function addToScreenMessage(neighbor: string): string {
+  return `Add ${neighbor} to the screen this parcel was opened from with add_to_screen, source walk. Do not save it.`;
+}
+
+/** Sections in wire order. A section with no id names nothing and is skipped; every field is read or left null. */
+function sectionsFromBrief(host: Record<string, unknown>): BriefSection[] {
+  const brief = asRecord(host.brief);
+  const raw = brief && Array.isArray(brief.sections) ? brief.sections : [];
+  const out: BriefSection[] = [];
+  for (const item of raw) {
+    const rec = asRecord(item);
+    if (!rec) continue;
+    const id = stringOrNull(rec.id);
+    if (!id) continue;
+    const disposition = stringOrNull(rec.disposition) ?? "unstated";
+    const asOf = stringOrNull(rec.asOf);
+    const data = asRecord(rec.data);
+    const citations = httpsCitations(rec.citations);
+    const painted = sectionPaint(disposition, asOf, data);
+    const section: BriefSection = {
+      id,
+      title: stringOrNull(rec.title) ?? id,
+      disposition,
+      asOf,
+      data,
+      citations,
+      citationsDegraded: rec.citationsDegraded === true || (disposition === "present" && citations.length === 0),
+      paint: painted.paint,
+    };
+    const reason = stringOrNull(rec.reason);
+    if (reason) section.reason = reason;
+    const refusal = refusalFrom(rec.refusal);
+    if (refusal) section.refusal = refusal;
+    const summary = stringOrNull(rec.zoneExposureSummary);
+    if (summary) section.zoneExposureSummary = summary;
+    const guidance = stringOrNull(rec.agentGuidance);
+    if (guidance) section.agentGuidance = guidance;
+    if (painted.paintReason) section.paintReason = painted.paintReason;
+    out.push(section);
+  }
+  return out;
+}
+
 export function renderParcelDraw(
-  model: Pick<PanelModel, "ring" | "edges" | "overlays" | "label" | "parcelNodeId" | "zoning" | "frame">,
+  model: Pick<PanelModel, "ring" | "edges" | "overlays" | "label" | "parcelNodeId" | "zoning" | "frame" | "sections">,
 ): string {
   const node = model.parcelNodeId
     ? `<div class="pn atom">${escapeHtml(model.parcelNodeId)}</div>`
@@ -523,17 +937,17 @@ export function renderParcelDraw(
         .map((e) => `<li>${escapeHtml(edgeCaption(e))}</li>`)
         .join("")}</ul>`
     : "";
-  const rows = model.overlays
-    .map((o) => {
-      const extra = o.id === "flood" ? " flood" : o.state === "refused" ? " refused" : "";
-      const shown = envelopeHuman(o.reason);
-      const why = shown
-        ? `<span class="why"><span class="key">reason</span> <span class="reason">${escapeHtml(shown)}</span></span>`
-        : "";
-      return `<div class="ovl${extra}"><span class="g ${glyphClass(railState(o.state))}"></span> <span class="key">${escapeHtml(o.id)}</span> <span class="lbl">${escapeHtml(o.label)}</span>${why}</div>`;
-    })
-    .join("");
-  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${svg}${tip}${edgeList}${rows}`;
+  const rows = model.overlays.map((o, i) => overlayRowHtml(o, i)).join("");
+  const sections = model.sections ?? [];
+  let floodFacts = "";
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    if (s && s.id === "flood") {
+      floodFacts = floodFactsHtml(s, i);
+      break;
+    }
+  }
+  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${svg}${tip}${edgeList}${rows}${floodFacts}`;
 }
 
 function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
@@ -551,6 +965,17 @@ function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
     if (typeof rec.sfha === "boolean") row.sfha = rec.sfha;
     const drawKind = stringOrNull(rec.draw);
     if (drawKind) row.draw = drawKind;
+    /* F5 F1: provenance, vintage and https citations as the wire carries them */
+    const provenance = stringOrNull(rec.provenance);
+    if (provenance) row.provenance = provenance;
+    const vintage = stringOrNull(rec.vintage);
+    if (vintage) row.vintage = vintage;
+    const citations = httpsCitations(rec.citations);
+    if (citations.length > 0) row.citations = citations;
+    if (rec.citationsDegraded === true) row.citationsDegraded = true;
+    const painted = overlayPaint(row);
+    row.paint = painted.paint;
+    if (painted.paintReason) row.paintReason = painted.paintReason;
     rows.push(row);
   }
   return rows;
@@ -689,10 +1114,13 @@ export function parseToolResult(text: string): PanelModel {
       parcelNodeId,
       label,
     };
-    const zoning = zoningFromDraw(parcelDraw, draw ? rec : (firstParcel ?? rec));
+    const host = draw ? rec : (firstParcel ?? rec);
+    const zoning = zoningFromDraw(parcelDraw, host);
     if (zoning) model.zoning = zoning;
     const frame = frameFromDraw(parcelDraw);
     if (frame) model.frame = frame;
+    const sections = sectionsFromBrief(host);
+    if (sections.length > 0) model.sections = sections;
     return model;
   }
 
@@ -782,6 +1210,30 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   scaleBarFt,
   ringSvg,
   frameNoteHtml,
+  /* S7 facts and actions */
+  glyphClass,
+  knownVintage,
+  httpsCitations,
+  overlayPaint,
+  refusalFrom,
+  sectionPaint,
+  sourceOf,
+  dateOnly,
+  stateWord,
+  citationHtml,
+  whyControlHtml,
+  reasonLineHtml,
+  metaHtml,
+  overlayRowHtml,
+  floodFactsHtml,
+  reportHtml,
+  saveChooserHtml,
+  pairedSection,
+  whyQuestion,
+  whyMessage,
+  saveMessage,
+  addToScreenMessage,
+  sectionsFromBrief,
 ];
 
 export function inlineSharedSource(): string {
@@ -987,6 +1439,27 @@ export function htmlContractViolations(html: string): string[] {
   if (!html.includes('method:"ui/open-link"')) {
     violations.push("open_link_unbound");
   }
+  /* S7: each item's mechanism must be present in the served script, or the item is a claim */
+  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(CITATION_DEGRADED)) {
+    violations.push("citation_link_unbound");
+  }
+  if (
+    !html.includes('data-act="why"') ||
+    !html.includes("function sendWhy") ||
+    !html.includes(WHY_TURN_OPENER) ||
+    !html.includes(WHY_TURN_INSTRUCTION)
+  ) {
+    violations.push("why_turn_unbound");
+  }
+  if (!html.includes('data-act="save"') || SAVE_STATUSES.some((s) => !html.includes(`"${s}"`))) {
+    violations.push("save_statuses_unbound");
+  }
+  if (!html.includes('data-act="report"') || !html.includes("function toggleReport")) {
+    violations.push("report_toggle_unbound");
+  }
+  if (!html.includes('data-act="addscreen"') || !html.includes("add_to_screen") || !html.includes("function sendAddToScreen")) {
+    violations.push("add_to_screen_unbound");
+  }
   const boundCopy = [
     NOTHING_TO_OPEN,
     OPEN_DID_NOT_REACH_ME,
@@ -1094,6 +1567,24 @@ svg.ring .sm{fill:var(--ss-t6)}
 .miss:last-child{border-bottom:none}
 .miss b{display:block;color:var(--ss-t3);font-weight:650;margin:0 0 4px}
 .boot{font:var(--ss-fs-meta)/1.3 ui-monospace,Consolas,monospace;color:var(--ss-t5);padding:2px 10px;flex:0 0 auto;white-space:normal;word-break:break-word}
+.cite{font:var(--ss-fs-meta)/1.2 ui-monospace,Consolas,monospace;border:1px solid var(--ss-line-14);background:var(--ss-raised);color:var(--ss-blue);border-radius:6px;padding:1px 6px;cursor:pointer;text-decoration:underline}
+.cite-deg{font:var(--ss-fs-meta)/1.2 ui-monospace,Consolas,monospace;color:var(--ss-slate)}
+.ask{font:var(--ss-fs-meta)/1.2 ui-monospace,Consolas,monospace;border:1px dashed var(--ss-line-14);background:transparent;color:var(--ss-t5);border-radius:6px;padding:1px 6px;cursor:pointer}
+.ask:hover,.cite:hover{filter:brightness(1.08)}
+.cell{border:none;background:transparent;padding:0;margin:0;cursor:pointer;font:inherit}
+.meta{display:block;font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin-top:2px}
+.meta span{margin-right:10px}
+.sw{color:var(--ss-t5);font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace}
+.facts{padding:8px 0;border-top:1px solid var(--ss-line-06);margin-top:6px}
+.kvs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace}
+.fsum{color:var(--ss-t5);margin-top:4px}
+.report{margin-top:10px;border-top:1px solid var(--ss-line-14);padding-top:8px}
+.rsec{padding:6px 0;border-bottom:1px solid var(--ss-line-06)}
+.rsec:last-child{border-bottom:none}
+.rt{font-weight:500}
+.guide{color:var(--ss-t5);font-size:var(--ss-fs-meta);margin-top:2px}
+.savegrp{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;margin-right:auto}
+.btn.on{border-color:var(--ss-blue);color:var(--ss-blue)}
 </style>
 </head>
 <body>
@@ -1131,6 +1622,23 @@ svg.ring .sm{fill:var(--ss-t6)}
   var UNIT_REFERENCE=${JSON.stringify(UNIT_REFERENCE)};
   var SCALE_BAR_FT=${JSON.stringify(SCALE_BAR_FT)};
   var ZONE_TINT=${JSON.stringify(ZONE_TINT)};
+  var CITATION_DEGRADED=${JSON.stringify(CITATION_DEGRADED)};
+  var AS_OF_MISSING=${JSON.stringify(AS_OF_MISSING)};
+  var ABSENCE_UNVERIFIED=${JSON.stringify(ABSENCE_UNVERIFIED)};
+  var DISPOSITION_UNSTATED=${JSON.stringify(DISPOSITION_UNSTATED)};
+  var BFE_NONE=${JSON.stringify(BFE_NONE)};
+  var UNSTATED=${JSON.stringify(UNSTATED)};
+  var WHY_NO_REASON=${JSON.stringify(WHY_NO_REASON)};
+  var WHY_TURN_OPENER=${JSON.stringify(WHY_TURN_OPENER)};
+  var WHY_TURN_INSTRUCTION=${JSON.stringify(WHY_TURN_INSTRUCTION)};
+  var WHY_LABEL=${JSON.stringify(WHY_LABEL)};
+  var SAVE_STATUSES=${JSON.stringify(SAVE_STATUSES)};
+  var SAVE_LABEL=${JSON.stringify(SAVE_LABEL)};
+  var ADD_TO_SCREEN_LABEL=${JSON.stringify(ADD_TO_SCREEN_LABEL)};
+  var REPORT_TOGGLE=${JSON.stringify(REPORT_TOGGLE)};
+  var NO_BRIEF=${JSON.stringify(NO_BRIEF)};
+  var STATE_WORDS=${JSON.stringify(STATE_WORDS)};
+  var SECTION_FOR_OVERLAY=${JSON.stringify(SECTION_FOR_OVERLAY)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
@@ -1144,6 +1652,8 @@ ${inlineSharedSource()}
   var listingAck=null;
   var hotEl=null;
   var pinnedEl=null;
+  /* R1: local view state (I8). Reset on every accepted result; never read from anywhere. */
+  var reportOpen=false;
   var rpcId=1;
   var initId=rpcId++;
   var ready=false;
@@ -1299,25 +1809,28 @@ ${inlineSharedSource()}
         var open=r.parcelNodeId
           ?'<button type="button" class="btn" data-act="open" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
           :'<div class="slot">'+${JSON.stringify(NOTHING_TO_OPEN)}+"</div>";
-        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){return "<td>"+glyph(r.rails[k])+"</td>"}).join("")+"<td>"+open+"</td></tr>";
+        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){
+          var g=glyph(r.rails[k]);
+          var ask=r.parcelNodeId?whyControlHtml("rail",railState(r.rails[k]),{rail:k,node:r.parcelNodeId},g):"";
+          return "<td>"+(ask||g)+"</td>";
+        }).join("")+"<td>"+open+"</td></tr>";
       }).join("");
       var note=model.stubsDegraded===true?'<p class="note">'+${JSON.stringify(RAILS_PARTLY_UNREAD)}+"</p>":"";
       root.innerHTML=card("screen board",stateLines()+note+'<div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
         '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>");
     } else if(model.kind==="parcel"){
-      var ov=model.overlays.map(function(o){
-        var extra=o.id==="flood"?" flood":o.state==="refused"?" refused":"";
-        var shown=envelopeHuman(o.reason);
-        var why=shown?reasonLine(shown):"";
-        return '<div class="ovl'+extra+'">'+glyph(o.state)+' <span class="key">'+esc(o.id)+'</span> <span class="lbl">'+esc(o.label)+"</span>"+why+"</div>";
-      }).join("")||'<p class="empty">No overlays on this draw.</p>';
+      var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("")||'<p class="empty">No overlays on this draw.</p>';
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
       var flood=floodOverlayOf(model.overlays);
       var svg=ringSvg(model.ring||[],model.edges||[],{zoning:model.zoning||null,flood:flood,frame:model.frame||null});
       var tip=svg?'<div class="tip" data-tip="1">'+EDGE_TIP_HINT+"</div>"+frameNoteHtml(model.frame||null):"";
       var edgeList=(model.edges&&model.edges.length)?'<ul class="edges">'+model.edges.map(function(e){return "<li>"+esc(edgeCaption(e))+"</li>"}).join("")+"</ul>":"";
-      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+svg+tip+edgeList+ov+"</div>"+
-        '<div class="acts"><button type="button" class="btn" data-act="save" onclick="window.__ss&&window.__ss.save()">Save property</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
+      var secs=model.sections||[];
+      var floodFacts="";
+      for(var fi=0;fi<secs.length;fi++){ if(secs[fi].id==="flood"){ floodFacts=floodFactsHtml(secs[fi],fi); break; } }
+      var report=reportOpen?reportHtml(secs):"";
+      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+svg+tip+edgeList+ov+floodFacts+report+"</div>"+
+        '<div class="acts">'+saveChooserHtml()+'<button type="button" class="btn'+(reportOpen?" on":"")+'" data-act="report" data-report-open="'+(reportOpen?"1":"0")+'" onclick="window.__ss&&window.__ss.report()">'+REPORT_TOGGLE+'</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
       var listing=root.querySelector('[data-act="listing"]');
       if(listing&&listingAck){
         listing.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
@@ -1386,10 +1899,40 @@ ${inlineSharedSource()}
     },${OPEN_DEAD_MS});
     host.sendMessage(openParcelMessage(node));
   }
-  function sendSave(){
-    if(model.parcelNodeId) host.sendMessage("Save property "+model.parcelNodeId+" with save_property. Do not change any screen.");
+  function attr(btn,name){
+    return btn&&typeof btn.getAttribute==="function"?btn.getAttribute(name):null;
   }
-  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,parse:parseToolResult};
+  /* C1: one draft per choice; a status off the enum drafts nothing; no saved state is read (I6). */
+  function sendSave(btn){
+    var status=attr(btn,"data-status");
+    if(!model.parcelNodeId||!status||SAVE_STATUSES.indexOf(status)<0) return;
+    host.sendMessage(saveMessage(model.parcelNodeId,status));
+  }
+  /* F1: the control's own https url, through the same ui/open-link path as the district. */
+  function sendCite(btn){
+    var url=attr(btn,"data-url");
+    if(!url||String(url).slice(0,8).toLowerCase()!=="https://") return;
+    openLink(url);
+  }
+  /* P1: a question, not an Open: same sendMessage path, no timer, no ack. */
+  function sendWhy(btn){
+    var q=whyQuestion(model,attr(btn,"data-why-kind"),{i:attr(btn,"data-why-i"),rail:attr(btn,"data-why-rail"),node:attr(btn,"data-why-node")});
+    if(!q) return;
+    host.sendMessage(whyMessage(q));
+  }
+  /* C2: the neighbor the door names; the screen id stays with Claude. */
+  function sendAddToScreen(btn){
+    var node=attr(btn,"data-node");
+    if(!node) return;
+    host.sendMessage(addToScreenMessage(node));
+  }
+  /* R1: local toggle (I8); render posts size-changed and nothing else. */
+  function toggleReport(){
+    if(model.kind!=="parcel") return;
+    reportOpen=!reportOpen;
+    render();
+  }
+  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,parse:parseToolResult};
   document.body.addEventListener("click",function(ev){
     var el=ev.target;
     if(!el||!el.closest) return;
@@ -1405,6 +1948,7 @@ ${inlineSharedSource()}
     openWait=null;
     openFail=null;
     openSent=null;
+    reportOpen=false;
     model=parseToolContent(result);
     render();
   }

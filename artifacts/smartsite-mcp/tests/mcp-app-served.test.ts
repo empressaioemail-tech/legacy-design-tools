@@ -253,6 +253,114 @@ const GOLD_PDD = goldWith((d) => {
   d.attrs = { zoning: { v: "PDD", jurisdiction: "bastrop_city_tx", state: "present" } };
 });
 
+/*
+ * P-91 v2 facts and actions (S7). Brief sections in the p543/p558 wire shape
+ * (r1BriefCompose: id, title, data, citations, asOf, disposition, reason,
+ * refusal, citationsDegraded, zoneExposureSummary, agentGuidance; the MCP
+ * normalizer keeps an explicit disposition) and overlays carrying the F5
+ * provenance/vintage pair. Ids, districts, flood zones, SFHA flags, the
+ * NFHL vintage label and the refusal codes are the fixture doc's and the
+ * producers' own enums. Every asOf instant, adapter name, elevation,
+ * citation URL and neighbor id below is a SYNTHETIC test input, never a
+ * parcel fact: the tests assert that what is painted equals what is on the
+ * wire, and that nothing is painted that is not.
+ */
+const ZONING_URL_2 = "https://gis.example.test/second";
+const FLOOD_URL = "https://msc.example.test/nfhl/48021";
+const PIPE_URL = "https://rrc.example.test/pipelines/48021";
+const AS_OF = "2026-08-29T10:00:00.000Z";
+const ENVELOPE_REFUSAL = {
+  state: "refused",
+  code: "declined-in-bake",
+  producer: "baked-envelope-facet",
+  supersededBy: "buildable-envelope",
+  declineReason: "no-zoning-stamp",
+  reason: "Buildable envelope was declined in bake: no-zoning-stamp.",
+};
+const ENVELOPE_GUIDANCE = "Setbacks and buildable envelope are refused on this read path. Do not invent distances or polygons.";
+const DRAINAGE_REASON = "drainage facet not produced for this parcel";
+const FLOOD_DATA_GOLD = {
+  state: "present",
+  inSpecialFloodHazardArea: false,
+  floodZone: "X",
+  zoneSubtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+  baseFloodElevation: null,
+  sourceAdapter: "adapter:flood-test",
+  sourceVintage: "NFHL_48_20260101",
+  evaluatedAt: AS_OF,
+};
+const FLOOD_DATA_49295 = { ...FLOOD_DATA_GOLD, inSpecialFloodHazardArea: true, floodZone: "AE", zoneSubtype: "FLOODWAY", baseFloodElevation: 372.5 };
+const FLOOD_SUMMARY = "Zone X shaded: outside the SFHA; 0.2 percent annual chance.";
+const SECTION_ZONING = {
+  id: "zoning",
+  title: "Zoning",
+  disposition: "present",
+  data: { district: "SF-1", sourceAdapter: "adapter:zoning-test" },
+  citations: ["http://plain.example.test/first", ZONING_URL, ZONING_URL_2],
+  asOf: AS_OF,
+};
+const SECTION_ENVELOPE = {
+  id: "setbacks-envelope",
+  title: "Setbacks and buildable envelope",
+  disposition: "refused",
+  data: null,
+  refusal: ENVELOPE_REFUSAL,
+  citations: [],
+  asOf: AS_OF,
+  agentGuidance: ENVELOPE_GUIDANCE,
+};
+const SECTION_FLOOD = { id: "flood", title: "Flood hazard", disposition: "present", data: FLOOD_DATA_GOLD, citations: [], asOf: AS_OF, citationsDegraded: true, zoneExposureSummary: null };
+const SECTION_LAND_USE = {
+  id: "land-use",
+  title: "Land use",
+  disposition: "absent",
+  data: { state: "absent", sourceAdapter: "adapter:landuse-test", sourceVintage: "2026-07" },
+  citations: [],
+  asOf: AS_OF,
+};
+const SECTION_DRAINAGE = { id: "drainage", title: "Drainage", disposition: "unread", data: null, citations: [], asOf: AS_OF, reason: DRAINAGE_REASON };
+const FACTS_SECTIONS = [SECTION_ZONING, SECTION_ENVELOPE, SECTION_FLOOD, SECTION_LAND_USE, SECTION_DRAINAGE];
+const OVERLAY_PIPELINE = { id: "pipeline", label: "No pipeline within 500 ft", geom: "none", draw: "legend-only", state: "absent-verified", provenance: "present", vintage: "2026-06", citations: [PIPE_URL] };
+/* a stray claim: absent-verified with neither provenance nor vintage; the panel refuses to trust it (F5) */
+const OVERLAY_SPECIAL_DISTRICT = { id: "special-district", label: "No special district of record", geom: "none", draw: "legend-only", state: "absent-verified" };
+/* the writer already downgraded this one and said why */
+const OVERLAY_WELL = { id: "well", label: "Well record not verified", geom: "none", draw: "legend-only", state: "unknown", reason: "provenance unknown; vintage unknown" };
+const FACTS_OVERLAYS = [...GOLD_NODE.draw.overlays, OVERLAY_PIPELINE, OVERLAY_SPECIAL_DISTRICT, OVERLAY_WELL];
+function factsWith(mutate: (draw: Json, body: Json) => void): Json {
+  return goldWith((d, b) => {
+    b.brief = { sections: clone(FACTS_SECTIONS) };
+    d.overlays = clone(FACTS_OVERLAYS);
+    mutate(d, b);
+  });
+}
+const GOLD_FACTS = factsWith(() => {});
+const GOLD_FACTS_NO_ASOF = factsWith((_d, b) => {
+  delete ((b.brief as Json).sections as Json[])[0]!.asOf;
+});
+const GOLD_FACTS_VINTAGE_ONLY = factsWith((d) => {
+  (d.overlays as Json[])[4] = { ...OVERLAY_SPECIAL_DISTRICT, vintage: "2026-05" };
+});
+const GOLD_FACTS_DEGRADED = factsWith((d) => {
+  (d.overlays as Json[])[4] = { ...OVERLAY_SPECIAL_DISTRICT, provenance: "degraded", vintage: "UNKNOWN", reason: "provenance degraded; vintage unknown" };
+});
+const GOLD_FACTS_FLOOD_SUMMARY = factsWith((_d, b) => {
+  ((b.brief as Json).sections as Json[])[2] = { ...SECTION_FLOOD, citations: [FLOOD_URL], citationsDegraded: false, zoneExposureSummary: FLOOD_SUMMARY };
+});
+const GOLD_FACTS_FLOOD_UNREAD = factsWith((_d, b) => {
+  ((b.brief as Json).sections as Json[])[2] = { id: "flood", title: "Flood hazard", disposition: "unread", data: null, citations: [], asOf: AS_OF, reason: "flood facet not read" };
+});
+const GOLD_FACTS_FLOOD_ABSENT = factsWith((_d, b) => {
+  ((b.brief as Json).sections as Json[])[2] = { id: "flood", title: "Flood hazard", disposition: "absent", data: { state: "absent", sourceAdapter: "adapter:flood-test", sourceVintage: "NFHL_48_20260101" }, citations: [], asOf: AS_OF };
+});
+const GOLD_FACTS_FLOOD_ABSENT_NO_VINTAGE = factsWith((_d, b) => {
+  ((b.brief as Json).sections as Json[])[2] = { id: "flood", title: "Flood hazard", disposition: "absent", data: { state: "absent", sourceAdapter: "adapter:flood-test" }, citations: [], asOf: AS_OF };
+});
+const NODE_49295_FACTS = {
+  ...NODE_49295,
+  brief: { sections: [{ ...SECTION_ZONING, citations: [ZONING_URL] }, SECTION_ENVELOPE, { ...SECTION_FLOOD, data: FLOOD_DATA_49295 }, SECTION_LAND_USE, SECTION_DRAINAGE] },
+};
+const SAVE_STATUSES = ["New", "Watching", "Chasing", "Passed"];
+
 const STUB_SIX = {
   situs: "present",
   zoning: "present",
@@ -348,6 +456,24 @@ const PARITY: Record<string, unknown> = {
   frameNotObject: { parcelNodeId: "48021:1", draw: { ...GOLD_NODE.draw, frame: "ft" } },
   sfhaString: { parcelNodeId: "48021:1", draw: { ...GOLD_NODE.draw, overlays: [{ id: "flood", state: "present", label: "Zone A", sfha: "true", draw: "tint-ring" }] } },
   drawNumber: { parcelNodeId: "48021:1", draw: { ...GOLD_NODE.draw, overlays: [{ id: "flood", state: "present", label: "Zone A", sfha: true, draw: 4 }] } },
+  /* v2 facts and actions shapes (S7) */
+  goldFacts: GOLD_FACTS,
+  goldFactsNoAsOf: GOLD_FACTS_NO_ASOF,
+  goldFactsVintageOnly: GOLD_FACTS_VINTAGE_ONLY,
+  goldFactsDegraded: GOLD_FACTS_DEGRADED,
+  goldFactsFloodSummary: GOLD_FACTS_FLOOD_SUMMARY,
+  goldFactsFloodUnread: GOLD_FACTS_FLOOD_UNREAD,
+  goldFactsFloodAbsent: GOLD_FACTS_FLOOD_ABSENT,
+  goldFactsFloodAbsentNoVintage: GOLD_FACTS_FLOOD_ABSENT_NO_VINTAGE,
+  node49295Facts: NODE_49295_FACTS,
+  sectionNoId: { ...GOLD_NODE, brief: { sections: [{ disposition: "present", data: {}, asOf: AS_OF }] } },
+  sectionNotObject: { ...GOLD_NODE, brief: { sections: ["zoning", 4, null] } },
+  refusalNotObject: { ...GOLD_NODE, brief: { sections: [{ ...SECTION_ENVELOPE, refusal: "nope" }] } },
+  dataNotObject: { ...GOLD_NODE, brief: { sections: [{ ...SECTION_FLOOD, data: "x" }] } },
+  asOfNumber: { ...GOLD_NODE, brief: { sections: [{ ...SECTION_ZONING, asOf: 5 }] } },
+  dispositionJunk: { ...GOLD_NODE, brief: { sections: [{ ...SECTION_ZONING, disposition: "Present" }] } },
+  provenanceNumber: { parcelNodeId: "48021:1", draw: { ...GOLD_NODE.draw, overlays: [{ ...OVERLAY_PIPELINE, provenance: 1, vintage: 2026, citations: "x" }] } },
+  citationsDegradedString: { parcelNodeId: "48021:1", draw: { ...GOLD_NODE.draw, overlays: [{ ...OVERLAY_PIPELINE, citationsDegraded: "true" }] } },
 };
 
 type FakeEvent = { type: string; target: FakeEl; currentTarget: FakeEl; preventDefault(): void };
@@ -653,7 +779,25 @@ function fresh() {
   const down = (i: number) => edge(i).dispatch("pointerdown");
   const district = () => root.querySelector("[data-zoning]");
   const openLinks = () => posted.filter((m) => m.method === "ui/open-link");
-  return { boot, root, posted, deliver, fire: fireMs, armed, text, init, toolResult, open, openButtons, sandbox, edges, edge, tip, tipText, hover, leave, down, district, openLinks };
+  /* v2 facts and actions handles (S7): every control is invoked through window.__ss with a painted element or a forged one */
+  const ss = () => sandbox.__ss as Record<string, (b?: unknown) => void>;
+  const btn = (attrs: Record<string, string>) => ({ getAttribute: (k: string) => (k in attrs ? (attrs[k] as string) : null) });
+  const messages = () => posted.filter((m) => m.method === "ui/message");
+  const lastText = () => {
+    const m = messages().pop();
+    const c = m?.params?.content as Array<{ text?: string }> | undefined;
+    return c?.[0]?.text ?? null;
+  };
+  const all = (sel: string) => root.querySelectorAll(sel);
+  /* the painted html between two markers; the fake DOM is flat, so a row's contents are read by slicing */
+  const segment = (from: string, to: string) => {
+    const html = root.innerHTML;
+    const a = html.indexOf(from);
+    if (a < 0) throw new Error(`no segment start ${from}`);
+    const b = html.indexOf(to, a + from.length);
+    return html.slice(a, b < 0 ? html.length : b);
+  };
+  return { boot, root, posted, deliver, fire: fireMs, armed, text, init, toolResult, open, openButtons, sandbox, edges, edge, tip, tipText, hover, leave, down, district, openLinks, ss, btn, messages, lastText, all, segment, strip };
 }
 
 function rowGlyphs(html: string, needle: string): string[] {
@@ -1276,5 +1420,436 @@ describe("P-91 v2 drawing (served)", () => {
     expect(noFrame.root.innerHTML).not.toContain("data-scale-ft");
     expect(noFrame.root.innerHTML).not.toContain("data-frame-quality");
     expect(noFrame.root.innerHTML).toContain('aria-label="parcel ring"');
+  });
+});
+
+/*
+ * Plan sentences for S7, literal on purpose (two derivations: the plan text
+ * here, the module constants there).
+ */
+const COPY2 = {
+  citationDegraded: "citation degraded",
+  asOfMissing: "as-of missing",
+  absenceUnverified: "absence unverified; no provenance on the wire",
+  bfeNone: "none on record",
+  addToScreen: "Add to screen",
+  report: "Report",
+  whyOpener: "Why is",
+  whyInstruction: "Answer from the record and the atom path; do not invent a value.",
+  noReason: "no reason on the wire",
+  unstated: "unstated",
+};
+const GOLD_LABEL = "908 PINE , BASTROP, TX 78602";
+
+describe("P-91 v2 facts and actions (served)", () => {
+  it("F1 citations: every https section or overlay citation is a control that posts ui/open-link with that URL; an http string never links; citationsDegraded paints the degraded text and opens nothing", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS);
+    /* overlay citation before the report is open */
+    const pipe = f.segment('data-overlay="pipeline"', "</div>");
+    expect(pipe).toContain(`data-act="cite" data-url="${PIPE_URL}"`);
+    /* the flood facts row is degraded: the text, never a link */
+    const floodRow = f.segment('<div class="facts flood"', "</div></div>");
+    expect(floodRow).toContain('data-cite-degraded="1"');
+    expect(floodRow).toContain(COPY2.citationDegraded);
+    expect(floodRow).not.toContain('data-act="cite"');
+    f.ss().report();
+    const zoning = f.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    expect(zoning).toContain(`data-act="cite" data-url="${ZONING_URL}"`);
+    expect(zoning).toContain(`data-act="cite" data-url="${ZONING_URL_2}"`);
+    expect(zoning).toContain(">citation 1</button>");
+    expect(zoning).toContain(">citation 2</button>");
+    expect(zoning).not.toContain(COPY2.citationDegraded);
+    expect(f.root.innerHTML).not.toContain("plain.example.test");
+    const urls = f.all('[data-act="cite"]').map((c) => c.getAttribute("data-url") ?? "");
+    expect(urls.every((u) => /^https:\/\//.test(u))).toBe(true);
+    expect(urls).toEqual(expect.arrayContaining([ZONING_URL, ZONING_URL_2, PIPE_URL]));
+    const before = f.posted.length;
+    const zoningCite = f.all('[data-act="cite"]').find((c) => c.getAttribute("data-url") === ZONING_URL);
+    expect(zoningCite).toBeDefined();
+    f.ss().cite(zoningCite);
+    expect(f.openLinks()).toHaveLength(1);
+    expect(f.openLinks()[0]).toEqual({ jsonrpc: "2.0", id: expect.any(Number), method: "ui/open-link", params: { url: ZONING_URL } });
+    expect(f.posted.length).toBe(before + 1);
+    expect(f.messages()).toHaveLength(0);
+    /* a forged control carrying an http url opens nothing */
+    f.ss().cite(f.btn({ "data-url": "http://plain.example.test/first" }));
+    f.ss().cite(f.btn({ "data-url": "javascript:alert(1)" }));
+    expect(f.openLinks()).toHaveLength(1);
+    /* a present section whose only citation is http is degraded, not linked */
+    const g = fresh();
+    g.init();
+    g.toolResult(factsWith((_d, b) => {
+      ((b.brief as Json).sections as Json[])[0] = { ...SECTION_ZONING, citations: ["http://plain.example.test/only"] };
+    }));
+    g.ss().report();
+    const gz = g.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    expect(gz).toContain(COPY2.citationDegraded);
+    expect(gz).not.toContain('data-act="cite"');
+    expect(g.root.innerHTML).not.toContain("plain.example.test");
+  });
+
+  it("F2 flood facts: zone, subtype, SFHA, base flood elevation or none on record, adapter, vintage and evaluated-at are each read from the section data; the summary prints only when on the wire; unread and absent print their state", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS);
+    const row = f.segment('<div class="facts flood"', "</div></div>");
+    expect(row).toContain('data-flood-state="present"');
+    expect(row).toContain('data-fact-zone="X"');
+    expect(row).toContain('data-fact-subtype="0.2 PCT ANNUAL CHANCE FLOOD HAZARD"');
+    expect(row).toContain('data-fact-sfha="no"');
+    expect(row).toContain(`data-fact-bfe="${COPY2.bfeNone}"`);
+    expect(row).toContain('data-fact-adapter="adapter:flood-test"');
+    expect(row).toContain('data-fact-vintage="NFHL_48_20260101"');
+    expect(row).toContain('data-fact-evaluated="2026-08-29"');
+    expect(row).not.toContain("T10:00");
+    expect(row).not.toContain("data-zone-exposure");
+    expect(f.text()).not.toContain(FLOOD_SUMMARY);
+    expect(f.strip(row)).toContain("as of 2026-08-29");
+    expect(f.strip(row)).toContain("source adapter:flood-test");
+    const ae = fresh();
+    ae.init();
+    ae.toolResult(NODE_49295_FACTS);
+    const aeRow = ae.segment('<div class="facts flood"', "</div></div>");
+    expect(aeRow).toContain('data-fact-zone="AE"');
+    expect(aeRow).toContain('data-fact-subtype="FLOODWAY"');
+    expect(aeRow).toContain('data-fact-sfha="yes"');
+    expect(aeRow).toContain('data-fact-bfe="372.5"');
+    expect(aeRow).toContain('data-fact-vintage="NFHL_48_20260101"');
+    expect(aeRow).not.toContain("data-zone-exposure");
+    expect(aeRow).toContain(COPY2.citationDegraded);
+    const s = fresh();
+    s.init();
+    s.toolResult(GOLD_FACTS_FLOOD_SUMMARY);
+    const sRow = s.segment('<div class="facts flood"', "</div></div>");
+    expect(sRow).toContain('data-zone-exposure="1"');
+    expect(s.strip(sRow)).toContain(FLOOD_SUMMARY);
+    expect(sRow).toContain(`data-act="cite" data-url="${FLOOD_URL}"`);
+    expect(sRow).not.toContain(COPY2.citationDegraded);
+    const u = fresh();
+    u.init();
+    u.toolResult(GOLD_FACTS_FLOOD_UNREAD);
+    const uRow = u.segment('<div class="facts flood"', "</div>");
+    expect(uRow).toContain('data-flood-state="unread"');
+    expect(uRow).toContain("g-unread");
+    expect(u.strip(uRow)).toContain("unread");
+    expect(u.strip(uRow)).toContain("flood facet not read");
+    expect(uRow).not.toContain("data-fact-zone");
+    expect(uRow).not.toContain(COPY2.bfeNone);
+    const a = fresh();
+    a.init();
+    a.toolResult(GOLD_FACTS_FLOOD_ABSENT);
+    const aRow = a.segment('<div class="facts flood"', "</div>");
+    expect(aRow).toContain('data-flood-state="absent-verified"');
+    expect(aRow).toContain("g-absent-verified");
+    expect(a.strip(aRow)).toContain("absent, verified");
+    expect(aRow).not.toContain("data-fact-zone");
+    const n = fresh();
+    n.init();
+    n.toolResult(GOLD_FACTS_FLOOD_ABSENT_NO_VINTAGE);
+    const nRow = n.segment('<div class="facts flood"', "</div>");
+    expect(nRow).toContain('data-flood-state="unknown"');
+    expect(n.strip(nRow)).toContain(COPY2.absenceUnverified);
+    /* S6's gold carries a flood section claiming present with no asOf and empty data: F6 fails it closed, and no value is invented */
+    const gold = fresh();
+    gold.init();
+    gold.toolResult(GOLD_NODE);
+    const goldRow = gold.segment('<div class="facts flood"', "</div>");
+    expect(goldRow).toContain('data-flood-state="unknown"');
+    expect(gold.strip(goldRow)).toContain(COPY2.asOfMissing);
+    expect(goldRow).not.toContain("data-fact-zone");
+    expect(goldRow).not.toContain(COPY2.bfeNone);
+    /* no brief: no facts row, and nothing invented for it */
+    const none = fresh();
+    none.init();
+    none.toolResult(GOLD_NO_BRIEF);
+    expect(none.root.innerHTML).not.toContain('<div class="facts flood"');
+    expect(none.root.innerHTML).not.toContain("data-fact-zone");
+  });
+
+  it("F5 verified means verified: an absent-verified overlay paints verified only with provenance present or a known vintage; otherwise unknown with the wire's reason, or the panel's note when the wire has none", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS);
+    const pipe = f.segment('data-overlay="pipeline"', "</div>");
+    expect(pipe).toContain('data-paint="absent-verified"');
+    expect(pipe).toContain("g-absent-verified");
+    expect(pipe).toContain('data-vintage="2026-06"');
+    expect(pipe).toContain('data-provenance="present"');
+    expect(pipe).not.toContain('data-act="why"');
+    const sd = f.segment('data-overlay="special-district"', "</div>");
+    expect(sd).toContain('data-paint="unknown"');
+    expect(sd).toContain("g-unknown");
+    expect(sd).not.toContain("g-absent-verified");
+    expect(sd).toContain(`data-paint-reason="${COPY2.absenceUnverified}"`);
+    expect(f.strip(sd)).toContain(COPY2.absenceUnverified);
+    expect(sd).toContain('data-act="why"');
+    const well = f.segment('data-overlay="well"', "</div>");
+    expect(well).toContain('data-paint="unknown"');
+    expect(f.strip(well)).toContain("provenance unknown; vintage unknown");
+    expect(well).not.toContain("data-paint-reason");
+    const v = fresh();
+    v.init();
+    v.toolResult(GOLD_FACTS_VINTAGE_ONLY);
+    const vsd = v.segment('data-overlay="special-district"', "</div>");
+    expect(vsd).toContain('data-paint="absent-verified"');
+    expect(vsd).toContain('data-vintage="2026-05"');
+    expect(vsd).not.toContain("data-paint-reason");
+    const d = fresh();
+    d.init();
+    d.toolResult(GOLD_FACTS_DEGRADED);
+    const dsd = d.segment('data-overlay="special-district"', "</div>");
+    expect(dsd).toContain('data-paint="unknown"');
+    expect(d.strip(dsd)).toContain("provenance degraded; vintage unknown");
+    expect(dsd).not.toContain("data-paint-reason");
+    expect(dsd).toContain('data-provenance="degraded"');
+  });
+
+  it("F6 as-of and source: a present section without asOf paints unknown with as-of missing; with asOf the row shows the date only and the source", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS_NO_ASOF);
+    f.ss().report();
+    const z = f.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    expect(z).toContain('data-report-state="unknown"');
+    expect(z).toContain("g-unknown");
+    expect(z).toContain(`data-paint-reason="${COPY2.asOfMissing}"`);
+    expect(f.strip(z)).toContain(COPY2.asOfMissing);
+    expect(z).not.toContain("data-as-of");
+    expect(z).toContain('data-act="why"');
+    const g = fresh();
+    g.init();
+    g.toolResult(GOLD_FACTS);
+    g.ss().report();
+    const gz = g.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    expect(gz).toContain('data-report-state="present"');
+    expect(gz).toContain('data-as-of="2026-08-29"');
+    expect(gz).not.toContain("T10:00");
+    expect(gz).toContain('data-source="adapter:zoning-test"');
+    expect(gz).not.toContain(COPY2.asOfMissing);
+    expect(gz).not.toContain('data-act="why"');
+    const env = g.segment('data-report-section="setbacks-envelope"', 'data-report-section="flood"');
+    expect(env).toContain('data-source="baked-envelope-facet"');
+    expect(env).toContain('data-as-of="2026-08-29"');
+  });
+
+  it("P1 board: an unknown, refused or unread rail cell is a control that drafts the why turn from the row; present and absent-verified cells are not; an unresolved row has none; no timer", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(BOARD);
+    const cells = f.all('[data-why-kind="rail"]');
+    /* 34137: drainage unknown + envelope refused; 34169: six unread; the unresolved row: none */
+    expect(cells).toHaveLength(8);
+    const at = (node: string, rail: string) => cells.find((c) => c.getAttribute("data-why-node") === node && c.getAttribute("data-why-rail") === rail);
+    expect(at("48021:34137", "situs")).toBeUndefined();
+    expect(at("48021:34137", "landUse")).toBeUndefined();
+    expect(at("48021:34137", "drainage")).toBeDefined();
+    expect(at("48021:34137", "envelope")).toBeDefined();
+    for (const rail of ["situs", "zoning", "landUse", "flood", "drainage", "envelope"]) expect(at("48021:34169", rail), rail).toBeDefined();
+    expect(cells.some((c) => c.getAttribute("data-why-node") === null || c.getAttribute("data-why-node") === "")).toBe(false);
+    expect(rowGlyphs(f.root.innerHTML, 'data-node="48021:34137"')).toEqual(STUB_SIX_GLYPHS);
+    f.ss().why(at("48021:34137", "drainage"));
+    expect(f.messages()).toHaveLength(1);
+    expect(f.lastText()).toBe(
+      `${COPY2.whyOpener} drainage unknown for 48021:34137 (908 Pine, Bastrop TX)? The record says: ${COPY2.noReason}; producer ${COPY2.unstated}; code ${COPY2.unstated}. ${COPY2.whyInstruction}`,
+    );
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    f.ss().why(at("48021:34137", "envelope"));
+    expect(f.lastText()).toContain(`${COPY2.whyOpener} envelope refused for 48021:34137`);
+    f.ss().why(at("48021:34169", "situs"));
+    expect(f.lastText()).toContain(`${COPY2.whyOpener} situs unread for 48021:34169 (111 Rainmaker Cv, Bastrop TX)?`);
+    /* forged controls for a present cell, an unknown rail, and an unknown node draft nothing */
+    f.ss().why(f.btn({ "data-why-kind": "rail", "data-why-rail": "situs", "data-why-node": "48021:34137" }));
+    f.ss().why(f.btn({ "data-why-kind": "rail", "data-why-rail": "owner", "data-why-node": "48021:34137" }));
+    f.ss().why(f.btn({ "data-why-kind": "rail", "data-why-rail": "situs", "data-why-node": "48021:999" }));
+    expect(f.messages()).toHaveLength(3);
+    expect(f.text()).not.toContain(COPY.sent);
+  });
+
+  it("P1 parcel: an overlay or section that is unknown, refused or unread drafts a why turn quoting the record; present and verified cells are not controls; every slot is a wire field or the literal fallback", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS);
+    expect(f.root.innerHTML).not.toContain("atom_path_pending");
+    const overlayWhy = (id: string) => {
+      const seg = f.segment(`data-overlay="${id}"`, "</div>");
+      const m = /data-why-kind="overlay" data-why-i="(\d+)"/.exec(seg);
+      return m ? f.btn({ "data-why-kind": "overlay", "data-why-i": m[1] as string }) : null;
+    };
+    expect(overlayWhy("flood")).toBeNull();
+    expect(overlayWhy("pipeline")).toBeNull();
+    expect(overlayWhy("envelope")).not.toBeNull();
+    expect(overlayWhy("footprint")).not.toBeNull();
+    expect(overlayWhy("special-district")).not.toBeNull();
+    f.ss().why(overlayWhy("envelope"));
+    expect(f.lastText()).toBe(
+      `${COPY2.whyOpener} envelope refused for 48021:34137 (${GOLD_LABEL})? The record says: atom_path_pending; producer baked-envelope-facet; code declined-in-bake. ${COPY2.whyInstruction}`,
+    );
+    f.ss().why(overlayWhy("special-district"));
+    expect(f.lastText()).toBe(
+      `${COPY2.whyOpener} special-district unknown for 48021:34137 (${GOLD_LABEL})? The record says: ${COPY2.noReason}; producer ${COPY2.unstated}; code ${COPY2.unstated}. ${COPY2.whyInstruction}`,
+    );
+    f.ss().why(overlayWhy("footprint"));
+    expect(f.lastText()).toContain(`${COPY2.whyOpener} footprint unknown for 48021:34137`);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.messages()).toHaveLength(3);
+    /* a forged control on a present overlay (flood is overlays[0]) drafts nothing */
+    f.ss().why(f.btn({ "data-why-kind": "overlay", "data-why-i": "0" }));
+    f.ss().why(f.btn({ "data-why-kind": "overlay", "data-why-i": "99" }));
+    expect(f.messages()).toHaveLength(3);
+    f.ss().report();
+    const sectionWhy = (id: string, next: string) => {
+      const seg = f.segment(`data-report-section="${id}"`, next);
+      const m = /data-why-kind="section" data-why-i="(\d+)"/.exec(seg);
+      return m ? f.btn({ "data-why-kind": "section", "data-why-i": m[1] as string }) : null;
+    };
+    expect(sectionWhy("zoning", 'data-report-section="setbacks-envelope"')).toBeNull();
+    expect(sectionWhy("land-use", 'data-report-section="drainage"')).toBeNull();
+    f.ss().why(sectionWhy("drainage", '<div class="acts">'));
+    expect(f.lastText()).toBe(
+      `${COPY2.whyOpener} drainage unread for 48021:34137 (${GOLD_LABEL})? The record says: ${DRAINAGE_REASON}; producer ${COPY2.unstated}; code ${COPY2.unstated}. ${COPY2.whyInstruction}`,
+    );
+    f.ss().why(sectionWhy("setbacks-envelope", 'data-report-section="flood"'));
+    expect(f.lastText()).toBe(
+      `${COPY2.whyOpener} setbacks-envelope refused for 48021:34137 (${GOLD_LABEL})? The record says: ${ENVELOPE_REFUSAL.reason}; producer baked-envelope-facet; code declined-in-bake. ${COPY2.whyInstruction}`,
+    );
+    const g = fresh();
+    g.init();
+    g.toolResult(GOLD_FACTS_NO_ASOF);
+    g.ss().report();
+    const seg = g.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    const m = /data-why-kind="section" data-why-i="(\d+)"/.exec(seg);
+    expect(m).not.toBeNull();
+    g.ss().why(g.btn({ "data-why-kind": "section", "data-why-i": m![1] as string }));
+    expect(g.lastText()).toBe(
+      `${COPY2.whyOpener} zoning unknown for 48021:34137 (${GOLD_LABEL})? The record says: ${COPY2.noReason}; producer ${COPY2.unstated}; code ${COPY2.unstated}. ${COPY2.whyInstruction}`,
+    );
+    /* the envelope overlay on the v1 gold (no brief) quotes only what it has */
+    const h = fresh();
+    h.init();
+    h.toolResult(GOLD);
+    const hm = /data-why-kind="overlay" data-why-i="(\d+)"/.exec(h.segment('data-overlay="envelope"', "</div>"));
+    h.ss().why(h.btn({ "data-why-kind": "overlay", "data-why-i": hm![1] as string }));
+    expect(h.lastText()).toBe(
+      `${COPY2.whyOpener} envelope refused for 48021:34137 (${GOLD_LABEL})? The record says: atom_path_pending; producer ${COPY2.unstated}; code ${COPY2.unstated}. ${COPY2.whyInstruction}`,
+    );
+  });
+
+  it("C1 save with a status: the Save property control is a chooser of New, Watching, Chasing, Passed; each choice drafts the save turn with that status; a second choice is another draft; an unknown status drafts nothing; no state is read", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS);
+    const saves = f.all('[data-act="save"]');
+    expect(saves.map((b) => b.getAttribute("data-status"))).toEqual(SAVE_STATUSES);
+    expect(f.text()).toContain("Save property");
+    const before = f.root.innerHTML;
+    f.ss().save(saves.find((b) => b.getAttribute("data-status") === "Watching"));
+    expect(f.lastText()).toBe("Save property 48021:34137 with save_property, status Watching. Do not change any screen.");
+    f.ss().save(saves.find((b) => b.getAttribute("data-status") === "Passed"));
+    expect(f.lastText()).toBe("Save property 48021:34137 with save_property, status Passed. Do not change any screen.");
+    expect(f.messages()).toHaveLength(2);
+    expect(f.root.innerHTML).toBe(before);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    f.ss().save(f.btn({ "data-status": "Sold" }));
+    f.ss().save(f.btn({}));
+    f.ss().save();
+    expect(f.messages()).toHaveLength(2);
+    const b = fresh();
+    b.init();
+    b.toolResult(BOARD);
+    expect(b.all('[data-act="save"]')).toHaveLength(0);
+  });
+
+  it("C2 add neighbor: the door tooltip offers Add to screen beside Open; it drafts the add_to_screen turn naming the neighbor and no screen id; a ROW edge and a road edge offer neither", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(1);
+    const tip = f.tip().innerHTML;
+    expect(tip).toContain('data-act="open" data-node="48021:34169"');
+    expect(tip).toContain('data-act="addscreen" data-node="48021:34169"');
+    expect(tip).toContain(COPY2.addToScreen);
+    expect(tip.indexOf('data-act="open"')).toBeLessThan(tip.indexOf('data-act="addscreen"'));
+    const before = f.posted.length;
+    f.ss().addToScreen(f.btn({ "data-node": "48021:34169" }));
+    expect(f.lastText()).toBe("Add 48021:34169 to the screen this parcel was opened from with add_to_screen, source walk. Do not save it.");
+    expect(f.lastText()).not.toMatch(/screen-\d|screenId/);
+    expect(f.posted.length).toBe(before + 1);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.text()).not.toContain(COPY.sent);
+    f.hover(2);
+    expect(f.tip().innerHTML).not.toContain('data-act="addscreen"');
+    expect(f.tip().innerHTML).not.toContain(COPY2.addToScreen);
+    f.hover(0);
+    expect(f.tip().innerHTML).not.toContain('data-act="addscreen"');
+    f.ss().addToScreen(f.btn({}));
+    expect(f.messages()).toHaveLength(1);
+  });
+
+  it("R1 report view: a local toggle lists every section in order with title, glyph and word, as-of date, source, citation control and agentGuidance; it posts no turn and no link; a second toggle removes it", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_FACTS);
+    expect(f.root.innerHTML).not.toContain('data-report="1"');
+    const toggle = f.root.querySelector('[data-act="report"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute("data-report-open")).toBe("0");
+    expect(f.strip(f.segment('<div class="acts">', "</div>"))).toContain(COPY2.report);
+    const msgsBefore = f.messages().length;
+    f.ss().report();
+    expect(f.root.querySelector('[data-act="report"]')?.getAttribute("data-report-open")).toBe("1");
+    const report = f.segment('<div class="report"', '<div class="acts">');
+    const ids = [...report.matchAll(/data-report-section="([^"]+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(["zoning", "setbacks-envelope", "flood", "land-use", "drainage"]);
+    const states = [...report.matchAll(/data-report-state="([^"]+)"/g)].map((m) => m[1]);
+    expect(states).toEqual(["present", "refused", "present", "absent-verified", "unread"]);
+    const text = f.strip(report);
+    for (const t of ["Zoning", "Setbacks and buildable envelope", "Flood hazard", "Land use", "Drainage"]) expect(text).toContain(t);
+    for (const w of ["present", "refused", "absent, verified", "unread"]) expect(text).toContain(w);
+    expect(text).toContain("as of 2026-08-29");
+    expect(text).not.toContain("T10:00");
+    expect(report).toContain('data-source="adapter:zoning-test"');
+    expect(report).toContain('data-source="baked-envelope-facet"');
+    expect(report).toContain('data-source="adapter:flood-test"');
+    expect(report).toContain('data-source="adapter:landuse-test"');
+    expect(report).toContain(`data-act="cite" data-url="${ZONING_URL}"`);
+    expect(report).toContain('data-agent-guidance="1"');
+    expect(text).toContain(ENVELOPE_GUIDANCE);
+    expect(text).toContain(DRAINAGE_REASON);
+    /* nothing composed and no data value: the district and the elevation stay off the report */
+    expect(report).not.toContain("SF-1");
+    expect(report).not.toContain("372.5");
+    expect(report).not.toContain("data-fact-zone");
+    expect(f.messages()).toHaveLength(msgsBefore);
+    expect(f.openLinks()).toHaveLength(0);
+    expect(f.root.innerHTML).toContain('aria-label="parcel ring"');
+    f.ss().report();
+    expect(f.root.innerHTML).not.toContain('data-report="1"');
+    expect(f.root.querySelector('[data-act="report"]')?.getAttribute("data-report-open")).toBe("0");
+    expect(f.messages()).toHaveLength(msgsBefore);
+    /* a later result closes the view; a parcel with no brief says so */
+    f.ss().report();
+    f.toolResult(GOLD);
+    expect(f.root.innerHTML).not.toContain('data-report="1"');
+    f.ss().report();
+    expect(f.strip(f.segment('<div class="report"', '<div class="acts">'))).toContain("No brief sections on this result");
+    expect(f.root.innerHTML).not.toContain("data-report-section");
+    const b = fresh();
+    b.init();
+    b.toolResult(BOARD);
+    expect(b.all('[data-act="report"]')).toHaveLength(0);
+  });
+
+  it("htmlContractViolations: the S7 checks fire on violated copies of the served html", () => {
+    const clean = app.buildAppHtml();
+    expect(app.htmlContractViolations(clean)).toEqual([]);
+    expect(app.htmlContractViolations(clean.replace(/function sendCite/g, "function sendSite"))).toContain("citation_link_unbound");
+    expect(app.htmlContractViolations(clean.split(COPY2.citationDegraded).join("citation missing"))).toContain("citation_link_unbound");
+    expect(app.htmlContractViolations(clean.replace(/function sendWhy/g, "function sendHow"))).toContain("why_turn_unbound");
+    expect(app.htmlContractViolations(clean.split(COPY2.whyOpener).join("Tell me about"))).toContain("why_turn_unbound");
+    expect(app.htmlContractViolations(clean.replace('"Chasing"', '"Pursuing"'))).toContain("save_statuses_unbound");
+    expect(app.htmlContractViolations(clean.replace(/function toggleReport/g, "function toggleView"))).toContain("report_toggle_unbound");
+    expect(app.htmlContractViolations(clean.replace(/function sendAddToScreen/g, "function sendAdd"))).toContain("add_to_screen_unbound");
   });
 });
