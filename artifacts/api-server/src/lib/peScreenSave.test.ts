@@ -7,15 +7,18 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  CREATE_SCREEN_RESOLVE_TIMEOUT_MS,
   addToScreen,
   createScreen,
   deleteSavedProperty,
+  isUniqueViolation,
   listScreens,
   saveProperty,
   setPropertyStatus,
   snapshotScreenMembership,
+  type NodeLookup,
   type QueryResolver,
 } from "./peScreenSave";
 import { MemoryScreenSaveStore } from "./peScreenSaveMemory";
@@ -23,8 +26,14 @@ import { MemoryScreenSaveStore } from "./peScreenSaveMemory";
 const SCOPE = { tenantId: "default", ownerUserId: "user-a12" };
 const GOLD = "48021:34137";
 const NEIGHBOR = "48021:34169";
+const ABSENT = "48021:900099";
 const CV = "111 Rainmaker Cv, Bastrop TX";
 const COVE = "111 Rainmaker Cove, Bastrop TX 78602";
+
+function neighborLookup(): NodeLookup {
+  return async (id) =>
+    id === NEIGHBOR ? { parcelNodeId: NEIGHBOR, label: NEIGHBOR } : null;
+}
 
 const A5_UNRESOLVED = [
   ", ,",
@@ -216,6 +225,74 @@ describe("A5 create forty keep six / A14 verbatim / A13 walk / I6", () => {
       expect(A5_UNRESOLVED).toContain(row.query);
     }
     expect(await store.countSaves(SCOPE)).toBe(before);
+    // Every resolver answered inside the budget: no degradation is declared.
+    expect(created.screen).not.toHaveProperty("degraded");
+    for (const row of created.screen.rows) {
+      expect(row).not.toHaveProperty("resolveTimedOut");
+    }
+  });
+
+  it("create_screen declares a resolver timeout on the row and the screen, persisting nothing extra", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new MemoryScreenSaveStore();
+      const pending = createScreen(
+        store,
+        SCOPE,
+        { name: "slow", queries: ["resolved-1 Main St", CV], source: "pasted" },
+        async (query) => {
+          if (query === CV) return new Promise<never>(() => {});
+          return [{ parcelNodeId: "48021:r1", label: query }];
+        },
+      );
+      await vi.advanceTimersByTimeAsync(CREATE_SCREEN_RESOLVE_TIMEOUT_MS + 1);
+      const created = await pending;
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      expect(created.screen.degraded).toEqual({ timedOut: [CV] });
+      expect(created.screen.rows[0]).not.toHaveProperty("resolveTimedOut");
+      expect(created.screen.rows[1]).toMatchObject({
+        query: CV,
+        resolution: "unresolved",
+        parcelNodeId: null,
+        resolveTimedOut: true,
+      });
+      // The rows table is unchanged: the timeout is declared, never stored.
+      expect(store.rows).toHaveLength(2);
+      for (const stored of store.rows) {
+        expect(stored).not.toHaveProperty("resolveTimedOut");
+      }
+      // A reload reads only the store, so it cannot and does not declare it.
+      const reloaded = await listScreens(store, SCOPE, created.screen.id);
+      expect(reloaded.ok && "screen" in reloaded).toBe(true);
+      if (!("screen" in reloaded)) return;
+      expect(reloaded.screen).not.toHaveProperty("degraded");
+      expect(reloaded.screen.rows[1]).not.toHaveProperty("resolveTimedOut");
+      expect(reloaded.screen.rows[1]?.resolution).toBe("unresolved");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("create_screen refuses two queries that resolve to the same node", async () => {
+    const store = new MemoryScreenSaveStore();
+    const result = await createScreen(
+      store,
+      SCOPE,
+      {
+        name: "same-node",
+        queries: ["908 Pine, Bastrop TX", GOLD],
+        source: "pasted",
+      },
+      async (query) => [{ parcelNodeId: GOLD, label: query }],
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.error).toBe("duplicate_resolved_node");
+    expect(result.error.node).toBe(GOLD);
+    expect(result.error.queries).toEqual(["908 Pine, Bastrop TX", GOLD]);
+    expect(store.screens).toHaveLength(0);
+    expect(store.rows).toHaveLength(0);
   });
 
   it("A14: Cv is stored as Cv and never rewritten to Cove", async () => {
@@ -243,26 +320,245 @@ describe("A5 create forty keep six / A14 verbatim / A13 walk / I6", () => {
     );
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    const added = await addToScreen(store, SCOPE, {
-      screenId: created.screen.id,
-      parcelNodeId: NEIGHBOR,
-      source: "walk",
-    });
+    const added = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: NEIGHBOR,
+        source: "walk",
+      },
+      neighborLookup(),
+    );
     expect(added.ok).toBe(true);
     if (!added.ok) return;
     expect(added.row.source).toBe("walk");
     expect(added.row.resolution).toBe("resolved");
     expect(added.row.parcelNodeId).toBe(NEIGHBOR);
     expect(await store.countSaves(SCOPE)).toBe(0);
-    const again = await addToScreen(store, SCOPE, {
-      screenId: created.screen.id,
-      parcelNodeId: NEIGHBOR,
-      source: "walk",
-    });
+    const again = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: NEIGHBOR,
+        source: "walk",
+      },
+      neighborLookup(),
+    );
     expect(again.ok).toBe(true);
     if (!again.ok) return;
     expect(again.row.id).toBe(added.row.id);
     expect(again.row.ordinal).toBe(added.row.ordinal);
+  });
+
+  it("add_to_screen writes unresolved when the parcel row is absent", async () => {
+    const store = new MemoryScreenSaveStore();
+    const created = await createScreen(
+      store,
+      SCOPE,
+      { name: "walk", queries: [], source: "pasted" },
+      a5Resolver(),
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const added = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: ABSENT,
+        source: "walk",
+      },
+      async () => null,
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.row.resolution).toBe("unresolved");
+    expect(added.row.parcelNodeId).toBeNull();
+    expect(added.row.query).toBe(ABSENT);
+    expect(added.row.source).toBe("walk");
+    expect(await store.countSaves(SCOPE)).toBe(0);
+    const again = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: ABSENT,
+        source: "walk",
+      },
+      async () => {
+        throw new Error("lookup must not run on the query-idempotent path");
+      },
+    );
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.row.id).toBe(added.row.id);
+    expect(again.row.resolution).toBe("unresolved");
+  });
+
+  it("add_to_screen refuses lookup_unavailable when the lookup throws and writes nothing", async () => {
+    const store = new MemoryScreenSaveStore();
+    const created = await createScreen(
+      store,
+      SCOPE,
+      { name: "walk", queries: [], source: "pasted" },
+      a5Resolver(),
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const updatedBefore = store.screens[0]?.updatedAt;
+    const threw = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: ABSENT,
+        source: "walk",
+      },
+      async () => {
+        throw new Error("pool exhausted");
+      },
+    );
+    // The store did not answer. That is not an absence; nothing is written,
+    // so the next add re-runs the lookup instead of reading a false miss.
+    expect(threw.ok).toBe(false);
+    if (threw.ok) return;
+    expect(threw.error).toEqual({ error: "lookup_unavailable", node: ABSENT });
+    expect(store.rows).toHaveLength(0);
+    expect(store.screens[0]?.updatedAt).toBe(updatedBefore);
+
+    const retried = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: ABSENT,
+        source: "walk",
+      },
+      async () => null,
+    );
+    expect(retried.ok).toBe(true);
+    if (!retried.ok) return;
+    expect(retried.row.resolution).toBe("unresolved");
+    expect(store.rows).toHaveLength(1);
+  });
+
+  it("add_to_screen returns the existing row when a concurrent add wins the unique index", async () => {
+    const store = new MemoryScreenSaveStore();
+    const created = await createScreen(
+      store,
+      SCOPE,
+      { name: "walk", queries: [], source: "pasted" },
+      a5Resolver(),
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    // The race: the pre-check saw no row, then a competing add lands between
+    // maxOrdinal and insertScreenRow. The memory store raises 23505 exactly
+    // as pe_screen_rows_screen_node_uidx does.
+    let competingId: string | undefined;
+    const origMax = store.maxOrdinal.bind(store);
+    store.maxOrdinal = async (screenId) => {
+      const max = await origMax(screenId);
+      const [row] = await store.insertScreenRows([
+        {
+          screenId,
+          ordinal: (max ?? -1) + 1,
+          query: NEIGHBOR,
+          parcelNodeId: NEIGHBOR,
+          resolution: "resolved",
+          source: "walk",
+          candidates: null,
+        },
+      ]);
+      competingId = row?.id;
+      return max;
+    };
+    const added = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: NEIGHBOR,
+        source: "walk",
+      },
+      neighborLookup(),
+    );
+    expect(competingId).toBeTruthy();
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.row.id).toBe(competingId);
+    expect(added.row.parcelNodeId).toBe(NEIGHBOR);
+    expect(added.row.resolution).toBe("resolved");
+    expect(store.rows).toHaveLength(1);
+  });
+
+  it("create_screen refuses lookup_unavailable when a node-id lookup throws and writes no screen", async () => {
+    const store = new MemoryScreenSaveStore();
+    const result = await createScreen(
+      store,
+      SCOPE,
+      {
+        name: "walk",
+        queries: ["908 Pine, Bastrop TX", GOLD],
+        source: "pasted",
+      },
+      async (query) => {
+        if (query === GOLD) throw new Error("statement timeout");
+        return [{ parcelNodeId: "48021:r1", label: query }];
+      },
+    );
+    // A partial screen that marks a real parcel absent is worse than no screen.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toEqual({ error: "lookup_unavailable", query: GOLD });
+    expect(store.screens).toHaveLength(0);
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("create_screen never writes a situs-search throw as an absence", async () => {
+    const store = new MemoryScreenSaveStore();
+    await expect(
+      createScreen(
+        store,
+        SCOPE,
+        { queries: ["908 Pine, Bastrop TX"], source: "pasted" },
+        async () => {
+          throw new Error("search down");
+        },
+      ),
+    ).rejects.toThrow("search down");
+    expect(store.screens).toHaveLength(0);
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("add_to_screen writes unresolved when the lookup answers with a different id", async () => {
+    const store = new MemoryScreenSaveStore();
+    const created = await createScreen(
+      store,
+      SCOPE,
+      { name: "walk", queries: [], source: "pasted" },
+      a5Resolver(),
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const rebound = await addToScreen(
+      store,
+      SCOPE,
+      {
+        screenId: created.screen.id,
+        parcelNodeId: "48021:900098",
+        source: "walk",
+      },
+      async () => ({ parcelNodeId: GOLD, label: GOLD }),
+    );
+    expect(rebound.ok).toBe(true);
+    if (!rebound.ok) return;
+    expect(rebound.row.resolution).toBe("unresolved");
+    expect(rebound.row.parcelNodeId).toBeNull();
+    expect(rebound.row.query).toBe("48021:900098");
   });
 
   it("I6: save works on a node not on any screen", async () => {
@@ -320,6 +616,22 @@ describe("I6 get_smart_site does not SELECT screen or save tables", () => {
     expect(assemblers).toContain("assembleNodeBriefBody");
     expect(assemblers).toContain("assembleStubBody");
     expect(assemblers).not.toMatch(/pe_screens|pe_screen_rows|peSavedProperties|pe_saved_properties/);
+  });
+});
+
+describe("isUniqueViolation", () => {
+  it("recognises pg's code on the error and drizzle's on the cause, nothing else", () => {
+    expect(isUniqueViolation({ code: "23505" })).toBe(true);
+    expect(isUniqueViolation({ cause: { code: "23505" } })).toBe(true);
+    expect(
+      isUniqueViolation(Object.assign(new Error("dup"), { code: "23505" })),
+    ).toBe(true);
+    expect(isUniqueViolation({ code: "23503" })).toBe(false);
+    expect(isUniqueViolation({ cause: { code: "23503" } })).toBe(false);
+    expect(isUniqueViolation(new Error("pe_screen_rows_screen_node_uidx"))).toBe(false);
+    expect(isUniqueViolation(null)).toBe(false);
+    expect(isUniqueViolation(undefined)).toBe(false);
+    expect(isUniqueViolation("23505")).toBe(false);
   });
 });
 

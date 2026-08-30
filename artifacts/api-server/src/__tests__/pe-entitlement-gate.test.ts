@@ -163,10 +163,13 @@ describe("PE entitlement gate", () => {
         .send({ parcelNodeId: BAKED_NODE_ID }),
       USER_FREE,
     );
-    // The dev-role bypass clears the 402 gate. The honest 404 is expected
-    // because this test has not seeded a snapshot in this case.
+    // The dev-role bypass clears the 402 gate. State constructed here: no
+    // txgio_parcel row for BAKED_NODE_ID and no snapshot, so the P-91 miss
+    // split answers the honest 404 for an ABSENT parcel (parcel_not_found),
+    // not the unbaked one.
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.error).toBe("parcel_not_found");
+    expect(res.body.parcelNodeId).toBe(BAKED_NODE_ID);
   });
 
   it("authed paid user receives a cited baked R1 brief and manifest", async () => {

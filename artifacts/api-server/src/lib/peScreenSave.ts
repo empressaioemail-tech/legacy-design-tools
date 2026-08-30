@@ -7,6 +7,7 @@
  * and never touch snapshot or screen tables.
  */
 
+import { parseParcelNodeId } from "./parcelNodeId";
 import { isPunctuationOnlySitus } from "./situsCompose";
 
 export const SCREEN_RESOLUTIONS = [
@@ -34,7 +35,12 @@ export const NOTE_MAX_CHARS = 4000;
 export const PARCEL_NODE_ID_MAX = 128;
 /** Named parallelism for create_screen resolver fan-out. */
 export const CREATE_SCREEN_RESOLVE_CONCURRENCY = 8;
-/** Per-query timeout. A hang writes unresolved; it must not drop the row. */
+/**
+ * Per-query resolver budget. A hang writes unresolved and is declared on
+ * the row (`resolveTimedOut`) and the screen (`degraded.timedOut`); it must
+ * not drop the row. Nothing about the timeout is stored (no reason column
+ * on pe_screen_rows in this cut), so a reload cannot re-declare it.
+ */
 export const CREATE_SCREEN_RESOLVE_TIMEOUT_MS = 8_000;
 export const CREATE_SCREEN_V1_SOURCES = ["pasted"] as const;
 export const ADD_TO_SCREEN_V1_SOURCES = ["walk", "saved", "pasted"] as const;
@@ -64,6 +70,12 @@ export type ScreenRow = {
   resolution: ScreenResolution;
   source: ScreenSource;
   candidates?: ScreenCandidate[];
+  /**
+   * Present (true) only on a create_screen response row whose resolver did
+   * not answer inside the budget. The stored row is a plain unresolved row;
+   * this flag is declared degradation, not state.
+   */
+  resolveTimedOut?: true;
 };
 
 export type Screen = {
@@ -72,6 +84,8 @@ export type Screen = {
   createdAt: string;
   updatedAt: string;
   rows: ScreenRow[];
+  /** Present only on a create_screen response when at least one resolver timed out. */
+  degraded?: { timedOut: string[] };
 };
 
 export type ScreenSummary = {
@@ -97,11 +111,59 @@ export type OwnerScope = { tenantId: string; ownerUserId: string };
 export type ScreenSaveError = {
   error: string;
   cap?: number;
+  node?: string;
+  query?: string;
+  queries?: string[];
+};
+
+/**
+ * A write-path refuse. `error` is the wire body. `cause` is the underlying
+ * throw when the refuse is `lookup_unavailable`; the route records it and
+ * never sends it.
+ */
+export type ScreenSaveRefuse = {
+  ok: false;
+  error: ScreenSaveError;
+  cause?: unknown;
 };
 
 export type ResolveHit = { parcelNodeId: string; label: string };
 
 export type QueryResolver = (query: string) => Promise<ResolveHit[]>;
+/**
+ * Existence check for add_to_screen. A measured miss (null) writes
+ * unresolved. A throw is not a miss: add_to_screen refuses with
+ * `lookup_unavailable` and writes nothing.
+ */
+export type NodeLookup = (parcelNodeId: string) => Promise<ResolveHit | null>;
+
+const PG_UNIQUE_VIOLATION = "23505";
+
+/** pg puts the SQLSTATE on `code`; drizzle wraps it as `cause.code`. */
+export function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const direct = (err as { code?: unknown }).code;
+  const cause = (err as { cause?: { code?: unknown } | null }).cause;
+  const causeCode =
+    cause !== null && typeof cause === "object" ? cause.code : undefined;
+  return direct === PG_UNIQUE_VIOLATION || causeCode === PG_UNIQUE_VIOLATION;
+}
+
+/**
+ * Thrown by resolveQueryRow when the store did not answer a node-id
+ * existence lookup. createScreen turns it into a `lookup_unavailable`
+ * refuse before anything is written.
+ */
+export class ScreenLookupUnavailableError extends Error {
+  readonly query: string;
+  override readonly cause: unknown;
+  constructor(query: string, cause: unknown) {
+    super("lookup_unavailable");
+    this.name = "ScreenLookupUnavailableError";
+    this.query = query;
+    this.cause = cause;
+  }
+}
 
 export type ScreenSaveStore = {
   countSaves(scope: OwnerScope): Promise<number>;
@@ -168,8 +230,8 @@ export type ScreenSaveStore = {
     screenId: string;
     ordinal: number;
     query: string;
-    parcelNodeId: string;
-    resolution: "resolved";
+    parcelNodeId: string | null;
+    resolution: ScreenResolution;
     source: ScreenSource;
     candidates: null;
   }): Promise<{ id: string }>;
@@ -340,53 +402,67 @@ async function withTimeout<T>(
   }
 }
 
-export async function resolveQueryRow(
-  query: string,
-  source: ScreenSource,
-  ordinal: number,
-  resolver: QueryResolver,
-): Promise<{
+export type PlannedScreenRow = {
   ordinal: number;
   query: string;
   parcelNodeId: string | null;
   resolution: ScreenResolution;
   source: ScreenSource;
   candidates: ScreenCandidate[] | null;
-}> {
+  /**
+   * True when the resolver did not answer inside
+   * CREATE_SCREEN_RESOLVE_TIMEOUT_MS. Declared on the wire only; never
+   * stored.
+   */
+  resolveTimedOut: boolean;
+};
+
+function unresolvedRow(
+  ordinal: number,
+  query: string,
+  source: ScreenSource,
+  resolveTimedOut = false,
+): PlannedScreenRow {
+  return {
+    ordinal,
+    query,
+    parcelNodeId: null,
+    resolution: "unresolved",
+    source,
+    candidates: null,
+    resolveTimedOut,
+  };
+}
+
+export async function resolveQueryRow(
+  query: string,
+  source: ScreenSource,
+  ordinal: number,
+  resolver: QueryResolver,
+): Promise<PlannedScreenRow> {
   if (isPunctuationOnlySitus(query)) {
-    return {
-      ordinal,
-      query,
-      parcelNodeId: null,
-      resolution: "unresolved",
-      source,
-      candidates: null,
-    };
+    return unresolvedRow(ordinal, query, source);
   }
   const trimmed = query.trim();
-  const timed = await withTimeout(resolver(trimmed), CREATE_SCREEN_RESOLVE_TIMEOUT_MS);
+  const isNodeQuery = parseParcelNodeId(trimmed) !== null;
+  let timed: { ok: true; value: ResolveHit[] } | { ok: false };
+  try {
+    timed = await withTimeout(resolver(trimmed), CREATE_SCREEN_RESOLVE_TIMEOUT_MS);
+  } catch (err) {
+    // The existence lookup did not answer. A row written unresolved here is
+    // a durable false absence for a parcel that may exist, so the whole
+    // create refuses instead. A situs-search throw propagates as today.
+    if (isNodeQuery) throw new ScreenLookupUnavailableError(query, err);
+    throw err;
+  }
   if (!timed.ok) {
-    return {
-      ordinal,
-      query,
-      parcelNodeId: null,
-      resolution: "unresolved",
-      source,
-      candidates: null,
-    };
+    return unresolvedRow(ordinal, query, source, true);
   }
   const hits = timed.value.filter(
     (h) => typeof h.parcelNodeId === "string" && h.parcelNodeId.trim() !== "",
   );
   if (hits.length === 0) {
-    return {
-      ordinal,
-      query,
-      parcelNodeId: null,
-      resolution: "unresolved",
-      source,
-      candidates: null,
-    };
+    return unresolvedRow(ordinal, query, source);
   }
   if (hits.length === 1) {
     return {
@@ -396,6 +472,7 @@ export async function resolveQueryRow(
       resolution: "resolved",
       source,
       candidates: null,
+      resolveTimedOut: false,
     };
   }
   const candidates = hits.map((h) => ({
@@ -404,14 +481,7 @@ export async function resolveQueryRow(
   }));
   const checked = validateCandidates(candidates);
   if ("error" in checked) {
-    return {
-      ordinal,
-      query,
-      parcelNodeId: null,
-      resolution: "unresolved",
-      source,
-      candidates: null,
-    };
+    return unresolvedRow(ordinal, query, source);
   }
   return {
     ordinal,
@@ -420,6 +490,7 @@ export async function resolveQueryRow(
     resolution: "ambiguous",
     source,
     candidates: checked,
+    resolveTimedOut: false,
   };
 }
 
@@ -428,7 +499,7 @@ export async function createScreen(
   scope: OwnerScope,
   input: { name?: string; queries: string[]; source: unknown },
   resolver: QueryResolver,
-): Promise<{ ok: true; screen: Screen } | { ok: false; error: ScreenSaveError }> {
+): Promise<{ ok: true; screen: Screen } | ScreenSaveRefuse> {
   const sourceErr = refuseSource(input.source, CREATE_SCREEN_V1_SOURCES);
   if (sourceErr) return { ok: false, error: sourceErr };
   const source = input.source as ScreenSource;
@@ -452,21 +523,58 @@ export async function createScreen(
 
   const createdAt = new Date();
   const name = resolveScreenName(input.name, createdAt);
-  const planned = await mapPool(
-    input.queries,
-    CREATE_SCREEN_RESOLVE_CONCURRENCY,
-    (query, ordinal) => resolveQueryRow(query, source, ordinal, resolver),
-  );
+  let planned: PlannedScreenRow[];
+  try {
+    planned = await mapPool(
+      input.queries,
+      CREATE_SCREEN_RESOLVE_CONCURRENCY,
+      (query, ordinal) => resolveQueryRow(query, source, ordinal, resolver),
+    );
+  } catch (err) {
+    if (err instanceof ScreenLookupUnavailableError) {
+      // Nothing has been written. A partial screen that marks a real parcel
+      // absent is worse than no screen.
+      return {
+        ok: false,
+        error: { error: "lookup_unavailable", query: err.query },
+        cause: err.cause,
+      };
+    }
+    throw err;
+  }
+  const seen = new Map<string, string>();
+  for (const row of planned) {
+    if (!row.parcelNodeId) continue;
+    const first = seen.get(row.parcelNodeId);
+    if (first !== undefined) {
+      return {
+        ok: false,
+        error: {
+          error: "duplicate_resolved_node",
+          node: row.parcelNodeId,
+          queries: [first, row.query],
+        },
+      };
+    }
+    seen.set(row.parcelNodeId, row.query);
+  }
 
   try {
     const screen = await store.transaction(async (tx) => {
       const savesBefore = await tx.countSaves(scope);
       const created = await tx.insertScreen({ scope, name, createdAt });
       if (planned.length > 0) {
+        // Explicit columns: the plan-only resolveTimedOut flag never reaches
+        // the store.
         await tx.insertScreenRows(
           planned.map((row) => ({
             screenId: created.id,
-            ...row,
+            ordinal: row.ordinal,
+            query: row.query,
+            parcelNodeId: row.parcelNodeId,
+            resolution: row.resolution,
+            source: row.source,
+            candidates: row.candidates,
           })),
         );
       }
@@ -477,6 +585,13 @@ export async function createScreen(
       return created;
     });
     const storedRows = await store.listScreenRows(screen.id);
+    const timedOut = planned.filter((row) => row.resolveTimedOut);
+    const timedOutOrdinals = new Set(timedOut.map((row) => row.ordinal));
+    const rows = storedRows.map((stored) => {
+      const wired = wireRow(stored);
+      if (timedOutOrdinals.has(stored.ordinal)) wired.resolveTimedOut = true;
+      return wired;
+    });
     return {
       ok: true,
       screen: {
@@ -484,12 +599,18 @@ export async function createScreen(
         name: screen.name,
         createdAt: toIso(screen.createdAt),
         updatedAt: toIso(screen.updatedAt),
-        rows: storedRows.map(wireRow),
+        rows,
+        ...(timedOut.length > 0
+          ? { degraded: { timedOut: timedOut.map((row) => row.query) } }
+          : {}),
       },
     };
   } catch (err) {
     if (err instanceof Error && err.message === "create_screen_wrote_saves") {
       throw err;
+    }
+    if (isUniqueViolation(err)) {
+      return { ok: false, error: { error: "duplicate_resolved_node" } };
     }
     throw err;
   }
@@ -499,10 +620,8 @@ export async function addToScreen(
   store: ScreenSaveStore,
   scope: OwnerScope,
   input: { screenId: string; parcelNodeId: string; source: unknown },
-): Promise<
-  | { ok: true; screenId: string; row: ScreenRow }
-  | { ok: false; error: ScreenSaveError }
-> {
+  lookup: NodeLookup,
+): Promise<{ ok: true; screenId: string; row: ScreenRow } | ScreenSaveRefuse> {
   const sourceErr = refuseSource(input.source, ADD_TO_SCREEN_V1_SOURCES);
   if (sourceErr) return { ok: false, error: sourceErr };
   const source = input.source as ScreenSource;
@@ -514,25 +633,61 @@ export async function addToScreen(
   if (!screen || screen.deletedAt) {
     return { ok: false, error: { error: "not_found" } };
   }
-  const existing = await store.findScreenRowByNode(screen.id, parcelNodeId);
-  if (existing) {
+  const existingNode = await store.findScreenRowByNode(screen.id, parcelNodeId);
+  if (existingNode) {
     return {
       ok: true,
       screenId: screen.id,
-      row: wireRow(existing),
+      row: wireRow(existingNode),
     };
   }
+  const existingQuery = (await store.listScreenRows(screen.id)).find(
+    (r) => r.query === parcelNodeId,
+  );
+  if (existingQuery) {
+    return {
+      ok: true,
+      screenId: screen.id,
+      row: wireRow(existingQuery),
+    };
+  }
+
+  let hit: ResolveHit | null;
+  try {
+    hit = await lookup(parcelNodeId);
+  } catch (err) {
+    // The store did not answer. That is not an absence: nothing is written,
+    // so the next add re-runs the lookup instead of reading a false miss
+    // off the query-idempotent path forever.
+    return {
+      ok: false,
+      error: { error: "lookup_unavailable", node: parcelNodeId },
+      cause: err,
+    };
+  }
+  const resolved = hit?.parcelNodeId === parcelNodeId;
   const max = await store.maxOrdinal(screen.id);
   const ordinal = max == null ? 0 : max + 1;
-  const inserted = await store.insertScreenRow({
-    screenId: screen.id,
-    ordinal,
-    query: parcelNodeId,
-    parcelNodeId,
-    resolution: "resolved",
-    source,
-    candidates: null,
-  });
+  let inserted: { id: string };
+  try {
+    inserted = await store.insertScreenRow({
+      screenId: screen.id,
+      ordinal,
+      query: parcelNodeId,
+      parcelNodeId: resolved ? parcelNodeId : null,
+      resolution: resolved ? "resolved" : "unresolved",
+      source,
+      candidates: null,
+    });
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    // A concurrent add of the same node (an agent retry after the 30 s
+    // abort) won pe_screen_rows_screen_node_uidx between the pre-check and
+    // the insert. The contract is idempotent: answer with that row.
+    const raced = await store.findScreenRowByNode(screen.id, parcelNodeId);
+    if (!raced) throw err;
+    return { ok: true, screenId: screen.id, row: wireRow(raced) };
+  }
   await store.touchScreen(screen.id, new Date());
   return {
     ok: true,
@@ -540,9 +695,9 @@ export async function addToScreen(
     row: {
       id: inserted.id,
       ordinal,
-      parcelNodeId,
+      parcelNodeId: resolved ? parcelNodeId : null,
       query: parcelNodeId,
-      resolution: "resolved",
+      resolution: resolved ? "resolved" : "unresolved",
       source,
     },
   };

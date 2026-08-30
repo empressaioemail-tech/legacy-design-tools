@@ -51,6 +51,7 @@ vi.mock("../../lib/peScreenSaveDb", () => ({
 
 vi.mock("../../lib/peScreenSaveResolve", () => ({
   cortexQueryResolver: vi.fn(),
+  cortexNodeLookup: vi.fn(() => async () => null),
 }));
 
 vi.mock("../../lib/recordsRequestService", () => ({

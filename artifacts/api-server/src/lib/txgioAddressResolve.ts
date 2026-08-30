@@ -64,6 +64,7 @@ import {
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
 import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
+import { isPunctuationOnlySitus } from "./situsCompose";
 import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
@@ -527,6 +528,63 @@ export async function lookupSitusByParcelNodeId(input: {
     };
   }
 
+  return null;
+}
+
+/**
+ * Screen resolve existence check. A typed node id is a hit only when a
+ * parcel row matches. Empty situs (null, blank, or the store's
+ * punctuation-only ", ," sentinel) is still a hit; the label is the node
+ * id. Absent row is null. A store error propagates so the caller refuses;
+ * it is never read as an absence. Never fabricates a situs string.
+ *
+ * `prop_id` is stored RAW (leading zeros intact, cad-ingest txgio parse)
+ * while the node-id suffix is the normalized form (`parcelNodeId.ts` strips
+ * leading zeros from an all-digit id). The predicate therefore matches the
+ * raw id or its zero-stripped form, and the post-filter requires the
+ * canonical node id rebuilt from the raw row to equal the wanted id. The
+ * ltrim arm is not served by `txgio_parcel_prop_idx` (county_fips, prop_id)
+ * and reads the county's index entries. leave_behind: an expression index
+ * on (county_fips, ltrim(prop_id, '0')) or a normalized column (migration).
+ */
+export async function lookupParcelNodeForScreen(input: {
+  parcelNodeId: string;
+  database?: TxgioAddressResolveDb;
+}): Promise<{ parcelNodeId: string; label: string } | null> {
+  const parsed = parseParcelNodeId(input.parcelNodeId);
+  if (!parsed) return null;
+
+  const database = input.database ?? defaultDb;
+  const rows = (await database
+    .select({
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, parsed.countyFips),
+        or(
+          eq(txgioParcel.propId, parsed.propId),
+          sql`ltrim(${txgioParcel.propId}, '0') = ${parsed.propId}`,
+        ),
+      ),
+    )
+    .limit(8)) as {
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const wanted = input.parcelNodeId.trim();
+  for (const r of rows) {
+    const rawPropId = r.propId?.trim();
+    if (!rawPropId) continue;
+    const nodeId = parcelNodeId(parsed.countyFips, rawPropId);
+    if (nodeId !== wanted) continue;
+    const situs = r.situsAddress?.trim();
+    const label = situs && !isPunctuationOnlySitus(situs) ? situs : nodeId;
+    return { parcelNodeId: nodeId, label };
+  }
   return null;
 }
 
