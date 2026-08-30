@@ -4,14 +4,14 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "find_parcel",
     title: "Find a parcel",
     description:
-      "Resolve one address or parcel node id to candidate parcels from county parcel records in Central Texas coverage. Returns hits (up to 10, each with situs and county) or hits: [] with a missClass. Use for a single lookup or to disambiguate one ambiguous screen row, then call get_smart_site on the chosen id. For two or more addresses, or a list the user wants to keep, use create_screen instead. An empty result means no match in our store, not that the parcel does not exist.",
+      "Resolve one address or parcel node id to candidate parcels from county parcel records in Central Texas coverage. Returns hits (up to 10 parcel records, each with parcelNodeId, situs and county) or hits: [] with a missClass. When nothing binds to a parcel but the address itself is known, `located` lists address points (latitude, longitude, county; no parcel id) and missClass is located-unbound; a located row is not a parcel and must never be passed to get_smart_site or add_to_screen. Use for a single lookup or to disambiguate one ambiguous screen row, then call get_smart_site on the chosen id. For two or more addresses, or a list the user wants to keep, use create_screen instead. An empty result means no match in our store, not that the parcel does not exist.",
     readiness: "live" as const,
   },
   {
     name: "get_smart_site",
     title: "Get its smart site",
     description:
-      "Read one parcel's on-record Smart Site facts by parcel node id (from find_parcel or a screen row). Any parcel in coverage; it does not need to be saved or on a screen. depth \"stub\" (default for an array): label, node id, smartsite.cloud link, and one of present / absent-verified / unknown / refused / unread for situs, zoning, landUse, flood, drainage, envelope. depth \"node\" (default for one id): the brief sections (zoning district and jurisdiction, land use, flood zone, setbacks-envelope disposition) with citations, plus a draw block (ring in local feet, named edges, overlays) the panel renders. Never contains setback distances, permitted-use tables, listings, sales, or owner data. Requires Solo or above, or a 30-day unlock on that parcel; otherwise returns refused with reason upgrade_required. Array cap 50; ids with no record come back in notFound with a reason. hop1 and subgraph are not implemented.",
+      "Read one parcel's on-record Smart Site facts by parcel node id (from find_parcel or a screen row). Any parcel in coverage; it does not need to be saved or on a screen. depth \"stub\" (default for an array): label, node id, smartsite.cloud link, and one of present / absent-verified / unknown / refused / unread for situs, zoning, landUse, flood, drainage, envelope. depth \"node\" (default for one id): the brief sections (zoning district and jurisdiction, land use, flood zone, setbacks-envelope disposition) with citations, plus a draw block (ring in local feet, named edges, overlays) the panel renders. Never contains setback distances, permitted-use tables, listings, sales, or owner data. Requires Solo or above, or a 30-day unlock on that parcel; otherwise returns refused with reason upgrade_required. Array cap 50; ids with no record come back in notFound with a reason. bakedAt, asOf and stampedAt are the snapshot's bake time, not the time of this call, and runId names that bake, so the same runId repeats across calls on one parcel. hop1 and subgraph are not implemented.",
     readiness: "live" as const,
   },
   {
@@ -101,3 +101,22 @@ export type SmartsiteToolName = (typeof SMARTSITE_MCP_TOOLS)[number]["name"];
 
 export const SERVER_NAME = "Smart Site";
 export const SERVER_VERSION = "0.0.1";
+export const SERVER_WEBSITE_URL = "https://smartsite.cloud";
+/**
+ * Connector card icon (MCP Implementation.icons, SDK 1.29). Points at the
+ * live Smart Site mark on smartsite.cloud (P-96), never at a copy in this
+ * package, so the card follows the product. PNG first: clients MUST support
+ * png/jpeg; svg is optional.
+ */
+export const SERVER_ICONS = [
+  {
+    src: "https://smartsite.cloud/apple-touch-icon.png",
+    mimeType: "image/png",
+    sizes: ["180x180"],
+  },
+  {
+    src: "https://smartsite.cloud/icons/icon-512.svg",
+    mimeType: "image/svg+xml",
+    sizes: ["512x512"],
+  },
+] as const;

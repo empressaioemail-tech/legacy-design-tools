@@ -69,6 +69,44 @@ function askTheMapInputSchema(): typeof ASK_THE_MAP_STRICT {
   return guarded;
 }
 
+/**
+ * P-91 QA 2026-08-30 D1. Cortex situs-search merges parcel hits with
+ * address-point rows (`parcelNodeId: null`, lat/lon) that exist for the web
+ * typeahead. To a third-party agent a null id inside `hits` is a trap. Here
+ * `hits` carries parcel hits only; when there is no parcel hit, the address
+ * points move to `located` (typed, never a hit) so a caller can say "address
+ * exists, parcel not bound" instead of "no match". Non-JSON bodies pass through.
+ */
+export function splitFindParcelHits(bodyText: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return bodyText;
+  const record = parsed as Record<string, unknown>;
+  if (!Array.isArray(record.hits)) return bodyText;
+  const parcelHits: unknown[] = [];
+  const located: unknown[] = [];
+  for (const raw of record.hits) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const hit = raw as Record<string, unknown>;
+    if (typeof hit.parcelNodeId === "string" && hit.parcelNodeId.length > 0) {
+      parcelHits.push(hit);
+    } else if (hit.source === "address-point") {
+      const { parcelNodeId: _null, ...point } = hit;
+      located.push(point);
+    }
+  }
+  const out: Record<string, unknown> = { ...record, hits: parcelHits };
+  if (parcelHits.length === 0 && located.length > 0) {
+    out.located = located;
+    if (out.missClass === undefined) out.missClass = "located-unbound";
+  }
+  return JSON.stringify(out);
+}
+
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
     status: "not_ready",
@@ -234,7 +272,12 @@ export function registerTools(server: McpServer): void {
               );
               const body = await res.text();
               return {
-                content: [{ type: "text" as const, text: body }],
+                content: [
+                  {
+                    type: "text" as const,
+                    text: res.ok ? splitFindParcelHits(body) : body,
+                  },
+                ],
                 isError: !res.ok,
               };
             });
