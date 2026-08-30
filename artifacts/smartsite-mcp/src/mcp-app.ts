@@ -1,7 +1,24 @@
 /** P-91 Wave I — Open turn and parcel draw. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p558.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p559.html";
 export const APP_MIME = "text/html;profile=mcp-app";
+
+/* p559 probe: three channels for the map-ground decision (v3 scoping measurement 6).
+ * Read-only; results paint into the boot strip and change no behavior. */
+export const PROBE_RESOURCE_URI = "ui://smartsite/probe-p559.txt";
+export const PROBE_RESOURCE_TEXT = "probe-ok";
+export const PROBE_NET_TARGETS = [
+  { key: "esri", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0" },
+  { key: "gcs", url: "https://storage.googleapis.com/hauska-map-tiles/parcels" },
+  { key: "svc7", url: "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83?f=json" },
+  { key: "self", url: "https://mcp.smartsite.cloud/health" },
+] as const;
+export const PROBE_CSP_DOMAINS = [
+  "https://server.arcgisonline.com",
+  "https://storage.googleapis.com",
+  "https://services7.arcgis.com",
+  "https://mcp.smartsite.cloud",
+] as const;
 export const APP_HOST_TOOLS = [
   "create_screen",
   "list_screens",
@@ -1740,8 +1757,23 @@ export function htmlContractViolations(html: string): string[] {
   if (/list_my_properties/.test(html) && /board source/.test(html) === false) {
     /* allowed only as a refused source note */
   }
-  if (/fetch\(|XMLHttpRequest|WebSocket/.test(html)) {
-    violations.push("direct_network");
+  {
+    /* p559: the probe block is the one admitted network region. It is a different
+     * kind of thing than app code, so it is split out by explicit markers rather
+     * than the check being widened; outside the markers the rule still fires, and
+     * a missing, unbalanced, or duplicated block is its own violation. */
+    const beginCount = html.split("/*P559_PROBE_BEGIN*/").length - 1;
+    const endCount = html.split("/*P559_PROBE_END*/").length - 1;
+    if (beginCount !== endCount || beginCount > 1) {
+      violations.push("probe_block_malformed");
+    }
+    const scanned =
+      beginCount === 1 && endCount === 1
+        ? html.replace(/\/\*P559_PROBE_BEGIN\*\/[\s\S]*?\/\*P559_PROBE_END\*\//, "")
+        : html;
+    if (/fetch\(|XMLHttpRequest|WebSocket/.test(scanned)) {
+      violations.push("direct_network");
+    }
   }
   if (/#F3F5F1|#F5F5F0|#EAEEE7/i.test(html)) {
     violations.push("cream_host_theme");
@@ -2027,6 +2059,9 @@ svg.ring .sm{fill:var(--ss-t6)}
   var msgCap="message=unread";
   var replyText="reply=none";
   var foreignCount=0;
+  var netText="net=unread";
+  var glText="gl=unread";
+  var bridgeText="bridge=unread";
   var pendingMsg=Object.create(null);
   function paintBoot(){
     if(!boot) return;
@@ -2036,9 +2071,61 @@ svg.ring .sm{fill:var(--ss-t6)}
     boot.setAttribute("data-message-cap",msgCap);
     boot.setAttribute("data-reply",replyText);
     boot.setAttribute("data-foreign",String(foreignCount));
-    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText,"foreign="+foreignCount].join(" ");
+    boot.setAttribute("data-net",netText.slice(4));
+    boot.setAttribute("data-gl",glText.slice(3));
+    boot.setAttribute("data-bridge",bridgeText.slice(7));
+    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText,"foreign="+foreignCount,netText,glText,bridgeText].join(" ");
   }
   paintBoot();
+  /*P559_PROBE_BEGIN*/
+  /* p559 probe. gl: synchronous context check. net: per-origin fetch, cors then no-cors
+   * (ok<status> = reachable with CORS; opq = reachable, no CORS; blk = blocked; to = timeout).
+   * bridge: resources/read through the host rpc once the handshake is ready. */
+  try{
+    var glc=document.createElement("canvas");
+    glText=glc.getContext("webgl2")?"gl=webgl2":(glc.getContext("webgl")||glc.getContext("experimental-webgl"))?"gl=webgl1":"gl=none";
+  }catch(eGl){glText="gl=err"}
+  paintBoot();
+  var PROBE_NET=${JSON.stringify(PROBE_NET_TARGETS)};
+  var PROBE_URI=${JSON.stringify(PROBE_RESOURCE_URI)};
+  var netParts=Object.create(null);
+  var probeIds=Object.create(null);
+  var bridgeTimer=null;
+  function paintNet(){
+    var out=[];
+    for(var ni=0;ni<PROBE_NET.length;ni++){var nk=PROBE_NET[ni].key;out.push(nk+":"+(netParts[nk]||"pending"))}
+    netText="net="+out.join(",");
+    paintBoot();
+  }
+  function probeOne(t){
+    netParts[t.key]="pending";
+    var done=false;
+    var timer=setTimeout(function(){if(!done){done=true;netParts[t.key]="to";paintNet();}},6000);
+    function finish(v){if(done)return;done=true;clearTimeout(timer);netParts[t.key]=v;paintNet();}
+    try{
+      fetch(t.url,{mode:"cors"}).then(function(r){finish("ok"+r.status)},function(){
+        try{
+          fetch(t.url,{mode:"no-cors"}).then(function(){finish("opq")},function(){finish("blk")});
+        }catch(eNc){finish("blk")}
+      });
+    }catch(eF){finish("blk")}
+  }
+  function startNetProbe(){
+    if(typeof fetch!=="function"){netText="net=nofetch";paintBoot();return;}
+    for(var pi=0;pi<PROBE_NET.length;pi++) probeOne(PROBE_NET[pi]);
+    paintNet();
+  }
+  function startBridgeProbe(){
+    if(bridgeText!=="bridge=unread") return;
+    bridgeText="bridge=pending";
+    var bid=rpcId++;
+    probeIds[bid]=1;probeIds[String(bid)]=1;
+    bridgeTimer=setTimeout(function(){bridgeText="bridge=timeout";paintBoot();},6000);
+    parent.postMessage({jsonrpc:"2.0",id:bid,method:"resources/read",params:{uri:PROBE_URI}},"*");
+    paintBoot();
+  }
+  startNetProbe();
+  /*P559_PROBE_END*/
   var RAILS=${JSON.stringify(RAILS)};
   var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
   var COUNTY_BY_FIPS=${JSON.stringify(COUNTY_BY_FIPS)};
@@ -2142,6 +2229,8 @@ ${inlineSharedSource()}
     ready=true;
     parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*");
     while(pending.length) postMessage(pending.shift());
+    if(handshake==="ready"){ startBridgeProbe(); }
+    else { bridgeText="bridge=nohost"; paintBoot(); }
   }
   var host={
     sendMessage:function(text){
@@ -2446,6 +2535,16 @@ ${inlineSharedSource()}
       flushReady();
       return;
     }
+    if(d.id!=null&&probeIds[d.id]){
+      delete probeIds[d.id];delete probeIds[String(d.id)];
+      if(bridgeTimer){clearTimeout(bridgeTimer);bridgeTimer=null;}
+      if(d.error){bridgeText="bridge=err"+(d.error.code!=null?String(d.error.code):"");}
+      else if(d.result&&d.result.contents&&d.result.contents.length){bridgeText="bridge=ok";}
+      else if(d.result!==undefined){bridgeText="bridge=empty";}
+      else {bridgeText="bridge=odd";}
+      paintBoot();
+      return;
+    }
     if(d.id!=null&&pendingMsg[d.id]){
       delete pendingMsg[d.id];
       delete pendingMsg[String(d.id)];
@@ -2522,17 +2621,27 @@ export function registerMcpApp(server: {
         _meta: {
           ui: {
             prefersBorder: false,
-            csp: { connectDomains: [], resourceDomains: [] },
+            /* p559: declare the probe origins so the run measures the DECLARED case.
+             * Empty arrays measured nothing; whether the host honors this is the question. */
+            csp: {
+              connectDomains: [...PROBE_CSP_DOMAINS],
+              resourceDomains: [...PROBE_CSP_DOMAINS],
+            },
           },
         },
       },
     ],
   });
+  const probeHandler = async (uri: { href: string }) => ({
+    contents: [{ uri: uri.href, mimeType: "text/plain", text: PROBE_RESOURCE_TEXT }],
+  });
   if (typeof server.registerResource === "function") {
     server.registerResource("Smart Site board", APP_RESOURCE_URI, { mimeType: APP_MIME }, handler);
+    server.registerResource("Smart Site probe", PROBE_RESOURCE_URI, { mimeType: "text/plain" }, probeHandler);
     return;
   }
   if (typeof server.resource === "function") {
     server.resource("Smart Site board", APP_RESOURCE_URI, { mimeType: APP_MIME }, handler);
+    server.resource("Smart Site probe", PROBE_RESOURCE_URI, { mimeType: "text/plain" }, probeHandler);
   }
 }

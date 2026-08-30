@@ -165,7 +165,7 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("String(d.id)===String(initId)");
     expect(html).toContain("pending.push");
     expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p558.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p559.html");
     expect(html).toContain("function fitHost");
     expect(html).toContain("ui/notifications/size-changed");
     expect(html).not.toMatch(/html,body\{[^}]*height:100%/);
