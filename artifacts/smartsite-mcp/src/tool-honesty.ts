@@ -312,6 +312,51 @@ export function normalizeR1BodyForExternal(
   };
 }
 
+/**
+ * A bake miss is a result the iframe must accept, not an MCP error the
+ * host keeps in the chat. Host silence is the 12s timer only.
+ */
+/** Host-forwardable miss. An `error` field is kept in the chat and never reaches the iframe. */
+export function bakeMissHostPayload(parcelNodeIds: string[]): string {
+  return JSON.stringify({ parcels: [], notFound: parcelNodeIds });
+}
+
+export function rewriteBakeMissForHost(
+  responseOk: boolean,
+  cortexBodyText: string,
+  parcelNodeIds: string[],
+): string | null {
+  if (responseOk) return null;
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    if ((parsed as { error?: unknown }).error !== "baked_snapshot_not_found") {
+      return null;
+    }
+    return bakeMissHostPayload(parcelNodeIds);
+  } catch {
+    return null;
+  }
+}
+
+export function getSmartSiteIsError(
+  responseOk: boolean,
+  cortexBodyText: string,
+): boolean {
+  if (responseOk) return false;
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return true;
+    }
+    return (parsed as { error?: unknown }).error !== "baked_snapshot_not_found";
+  } catch {
+    return true;
+  }
+}
+
 /** Batch node rows keep per-parcel brief honesty; stubs pass through. */
 export function normalizeGetSmartSiteResponseText(
   cortexBodyText: string,

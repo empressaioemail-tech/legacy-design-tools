@@ -8,6 +8,8 @@ import {
   sanitizeAskTheMapErrorBody,
   stripEntitlementForExternal,
   stripSavedPropertiesForExternal,
+  getSmartSiteIsError,
+  rewriteBakeMissForHost,
 } from "../src/tool-honesty.js";
 
 const GOLD_DRAW_A3 = {
@@ -391,5 +393,53 @@ describe("normalizeR1BodyForExternal remainder", () => {
       draw,
     });
     expect(body.draw).toEqual(draw);
+  });
+});
+
+describe("getSmartSiteIsError", () => {
+  it("does not flag a bake miss as an MCP error", () => {
+    expect(
+      getSmartSiteIsError(
+        false,
+        JSON.stringify({
+          error: "baked_snapshot_not_found",
+          parcelNodeId: "48021:900099",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps other HTTP misses as errors", () => {
+    expect(
+      getSmartSiteIsError(false, JSON.stringify({ error: "authentication_required" })),
+    ).toBe(true);
+    expect(getSmartSiteIsError(false, "not-json")).toBe(true);
+    expect(getSmartSiteIsError(true, JSON.stringify({ draw: {} }))).toBe(false);
+  });
+});
+
+describe("rewriteBakeMissForHost", () => {
+  it("rewrites a bake miss into a 200-shaped empty batch", () => {
+    expect(
+      rewriteBakeMissForHost(
+        false,
+        JSON.stringify({
+          error: "baked_snapshot_not_found",
+          parcelNodeId: "48021:900099",
+        }),
+        ["48021:900099"],
+      ),
+    ).toBe(JSON.stringify({ parcels: [], notFound: ["48021:900099"] }));
+  });
+
+  it("leaves other bodies alone", () => {
+    expect(
+      rewriteBakeMissForHost(
+        false,
+        JSON.stringify({ error: "authentication_required" }),
+        ["48021:34137"],
+      ),
+    ).toBeNull();
+    expect(rewriteBakeMissForHost(true, "{}", ["48021:34137"])).toBeNull();
   });
 });

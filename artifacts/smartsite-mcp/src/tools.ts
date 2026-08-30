@@ -21,7 +21,9 @@ import { loadHauskaMcpConfig } from "./hauska-client.js";
 import {
   askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
+  getSmartSiteIsError,
   normalizeGetSmartSiteResponseText,
+  rewriteBakeMissForHost,
   sanitizeAskTheMapErrorBody,
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
@@ -261,10 +263,12 @@ export function registerTools(server: McpServer): void {
                 Array.isArray(parcelNodeId) || depth === "stub"
                   ? "stub-or-batch"
                   : "single-node";
-              const normalized = normalizeGetSmartSiteResponseText(body, mode);
+              const miss = rewriteBakeMissForHost(res.ok, body, ids);
+              const normalized =
+                miss ?? normalizeGetSmartSiteResponseText(body, mode);
               return {
                 content: [{ type: "text" as const, text: normalized }],
-                isError: !res.ok,
+                isError: miss ? false : getSmartSiteIsError(res.ok, body),
               };
             });
           }
