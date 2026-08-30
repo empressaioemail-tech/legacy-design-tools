@@ -84,6 +84,13 @@
  *
  * Exit-bounded: connect -> stream export -> tippecanoe -> hash -> summary,
  * then exit. Exit 0 on success, 1 on fatal error or zero features.
+ *
+ * BLAST RADIUS (CTX W1 item 6 honest point): this CLI does not write
+ * `place_layer_snapshots` coords. The retired keep-prior 0,0 CASE lives on
+ * the conformant facet bake (`honestPointUpsert.ts` /
+ * `nodeFacetBakeTier1ConformantCli.ts`). A later PMTiles rebuild must not
+ * re-derive a serve query point from an inherited centroid that bake
+ * already overwrote.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";

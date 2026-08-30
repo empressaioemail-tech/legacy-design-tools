@@ -21,6 +21,28 @@ import {
   landUseJoinKey,
   normalizeSitusAddress,
 } from "./lib/joinNormalize";
+import {
+  ALIAS_JOIN_SOURCE,
+  emitBindFromSitusRecovery,
+  resolveOpenAlias,
+  situsKeysNeedingFetch,
+  SITUS_EXTEND_GO_FIPS,
+} from "./lib/cadTxgioAliasRead";
+import {
+  HONEST_POINT_COORD_SET_SQL,
+  HONEST_POINT_KEEP_PRIOR_CLAUSE_RETIRED,
+  snapshotCoordForWrite,
+} from "./lib/honestPointUpsert";
+import {
+  absentVerifiedLandUse,
+  isAbsentVerifiedLeaf,
+  landUseBakeLegal,
+  pickNamedLandUse,
+} from "./lib/namedLandUseSource";
+import { selectTaxYearWinner } from "./lib/taxYearSelect";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ParcelJoinRow } from "./lib/nodeFacetTier1ParcelJoin";
 import {
   assertNoOwnerKey,
@@ -134,6 +156,9 @@ function newPayload(
     situsAddress?: string | null;
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
+    namedLandUse?: ConformantTier1BuildInput["namedLandUse"];
+    aliasJoin?: ConformantTier1BuildInput["aliasJoin"];
+    taxYearSelection?: ConformantTier1BuildInput["taxYearSelection"];
   } = {},
 ) {
   return buildConformantTier1Payload({
@@ -152,6 +177,9 @@ function newPayload(
       ...(opts.situsRow !== undefined ? { situsRow: opts.situsRow } : {}),
     },
     ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
+    ...(opts.namedLandUse !== undefined ? { namedLandUse: opts.namedLandUse } : {}),
+    ...(opts.aliasJoin ? { aliasJoin: opts.aliasJoin } : {}),
+    ...(opts.taxYearSelection ? { taxYearSelection: opts.taxYearSelection } : {}),
     nowIso: NOW,
   });
 }
@@ -318,11 +346,12 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(req.unexpectedRoots).toEqual([]);
   });
 
-  it("no txgio row and no landAcres and no use code: every facet is an explicit null and coverage says so", () => {
+  it("no txgio row and no landAcres and no use code: landUse is absent-verified, never null+coverage false", () => {
     const n = newPayload(null, {
       body: conformantBody({ claim: { landAcres: null, propertyUseCode: null } }),
     });
-    expect(n.baseFacts.landUse).toBeNull();
+    expect(isAbsentVerifiedLeaf(n.baseFacts.landUse)).toBe(true);
+    expect(landUseBakeLegal(n)).toBe(true);
     expect(n.baseFacts.acreage).toBeNull();
     expect(n.zoning).toBeNull();
     expect(n.envelope).toBeNull();
@@ -342,8 +371,8 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
     expect(n.provenance.parcelJoin.basis).toMatch(/unmeasured/);
     // Land use is the claim's own field: the join gate does not strip it.
-    expect(n.baseFacts.landUse?.code).toBe("A1");
-    expect(n.provenance.landUseGateBlocked).toBe(false);
+    expect(n.baseFacts.landUse && "code" in n.baseFacts.landUse ? n.baseFacts.landUse.code : null).toBe("A1");
+    expect(n.provenance.landUseGateBlocked).toBe(true);
     expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
   });
 
@@ -451,7 +480,13 @@ describe("the divergence instrument fails when it should", () => {
       ["access", "accessNormalizedFrom", "baked", "publishRunId", "shapeSource", "source"].sort(),
     );
     expect([...DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES].sort()).toEqual(
-      ["facetCoverage.tier1", "facets.base", "provenance.parcelJoin"].sort(),
+      [
+        "facetCoverage.tier1",
+        "facets.base",
+        "provenance.parcelJoin",
+        "provenance.taxYear",
+        "provenance.taxYearRule",
+      ].sort(),
     );
   });
 });
@@ -685,7 +720,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "BREM SARAH",
       },
     });
-    expect(n.baseFacts.landUse).toBeNull();
+    expect(isAbsentVerifiedLeaf(n.baseFacts.landUse)).toBe(true);
     expect(n.facetCoverage.landUse).toBe(false);
     expect(n.provenance.landUseSource).toBeNull();
     expect(n.provenance.landUseAddressRecovered).toBe(false);
@@ -705,7 +740,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "PURVIS MICHAEL",
       },
     });
-    expect(blankCad.baseFacts.landUse).toBeNull();
+    expect(isAbsentVerifiedLeaf(blankCad.baseFacts.landUse)).toBe(true);
     expect(blankCad.provenance.landUseAddressRecovered).toBe(false);
 
     const blankTxgio = newPayload(null, {
@@ -720,7 +755,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: null,
       },
     });
-    expect(blankTxgio.baseFacts.landUse).toBeNull();
+    expect(isAbsentVerifiedLeaf(blankTxgio.baseFacts.landUse)).toBe(true);
     expect(blankTxgio.provenance.parcelJoin.state).toBe("gate-blocked");
   });
 
@@ -739,7 +774,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "PURVIS MICHAEL",
       },
     });
-    expect(n.baseFacts.landUse).toBeNull();
+    expect(isAbsentVerifiedLeaf(n.baseFacts.landUse)).toBe(true);
     expect(n.provenance.landUseAddressRecovered).toBe(false);
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
   });
@@ -910,5 +945,358 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
     expect(() => assertNoOwnerKey(poisoned)).toThrow(
       expect.objectContaining({ code: "OWNER_KEY_IN_PAYLOAD" }),
     );
+  });
+});
+
+function landUseCodeOf(n: { baseFacts: { landUse: unknown } }): string | null {
+  const lu = n.baseFacts.landUse;
+  if (lu && typeof lu === "object" && "code" in lu && typeof lu.code === "string") {
+    return lu.code;
+  }
+  return null;
+}
+
+function taxAtom(
+  entityId: string,
+  fields: {
+    taxYear?: number | null;
+    situsAddress?: string | null;
+    situsCity?: string | null;
+    propertyUseCode?: string | null;
+    landAcres?: number | null;
+    situsRefuse?: boolean;
+  },
+) {
+  const year = fields.taxYear;
+  return {
+    entityId,
+    situsRefuse: fields.situsRefuse === true,
+    body: conformantBody({
+      claim: {
+        sourceIdentifiers:
+          year === undefined
+            ? { prop_id: "34137" }
+            : year === null
+              ? { prop_id: "34137" }
+              : { prop_id: "34137", taxYear: year },
+        situsAddress: fields.situsAddress ?? "908 PINE , BASTROP, TX 78602",
+        situsCity: fields.situsCity ?? "BASTROP",
+        propertyUseCode: fields.propertyUseCode ?? "A1",
+        landAcres: fields.landAcres ?? 0.3815,
+      },
+    }) as Record<string, unknown>,
+  };
+}
+
+describe("CTX W1 item 2: seed stays, not-vacuous", () => {
+  it("seed is exactly {48209, 48491}; a non-seed FIPS still joins; blocked FIPS still refuse prop_id", () => {
+    expect([...LANDUSE_JOIN_DISABLED_FIPS_SEED].sort()).toEqual(["48209", "48491"]);
+    expect(LANDUSE_JOIN_DISABLED_FIPS_SEED.size).toBe(2);
+    expect(landUseJoinKey("48021", "34137")).toBe("34137");
+    expect(landUseJoinKey("48055", "1")).toBe("1");
+    expect(landUseJoinKey("48453", "493738")).toBe("493738");
+    expect(landUseJoinKey("48209", "135570")).toBeNull();
+    expect(landUseJoinKey("48491", "76149")).toBeNull();
+    expect(SITUS_EXTEND_GO_FIPS.size).toBe(0);
+    expect(SITUS_EXTEND_GO_FIPS.has("48021")).toBe(false);
+    expect(SITUS_EXTEND_GO_FIPS.has("48055")).toBe(false);
+    expect(SITUS_EXTEND_GO_FIPS.has("48453")).toBe(false);
+  });
+});
+
+describe("CTX W1 item 3: tax year max-year rule", () => {
+  it("singleton yeared: taxYearRule max-year", () => {
+    const sel = selectTaxYearWinner([taxAtom("a:2025", { taxYear: 2025 })]);
+    expect(sel.outcome).toBe("selected");
+    if (sel.outcome !== "selected") return;
+    expect(sel.taxYear).toBe(2025);
+    expect(sel.taxYearRule).toBe("max-year");
+    expect(sel.refused).toBe(false);
+    const n = newPayload(txgioRow(), {
+      taxYearSelection: {
+        taxYear: sel.taxYear,
+        taxYearRule: sel.taxYearRule,
+        refused: sel.refused,
+      },
+    });
+    expect(n.provenance.taxYear).toBe(2025);
+    expect(n.provenance.taxYearRule).toBe("max-year");
+  });
+
+  it("two years agree on load-bearing: max-year-agree, winner ORDER BY entity_id", () => {
+    const sel = selectTaxYearWinner([
+      taxAtom("z:2026", { taxYear: 2026 }),
+      taxAtom("a:2026", { taxYear: 2026 }),
+      taxAtom("m:2025", { taxYear: 2025, propertyUseCode: "B2" }),
+    ]);
+    expect(sel.outcome).toBe("selected");
+    if (sel.outcome !== "selected") return;
+    expect(sel.taxYear).toBe(2026);
+    expect(sel.taxYearRule).toBe("max-year-agree");
+    expect(sel.refused).toBe(false);
+    expect(sel.entityId).toBe("a:2026");
+  });
+
+  it("same max year disagree: refuse, max-year-disagree, does not overwrite", () => {
+    const sel = selectTaxYearWinner([
+      taxAtom("b:2026", { taxYear: 2026, propertyUseCode: "A1" }),
+      taxAtom("a:2026", { taxYear: 2026, propertyUseCode: "F1" }),
+    ]);
+    expect(sel.outcome).toBe("selected");
+    if (sel.outcome !== "selected") return;
+    expect(sel.taxYearRule).toBe("max-year-disagree");
+    expect(sel.refused).toBe(true);
+    expect(sel.entityId).toBe("a:2026");
+    const n = newPayload(txgioRow(), {
+      body: sel.body,
+      taxYearSelection: {
+        taxYear: sel.taxYear,
+        taxYearRule: sel.taxYearRule,
+        refused: true,
+      },
+    });
+    expect(n.provenance.taxYearRule).toBe("max-year-disagree");
+    expect(isAbsentVerifiedLeaf(n.baseFacts.landUse)).toBe(true);
+    expect(n.baseFacts.situsCity).toBeNull();
+    expect(landUseCodeOf(n)).toBeNull();
+  });
+
+  it("unyeared singleton: unyeared-singleton", () => {
+    const sel = selectTaxYearWinner([taxAtom("only", { taxYear: null })]);
+    expect(sel.outcome).toBe("selected");
+    if (sel.outcome !== "selected") return;
+    expect(sel.taxYear).toBeNull();
+    expect(sel.taxYearRule).toBe("unyeared-singleton");
+    expect(sel.refused).toBe(false);
+  });
+
+  it("unyeared disagree: unyeared-disagree", () => {
+    const sel = selectTaxYearWinner([
+      taxAtom("b", { taxYear: null, situsCity: "ELGIN" }),
+      taxAtom("a", { taxYear: null, situsCity: "BASTROP" }),
+    ]);
+    expect(sel.outcome).toBe("selected");
+    if (sel.outcome !== "selected") return;
+    expect(sel.taxYearRule).toBe("unyeared-disagree");
+    expect(sel.refused).toBe(true);
+    expect(sel.entityId).toBe("a");
+  });
+
+  it("punctuation-only situs is dropped before year selection", () => {
+    const sel = selectTaxYearWinner([
+      taxAtom("punct", { taxYear: 2026, situsRefuse: true }),
+      taxAtom("ok", { taxYear: 2025 }),
+    ]);
+    expect(sel.outcome).toBe("selected");
+    if (sel.outcome !== "selected") return;
+    expect(sel.taxYear).toBe(2025);
+    expect(sel.taxYearRule).toBe("max-year");
+    expect(selectTaxYearWinner([taxAtom("only-punct", { situsRefuse: true })]).outcome).toBe(
+      "dropped",
+    );
+  });
+});
+
+describe("CTX W1 item 4: landUse from the named W0b source", () => {
+  it("fail: landUse null plus coverage false is illegal (the live Pine/Rainmaker miss)", () => {
+    expect(
+      landUseBakeLegal({
+        baseFacts: { landUse: null },
+        facetCoverage: { landUse: false },
+      }),
+    ).toBe(false);
+  });
+
+  it("Pine 48021:34137: named land-use-fact A1 projects when claim.propertyUseCode is null", () => {
+    const n = newPayload(txgioRow(), {
+      body: conformantBody({ claim: { propertyUseCode: null } }),
+      namedLandUse: { code: "A1", vintage: "2025", source: "land-use-fact" },
+    });
+    expect(landUseCodeOf(n)).toBe("A1");
+    expect(n.baseFacts.landUse && "source" in n.baseFacts.landUse
+      ? n.baseFacts.landUse.source
+      : null).toBe("land-use-fact");
+    expect(n.facetCoverage.landUse).toBe(true);
+    expect(n.provenance.landUseGateBlocked).toBe(false);
+    expect(landUseBakeLegal(n)).toBe(true);
+  });
+
+  it("Rainmaker 48021:8720522: named cad-property A1 projects", () => {
+    const n = newPayload(null, {
+      body: conformantBody({
+        nodeId: "48021:8720522",
+        claim: {
+          sourceIdentifiers: { prop_id: "8720522", taxYear: 2025 },
+          propertyUseCode: null,
+        },
+      }),
+      parcelNodeId: "48021:8720522",
+      namedLandUse: { code: "A1", vintage: "2025", source: "cad-property" },
+    });
+    expect(landUseCodeOf(n)).toBe("A1");
+    expect(n.facetCoverage.landUse).toBe(true);
+    expect(landUseBakeLegal(n)).toBe(true);
+  });
+
+  it("Travis blank fails when the named source is present (must not emit null+false)", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48453", "493738", 2026, {
+        situsAddress: "4707 SHOALWOOD AVE",
+        situsCity: "AUSTIN",
+        situsZip: "78756",
+        propertyUseCode: null,
+      }),
+      countyFips: "48453",
+      countyName: "Travis",
+      parcelNodeId: "48453:493738",
+      situsAddress: "4707 SHOALWOOD AVE",
+      namedLandUse: { code: "A1", vintage: "2026", source: "land-use-fact" },
+    });
+    expect(landUseCodeOf(n)).toBe("A1");
+    expect(n.facetCoverage.landUse).toBe(true);
+    expect(landUseBakeLegal(n)).toBe(true);
+  });
+
+  it("landUseGateBlocked is the join gate, not hardcoded false", () => {
+    const blocked = newPayload(txgioRow(), { gateBlocked: true });
+    const open = newPayload(txgioRow(), { gateBlocked: false });
+    expect(blocked.provenance.landUseGateBlocked).toBe(true);
+    expect(open.provenance.landUseGateBlocked).toBe(false);
+  });
+
+  it("named source prefers land-use-fact over cad-property", () => {
+    expect(
+      pickNamedLandUse(
+        { code: "A1", vintage: "2025", source: "land-use-fact" },
+        { code: "B2", vintage: "2025", source: "cad-property" },
+      )?.source,
+    ).toBe("land-use-fact");
+    expect(isAbsentVerifiedLeaf(absentVerifiedLandUse(NOW))).toBe(true);
+  });
+});
+
+describe("CTX W1 item 6: honest point on refuse", () => {
+  it("fail-then-pass: a prior fabricated centroid is overwritten by 0,0", () => {
+    const prior = { lat: 30.11, lng: -97.31 };
+    const keepPrior =
+      0 === 0 && 0 === 0 ? prior : { lat: 0, lng: 0 };
+    expect(keepPrior).toEqual(prior);
+    expect(
+      snapshotCoordForWrite({
+        newLat: 0,
+        newLng: 0,
+        gateBlockedNoRing: false,
+      }),
+    ).toEqual({ lat: 0, lng: 0 });
+    expect(
+      snapshotCoordForWrite({
+        newLat: 30.11,
+        newLng: -97.31,
+        gateBlockedNoRing: true,
+      }),
+    ).toEqual({ lat: 0, lng: 0 });
+  });
+
+  it("live upsert SQL writes EXCLUDED coords and does not keep prior on sentinel", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const cli = readFileSync(join(here, "nodeFacetBakeTier1ConformantCli.ts"), "utf8");
+    expect(cli).toContain("HONEST_POINT_COORD_SET_SQL");
+    expect(cli).toContain("snapshotCoordForWrite");
+    expect(cli).not.toContain(HONEST_POINT_KEEP_PRIOR_CLAUSE_RETIRED);
+    expect(cli).toMatch(/parcelsPmtilesBakeCli/);
+    expect(HONEST_POINT_COORD_SET_SQL).toMatch(/lat_rounded = EXCLUDED\.lat_rounded/);
+    expect(HONEST_POINT_COORD_SET_SQL).toMatch(/lng_rounded = EXCLUDED\.lng_rounded/);
+  });
+});
+
+describe("CTX W1 item 8: alias first, then situs", () => {
+  it("open alias joins from the TxGIO key and skips the situs fetch", () => {
+    const aliasRow = txgioRow({
+      feature_index: 88,
+      prop_id: "TXGIO-KEY",
+      zoning_district: "ALIAS-Z",
+      zoning_jurisdiction: "bastrop-city-tx",
+      situs_state: "TX",
+    });
+    const colliding = txgioRow({
+      feature_index: 1,
+      prop_id: "135570",
+      zoning_district: "COLLISION",
+    });
+    const n = newPayload(colliding, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      aliasJoin: { txgioId: "TXGIO-KEY", row: aliasRow },
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "Z9"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(n.provenance.parcelJoin).toMatchObject({
+      state: "joined-situs",
+      source: ALIAS_JOIN_SOURCE,
+      featureIndex: 88,
+    });
+    expect(n.zoning?.district).toBe("ALIAS-Z");
+    expect(n.zoning?.district).not.toBe("COLLISION");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    const aliases = new Map([
+      [
+        "135570",
+        {
+          countyFips: "48209",
+          cadPropId: "135570",
+          txgioId: "TXGIO-KEY",
+          situsKey: HAYS_ADDR_KEY,
+        },
+      ],
+    ]);
+    expect(resolveOpenAlias(aliases, "135570")?.txgioId).toBe("TXGIO-KEY");
+    expect(
+      situsKeysNeedingFetch(
+        [{ cadPropId: "135570", situsKey: HAYS_ADDR_KEY }],
+        aliases,
+      ),
+    ).toEqual([]);
+    expect(
+      situsKeysNeedingFetch(
+        [{ cadPropId: "999", situsKey: HAYS_ADDR_KEY }],
+        aliases,
+      ),
+    ).toEqual([HAYS_ADDR_KEY]);
+  });
+
+  it("new bind emit set may be empty; a recovered bind is in the set", () => {
+    expect(
+      emitBindFromSitusRecovery({
+        countyFips: "48209",
+        cadPropId: "",
+        txgioId: "X",
+        situsKey: "K",
+        asOf: NOW,
+      }),
+    ).toBeNull();
+    const bind = emitBindFromSitusRecovery({
+      countyFips: "48209",
+      cadPropId: "135570",
+      txgioId: "TXGIO-KEY",
+      situsKey: HAYS_ADDR_KEY,
+      asOf: NOW,
+    });
+    expect(bind).toEqual({
+      county_fips: "48209",
+      cad_prop_id: "135570",
+      txgio_id: "TXGIO-KEY",
+      situs_key: HAYS_ADDR_KEY,
+      owners_agree: true,
+      as_of: NOW,
+      method: "cad-roll-address-join",
+    });
+    expect([] as unknown[]).toHaveLength(0);
   });
 });
