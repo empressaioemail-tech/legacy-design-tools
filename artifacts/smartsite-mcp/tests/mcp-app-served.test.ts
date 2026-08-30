@@ -91,9 +91,18 @@ const BATCH = {
   ],
   notFound: ["48021:900099"],
 };
+/*
+ * Verbatim get_smart_site batch result from production p555/p542, 2026-08-30.
+ * The six rails are FLAT on each parcel record; there is no stub key on the wire.
+ * Kept as the exact string so the served script parses what production sends.
+ */
+const LIVE_BATCH =
+  '{"parcels":[{"parcelNodeId":"48021:34137","label":"908 PINE , BASTROP, TX 78602","url":"https://smartsite.cloud/p/48021:34137","situs":"present","zoning":"present","landUse":"unknown","flood":"present","drainage":"unread","envelope":"refused"},{"parcelNodeId":"48021:8720522","label":"111 RAINMAKER CV, BASTROP, TX 78602","url":"https://smartsite.cloud/p/48021:8720522","situs":"present","zoning":"present","landUse":"unknown","flood":"present","drainage":"unread","envelope":"refused"}],"notFound":["48021:900099"]}';
+const LIVE_GLYPHS = ["present", "present", "unknown", "present", "unread", "refused"];
 
 /* The ten divergence fixtures from the deep-dive harness plus the new kinds. */
 const PARITY: Record<string, unknown> = {
+  liveBatch: LIVE_BATCH,
   legacyMiss: { parcels: [], notFound: ["48021:900099"] },
   idFallback: { rows: [{ query: "a", id: "48021:1" }] },
   absentState: { rows: [{ query: "a", parcelNodeId: "48021:1", stub: { situs: "absent" } }] },
@@ -392,6 +401,23 @@ describe("served iframe script", () => {
     expect(rowGlyphs(f.root.innerHTML, "48021:900099")).toEqual(ALL_UNREAD);
     expect(f.text()).not.toContain(COPY.empty);
     expect(f.text()).not.toContain(COPY.absentPrefix);
+    expect(f.root.innerHTML).not.toContain("smartsite.cloud");
+  });
+
+  it("p556 live batch: flat rails on each parcel paint as glyphs (never six unread), one Open per parcel, node unresolved for the notFound id", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(LIVE_BATCH);
+    expect(f.openButtons()).toBe(2);
+    expect(rowGlyphs(f.root.innerHTML, 'data-node="48021:34137"')).toEqual(LIVE_GLYPHS);
+    expect(rowGlyphs(f.root.innerHTML, 'data-node="48021:8720522"')).toEqual(LIVE_GLYPHS);
+    expect(rowGlyphs(f.root.innerHTML, "48021:900099")).toEqual(ALL_UNREAD);
+    expect(f.text()).toContain("908 PINE , BASTROP, TX 78602");
+    expect(f.text()).toContain("111 RAINMAKER CV, BASTROP, TX 78602");
+    expect(f.text()).toContain(COPY.nodeUnresolved);
+    expect(f.text()).toContain(COPY.nothingToOpen);
+    expect(f.text()).not.toContain(COPY.empty);
+    expect(f.text()).not.toContain(COPY.railsPartlyUnread);
     expect(f.root.innerHTML).not.toContain("smartsite.cloud");
   });
 

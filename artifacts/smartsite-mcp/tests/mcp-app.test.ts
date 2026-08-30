@@ -102,7 +102,7 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("String(d.id)===String(initId)");
     expect(html).toContain("pending.push");
     expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p555.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p556.html");
     expect(html).toContain("function fitHost");
     expect(html).toContain("ui/notifications/size-changed");
     expect(html).not.toMatch(/html,body\{[^}]*height:100%/);
@@ -612,6 +612,40 @@ describe("Wave J honesty", () => {
     expect(degraded.rows[1]?.rails.situs).toBe("unread");
     const undeclared = parseToolResult(JSON.stringify({ id: "s", rows: [{ query: "q", parcelNodeId: "48021:1" }] }));
     expect(undeclared.stubsDegraded).toBeUndefined();
+  });
+
+  it("p556: the live batch stub result carries its rails flat on each parcel, and they paint as rails, not six unread", () => {
+    /* Verbatim get_smart_site result from production p555/p542, 2026-08-30. No stub key on the wire. */
+    const live =
+      '{"parcels":[{"parcelNodeId":"48021:34137","label":"908 PINE , BASTROP, TX 78602","url":"https://smartsite.cloud/p/48021:34137","situs":"present","zoning":"present","landUse":"unknown","flood":"present","drainage":"unread","envelope":"refused"},{"parcelNodeId":"48021:8720522","label":"111 RAINMAKER CV, BASTROP, TX 78602","url":"https://smartsite.cloud/p/48021:8720522","situs":"present","zoning":"present","landUse":"unknown","flood":"present","drainage":"unread","envelope":"refused"}],"notFound":["48021:900099"]}';
+    const liveRails = { situs: "present", zoning: "present", landUse: "unknown", flood: "present", drainage: "unread", envelope: "refused" };
+    const allUnread = { situs: "unread", zoning: "unread", landUse: "unread", flood: "unread", drainage: "unread", envelope: "unread" };
+    const model = parseToolResult(live);
+    expect(model.kind).toBe("board");
+    expect(model.rows).toHaveLength(3);
+    expect(model.rows[0]).toEqual({
+      query: "908 PINE , BASTROP, TX 78602",
+      parcelNodeId: "48021:34137",
+      resolution: "resolved",
+      rails: liveRails,
+    });
+    expect(model.rows[1]).toEqual({
+      query: "111 RAINMAKER CV, BASTROP, TX 78602",
+      parcelNodeId: "48021:8720522",
+      resolution: "resolved",
+      rails: liveRails,
+    });
+    expect(model.rows[2]).toEqual({ query: "48021:900099", parcelNodeId: null, resolution: "unresolved", rails: allUnread });
+    /* Precedence: a nested stub object still wins over flat keys; a non-object stub falls through to the flat keys. */
+    const both = parseToolResult(
+      JSON.stringify({ parcels: [{ parcelNodeId: "48021:1", stub: { situs: "absent" }, situs: "present" }], notFound: [] }),
+    );
+    expect(both.rows[0]?.rails.situs).toBe("absent-verified");
+    const stringStub = parseToolResult(
+      JSON.stringify({ parcels: [{ parcelNodeId: "48021:1", stub: "present", situs: "present", zoning: "pending" }], notFound: [] }),
+    );
+    expect(stringStub.rows[0]?.rails.situs).toBe("present");
+    expect(stringStub.rows[0]?.rails.zoning).toBe("unread");
   });
 
   it("escapes quotes in attributes and whitelists glyph states on the exported renderer", () => {

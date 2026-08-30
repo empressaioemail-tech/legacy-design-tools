@@ -1,6 +1,6 @@
 /** P-91 Wave I — Open turn and parcel draw. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p555.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p556.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_HOST_TOOLS = [
   "create_screen",
@@ -364,9 +364,10 @@ function batchRowsFrom(rec: Record<string, unknown>): BoardRow[] | null {
   for (const raw of rec.parcels) {
     const p = asRecord(raw);
     if (!p || typeof p.parcelNodeId !== "string" || p.parcelNodeId.length === 0) continue;
-    const stub = asRecord(p.stub);
+    /* p556: the live server sends the six rails FLAT on the parcel record. A nested stub object wins when present. */
+    const stub = asRecord(p.stub) ?? p;
     const rails = {} as Record<RailName, CellState>;
-    for (const rail of RAILS) rails[rail] = stub ? railState(stub[rail]) : "unread";
+    for (const rail of RAILS) rails[rail] = railState(stub[rail]);
     const label = typeof p.label === "string" && p.label.length > 0 ? p.label : p.parcelNodeId;
     rows.push({ query: label, parcelNodeId: p.parcelNodeId, resolution: "resolved", rails });
   }
