@@ -4,12 +4,11 @@ import {
   ASK_THE_MAP_INTERNAL_FIELD_NAMES,
   askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
+  buildRunReportErrorBody,
+  mapGetSmartSiteNonOk,
   normalizeR1BodyForExternal,
   sanitizeAskTheMapErrorBody,
-  stripEntitlementForExternal,
   stripSavedPropertiesForExternal,
-  getSmartSiteIsError,
-  rewriteBakeMissForHost,
 } from "../src/tool-honesty.js";
 
 const GOLD_DRAW_A3 = {
@@ -47,26 +46,44 @@ const GOLD_DRAW_A3 = {
   confidence: "seed",
 };
 
-describe("stripEntitlementForExternal", () => {
-  it("returns minimal entitled shape and strips internal ids", () => {
-    const summary = stripEntitlementForExternal({
-      authenticated: true,
-      tier: "paid",
-      subscriptionTier: "studio",
-      tenantId: "tenant-secret",
-      userId: "user-secret",
-      devRole: true,
-      entitlementSource: "stripe",
-      property: { parcelNodeId: "node-1", unlocked: true },
+describe("buildRunReportErrorBody (stamp only on res.ok)", () => {
+  it("keeps the upstream JSON body under its own keys and status error wins", () => {
+    const body = buildRunReportErrorBody(
+      JSON.stringify({
+        error: "upgrade_required",
+        message: "Unlock this property or go Pro to run this report",
+        tier: "free",
+      }),
+    );
+    expect(body).toEqual({
+      status: "error",
+      error: "upgrade_required",
+      message: "Unlock this property or go Pro to run this report",
+      tier: "free",
     });
-    expect(summary).toEqual({ entitled: true, subscriptionTier: "studio" });
-    expect(summary).not.toHaveProperty("userId");
-    expect(summary).not.toHaveProperty("tenantId");
-    expect(summary).not.toHaveProperty("entitlementSource");
+    expect(body).not.toHaveProperty("reportKind");
+    expect(body).not.toHaveProperty("reportReadMode");
+    expect(body).not.toHaveProperty("async");
   });
 
-  it("returns entitled false for empty input", () => {
-    expect(stripEntitlementForExternal(null)).toEqual({ entitled: false });
+  it("an upstream status field cannot overwrite the error marker", () => {
+    const body = buildRunReportErrorBody(
+      JSON.stringify({ status: "queued", error: "rate_limited" }),
+    );
+    expect(body.status).toBe("error");
+    expect(body.upstreamStatus).toBe("queued");
+    expect(body.error).toBe("rate_limited");
+  });
+
+  it("non-JSON and non-object bodies land under brief", () => {
+    expect(buildRunReportErrorBody("upstream unavailable")).toEqual({
+      status: "error",
+      brief: "upstream unavailable",
+    });
+    expect(buildRunReportErrorBody("[1,2]")).toEqual({
+      status: "error",
+      brief: "[1,2]",
+    });
   });
 });
 
@@ -396,50 +413,93 @@ describe("normalizeR1BodyForExternal remainder", () => {
   });
 });
 
-describe("getSmartSiteIsError", () => {
-  it("does not flag a bake miss as an MCP error", () => {
-    expect(
-      getSmartSiteIsError(
-        false,
-        JSON.stringify({
-          error: "baked_snapshot_not_found",
-          parcelNodeId: "48021:900099",
-        }),
-      ),
-    ).toBe(false);
+describe("mapGetSmartSiteNonOk (P-91 build plan 4.1)", () => {
+  const ID = "48021:900099";
+  const unbaked = {
+    error: "baked_snapshot_not_found",
+    message: "No baked facet snapshot exists for this parcel node.",
+    parcelNodeId: ID,
+  };
+
+  it("404 parcel_not_found is a declared absence with parcelExists false", () => {
+    const text = mapGetSmartSiteNonOk(
+      404,
+      JSON.stringify({ error: "parcel_not_found", parcelNodeId: ID, parcelExists: false }),
+      [ID],
+    );
+    expect(text).not.toBeNull();
+    expect(JSON.parse(text!)).toEqual({
+      parcels: [],
+      notFound: [ID],
+      reason: "parcel_not_found",
+      parcelExists: false,
+    });
   });
 
-  it("keeps other HTTP misses as errors", () => {
-    expect(
-      getSmartSiteIsError(false, JSON.stringify({ error: "authentication_required" })),
-    ).toBe(true);
-    expect(getSmartSiteIsError(false, "not-json")).toBe(true);
-    expect(getSmartSiteIsError(true, JSON.stringify({ draw: {} }))).toBe(false);
-  });
-});
-
-describe("rewriteBakeMissForHost", () => {
-  it("rewrites a bake miss into a 200-shaped empty batch", () => {
-    expect(
-      rewriteBakeMissForHost(
-        false,
-        JSON.stringify({
-          error: "baked_snapshot_not_found",
-          parcelNodeId: "48021:900099",
-        }),
-        ["48021:900099"],
-      ),
-    ).toBe(JSON.stringify({ parcels: [], notFound: ["48021:900099"] }));
+  it("404 baked_snapshot_not_found carries a boolean parcelExists", () => {
+    const text = mapGetSmartSiteNonOk(
+      404,
+      JSON.stringify({ ...unbaked, parcelExists: true }),
+      [ID],
+    );
+    expect(JSON.parse(text!)).toEqual({
+      parcels: [],
+      notFound: [ID],
+      reason: "baked_snapshot_not_found",
+      parcelExists: true,
+    });
   });
 
-  it("leaves other bodies alone", () => {
+  it("404 baked_snapshot_not_found without parcelExists is unmeasured, and a non-boolean is not a boolean", () => {
+    expect(JSON.parse(mapGetSmartSiteNonOk(404, JSON.stringify(unbaked), [ID])!)).toEqual({
+      parcels: [],
+      notFound: [ID],
+      reason: "baked_snapshot_not_found",
+      parcelExists: "unmeasured",
+    });
     expect(
-      rewriteBakeMissForHost(
-        false,
-        JSON.stringify({ error: "authentication_required" }),
-        ["48021:34137"],
-      ),
-    ).toBeNull();
-    expect(rewriteBakeMissForHost(true, "{}", ["48021:34137"])).toBeNull();
+      JSON.parse(
+        mapGetSmartSiteNonOk(404, JSON.stringify({ ...unbaked, parcelExists: "yes" }), [ID])!,
+      ).parcelExists,
+    ).toBe("unmeasured");
+  });
+
+  it("402 upgrade_required refuses every requested id and drops the upstream copy", () => {
+    const body = JSON.stringify({
+      error: "upgrade_required",
+      message: "Unlock this property or go Pro to run this report",
+      tier: "free",
+    });
+    expect(JSON.parse(mapGetSmartSiteNonOk(402, body, [ID])!)).toEqual({
+      parcels: [],
+      notFound: [],
+      refused: [{ parcelNodeId: ID, reason: "upgrade_required" }],
+    });
+    const many = mapGetSmartSiteNonOk(402, body, ["a:1", "a:2"])!;
+    expect(JSON.parse(many).refused).toEqual([
+      { parcelNodeId: "a:1", reason: "upgrade_required" },
+      { parcelNodeId: "a:2", reason: "upgrade_required" },
+    ]);
+    expect(many).not.toContain("go Pro");
+  });
+
+  it("returns null (pass through as error) for everything else", () => {
+    expect(mapGetSmartSiteNonOk(404, JSON.stringify(unbaked), ["a:1", "a:2"])).toBeNull();
+    expect(mapGetSmartSiteNonOk(500, JSON.stringify(unbaked), [ID])).toBeNull();
+    expect(mapGetSmartSiteNonOk(404, JSON.stringify({ error: "invalid_parcel_node_id" }), [ID])).toBeNull();
+    expect(mapGetSmartSiteNonOk(402, JSON.stringify({ error: "authentication_required" }), [ID])).toBeNull();
+    expect(mapGetSmartSiteNonOk(401, JSON.stringify({ error: "authentication_required" }), [ID])).toBeNull();
+    expect(mapGetSmartSiteNonOk(404, "not-json", [ID])).toBeNull();
+    expect(mapGetSmartSiteNonOk(404, "[]", [ID])).toBeNull();
+    expect(mapGetSmartSiteNonOk(404, JSON.stringify(unbaked), [])).toBeNull();
+  });
+
+  it("falsifier: every mapped miss carries reason; a copy without it is not the same shape", () => {
+    const mapped = JSON.parse(mapGetSmartSiteNonOk(404, JSON.stringify(unbaked), [ID])!);
+    expect(mapped.reason).toBe("baked_snapshot_not_found");
+    const { reason, ...stripped } = mapped;
+    void reason;
+    expect(stripped).not.toHaveProperty("reason");
+    expect(stripped).not.toEqual(mapped);
   });
 });

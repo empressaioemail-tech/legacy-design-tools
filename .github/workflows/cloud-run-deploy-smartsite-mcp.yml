@@ -185,9 +185,23 @@ jobs:
           BASE_URL=$(gcloud run services describe "${{ env.CLOUD_RUN_SERVICE }}" \
             --region="${{ env.GCP_REGION }}" \
             --format='value(status.url)')
-          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health")
-          echo "GET ${BASE_URL}/health -> HTTP ${STATUS}"
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Production /health returned HTTP ${STATUS} after traffic shift"
+          BODY_FILE=$(mktemp)
+          HTTP=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" "${BASE_URL}/health")
+          echo "GET ${BASE_URL}/health -> HTTP ${HTTP}"
+          cat "$BODY_FILE"; echo
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::Production /health returned HTTP ${HTTP} after traffic shift"
             exit 1
           fi
+          # /health answers 200 with status "degraded" when auth or cortex is
+          # unconfigured, and a degraded server 503s every /mcp call. HTTP 200
+          # alone is not a pass. Fields are read by name, never by position.
+          if ! HEALTH_STATUS=$(jq -r '.status // "missing"' "$BODY_FILE"); then
+            echo "::error::Production /health body is not JSON after traffic shift"
+            exit 1
+          fi
+          if [ "$HEALTH_STATUS" != "ok" ]; then
+            echo "::error::Production /health status is '${HEALTH_STATUS}' after traffic shift (authConfigured=$(jq -r '.authConfigured' "$BODY_FILE"), cortexConfigured=$(jq -r '.cortexConfigured' "$BODY_FILE"), revision=$(jq -r '.revision' "$BODY_FILE"))"
+            exit 1
+          fi
+          echo "Production /health status ok (revision $(jq -r '.revision' "$BODY_FILE"))"

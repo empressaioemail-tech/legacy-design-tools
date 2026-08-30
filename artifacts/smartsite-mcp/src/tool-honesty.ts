@@ -1,37 +1,3 @@
-/** External-safe entitlement shape — never echo cortex userId/tenantId blobs. */
-export type ExternalEntitlementSummary = {
-  entitled: boolean;
-  subscriptionTier?: string;
-};
-
-export function stripEntitlementForExternal(
-  raw: unknown,
-): ExternalEntitlementSummary {
-  if (!raw || typeof raw !== "object") {
-    return { entitled: false };
-  }
-  const record = raw as Record<string, unknown>;
-  const subscriptionTier =
-    typeof record.subscriptionTier === "string"
-      ? record.subscriptionTier
-      : undefined;
-  const property =
-    record.property && typeof record.property === "object"
-      ? (record.property as Record<string, unknown>)
-      : null;
-  const unlocked = property?.unlocked === true;
-  const tierEntitled =
-    record.tier === "paid" ||
-    record.authenticated === true ||
-    subscriptionTier === "studio" ||
-    subscriptionTier === "team" ||
-    subscriptionTier === "pro";
-  return {
-    entitled: unlocked || tierEntitled,
-    ...(subscriptionTier ? { subscriptionTier } : {}),
-  };
-}
-
 const PUNCTUATION_ONLY_SITUS_RE = /^[\s,.\-;:'"`]+$/;
 
 export function isPunctuationOnlySitusLabel(value: unknown): boolean {
@@ -173,6 +139,37 @@ export function buildRunReportEnvelope(
   return { ...honesty, brief: cortexBodyText };
 }
 
+export type RunReportErrorBody = { status: "error" } & Record<string, unknown>;
+
+/**
+ * Cortex non-OK for run_report. No reportKind, reportReadMode, or async:
+ * those describe a read that happened, and none did. The upstream body
+ * travels under its own keys, `status: "error"` always wins, and an
+ * upstream `status` moves to `upstreamStatus` rather than being dropped.
+ * Non-JSON and non-object bodies land under `brief` as text.
+ */
+export function buildRunReportErrorBody(
+  cortexBodyText: string,
+): RunReportErrorBody {
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const { status: upstreamStatus, ...rest } = parsed as Record<
+        string,
+        unknown
+      >;
+      return {
+        ...rest,
+        ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+        status: "error",
+      };
+    }
+  } catch {
+    // Non-JSON error bodies stay under `brief`.
+  }
+  return { status: "error", brief: cortexBodyText };
+}
+
 export type ExternalBriefSectionDisposition =
   | "present"
   | "refused"
@@ -312,49 +309,94 @@ export function normalizeR1BodyForExternal(
   };
 }
 
-/**
- * A bake miss is a result the iframe must accept, not an MCP error the
- * host keeps in the chat. Host silence is the 12s timer only.
- */
-/** Host-forwardable miss. An `error` field is kept in the chat and never reaches the iframe. */
-export function bakeMissHostPayload(parcelNodeIds: string[]): string {
-  return JSON.stringify({ parcels: [], notFound: parcelNodeIds });
-}
+export type GetSmartSiteMissReason =
+  | "parcel_not_found"
+  | "baked_snapshot_not_found";
 
-export function rewriteBakeMissForHost(
-  responseOk: boolean,
+export type GetSmartSiteRefusal = {
+  parcelNodeId: string;
+  reason: "upgrade_required";
+};
+
+/**
+ * Result text for a cortex non-OK that the host forwards to the panel.
+ * `reason` always travels on a miss; `parcelExists` is `"unmeasured"`
+ * when cortex did not say, never a fabricated boolean.
+ */
+export type GetSmartSiteNonOkResult =
+  | {
+      parcels: [];
+      notFound: [string];
+      reason: GetSmartSiteMissReason;
+      parcelExists: boolean | "unmeasured";
+    }
+  | { parcels: []; notFound: []; refused: GetSmartSiteRefusal[] };
+
+/**
+ * P-91 build plan, wire contract 4.1. A cortex non-OK on research/brief
+ * becomes a declared result (the caller sets isError false and the host
+ * forwards it to the panel) in exactly the named cases; anything else
+ * returns null and the caller passes the body through with isError true.
+ *
+ * 404 rows apply to a single id only: cortex never 404s an array (per-id
+ * notFound rides inside a 200), so a 404 on an array is unexpected and is
+ * not turned into per-id absences. A 402 on an array refuses every id.
+ * The upstream message copy is not carried; the state is the reason.
+ */
+export function mapGetSmartSiteNonOk(
+  httpStatus: number,
   cortexBodyText: string,
-  parcelNodeIds: string[],
+  parcelNodeIds: readonly string[],
 ): string | null {
-  if (responseOk) return null;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(cortexBodyText);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    if ((parsed as { error?: unknown }).error !== "baked_snapshot_not_found") {
-      return null;
-    }
-    return bakeMissHostPayload(parcelNodeIds);
+    parsed = JSON.parse(cortexBodyText);
   } catch {
     return null;
   }
-}
-
-export function getSmartSiteIsError(
-  responseOk: boolean,
-  cortexBodyText: string,
-): boolean {
-  if (responseOk) return false;
-  try {
-    const parsed: unknown = JSON.parse(cortexBodyText);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return true;
-    }
-    return (parsed as { error?: unknown }).error !== "baked_snapshot_not_found";
-  } catch {
-    return true;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
   }
+  const body = parsed as Record<string, unknown>;
+  if (parcelNodeIds.length === 0) return null;
+
+  if (httpStatus === 402 && body.error === "upgrade_required") {
+    const refused: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [],
+      refused: parcelNodeIds.map((parcelNodeId) => ({
+        parcelNodeId,
+        reason: "upgrade_required",
+      })),
+    };
+    return JSON.stringify(refused);
+  }
+
+  if (httpStatus !== 404 || parcelNodeIds.length !== 1) return null;
+  const id = parcelNodeIds[0]!;
+
+  if (body.error === "parcel_not_found") {
+    const absent: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [id],
+      reason: "parcel_not_found",
+      parcelExists: false,
+    };
+    return JSON.stringify(absent);
+  }
+
+  if (body.error === "baked_snapshot_not_found") {
+    const unbaked: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [id],
+      reason: "baked_snapshot_not_found",
+      parcelExists:
+        typeof body.parcelExists === "boolean" ? body.parcelExists : "unmeasured",
+    };
+    return JSON.stringify(unbaked);
+  }
+
+  return null;
 }
 
 /** Batch node rows keep per-parcel brief honesty; stubs pass through. */
