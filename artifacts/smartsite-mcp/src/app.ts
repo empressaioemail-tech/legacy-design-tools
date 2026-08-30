@@ -8,7 +8,12 @@ import {
   loadAuthConfig,
   type AuthConfig,
 } from "./auth.js";
-import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
+import {
+  SERVER_ICONS,
+  SERVER_NAME,
+  SERVER_VERSION,
+  SERVER_WEBSITE_URL,
+} from "./constants.js";
 import {
   buildDependenciesHealthReport,
   buildHealthReport,
@@ -21,14 +26,31 @@ import {
 } from "./oauth-metadata.js";
 import { registerTools } from "./tools.js";
 
+/**
+ * The Implementation every /mcp session announces on initialize. Exported so a
+ * test can read it through a real client's initialize result, which is what a
+ * host paints on the connector card (P-91 QA 2026-08-30: the card showed a
+ * fallback icon because this carried no icons).
+ */
+export function serverImplementation(): {
+  name: string;
+  version: string;
+  websiteUrl: string;
+  icons: Array<{ src: string; mimeType: string; sizes: string[] }>;
+} {
+  return {
+    name: SERVER_NAME,
+    version: SERVER_VERSION,
+    websiteUrl: SERVER_WEBSITE_URL,
+    icons: SERVER_ICONS.map((icon) => ({ ...icon, sizes: [...icon.sizes] })),
+  };
+}
+
 async function buildPerRequestMcp(): Promise<{
   transport: StreamableHTTPServerTransport;
   close: () => Promise<void>;
 }> {
-  const mcpServer = new McpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
-  });
+  const mcpServer = new McpServer(serverImplementation());
   registerTools(mcpServer);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -57,6 +79,15 @@ export function createSmartsiteMcpApp(
   const authConfig = options.authConfig ?? loadAuthConfig();
   const mcpAuth = buildMcpAuthMiddleware(authConfig);
   const authkit = authkitIssuer();
+
+  // The MCP host has no page of its own. A browser or a host probing for a
+  // site icon lands on the product, never on "Cannot GET /".
+  app.get("/", (_req, res) => {
+    res.redirect(302, SERVER_WEBSITE_URL);
+  });
+  app.get("/favicon.ico", (_req, res) => {
+    res.redirect(302, `${SERVER_WEBSITE_URL}/favicon.ico`);
+  });
 
   app.get("/health", (_req, res) => {
     // Same AuthConfig object the /mcp gate was built from, so /health and

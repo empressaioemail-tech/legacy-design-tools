@@ -6,7 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { SERVER_NAME, SMARTSITE_MCP_TOOLS } from "../src/constants.js";
 import type { SmartsiteAuthContext } from "../src/request-context.js";
 import { sanitizeAskTheMapErrorBody } from "../src/tool-honesty.js";
-import { registerTools } from "../src/tools.js";
+import { registerTools, splitFindParcelHits } from "../src/tools.js";
 
 const mockCortexFetch = vi.fn();
 vi.mock("../src/cortex-client.js", () => ({
@@ -1254,5 +1254,46 @@ describe("schemas as types (P-91 S2 item 5)", () => {
       expect(result.isError).toBe(true);
       expect(mockCortexFetch).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("find_parcel hits carry parcel records only (P-91 QA 2026-08-30 D1)", () => {
+  const live = JSON.stringify({
+    hits: [
+      { parcelNodeId: "48021:8720522", situsAddress: "111 RAINMAKER CV, BASTROP, TX 78602", countyFips: "48021", source: "parcel-situs" },
+      { parcelNodeId: null, label: "111 Rainmaker Cv, Bastrop, TX 78602", countyFips: "48021", latitude: 30.1, longitude: -97.3, source: "address-point" },
+    ],
+  });
+
+  it("drops the null-id address point when a parcel hit exists", () => {
+    const out = JSON.parse(splitFindParcelHits(live)) as { hits: Array<{ parcelNodeId: unknown }>; located?: unknown };
+    expect(out.hits).toHaveLength(1);
+    expect(out.hits[0]?.parcelNodeId).toBe("48021:8720522");
+    expect(out.located).toBeUndefined();
+    for (const hit of out.hits) expect(typeof hit.parcelNodeId).toBe("string");
+  });
+
+  it("moves address points to located, typed and without a parcel id, when nothing binds", () => {
+    const miss = JSON.stringify({
+      hits: [
+        { parcelNodeId: null, label: "9999 Nowhere Ln, Bastrop, TX", countyFips: "48021", latitude: 30.2, longitude: -97.4, source: "address-point" },
+      ],
+    });
+    const out = JSON.parse(splitFindParcelHits(miss)) as {
+      hits: unknown[];
+      located?: Array<Record<string, unknown>>;
+      missClass?: string;
+    };
+    expect(out.hits).toEqual([]);
+    expect(out.located).toHaveLength(1);
+    expect(out.located?.[0]).not.toHaveProperty("parcelNodeId");
+    expect(out.located?.[0]).toMatchObject({ latitude: 30.2, longitude: -97.4, source: "address-point" });
+    expect(out.missClass).toBe("located-unbound");
+  });
+
+  it("keeps a cortex missClass and passes non-JSON through", () => {
+    const budget = JSON.stringify({ hits: [], missClass: "situs-search-budget" });
+    expect(JSON.parse(splitFindParcelHits(budget))).toEqual({ hits: [], missClass: "situs-search-budget" });
+    expect(splitFindParcelHits("<html>500</html>")).toBe("<html>500</html>");
   });
 });
