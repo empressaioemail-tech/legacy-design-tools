@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assembleParcelDraw,
   assertDrawStub,
+  disposeDrawEdgeNeighbor,
   metresToSurveyFeet,
   type AssembleParcelDrawInput,
   type DrawBoundaryEdgeIn,
@@ -26,6 +27,7 @@ const GOLD_EDGES: DrawBoundaryEdgeIn[] = [
       ],
     },
     propertyLineTags: { bearing: "S 89°52' W", distanceFeet: 98.97717491201193 },
+    sourceAdapter: "descriptor-fixture",
   },
   {
     entityId: "48021:34137:boundary:1",
@@ -41,6 +43,8 @@ const GOLD_EDGES: DrawBoundaryEdgeIn[] = [
       ],
     },
     propertyLineTags: { bearing: "S 0°27' E", distanceFeet: 167.99192515757665 },
+    sourceAdapter: "descriptor-fixture",
+    neighborCheck: { result: "reciprocal" },
   },
   {
     entityId: "48021:34137:boundary:2",
@@ -59,6 +63,7 @@ const GOLD_EDGES: DrawBoundaryEdgeIn[] = [
       ],
     },
     propertyLineTags: { bearing: "N 89°28' E", distanceFeet: 99.91565902085094 },
+    sourceAdapter: "descriptor-fixture",
   },
   {
     entityId: "48021:34137:boundary:3",
@@ -77,6 +82,7 @@ const GOLD_EDGES: DrawBoundaryEdgeIn[] = [
       ],
     },
     propertyLineTags: { bearing: "N 0°46' W", distanceFeet: 167.32287943589597 },
+    sourceAdapter: "descriptor-fixture",
   },
 ];
 
@@ -106,7 +112,12 @@ function goldInput(
       landUseDescription: "Single-family residential",
       taxYear: 2025,
     },
-    yearBuilt: 1910,
+    yearBuilt: {
+      v: 1910,
+      source: "cad_property",
+      sourceVintage: "tier:cad-export",
+    },
+    anchor: { lat: 30.1102, lng: -97.315 },
     boundary: { state: "present", edges: GOLD_EDGES },
     flood: {
       state: "present",
@@ -494,6 +505,139 @@ describe("F5 verified means verified", () => {
     const unknownVintage = structuredClone(good) as ParcelDrawStub;
     unknownVintage.overlays.find((o) => o.id === "well")!.vintage = "UNKNOWN";
     expect(() => assertDrawStub(unknownVintage)).toThrow(/well overlay is absent-verified without/);
+  });
+});
+
+describe("X2 edge disposition (both arms)", () => {
+  it("a gold reciprocal neighbour stays present and always keys neighbor", () => {
+    const draw = assembleParcelDraw(goldInput());
+    const side = draw.edges?.find((e) => e.id === "48021:34137:boundary:1");
+    expect(side).toMatchObject({
+      state: "present",
+      neighbor: "48021:34169",
+      reciprocity: "pass",
+      sourceAdapter: "descriptor-fixture",
+    });
+    for (const edge of draw.edges ?? []) {
+      expect(edge).toHaveProperty("neighbor");
+      expect(edge).toHaveProperty("sourceAdapter");
+    }
+    expect(draw.frame.anchor).toEqual({ lat: 30.1102, lng: -97.315 });
+  });
+
+  it("an unchecked neighbour id is unknown, never present", () => {
+    const draw = assembleParcelDraw(goldInput());
+    const front = draw.edges?.find((e) => e.id === "48021:34137:boundary:2");
+    expect(front).toMatchObject({
+      state: "unknown",
+      neighbor: "48021:34121",
+    });
+    expect(front).not.toHaveProperty("reciprocity");
+  });
+
+  it("a contradicted neighbour cannot emit present", () => {
+    const edges = GOLD_EDGES.map((e) =>
+      e.edgeIndex === 1
+        ? {
+            ...e,
+            neighborCheck: {
+              result: "contradicted" as const,
+              agentGuidance:
+                "Reciprocal edge on 48021:34169 does not name this parcel.",
+            },
+          }
+        : e,
+    );
+    const draw = assembleParcelDraw(
+      goldInput({ boundary: { state: "present", edges } }),
+    );
+    const side = draw.edges?.find((e) => e.id === "48021:34137:boundary:1");
+    expect(side?.state).toBe("refused");
+    expect(side).toMatchObject({
+      neighbor: "48021:34169",
+      agentGuidance:
+        "Reciprocal edge on 48021:34169 does not name this parcel.",
+    });
+    expect(side?.state).not.toBe("present");
+  });
+
+  it("a self-neighbour is refused from the payload, not from adjacencyKind", () => {
+    const disposed = disposeDrawEdgeNeighbor({
+      parcelNodeId: "48021:34137",
+      parcelNeighborPropId: "34137",
+      fips: "48021",
+    });
+    expect(disposed).toMatchObject({
+      state: "refused",
+      neighbor: "48021:34137",
+    });
+    expect(disposed.state).not.toBe("present");
+  });
+
+  it("null neighbour is unknown, not a present without a witness", () => {
+    const rear = assembleParcelDraw(goldInput()).edges?.find(
+      (e) => e.id === "48021:34137:boundary:0",
+    );
+    expect(rear).toMatchObject({
+      state: "unknown",
+      neighbor: null,
+      reason: "no neighbour of record",
+    });
+    expect(rear).not.toHaveProperty("reciprocity");
+  });
+
+  it("a retired edge is dropped; the active sibling stays", () => {
+    const edges = [
+      ...GOLD_EDGES,
+      {
+        ...GOLD_EDGES[1]!,
+        entityId: "48021:34137:boundary:99",
+        edgeIndex: 99,
+        status: "retired",
+        parcelNeighborPropId: "99999",
+      },
+    ];
+    const draw = assembleParcelDraw(
+      goldInput({ boundary: { state: "present", edges } }),
+    );
+    expect(draw.edges?.some((e) => e.id === "48021:34137:boundary:99")).toBe(
+      false,
+    );
+    expect(
+      draw.edges?.some((e) => e.id === "48021:34137:boundary:1"),
+    ).toBe(true);
+  });
+});
+
+describe("landUse bake keys (description / vintage)", () => {
+  it("populates desc and taxYear from the keys the bake writes", () => {
+    const draw = assembleParcelDraw(
+      goldInput({
+        landUse: {
+          code: "A1",
+          description: "Single-family residential",
+          vintage: "2025",
+        },
+      }),
+    );
+    expect(draw.attrs.landUse).toMatchObject({
+      v: "A1",
+      desc: "Single-family residential",
+      taxYear: 2025,
+      state: "present",
+    });
+  });
+});
+
+describe("yearBuilt carries its source, never a bake fallback shape", () => {
+  it("ships cad_property on the wire", () => {
+    const draw = assembleParcelDraw(goldInput());
+    expect(draw.attrs.yearBuilt).toEqual({
+      v: 1910,
+      state: "present",
+      source: "cad_property",
+      sourceVintage: "tier:cad-export",
+    });
   });
 });
 

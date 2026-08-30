@@ -127,6 +127,8 @@ export type BoundaryEdgeItem = {
   setback: unknown;
   interior: BoundaryInterior | null;
   propertyLineTags: BoundaryPropertyLineTags | null;
+  status: string | null;
+  sourceAdapter: string | null;
 };
 
 export type BoundaryEdgeFactPresent = {
@@ -326,6 +328,8 @@ function presentEdgeFromRow(
     setback: rec.setback ?? null,
     interior: asInterior(rec.interior),
     propertyLineTags: asPropertyLineTags(rec.propertyLineTags),
+    status: asNullableString(rec.status),
+    sourceAdapter: asNullableString(rec.sourceAdapter),
   };
 }
 
@@ -410,6 +414,7 @@ export function interpretBoundaryEdgeFactRows(
   const integerPresent: BoundaryEdgeItem[] = [];
   const paddedPresent: BoundaryEdgeItem[] = [];
   const bodyByEntityId = new Map<string, Record<string, unknown>>();
+  let retiredDropped = 0;
 
   for (const row of hits) {
     const rec = asRecord(row.body);
@@ -424,9 +429,21 @@ export function interpretBoundaryEdgeFactRows(
         reason: parsed.malformed,
       };
     }
+    if ((parsed.status ?? "").trim() === "retired") {
+      retiredDropped += 1;
+      continue;
+    }
     const prefix = prefixOfEntityId(row.entity_id, tried);
     if (prefix === tried[0]) integerPresent.push(parsed);
     else paddedPresent.push(parsed);
+  }
+
+  if (
+    integerPresent.length === 0 &&
+    paddedPresent.length === 0 &&
+    retiredDropped > 0
+  ) {
+    return presentFromItems([], bodyByEntityId, tried);
   }
 
   if (integerPresent.length > 0 && paddedPresent.length > 0) {
