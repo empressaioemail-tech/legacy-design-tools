@@ -20,7 +20,7 @@ import {
 } from "../lib/peScreenSave";
 import { createDrizzleScreenSaveStore } from "../lib/peScreenSaveDb";
 import { cortexNodeLookup, cortexQueryResolver } from "../lib/peScreenSaveResolve";
-import { lookupParcelNodeForScreen } from "../lib/txgioAddressResolve";
+import type { NodeLookup } from "../lib/peScreenSave";
 import {
   PE_FREE_CHAT_MESSAGE_LIMIT,
   createPePropertyUnlock,
@@ -495,9 +495,12 @@ function sendScreenSaveRefuse(
  * collapsed into either 404.
  */
 async function sendBriefMiss(res: Response, parcelNodeId: string): Promise<void> {
-  let probe: Awaited<ReturnType<typeof lookupParcelNodeForScreen>>;
+  // Same existence seam add_to_screen uses (peScreenSaveResolve.cortexNodeLookup),
+  // never a direct txgioAddressResolve import: that module reads @workspace/db
+  // tables at load, and the route suites mock the seam, not the store.
+  let probe: Awaited<ReturnType<NodeLookup>>;
   try {
-    probe = await lookupParcelNodeForScreen({ parcelNodeId });
+    probe = await cortexNodeLookup()(parcelNodeId);
   } catch (err) {
     logger.warn({ err, parcelNodeId }, "pe_brief_existence_probe_unavailable");
     res.status(503).json({ error: "lookup_unavailable", parcelNodeId });

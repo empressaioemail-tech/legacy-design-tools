@@ -51,7 +51,9 @@ vi.mock("../../lib/peScreenSaveDb", () => ({
 }));
 
 vi.mock("../../lib/peScreenSaveResolve", () => ({
-  cortexNodeLookup: vi.fn(() => async () => null),
+  // The brief-miss probe rides this seam (same as add_to_screen), so the fake
+  // probe is wired here, not on txgioAddressResolve.
+  cortexNodeLookup: () => (parcelNodeId: string) => fakes.probe({ parcelNodeId }),
   cortexQueryResolver: vi.fn(),
 }));
 
