@@ -3,9 +3,22 @@
  * five-state value per rail. Drainage is unread when never fetched.
  * atom-miss maps to unknown. absent-verified only from pipeline
  * present-outside or a :sd:outside bind.
+ *
+ * The stub is a projection of the node (P-91 v2, triage D2): every rail
+ * that has a brief section is that section's disposition mapped through
+ * `railStateFromSectionDisposition`, and the disposition predicates live in
+ * `r1BriefCompose`. There is one derivation, read at two depths.
  */
 
 import { SMARTSITE_PARCEL_URL_PREFIX } from "./parcelDrawStub";
+import {
+  drainageDisposition,
+  envelopeDisposition,
+  factReadDisposition,
+  landUseDisposition,
+  zoningDisposition,
+  type R1BriefSectionDisposition,
+} from "./r1BriefCompose";
 import { composeSitusLabel } from "./situsCompose";
 
 export const SMART_SITE_RAIL_STATES = [
@@ -65,55 +78,42 @@ function isSdOutsideEntityId(entityId: string | undefined): boolean {
 }
 
 /**
+ * Node section disposition into the rail vocabulary. `absent` (no
+ * determination, no refusal) is `unknown` on the rail: `absent-verified`
+ * needs a positive typed result (WDLL item 5) that no section carries.
+ */
+export function railStateFromSectionDisposition(
+  disposition: R1BriefSectionDisposition,
+): SmartSiteRailState {
+  switch (disposition) {
+    case "present":
+      return "present";
+    case "refused":
+      return "refused";
+    case "unread":
+      return "unread";
+    case "absent":
+      return "unknown";
+  }
+}
+
+/**
  * Fifth-state mapper. unread is only legal when the read was not attempted.
- * atom-miss is unknown, never absent-verified.
+ * atom-miss is unknown, never absent-verified. Outside the two positive
+ * typed results, a read projects exactly as its section would.
  */
 export function railStateFromRead(read: RailReadInput): SmartSiteRailState {
   if (!read.attempted) return "unread";
   if (read.state == null) return "unknown";
-  if (read.state === "refused") {
-    return read.code === "atom-miss" ? "unknown" : "refused";
-  }
   if (read.kind === "pipeline" && read.state === "present" && read.presentOutside) {
     return "absent-verified";
   }
   if (read.kind === "sd" && (read.state === "absent" || isSdOutsideEntityId(read.entityId))) {
     return "absent-verified";
   }
-  if (read.state === "absent") return "unknown";
-  if (read.state === "present") return "present";
-  return "unknown";
-}
-
-function bakeFieldState(value: unknown): SmartSiteRailState {
-  if (value == null) return "unknown";
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? "present" : "unknown";
-  }
-  const rec = asRecord(value);
-  if (!rec) return "unknown";
-  for (const key of ["district", "code", "landUseCode", "zoningCode", "v"]) {
-    const candidate = rec[key];
-    if (typeof candidate === "string" && candidate.trim()) return "present";
-  }
-  return Object.keys(rec).length > 0 ? "present" : "unknown";
-}
-
-function envelopeHasProductData(envelope: unknown): boolean {
-  const record = asRecord(envelope);
-  if (!record) return false;
-  if (asRecord(record.geojson)) return true;
-  return record.status === "ok" || record.status === "no-buildable-area";
-}
-
-function envelopeRailState(input: {
-  envelope: unknown;
-  envelopeBriefRefusal?: { state?: string } | null;
-}): SmartSiteRailState {
-  if (envelopeHasProductData(input.envelope)) return "present";
-  if (input.envelopeBriefRefusal?.state === "refused") return "refused";
-  return "unknown";
+  return railStateFromSectionDisposition(
+    factReadDisposition({ state: read.state, code: read.code }),
+  );
 }
 
 export function composeSmartSiteStub(input: {
@@ -138,19 +138,24 @@ export function composeSmartSiteStub(input: {
     ],
   });
   const flood = railStateFromRead(input.flood ?? { attempted: false });
-  const drainage = railStateFromRead(input.drainage ?? { attempted: false });
+  // A live drainage read wins when one was attempted; otherwise the rail is
+  // the bake's drainage facet, exactly as the node section reads it (F7).
+  const drainage = input.drainage?.attempted
+    ? railStateFromRead(input.drainage)
+    : railStateFromSectionDisposition(drainageDisposition(root.drainage ?? null));
   return {
     parcelNodeId: input.parcelNodeId,
     label: situs.label,
     url: `${SMARTSITE_PARCEL_URL_PREFIX}${input.parcelNodeId}`,
     situs: situs.situs,
-    zoning: bakeFieldState(root.zoning),
-    landUse: bakeFieldState(baseFacts.landUse),
+    zoning: railStateFromSectionDisposition(zoningDisposition(root.zoning)),
+    landUse: railStateFromSectionDisposition(
+      landUseDisposition(baseFacts.landUse),
+    ),
     flood,
     drainage,
-    envelope: envelopeRailState({
-      envelope: root.envelope,
-      envelopeBriefRefusal: input.envelopeBriefRefusal,
-    }),
+    envelope: railStateFromSectionDisposition(
+      envelopeDisposition(root.envelope, input.envelopeBriefRefusal),
+    ),
   };
 }
