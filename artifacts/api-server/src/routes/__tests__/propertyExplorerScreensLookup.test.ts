@@ -237,3 +237,52 @@ describe("POST /property-explorer/v1/screens with a node-id query", () => {
     expect(res.body.screen).not.toHaveProperty("degraded");
   });
 });
+
+/**
+ * B2 (2026-08-30 v2 card, triage Cv/Cove row). Listing-derived pastes carry
+ * two spellings of one parcel. The screen is a set of parcel references, so
+ * the second spelling is the same row: it is not written, it is declared,
+ * and nothing is refused.
+ */
+describe("POST /property-explorer/v1/screens with two spellings of one parcel (B2)", () => {
+  const CV = "111 Rainmaker Cv, Bastrop TX";
+  const COVE = "111 Rainmaker Cove, Bastrop TX 78602";
+  const NODE = "48021:c1";
+
+  beforeEach(() => {
+    store.screens = [];
+    store.rows = [];
+    store.saves = [];
+    fakes.lookup.mockReset();
+    fakes.resolver.mockReset();
+    fakes.resolver.mockImplementation(async (q) =>
+      /rainmaker/i.test(q)
+        ? [{ parcelNodeId: NODE, label: "111 RAINMAKER CV, BASTROP, TX 78602" }]
+        : [],
+    );
+  });
+
+  it("Cv and Cove resolve to one node: 200, one row, one declared duplicate, nothing refused", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "listing paste", queries: [CV, COVE], source: "pasted" });
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty("error");
+    expect(res.body.screen.rows).toHaveLength(1);
+    expect(res.body.screen.rows[0]).toMatchObject({
+      ordinal: 0,
+      query: CV,
+      parcelNodeId: NODE,
+      resolution: "resolved",
+    });
+    expect(res.body.screen.degraded).toEqual({
+      duplicates: [{ query: COVE, parcelNodeId: NODE, keptQuery: CV }],
+    });
+    expect(JSON.stringify(res.body)).not.toContain("duplicate_resolved_node");
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0]!.query).toBe(CV);
+    expect(fakes.resolver).toHaveBeenCalledWith(CV);
+    expect(fakes.resolver).toHaveBeenCalledWith(COVE);
+  });
+});

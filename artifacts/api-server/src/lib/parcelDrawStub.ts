@@ -101,7 +101,7 @@ export type AssembleParcelDrawInput = {
         inSpecialFloodHazardArea: boolean;
         citations?: string[];
       }
-    | { state: "refused" | "absent" };
+    | { state: "refused" | "absent"; sourceVintage?: string | null };
   envelopeRefusalReason: string | null;
   pipeline:
     | {
@@ -110,16 +110,72 @@ export type AssembleParcelDrawInput = {
         bufferMeters: number | null;
         sourceVintage: string | null;
       }
-    | { state: "refused" | "absent" };
-  well: { state: "present" } | { state: "refused" | "absent"; code?: string };
+    | { state: "refused" | "absent"; sourceVintage?: string | null };
+  well:
+    | { state: "present" }
+    | { state: "refused" | "absent"; code?: string; sourceVintage?: string | null };
   specialDistrict:
     | { state: "present"; districtName?: string | null; districtId?: string | null }
-    | { state: "absent" }
+    | { state: "absent"; sourceVintage?: string | null }
     | { state: "refused"; code?: string };
 };
 
 export function metresToSurveyFeet(metres: number): number {
   return Math.round(metres * US_SURVEY_FEET_PER_METRE * 100) / 100;
+}
+
+/**
+ * A metres field printed in the feet frame with no more precision than the
+ * source: the source's decimal resolution (0.1 m for `152.4`) is converted
+ * to feet and the label keeps only the decimals that resolution supports.
+ * `152.4` prints `500 ft`; `30.48` prints `100.0 ft`; `100` prints `328 ft`.
+ */
+export function feetLabelFromMetres(metres: number): string {
+  const text = String(metres);
+  const dot = text.indexOf(".");
+  const metreDecimals = dot < 0 ? 0 : text.length - dot - 1;
+  const resolutionFeet =
+    Math.pow(10, -metreDecimals) * US_SURVEY_FEET_PER_METRE;
+  const feetDecimals = Math.max(0, Math.floor(-Math.log10(resolutionFeet)));
+  return `${(metres * US_SURVEY_FEET_PER_METRE).toFixed(feetDecimals)} ft`;
+}
+
+function knownVintage(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toUpperCase() === "UNKNOWN") return null;
+  return trimmed;
+}
+
+export type VerifiedAbsence =
+  | { state: "absent-verified"; provenance: "present"; vintage: string }
+  | { state: "unknown"; reason: string; provenance?: "degraded"; vintage?: string };
+
+/**
+ * F5 (triage D6): absent-verified is earned, never asserted. The draw wire's
+ * provenance is read off the vintage the fact carries: a known vintage is
+ * present provenance; a vintage the atom spells UNKNOWN is degraded
+ * provenance (the record declares it does not know); no vintage at all is
+ * no provenance. Only the first earns absent-verified. The other two are
+ * unknown, with `reason` naming what is missing.
+ */
+export function verifiedAbsence(basis: {
+  sourceVintage?: string | null;
+}): VerifiedAbsence {
+  const raw = basis.sourceVintage;
+  const vintage = knownVintage(raw);
+  if (vintage) {
+    return { state: "absent-verified", provenance: "present", vintage };
+  }
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return {
+      state: "unknown",
+      reason: "provenance degraded; vintage unknown",
+      provenance: "degraded",
+      vintage: raw.trim(),
+    };
+  }
+  return { state: "unknown", reason: "provenance unknown; vintage unknown" };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -283,13 +339,22 @@ function landUseAttrs(landUse: unknown): Record<string, unknown> | null {
 function floodOverlay(
   flood: AssembleParcelDrawInput["flood"],
 ): DrawOverlay {
+  if (flood.state === "absent") {
+    return {
+      id: "flood",
+      label: "No mapped flood zone of record",
+      geom: "none",
+      draw: "legend-only",
+      ...verifiedAbsence(flood),
+    };
+  }
   if (flood.state !== "present") {
     return {
       id: "flood",
       label: "Flood record not checked",
       geom: "none",
       draw: "legend-only",
-      state: flood.state === "absent" ? "absent-verified" : "unknown",
+      state: "unknown",
     };
   }
   const zone = flood.floodZone?.trim() || "unlabelled";
@@ -326,6 +391,14 @@ export function assertDrawStub(draw: ParcelDrawStub): void {
     if (overlay.id === "flood" && presentCitationDishonest(overlay)) {
       throw new Error(
         "present flood overlay ships an empty citation array; set citationsDegraded or attach an http citation",
+      );
+    }
+    if (
+      overlay.state === "absent-verified" &&
+      (overlay.provenance !== "present" || knownVintage(overlay.vintage) === null)
+    ) {
+      throw new Error(
+        `${overlay.id} overlay is absent-verified without provenance present and a known vintage`,
       );
     }
   }
@@ -388,18 +461,11 @@ export function assembleParcelDraw(
     overlays.push({
       id: "pipeline",
       label:
-        metres != null
-          ? `No pipeline within ${metres} m`
+        metres != null && Number.isFinite(metres)
+          ? `No pipeline within ${feetLabelFromMetres(metres)}`
           : "No pipeline within screening distance",
       draw: "legend-only",
-      state: "absent-verified",
-      ...(input.pipeline.sourceVintage
-        ? {
-            provenance:
-              input.pipeline.sourceVintage === "UNKNOWN" ? "degraded" : "present",
-            vintage: input.pipeline.sourceVintage,
-          }
-        : {}),
+      ...verifiedAbsence(input.pipeline),
     });
   } else if (input.pipeline.state === "present") {
     overlays.push({
@@ -413,7 +479,7 @@ export function assembleParcelDraw(
       id: "pipeline",
       label: "No pipeline of record",
       draw: "legend-only",
-      state: "absent-verified",
+      ...verifiedAbsence(input.pipeline),
     });
   } else {
     overlays.push({
@@ -429,7 +495,7 @@ export function assembleParcelDraw(
       id: "specialDistrict",
       label: "Outside mapped special districts",
       draw: "legend-only",
-      state: "absent-verified",
+      ...verifiedAbsence(input.specialDistrict),
     });
   } else if (input.specialDistrict.state === "present") {
     const name =
@@ -463,7 +529,7 @@ export function assembleParcelDraw(
       id: "well",
       label: "No well of record within screening distance",
       draw: "legend-only",
-      state: "absent-verified",
+      ...verifiedAbsence(input.well),
     });
   } else {
     overlays.push({

@@ -124,14 +124,36 @@ export type ScreenRow = {
   stubRead?: StubReadState;
 };
 
+/**
+ * B2 (P-91 v2). A later query that resolved to a node an earlier query in
+ * the same create already resolved to. A screen holds parcel references, so
+ * the second reference is the same row: it is not written and is declared
+ * here. `keptQuery` is the query whose row stands.
+ */
+export type ScreenDuplicate = {
+  query: string;
+  parcelNodeId: string;
+  keptQuery: string;
+};
+
+/**
+ * Declared degradation on a create_screen response. Each key is present
+ * only when non-empty; the object is present only when at least one is.
+ * Nothing here is stored, so a reload cannot re-declare it.
+ */
+export type ScreenDegraded = {
+  timedOut?: string[];
+  duplicates?: ScreenDuplicate[];
+};
+
 export type Screen = {
   id: string;
   name: string;
   createdAt: string;
   updatedAt: string;
   rows: ScreenRow[];
-  /** Present only on a create_screen response when at least one resolver timed out. */
-  degraded?: { timedOut: string[] };
+  /** Present only on a create_screen response that declares a timeout or a duplicate. */
+  degraded?: ScreenDegraded;
   /** Present (true) only when at least one resolved row's stubRead is not `ok`. */
   stubsDegraded?: true;
 };
@@ -590,32 +612,38 @@ export async function createScreen(
     }
     throw err;
   }
-  const seen = new Map<string, string>();
+  // B2: two queries that resolve to one parcel are one row. The first query
+  // keeps the row at its paste ordinal; each later one is not written and is
+  // declared on the response. Listing-derived pastes (Cv / Cove) hit this
+  // every time, so it is a declared row outcome, not a screen refuse.
+  const keptQueryByNode = new Map<string, string>();
+  const duplicates: ScreenDuplicate[] = [];
+  const toWrite: PlannedScreenRow[] = [];
   for (const row of planned) {
-    if (!row.parcelNodeId) continue;
-    const first = seen.get(row.parcelNodeId);
-    if (first !== undefined) {
-      return {
-        ok: false,
-        error: {
-          error: "duplicate_resolved_node",
-          node: row.parcelNodeId,
-          queries: [first, row.query],
-        },
-      };
+    if (row.parcelNodeId) {
+      const keptQuery = keptQueryByNode.get(row.parcelNodeId);
+      if (keptQuery !== undefined) {
+        duplicates.push({
+          query: row.query,
+          parcelNodeId: row.parcelNodeId,
+          keptQuery,
+        });
+        continue;
+      }
+      keptQueryByNode.set(row.parcelNodeId, row.query);
     }
-    seen.set(row.parcelNodeId, row.query);
+    toWrite.push(row);
   }
 
   try {
     const screen = await store.transaction(async (tx) => {
       const savesBefore = await tx.countSaves(scope);
       const created = await tx.insertScreen({ scope, name, createdAt });
-      if (planned.length > 0) {
+      if (toWrite.length > 0) {
         // Explicit columns: the plan-only resolveTimedOut flag never reaches
         // the store.
         await tx.insertScreenRows(
-          planned.map((row) => ({
+          toWrite.map((row) => ({
             screenId: created.id,
             ordinal: row.ordinal,
             query: row.query,
@@ -633,13 +661,19 @@ export async function createScreen(
       return created;
     });
     const storedRows = await store.listScreenRows(screen.id);
-    const timedOut = planned.filter((row) => row.resolveTimedOut);
+    const timedOut = toWrite.filter((row) => row.resolveTimedOut);
     const timedOutOrdinals = new Set(timedOut.map((row) => row.ordinal));
     const rows = storedRows.map((stored) => {
       const wired = wireRow(stored);
       if (timedOutOrdinals.has(stored.ordinal)) wired.resolveTimedOut = true;
       return wired;
     });
+    const degraded: ScreenDegraded = {
+      ...(timedOut.length > 0
+        ? { timedOut: timedOut.map((row) => row.query) }
+        : {}),
+      ...(duplicates.length > 0 ? { duplicates } : {}),
+    };
     return {
       ok: true,
       screen: {
@@ -648,15 +682,16 @@ export async function createScreen(
         createdAt: toIso(screen.createdAt),
         updatedAt: toIso(screen.updatedAt),
         rows,
-        ...(timedOut.length > 0
-          ? { degraded: { timedOut: timedOut.map((row) => row.query) } }
-          : {}),
+        ...(Object.keys(degraded).length > 0 ? { degraded } : {}),
       },
     };
   } catch (err) {
     if (err instanceof Error && err.message === "create_screen_wrote_saves") {
       throw err;
     }
+    // Defence in depth: the plan above removes every duplicate it can see,
+    // so pe_screen_rows_screen_node_uidx firing here means a write the plan
+    // did not see. Nothing is left behind (the transaction rolled back).
     if (isUniqueViolation(err)) {
       return { ok: false, error: { error: "duplicate_resolved_node" } };
     }

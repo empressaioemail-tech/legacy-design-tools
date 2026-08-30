@@ -179,14 +179,15 @@ describe("assembleParcelDraw gold (WDLL 23–25)", () => {
     });
   });
 
-  it("maps atom-miss well to unknown and pipeline outside to absent-verified", () => {
+  it("maps atom-miss well to unknown; gold pipeline outside with vintage UNKNOWN is unknown, not verified (F5)", () => {
     const well = draw.overlays.find((o) => o.id === "well");
     const pipe = draw.overlays.find((o) => o.id === "pipeline");
     const foot = draw.overlays.find((o) => o.id === "footprint");
     expect(well?.state).toBe("unknown");
     expect(well?.label).toMatch(/not checked/i);
-    expect(pipe?.state).toBe("absent-verified");
-    expect(pipe?.label).toBe("No pipeline within 152.4 m");
+    expect(pipe?.state).toBe("unknown");
+    expect(pipe?.reason).toBe("provenance degraded; vintage unknown");
+    expect(pipe?.label).toBe("No pipeline within 500 ft");
     expect(foot?.state).toBe("unknown");
     expect(foot?.label).toMatch(/1910/);
     expect(foot?.draw).toBe("hatch-interior");
@@ -223,12 +224,24 @@ describe("assertDrawStub", () => {
 });
 
 describe("typed well absence", () => {
-  it("maps stored well absence to absent-verified, not unknown", () => {
+  it("maps stored well absence with a vintage to absent-verified, not unknown", () => {
+    const draw = assembleParcelDraw(
+      goldInput({ well: { state: "absent", sourceVintage: "RRC_WELLS_2026-07" } }),
+    );
+    expect(draw.overlays.find((o) => o.id === "well")).toMatchObject({
+      state: "absent-verified",
+      provenance: "present",
+      vintage: "RRC_WELLS_2026-07",
+    });
+  });
+
+  it("maps stored well absence without a vintage to unknown and says why (F5)", () => {
     const draw = assembleParcelDraw(
       goldInput({ well: { state: "absent" } }),
     );
     expect(draw.overlays.find((o) => o.id === "well")).toMatchObject({
-      state: "absent-verified",
+      state: "unknown",
+      reason: "provenance unknown; vintage unknown",
     });
   });
 });
@@ -326,5 +339,173 @@ describe("assertDrawStub present-citation fail-closed (P-91 item 9)", () => {
       delete (flood as { citationsDegraded?: unknown }).citationsDegraded;
     }
     expect(() => assertDrawStub(bad)).toThrow(/citationsDegraded|empty citation/i);
+  });
+});
+
+/**
+ * F5 (v2 card, triage D6). absent-verified was asserted with provenance
+ * degraded and vintage UNKNOWN, and specialDistrict with no provenance at
+ * all. Verified means verified: the state is earned only with known
+ * provenance and a known vintage; otherwise unknown with a reason that
+ * names what is missing. The pipeline radius prints in feet.
+ */
+describe("F5 verified means verified", () => {
+  function absentVerifiedOverlays(draw: ParcelDrawStub) {
+    return draw.overlays.filter((o) => o.state === "absent-verified");
+  }
+
+  it("gold pipeline (provenance degraded, vintage UNKNOWN) is unknown with both reasons and the radius in feet", () => {
+    const pipe = assembleParcelDraw(goldInput()).overlays.find((o) => o.id === "pipeline");
+    expect(pipe).toMatchObject({
+      id: "pipeline",
+      state: "unknown",
+      reason: "provenance degraded; vintage unknown",
+      provenance: "degraded",
+      vintage: "UNKNOWN",
+      label: "No pipeline within 500 ft",
+    });
+    expect(pipe?.label).not.toMatch(/152\.4| m$/);
+  });
+
+  it("pipeline outside with a known vintage stays absent-verified with provenance present", () => {
+    const pipe = assembleParcelDraw(
+      goldInput({
+        pipeline: {
+          state: "present",
+          nearPipeline: false,
+          bufferMeters: 152.4,
+          sourceVintage: "RRC_T4_2026Q1",
+        },
+      }),
+    ).overlays.find((o) => o.id === "pipeline");
+    expect(pipe).toMatchObject({
+      state: "absent-verified",
+      provenance: "present",
+      vintage: "RRC_T4_2026Q1",
+      label: "No pipeline within 500 ft",
+    });
+    expect(pipe).not.toHaveProperty("reason");
+  });
+
+  it("pipeline outside with no vintage at all is unknown: provenance unknown; vintage unknown", () => {
+    const pipe = assembleParcelDraw(
+      goldInput({
+        pipeline: {
+          state: "present",
+          nearPipeline: false,
+          bufferMeters: 152.4,
+          sourceVintage: null,
+        },
+      }),
+    ).overlays.find((o) => o.id === "pipeline");
+    expect(pipe).toMatchObject({
+      state: "unknown",
+      reason: "provenance unknown; vintage unknown",
+    });
+    expect(pipe).not.toHaveProperty("provenance");
+    expect(pipe).not.toHaveProperty("vintage");
+  });
+
+  it("specialDistrict absent with no provenance field is unknown and says why", () => {
+    const sd = assembleParcelDraw(goldInput()).overlays.find(
+      (o) => o.id === "specialDistrict",
+    );
+    expect(sd).toMatchObject({
+      id: "specialDistrict",
+      state: "unknown",
+      reason: "provenance unknown; vintage unknown",
+    });
+  });
+
+  it("specialDistrict absent with a vintage is absent-verified", () => {
+    const sd = assembleParcelDraw(
+      goldInput({
+        specialDistrict: { state: "absent", sourceVintage: "TCEQ_SD_2026-07" },
+      }),
+    ).overlays.find((o) => o.id === "specialDistrict");
+    expect(sd).toMatchObject({
+      state: "absent-verified",
+      provenance: "present",
+      vintage: "TCEQ_SD_2026-07",
+    });
+  });
+
+  it("flood typed absence without a vintage is unknown, never absent-verified", () => {
+    const flood = assembleParcelDraw(
+      goldInput({ flood: { state: "absent" } }),
+    ).overlays.find((o) => o.id === "flood");
+    expect(flood?.state).toBe("unknown");
+    expect(flood?.reason).toBe("provenance unknown; vintage unknown");
+  });
+
+  it("a vintage spelled UNKNOWN in any case, or blank, is not a vintage", () => {
+    for (const vintage of ["UNKNOWN", "unknown", " Unknown ", ""]) {
+      const pipe = assembleParcelDraw(
+        goldInput({
+          pipeline: {
+            state: "present",
+            nearPipeline: false,
+            bufferMeters: 152.4,
+            sourceVintage: vintage,
+          },
+        }),
+      ).overlays.find((o) => o.id === "pipeline");
+      expect(pipe?.state, "vintage=" + JSON.stringify(vintage)).toBe("unknown");
+    }
+  });
+
+  it("invariant: no overlay is absent-verified without provenance present and a vintage", () => {
+    const inputs = [
+      goldInput(),
+      goldInput({
+        well: { state: "absent" },
+        flood: { state: "absent" },
+        pipeline: { state: "absent" },
+      }),
+      goldInput({
+        well: { state: "absent", sourceVintage: "RRC_WELLS_2026-07" },
+        specialDistrict: { state: "absent", sourceVintage: "TCEQ_SD_2026-07" },
+        pipeline: { state: "absent", sourceVintage: "RRC_T4_2026Q1" },
+      }),
+    ];
+    let verified = 0;
+    for (const input of inputs) {
+      for (const overlay of absentVerifiedOverlays(assembleParcelDraw(input))) {
+        verified += 1;
+        expect(overlay.provenance, overlay.id).toBe("present");
+        expect(typeof overlay.vintage, overlay.id).toBe("string");
+        expect(overlay.vintage!.trim().toUpperCase(), overlay.id).not.toBe("UNKNOWN");
+        expect(overlay.vintage!.trim(), overlay.id).not.toBe("");
+      }
+    }
+    // The sweep is not vacuous: the third input earns exactly three.
+    expect(verified).toBe(3);
+  });
+
+  it("assertDrawStub refuses an absent-verified overlay that lost its provenance or vintage", () => {
+    const good = assembleParcelDraw(
+      goldInput({ well: { state: "absent", sourceVintage: "RRC_WELLS_2026-07" } }),
+    );
+    expect(() => assertDrawStub(good)).not.toThrow();
+    const noProvenance = structuredClone(good) as ParcelDrawStub;
+    const well = noProvenance.overlays.find((o) => o.id === "well")!;
+    delete (well as { provenance?: unknown }).provenance;
+    expect(() => assertDrawStub(noProvenance)).toThrow(/well overlay is absent-verified without/);
+    const unknownVintage = structuredClone(good) as ParcelDrawStub;
+    unknownVintage.overlays.find((o) => o.id === "well")!.vintage = "UNKNOWN";
+    expect(() => assertDrawStub(unknownVintage)).toThrow(/well overlay is absent-verified without/);
+  });
+});
+
+describe("feetLabelFromMetres prints no more precision than the source", () => {
+  it("152.4 m (one decimal) prints as whole feet: 500 ft", async () => {
+    const mod = (await import("../parcelDrawStub")) as {
+      feetLabelFromMetres?: (metres: number) => string;
+    };
+    expect(typeof mod.feetLabelFromMetres).toBe("function");
+    expect(mod.feetLabelFromMetres!(152.4)).toBe("500 ft");
+    expect(mod.feetLabelFromMetres!(100)).toBe("328 ft");
+    expect(mod.feetLabelFromMetres!(30.48)).toBe("100.0 ft");
+    expect(mod.feetLabelFromMetres!(0.5)).toBe("2 ft");
   });
 });
