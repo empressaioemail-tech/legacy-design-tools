@@ -281,23 +281,86 @@ describe("A5 create forty keep six / A14 verbatim / A13 walk / I6", () => {
     }
   });
 
-  it("create_screen refuses two queries that resolve to the same node", async () => {
+  it("B2: two spellings that resolve to one node write one row and declare the duplicate; nothing is refused", async () => {
     const store = new MemoryScreenSaveStore();
+    const PINE = "908 Pine, Bastrop TX";
     const result = await createScreen(
       store,
       SCOPE,
       {
-        name: "same-node",
-        queries: ["908 Pine, Bastrop TX", GOLD],
+        name: "listing paste",
+        queries: [CV, COVE, PINE],
         source: "pasted",
       },
+      async (query) =>
+        query === PINE
+          ? [{ parcelNodeId: GOLD, label: query }]
+          : [{ parcelNodeId: NEIGHBOR, label: query }],
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The first query keeps the row at its paste ordinal; the later spelling
+    // of the same parcel is not written and leaves a gap at ordinal 1.
+    expect(
+      result.screen.rows.map((r) => [r.ordinal, r.query, r.parcelNodeId]),
+    ).toEqual([
+      [0, CV, NEIGHBOR],
+      [2, PINE, GOLD],
+    ]);
+    expect(result.screen.degraded).toEqual({
+      duplicates: [{ query: COVE, parcelNodeId: NEIGHBOR, keptQuery: CV }],
+    });
+    expect(JSON.stringify(result)).not.toContain("duplicate_resolved_node");
+    expect(store.rows.map((r) => r.query)).toEqual([CV, PINE]);
+    expect(store.saves).toHaveLength(0);
+    // A reload reads only the store: the declaration is not persisted.
+    const reloaded = await listScreens(store, SCOPE, result.screen.id);
+    expect(reloaded.ok && "screen" in reloaded).toBe(true);
+    if (!("screen" in reloaded)) return;
+    expect(reloaded.screen).not.toHaveProperty("degraded");
+    expect(reloaded.screen.rows).toHaveLength(2);
+  });
+
+  it("B2: three queries to one node keep the first and declare two duplicates naming it", async () => {
+    const store = new MemoryScreenSaveStore();
+    const result = await createScreen(
+      store,
+      SCOPE,
+      { queries: [CV, COVE, GOLD], source: "pasted" },
+      async (query) => [{ parcelNodeId: GOLD, label: query }],
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.screen.rows).toHaveLength(1);
+    expect(result.screen.rows[0]).toMatchObject({ ordinal: 0, query: CV, parcelNodeId: GOLD });
+    expect(result.screen.degraded).toEqual({
+      duplicates: [
+        { query: COVE, parcelNodeId: GOLD, keptQuery: CV },
+        { query: GOLD, parcelNodeId: GOLD, keptQuery: CV },
+      ],
+    });
+    expect(store.rows).toHaveLength(1);
+  });
+
+  it("B2 defence in depth: a unique-index violation the plan did not see still refuses duplicate_resolved_node and writes nothing", async () => {
+    const store = new MemoryScreenSaveStore();
+    const orig = store.insertScreenRows.bind(store);
+    store.insertScreenRows = async (rows) => {
+      // A competing write for the same node lands between the plan and the
+      // insert; the memory store then raises 23505 exactly as
+      // pe_screen_rows_screen_node_uidx does.
+      await orig([{ ...rows[0]!, ordinal: 99 }]);
+      return orig(rows);
+    };
+    const result = await createScreen(
+      store,
+      SCOPE,
+      { queries: [CV], source: "pasted" },
       async (query) => [{ parcelNodeId: GOLD, label: query }],
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.error).toBe("duplicate_resolved_node");
-    expect(result.error.node).toBe(GOLD);
-    expect(result.error.queries).toEqual(["908 Pine, Bastrop TX", GOLD]);
+    expect(result.error).toEqual({ error: "duplicate_resolved_node" });
     expect(store.screens).toHaveLength(0);
     expect(store.rows).toHaveLength(0);
   });

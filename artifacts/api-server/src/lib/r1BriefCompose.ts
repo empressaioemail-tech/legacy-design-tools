@@ -1,6 +1,14 @@
 /**
  * Pure R1 brief composition from baked facets + live atom reads.
  * Kept DB-free so route tests can exercise refusal wiring without a store.
+ *
+ * Every section carries a `disposition` (P-91 v2, triage D2/D3): present is
+ * a determination, refused is a producer refusal about the parcel, absent is
+ * no determination and no refusal (data null, an empty record, a typed
+ * absence that is not promoted, or an atom that is not there), unread is a
+ * producer that has not run for this parcel. The stub depth projects these
+ * into the rail vocabulary through `smartSiteStub.railStateFromSectionDisposition`;
+ * the predicates below are the one derivation both depths share.
  */
 
 import type {
@@ -12,26 +20,50 @@ import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 
 type JsonRecord = Record<string, unknown>;
 
+export type R1BriefSectionDisposition =
+  | "present"
+  | "absent"
+  | "refused"
+  | "unread";
+
+export type R1BriefSectionId =
+  | "zoning"
+  | "setbacks-envelope"
+  | "flood"
+  | "land-use"
+  | "drainage";
+
 export type R1BriefSection = {
-  id: "zoning" | "setbacks-envelope" | "flood" | "land-use";
+  id: R1BriefSectionId;
   title: string;
   data: unknown;
   refusal?: unknown;
   citations: string[];
   /** ISO instant for when this section's determination was evaluated or baked. */
   asOf: string | null;
+  disposition: R1BriefSectionDisposition;
+  /** Present with `unread`: why the producer has not run for this parcel. */
+  reason?: string;
   /** Present when the section carries a determination but no http citation URL. */
   citationsDegraded?: boolean;
-  /** Flood-only: clarifies Zone X + outside-SFHA misreads. */
+  /** Flood-only: clarifies Zone X + outside-SFHA misreads. Withheld while citationsDegraded (F2). */
   zoneExposureSummary?: string | null;
   /** Setbacks-envelope-only: MCP guard when data is refused. */
   agentGuidance?: string | null;
 };
 
+/** Why the drainage section is unread until the facet exists (F7). */
+export const DRAINAGE_UNREAD_REASON =
+  "drainage facet not produced for this parcel";
+
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : null;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function urlsFrom(value: unknown): string[] {
@@ -117,7 +149,84 @@ function envelopeHasProductData(envelope: unknown): boolean {
   return false;
 }
 
-/** Exported for unit tests — Zone X + inSFHA:false is often misread as minimal risk. */
+/* ------------------------------------------------------------------ */
+/* Disposition predicates: the one derivation node and stub share.     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A zoning determination is a district. The Tier-1 bake writes
+ * `{ district, jurisdictionKey?, provenance? } | null`; a record without a
+ * district (an empty record, a note) is not a determination.
+ */
+export function zoningDisposition(zoning: unknown): "present" | "absent" {
+  if (nonEmptyString(zoning)) return "present";
+  const record = asRecord(zoning);
+  if (!record) return "absent";
+  return ["district", "zone", "code", "zoningCode"].some((key) =>
+    nonEmptyString(record[key]),
+  )
+    ? "present"
+    : "absent";
+}
+
+/**
+ * A land-use determination is a code. The Tier-1 bake writes
+ * `{ code, description, source, vintage } | null`; the land-use-fact atom
+ * shape carries `landUseCode`. Description, source and vintage without a
+ * code are not a determination.
+ */
+export function landUseDisposition(landUse: unknown): "present" | "absent" {
+  if (nonEmptyString(landUse)) return "present";
+  const record = asRecord(landUse);
+  if (!record) return "absent";
+  return ["code", "landUseCode"].some((key) => nonEmptyString(record[key]))
+    ? "present"
+    : "absent";
+}
+
+/** Envelope: product data is present; a typed refusal is refused; else absent. */
+export function envelopeDisposition(
+  envelope: unknown,
+  refusal?: { state?: string } | null,
+): "present" | "refused" | "absent" {
+  if (envelopeHasProductData(envelope)) return "present";
+  if (refusal?.state === "refused") return "refused";
+  return "absent";
+}
+
+/**
+ * Disposition of a live fact read (flood today). A typed absence is not
+ * promoted at section level (WDLL item 5: absent-verified needs a positive
+ * typed result the section vocabulary does not carry), and an atom that is
+ * not there is absent, not a refusal about the parcel. Every other refusal
+ * code is a producer refusal.
+ */
+export function factReadDisposition(
+  read: { state: "present" | "absent" | "refused"; code?: string } | null | undefined,
+): R1BriefSectionDisposition {
+  if (!read) return "absent";
+  if (read.state === "present") return "present";
+  if (read.state === "absent") return "absent";
+  return read.code === "atom-miss" ? "absent" : "refused";
+}
+
+/**
+ * Drainage facet in the bake (`facets.drainage`), defined here ahead of the
+ * data lane: a record with `state: "refused"` is refused; `state: "absent"`
+ * is absent; any other non-empty record (or `state: "present"`) is present;
+ * null or an empty record is unread because the producer has not run.
+ */
+export function drainageDisposition(
+  drainage: unknown,
+): R1BriefSectionDisposition {
+  const record = asRecord(drainage);
+  if (!record) return "unread";
+  if (record.state === "refused") return "refused";
+  if (record.state === "absent") return "absent";
+  return Object.keys(record).length > 0 ? "present" : "unread";
+}
+
+/** Exported for unit tests. Zone X + inSFHA:false is often misread as minimal risk. */
 export function summarizeFloodZoneExposure(
   fact: FloodHazardFactPresent,
 ): string | null {
@@ -148,19 +257,19 @@ export function summarizeFloodZoneExposure(
       return (
         `Mapped Zone ${fact.floodZone} with 0.2% annual-chance flood hazard` +
         (fact.zoneSubtype ? ` (${fact.zoneSubtype})` : "") +
-        ". Outside the SFHA but not minimal risk — shaded Zone X still carries flood exposure."
+        ". Outside the SFHA but not minimal risk. Shaded Zone X still carries flood exposure."
       );
     }
     if (fact.zoneSubtype) {
       return (
         `Mapped Zone ${fact.floodZone} outside the SFHA (${fact.zoneSubtype}). ` +
-        "Zone X is not automatically minimal risk — read the zone subtype."
+        "Zone X is not automatically minimal risk. Read the zone subtype."
       );
     }
     return (
       "Mapped Zone X outside the SFHA. Zone X with inSpecialFloodHazardArea: false is " +
       "often misread as minimal risk; confirm unshaded Zone X versus 0.2% annual-chance " +
-      "shaded X — zone subtype was not recorded on this atom."
+      "shaded X. Zone subtype was not recorded on this atom."
     );
   }
 
@@ -177,21 +286,20 @@ type BriefSectionParts = Pick<
   | "refusal"
   | "citations"
   | "asOf"
+  | "disposition"
+  | "reason"
   | "citationsDegraded"
   | "zoneExposureSummary"
   | "agentGuidance"
 >;
 
 function withCitationPosture(
-  parts: Pick<BriefSectionParts, "data" | "refusal" | "citations" | "asOf" | "zoneExposureSummary">,
+  parts: Pick<BriefSectionParts, "data" | "citations" | "asOf" | "disposition">,
 ): BriefSectionParts {
-  const hasDetermination =
-    parts.data !== null &&
-    parts.data !== undefined &&
-    parts.refusal == null;
   return {
     ...parts,
-    citationsDegraded: hasDetermination && parts.citations.length === 0,
+    citationsDegraded:
+      parts.disposition === "present" && parts.citations.length === 0,
   };
 }
 
@@ -201,27 +309,32 @@ function composeFloodBriefSection(
 ): BriefSectionParts {
   if (floodHazardFact) {
     if (floodHazardFact.state === "present") {
-      const citations = urlsFrom(floodHazardFact);
-      return withCitationPosture({
+      const posture = withCitationPosture({
         data: floodHazardFact,
-        citations,
+        citations: urlsFrom(floodHazardFact),
         asOf: floodHazardFact.evaluatedAt,
-        zoneExposureSummary: summarizeFloodZoneExposure(floodHazardFact),
+        disposition: "present",
       });
+      // F2 (triage D5): the prose is the most quotable sentence in the brief
+      // and is withheld until the citation behind it exists.
+      return {
+        ...posture,
+        zoneExposureSummary: posture.citationsDegraded
+          ? null
+          : summarizeFloodZoneExposure(floodHazardFact),
+      };
     }
     if (floodHazardFact.state === "absent") {
-      const citations = urlsFrom(floodHazardFact);
-      return withCitationPosture({
+      return {
         data: floodHazardFact,
-        citations,
+        citations: urlsFrom(floodHazardFact),
         asOf: asOfFrom(floodHazardFact),
+        disposition: factReadDisposition(floodHazardFact),
         zoneExposureSummary: null,
-      });
+      };
     }
-    if (
-      floodHazardFact.state === "refused" &&
-      floodHazardFact.code === "atom-miss"
-    ) {
+    const disposition = factReadDisposition(floodHazardFact);
+    if (floodHazardFact.code === "atom-miss") {
       const bakedRefusal = asRecord(tier2)?.floodDisposition ?? null;
       if (bakedRefusal) {
         return {
@@ -229,6 +342,7 @@ function composeFloodBriefSection(
           refusal: bakedRefusal,
           citations: urlsFrom(bakedRefusal),
           asOf: asOfFrom(bakedRefusal),
+          disposition,
         };
       }
     }
@@ -237,6 +351,7 @@ function composeFloodBriefSection(
       refusal: floodHazardFact,
       citations: [],
       asOf: null,
+      disposition,
     };
   }
   const refusal = asRecord(tier2)?.floodDisposition ?? null;
@@ -245,6 +360,7 @@ function composeFloodBriefSection(
     refusal,
     citations: urlsFrom(refusal),
     asOf: asOfFrom(refusal),
+    disposition: refusal != null ? "refused" : "absent",
   };
 }
 
@@ -253,19 +369,22 @@ function composeSetbacksEnvelopeBriefSection(
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null,
   bakedAt?: string | null,
 ): BriefSectionParts {
-  if (envelopeHasProductData(envelope)) {
+  const disposition = envelopeDisposition(envelope, envelopeBriefRefusal);
+  if (disposition === "present") {
     return withCitationPosture({
       data: envelope,
       citations: urlsFrom(envelope),
       asOf: asOfFrom(envelope) ?? bakedAt ?? null,
+      disposition,
     });
   }
-  if (envelopeBriefRefusal) {
+  if (disposition === "refused" && envelopeBriefRefusal) {
     return {
       data: null,
       refusal: envelopeBriefRefusal,
       citations: [],
       asOf: bakedAt ?? null,
+      disposition,
       agentGuidance: envelopeAgentGuidance(envelopeBriefRefusal),
     };
   }
@@ -273,7 +392,63 @@ function composeSetbacksEnvelopeBriefSection(
     data: envelope ?? null,
     citations: urlsFrom(envelope),
     asOf: asOfFrom(envelope) ?? bakedAt ?? null,
+    disposition: "absent",
   });
+}
+
+function composeDrainageBriefSection(
+  drainage: unknown,
+  bakedAt: string | null,
+): BriefSectionParts {
+  const disposition = drainageDisposition(drainage);
+  if (disposition === "unread") {
+    return {
+      data: null,
+      citations: [],
+      asOf: bakedAt,
+      disposition,
+      reason: DRAINAGE_UNREAD_REASON,
+    };
+  }
+  if (disposition === "refused") {
+    return {
+      data: null,
+      refusal: drainage,
+      citations: urlsFrom(drainage),
+      asOf: asOfFrom(drainage) ?? bakedAt,
+      disposition,
+    };
+  }
+  return withCitationPosture({
+    data: drainage,
+    citations: urlsFrom(drainage),
+    asOf: asOfFrom(drainage) ?? bakedAt,
+    disposition,
+  });
+}
+
+function sectionFromParts(
+  id: R1BriefSectionId,
+  title: string,
+  parts: BriefSectionParts,
+): R1BriefSection {
+  return {
+    id,
+    title,
+    data: parts.data,
+    ...(parts.refusal != null ? { refusal: parts.refusal } : {}),
+    citations: parts.citations,
+    asOf: parts.asOf,
+    disposition: parts.disposition,
+    ...(parts.reason != null ? { reason: parts.reason } : {}),
+    ...(parts.citationsDegraded ? { citationsDegraded: true } : {}),
+    ...(parts.zoneExposureSummary != null
+      ? { zoneExposureSummary: parts.zoneExposureSummary }
+      : {}),
+    ...(parts.agentGuidance != null
+      ? { agentGuidance: parts.agentGuidance }
+      : {}),
+  };
 }
 
 export function buildR1Brief(
@@ -295,62 +470,41 @@ export function buildR1Brief(
     typeof root.bakedAt === "string" && root.bakedAt.trim()
       ? root.bakedAt
       : null;
-  const floodSection = composeFloodBriefSection(
-    tier2,
-    options?.floodHazardFact,
-  );
+  const zoningSection = withCitationPosture({
+    data: root.zoning ?? null,
+    citations: urlsFrom(root.zoning),
+    asOf: asOfFrom(root.zoning) ?? bakedAt,
+    disposition: zoningDisposition(root.zoning),
+  });
   const envelopeSection = composeSetbacksEnvelopeBriefSection(
     envelope,
     options?.envelopeBriefRefusal,
     bakedAt,
   );
+  const floodSection = composeFloodBriefSection(
+    tier2,
+    options?.floodHazardFact,
+  );
+  const landUseSection = withCitationPosture({
+    data: baseFacts.landUse ?? null,
+    citations: urlsFrom(baseFacts.landUse),
+    asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
+    disposition: landUseDisposition(baseFacts.landUse),
+  });
+  const drainageSection = composeDrainageBriefSection(
+    root.drainage ?? null,
+    bakedAt,
+  );
   const sections: R1BriefSection[] = [
-    {
-      id: "zoning",
-      title: "Zoning",
-      data: root.zoning ?? null,
-      citations: urlsFrom(root.zoning),
-      asOf: asOfFrom(root.zoning) ?? bakedAt,
-      ...(urlsFrom(root.zoning).length === 0 && root.zoning != null
-        ? { citationsDegraded: true }
-        : {}),
-    },
-    {
-      id: "setbacks-envelope",
-      title: "Setbacks and buildable envelope",
-      data: envelopeSection.data,
-      ...(envelopeSection.refusal != null
-        ? { refusal: envelopeSection.refusal }
-        : {}),
-      citations: envelopeSection.citations,
-      asOf: envelopeSection.asOf,
-      ...(envelopeSection.citationsDegraded ? { citationsDegraded: true } : {}),
-      ...(envelopeSection.agentGuidance != null
-        ? { agentGuidance: envelopeSection.agentGuidance }
-        : {}),
-    },
-    {
-      id: "flood",
-      title: "Flood",
-      data: floodSection.data,
-      ...(floodSection.refusal != null ? { refusal: floodSection.refusal } : {}),
-      citations: floodSection.citations,
-      asOf: floodSection.asOf,
-      ...(floodSection.citationsDegraded ? { citationsDegraded: true } : {}),
-      ...(floodSection.zoneExposureSummary != null
-        ? { zoneExposureSummary: floodSection.zoneExposureSummary }
-        : {}),
-    },
-    {
-      id: "land-use",
-      title: "Land use",
-      data: baseFacts.landUse ?? null,
-      citations: urlsFrom(baseFacts.landUse),
-      asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
-      ...(urlsFrom(baseFacts.landUse).length === 0 && baseFacts.landUse != null
-        ? { citationsDegraded: true }
-        : {}),
-    },
+    sectionFromParts("zoning", "Zoning", zoningSection),
+    sectionFromParts(
+      "setbacks-envelope",
+      "Setbacks and buildable envelope",
+      envelopeSection,
+    ),
+    sectionFromParts("flood", "Flood", floodSection),
+    sectionFromParts("land-use", "Land use", landUseSection),
+    sectionFromParts("drainage", "Drainage", drainageSection),
   ];
   const disclosures = verbatimValues(
     { facets, tier2 },
