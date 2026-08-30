@@ -10,7 +10,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   CREATE_SCREEN_RESOLVE_TIMEOUT_MS,
+  SCREEN_STUB_BUDGET_MS,
+  SCREEN_STUB_CONCURRENCY,
   addToScreen,
+  attachScreenStubs,
   createScreen,
   deleteSavedProperty,
   isUniqueViolation,
@@ -20,6 +23,10 @@ import {
   snapshotScreenMembership,
   type NodeLookup,
   type QueryResolver,
+  type Screen,
+  type ScreenRow,
+  type ScreenRowStub,
+  type ScreenStubAssembler,
 } from "./peScreenSave";
 import { MemoryScreenSaveStore } from "./peScreenSaveMemory";
 
@@ -665,6 +672,250 @@ describe("I5 no listing columns", () => {
       "searchCache",
     ]) {
       expect(blob).not.toContain(key);
+    }
+  });
+});
+
+/**
+ * P-91 4.3 rails at first paint. The stub pass is a read-only projection
+ * onto the response: nothing here may reach the store, and the three
+ * non-answers (measured miss, throw, not started) stay three states.
+ */
+describe("4.3 rails at first paint: attachScreenStubs", () => {
+  const OK_NODE = "48021:34137";
+  const MISS_NODE = "48021:900099";
+  const DOWN_NODE = "48021:900098";
+  const STAMP = "2026-08-29T15:00:00.000Z";
+
+  function allRails(state: ScreenRowStub["situs"]): ScreenRowStub {
+    return {
+      situs: state,
+      zoning: state,
+      landUse: state,
+      flood: state,
+      drainage: state,
+      envelope: state,
+    };
+  }
+
+  function resolvedRow(ordinal: number, parcelNodeId: string): ScreenRow {
+    return {
+      id: `r${ordinal}`,
+      ordinal,
+      parcelNodeId,
+      query: parcelNodeId,
+      resolution: "resolved",
+      source: "pasted",
+    };
+  }
+
+  function screenOf(rows: ScreenRow[]): Screen {
+    return {
+      id: "screen-1",
+      name: "walk",
+      createdAt: STAMP,
+      updatedAt: STAMP,
+      rows,
+    };
+  }
+
+  function mixedScreen(): Screen {
+    return screenOf([
+      resolvedRow(0, OK_NODE),
+      resolvedRow(1, MISS_NODE),
+      resolvedRow(2, DOWN_NODE),
+      {
+        id: "r3",
+        ordinal: 3,
+        parcelNodeId: null,
+        query: "no-such-situs-zzz-99999",
+        resolution: "unresolved",
+        source: "pasted",
+      },
+      {
+        id: "r4",
+        ordinal: 4,
+        parcelNodeId: null,
+        query: "111 Rainmaker Cv, Bastrop TX",
+        resolution: "ambiguous",
+        source: "pasted",
+        candidates: [
+          { parcelNodeId: "48021:c1", label: "111 Rainmaker Cv" },
+          { parcelNodeId: "48021:c2", label: "111 Rainmaker Cove" },
+        ],
+      },
+    ]);
+  }
+
+  /** The real assembler's body: extra keys, drainage never attempted, flood atom-miss. */
+  function okBody(parcelNodeId: string) {
+    return {
+      parcelNodeId,
+      label: "910 PINE, BASTROP, TX 78602",
+      url: `https://smartsite.cloud/parcel/${parcelNodeId}`,
+      situs: "present" as const,
+      zoning: "present" as const,
+      landUse: "unknown" as const,
+      flood: "unknown" as const,
+      drainage: "unread" as const,
+      envelope: "refused" as const,
+    };
+  }
+
+  function mixedAssembler(): ScreenStubAssembler {
+    return async (id) => {
+      if (id === OK_NODE) return okBody(id);
+      if (id === DOWN_NODE) throw new Error("statement timeout");
+      return null;
+    };
+  }
+
+  it("a body carries its six rails with stubRead ok; a throw is unread + error; unresolved and ambiguous rows carry neither key; the screen declares stubsDegraded", async () => {
+    const errors: Array<[string, unknown]> = [];
+    const out = await attachScreenStubs(mixedScreen(), mixedAssembler(), {
+      onReadError: (id, err) => errors.push([id, err]),
+    });
+    const byNode = new Map(out.rows.map((r) => [r.query, r]));
+
+    const ok = byNode.get(OK_NODE)!;
+    expect(ok.stubRead).toBe("ok");
+    expect(ok.stub).toEqual({
+      situs: "present",
+      zoning: "present",
+      landUse: "unknown",
+      flood: "unknown",
+      drainage: "unread",
+      envelope: "refused",
+    });
+    // Only the six rails travel; label/url/parcelNodeId from the body do not.
+    expect(Object.keys(ok.stub!).sort()).toEqual(
+      ["drainage", "envelope", "flood", "landUse", "situs", "zoning"],
+    );
+
+    const down = byNode.get(DOWN_NODE)!;
+    expect(down.stubRead).toBe("error");
+    expect(down.stub).toEqual(allRails("unread"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]![0]).toBe(DOWN_NODE);
+    expect((errors[0]![1] as Error).message).toBe("statement timeout");
+
+    for (const query of ["no-such-situs-zzz-99999", "111 Rainmaker Cv, Bastrop TX"]) {
+      const row = byNode.get(query)!;
+      expect(row).not.toHaveProperty("stub");
+      expect(row).not.toHaveProperty("stubRead");
+    }
+    expect(out.stubsDegraded).toBe(true);
+  });
+
+  it("falsifier (WDLL 5): a null body is a measured bake miss and maps every rail to unknown, never unread", async () => {
+    const out = await attachScreenStubs(mixedScreen(), mixedAssembler());
+    const miss = out.rows.find((r) => r.query === MISS_NODE)!;
+    expect(miss.stubRead).toBe("ok");
+    expect(miss.stub).toEqual(allRails("unknown"));
+    expect(Object.values(miss.stub!)).not.toContain("unread");
+  });
+
+  it("all rows ok omits stubsDegraded", async () => {
+    const out = await attachScreenStubs(
+      screenOf([resolvedRow(0, OK_NODE), resolvedRow(1, MISS_NODE)]),
+      async (id) => (id === OK_NODE ? okBody(id) : null),
+    );
+    expect(out).not.toHaveProperty("stubsDegraded");
+    expect(out.rows.map((r) => r.stubRead)).toEqual(["ok", "ok"]);
+  });
+
+  it("a screen with no resolved rows calls the assembler zero times and is not degraded", async () => {
+    const assembler = vi.fn<ScreenStubAssembler>(async () => null);
+    const out = await attachScreenStubs(
+      screenOf([
+        {
+          id: "r0",
+          ordinal: 0,
+          parcelNodeId: null,
+          query: ", ,",
+          resolution: "unresolved",
+          source: "pasted",
+        },
+      ]),
+      assembler,
+    );
+    expect(assembler).not.toHaveBeenCalled();
+    expect(out).not.toHaveProperty("stubsDegraded");
+    expect(out.rows[0]).not.toHaveProperty("stub");
+  });
+
+  it("does not mutate the input screen; the store-shaped rows never gain a stub key", async () => {
+    const input = mixedScreen();
+    const before = JSON.stringify(input);
+    const out = await attachScreenStubs(input, mixedAssembler());
+    expect(JSON.stringify(input)).toBe(before);
+    expect(out).not.toBe(input);
+    expect(out.rows).not.toBe(input.rows);
+    for (const row of input.rows) {
+      expect(row).not.toHaveProperty("stub");
+      expect(row).not.toHaveProperty("stubRead");
+    }
+    expect(out.updatedAt).toBe(STAMP);
+  });
+
+  it("a rail outside the five-state vocabulary is a read that did not complete: row error, rails unread, onReadError named", async () => {
+    const errors: Array<[string, unknown]> = [];
+    const out = await attachScreenStubs(
+      screenOf([resolvedRow(0, OK_NODE)]),
+      async (id) =>
+        ({ ...okBody(id), zoning: "maybe" }) as unknown as ReturnType<
+          typeof okBody
+        >,
+      { onReadError: (id, err) => errors.push([id, err]) },
+    );
+    expect(out.rows[0]!.stubRead).toBe("error");
+    expect(out.rows[0]!.stub).toEqual(allRails("unread"));
+    expect(out.stubsDegraded).toBe(true);
+    expect(errors).toHaveLength(1);
+    expect(String((errors[0]![1] as Error).message)).toContain("zoning");
+  });
+
+  it("rows not started inside SCREEN_STUB_BUDGET_MS are skipped; rows already started finish", async () => {
+    expect(SCREEN_STUB_BUDGET_MS).toBe(6_000);
+    expect(SCREEN_STUB_CONCURRENCY).toBe(8);
+    vi.useFakeTimers();
+    try {
+      const rows = Array.from({ length: 20 }, (_, i) =>
+        resolvedRow(i, `48021:b${i}`),
+      );
+      const started: string[] = [];
+      const finished: string[] = [];
+      const READ_MS = 4_000;
+      const assembler: ScreenStubAssembler = async (id) => {
+        started.push(id);
+        await new Promise<void>((resolve) => setTimeout(resolve, READ_MS));
+        finished.push(id);
+        return okBody(id);
+      };
+      const pending = attachScreenStubs(screenOf(rows), assembler);
+      // t=0: eight start. t=4000: eight finish, eight more start (under budget).
+      // t=8000: those finish; the four never started are past the budget.
+      await vi.advanceTimersByTimeAsync(READ_MS);
+      expect(started).toHaveLength(16);
+      await vi.advanceTimersByTimeAsync(READ_MS);
+      // Asserted before awaiting: with the budget check removed the last four
+      // rows start here, and this fails by assertion instead of by a hang.
+      expect(started).toHaveLength(16);
+      const out = await pending;
+      expect(started).toHaveLength(16);
+      expect(finished).toHaveLength(16);
+      const reads = out.rows.map((r) => r.stubRead);
+      expect(reads.filter((s) => s === "ok")).toHaveLength(16);
+      expect(reads.filter((s) => s === "skipped")).toHaveLength(4);
+      for (const row of out.rows.slice(16)) {
+        expect(row.stubRead).toBe("skipped");
+        expect(row.stub).toEqual(allRails("unread"));
+      }
+      // A row started at t=4000 finished at t=8000, past the budget, and is ok.
+      expect(out.rows[15]!.stubRead).toBe("ok");
+      expect(out.stubsDegraded).toBe(true);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

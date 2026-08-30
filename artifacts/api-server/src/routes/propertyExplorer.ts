@@ -10,10 +10,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, peSavedProperties, peShareGrants, peWorkbenchState } from "@workspace/db";
 import {
   addToScreen,
+  attachScreenStubs,
   createScreen,
   listScreens,
   saveProperty,
   setPropertyStatus,
+  type Screen,
   type ScreenSaveRefuse,
 } from "../lib/peScreenSave";
 import { createDrizzleScreenSaveStore } from "../lib/peScreenSaveDb";
@@ -198,6 +200,23 @@ async function assembleStubBody(parcelNodeId: string) {
     flood: floodReadToRail(floodHazardFact),
     drainage: { attempted: false },
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+  });
+}
+
+/**
+ * P-91 4.3. Rails on a create_screen / list_screens(screenId) response,
+ * read through the same assembler the brief's stub depth serves. No paid
+ * gate on this path by design: the board is the intake surface, and
+ * GET /saved-properties already serves these rails to the same user under
+ * requirePeAuthenticated. Nothing here is stored and updatedAt does not move.
+ */
+async function attachStubsForResponse(screen: Screen): Promise<Screen> {
+  return attachScreenStubs(screen, assembleStubBody, {
+    onReadError: (parcelNodeId, err) =>
+      logger.warn(
+        { err, parcelNodeId, screenId: screen.id },
+        "pe_screen_stub_read_error",
+      ),
   });
 }
 
@@ -544,7 +563,7 @@ router.post(
       sendScreenSaveRefuse(req, res, result);
       return;
     }
-    res.json({ screen: result.screen });
+    res.json({ screen: await attachStubsForResponse(result.screen) });
   },
 );
 
@@ -591,7 +610,7 @@ router.get(
       return;
     }
     if ("screen" in result) {
-      res.json({ screen: result.screen });
+      res.json({ screen: await attachStubsForResponse(result.screen) });
       return;
     }
     res.json({ screens: result.screens });

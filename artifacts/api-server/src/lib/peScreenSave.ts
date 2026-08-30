@@ -9,6 +9,12 @@
 
 import { parseParcelNodeId } from "./parcelNodeId";
 import { isPunctuationOnlySitus } from "./situsCompose";
+import {
+  SMART_SITE_RAIL_STATES,
+  SMART_SITE_STUB_RAILS,
+  type SmartSiteRailState,
+  type SmartSiteStubRail,
+} from "./smartSiteStub";
 
 export const SCREEN_RESOLUTIONS = [
   "resolved",
@@ -42,6 +48,18 @@ export const CREATE_SCREEN_RESOLVE_CONCURRENCY = 8;
  * on pe_screen_rows in this cut), so a reload cannot re-declare it.
  */
 export const CREATE_SCREEN_RESOLVE_TIMEOUT_MS = 8_000;
+/**
+ * P-91 4.3: named parallelism for the stub pass that paints rails on a
+ * create_screen / list_screens(screenId) response. Same pool width as the
+ * resolver fan-out.
+ */
+export const SCREEN_STUB_CONCURRENCY = 8;
+/**
+ * Wall-clock budget for the whole stub pass. A row not started by then is
+ * declared `skipped` (every rail `unread`); a row already started runs to
+ * its end. Nothing about the stub pass is stored.
+ */
+export const SCREEN_STUB_BUDGET_MS = 6_000;
 export const CREATE_SCREEN_V1_SOURCES = ["pasted"] as const;
 export const ADD_TO_SCREEN_V1_SOURCES = ["walk", "saved", "pasted"] as const;
 export const V2_INTAKE_SOURCES = ["chrome", "gmail", "file"] as const;
@@ -62,6 +80,21 @@ const LISTING_KEYS = [
 
 export type ScreenCandidate = { parcelNodeId: string; label: string };
 
+export const STUB_READ_STATES = ["ok", "error", "skipped"] as const;
+export type StubReadState = (typeof STUB_READ_STATES)[number];
+
+/** The six rails in the five-state vocabulary `composeSmartSiteStub` serves. */
+export type ScreenRowStub = Record<SmartSiteStubRail, SmartSiteRailState>;
+
+/**
+ * The stub read for one resolved row. A body carries the six rails (any
+ * other key is ignored); null is a measured miss (no baked snapshot); a
+ * throw is a read that did not complete.
+ */
+export type ScreenStubAssembler = (
+  parcelNodeId: string,
+) => Promise<ScreenRowStub | null>;
+
 export type ScreenRow = {
   id: string;
   ordinal: number;
@@ -76,6 +109,19 @@ export type ScreenRow = {
    * this flag is declared degradation, not state.
    */
   resolveTimedOut?: true;
+  /**
+   * P-91 4.3: the six rails for a resolved row, read from the baked
+   * snapshot when the response is built. Never stored; absent on ambiguous
+   * and unresolved rows.
+   */
+  stub?: ScreenRowStub;
+  /**
+   * How `stub` was obtained. `ok`: the assembler answered (a body, or a
+   * measured miss mapped to `unknown` on every rail). `error`: it threw
+   * (every rail `unread`). `skipped`: not started inside
+   * SCREEN_STUB_BUDGET_MS (every rail `unread`).
+   */
+  stubRead?: StubReadState;
 };
 
 export type Screen = {
@@ -86,6 +132,8 @@ export type Screen = {
   rows: ScreenRow[];
   /** Present only on a create_screen response when at least one resolver timed out. */
   degraded?: { timedOut: string[] };
+  /** Present (true) only when at least one resolved row's stubRead is not `ok`. */
+  stubsDegraded?: true;
 };
 
 export type ScreenSummary = {
@@ -739,6 +787,132 @@ export async function listScreens(
       createdAt: toIso(s.createdAt),
       updatedAt: toIso(s.updatedAt),
     })),
+  };
+}
+
+function allRails(state: SmartSiteRailState): ScreenRowStub {
+  return {
+    situs: state,
+    zoning: state,
+    landUse: state,
+    flood: state,
+    drainage: state,
+    envelope: state,
+  };
+}
+
+function isRailState(value: unknown): value is SmartSiteRailState {
+  return (
+    typeof value === "string" &&
+    (SMART_SITE_RAIL_STATES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Project the six rails out of an assembler body. A rail outside the
+ * vocabulary is not defaulted: the read did not produce a state for it, and
+ * the caller declares the row `error`.
+ */
+function projectRails(
+  body: Record<string, unknown>,
+): { ok: true; stub: ScreenRowStub } | { ok: false; rail: string; value: unknown } {
+  const stub = {} as ScreenRowStub;
+  for (const rail of SMART_SITE_STUB_RAILS) {
+    const value = body[rail];
+    if (!isRailState(value)) return { ok: false, rail, value };
+    stub[rail] = value;
+  }
+  return { ok: true, stub };
+}
+
+type StubReadResult = { stub: ScreenRowStub; stubRead: StubReadState };
+
+export type AttachScreenStubsOptions = {
+  /** Clock for the budget. Defaults to Date.now. */
+  now?: () => number;
+  /** Called once per row whose read is declared `error`; the route logs it. */
+  onReadError?: (parcelNodeId: string, err: unknown) => void;
+};
+
+/**
+ * P-91 4.3. Paint rails onto every resolved row of a screen response.
+ * Pure over the screen: returns a new Screen, never mutates the input, and
+ * writes nothing anywhere. The three non-answers stay three states: a null
+ * body is a measured miss (every rail `unknown`, read `ok`); a throw is
+ * every rail `unread` with read `error`; a row not started inside
+ * SCREEN_STUB_BUDGET_MS is every rail `unread` with read `skipped`.
+ * `unread` never stands in for a miss (WDLL item 5).
+ */
+export async function attachScreenStubs(
+  screen: Screen,
+  assembler: ScreenStubAssembler,
+  options: AttachScreenStubsOptions = {},
+): Promise<Screen> {
+  const now = options.now ?? Date.now;
+  const startedAt = now();
+  const resolvedIndexes: number[] = [];
+  screen.rows.forEach((row, i) => {
+    if (row.resolution === "resolved") resolvedIndexes.push(i);
+  });
+  const reads = await mapPool(
+    resolvedIndexes,
+    SCREEN_STUB_CONCURRENCY,
+    async (rowIndex): Promise<StubReadResult> => {
+      const row = screen.rows[rowIndex]!;
+      if (now() - startedAt >= SCREEN_STUB_BUDGET_MS) {
+        return { stub: allRails("unread"), stubRead: "skipped" };
+      }
+      if (row.parcelNodeId === null) {
+        // pe_screen_rows_resolved_node_chk forbids this shape. If it is
+        // reached anyway the row is declared, not silently left bare.
+        options.onReadError?.(row.query, new Error("resolved_row_without_node"));
+        return { stub: allRails("unread"), stubRead: "error" };
+      }
+      let body: ScreenRowStub | null;
+      try {
+        body = await assembler(row.parcelNodeId);
+      } catch (err) {
+        options.onReadError?.(row.parcelNodeId, err);
+        return { stub: allRails("unread"), stubRead: "error" };
+      }
+      if (body === null) {
+        // Measured miss: no baked snapshot for a parcel that resolved. Every
+        // rail is unknown. `unread` here would claim the read was never made.
+        return { stub: allRails("unknown"), stubRead: "ok" };
+      }
+      if (typeof body !== "object") {
+        options.onReadError?.(
+          row.parcelNodeId,
+          new Error(`stub_body_not_an_object: ${typeof body}`),
+        );
+        return { stub: allRails("unread"), stubRead: "error" };
+      }
+      const projected = projectRails(body as Record<string, unknown>);
+      if (!projected.ok) {
+        options.onReadError?.(
+          row.parcelNodeId,
+          new Error(
+            `stub_rail_out_of_vocabulary: ${projected.rail}=${String(projected.value)}`,
+          ),
+        );
+        return { stub: allRails("unread"), stubRead: "error" };
+      }
+      return { stub: projected.stub, stubRead: "ok" };
+    },
+  );
+  const byIndex = new Map<number, StubReadResult>();
+  resolvedIndexes.forEach((rowIndex, k) => byIndex.set(rowIndex, reads[k]!));
+  let degraded = false;
+  const rows = screen.rows.map((row, i) => {
+    const read = byIndex.get(i);
+    if (!read) return { ...row };
+    if (read.stubRead !== "ok") degraded = true;
+    return { ...row, stub: read.stub, stubRead: read.stubRead };
+  });
+  return {
+    ...screen,
+    rows,
+    ...(degraded ? { stubsDegraded: true as const } : {}),
   };
 }
 
