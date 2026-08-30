@@ -175,7 +175,13 @@ export class MemoryScreenSaveStore implements ScreenSaveStore {
         const dup = this.rows.find(
           (r) => r.screenId === row.screenId && r.parcelNodeId === row.parcelNodeId,
         );
-        if (dup) throw new Error("pe_screen_rows_screen_node_uidx");
+        // Same shape pg raises for pe_screen_rows_screen_node_uidx, so the
+        // write path's 23505 catch can be driven without Neon.
+        if (dup) {
+          throw Object.assign(new Error("pe_screen_rows_screen_node_uidx"), {
+            code: "23505",
+          });
+        }
       }
       const rec: RowRec = {
         id: randomUUID(),
@@ -231,8 +237,8 @@ export class MemoryScreenSaveStore implements ScreenSaveStore {
     screenId: string;
     ordinal: number;
     query: string;
-    parcelNodeId: string;
-    resolution: "resolved";
+    parcelNodeId: string | null;
+    resolution: ScreenResolution;
     source: ScreenSource;
     candidates: null;
   }) {
