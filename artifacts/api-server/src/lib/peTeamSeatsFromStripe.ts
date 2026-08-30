@@ -1,13 +1,13 @@
 /**
  * Team seat count from billed Stripe items. The webhook grant reads this
  * and writes `pe_user_entitlements.seats_purchased`. Unknown stays null.
- * Never invent the included-10 from a Team tier flag alone.
+ * Never invent the included count from a Team tier flag alone.
  */
 
 import type { PeSubscriptionTier } from "@workspace/db";
 
-/** Seats included in the Team base price (LOCKED ladder: "$299/mo for up to 10 seats"). */
-export const PE_TEAM_INCLUDED_SEATS = 10;
+/** Seats included in the Team base price (operator 2026-08-29: $299/mo for 3). */
+export const PE_TEAM_INCLUDED_SEATS = 3;
 
 export type StripePriceItem = {
   priceId: string | null;
