@@ -1565,6 +1565,20 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
     ["set_property_status", { parcelNodeId: "48021:34137", status: "Passed" }],
   ];
 
+  /**
+   * P-91 v3 M-1: a single-id node get_smart_site issues a second, concurrent
+   * cortex call for the parcel anchor. Every other entry still reaches cortex
+   * exactly once, which is what this count is guarding.
+   */
+  function expectedCortexCalls(
+    name: string,
+    args: Record<string, unknown>,
+  ): number {
+    return name === "get_smart_site" && typeof args.parcelNodeId === "string"
+      ? 2
+      : 1;
+  }
+
   it("an opaque (HTML) upstream non-OK is wrapped as upstream_non_json with the HTTP status, on every cortex-backed tool", async () => {
     for (const [name, args] of CORTEX_CALLS) {
       mockCortexFetch.mockReset();
@@ -1579,7 +1593,9 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
         upstreamStatus: 502,
         brief: "<html>bad gateway</html>",
       });
-      expect(mockCortexFetch, `${name} reached cortex`).toHaveBeenCalledTimes(1);
+      expect(mockCortexFetch, `${name} reached cortex`).toHaveBeenCalledTimes(
+        expectedCortexCalls(name, args),
+      );
     }
   });
 

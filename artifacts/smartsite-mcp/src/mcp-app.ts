@@ -1,6 +1,12 @@
 /** P-91 Wave I — Open turn and parcel draw. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p559.html";
+/* Types only. Nothing in this module may import a VALUE from parcel-anchor.js:
+ * half of this file is embedded into the served script by source (INLINE_SHARED)
+ * and an imported binding would not exist in that scope. The compile time link
+ * that keeps the two shapes in step is PANEL_ANCHOR_ACCEPTS_WIRE below. */
+import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
+
+export const APP_RESOURCE_URI = "ui://smartsite/app-p560.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 
 /* p559 probe: three channels for the map-ground decision (v3 scoping measurement 6).
@@ -134,6 +140,34 @@ export type DrawFrame = {
   quality: string | null;
 };
 
+/**
+ * M-2: the panel's reading of the absolute point the M-1 lane put on the wire.
+ * The panel prints and places what the wire carried and invents no component of
+ * it, so precision and source are read as plain strings rather than pinned to
+ * this module's idea of what the producer emits.
+ */
+export type PanelAnchor = {
+  lat: number;
+  lon: number;
+  precision: string | null;
+  source: string | null;
+};
+
+/** `status` is the producer's four value union; `anchor` exists only under "ok". */
+export type PanelAnchorRead = {
+  status: AnchorReadStatus;
+  reason: string | null;
+};
+
+/**
+ * Compile time link, not a comment: a wire anchor as parcel-anchor.ts declares
+ * it must still be readable as a PanelAnchor. If that module renames or retypes
+ * a component, `true` stops being assignable to `never` and typecheck fails
+ * here rather than the panel silently reading undefined off the wire.
+ */
+export type PanelAnchorAcceptsWire = ParcelAnchor extends PanelAnchor ? true : never;
+export const PANEL_ANCHOR_ACCEPTS_WIRE: PanelAnchorAcceptsWire = true;
+
 export type PanelKind = "board" | "parcel" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
 export type MissClass = "absent" | "unbaked" | "unstated";
 export type MissRow = {
@@ -188,6 +222,10 @@ export type PanelModel = {
   screens?: ScreenSummary[];
   /** H1: a body that names its own state. */
   declared?: DeclaredBody;
+  /** M-2: the absolute point, present only when anchorRead.status is "ok". */
+  anchor?: PanelAnchor;
+  /** M-2: the declared outcome of the anchor read, absent when the wire carried none. */
+  anchorRead?: PanelAnchorRead;
 };
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
@@ -602,8 +640,29 @@ export function edgeEnds(edge: DrawEdge, fallback: number, n: number): [number, 
 
 export type DrawCues = { zoning?: DrawZoning | null; flood?: OverlayRow | null; frame?: DrawFrame | null };
 
-export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): string {
-  if (ring.length < 3) return "";
+/**
+ * The one placement of the local foot frame into the 320x220 viewBox. Extracted
+ * from ringSvg so the aerial ground is placed by the same arithmetic that placed
+ * the ring, rather than by a second copy that has to be kept in step. Output of
+ * ringSvg is unchanged by the extraction.
+ *
+ * `s` is viewBox units per ground foot. Fewer than three points is not a ring.
+ */
+export type RingFit = {
+  w: number;
+  h: number;
+  pad: number;
+  s: number;
+  ox: number;
+  oy: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+export function ringFit(ring: RingPt[]): RingFit | null {
+  if (ring.length < 3) return null;
   const xs = ring.map((p) => p.x);
   const ys = ring.map((p) => p.y);
   const minX = Math.min(...xs);
@@ -616,10 +675,33 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
   const s = Math.min((w - pad * 2) / Math.max(maxX - minX, 1), (h - pad * 2) / Math.max(maxY - minY, 1));
   const ox = (w - (maxX - minX) * s) / 2;
   const oy = (h - (maxY - minY) * s) / 2;
+  return { w, h, pad, s, ox, oy, minX, minY, maxX, maxY };
+}
+
+/**
+ * A point of the local foot frame in viewBox units. Screen y grows downward and
+ * the frame's y axis is true north, so y inverts here and nowhere else. The
+ * frame's origin is the parcel centroid, which is the point the anchor names, so
+ * ringPixel(fit, 0, 0) is BOTH the ring origin and the anchor: one call, so
+ * registration is by construction and not by adjustment.
+ */
+export function ringPixel(fit: RingFit, x: number, y: number): RingPt {
+  return { x: fit.ox + (x - fit.minX) * fit.s, y: fit.h - (fit.oy + (y - fit.minY) * fit.s) };
+}
+
+export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): string {
+  const fit = ringFit(ring);
+  if (!fit) return "";
+  const minX = fit.minX;
+  const maxX = fit.maxX;
+  const pad = fit.pad;
+  const w = fit.w;
+  const h = fit.h;
+  const s = fit.s;
+  const oy = fit.oy;
   const pt = (p: RingPt) => {
-    const x = ox + (p.x - minX) * s;
-    const y = h - (oy + (p.y - minY) * s);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
+    const q = ringPixel(fit, p.x, p.y);
+    return `${q.x.toFixed(1)},${q.y.toFixed(1)}`;
   };
   const pts = ring.map(pt).join(" ");
   const n = ring.length;
@@ -687,6 +769,306 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
 export function frameNoteHtml(frame: DrawFrame | null | undefined): string {
   if (!frame || !frame.quality) return "";
   return `<div class="fnote" data-frame-quality="${escapeHtml(frame.quality)}">frame ${escapeHtml(frame.quality)}</div>`;
+}
+
+/*
+ * P-91 v3 M-2: the aerial ground under the drawing.
+ *
+ * The ring lives in a local foot frame whose origin is the parcel's own
+ * centroid, so the only thing that can put it on the earth is the anchor the
+ * M-1 lane reads. Without that anchor there is no ground at all: today's void,
+ * never a default coordinate, never a stand in tile, never a grey box standing
+ * for imagery.
+ *
+ * No map library. Web Mercator is arithmetic and it is done here, and the
+ * mosaic is a handful of <img> elements placed in the same coordinate space the
+ * ring was placed in by ringFit and ringPixel. No pan, no zoom, no camera.
+ */
+
+/**
+ * Esri orders this path z / row / column, which is z / y / x, NOT z/x/y.
+ * Transposing the last two segments fetches real imagery of the wrong place,
+ * which renders beautifully and is a confident lie. This string is the single
+ * source for both the fetched url and the origin declared in the resource CSP.
+ */
+export const GROUND_TILE_URL_TEMPLATE =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+
+/** Derived from the template above, never a second copy of the host. */
+export const GROUND_TILE_ORIGIN = new URL(GROUND_TILE_URL_TEMPLATE).origin;
+
+/**
+ * What the page LOADS, as opposed to what it connects to. The ground's origin is
+ * derived from the template rather than written a second time, so a template
+ * pointed at another host declares that host or declares nothing, never the
+ * wrong one. The p559 probe origins already include the imagery host, so today
+ * this list equals PROBE_CSP_DOMAINS; it stops equalling it the moment the
+ * template moves, which is the point of deriving it.
+ */
+export const RESOURCE_CSP_DOMAINS: readonly string[] = ((): string[] => {
+  const out: string[] = PROBE_CSP_DOMAINS.slice();
+  if (out.indexOf(GROUND_TILE_ORIGIN) < 0) out.push(GROUND_TILE_ORIGIN);
+  return out;
+})();
+
+export const GROUND_TILE_PX = 256;
+
+/**
+ * Web Mercator metres per pixel at zoom 0 on a 256 pixel tile: the circumference
+ * of the EPSG:3857 sphere over 256. Ground resolution at any level is this times
+ * cos(latitude) over 2**zoom. Dropping the cosine makes every parcel about 15
+ * percent wrong at Texas latitudes: a drawing that does not match the roof.
+ */
+export const GROUND_EQUATOR_MPP = 156543.03392804097;
+
+/** The US survey foot, 1200/3937 m, the factor the draw frame declares. Not 0.3048. */
+export const US_SURVEY_FOOT_M = 1200 / 3937;
+
+export const GROUND_ZOOM_MIN = 14;
+
+/**
+ * Esri publishes World Imagery to level 19 broadly and past 19 only in selected
+ * areas, where an over zoomed request answers with a placeholder rather than
+ * imagery. 19 is the last level that is imagery everywhere we serve, so it is
+ * the cap, and a small parcel is honestly upscaled rather than dishonestly
+ * detailed.
+ */
+export const GROUND_ZOOM_MAX = 19;
+
+/** The 320 unit viewBox paints at roughly twice its unit width on a retina panel. */
+export const GROUND_SUPERSAMPLE = 2;
+
+/** A mosaic larger than this is refused rather than painted. */
+export const GROUND_MAX_TILES = 36;
+
+export const GROUND_SOURCE_LABEL = "Aerial: Esri World Imagery";
+/** Esri publishes no per tile capture date, so we state that we do not know it. */
+export const GROUND_VINTAGE_NOTE = "capture date unstated";
+export const GROUND_TOGGLE_LABEL = "Aerial";
+
+/** Ground resolution in metres per pixel at this latitude and zoom. */
+export function groundMetresPerPixel(lat: number, z: number): number {
+  return (GROUND_EQUATOR_MPP * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, z);
+}
+
+/** Map pixels per ground foot: metres per foot over metres per pixel. */
+export function groundPixelsPerFoot(lat: number, z: number): number {
+  return US_SURVEY_FOOT_M / groundMetresPerPixel(lat, z);
+}
+
+/** Web Mercator world pixel of a coordinate at one zoom. Y grows southward. */
+export function groundWorldPixel(lat: number, lon: number, z: number): { wx: number; wy: number } {
+  const n = Math.pow(2, z) * GROUND_TILE_PX;
+  const latRad = (lat * Math.PI) / 180;
+  const wx = ((lon + 180) / 360) * n;
+  const wy = (0.5 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / (2 * Math.PI)) * n;
+  return { wx, wy };
+}
+
+/** The inverse of groundWorldPixel, so the pair can be round tripped in a test. */
+export function groundLatLon(wx: number, wy: number, z: number): { lat: number; lon: number } {
+  const n = Math.pow(2, z) * GROUND_TILE_PX;
+  const lon = (wx / n) * 360 - 180;
+  const m = Math.PI * (1 - 2 * (wy / n));
+  const lat = (Math.atan(Math.sinh(m)) * 180) / Math.PI;
+  return { lat, lon };
+}
+
+/** The tile holding a coordinate. x is the column, y is the row. */
+export function groundTileId(lat: number, lon: number, z: number): { z: number; x: number; y: number } {
+  const p = groundWorldPixel(lat, lon, z);
+  return {
+    z: z,
+    x: Math.floor(p.wx / GROUND_TILE_PX),
+    y: Math.floor(p.wy / GROUND_TILE_PX),
+  };
+}
+
+/** z / y / x. The row goes before the column. */
+export function groundTileUrl(z: number, x: number, y: number): string {
+  return GROUND_TILE_URL_TEMPLATE.replace("{z}", String(z))
+    .replace("{y}", String(y))
+    .replace("{x}", String(x));
+}
+
+/**
+ * The coarsest level whose imagery carries at least GROUND_SUPERSAMPLE image
+ * pixels per viewBox unit, clamped to the published range. Ground resolution
+ * rises monotonically with z, so the first level that clears the target is the
+ * one to use; a parcel small enough to want more than level 19 is clamped and
+ * upscaled rather than sent to a level that answers with a placeholder.
+ */
+export function groundZoomFor(lat: number, viewBoxUnitsPerFoot: number): number {
+  const want = viewBoxUnitsPerFoot * GROUND_SUPERSAMPLE;
+  for (let z = GROUND_ZOOM_MIN; z <= GROUND_ZOOM_MAX; z++) {
+    if (groundPixelsPerFoot(lat, z) >= want) return z;
+  }
+  return GROUND_ZOOM_MAX;
+}
+
+export type GroundTile = {
+  z: number;
+  x: number;
+  y: number;
+  url: string;
+  /** viewBox units */
+  left: number;
+  top: number;
+  size: number;
+};
+
+export type GroundPlan = {
+  z: number;
+  lat: number;
+  lon: number;
+  metresPerPixel: number;
+  pixelsPerFoot: number;
+  /** viewBox units per map pixel; the whole conversion between the two scales */
+  vbPerMapPx: number;
+  anchorPx: RingPt;
+  worldPx: { wx: number; wy: number };
+  fit: RingFit;
+  tiles: GroundTile[];
+};
+
+/** A plan or a declared reason there is none. Never a plan built on a guess. */
+export type GroundOutcome = { plan: GroundPlan | null; reason: string | null };
+
+/** One world pixel expressed in viewBox units, through the anchor. */
+export function groundVbFromWorld(plan: GroundPlan, wx: number, wy: number): RingPt {
+  return {
+    x: plan.anchorPx.x + (wx - plan.worldPx.wx) * plan.vbPerMapPx,
+    y: plan.anchorPx.y + (wy - plan.worldPx.wy) * plan.vbPerMapPx,
+  };
+}
+
+/** One coordinate expressed in viewBox units, through the same path the tiles take. */
+export function groundProject(plan: GroundPlan, lat: number, lon: number): RingPt {
+  const p = groundWorldPixel(lat, lon, plan.z);
+  return groundVbFromWorld(plan, p.wx, p.wy);
+}
+
+/**
+ * Fail closed. Any read that is not "ok", any missing or unusable coordinate,
+ * any ring too small to place, and any mosaic over the cap all return a null
+ * plan and a reason. Nothing here substitutes a coordinate it did not receive.
+ */
+export function groundPlan(
+  ring: RingPt[],
+  anchor: PanelAnchor | null | undefined,
+  read: PanelAnchorRead | null | undefined,
+): GroundOutcome {
+  if (!read) return { plan: null, reason: "ground_anchor_unread" };
+  if (read.status !== "ok") return { plan: null, reason: "ground_anchor_" + read.status };
+  if (!anchor) return { plan: null, reason: "ground_anchor_missing" };
+  const lat = anchor.lat;
+  const lon = anchor.lon;
+  if (typeof lat !== "number" || typeof lon !== "number") return { plan: null, reason: "ground_anchor_missing" };
+  if (!isFinite(lat) || !isFinite(lon)) return { plan: null, reason: "ground_anchor_missing" };
+  if (lat === 0 || lon === 0) return { plan: null, reason: "ground_anchor_missing" };
+  if (lat > 85 || lat < -85 || lon > 180 || lon < -180) return { plan: null, reason: "ground_anchor_off_world" };
+  const fit = ringFit(ring);
+  if (!fit) return { plan: null, reason: "ground_no_ring" };
+  const z = groundZoomFor(lat, fit.s);
+  const mpp = groundMetresPerPixel(lat, z);
+  const ppf = groundPixelsPerFoot(lat, z);
+  if (!(mpp > 0) || !(ppf > 0)) return { plan: null, reason: "ground_scale_unresolved" };
+  const world = groundWorldPixel(lat, lon, z);
+  const plan: GroundPlan = {
+    z: z,
+    lat: lat,
+    lon: lon,
+    metresPerPixel: mpp,
+    pixelsPerFoot: ppf,
+    vbPerMapPx: fit.s / ppf,
+    anchorPx: ringPixel(fit, 0, 0),
+    worldPx: world,
+    fit: fit,
+    tiles: [],
+  };
+  const k = plan.vbPerMapPx;
+  const side = Math.pow(2, z);
+  const wxMin = world.wx + (0 - plan.anchorPx.x) / k;
+  const wxMax = world.wx + (fit.w - plan.anchorPx.x) / k;
+  const wyMin = world.wy + (0 - plan.anchorPx.y) / k;
+  const wyMax = world.wy + (fit.h - plan.anchorPx.y) / k;
+  const txMin = Math.max(0, Math.floor(wxMin / GROUND_TILE_PX));
+  const txMax = Math.min(side - 1, Math.floor(wxMax / GROUND_TILE_PX));
+  const tyMin = Math.max(0, Math.floor(wyMin / GROUND_TILE_PX));
+  const tyMax = Math.min(side - 1, Math.floor(wyMax / GROUND_TILE_PX));
+  if (txMax < txMin || tyMax < tyMin) return { plan: null, reason: "ground_off_world" };
+  if ((txMax - txMin + 1) * (tyMax - tyMin + 1) > GROUND_MAX_TILES) {
+    return { plan: null, reason: "ground_tile_cap" };
+  }
+  const size = GROUND_TILE_PX * k;
+  for (let ty = tyMin; ty <= tyMax; ty++) {
+    for (let tx = txMin; tx <= txMax; tx++) {
+      const at = groundVbFromWorld(plan, tx * GROUND_TILE_PX, ty * GROUND_TILE_PX);
+      plan.tiles.push({
+        z: z,
+        x: tx,
+        y: ty,
+        url: groundTileUrl(z, tx, ty),
+        left: at.x,
+        top: at.y,
+        size: size,
+      });
+    }
+  }
+  return { plan: plan, reason: null };
+}
+
+/** viewBox units as a percentage of the box, which is what the mosaic is positioned in. */
+export function groundPct(value: number, span: number): string {
+  return ((value / span) * 100).toFixed(4) + "%";
+}
+
+/**
+ * The mosaic. Percentages of the wrapper, whose box is the svg's box, whose
+ * aspect ratio is the viewBox's, so a percentage here is a viewBox unit there.
+ */
+export function groundLayerHtml(plan: GroundPlan): string {
+  const fit = plan.fit;
+  let imgs = "";
+  for (let i = 0; i < plan.tiles.length; i++) {
+    const t = plan.tiles[i];
+    if (!t) continue;
+    const style =
+      "left:" +
+      groundPct(t.left, fit.w) +
+      ";top:" +
+      groundPct(t.top, fit.h) +
+      ";width:" +
+      groundPct(t.size, fit.w) +
+      ";height:" +
+      groundPct(t.size, fit.h);
+    imgs +=
+      `<img class="gt" alt="" draggable="false" decoding="async" data-tile="${t.z}/${t.y}/${t.x}"` +
+      ` src="${escapeHtml(t.url)}" style="${style}">`;
+  }
+  return `<div class="ground" aria-hidden="true" data-ground-z="${plan.z}" data-ground-tiles="${plan.tiles.length}">${imgs}</div>`;
+}
+
+/** Source and vintage, then the toggle. The vintage is stated as unknown, never implied. */
+export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
+  if (!plan) return "";
+  const label = GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE;
+  return (
+    `<div class="gnote" data-ground-note="1"><span data-ground-source="1">${escapeHtml(label)}</span>` +
+    `<button type="button" class="btn${on ? " on" : ""}" data-act="ground" data-ground-on="${on ? "1" : "0"}"` +
+    ` onclick="window.__ss&&window.__ss.ground()">${GROUND_TOGGLE_LABEL}</button></div>`
+  );
+}
+
+/**
+ * The drawing with ground under it, or the drawing exactly as it renders today.
+ * A null plan returns the svg untouched: no wrapper, no note, no toggle and no
+ * tile url anywhere in the html.
+ */
+export function groundWrapHtml(svg: string, plan: GroundPlan | null, on: boolean): string {
+  if (!svg || !plan) return svg;
+  const layer = on ? groundLayerHtml(plan) : "";
+  return `<div class="gwrap" data-ground="${on ? "on" : "off"}">${layer}${svg}</div>` + groundNoteHtml(plan, on);
 }
 
 /*
@@ -1206,7 +1588,11 @@ function sectionsFromBrief(host: Record<string, unknown>): BriefSection[] {
 }
 
 export function renderParcelDraw(
-  model: Pick<PanelModel, "ring" | "edges" | "overlays" | "label" | "parcelNodeId" | "zoning" | "frame" | "sections">,
+  model: Pick<
+    PanelModel,
+    "ring" | "edges" | "overlays" | "label" | "parcelNodeId" | "zoning" | "frame" | "sections" | "anchor" | "anchorRead"
+  >,
+  groundOn?: boolean,
 ): string {
   const node = model.parcelNodeId
     ? `<div class="pn atom">${escapeHtml(model.parcelNodeId)}</div>`
@@ -1216,6 +1602,13 @@ export function renderParcelDraw(
     flood: floodOverlayOf(model.overlays),
     frame: model.frame ?? null,
   });
+  /* M-2: ground under the drawing when the anchor was read, otherwise the svg
+   * exactly as it renders with no anchor on the wire. */
+  const drawn = groundWrapHtml(
+    svg,
+    groundPlan(model.ring ?? [], model.anchor ?? null, model.anchorRead ?? null).plan,
+    groundOn === undefined ? true : groundOn,
+  );
   const tip = svg ? `<div class="tip" data-tip="1">${EDGE_TIP_HINT}</div>${frameNoteHtml(model.frame ?? null)}` : "";
   const edgeList = (model.edges ?? []).length
     ? `<ul class="edges">${(model.edges ?? [])
@@ -1232,7 +1625,7 @@ export function renderParcelDraw(
       break;
     }
   }
-  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${svg}${tip}${edgeList}${rows}${floodFacts}`;
+  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${drawn}${tip}${edgeList}${rows}${floodFacts}`;
 }
 
 function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
@@ -1298,6 +1691,36 @@ function frameFromDraw(draw: Record<string, unknown>): DrawFrame | null {
   const frame = asRecord(draw.frame);
   if (!frame) return null;
   return { units: stringOrNull(frame.units), quality: stringOrNull(frame.quality) };
+}
+
+/**
+ * M-2: anchorRead is an OBJECT carrying one of four statuses, not a bare string.
+ * A body whose anchorRead is a string, or carries a status outside the union, is
+ * read as no declaration at all, which paints no ground.
+ */
+function anchorReadFrom(value: unknown): PanelAnchorRead | null {
+  const rec = asRecord(value);
+  if (!rec) return null;
+  const s = rec.status;
+  if (s !== "ok" && s !== "absent" && s !== "error" && s !== "skipped") return null;
+  return { status: s, reason: stringOrNull(rec.reason) };
+}
+
+/**
+ * M-2: a coordinate is read only under an "ok" read, and only when both
+ * components are finite, non zero and on the world. Anything else is no anchor,
+ * which paints no ground rather than a placed guess.
+ */
+function anchorFrom(value: unknown, read: PanelAnchorRead | null): PanelAnchor | null {
+  if (!read || read.status !== "ok") return null;
+  const rec = asRecord(value);
+  if (!rec) return null;
+  const lat = numberOrNull(rec.lat);
+  const lon = numberOrNull(rec.lon);
+  if (lat === null || lon === null) return null;
+  if (lat === 0 || lon === 0) return null;
+  if (lat > 85 || lat < -85 || lon > 180 || lon < -180) return null;
+  return { lat: lat, lon: lon, precision: stringOrNull(rec.precision), source: stringOrNull(rec.source) };
 }
 
 function batchRowsFrom(rec: Record<string, unknown>): BoardRow[] | null {
@@ -1478,6 +1901,15 @@ export function parseToolResult(text: string): PanelModel {
     if (frame) model.frame = frame;
     const sections = sectionsFromBrief(host);
     if (sections.length > 0) model.sections = sections;
+    /* M-2: the anchor lane attaches its outcome at the TOP level of the body, as
+     * siblings of draw, so it is read off rec and never off the draw or a parcel
+     * row. An array result carries a "skipped" read and no coordinate. */
+    const anchorRead = anchorReadFrom(rec.anchorRead);
+    if (anchorRead) {
+      model.anchorRead = anchorRead;
+      const anchor = anchorFrom(rec.anchor, anchorRead);
+      if (anchor) model.anchor = anchor;
+    }
     return model;
   }
 
@@ -1576,8 +2008,24 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   floodZoneLabel,
   floodOverlayOf,
   scaleBarFt,
+  ringFit,
+  ringPixel,
   ringSvg,
   frameNoteHtml,
+  /* M-2 aerial ground */
+  anchorReadFrom,
+  anchorFrom,
+  groundMetresPerPixel,
+  groundPixelsPerFoot,
+  groundWorldPixel,
+  groundTileUrl,
+  groundZoomFor,
+  groundVbFromWorld,
+  groundPlan,
+  groundPct,
+  groundLayerHtml,
+  groundNoteHtml,
+  groundWrapHtml,
   /* S7 facts and actions */
   glyphClass,
   knownVintage,
@@ -1863,6 +2311,24 @@ export function htmlContractViolations(html: string): string[] {
   if (!html.includes('data-act="report"') || !html.includes("function toggleReport")) {
     violations.push("report_toggle_unbound");
   }
+  /* M-2: the ground's mechanism must be in the served script, or the ground is a claim.
+   * Tile <img> elements are not fetch, XMLHttpRequest or WebSocket, so the
+   * direct_network rule above is neither tripped nor widened by them. */
+  if (
+    !html.includes('data-act="ground"') ||
+    !html.includes("function toggleGround") ||
+    !html.includes("function groundPlan") ||
+    !html.includes("function groundWrapHtml") ||
+    !html.includes(GROUND_TILE_URL_TEMPLATE) ||
+    !html.includes(GROUND_VINTAGE_NOTE)
+  ) {
+    violations.push("ground_unbound");
+  }
+  /* Esri orders the path z / row / column. A transposed template fetches real
+   * imagery of the wrong place, so the transposition is refused at the page. */
+  if (!html.includes("/tile/{z}/{y}/{x}") || html.includes("/tile/{z}/{x}/{y}")) {
+    violations.push("ground_tile_axis_transposed");
+  }
   if (!html.includes('data-act="addscreen"') || !html.includes("add_to_screen") || !html.includes("function sendAddToScreen")) {
     violations.push("add_to_screen_unbound");
   }
@@ -1996,6 +2462,20 @@ svg.ring .zn.link{cursor:pointer;text-decoration:underline}
 svg.ring .fz{fill:var(--ss-blue)}
 svg.ring .sm{fill:var(--ss-t6)}
 .flood-tint,.north,.scale{pointer-events:none}
+/* M-2 ground. The wrapper carries the drawing's margin so its box is the svg's
+   box exactly: no margin collapsing question, and a percentage inside it is a
+   viewBox unit. The layer paints no background, so a tile that does not load
+   leaves the panel's own void rather than a grey stand-in for imagery. */
+.gwrap{position:relative;margin:8px 0;border-radius:6px;overflow:hidden}
+.gwrap svg.ring{margin:0;position:relative;z-index:1}
+.ground{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.ground img{position:absolute;display:block;max-width:none;user-select:none}
+/* The ring's void fill is a 55 percent scrim, which is right over nothing and
+   wrong over imagery. Scoped to ground on, so with the ground off the drawing
+   renders exactly as it does today. */
+.gwrap[data-ground="on"] .ring-fill{fill-opacity:.16}
+.gnote{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.gnote .btn{padding:3px 8px;font-size:var(--ss-fs-meta)}
 .tip{font:var(--ss-fs-meta)/1.6 ui-monospace,Consolas,monospace;color:var(--ss-t5);margin:0 0 8px;min-height:1.6em}
 .tip span{margin-right:8px}
 .tip .tn{color:var(--ss-atom)}
@@ -2173,6 +2653,19 @@ svg.ring .sm{fill:var(--ss-t6)}
   var UPSTREAM_KEY=${JSON.stringify(UPSTREAM_KEY)};
   var SORT_COMPLETENESS_LABEL=${JSON.stringify(SORT_COMPLETENESS_LABEL)};
   var DECLARED_STATUSES=${JSON.stringify(DECLARED_STATUSES)};
+  /* M-2 aerial ground. The served scope gets the same constants the tested
+   * helpers read, so the tile url and the CSP origin cannot drift apart. */
+  var GROUND_TILE_URL_TEMPLATE=${JSON.stringify(GROUND_TILE_URL_TEMPLATE)};
+  var GROUND_TILE_PX=${JSON.stringify(GROUND_TILE_PX)};
+  var GROUND_EQUATOR_MPP=${JSON.stringify(GROUND_EQUATOR_MPP)};
+  var US_SURVEY_FOOT_M=${JSON.stringify(US_SURVEY_FOOT_M)};
+  var GROUND_ZOOM_MIN=${JSON.stringify(GROUND_ZOOM_MIN)};
+  var GROUND_ZOOM_MAX=${JSON.stringify(GROUND_ZOOM_MAX)};
+  var GROUND_SUPERSAMPLE=${JSON.stringify(GROUND_SUPERSAMPLE)};
+  var GROUND_MAX_TILES=${JSON.stringify(GROUND_MAX_TILES)};
+  var GROUND_SOURCE_LABEL=${JSON.stringify(GROUND_SOURCE_LABEL)};
+  var GROUND_VINTAGE_NOTE=${JSON.stringify(GROUND_VINTAGE_NOTE)};
+  var GROUND_TOGGLE_LABEL=${JSON.stringify(GROUND_TOGGLE_LABEL)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
@@ -2188,6 +2681,8 @@ ${inlineSharedSource()}
   var pinnedEl=null;
   /* R1: local view state (I8). Reset on every accepted result; never read from anywhere. */
   var reportOpen=false;
+  /* M-2: local view state, same rule. On whenever a ground exists; the toggle turns it off. */
+  var groundOn=true;
   var rpcId=1;
   var initId=rpcId++;
   var ready=false;
@@ -2362,13 +2857,15 @@ ${inlineSharedSource()}
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
       var flood=floodOverlayOf(model.overlays);
       var svg=ringSvg(model.ring||[],model.edges||[],{zoning:model.zoning||null,flood:flood,frame:model.frame||null});
+      /* M-2: same helpers the exported twin uses; a null plan returns svg untouched */
+      var drawn=groundWrapHtml(svg,groundPlan(model.ring||[],model.anchor||null,model.anchorRead||null).plan,groundOn);
       var tip=svg?'<div class="tip" data-tip="1">'+EDGE_TIP_HINT+"</div>"+frameNoteHtml(model.frame||null):"";
       var edgeList=(model.edges&&model.edges.length)?'<ul class="edges">'+model.edges.map(function(e){return "<li>"+esc(edgeCaption(e))+"</li>"}).join("")+"</ul>":"";
       var secs=model.sections||[];
       var floodFacts="";
       for(var fi=0;fi<secs.length;fi++){ if(secs[fi].id==="flood"){ floodFacts=floodFactsHtml(secs[fi],fi); break; } }
       var report=reportOpen?reportHtml(secs):"";
-      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+svg+tip+edgeList+ov+floodFacts+report+"</div>"+
+      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+drawn+tip+edgeList+ov+floodFacts+report+"</div>"+
         '<div class="acts">'+saveChooserHtml()+'<button type="button" class="btn'+(reportOpen?" on":"")+'" data-act="report" data-report-open="'+(reportOpen?"1":"0")+'" onclick="window.__ss&&window.__ss.report()">'+REPORT_TOGGLE+'</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
       var listing=root.querySelector('[data-act="listing"]');
       if(listing&&listingAck){
@@ -2497,7 +2994,13 @@ ${inlineSharedSource()}
     reportOpen=!reportOpen;
     render();
   }
-  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,fp:function(){return fingerprint(model)},parse:parseToolResult};
+  /* M-2: local toggle, R1's pattern. Off removes every tile from the html; it does not hide them. */
+  function toggleGround(){
+    if(model.kind!=="parcel") return;
+    groundOn=!groundOn;
+    render();
+  }
+  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,ground:toggleGround,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,fp:function(){return fingerprint(model)},parse:parseToolResult};
   document.body.addEventListener("click",function(ev){
     var el=ev.target;
     if(!el||!el.closest) return;
@@ -2514,6 +3017,7 @@ ${inlineSharedSource()}
     openFail=null;
     openSent=null;
     reportOpen=false;
+    groundOn=true;
     sortKey="completeness";
     sortDir=1;
     model=parseToolContent(result);
@@ -2625,7 +3129,9 @@ export function registerMcpApp(server: {
              * Empty arrays measured nothing; whether the host honors this is the question. */
             csp: {
               connectDomains: [...PROBE_CSP_DOMAINS],
-              resourceDomains: [...PROBE_CSP_DOMAINS],
+              /* M-2: the ground LOADS tiles, it does not connect; its origin is
+               * derived from the tile template, never a second copy. */
+              resourceDomains: [...RESOURCE_CSP_DOMAINS],
             },
           },
         },
