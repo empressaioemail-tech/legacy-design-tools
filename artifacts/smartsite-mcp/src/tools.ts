@@ -20,7 +20,7 @@ import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
 import {
   buildRunReportEnvelope,
-  buildRunReportErrorBody,
+  declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
   normalizeGetSmartSiteResponseText,
   stripSavedPropertiesForExternal,
@@ -29,7 +29,22 @@ import type { ToolResult } from "./tools-types.js";
 import { appMetaFor, registerMcpApp } from "./mcp-app.js";
 
 const SMARTSITE_BATCH_CAP = 50;
+/**
+ * H2 (measured 2026-08-30 on p557): a node body averages 4,711 characters
+ * (largest 5,549), and the host writes any tool result over roughly 150,000
+ * characters to a file and hands the panel a pointer, so a 50-id node batch
+ * (about 235,000) never reaches the panel. Node arrays cap at 25; stub keeps
+ * 50. The JSON schema cannot express a depth-dependent cap, so the array
+ * stays max(50) there and this rule is enforced here and published in the
+ * description.
+ */
+const SMARTSITE_NODE_BATCH_CAP = 25;
 const GET_SMART_SITE_DEPTHS = ["stub", "node", "hop1", "subgraph"] as const;
+type ImplementedDepth = "stub" | "node";
+
+function batchCapFor(depth: ImplementedDepth): number {
+  return depth === "node" ? SMARTSITE_NODE_BATCH_CAP : SMARTSITE_BATCH_CAP;
+}
 const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
 const SCREEN_ROW_SOURCES = ["walk", "saved", "pasted"] as const;
 
@@ -134,6 +149,58 @@ function upgradeRequiredResult(
   return {
     content: [{ type: "text", text: JSON.stringify(refusal) }],
     isError: true,
+  };
+}
+
+/** H1: a cortex non-OK travels as a declared error body, never raw. */
+function upstreamErrorResult(httpStatus: number, bodyText: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(declareUpstreamNonOk(httpStatus, bodyText)),
+      },
+    ],
+    isError: true,
+  };
+}
+
+function isDeclaredErrorText(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+    const rec = parsed as Record<string, unknown>;
+    return (
+      typeof rec.status === "string" &&
+      rec.status.length > 0 &&
+      typeof rec.reason === "string" &&
+      rec.reason.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * H1 for a result built outside this file (the export proxy): an error
+ * result whose text is not already a declared body is wrapped here. The
+ * upstream HTTP status did not travel with it, so it is `"unmeasured"`,
+ * never a guessed number.
+ */
+function ensureDeclaredError(result: ToolResult): ToolResult {
+  if (!result.isError) return result;
+  const text = result.content[0]?.text;
+  if (typeof text !== "string" || isDeclaredErrorText(text)) return result;
+  return {
+    ...result,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(declareUpstreamNonOk("unmeasured", text)),
+      },
+    ],
   };
 }
 
@@ -271,14 +338,12 @@ export function registerTools(server: McpServer): void {
                 { userId: auth.userId },
               );
               const body = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, body);
               return {
                 content: [
-                  {
-                    type: "text" as const,
-                    text: res.ok ? splitFindParcelHits(body) : body,
-                  },
+                  { type: "text" as const, text: splitFindParcelHits(body) },
                 ],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
@@ -294,6 +359,7 @@ export function registerTools(server: McpServer): void {
                     type: "text" as const,
                     text: JSON.stringify({
                       status: "not_implemented",
+                      reason: "depth_not_implemented",
                       depth,
                     }),
                   },
@@ -304,7 +370,11 @@ export function registerTools(server: McpServer): void {
             const ids = Array.isArray(parcelNodeId)
               ? parcelNodeId
               : [parcelNodeId];
-            if (ids.length > SMARTSITE_BATCH_CAP) {
+            // Published defaults: an array reads at stub, one id at node.
+            const effectiveDepth: ImplementedDepth =
+              depth ?? (Array.isArray(parcelNodeId) ? "stub" : "node");
+            const cap = batchCapFor(effectiveDepth);
+            if (Array.isArray(parcelNodeId) && ids.length > cap) {
               return {
                 content: [
                   {
@@ -312,8 +382,9 @@ export function registerTools(server: McpServer): void {
                     text: JSON.stringify({
                       status: "refused",
                       reason: "parcel_batch_cap",
-                      cap: SMARTSITE_BATCH_CAP,
+                      cap,
                       received: ids.length,
+                      depth: effectiveDepth,
                     }),
                   },
                 ],
@@ -337,9 +408,12 @@ export function registerTools(server: McpServer): void {
                 // Wire contract 4.1: a declared miss or refusal is a result
                 // the host forwards to the panel; anything else is an error.
                 const declared = mapGetSmartSiteNonOk(res.status, body, ids);
+                if (declared === null) {
+                  return upstreamErrorResult(res.status, body);
+                }
                 return {
-                  content: [{ type: "text" as const, text: declared ?? body }],
-                  isError: declared === null,
+                  content: [{ type: "text" as const, text: declared }],
+                  isError: false,
                 };
               }
               const mode =
@@ -364,7 +438,11 @@ export function registerTools(server: McpServer): void {
                 content: [
                   {
                     type: "text" as const,
-                    text: JSON.stringify({ error: "screen_id_not_accepted" }),
+                    text: JSON.stringify({
+                      status: "refused",
+                      reason: "screen_id_not_accepted",
+                      error: "screen_id_not_accepted",
+                    }),
                   },
                 ],
                 isError: true,
@@ -377,20 +455,14 @@ export function registerTools(server: McpServer): void {
                 { userId: auth.userId },
               );
               const body = await res.text();
-              if (!res.ok) {
-                return {
-                  content: [{ type: "text" as const, text: body }],
-                  isError: true,
-                };
-              }
+              if (!res.ok) return upstreamErrorResult(res.status, body);
               let parsed: unknown;
               try {
                 parsed = JSON.parse(body);
               } catch {
-                return {
-                  content: [{ type: "text" as const, text: body }],
-                  isError: true,
-                };
+                // A 200 that is not JSON is still an error this server
+                // declares (H1), carrying the status it actually saw.
+                return upstreamErrorResult(res.status, body);
               }
               const summary = stripSavedPropertiesForExternal(parsed);
               return {
@@ -419,16 +491,9 @@ export function registerTools(server: McpServer): void {
               const body = await res.text();
               if (!res.ok) {
                 // No read happened, so no read stamp (reportKind /
-                // reportReadMode / async). The upstream body travels as is.
-                return {
-                  content: [
-                    {
-                      type: "text" as const,
-                      text: JSON.stringify(buildRunReportErrorBody(body)),
-                    },
-                  ],
-                  isError: true,
-                };
+                // reportReadMode / async). The upstream body travels under
+                // its own keys as a declared error (H1).
+                return upstreamErrorResult(res.status, body);
               }
               const envelope = buildRunReportEnvelope(parcelNodeId, body);
               return {
@@ -461,7 +526,9 @@ export function registerTools(server: McpServer): void {
                 isError: true,
               };
             }
-            return executeExportInstrument({ parcelNodeId, kind });
+            return ensureDeclaredError(
+              await executeExportInstrument({ parcelNodeId, kind }),
+            );
           }
           case "create_screen": {
             const body = args as {
@@ -480,9 +547,10 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
               return {
                 content: [{ type: "text" as const, text }],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
@@ -503,9 +571,10 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
               return {
                 content: [{ type: "text" as const, text }],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
@@ -519,9 +588,10 @@ export function registerTools(server: McpServer): void {
                 userId: auth.userId,
               });
               const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
               return {
                 content: [{ type: "text" as const, text }],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
@@ -545,9 +615,10 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
               return {
                 content: [{ type: "text" as const, text }],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
@@ -567,9 +638,10 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
               return {
                 content: [{ type: "text" as const, text }],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }

@@ -11,7 +11,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "get_smart_site",
     title: "Get its smart site",
     description:
-      "Read one parcel's on-record Smart Site facts by parcel node id (from find_parcel or a screen row). Any parcel in coverage; it does not need to be saved or on a screen. depth \"stub\" (default for an array): label, node id, smartsite.cloud link, and one of present / absent-verified / unknown / refused / unread for situs, zoning, landUse, flood, drainage, envelope. depth \"node\" (default for one id): the brief sections (zoning district and jurisdiction, land use, flood zone, setbacks-envelope disposition) with citations, plus a draw block (ring in local feet, named edges, overlays) the panel renders. Never contains setback distances, permitted-use tables, listings, sales, or owner data. Requires Solo or above, or a 30-day unlock on that parcel; otherwise returns refused with reason upgrade_required. Array cap 50; ids with no record come back in notFound with a reason. bakedAt, asOf and stampedAt are the snapshot's bake time, not the time of this call, and runId names that bake, so the same runId repeats across calls on one parcel. hop1 and subgraph are not implemented.",
+      "Read one parcel's on-record Smart Site facts by parcel node id (from find_parcel or a screen row). Any parcel in coverage; it does not need to be saved or on a screen. depth \"stub\" (default for an array): label, node id, smartsite.cloud link, and one of present / absent-verified / unknown / refused / unread for situs, zoning, landUse, flood, drainage, envelope. depth \"node\" (default for one id): the brief sections (zoning district and jurisdiction, land use, flood zone, setbacks-envelope disposition) with citations, plus a draw block (ring in local feet, named edges, overlays) the panel renders. Never contains setback distances, permitted-use tables, listings, sales, or owner data. Requires Solo or above, or a 30-day unlock on that parcel; otherwise returns refused with reason upgrade_required. Array cap 50 at depth stub; depth node: array cap 25, because a larger batch exceeds what the host delivers to the panel; over the cap returns refused with reason parcel_batch_cap. Ids with no record come back in notFound with a reason. bakedAt, asOf and stampedAt are the snapshot's bake time, not the time of this call, and runId names that bake, so the same runId repeats across calls on one parcel. hop1 and subgraph are not implemented.",
     readiness: "live" as const,
   },
   {
@@ -64,7 +64,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "create_screen",
     title: "Create a screen",
     description:
-      "Create a named intake screen from pasted queries and open the screening board in the MCP App. source must be exactly \"pasted\". Two queries that resolve to the same parcel refuse the whole screen with duplicate_resolved_node; dedupe first. Resolved rows carry six rail states. Does not write a save. Unresolved rows keep the original query.",
+      "Create a named intake screen from pasted queries and open the screening board in the MCP App. source must be exactly \"pasted\". A query that resolves to a parcel already on the screen is reported in degraded.duplicates and not written twice. Resolved rows carry six rail states. Does not write a save. Unresolved rows keep the original query.",
     readiness: "live" as const,
   },
   {

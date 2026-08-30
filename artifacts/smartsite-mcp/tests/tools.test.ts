@@ -9,11 +9,12 @@ import { sanitizeAskTheMapErrorBody } from "../src/tool-honesty.js";
 import { registerTools, splitFindParcelHits } from "../src/tools.js";
 
 const mockCortexFetch = vi.fn();
+const CORTEX_TEST_CONFIG = { baseUrl: "http://cortex.test", serviceApiKey: "test-key" };
+const mockLoadCortexConfig = vi.fn<() => typeof CORTEX_TEST_CONFIG | null>(
+  () => CORTEX_TEST_CONFIG,
+);
 vi.mock("../src/cortex-client.js", () => ({
-  loadCortexClientConfig: () => ({
-    baseUrl: "http://cortex.test",
-    serviceApiKey: "test-key",
-  }),
+  loadCortexClientConfig: () => mockLoadCortexConfig(),
   cortexFetch: (...args: unknown[]) => mockCortexFetch(...args),
 }));
 
@@ -787,6 +788,7 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
       expect(hop.isError).toBe(true);
       expect(JSON.parse((hop.content?.[0] as { text: string }).text)).toEqual({
         status: "not_implemented",
+        reason: "depth_not_implemented",
         depth: "hop1",
       });
       const sub = await client.callTool({
@@ -795,6 +797,7 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
       });
       expect(JSON.parse((sub.content?.[0] as { text: string }).text)).toEqual({
         status: "not_implemented",
+        reason: "depth_not_implemented",
         depth: "subgraph",
       });
       expect(mockCortexFetch).not.toHaveBeenCalled();
@@ -865,7 +868,11 @@ describe("P-91 Wave B screen/save tools", () => {
       });
       expect(result.isError).toBe(true);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(parsed).toEqual({ error: "screen_id_not_accepted" });
+      expect(parsed).toEqual({
+        status: "refused",
+        reason: "screen_id_not_accepted",
+        error: "screen_id_not_accepted",
+      });
     });
     expect(mockCortexFetch).not.toHaveBeenCalled();
   });
@@ -1061,22 +1068,45 @@ describe("get_smart_site non-OK wire contract (P-91 build plan 4.1)", () => {
         arguments: { parcelNodeId: ids, depth: "stub" },
       });
       expect(result.isError).toBe(true);
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toEqual(body);
+      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(parsed).toEqual({
+        ...body,
+        status: "error",
+        reason: "baked_snapshot_not_found",
+        upstreamStatus: 404,
+      });
+      expect(parsed).not.toHaveProperty("notFound");
     });
   });
 
-  it("any other non-OK passes the body through with isError true", async () => {
+  it("any other non-OK is declared: upstream keys kept, status error, reason, upstreamStatus (H1)", async () => {
     const res = await callSingle(500, { error: "internal", detail: "pool exhausted" });
     expect(res.isError).toBe(true);
-    expect(JSON.parse(res.text)).toEqual({ error: "internal", detail: "pool exhausted" });
+    expect(JSON.parse(res.text)).toEqual({
+      error: "internal",
+      detail: "pool exhausted",
+      status: "error",
+      reason: "internal",
+      upstreamStatus: 500,
+    });
 
     const html = await callSingle(502, "<html>bad gateway</html>");
     expect(html.isError).toBe(true);
-    expect(html.text).toBe("<html>bad gateway</html>");
+    expect(JSON.parse(html.text)).toEqual({
+      status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: 502,
+      brief: "<html>bad gateway</html>",
+    });
 
     const auth = await callSingle(401, { error: "authentication_required" });
     expect(auth.isError).toBe(true);
-    expect(JSON.parse(auth.text)).toEqual({ error: "authentication_required" });
+    expect(JSON.parse(auth.text)).toEqual({
+      error: "authentication_required",
+      status: "error",
+      reason: "authentication_required",
+      upstreamStatus: 401,
+    });
   });
 
   it("falsifier: a fixture with reason stripped fails the shape check", () => {
@@ -1117,6 +1147,8 @@ describe("run_report honesty stamp only on res.ok (deep dive 4.1 row 4)", () => 
       expect(result.isError).toBe(true);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
       expect(parsed.status).toBe("error");
+      expect(parsed.reason).toBe("upgrade_required");
+      expect(parsed.upstreamStatus).toBe(402);
       expect(parsed.error).toBe("upgrade_required");
       expect(parsed.tier).toBe("free");
       expect(parsed).not.toHaveProperty("reportKind");
@@ -1145,6 +1177,8 @@ describe("run_report honesty stamp only on res.ok (deep dive 4.1 row 4)", () => 
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
       expect(parsed).toEqual({
         status: "error",
+        reason: "baked_snapshot_not_found",
+        upstreamStatus: 404,
         error: "baked_snapshot_not_found",
         message: "No baked facet snapshot exists for this parcel node.",
         parcelNodeId: "48021:900099",
@@ -1163,7 +1197,12 @@ describe("run_report honesty stamp only on res.ok (deep dive 4.1 row 4)", () => 
       });
       expect(result.isError).toBe(true);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(parsed).toEqual({ status: "error", brief: "upstream unavailable" });
+      expect(parsed).toEqual({
+        status: "error",
+        reason: "upstream_non_json",
+        upstreamStatus: 502,
+        brief: "upstream unavailable",
+      });
     });
   });
 });
@@ -1295,5 +1334,342 @@ describe("find_parcel hits carry parcel records only (P-91 QA 2026-08-30 D1)", (
     const budget = JSON.stringify({ hits: [], missClass: "situs-search-budget" });
     expect(JSON.parse(splitFindParcelHits(budget))).toEqual({ hits: [], missClass: "situs-search-budget" });
     expect(splitFindParcelHits("<html>500</html>")).toBe("<html>500</html>");
+  });
+});
+
+/**
+ * H2 (measured 2026-08-30): a node body averages 4,711 chars (largest 5,549);
+ * a 50-id node batch is about 235,000 chars, past the roughly 150,000 at which
+ * the host writes the result to a file and hands the panel a pointer. Node
+ * arrays cap at 25; stub keeps 50. The schema cannot express a depth-dependent
+ * cap, so the array stays max(50) and the node rule lives in the handler.
+ */
+describe("H2: node-depth array cap 25", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ parcels: [], notFound: [] }), { status: 200 }),
+    );
+  });
+
+  const idsOf = (n: number) => Array.from({ length: n }, (_, i) => `48021:${20000 + i}`);
+
+  async function call(parcelNodeId: string[], depth?: "stub" | "node") {
+    let out: { isError?: boolean; text: string } | null = null;
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "get_smart_site",
+        arguments: depth ? { parcelNodeId, depth } : { parcelNodeId },
+      });
+      out = {
+        isError: result.isError as boolean | undefined,
+        text: (result.content?.[0] as { text: string }).text,
+      };
+    });
+    return out!;
+  }
+
+  function cortexBodySent(): Record<string, unknown> {
+    const init = mockCortexFetch.mock.calls[0]?.[2] as { body?: string } | undefined;
+    return JSON.parse(init?.body ?? "{}");
+  }
+
+  it("26 ids at depth node refuse with parcel_batch_cap, cap 25, depth node, and never reach cortex", async () => {
+    const res = await call(idsOf(26), "node");
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.text)).toEqual({
+      status: "refused",
+      reason: "parcel_batch_cap",
+      cap: 25,
+      received: 26,
+      depth: "node",
+    });
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("25 ids at depth node pass to cortex with depth node", async () => {
+    const res = await call(idsOf(25), "node");
+    expect(res.isError).toBe(false);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect(cortexBodySent()).toMatchObject({ depth: "node" });
+    expect((cortexBodySent().parcelNodeId as string[]).length).toBe(25);
+  });
+
+  it("26 ids at depth stub pass to cortex", async () => {
+    const res = await call(idsOf(26), "stub");
+    expect(res.isError).toBe(false);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect((cortexBodySent().parcelNodeId as string[]).length).toBe(26);
+  });
+
+  it("26 ids with no depth (array default is stub) pass to cortex without a depth key", async () => {
+    const res = await call(idsOf(26));
+    expect(res.isError).toBe(false);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect(cortexBodySent()).not.toHaveProperty("depth");
+  });
+
+  it("50 ids at depth stub pass to cortex", async () => {
+    const res = await call(idsOf(50), "stub");
+    expect(res.isError).toBe(false);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect((cortexBodySent().parcelNodeId as string[]).length).toBe(50);
+  });
+
+  it("51 ids at any depth refuse at the published schema (max 50) before the handler", async () => {
+    for (const depth of ["node", "stub", undefined] as const) {
+      const res = await call(idsOf(51), depth);
+      expect(res.isError, `depth ${depth}`).toBe(true);
+      expect(res.text, `depth ${depth}`).toContain("50");
+      expect(res.text, `depth ${depth}`).not.toContain("parcel_batch_cap");
+    }
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("H1 wire half: every non-OK or refused body carries a machine-readable status and reason", () => {
+  const originalHauskaUrl = process.env.HAUSKA_MCP_BASE_URL;
+
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+    delete process.env.HAUSKA_MCP_BASE_URL;
+  });
+
+  afterEach(() => {
+    if (originalHauskaUrl === undefined) delete process.env.HAUSKA_MCP_BASE_URL;
+    else process.env.HAUSKA_MCP_BASE_URL = originalHauskaUrl;
+    vi.restoreAllMocks();
+  });
+
+  /** Meaning-shaped: status and reason are both non-empty strings. */
+  function expectDeclared(parsed: unknown): void {
+    const rec = parsed as Record<string, unknown>;
+    expect(typeof rec.status, "status is a string").toBe("string");
+    expect((rec.status as string).length, "status non-empty").toBeGreaterThan(0);
+    expect(typeof rec.reason, "reason is a string").toBe("string");
+    expect((rec.reason as string).length, "reason non-empty").toBeGreaterThan(0);
+  }
+
+  async function callRaw(name: string, args: Record<string, unknown>) {
+    let out: { isError?: boolean; text: string } | null = null;
+    await withTestClient(async (client) => {
+      const result = await client.callTool({ name, arguments: args });
+      out = {
+        isError: result.isError as boolean | undefined,
+        text: (result.content?.[0] as { text: string }).text,
+      };
+    });
+    return out!;
+  }
+
+  it("falsifier: expectDeclared rejects a body missing status, missing reason, or carrying an empty one", () => {
+    expect(() => expectDeclared({ status: "error" })).toThrow();
+    expect(() => expectDeclared({ reason: "x" })).toThrow();
+    expect(() => expectDeclared({ status: "", reason: "x" })).toThrow();
+    expect(() => expectDeclared({ status: "error", reason: "" })).toThrow();
+    expect(() => expectDeclared({ status: "error", reason: 7 })).toThrow();
+    expect(() => expectDeclared({ status: "error", reason: "x" })).not.toThrow();
+  });
+
+  it("not_implemented (hop1, subgraph) carries reason depth_not_implemented", async () => {
+    for (const depth of ["hop1", "subgraph"]) {
+      const res = await callRaw("get_smart_site", { parcelNodeId: "48021:34137", depth });
+      expect(res.isError).toBe(true);
+      const parsed = JSON.parse(res.text);
+      expectDeclared(parsed);
+      expect(parsed).toEqual({ status: "not_implemented", reason: "depth_not_implemented", depth });
+    }
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("the batch-cap refuse carries status, reason, cap, received, depth", async () => {
+    const res = await callRaw("get_smart_site", {
+      parcelNodeId: Array.from({ length: 26 }, (_, i) => `48021:${30000 + i}`),
+      depth: "node",
+    });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expectDeclared(parsed);
+    expect(parsed).toMatchObject({
+      status: "refused",
+      reason: "parcel_batch_cap",
+      cap: 25,
+      received: 26,
+      depth: "node",
+    });
+  });
+
+  it("list_my_properties screenId refuse carries status refused and reason screen_id_not_accepted", async () => {
+    const res = await callRaw("list_my_properties", { screenId: "x" });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expectDeclared(parsed);
+    expect(parsed).toEqual({
+      status: "refused",
+      reason: "screen_id_not_accepted",
+      error: "screen_id_not_accepted",
+    });
+  });
+
+  it("degradedResult: cortex not configured carries status degraded and reason cortex_not_configured", async () => {
+    mockLoadCortexConfig.mockReturnValueOnce(null);
+    const res = await callRaw("find_parcel", { query: "908 Pine" });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expectDeclared(parsed);
+    expect(parsed).toMatchObject({ status: "degraded", reason: "cortex_not_configured" });
+    expect(typeof parsed.message).toBe("string");
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("notReadyMessage: a blocked tool carries status not_ready, tool, and the plan-row reason", async () => {
+    const res = await callRaw("request_records", { parcelNodeId: "48021:34137" });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expectDeclared(parsed);
+    expect(parsed).toMatchObject({
+      status: "not_ready",
+      tool: "request_records",
+      reason: "P-85 item 4",
+    });
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("upgradeRequiredResult carries status upgrade_required and a gate reason", async () => {
+    mockAuth = { ...defaultAuth, accessTier: "free", subscriptionTier: null };
+    const report = JSON.parse((await callRaw("run_report", { parcelNodeId: "48021:34137" })).text);
+    expectDeclared(report);
+    expect(report).toMatchObject({ status: "upgrade_required", reason: "deep_report" });
+    const studio = JSON.parse(
+      (await callRaw("export_instrument", { parcelNodeId: "48021:34137", kind: "siteplan" })).text,
+    );
+    expectDeclared(studio);
+    expect(studio).toMatchObject({ status: "upgrade_required", reason: "studio_report" });
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  /** Every cortex-backed tool with legal arguments. */
+  const CORTEX_CALLS: Array<[string, Record<string, unknown>]> = [
+    ["find_parcel", { query: "908 Pine" }],
+    ["get_smart_site", { parcelNodeId: "48021:34137" }],
+    ["get_smart_site", { parcelNodeId: ["48021:34137", "48021:34169"], depth: "stub" }],
+    ["list_my_properties", {}],
+    ["run_report", { parcelNodeId: "48021:34137" }],
+    ["create_screen", { queries: ["111 Rainmaker Cv"], source: "pasted" }],
+    ["add_to_screen", { screenId: "scr-1", parcelNodeId: "48021:34137", source: "walk" }],
+    ["list_screens", {}],
+    ["list_screens", { screenId: "scr-1" }],
+    ["save_property", { parcelNodeId: "48021:34137", status: "Watching" }],
+    ["set_property_status", { parcelNodeId: "48021:34137", status: "Passed" }],
+  ];
+
+  it("an opaque (HTML) upstream non-OK is wrapped as upstream_non_json with the HTTP status, on every cortex-backed tool", async () => {
+    for (const [name, args] of CORTEX_CALLS) {
+      mockCortexFetch.mockReset();
+      mockCortexFetch.mockResolvedValue(new Response("<html>bad gateway</html>", { status: 502 }));
+      const res = await callRaw(name, args);
+      expect(res.isError, `${name} isError`).toBe(true);
+      const parsed = JSON.parse(res.text);
+      expectDeclared(parsed);
+      expect(parsed, name).toEqual({
+        status: "error",
+        reason: "upstream_non_json",
+        upstreamStatus: 502,
+        brief: "<html>bad gateway</html>",
+      });
+      expect(mockCortexFetch, `${name} reached cortex`).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("a JSON upstream non-OK keeps its keys and gains status error, reason from error, and the HTTP status, on every cortex-backed tool", async () => {
+    for (const [name, args] of CORTEX_CALLS) {
+      mockCortexFetch.mockReset();
+      mockCortexFetch.mockResolvedValue(
+        new Response(JSON.stringify({ error: "internal", detail: "pool exhausted" }), {
+          status: 500,
+        }),
+      );
+      const res = await callRaw(name, args);
+      expect(res.isError, `${name} isError`).toBe(true);
+      const parsed = JSON.parse(res.text);
+      expectDeclared(parsed);
+      expect(parsed, name).toEqual({
+        error: "internal",
+        detail: "pool exhausted",
+        status: "error",
+        reason: "internal",
+        upstreamStatus: 500,
+      });
+    }
+  });
+
+  it("meaning check: upstreamStatus in the body agrees with the HTTP status the mock served", async () => {
+    for (const status of [400, 403, 409, 429, 503]) {
+      mockCortexFetch.mockReset();
+      mockCortexFetch.mockResolvedValue(new Response("nope", { status }));
+      const parsed = JSON.parse(
+        (await callRaw("create_screen", { queries: ["x"], source: "pasted" })).text,
+      );
+      expect(parsed.upstreamStatus).toBe(status);
+    }
+  });
+
+  it("an upstream JSON body with its own status and reason: status moves to upstreamBodyStatus, reason is kept", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "queued", reason: "rate_limited" }), { status: 429 }),
+    );
+    const parsed = JSON.parse((await callRaw("list_screens", {})).text);
+    expect(parsed).toEqual({
+      status: "error",
+      reason: "rate_limited",
+      upstreamStatus: 429,
+      upstreamBodyStatus: "queued",
+    });
+  });
+
+  it("list_my_properties: a 200 that is not JSON is declared upstream_non_json with upstreamStatus 200, isError true", async () => {
+    mockCortexFetch.mockResolvedValue(new Response("<html>login</html>", { status: 200 }));
+    const res = await callRaw("list_my_properties", {});
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.text)).toEqual({
+      status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: 200,
+      brief: "<html>login</html>",
+    });
+  });
+
+  it("OK bodies are untouched: a 200 JSON pass-through gains no status or reason", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ id: "scr-1", rows: [] }), { status: 200 }),
+    );
+    const res = await callRaw("list_screens", { screenId: "scr-1" });
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.text)).toEqual({ id: "scr-1", rows: [] });
+  });
+
+  it("export_instrument: a Hauska non-OK pass-through is declared; the HTTP status is unmeasured at this boundary", async () => {
+    process.env.HAUSKA_MCP_BASE_URL = "https://hauska-mcp.test";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("hauska-mcp.test/health")) return new Response("{}", { status: 200 });
+      if (url.includes("hauska-mcp.test/tools/export_instrument")) {
+        return new Response("<html>500</html>", { status: 500 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const res = await callRaw("export_instrument", { parcelNodeId: "48021:34137", kind: "brief" });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expectDeclared(parsed);
+    expect(parsed).toEqual({
+      status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: "unmeasured",
+      brief: "<html>500</html>",
+    });
+    expect(mockCortexFetch).not.toHaveBeenCalled();
   });
 });

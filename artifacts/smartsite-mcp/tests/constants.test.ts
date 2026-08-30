@@ -39,6 +39,10 @@ describe("smartsite-mcp constants", () => {
     const getSmartSite = SMARTSITE_MCP_TOOLS.find((t) => t.name === "get_smart_site");
     expect(getSmartSite?.description).toContain("upgrade_required");
     expect(getSmartSite?.description).toContain("Array cap 50");
+    // H2 (2026-08-30): node bodies average 4,711 chars (largest 5,549); a
+    // 50-id node batch is about 235,000, past what the host delivers to the panel.
+    expect(getSmartSite?.description).toContain("array cap 25");
+    expect(getSmartSite?.description).toMatch(/depth node: array cap 25/);
     expect(getSmartSite?.description).toMatch(/does not need to be saved/);
     const findParcel = SMARTSITE_MCP_TOOLS.find((t) => t.name === "find_parcel");
     expect(findParcel?.description).toContain("missClass");
@@ -49,9 +53,13 @@ describe("smartsite-mcp constants", () => {
       const tool = SMARTSITE_MCP_TOOLS.find((t) => t.name === name);
       expect(tool?.description).toContain("New, Watching, Chasing, Passed");
     }
-    expect(
-      SMARTSITE_MCP_TOOLS.find((t) => t.name === "create_screen")?.description,
-    ).toContain("duplicate_resolved_node");
+    // B2 (cortex S9, same cut): a duplicate is a row outcome, not a screen refuse.
+    const createScreen =
+      SMARTSITE_MCP_TOOLS.find((t) => t.name === "create_screen")?.description ?? "";
+    expect(createScreen).not.toContain("duplicate_resolved_node");
+    expect(createScreen).not.toMatch(/dedupe first/i);
+    expect(createScreen).toContain("degraded.duplicates");
+    expect(createScreen).toContain("not written twice");
     expect(
       SMARTSITE_MCP_TOOLS.find((t) => t.name === "add_to_screen")?.description,
     ).toContain("walk, saved, pasted");
