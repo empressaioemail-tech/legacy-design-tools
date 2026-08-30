@@ -139,41 +139,93 @@ export function buildRunReportEnvelope(
   return { ...honesty, brief: cortexBodyText };
 }
 
-export type RunReportErrorBody = { status: "error" } & Record<string, unknown>;
+/**
+ * H1 wire half (P-91 v2, 2026-08-30). Every non-OK body this server emits
+ * carries a machine-readable `status` and `reason` so the panel can paint a
+ * declared line instead of the empty copy. `upstreamStatus` is the HTTP
+ * status of the upstream response, or `"unmeasured"` where the boundary
+ * that produced the text did not carry it (the export proxy).
+ */
+export type DeclaredUpstreamErrorBody = {
+  status: "error";
+  reason: string;
+  upstreamStatus: number | "unmeasured";
+} & Record<string, unknown>;
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
 
 /**
- * Cortex non-OK for run_report. No reportKind, reportReadMode, or async:
- * those describe a read that happened, and none did. The upstream body
- * travels under its own keys, `status: "error"` always wins, and an
- * upstream `status` moves to `upstreamStatus` rather than being dropped.
- * Non-JSON and non-object bodies land under `brief` as text.
+ * Wrap an upstream non-OK (cortex, or Hauska via the export proxy) as a
+ * declared error. For run_report this also means no reportKind,
+ * reportReadMode, or async: those describe a read that happened, and none
+ * did. A JSON object body travels under its own keys; `status: "error"`
+ * always wins, and an upstream `status` field moves to `upstreamBodyStatus`
+ * (one key, one meaning: `upstreamStatus` is only ever the HTTP status).
+ * `reason` is the upstream `reason` when it is a non-empty string, else the
+ * upstream `error` code when that is, else `upstream_error`; a non-string
+ * upstream `reason` is kept under `upstreamBodyReason`, never dropped.
+ * Non-JSON and non-object bodies are `upstream_non_json` with the text
+ * under `brief`.
  */
-export function buildRunReportErrorBody(
-  cortexBodyText: string,
-): RunReportErrorBody {
+export function declareUpstreamNonOk(
+  upstreamStatus: number | "unmeasured",
+  bodyText: string,
+): DeclaredUpstreamErrorBody {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(cortexBodyText);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const { status: upstreamStatus, ...rest } = parsed as Record<
-        string,
-        unknown
-      >;
-      return {
-        ...rest,
-        ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
-        status: "error",
-      };
-    }
+    parsed = JSON.parse(bodyText);
   } catch {
-    // Non-JSON error bodies stay under `brief`.
+    parsed = undefined;
   }
-  return { status: "error", brief: cortexBodyText };
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const {
+      status: upstreamBodyStatus,
+      reason: upstreamReason,
+      ...rest
+    } = parsed as Record<string, unknown>;
+    const reason = nonEmptyString(upstreamReason)
+      ? upstreamReason
+      : nonEmptyString(rest.error)
+        ? rest.error
+        : "upstream_error";
+    return {
+      ...rest,
+      ...(upstreamBodyStatus !== undefined ? { upstreamBodyStatus } : {}),
+      ...(upstreamReason !== undefined && !nonEmptyString(upstreamReason)
+        ? { upstreamBodyReason: upstreamReason }
+        : {}),
+      status: "error",
+      reason,
+      upstreamStatus,
+    };
+  }
+  return {
+    status: "error",
+    reason: "upstream_non_json",
+    upstreamStatus,
+    brief: bodyText,
+  };
 }
 
 export type ExternalBriefSectionDisposition =
   | "present"
   | "refused"
-  | "absent";
+  | "absent"
+  | "unread";
+
+const EXTERNAL_BRIEF_SECTION_DISPOSITIONS: readonly ExternalBriefSectionDisposition[] =
+  ["present", "refused", "absent", "unread"];
+
+function asExplicitDisposition(
+  value: unknown,
+): ExternalBriefSectionDisposition | null {
+  return typeof value === "string" &&
+    (EXTERNAL_BRIEF_SECTION_DISPOSITIONS as readonly string[]).includes(value)
+    ? (value as ExternalBriefSectionDisposition)
+    : null;
+}
 
 export type ExternalBriefSection = {
   id?: string;
@@ -185,10 +237,29 @@ export type ExternalBriefSection = {
   [key: string]: unknown;
 };
 
-function sectionDisposition(section: Record<string, unknown>): ExternalBriefSectionDisposition {
+function derivedSectionDisposition(
+  section: Record<string, unknown>,
+): Exclude<ExternalBriefSectionDisposition, "unread"> {
   if (section.refusal != null) return "refused";
   if (section.data !== null && section.data !== undefined) return "present";
   return "absent";
+}
+
+/**
+ * F7 (P-91 v2). A section that carries an explicit disposition keeps it,
+ * with its `reason`: cortex emits drainage as `unread` until the facet
+ * exists, and rewriting that to `absent` would turn "not read" into "read,
+ * nothing there". The wire may weaken a claim, never strengthen one: the
+ * one claim it rewrites is `present` without data, which the section does
+ * not support, and that falls to the derived state (refused if a refusal
+ * rides along, else absent). A missing or unrecognised disposition derives.
+ */
+function sectionDisposition(section: Record<string, unknown>): ExternalBriefSectionDisposition {
+  const derived = derivedSectionDisposition(section);
+  const claimed = asExplicitDisposition(section.disposition);
+  if (claimed === null) return derived;
+  if (claimed === "present" && derived !== "present") return derived;
+  return claimed;
 }
 
 function isHttpCitation(value: unknown): value is string {

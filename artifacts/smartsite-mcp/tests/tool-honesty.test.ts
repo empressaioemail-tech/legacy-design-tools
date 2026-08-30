@@ -4,8 +4,9 @@ import {
   ASK_THE_MAP_INTERNAL_FIELD_NAMES,
   askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
-  buildRunReportErrorBody,
+  declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
+  normalizeGetSmartSiteResponseText,
   normalizeR1BodyForExternal,
   sanitizeAskTheMapErrorBody,
   stripSavedPropertiesForExternal,
@@ -46,9 +47,10 @@ const GOLD_DRAW_A3 = {
   confidence: "seed",
 };
 
-describe("buildRunReportErrorBody (stamp only on res.ok)", () => {
-  it("keeps the upstream JSON body under its own keys and status error wins", () => {
-    const body = buildRunReportErrorBody(
+describe("declareUpstreamNonOk (H1 wire half; run_report stamp only on res.ok)", () => {
+  it("keeps the upstream JSON body under its own keys; status error, reason from error, upstreamStatus is the HTTP status", () => {
+    const body = declareUpstreamNonOk(
+      402,
       JSON.stringify({
         error: "upgrade_required",
         message: "Unlock this property or go Pro to run this report",
@@ -57,6 +59,8 @@ describe("buildRunReportErrorBody (stamp only on res.ok)", () => {
     );
     expect(body).toEqual({
       status: "error",
+      reason: "upgrade_required",
+      upstreamStatus: 402,
       error: "upgrade_required",
       message: "Unlock this property or go Pro to run this report",
       tier: "free",
@@ -66,24 +70,71 @@ describe("buildRunReportErrorBody (stamp only on res.ok)", () => {
     expect(body).not.toHaveProperty("async");
   });
 
-  it("an upstream status field cannot overwrite the error marker", () => {
-    const body = buildRunReportErrorBody(
-      JSON.stringify({ status: "queued", error: "rate_limited" }),
+  it("an upstream status field moves to upstreamBodyStatus and cannot overwrite the error marker; an upstream reason is kept", () => {
+    const body = declareUpstreamNonOk(
+      429,
+      JSON.stringify({ status: "queued", reason: "rate_limited", error: "throttled" }),
     );
-    expect(body.status).toBe("error");
-    expect(body.upstreamStatus).toBe("queued");
-    expect(body.error).toBe("rate_limited");
+    expect(body).toEqual({
+      status: "error",
+      reason: "rate_limited",
+      upstreamStatus: 429,
+      upstreamBodyStatus: "queued",
+      error: "throttled",
+    });
   });
 
-  it("non-JSON and non-object bodies land under brief", () => {
-    expect(buildRunReportErrorBody("upstream unavailable")).toEqual({
+  it("a JSON body naming no error and no reason is upstream_error, never a bare status", () => {
+    expect(declareUpstreamNonOk(500, JSON.stringify({ detail: "pool exhausted" }))).toEqual({
       status: "error",
-      brief: "upstream unavailable",
+      reason: "upstream_error",
+      upstreamStatus: 500,
+      detail: "pool exhausted",
     });
-    expect(buildRunReportErrorBody("[1,2]")).toEqual({
+    // A non-string or empty error code is not a reason.
+    expect(declareUpstreamNonOk(500, JSON.stringify({ error: { code: 7 } })).reason).toBe(
+      "upstream_error",
+    );
+    expect(declareUpstreamNonOk(500, JSON.stringify({ error: "" })).reason).toBe("upstream_error");
+  });
+
+  it("non-JSON and non-object bodies are wrapped as upstream_non_json under brief", () => {
+    expect(declareUpstreamNonOk(502, "<html>bad gateway</html>")).toEqual({
       status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: 502,
+      brief: "<html>bad gateway</html>",
+    });
+    expect(declareUpstreamNonOk(500, "[1,2]")).toEqual({
+      status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: 500,
       brief: "[1,2]",
     });
+    expect(declareUpstreamNonOk("unmeasured", "")).toEqual({
+      status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: "unmeasured",
+      brief: "",
+    });
+  });
+
+  it("falsifier: every declared body has a non-empty string status and reason; a body without one is not the shape", () => {
+    const bodies = [
+      declareUpstreamNonOk(500, JSON.stringify({ error: "internal" })),
+      declareUpstreamNonOk(502, "<html>"),
+      declareUpstreamNonOk(404, JSON.stringify({})),
+    ];
+    for (const body of bodies) {
+      expect(typeof body.status).toBe("string");
+      expect(body.status.length).toBeGreaterThan(0);
+      expect(typeof body.reason).toBe("string");
+      expect(body.reason.length).toBeGreaterThan(0);
+    }
+    const { reason, ...stripped } = bodies[0]!;
+    void reason;
+    expect(stripped).not.toHaveProperty("reason");
+    expect(stripped).not.toEqual(bodies[0]);
   });
 });
 
@@ -236,6 +287,132 @@ describe("normalizeR1BodyForExternal", () => {
     const sections = (body.brief as { sections: Array<{ disposition: string }> })
       .sections;
     expect(sections[0]?.disposition).toBe("present");
+  });
+
+  describe("F7: an explicit disposition survives normalization; only an unsupported claim is rewritten", () => {
+    type Section = {
+      id?: string;
+      data: unknown;
+      disposition: string;
+      reason?: unknown;
+      refusal?: unknown;
+    };
+    const sectionsOf = (body: Record<string, unknown>): Section[] =>
+      (body.brief as { sections: Section[] }).sections;
+
+    it("explicit unread with null data stays unread and keeps its reason", () => {
+      const body = normalizeR1BodyForExternal({
+        brief: {
+          sections: [
+            {
+              id: "drainage",
+              data: null,
+              citations: [],
+              disposition: "unread",
+              reason: "drainage facet not yet baked for this parcel",
+            },
+          ],
+        },
+      });
+      expect(sectionsOf(body)[0]).toEqual({
+        id: "drainage",
+        data: null,
+        citations: [],
+        disposition: "unread",
+        reason: "drainage facet not yet baked for this parcel",
+      });
+    });
+
+    it("no disposition and null data still derives absent", () => {
+      const body = normalizeR1BodyForExternal({
+        brief: { sections: [{ id: "drainage", data: null, citations: [] }] },
+      });
+      expect(sectionsOf(body)[0]?.disposition).toBe("absent");
+    });
+
+    it("a claim of present with null data and no refusal is rewritten to absent (fail closed), and the rewrite is real", () => {
+      const claimed = { id: "drainage", data: null, citations: [], disposition: "present" };
+      expect(claimed.disposition).toBe("present");
+      const body = normalizeR1BodyForExternal({ brief: { sections: [claimed] } });
+      const out = sectionsOf(body)[0]!;
+      expect(out.disposition).toBe("absent");
+      expect(out.disposition).not.toBe(claimed.disposition);
+      expect(out.data).toBeNull();
+    });
+
+    it("a claim of present with null data but a refusal is rewritten to refused, not absent", () => {
+      const body = normalizeR1BodyForExternal({
+        brief: {
+          sections: [
+            {
+              id: "setbacks-envelope",
+              data: null,
+              disposition: "present",
+              refusal: { state: "refused", code: "atom_path_pending" },
+            },
+          ],
+        },
+      });
+      expect(sectionsOf(body)[0]?.disposition).toBe("refused");
+    });
+
+    it("explicit refused, absent, and present-with-data are kept as claimed, reasons intact", () => {
+      const body = normalizeR1BodyForExternal({
+        brief: {
+          sections: [
+            { id: "a", data: null, disposition: "refused", reason: "declined" },
+            { id: "b", data: null, disposition: "absent", reason: "no record" },
+            { id: "c", data: { v: 1 }, disposition: "present" },
+          ],
+        },
+      });
+      const out = sectionsOf(body);
+      expect(out.map((s) => s.disposition)).toEqual(["refused", "absent", "present"]);
+      expect(out[0]?.reason).toBe("declined");
+      expect(out[1]?.reason).toBe("no record");
+    });
+
+    it("a disposition outside present | refused | absent | unread is ignored and derived", () => {
+      const body = normalizeR1BodyForExternal({
+        brief: {
+          sections: [
+            { id: "x", data: null, disposition: "maybe" },
+            { id: "y", data: { v: 1 }, disposition: "" },
+          ],
+        },
+      });
+      expect(sectionsOf(body).map((s) => s.disposition)).toEqual(["absent", "present"]);
+    });
+
+    it("reaches node-batch rows through normalizeGetSmartSiteResponseText", () => {
+      const text = normalizeGetSmartSiteResponseText(
+        JSON.stringify({
+          parcels: [
+            {
+              parcelNodeId: "48021:34137",
+              brief: {
+                sections: [
+                  {
+                    id: "drainage",
+                    data: null,
+                    citations: [],
+                    disposition: "unread",
+                    reason: "not read",
+                  },
+                ],
+              },
+            },
+          ],
+          notFound: [],
+        }),
+        "stub-or-batch",
+      );
+      const parcels = JSON.parse(text).parcels as Array<{ brief: { sections: Section[] } }>;
+      expect(parcels[0]?.brief.sections[0]).toMatchObject({
+        disposition: "unread",
+        reason: "not read",
+      });
+    });
   });
 
   it("passes a valid draw stub through", () => {
