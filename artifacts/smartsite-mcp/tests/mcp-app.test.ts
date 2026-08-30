@@ -15,12 +15,22 @@ import {
   LISTING_TURN_OPENER,
   EMPTY_BOARD_TITLE,
   NOTHING_TO_OPEN,
-  NOT_ON_FILE,
+  NOT_ON_FILE_PREFIX,
+  NO_BAKED_SNAPSHOT_PREFIX,
+  OPEN_SENT,
+  RESULT_NOT_READABLE,
+  UPGRADE_TO_OPEN,
+  COUNTY_BY_FIPS,
   OPEN_DEAD_MS,
   OPEN_DID_NOT_REACH_ME,
   OPEN_TURN_INSTRUCTION,
   OPEN_TURN_OPENER,
   buildAppHtml,
+  countyForNodeId,
+  escapeHtml,
+  noBakedSnapshotSentence,
+  notOnFileSentence,
+  parseToolContent,
   edgeCaption,
   envelopeHuman,
   openParcelMessage,
@@ -92,7 +102,7 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("String(d.id)===String(initId)");
     expect(html).toContain("pending.push");
     expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p554.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p555.html");
     expect(html).toContain("function fitHost");
     expect(html).toContain("ui/notifications/size-changed");
     expect(html).not.toMatch(/html,body\{[^}]*height:100%/);
@@ -161,6 +171,27 @@ describe("mcp-app contracts", () => {
     expect(htmlContractViolations(clean + "find_listing_history")).toContain("ghost_catalog_tool");
     expect(htmlContractViolations(clean + "Save to screen")).toContain("save_to_screen_label");
     expect(htmlContractViolations(clean + "Not read yet")).toContain("hatch_labeled_unread");
+    expect(
+      htmlContractViolations(clean.replace("if(ev.source!==window.parent)", "if(false)")),
+    ).toContain("origin_unchecked");
+    expect(
+      htmlContractViolations(
+        clean
+          .replace("var d=ev.data;", "")
+          .replace("if(ev.source!==window.parent)", "var d=ev.data;if(ev.source!==window.parent)"),
+      ),
+    ).toContain("origin_unchecked");
+    for (const sentence of [
+      OPEN_DID_NOT_REACH_ME,
+      OPEN_SENT,
+      NOT_ON_FILE_PREFIX,
+      NO_BAKED_SNAPSHOT_PREFIX,
+      UPGRADE_TO_OPEN,
+      RESULT_NOT_READABLE,
+      NOTHING_TO_OPEN,
+    ]) {
+      expect(htmlContractViolations(clean.split(sentence).join("")), sentence).toContain("miss_copy_unbound");
+    }
   });
 
   it("does not treat list_my_properties as a board source", () => {
@@ -401,17 +432,36 @@ describe("Wave J honesty", () => {
     expect(htmlContractViolations(html + "Not read yet")).toContain("hatch_labeled_unread");
   });
 
-  it("binds empty, zzzz slot, and the F6 pair as distinct sentences", () => {
+  it("binds empty, zzzz slot, and the plan 4.4 state sentences as distinct copy", () => {
     const html = buildAppHtml();
     expect(html).toContain(EMPTY_BOARD_TITLE);
     expect(html).toContain("Paste addresses in the chat. This panel does not search.");
     expect(html).toContain(NOTHING_TO_OPEN);
     expect(html).toContain(OPEN_DID_NOT_REACH_ME);
-    expect(html).toContain(NOT_ON_FILE);
+    expect(html).toContain(OPEN_SENT);
+    expect(html).toContain(NOT_ON_FILE_PREFIX);
+    expect(html).toContain(NO_BAKED_SNAPSHOT_PREFIX);
+    expect(html).toContain(UPGRADE_TO_OPEN);
+    expect(html).toContain(RESULT_NOT_READABLE);
     expect(html).not.toContain("Waiting for a screen or a parcel.");
-    expect(OPEN_DID_NOT_REACH_ME).not.toBe(NOT_ON_FILE);
-    expect(html).toContain('if(next.kind!=="parcel")');
+    expect(html).not.toContain("Not on file in Bastrop");
+    const sentences = [
+      OPEN_DID_NOT_REACH_ME,
+      OPEN_SENT,
+      NOT_ON_FILE_PREFIX,
+      NO_BAKED_SNAPSHOT_PREFIX,
+      UPGRADE_TO_OPEN,
+      RESULT_NOT_READABLE,
+      NOTHING_TO_OPEN,
+    ];
+    expect(new Set(sentences).size).toBe(sentences.length);
+    expect(html).toContain("if(ev.source!==window.parent)");
+    expect(html).toContain("foreign=");
+    expect(html).toContain("Object.create(null)");
+    const afterToolResultAccept = html.split("accept(d.params);")[1] ?? "";
+    expect(afterToolResultAccept.trimStart().startsWith("});")).toBe(true);
     expect(html).toContain("openWait");
+    expect(html).toContain("openSent");
     expect(html).toContain("clearOpenTimer");
     expect(html).toContain(String(OPEN_DEAD_MS));
     expect(OPEN_DEAD_MS).toBe(12000);
@@ -457,6 +507,128 @@ describe("Wave J honesty", () => {
     expect(click.message).toContain(LISTING_TURN_OPENER);
     expect(openParcelMessage("48021:34137")).toContain("Do not call save_property");
     expect(openParcelMessage("48021:34137")).not.toContain("save_to_screen");
+  });
+
+  it("county copy follows the id prefix and never names a county the id does not map to", () => {
+    expect(countyForNodeId("48021:900099")).toBe("Bastrop");
+    expect(countyForNodeId("48453:1")).toBe("Travis");
+    expect(countyForNodeId("48491:7")).toBe("Williamson");
+    expect(countyForNodeId("99999:1")).toBe("this county");
+    expect(countyForNodeId("not-an-id")).toBe("this county");
+    expect(countyForNodeId(null)).toBe("this county");
+    expect(notOnFileSentence("48453:1")).toBe("Not on file in Travis");
+    expect(notOnFileSentence("48453:1")).not.toContain("Bastrop");
+    expect(noBakedSnapshotSentence("48021:900099")).toBe("No baked snapshot yet for 48021:900099");
+    expect(Object.keys(COUNTY_BY_FIPS).sort()).toEqual(["48021", "48055", "48209", "48453", "48491"]);
+  });
+
+  it("parses miss, refused, unreadable, and batch stub as their own kinds", () => {
+    const absent = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: ["48021:900099"], reason: "parcel_not_found", parcelExists: false }),
+    );
+    expect(absent.kind).toBe("miss");
+    expect(absent.misses).toEqual([
+      { parcelNodeId: "48021:900099", county: "Bastrop", missClass: "absent", reason: "parcel_not_found", parcelExists: false },
+    ]);
+    const unbaked = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: ["48021:900099"], reason: "baked_snapshot_not_found", parcelExists: true }),
+    );
+    expect(unbaked.kind).toBe("miss");
+    expect(unbaked.misses?.[0]?.missClass).toBe("unbaked");
+    const unmeasured = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: ["48021:900099"], reason: "baked_snapshot_not_found", parcelExists: "unmeasured" }),
+    );
+    expect(unmeasured.misses?.[0]?.missClass).toBe("unbaked");
+    expect(unmeasured.misses?.[0]?.parcelExists).toBe("unmeasured");
+    const fieldMissing = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: ["48021:900099"], reason: "baked_snapshot_not_found" }),
+    );
+    expect(fieldMissing.misses?.[0]?.parcelExists).toBe("unmeasured");
+    const contradiction = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: ["48021:900099"], reason: "baked_snapshot_not_found", parcelExists: false }),
+    );
+    expect(contradiction.misses?.[0]?.missClass).toBe("absent");
+    const unstated = parseToolResult(JSON.stringify({ parcels: [], notFound: ["48021:1"], reason: "something_else" }));
+    expect(unstated.kind).toBe("miss");
+    expect(unstated.misses?.[0]?.missClass).toBe("unstated");
+    const legacy = parseToolResult(JSON.stringify({ parcels: [], notFound: ["48021:900099"] }));
+    expect(legacy.kind).toBe("board");
+    expect(legacy.rows[0]).toMatchObject({ query: "48021:900099", parcelNodeId: null, resolution: "unresolved" });
+    const refused = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: [], refused: [{ parcelNodeId: "48021:34137", reason: "upgrade_required" }] }),
+    );
+    expect(refused.kind).toBe("refused");
+    expect(refused.refused).toEqual([{ parcelNodeId: "48021:34137", reason: "upgrade_required" }]);
+    expect(refused.rows).toEqual([]);
+    expect(parseToolResult("not json").kind).toBe("unreadable");
+    expect(parseToolResult("[1,2]").kind).toBe("unreadable");
+    expect(parseToolResult("null").kind).toBe("unreadable");
+    expect(parseToolContent({ content: [{ type: "image", data: "AAAA", mimeType: "image/png" }] }).kind).toBe("unreadable");
+    expect(parseToolContent({ content: [] }).kind).toBe("unreadable");
+    expect(parseToolContent(undefined).kind).toBe("unreadable");
+    expect(
+      parseToolContent({
+        content: [
+          { type: "image", data: "AAAA", mimeType: "image/png" },
+          { type: "text", text: JSON.stringify({ parcels: [], refused: [{ parcelNodeId: "48021:1", reason: "upgrade_required" }] }) },
+        ],
+      }).kind,
+    ).toBe("refused");
+    const batch = parseToolResult(
+      JSON.stringify({
+        parcels: [
+          {
+            parcelNodeId: "48021:34137",
+            label: "908 PINE , BASTROP, TX 78602",
+            url: "https://smartsite.cloud/p/48021:34137",
+            stub: { situs: "present", zoning: "absent", landUse: "unknown", flood: "refused", drainage: "pending", envelope: 7 },
+          },
+        ],
+        notFound: ["48021:900099"],
+      }),
+    );
+    expect(batch.kind).toBe("board");
+    expect(batch.rows).toHaveLength(2);
+    expect(batch.rows[0]).toMatchObject({
+      query: "908 PINE , BASTROP, TX 78602",
+      parcelNodeId: "48021:34137",
+      resolution: "resolved",
+      rails: { situs: "present", zoning: "absent-verified", landUse: "unknown", flood: "refused", drainage: "unread", envelope: "unread" },
+    });
+    expect(batch.rows[1]).toMatchObject({ query: "48021:900099", parcelNodeId: null, resolution: "unresolved" });
+    const degraded = parseToolResult(
+      JSON.stringify({
+        id: "s",
+        stubsDegraded: true,
+        rows: [
+          { query: "q", parcelNodeId: "48021:1", resolution: "resolved", stub: { situs: "present" }, stubRead: "ok" },
+          { query: "r", parcelNodeId: "48021:2", resolution: "resolved", stubRead: "skipped" },
+        ],
+      }),
+    );
+    expect(degraded.kind).toBe("board");
+    expect(degraded.stubsDegraded).toBe(true);
+    expect(degraded.rows[0]?.rails.situs).toBe("present");
+    expect(degraded.rows[1]?.rails.situs).toBe("unread");
+    const undeclared = parseToolResult(JSON.stringify({ id: "s", rows: [{ query: "q", parcelNodeId: "48021:1" }] }));
+    expect(undeclared.stubsDegraded).toBeUndefined();
+  });
+
+  it("escapes quotes in attributes and whitelists glyph states on the exported renderer", () => {
+    expect(escapeHtml("a\"b'c<d>&")).toBe("a&quot;b&#39;c&lt;d&gt;&amp;");
+    expect(escapeHtml(null)).toBe("");
+    expect(escapeHtml(undefined)).toBe("");
+    const drawn = renderParcelDraw({
+      parcelNodeId: '48021:x" onmouseover="alert(1)',
+      label: "<b>x</b>",
+      overlays: [{ id: "flood", state: 'present" data-pwn="1', label: "Zone X" }],
+      ring: [],
+      edges: [],
+    });
+    expect(drawn).not.toContain('onmouseover="alert(1)"');
+    expect(drawn).not.toContain("<b>x</b>");
+    expect(drawn).not.toContain('data-pwn="1"');
+    expect(drawn).toContain("g-unread");
   });
 });
 

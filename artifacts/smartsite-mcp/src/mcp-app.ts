@@ -1,6 +1,6 @@
 /** P-91 Wave I — Open turn and parcel draw. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p554.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p555.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_HOST_TOOLS = [
   "create_screen",
@@ -55,8 +55,19 @@ export type DrawEdge = {
   bearing?: string | null;
 };
 
+export type PanelKind = "board" | "parcel" | "empty" | "miss" | "refused" | "unreadable";
+export type MissClass = "absent" | "unbaked" | "unstated";
+export type MissRow = {
+  parcelNodeId: string;
+  county: string;
+  missClass: MissClass;
+  reason: string;
+  parcelExists: boolean | "unmeasured";
+};
+export type RefusedRow = { parcelNodeId: string; reason: string };
+
 export type PanelModel = {
-  kind: "board" | "parcel" | "empty";
+  kind: PanelKind;
   screenId?: string;
   rows: BoardRow[];
   parcelNodeId?: string;
@@ -64,6 +75,9 @@ export type PanelModel = {
   overlays: OverlayRow[];
   ring?: RingPt[];
   edges?: DrawEdge[];
+  misses?: MissRow[];
+  refused?: RefusedRow[];
+  stubsDegraded?: boolean;
 };
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
@@ -98,6 +112,63 @@ function railState(value: unknown): CellState {
   if (value === "unread") return "unread";
   if (value === "unknown") return "unknown";
   return "unread";
+}
+
+/** Plan 4.4 sentences. One state, one sentence; unknown, refused, and unread never share one. */
+export const OPEN_SENT = "Sent to chat. Press Send to open.";
+export const NOT_ON_FILE_PREFIX = "Not on file in";
+export const NO_BAKED_SNAPSHOT_PREFIX = "No baked snapshot yet for";
+export const NOT_RETURNED = "Not returned";
+export const UPGRADE_TO_OPEN = "Upgrade to open this parcel";
+export const OPEN_REFUSED = "Open refused";
+export const RESULT_NOT_READABLE = "Result not readable";
+export const RESULT_NOT_READABLE_BODY = "The tool result carried no JSON text part. Ask again in the chat.";
+export const RAILS_PARTLY_UNREAD = "Some rails on this screen were not read";
+
+/** CAPCOG county names by fips prefix. Source: artifacts/api-server/src/countyCoverageScoreCli.ts. */
+export const COUNTY_BY_FIPS: Record<string, string> = {
+  "48021": "Bastrop",
+  "48055": "Caldwell",
+  "48209": "Hays",
+  "48453": "Travis",
+  "48491": "Williamson",
+};
+export const COUNTY_UNKNOWN = "this county";
+
+export function countyForNodeId(id: unknown): string {
+  const m = typeof id === "string" ? /^(\d{5}):/.exec(id.trim()) : null;
+  const county = m ? COUNTY_BY_FIPS[m[1]] : undefined;
+  return typeof county === "string" ? county : COUNTY_UNKNOWN;
+}
+
+export function notOnFileSentence(id: unknown): string {
+  return NOT_ON_FILE_PREFIX + " " + countyForNodeId(id);
+}
+
+export function noBakedSnapshotSentence(id: unknown): string {
+  return NO_BAKED_SNAPSHOT_PREFIX + " " + String(id == null ? "" : id);
+}
+
+export function escapeHtml(value: unknown): string {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function stringList(value: unknown): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(value)) return out;
+  for (const item of value) {
+    if (typeof item === "string" && item.length > 0) out.push(item);
+  }
+  return out;
+}
+
+function emptyModel(kind: PanelKind): PanelModel {
+  return { kind, rows: [], overlays: [], ring: [], edges: [] };
 }
 
 function rowFromUnknown(raw: unknown): BoardRow | null {
@@ -250,12 +321,12 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[]): string {
 
 export function renderParcelDraw(model: Pick<PanelModel, "ring" | "edges" | "overlays" | "label" | "parcelNodeId">): string {
   const node = model.parcelNodeId
-    ? `<div class="pn atom">${model.parcelNodeId}</div>`
+    ? `<div class="pn atom">${escapeHtml(model.parcelNodeId)}</div>`
     : "";
   const svg = ringSvg(model.ring ?? [], model.edges ?? []);
   const edgeList = (model.edges ?? []).length
     ? `<ul class="edges">${(model.edges ?? [])
-        .map((e) => `<li>${edgeCaption(e)}</li>`)
+        .map((e) => `<li>${escapeHtml(edgeCaption(e))}</li>`)
         .join("")}</ul>`
     : "";
   const rows = model.overlays
@@ -263,12 +334,12 @@ export function renderParcelDraw(model: Pick<PanelModel, "ring" | "edges" | "ove
       const extra = o.id === "flood" ? " flood" : o.state === "refused" ? " refused" : "";
       const shown = envelopeHuman(o.reason);
       const why = shown
-        ? `<span class="why"><span class="key">reason</span> <span class="reason">${shown}</span></span>`
+        ? `<span class="why"><span class="key">reason</span> <span class="reason">${escapeHtml(shown)}</span></span>`
         : "";
-      return `<div class="ovl${extra}"><span class="g g-${o.state === "absent" ? "absent-verified" : o.state}"></span> <span class="key">${o.id}</span> <span class="lbl">${o.label}</span>${why}</div>`;
+      return `<div class="ovl${extra}"><span class="g ${glyphClass(railState(o.state))}"></span> <span class="key">${escapeHtml(o.id)}</span> <span class="lbl">${escapeHtml(o.label)}</span>${why}</div>`;
     })
     .join("");
-  return `${node}${model.label ? `<div class="pl">${model.label}</div>` : ""}${svg}${edgeList}${rows}`;
+  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${svg}${edgeList}${rows}`;
 }
 
 function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
@@ -287,21 +358,77 @@ function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
   return rows;
 }
 
+function batchRowsFrom(rec: Record<string, unknown>): BoardRow[] | null {
+  if (!Array.isArray(rec.parcels)) return null;
+  const rows: BoardRow[] = [];
+  for (const raw of rec.parcels) {
+    const p = asRecord(raw);
+    if (!p || typeof p.parcelNodeId !== "string" || p.parcelNodeId.length === 0) continue;
+    const stub = asRecord(p.stub);
+    const rails = {} as Record<RailName, CellState>;
+    for (const rail of RAILS) rails[rail] = stub ? railState(stub[rail]) : "unread";
+    const label = typeof p.label === "string" && p.label.length > 0 ? p.label : p.parcelNodeId;
+    rows.push({ query: label, parcelNodeId: p.parcelNodeId, resolution: "resolved", rails });
+  }
+  for (const id of stringList(rec.notFound)) {
+    const rails = {} as Record<RailName, CellState>;
+    for (const rail of RAILS) rails[rail] = "unread";
+    rows.push({ query: id, parcelNodeId: null, resolution: "unresolved", rails });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
+function missRowsFrom(rec: Record<string, unknown>): MissRow[] | null {
+  const reason = rec.reason;
+  if (typeof reason !== "string" || reason.length === 0) return null;
+  if (!Array.isArray(rec.parcels) || rec.parcels.length > 0) return null;
+  const ids = stringList(rec.notFound);
+  if (ids.length === 0) return null;
+  const parcelExists: boolean | "unmeasured" =
+    rec.parcelExists === true ? true : rec.parcelExists === false ? false : "unmeasured";
+  const missClass: MissClass =
+    reason === "parcel_not_found" || parcelExists === false
+      ? "absent"
+      : reason === "baked_snapshot_not_found"
+        ? "unbaked"
+        : "unstated";
+  const out: MissRow[] = [];
+  for (const id of ids) {
+    out.push({ parcelNodeId: id, county: countyForNodeId(id), missClass, reason, parcelExists });
+  }
+  return out;
+}
+
+function refusedRowsFrom(rec: Record<string, unknown>): RefusedRow[] | null {
+  if (!Array.isArray(rec.refused) || rec.refused.length === 0) return null;
+  if (Array.isArray(rec.parcels) && rec.parcels.length > 0) return null;
+  const out: RefusedRow[] = [];
+  for (const raw of rec.refused) {
+    const r = asRecord(raw);
+    if (!r || typeof r.parcelNodeId !== "string" || r.parcelNodeId.length === 0) continue;
+    const reason = typeof r.reason === "string" && r.reason.length > 0 ? r.reason : "unstated";
+    out.push({ parcelNodeId: r.parcelNodeId, reason });
+  }
+  return out.length > 0 ? out : null;
+}
+
 /**
- * Board source is a screen. Saved-list payloads (`list_my_properties`) are ignored
- * even if they appear in the same JSON.
+ * Board source is a screen or a batch stub result. Saved-list payloads are
+ * ignored even if they appear in the same JSON. This is also the served parser:
+ * buildAppHtml() embeds this function and its helpers by source (INLINE_SHARED),
+ * so the iframe runs this code, not a hand copy.
  */
 export function parseToolResult(text: string): PanelModel {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { kind: "empty", rows: [], overlays: [], ring: [], edges: [] };
+    return emptyModel("unreadable");
   }
   const rec = asRecord(parsed);
-  if (!rec) return { kind: "empty", rows: [], overlays: [], ring: [], edges: [] };
+  if (!rec) return emptyModel("unreadable");
   if (Array.isArray(rec.savedProperties) && !rec.rows && !rec.screens) {
-    return { kind: "empty", rows: [], overlays: [], ring: [], edges: [] };
+    return emptyModel("empty");
   }
 
   const draw = asRecord(rec.draw);
@@ -331,14 +458,15 @@ export function parseToolResult(text: string): PanelModel {
     };
   }
 
+  const refused = refusedRowsFrom(rec);
+  if (refused) return { kind: "refused", rows: [], overlays: [], ring: [], edges: [], refused };
+  const misses = missRowsFrom(rec);
+  if (misses) return { kind: "miss", rows: [], overlays: [], ring: [], edges: [], misses };
+  const batch = batchRowsFrom(rec);
+  if (batch) return { kind: "board", rows: batch, overlays: [], ring: [], edges: [] };
+
   const screen = asRecord(rec.screen) ?? rec;
-  const rawRows = Array.isArray(rec.rows)
-    ? rec.rows
-    : Array.isArray(screen.rows)
-      ? screen.rows
-      : Array.isArray(rec.screens)
-        ? []
-        : [];
+  const rawRows = Array.isArray(rec.rows) ? rec.rows : Array.isArray(screen.rows) ? screen.rows : [];
   const rows: BoardRow[] = [];
   for (const raw of rawRows) {
     const row = rowFromUnknown(raw);
@@ -346,14 +474,62 @@ export function parseToolResult(text: string): PanelModel {
   }
   if (rows.length > 0) {
     const screenId =
-      typeof rec.id === "string"
-        ? rec.id
-        : typeof screen.id === "string"
-          ? screen.id
-          : undefined;
-    return { kind: "board", screenId, rows, overlays: [], ring: [], edges: [] };
+      typeof rec.id === "string" ? rec.id : typeof screen.id === "string" ? screen.id : undefined;
+    const degraded = typeof rec.stubsDegraded === "boolean" ? rec.stubsDegraded : screen.stubsDegraded;
+    const model: PanelModel = { kind: "board", screenId, rows, overlays: [], ring: [], edges: [] };
+    if (typeof degraded === "boolean") model.stubsDegraded = degraded;
+    return model;
   }
-  return { kind: "empty", rows: [], overlays: [], ring: [], edges: [] };
+  return emptyModel("empty");
+}
+
+export function firstTextPart(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    const rec = asRecord(part);
+    if (rec && rec.type === "text" && typeof rec.text === "string") return rec.text;
+  }
+  return null;
+}
+
+/** A tool result with no text part is unreadable, never empty. Scans every part. */
+export function parseToolContent(result: unknown): PanelModel {
+  if (typeof result === "string") return parseToolResult(result);
+  const rec = asRecord(result);
+  const text = rec ? firstTextPart(rec.content) : null;
+  return text === null ? emptyModel("unreadable") : parseToolResult(text);
+}
+
+/**
+ * The served script's parser is this module's parser, embedded by source.
+ * Every function the parser reaches must be listed here. The served suite
+ * (tests/mcp-app-served.test.ts) runs the embedded copy and fails on a missing one.
+ */
+const INLINE_SHARED: ReadonlyArray<Function> = [
+  asRecord,
+  railState,
+  numberOrNull,
+  stringOrNull,
+  stringList,
+  emptyModel,
+  countyForNodeId,
+  notOnFileSentence,
+  noBakedSnapshotSentence,
+  escapeHtml,
+  rowFromUnknown,
+  ringFromDraw,
+  edgesFromDraw,
+  overlaysFromDraw,
+  batchRowsFrom,
+  missRowsFrom,
+  refusedRowsFrom,
+  parseToolResult,
+  firstTextPart,
+  parseToolContent,
+];
+
+export function inlineSharedSource(): string {
+  return INLINE_SHARED.map((fn) => "  " + fn.toString()).join("\n");
 }
 
 export function panelFingerprint(model: PanelModel): string {
@@ -395,7 +571,6 @@ export const EMPTY_BOARD_TITLE = "No screen yet";
 export const EMPTY_BOARD_BODY = "Paste addresses in the chat. This panel does not search.";
 export const NOTHING_TO_OPEN = "Nothing to open until this resolves";
 export const OPEN_DID_NOT_REACH_ME = "Open did not reach me";
-export const NOT_ON_FILE = "Not on file in Bastrop";
 /** Host silence after Open click. Late tool results still replace this. */
 export const OPEN_DEAD_MS = 12000;
 
@@ -547,8 +722,24 @@ export function htmlContractViolations(html: string): string[] {
   if (/Not read yet/.test(html)) {
     violations.push("hatch_labeled_unread");
   }
-  if (!html.includes(NOTHING_TO_OPEN) || !html.includes(OPEN_DID_NOT_REACH_ME) || !html.includes(NOT_ON_FILE)) {
+  const boundCopy = [
+    NOTHING_TO_OPEN,
+    OPEN_DID_NOT_REACH_ME,
+    OPEN_SENT,
+    NOT_ON_FILE_PREFIX,
+    NO_BAKED_SNAPSHOT_PREFIX,
+    UPGRADE_TO_OPEN,
+    RESULT_NOT_READABLE,
+  ];
+  if (boundCopy.some((copy) => !html.includes(copy))) {
     violations.push("miss_copy_unbound");
+  }
+  const listenerAt = html.indexOf('addEventListener("message"');
+  const from = listenerAt < 0 ? 0 : listenerAt;
+  const guardAt = html.indexOf("if(ev.source!==window.parent)", from);
+  const dataReadAt = html.indexOf("var d=ev.data", from);
+  if (listenerAt < 0 || guardAt < 0 || dataReadAt < 0 || guardAt > dataReadAt) {
+    violations.push("origin_unchecked");
   }
   if (!html.includes(EMPTY_BOARD_TITLE)) {
     violations.push("empty_board_unbound");
@@ -619,6 +810,10 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
 .empty b{display:block;color:var(--ss-t3);font-weight:650;margin:0 0 4px}
 .slot{color:var(--ss-slate);font-size:var(--ss-fs-meta);text-align:right;max-width:11em}
 .fail{color:var(--ss-slate);padding:8px 12px;font-size:var(--ss-fs-body)}
+.note{color:var(--ss-t5);padding:8px 12px;font-size:var(--ss-fs-body)}
+.miss{padding:6px 0;border-bottom:1px solid var(--ss-line-06)}
+.miss:last-child{border-bottom:none}
+.miss b{display:block;color:var(--ss-t3);font-weight:650;margin:0 0 4px}
 .boot{font:var(--ss-fs-meta)/1.3 ui-monospace,Consolas,monospace;color:var(--ss-t5);padding:2px 10px;flex:0 0 auto;white-space:normal;word-break:break-word}
 </style>
 </head>
@@ -632,7 +827,8 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
   var capText="caps=unread";
   var msgCap="message=unread";
   var replyText="reply=none";
-  var pendingMsg={};
+  var foreignCount=0;
+  var pendingMsg=Object.create(null);
   function paintBoot(){
     if(!boot) return;
     boot.setAttribute("data-script","ran");
@@ -640,14 +836,22 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
     boot.setAttribute("data-caps",capText);
     boot.setAttribute("data-message-cap",msgCap);
     boot.setAttribute("data-reply",replyText);
-    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText].join(" ");
+    boot.setAttribute("data-foreign",String(foreignCount));
+    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText,"foreign="+foreignCount].join(" ");
   }
   paintBoot();
-  var RAILS=["situs","zoning","landUse","flood","drainage","envelope"];
+  var RAILS=${JSON.stringify(RAILS)};
   var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
-  var model={kind:"empty",rows:[],overlays:[],ring:[],edges:[]};
+  var COUNTY_BY_FIPS=${JSON.stringify(COUNTY_BY_FIPS)};
+  var COUNTY_UNKNOWN=${JSON.stringify(COUNTY_UNKNOWN)};
+  var NOT_ON_FILE_PREFIX=${JSON.stringify(NOT_ON_FILE_PREFIX)};
+  var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(NO_BAKED_SNAPSHOT_PREFIX)};
+${inlineSharedSource()}
+  var esc=escapeHtml;
+  var model=emptyModel("empty");
   var openWait=null;
   var openFail=null;
+  var openSent=null;
   var openTimer=null;
   function clearOpenTimer(){ if(openTimer){ clearTimeout(openTimer); openTimer=null; } }
   var sortKey="query";
@@ -730,18 +934,6 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
     return i;
   }
   function edgeHasRoad(e){return !!(e.roadNode||e.road)}
-  function ringFrom(draw){
-    if(!draw||!Array.isArray(draw.ring)) return [];
-    var out=[];
-    draw.ring.forEach(function(raw){
-      if(Array.isArray(raw)&&raw.length>=2&&typeof raw[0]==="number"&&typeof raw[1]==="number") out.push({x:raw[0],y:raw[1]});
-      else if(raw&&typeof raw.x==="number"&&typeof raw.y==="number") out.push({x:raw.x,y:raw.y});
-    });
-    return out;
-  }
-  function edgesFrom(draw){
-    return draw&&Array.isArray(draw.edges)?draw.edges:[];
-  }
   function ringSvg(ring,edges){
     if(!ring||ring.length<3) return "";
     var xs=ring.map(function(p){return p.x}), ys=ring.map(function(p){return p.y});
@@ -775,34 +967,26 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
     var cls="pn";
     return '<div class="unres">'+cap+'</div><div class="'+cls+'">'+esc(r.query)+"</div>";
   }
-  function parse(text){
-    var rec; try{rec=JSON.parse(text)}catch(e){return {kind:"empty",rows:[],overlays:[],ring:[],edges:[]}}
-    if(!rec||typeof rec!=="object") return {kind:"empty",rows:[],overlays:[],ring:[],edges:[]};
-    if(Array.isArray(rec.savedProperties)&&!rec.rows&&!rec.screens) return {kind:"empty",rows:[],overlays:[],ring:[],edges:[]};
-    var draw=rec.draw||(rec.parcels&&rec.parcels[0]&&rec.parcels[0].draw);
-    if(draw&&(draw.ring||draw.overlays||draw.label||draw.edges)){
-      var overlays=[];
-      (draw.overlays||[]).forEach(function(o){
-        if(!o||!o.id) return;
-        overlays.push({id:o.id,state:o.state||"unknown",label:o.label||o.id,reason:o.reason});
-      });
-      return {kind:"parcel",rows:[],overlays:overlays,ring:ringFrom(draw),edges:edgesFrom(draw),parcelNodeId:rec.parcelNodeId||(rec.parcels&&rec.parcels[0]&&rec.parcels[0].parcelNodeId),label:draw.label||rec.label};
-    }
-    var raw=rec.rows||(rec.screen&&rec.screen.rows)||[];
-    var rows=[];
-    raw.forEach(function(r){
-      if(!r) return;
-      var rails={};
-      var stub=r.stub||r.rails||r.d||{};
-      RAILS.forEach(function(k){rails[k]=stub[k]||"unread"});
-      rows.push({query:r.query||r.parcelNodeId||"situs unresolved",parcelNodeId:r.parcelNodeId||null,resolution:r.resolution||(r.parcelNodeId?"resolved":"unresolved"),rails:rails});
-    });
-    if(rows.length) return {kind:"board",screenId:rec.id||(rec.screen&&rec.screen.id),rows:rows,overlays:[],ring:[],edges:[]};
-    return {kind:"empty",rows:[],overlays:[],ring:[],edges:[]};
-  }
   function glyph(state){
-    var cls="g g-"+(state==="absent"?"absent-verified":state);
-    return '<span class="'+cls+'" title="'+state+'"></span>';
+    var s=railState(state);
+    return '<span class="g g-'+esc(s)+'" title="'+esc(s)+'"></span>';
+  }
+  function idLine(id){ return '<span class="pn atom">'+esc(id)+"</span>"; }
+  function reasonLine(reason){ return '<span class="why"><span class="key">reason</span> <span class="reason">'+esc(reason)+"</span></span>"; }
+  function missLine(m){
+    if(m.missClass==="absent") return '<p class="miss"><b>'+esc(notOnFileSentence(m.parcelNodeId))+"</b>"+idLine(m.parcelNodeId)+"</p>";
+    if(m.missClass==="unbaked") return '<p class="miss"><b>'+esc(noBakedSnapshotSentence(m.parcelNodeId))+"</b>"+idLine(m.parcelNodeId)+"</p>";
+    return '<p class="miss"><b>'+${JSON.stringify(NOT_RETURNED)}+"</b>"+idLine(m.parcelNodeId)+reasonLine(m.reason)+"</p>";
+  }
+  function refusedLine(r){
+    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+${JSON.stringify(UPGRADE_TO_OPEN)}+"</b>"+idLine(r.parcelNodeId)+"</p>";
+    return '<p class="miss"><b>'+${JSON.stringify(OPEN_REFUSED)}+"</b>"+idLine(r.parcelNodeId)+reasonLine(r.reason)+"</p>";
+  }
+  function stateLines(){
+    return (openFail?'<p class="fail">'+esc(openFail)+"</p>":"")+(openSent?'<p class="note">'+${JSON.stringify(OPEN_SENT)}+"</p>":"");
+  }
+  function card(title,inner){
+    return '<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+title+' <span data-script="ran">script-ran</span></div>'+inner+"</div>";
   }
   function render(){
     var root=document.getElementById("root");
@@ -819,20 +1003,21 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
           :'<div class="slot">'+${JSON.stringify(NOTHING_TO_OPEN)}+"</div>";
         return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){return "<td>"+glyph(r.rails[k])+"</td>"}).join("")+"<td>"+open+"</td></tr>";
       }).join("");
-      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · screen board <span data-script="ran">script-ran</span></div>'+(openFail?'<p class="fail">'+esc(openFail)+"</p>":"")+'<div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
-        '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div></div>";
+      var note=model.stubsDegraded===true?'<p class="note">'+${JSON.stringify(RAILS_PARTLY_UNREAD)}+"</p>":"";
+      root.innerHTML=card("screen board",stateLines()+note+'<div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
+        '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>");
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o){
         var extra=o.id==="flood"?" flood":o.state==="refused"?" refused":"";
         var shown=envelopeHuman(o.reason);
-        var why=shown?'<span class="why"><span class="key">reason</span> <span class="reason">'+esc(shown)+"</span></span>":"";
+        var why=shown?reasonLine(shown):"";
         return '<div class="ovl'+extra+'">'+glyph(o.state)+' <span class="key">'+esc(o.id)+'</span> <span class="lbl">'+esc(o.label)+"</span>"+why+"</div>";
       }).join("")||'<p class="empty">No overlays on this draw.</p>';
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
       var svg=ringSvg(model.ring||[],model.edges||[]);
       var edgeList=(model.edges&&model.edges.length)?'<ul class="edges">'+model.edges.map(function(e){return "<li>"+esc(edgeCaption(e))+"</li>"}).join("")+"</ul>":"";
-      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+esc(model.label||model.parcelNodeId||"parcel")+' <span data-script="ran">script-ran</span></div><div class="well">'+node+svg+edgeList+ov+"</div>"+
-        '<div class="acts"><button type="button" class="btn" data-act="save" onclick="window.__ss&&window.__ss.save()">Save property</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+listingAck.chars+'">Posted '+listingAck.chars+" chars</div>":"")+"</div>";
+      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),'<div class="well">'+node+svg+edgeList+ov+"</div>"+
+        '<div class="acts"><button type="button" class="btn" data-act="save" onclick="window.__ss&&window.__ss.save()">Save property</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
       var listing=root.querySelector('[data-act="listing"]');
       if(listing&&listingAck){
         listing.textContent=${JSON.stringify(LISTING_ACK_LABEL)};
@@ -840,8 +1025,14 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
         listing.setAttribute("data-listing-ack","1");
         listing.setAttribute("data-listing-chars",String(listingAck.chars));
       }
+    } else if(model.kind==="miss"){
+      root.innerHTML=card("lookup",'<div class="well">'+(model.misses||[]).map(missLine).join("")+"</div>");
+    } else if(model.kind==="refused"){
+      root.innerHTML=card("refused",'<div class="well">'+(model.refused||[]).map(refusedLine).join("")+"</div>");
+    } else if(model.kind==="unreadable"){
+      root.innerHTML=card("result",'<p class="empty"><b>'+${JSON.stringify(RESULT_NOT_READABLE)}+"</b>"+${JSON.stringify(RESULT_NOT_READABLE_BODY)}+"</p>");
     } else {
-      root.innerHTML='<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · waiting <span data-script="ran">script-ran</span></div>'+(openFail?'<p class="fail">'+esc(openFail)+"</p>":"")+'<p class="empty"><b>'+${JSON.stringify(EMPTY_BOARD_TITLE)}+"</b>"+${JSON.stringify(EMPTY_BOARD_BODY)}+"</p></div>";
+      root.innerHTML=card("waiting",stateLines()+'<p class="empty"><b>'+${JSON.stringify(EMPTY_BOARD_TITLE)}+"</b>"+${JSON.stringify(EMPTY_BOARD_BODY)}+"</p>");
     }
     requestAnimationFrame(function(){ fitHost(); });
   }
@@ -884,6 +1075,7 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
     clearOpenTimer();
     openWait=node;
     openFail=null;
+    openSent=null;
     openTimer=setTimeout(function(){
       if(openWait){
         openFail=${JSON.stringify(OPEN_DID_NOT_REACH_ME)};
@@ -896,7 +1088,7 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
   function sendSave(){
     if(model.parcelNodeId) host.sendMessage("Save property "+model.parcelNodeId+" with save_property. Do not change any screen.");
   }
-  window.__ss={listing:sendListing,open:sendOpen,save:sendSave};
+  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,parse:parseToolResult};
   document.body.addEventListener("click",function(ev){
     var el=ev.target;
     if(!el||!el.closest) return;
@@ -907,22 +1099,16 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
       render();
     }
   });
-  function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
   function accept(result){
-    var text="";
-    if(result&&Array.isArray(result.content)&&result.content[0]&&result.content[0].text) text=result.content[0].text;
-    else if(typeof result==="string") text=result;
-    var next=parse(text);
     clearOpenTimer();
-    if(openWait||openFail===${JSON.stringify(OPEN_DID_NOT_REACH_ME)}){
-      if(next.kind!=="parcel") openFail=${JSON.stringify(NOT_ON_FILE)};
-      else openFail=null;
-      openWait=null;
-    }
-    model=next;
+    openWait=null;
+    openFail=null;
+    openSent=null;
+    model=parseToolContent(result);
     render();
   }
   window.addEventListener("message",function(ev){
+    if(ev.source!==window.parent){ foreignCount++; paintBoot(); return; }
     var d=ev.data;
     if(!d) return;
     if(String(d.id)===String(initId)&&(d.result!==undefined||d.error)){
@@ -946,6 +1132,7 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
           clearOpenTimer();
           openFail=${JSON.stringify(OPEN_DID_NOT_REACH_ME)};
           openWait=null;
+          openSent=null;
           render();
         }
       } else if(d.result&&d.result.isError){
@@ -953,7 +1140,14 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
         accept(d.result);
       } else if(d.result!==undefined){
         replyText="reply=ok";
-        if(d.result.content) accept(d.result);
+        if(d.result&&d.result.content) accept(d.result);
+        else if(openWait){
+          clearOpenTimer();
+          openSent=openWait;
+          openWait=null;
+          openFail=null;
+          render();
+        }
       } else {
         replyText="reply=empty";
       }
@@ -961,7 +1155,6 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
       return;
     }
     if(d.method==="ui/notifications/tool-result"&&d.params) accept(d.params);
-    if(d.result&&d.result.content) accept(d.result);
   });
   markHandshake("wait");
   parent.postMessage({jsonrpc:"2.0",id:initId,method:"ui/initialize",params:{protocolVersion:"2026-01-26",appInfo:{name:"SmartSiteBoard",version:"1"},appCapabilities:{availableDisplayModes:["inline"]}}},"*");
