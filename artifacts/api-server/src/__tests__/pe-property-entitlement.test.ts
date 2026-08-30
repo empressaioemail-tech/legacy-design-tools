@@ -22,6 +22,7 @@ import {
   peChatMessageCounts,
   pePropertyUnlocks,
   peUserEntitlements,
+  txgioParcel,
   users,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
@@ -264,7 +265,37 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
     expect(res.body.property).toEqual({ parcelNodeId: PARCEL, unlocked: false });
   });
 
-  it("property-unlocked user clears the brief gate (honest 404, no snapshot seeded)", async () => {
+  it("property-unlocked user clears the brief gate (parcel row exists, no snapshot: honest unbaked 404)", async () => {
+    // State constructed: a txgio_parcel row for PARCEL stored in the raw CAD
+    // form WITH leading zeros ("0010068" for node 48055:10068) and no baked
+    // snapshot. The P-91 miss split must find the row through the
+    // zero-stripped match against real Postgres and answer
+    // baked_snapshot_not_found, never parcel_not_found. txgio_parcel is in the
+    // per-test truncate list, so this row does not reach the other fixtures.
+    await db.insert(txgioParcel).values({
+      countyFips: "48055",
+      tileKey: "g0.02:-97.68000,29.88000",
+      featureIndex: 0,
+      propId: "0010068",
+      situsAddress: "1 TEST LN, LOCKHART, TX 78644",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.68, 29.88],
+            [-97.67, 29.88],
+            [-97.67, 29.89],
+            [-97.68, 29.88],
+          ],
+        ],
+      },
+      westLng: -97.68,
+      southLat: 29.88,
+      eastLng: -97.67,
+      northLat: 29.89,
+      sourceFile: "pe-property-entitlement.test",
+      sourceVintage: "test-fixture",
+    });
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -273,6 +304,7 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
     );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.parcelNodeId).toBe(PARCEL);
   });
 
   it("property-unlocked user is still walled off OTHER parcels", async () => {
@@ -286,7 +318,9 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
     expect(res.body.error).toBe("upgrade_required");
   });
 
-  it("paid user clears the gate unchanged", async () => {
+  it("paid user clears the gate unchanged (no parcel row, no snapshot: honest absent 404)", async () => {
+    // State constructed: nothing seeded for PARCEL. The gate is what this
+    // fixture is about; past it, the P-91 miss split answers parcel_not_found.
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -294,7 +328,7 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
       USER_PAID,
     );
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.error).toBe("parcel_not_found");
   });
 
   it("layer-manifest resolves the parcel from the runId for the unlock check", async () => {
@@ -307,6 +341,9 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
       ),
       USER_UNLOCKED,
     );
+    // State constructed: no snapshot for PARCEL. The layer-manifest route is
+    // NOT on the P-91 miss split (it runs no existence probe), so its 404
+    // stays baked_snapshot_not_found regardless of whether a parcel row exists.
     expect(unlockedRes.status).toBe(404);
     expect(unlockedRes.body.error).toBe("baked_snapshot_not_found");
 
@@ -523,8 +560,11 @@ describe("internal dev-role route (WDLL 2026-08-05 item 4)", () => {
         .send({ parcelNodeId: OTHER_PARCEL }),
       USER_FREE,
     );
+    // State constructed: dev role granted, no txgio_parcel row and no
+    // snapshot for OTHER_PARCEL. Past the gate, the P-91 miss split answers
+    // the absent-parcel 404.
     expect(brief.status).toBe(404);
-    expect(brief.body.error).toBe("baked_snapshot_not_found");
+    expect(brief.body.error).toBe("parcel_not_found");
   });
 
   it("revoking dev role closes the gate on the very next read", async () => {

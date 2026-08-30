@@ -10,13 +10,17 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, peSavedProperties, peShareGrants, peWorkbenchState } from "@workspace/db";
 import {
   addToScreen,
+  attachScreenStubs,
   createScreen,
   listScreens,
   saveProperty,
   setPropertyStatus,
+  type Screen,
+  type ScreenSaveRefuse,
 } from "../lib/peScreenSave";
 import { createDrizzleScreenSaveStore } from "../lib/peScreenSaveDb";
-import { cortexQueryResolver } from "../lib/peScreenSaveResolve";
+import { cortexNodeLookup, cortexQueryResolver } from "../lib/peScreenSaveResolve";
+import type { NodeLookup } from "../lib/peScreenSave";
 import {
   PE_FREE_CHAT_MESSAGE_LIMIT,
   createPePropertyUnlock,
@@ -196,6 +200,23 @@ async function assembleStubBody(parcelNodeId: string) {
     flood: floodReadToRail(floodHazardFact),
     drainage: { attempted: false },
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+  });
+}
+
+/**
+ * P-91 4.3. Rails on a create_screen / list_screens(screenId) response,
+ * read through the same assembler the brief's stub depth serves. No paid
+ * gate on this path by design: the board is the intake surface, and
+ * GET /saved-properties already serves these rails to the same user under
+ * requirePeAuthenticated. Nothing here is stored and updatedAt does not move.
+ */
+async function attachStubsForResponse(screen: Screen): Promise<Screen> {
+  return attachScreenStubs(screen, assembleStubBody, {
+    onReadError: (parcelNodeId, err) =>
+      logger.warn(
+        { err, parcelNodeId, screenId: screen.id },
+        "pe_screen_stub_read_error",
+      ),
   });
 }
 
@@ -436,7 +457,69 @@ router.delete(
 function screenSaveHttpStatus(error: string): number {
   if (error === "not_found" || error === "saved_property_not_found") return 404;
   if (error === "authentication_required") return 401;
+  // The parcel store did not answer an existence lookup. Nothing was
+  // written and the caller retries. Never a 404, never a written absence.
+  if (error === "lookup_unavailable") return 503;
   return 400;
+}
+
+/**
+ * Screens write-path refuse. The wire body is the refuse's `error`; the
+ * underlying throw behind a `lookup_unavailable` is recorded here and never
+ * sent.
+ */
+function sendScreenSaveRefuse(
+  req: Request,
+  res: Response,
+  refuse: ScreenSaveRefuse,
+): void {
+  const status = screenSaveHttpStatus(refuse.error.error);
+  if (status === 503) {
+    logger.warn(
+      {
+        err: refuse.cause,
+        refuse: refuse.error,
+        path: req.originalUrl?.split("?")[0],
+      },
+      "pe_screen_lookup_unavailable",
+    );
+  }
+  res.status(status).json(refuse.error);
+}
+
+/**
+ * A null assembler result is "no tier1 snapshot", which is two states: the
+ * parcel is not in the store (`parcel_not_found`) or it is and no bake has
+ * run (`baked_snapshot_not_found`). The existence probe splits them. A probe
+ * that throws is a third state (`lookup_unavailable`, 503) and is never
+ * collapsed into either 404.
+ */
+async function sendBriefMiss(res: Response, parcelNodeId: string): Promise<void> {
+  // Same existence seam add_to_screen uses (peScreenSaveResolve.cortexNodeLookup),
+  // never a direct txgioAddressResolve import: that module reads @workspace/db
+  // tables at load, and the route suites mock the seam, not the store.
+  let probe: Awaited<ReturnType<NodeLookup>>;
+  try {
+    probe = await cortexNodeLookup()(parcelNodeId);
+  } catch (err) {
+    logger.warn({ err, parcelNodeId }, "pe_brief_existence_probe_unavailable");
+    res.status(503).json({ error: "lookup_unavailable", parcelNodeId });
+    return;
+  }
+  if (!probe) {
+    res.status(404).json({
+      error: "parcel_not_found",
+      message: "No parcel with this node id exists in the parcel store.",
+      parcelNodeId,
+    });
+    return;
+  }
+  res.status(404).json({
+    error: "baked_snapshot_not_found",
+    message:
+      "The parcel exists but no baked facet snapshot exists for it yet.",
+    parcelNodeId,
+  });
 }
 
 const CreateScreenBodySchema = z.object({
@@ -480,10 +563,10 @@ router.post(
       cortexQueryResolver(),
     );
     if (!result.ok) {
-      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      sendScreenSaveRefuse(req, res, result);
       return;
     }
-    res.json({ screen: result.screen });
+    res.json({ screen: await attachStubsForResponse(result.screen) });
   },
 );
 
@@ -530,7 +613,7 @@ router.get(
       return;
     }
     if ("screen" in result) {
-      res.json({ screen: result.screen });
+      res.json({ screen: await attachStubsForResponse(result.screen) });
       return;
     }
     res.json({ screens: result.screens });
@@ -553,13 +636,18 @@ router.post(
       res.status(400).json({ error: "invalid_input" });
       return;
     }
-    const result = await addToScreen(createDrizzleScreenSaveStore(), scope, {
-      screenId,
-      parcelNodeId: parsed.data.parcelNodeId,
-      source: parsed.data.source,
-    });
+    const result = await addToScreen(
+      createDrizzleScreenSaveStore(),
+      scope,
+      {
+        screenId,
+        parcelNodeId: parsed.data.parcelNodeId,
+        source: parsed.data.source,
+      },
+      cortexNodeLookup(),
+    );
     if (!result.ok) {
-      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      sendScreenSaveRefuse(req, res, result);
       return;
     }
     res.json({ screenId: result.screenId, row: result.row });
@@ -911,11 +999,7 @@ router.post(
       if (parsed.depth === "stub") {
         const stub = await assembleStubBody(parcelNodeId);
         if (!stub) {
-          res.status(404).json({
-            error: "baked_snapshot_not_found",
-            message: "No baked facet snapshot exists for this parcel node.",
-            parcelNodeId,
-          });
+          await sendBriefMiss(res, parcelNodeId);
           return;
         }
         res.json(stub);
@@ -923,16 +1007,16 @@ router.post(
       }
       const body = await assembleNodeBriefBody(parcelNodeId);
       if (!body) {
-        res.status(404).json({
-          error: "baked_snapshot_not_found",
-          message: "No baked facet snapshot exists for this parcel node.",
-          parcelNodeId,
-        });
+        await sendBriefMiss(res, parcelNodeId);
         return;
       }
       res.json(body);
       return;
     }
+
+    // Array path: per-id notFound inside a 200, unchanged. No existence
+    // probe here: the ltrim arm of the probe reads a county's index entries
+    // per id, so fifty misses on a large county is not a bounded cost.
 
     const parcels: unknown[] = [];
     const notFound: string[] = [];

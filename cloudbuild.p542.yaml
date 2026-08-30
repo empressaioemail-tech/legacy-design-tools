@@ -1,0 +1,14 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/cortex-api:p542
+      - .
+images:
+  - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/cortex-api:p542
+timeout: 3600s
+options:
+  machineType: E2_HIGHCPU_8
