@@ -5,8 +5,8 @@ steps:
       - -f
       - artifacts/smartsite-mcp/Dockerfile
       - -t
-      - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/smartsite-mcp:p558
+      - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/smartsite-mcp:p560
       - .
 images:
-  - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/smartsite-mcp:p558
+  - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/smartsite-mcp:p560
 timeout: 1200s
