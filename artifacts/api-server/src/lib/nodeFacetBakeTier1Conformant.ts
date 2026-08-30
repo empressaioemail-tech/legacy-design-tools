@@ -63,14 +63,23 @@ import type { AddressLandUseEntry } from "./joinIntegrityGate";
 import { resolveAddressLandUse } from "./joinIntegrityGate";
 import { addressJoinKey, LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
 import {
+  ALIAS_JOIN_SOURCE,
+} from "./cadTxgioAliasRead";
+import {
+  absentVerifiedLandUse,
+  type NamedLandUseHit,
+} from "./namedLandUseSource";
+import {
   assembleTier1Payload,
   COUNTY_NAMES,
   firstRing,
   type BaseFacts,
+  type LandUseSource,
   type Tier1FacetPayload,
 } from "./nodeFacetTier1Assemble";
 import type { ParcelJoinRow } from "./nodeFacetTier1ParcelJoin";
 import { ptadLandUseDescription } from "./ptadLandUse";
+import type { TaxYearRule } from "./taxYearSelect";
 
 export const CONFORMANT_SHAPE_SOURCE = "conformant-v1";
 export const CONFORMANT_TIER1_SOURCE = "conformant-v1-cad-parcel-roll";
@@ -211,6 +220,7 @@ export type ParcelJoinRecord =
       basis: string;
       featureIndex: number | null;
       sourceVintage: string | null;
+      source: typeof ALIAS_JOIN_SOURCE | "cad-roll-address-join";
     }
   | { table: string; state: "no-row"; basis: string }
   | { table: string; state: "gate-blocked"; basis: string };
@@ -229,7 +239,11 @@ export interface ConformantTier1Payload extends Omit<
     base: { parcelNodeId: string; situsAddress: string | null; apn: string | null };
   };
   facetCoverage: Tier1FacetPayload["facetCoverage"] & { tier1: "populated" };
-  provenance: Tier1FacetPayload["provenance"] & { parcelJoin: ParcelJoinRecord };
+  provenance: Tier1FacetPayload["provenance"] & {
+    parcelJoin: ParcelJoinRecord;
+    taxYear: number | null;
+    taxYearRule: TaxYearRule | null;
+  };
 }
 
 export interface ConformantTier1BuildInput {
@@ -257,10 +271,34 @@ export interface ConformantTier1BuildInput {
     situsRow?: ParcelJoinRow | null;
   };
   /**
+   * Open CAD→TxGIO alias for this node. When present, join from that
+   * TxGIO key and skip situs recovery. W1 reads; it does not persist.
+   */
+  aliasJoin?: {
+    txgioId: string;
+    row: ParcelJoinRow | null;
+  };
+  /**
+   * W0b named land-use (`land-use-fact.landUseCode` /
+   * `cad_property.property_use_code`). Projected when present. Absence
+   * writes absent-verified, never `null` + `coverage: false`.
+   */
+  namedLandUse?: NamedLandUseHit | null;
+  /**
+   * Max-year selection for this node. When `refused`, load-bearing claim
+   * fields are unmeasured / absent-verified.
+   */
+  taxYearSelection?: {
+    taxYear: number | null;
+    taxYearRule: TaxYearRule;
+    refused: boolean;
+  };
+  /**
    * Owner-gated situs recovery for a gate-blocked county. When present,
    * land-use is resolved via `addressJoinKey` + `resolveAddressLandUse`
    * (never the claim's propertyUseCode, never a prop_id join). The TxGIO
    * owner is used only for the gate and is never copied into the payload.
+   * Does not run when `aliasJoin` is set.
    */
   situsRecovery?: {
     addressLandUse: ReadonlyMap<string, AddressLandUseEntry>;
@@ -295,26 +333,22 @@ export function buildConformantTier1Payload(
 ): ConformantTier1Payload {
   const { parcelNodeId, countyFips, nowIso } = input;
   const claim = readConformantCadClaim(input.body);
+  const taxSel = input.taxYearSelection;
+  const claimRefused = taxSel?.refused === true;
   const apn = parcelNodeId.split(":")[1] ?? null;
   const countyName = input.countyName ?? COUNTY_NAMES[countyFips] ?? countyFips;
 
   const gateBlocked = input.parcelJoin.gateBlocked;
+  const aliasHit = input.aliasJoin != null;
   // Prop_id row is never used on a blocked county (the collision).
   let row: ParcelJoinRow | null = gateBlocked ? null : input.parcelJoin.row;
   let landUseAddressRecovered = false;
   let situsRecoveryAccepted = false;
-
-  const code = claim.propertyUseCode;
-  let landUse: BaseFacts["landUse"] = code
-    ? {
-        code,
-        description: ptadLandUseDescription(code) ?? null,
-        source: "cad-roll",
-        vintage: claim.taxYear != null ? String(claim.taxYear) : null,
-      }
-    : null;
-
-  if (gateBlocked && input.situsRecovery) {
+  let recoveredLandUse: BaseFacts["landUse"] = null;
+  if (aliasHit) {
+    row = input.aliasJoin!.row;
+    situsRecoveryAccepted = true;
+  } else if (gateBlocked && input.situsRecovery) {
     const blocked =
       input.situsRecovery.blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED;
     const addrKey = addressJoinKey(countyFips, input.situsAddress, blocked);
@@ -328,7 +362,7 @@ export function buildConformantTier1Payload(
       input.situsRecovery.addressLandUse,
     );
     if (hit) {
-      landUse = {
+      recoveredLandUse = {
         code: hit.code,
         description: ptadLandUseDescription(hit.code) ?? null,
         source: "cad-roll-address-join",
@@ -338,14 +372,52 @@ export function buildConformantTier1Payload(
       situsRecoveryAccepted = true;
       row = input.parcelJoin.situsRow ?? null;
     } else {
-      // Recovery attempted and refused (disagree, blank owner, blank situs,
-      // or no address match): honest null, never the claim code as a silent
-      // fallback, never the offered prop_id row.
-      landUse = null;
       landUseAddressRecovered = false;
       row = null;
     }
   }
+
+  const named = input.namedLandUse;
+  const code = claim.propertyUseCode;
+  let landUse: BaseFacts["landUse"];
+  if (claimRefused) {
+    landUse = absentVerifiedLandUse(nowIso);
+    landUseAddressRecovered = false;
+  } else if (named?.code) {
+    const src: LandUseSource =
+      named.source === "land-use-fact" ? "land-use-fact" : "cad-property";
+    landUse = {
+      code: named.code,
+      description: ptadLandUseDescription(named.code) ?? null,
+      source: src,
+      vintage: named.vintage,
+    };
+    landUseAddressRecovered = false;
+  } else if (recoveredLandUse) {
+    landUse = recoveredLandUse;
+  } else if (gateBlocked && input.situsRecovery) {
+    landUse = absentVerifiedLandUse(nowIso);
+  } else if (code) {
+    landUse = {
+      code,
+      description: ptadLandUseDescription(code) ?? null,
+      source: "cad-roll",
+      vintage: claim.taxYear != null ? String(claim.taxYear) : null,
+    };
+  } else {
+    landUse = absentVerifiedLandUse(nowIso);
+  }
+
+  const situsAddress = claimRefused ? null : input.situsAddress;
+  const situsCity = claimRefused ? null : claim.situsCity;
+  const situsZip = claimRefused ? null : claim.situsZip;
+  const landAcres = claimRefused ? null : claim.landAcres;
+  const parcelVintage =
+    taxSel?.taxYear != null
+      ? String(taxSel.taxYear)
+      : claim.taxYear != null
+        ? String(claim.taxYear)
+        : null;
 
   const ring = row ? firstRing(row.geometry) : null;
 
@@ -355,21 +427,19 @@ export function buildConformantTier1Payload(
     countyName,
     facetSchemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
     apn,
-    situsAddress: input.situsAddress,
-    situsCity: claim.situsCity,
+    situsAddress,
+    situsCity,
     situsState: row?.situs_state ?? null,
-    situsZip: claim.situsZip,
+    situsZip,
     landUse,
     landUseAddressRecovered,
-    // The land-use is the claim's own field or a recovered address join;
-    // the prop_id join gate is recorded on provenance.parcelJoin instead.
-    landUseGateBlocked: false,
+    landUseGateBlocked: gateBlocked,
     ring,
-    acreageWithoutRing: conformantAcreageFromClaim(claim.landAcres),
+    acreageWithoutRing: conformantAcreageFromClaim(landAcres),
     zoningDistrictRaw: row?.zoning_district ?? null,
     zoningJurisdictionRaw: row?.zoning_jurisdiction ?? null,
     parcelSource: CONFORMANT_TIER1_SOURCE,
-    parcelVintage: claim.taxYear != null ? String(claim.taxYear) : null,
+    parcelVintage,
     nowIso,
     onSitusFallback: input.onSitusFallback,
   });
@@ -379,11 +449,23 @@ export function buildConformantTier1Payload(
     typeof r.source_vintage === "string" && r.source_vintage.trim()
       ? r.source_vintage.trim()
       : null;
-  const parcelJoin: ParcelJoinRecord = gateBlocked
+  const parcelJoin: ParcelJoinRecord = aliasHit
+    ? {
+        table,
+        state: "joined-situs",
+        source: ALIAS_JOIN_SOURCE,
+        basis: row
+          ? `${table} row feature_index ${row.feature_index} matched on open landing_cad_txgio_alias txgio_id ${input.aliasJoin!.txgioId} (source ${ALIAS_JOIN_SOURCE})`
+          : `open landing_cad_txgio_alias for ${parcelNodeId} bound txgio_id ${input.aliasJoin!.txgioId}; no ${table} row matched (zoning stamp and geometry unavailable)`,
+        featureIndex: row ? row.feature_index : null,
+        sourceVintage: row ? sourceVintageOf(row) : null,
+      }
+    : gateBlocked
     ? situsRecoveryAccepted
       ? {
           table,
           state: "joined-situs",
+          source: "cad-roll-address-join",
           basis: row
             ? `${table} row feature_index ${row.feature_index} matched on normalizeSitusAddress (situs-address recovery for county ${countyFips})`
             : `situs-address recovery accepted for county ${countyFips} on normalizeSitusAddress; no ${table} row matched (zoning stamp and geometry unavailable)`,
@@ -430,13 +512,18 @@ export function buildConformantTier1Payload(
     facets: {
       base: {
         parcelNodeId,
-        situsAddress: input.situsAddress,
+        situsAddress,
         apn,
       },
     },
     ...rest,
     facetCoverage: { ...facetCoverage, tier1: "populated" },
-    provenance: { ...provenance, parcelJoin },
+    provenance: {
+      ...provenance,
+      parcelJoin,
+      taxYear: taxSel?.taxYear ?? claim.taxYear,
+      taxYearRule: taxSel?.taxYearRule ?? (claim.taxYear != null ? "max-year" : null),
+    },
   };
 }
 
@@ -528,6 +615,8 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   "facets.base",
   "facetCoverage.tier1",
   "provenance.parcelJoin",
+  "provenance.taxYear",
+  "provenance.taxYearRule",
 ];
 
 function underPrefix(path: string, prefix: string): boolean {

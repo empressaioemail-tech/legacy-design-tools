@@ -24,9 +24,17 @@
  * `joined-situs` on recovery. Owner never enters a payload
  * (`assertNoOwnerKey` before every write). The seed is not lifted.
  *
- * Coordinates: the ring centroid is written when a ring exists; on conflict
- * the 0,0 sentinel never overwrites a real prior coordinate (the serve's
- * city-limits query point reads it).
+ * Coordinates: the ring centroid is written when a ring exists. A
+ * gate-blocked or 0,0 sentinel write OVERWRITES a prior non-zero point
+ * (W1 item 6; the keep-prior CASE is retired). Blast radius includes this
+ * CLI, the old tier-1 bake, and `parcelsPmtilesBakeCli` (PMTiles geometry
+ * must not re-derive a query point from an inherited centroid).
+ *
+ * CTX W1: max-year tax selection; named landUse (land-use-fact /
+ * cad_property.property_use_code) or absent-verified; alias-first join
+ * from `landing_cad_txgio_alias`. Situs-extend is OFF for 48021 / 48055 /
+ * 48453 (W0b no-go). New bind emit may be empty. This CLI does not write
+ * `identity.alias` atoms. Seed stays.
  *
  * Usage: --county=<fips> [--prop-ids=a.b.c] [--dry-run] [--page-size=5000]
  *        [--shape=conformant-v1]   (accepted for the publish job; the shape
@@ -54,6 +62,24 @@ import {
   type ParcelJoinRow,
   type ParcelTableSource,
 } from "./lib/nodeFacetTier1ParcelJoin.js";
+import {
+  emitBindFromSitusRecovery,
+  loadOpenCadTxgioAliases,
+  resolveOpenAlias,
+  situsKeysNeedingFetch,
+  SITUS_EXTEND_GO_FIPS,
+  type CadTxgioBindEmit,
+} from "./lib/cadTxgioAliasRead.js";
+import {
+  HONEST_POINT_COORD_SET_SQL,
+  snapshotCoordForWrite,
+} from "./lib/honestPointUpsert.js";
+import { pickNamedLandUse } from "./lib/namedLandUseSource.js";
+import {
+  fetchCountyLandUseFactByPropId,
+  fetchCountyPropertyUseByPropId,
+} from "./lib/namedLandUseSourceFetch.js";
+import { selectTaxYearWinner, type TaxYearRule } from "./lib/taxYearSelect.js";
 import {
   assertNoOwnerKey,
   buildConformantTier1Payload,
@@ -191,8 +217,15 @@ async function main() {
 
   // Pass 1: identity. No node id -> no stable key -> never invented.
   let skippedNoNode = 0;
-  const work: Array<{ body: Record<string, unknown>; parcelNodeId: string }> = [];
-  for (const { body: rawBody } of cadRows) {
+  const rawWork: Array<{
+    body: Record<string, unknown>;
+    parcelNodeId: string;
+    entityId: string;
+  }> = [];
+  for (const { entity_id: entityIdRaw, body: rawBody } of cadRows as Array<{
+    entity_id?: string;
+    body: unknown;
+  }>) {
     const body = (rawBody ?? {}) as Record<string, unknown>;
     const parcelNodeId = parcelNodeIdFromBody(body, county);
     if (!parcelNodeId) {
@@ -202,7 +235,50 @@ async function main() {
     if (propIds && !propIds.includes(parcelNodeId.split(":")[1] ?? "")) {
       continue;
     }
-    work.push({ body, parcelNodeId });
+    const entityId =
+      typeof entityIdRaw === "string" && entityIdRaw.trim()
+        ? entityIdRaw.trim()
+        : `${parcelNodeId}:${rawWork.length}`;
+    rawWork.push({ body, parcelNodeId, entityId });
+  }
+
+  // Max-year selection per parcel node (W0 tax-year rule). Winner ORDER BY
+  // entity_id, never page order. Disagree refuses claim fields.
+  let skippedBadSitus = 0;
+  const work: Array<{
+    body: Record<string, unknown>;
+    parcelNodeId: string;
+    entityId: string;
+    taxYear: number | null;
+    taxYearRule: TaxYearRule;
+    taxYearRefused: boolean;
+  }> = [];
+  const byNode = new Map<string, typeof rawWork>();
+  for (const w of rawWork) {
+    const list = byNode.get(w.parcelNodeId) ?? [];
+    list.push(w);
+    byNode.set(w.parcelNodeId, list);
+  }
+  for (const [parcelNodeId, atoms] of byNode) {
+    const sel = selectTaxYearWinner(
+      atoms.map((a) => ({
+        body: a.body,
+        entityId: a.entityId,
+        situsRefuse: situsForBake(a.body).refuse,
+      })),
+    );
+    if (sel.outcome === "dropped") {
+      skippedBadSitus += atoms.length;
+      continue;
+    }
+    work.push({
+      body: sel.body,
+      parcelNodeId,
+      entityId: sel.entityId,
+      taxYear: sel.taxYear,
+      taxYearRule: sel.taxYearRule,
+      taxYearRefused: sel.refused,
+    });
   }
 
   // The parcel join, gated exactly as the old bake gates its prop_id join.
@@ -211,24 +287,36 @@ async function main() {
   const blockedSet = effectiveBlockedFips(ledgerBlocked);
   const joinGateBlocked = blockedSet.has(county);
   const parcelTable = await resolveParcelTableForCounty(neondb, county);
+  const aliasLoad = await loadOpenCadTxgioAliases(neondb, county);
+  const aliases = aliasLoad.rows;
   let parcelRows = new Map<string, ParcelJoinRow>();
   let situsRows = new Map<string, ParcelJoinRow>();
+  let aliasRows = new Map<string, ParcelJoinRow>();
   let txgioMultiFeature = 0;
   const addressLandUse = joinGateBlocked
     ? await fetchCountyLandUseByAddress(neondb, county)
     : null;
+  const cadUse = await fetchCountyPropertyUseByPropId(neondb, county);
+  const factUse = await fetchCountyLandUseFactByPropId(mcp, county);
+  if (parcelTable && aliases.size > 0) {
+    const txgioIds = [...new Set([...aliases.values()].map((a) => a.txgioId))];
+    const joined = await joinParcelRows(neondb, county, parcelTable, txgioIds, pageSize);
+    aliasRows = joined.byPropId;
+    txgioMultiFeature += joined.multiFeature;
+  }
   if (joinGateBlocked && parcelTable) {
-    const situsKeys = [
-      ...new Set(
-        work
-          .map((w) => {
-            const { situs, refuse } = situsForBake(w.body);
-            if (refuse) return null;
-            return addressJoinKey(county, situs, blockedSet);
-          })
-          .filter((k): k is string => k != null),
-      ),
-    ];
+    const situsWork = work.map((w) => {
+      const { situs, refuse } = situsForBake(w.body);
+      const propId = w.parcelNodeId.split(":")[1] ?? "";
+      return {
+        cadPropId: propId,
+        situsKey:
+          refuse || resolveOpenAlias(aliases, propId)
+            ? null
+            : addressJoinKey(county, situs, blockedSet),
+      };
+    });
+    const situsKeys = situsKeysNeedingFetch(situsWork, aliases);
     const joined = await joinParcelRowsBySitus(
       neondb,
       county,
@@ -237,26 +325,29 @@ async function main() {
       pageSize,
     );
     situsRows = joined.bySitus;
-    txgioMultiFeature = joined.multiFeature;
+    txgioMultiFeature += joined.multiFeature;
   } else if (!joinGateBlocked && parcelTable) {
+    // Situs-extend is OFF (SITUS_EXTEND_GO_FIPS empty). Prop_id join only.
+    void SITUS_EXTEND_GO_FIPS;
     const ids = [...new Set(work.map((w) => w.parcelNodeId.split(":")[1] ?? "").filter(Boolean))];
     const joined = await joinParcelRows(neondb, county, parcelTable, ids, pageSize);
     parcelRows = joined.byPropId;
-    txgioMultiFeature = joined.multiFeature;
+    txgioMultiFeature += joined.multiFeature;
   }
   const joinTable = parcelTable?.table ?? DEFAULT_PARCEL_TABLE;
 
   let written = 0;
-  let skippedBadSitus = 0;
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
+  let aliasJoined = 0;
+  const bindEmit: CadTxgioBindEmit[] = [];
   const facetHits = { landUse: 0, acreage: 0, zoning: 0, envelopeDerived: 0 };
   const publishRunId = publishRunIdFromEnv();
   const nowIso = new Date().toISOString();
   const countyName = COUNTY_NAMES[county] ?? county;
 
-  for (const { body, parcelNodeId } of work) {
+  for (const { body, parcelNodeId, taxYear, taxYearRule, taxYearRefused } of work) {
     let access: { discoverability: string; entitlement: string };
     let accessNormalizedFrom: string | null = null;
     try {
@@ -271,19 +362,38 @@ async function main() {
       continue;
     }
     const propId = parcelNodeId.split(":")[1] ?? "";
+    const alias = resolveOpenAlias(aliases, propId);
+    const aliasRow = alias ? (aliasRows.get(alias.txgioId) ?? null) : null;
     const propIdRow = joinGateBlocked ? null : (parcelRows.get(propId) ?? null);
     let situsRow: ParcelJoinRow | null = null;
     let txgioOwner: string | null = null;
-    if (joinGateBlocked && addressLandUse) {
+    if (!alias && joinGateBlocked && addressLandUse) {
       const addrKey = addressJoinKey(county, situs, blockedSet);
       const offered = addrKey ? (situsRows.get(addrKey) ?? null) : null;
       txgioOwner = offered?.txgio_owner_for_gate ?? null;
       // Pass the situs-keyed row ONLY after the owner gate accepts.
       const hit = resolveAddressLandUse(addrKey, txgioOwner, addressLandUse);
       situsRow = hit ? offered : null;
+      if (situsRow) {
+        const bind = emitBindFromSitusRecovery({
+          countyFips: county,
+          cadPropId: propId,
+          txgioId: situsRow.prop_id,
+          situsKey: addrKey,
+          asOf: nowIso,
+        });
+        if (bind) bindEmit.push(bind);
+      }
     }
-    const row = joinGateBlocked ? situsRow : propIdRow;
-    if (joinGateBlocked) {
+    const row = alias ? aliasRow : joinGateBlocked ? situsRow : propIdRow;
+    if (alias) {
+      if (aliasRow) {
+        aliasJoined += 1;
+        txgioJoined += 1;
+      } else {
+        txgioNoRow += 1;
+      }
+    } else if (joinGateBlocked) {
       if (situsRow) txgioJoined += 1;
       else txgioNoRow += 1;
     } else if (propIdRow) {
@@ -292,6 +402,7 @@ async function main() {
       txgioNoRow += 1;
     }
 
+    const namedLandUse = pickNamedLandUse(factUse.get(propId), cadUse.get(propId));
     const payload = buildConformantTier1Payload({
       body,
       parcelNodeId,
@@ -307,7 +418,16 @@ async function main() {
         gateBlocked: joinGateBlocked,
         ...(joinGateBlocked ? { situsRow } : {}),
       },
-      ...(joinGateBlocked && addressLandUse
+      ...(alias
+        ? { aliasJoin: { txgioId: alias.txgioId, row: aliasRow } }
+        : {}),
+      namedLandUse,
+      taxYearSelection: {
+        taxYear,
+        taxYearRule,
+        refused: taxYearRefused,
+      },
+      ...(!alias && joinGateBlocked && addressLandUse
         ? {
             situsRecovery: {
               addressLandUse,
@@ -335,8 +455,19 @@ async function main() {
 
     const ring = row ? firstRing(row.geometry) : null;
     const centroid = ring ? ringCentroid(ring) : null;
-    const latRounded = centroid ? centroid.lat.toFixed(5) : PLACE_COORD_SENTINEL;
-    const lngRounded = centroid ? centroid.lng.toFixed(5) : PLACE_COORD_SENTINEL;
+    const gateBlockedNoRing =
+      payload.provenance.parcelJoin.state === "gate-blocked" && !ring;
+    const writtenCoord = snapshotCoordForWrite({
+      newLat: centroid ? centroid.lat : 0,
+      newLng: centroid ? centroid.lng : 0,
+      gateBlockedNoRing,
+    });
+    const latRounded = ring && !gateBlockedNoRing
+      ? writtenCoord.lat.toFixed(5)
+      : PLACE_COORD_SENTINEL;
+    const lngRounded = ring && !gateBlockedNoRing
+      ? writtenCoord.lng.toFixed(5)
+      : PLACE_COORD_SENTINEL;
 
     const contentHash = contentHashForPayload(payload as unknown as Record<string, unknown>);
     if (!dryRun) {
@@ -349,14 +480,7 @@ async function main() {
                content_hash = EXCLUDED.content_hash,
                snapshot_at = EXCLUDED.snapshot_at,
                updated_at = EXCLUDED.updated_at,
-               lat_rounded = CASE
-                 WHEN EXCLUDED.lat_rounded = 0 AND EXCLUDED.lng_rounded = 0
-                   THEN place_layer_snapshots.lat_rounded
-                 ELSE EXCLUDED.lat_rounded END,
-               lng_rounded = CASE
-                 WHEN EXCLUDED.lat_rounded = 0 AND EXCLUDED.lng_rounded = 0
-                   THEN place_layer_snapshots.lng_rounded
-                 ELSE EXCLUDED.lng_rounded END`,
+               ${HONEST_POINT_COORD_SET_SQL}`,
         [
           placeKeyForNode(parcelNodeId),
           TIER1_ADAPTER_KEY,
@@ -382,6 +506,11 @@ async function main() {
       skippedBadAccess,
       parcelTable: parcelTable?.table ?? null,
       joinGateBlocked,
+      aliasTable: aliasLoad.tableState,
+      aliasOpenRows: aliases.size,
+      aliasJoined,
+      bindEmitCount: bindEmit.length,
+      bindEmit,
       txgioJoined,
       txgioNoRow,
       txgioMultiFeature,

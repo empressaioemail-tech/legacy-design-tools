@@ -32,6 +32,10 @@ import {
   type Tier1EnvelopeFacet,
 } from "./nodeFacetBakeTier1";
 import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
+import {
+  isAbsentVerifiedLeaf,
+  type AbsentVerifiedLeaf,
+} from "./namedLandUseSource";
 import { resolveZoningJurisdiction } from "@workspace/cad-ingest/zoning-layers";
 import {
   resolveZoningLayerForDistrict,
@@ -60,8 +64,12 @@ export const COUNTY_NAMES: Record<string, string> = {
   "48309": "McLennan",
 };
 
-/** The provenance of a recovered land-use — prop_id join vs address recovery. */
-export type LandUseSource = "cad-roll" | "cad-roll-address-join";
+/** The provenance of a recovered land-use — named source, claim, or address recovery. */
+export type LandUseSource =
+  | "cad-roll"
+  | "cad-roll-address-join"
+  | "land-use-fact"
+  | "cad-property";
 
 /**
  * How an acreage value was obtained. `shoelace-wgs84` is the parcel ring
@@ -87,21 +95,22 @@ export interface BaseFacts {
    * city-limits containment.
    */
   situsZip: string | null;
-  landUse: {
-    code: string;
-    description: string | null;
-    /**
-     * How the land-use was joined. `cad-roll` is the normal prop_id join
-     * (and, on the conformant path, the claim's own `propertyUseCode`);
-     * `cad-roll-address-join` is the situs-address RECOVERY join used for
-     * prop_id-gate-blocked counties (Williamson/Hays), where each accepted
-     * match ALSO passed the per-match owner gate. The distinct value lets the
-     * card/ledger show HOW the land-use was verified.
-     */
-    source: LandUseSource;
-    /** CAD vintage string, or the tax year; null when the source carried none. */
-    vintage: string | null;
-  } | null;
+  landUse:
+    | {
+        code: string;
+        description: string | null;
+        /**
+         * How the land-use was joined. `land-use-fact` / `cad-property` are
+         * the W0b named sources; `cad-roll` is the claim's own
+         * `propertyUseCode`; `cad-roll-address-join` is the situs-address
+         * RECOVERY join used for prop_id-gate-blocked counties.
+         */
+        source: LandUseSource;
+        /** CAD vintage string, or the tax year; null when the source carried none. */
+        vintage: string | null;
+      }
+    | AbsentVerifiedLeaf
+    | null;
   acreage: { value: number; sqft: number; method: AcreageMethod } | null;
 }
 
@@ -333,9 +342,13 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
       })
     : null;
 
+  const landUseHasCode =
+    input.landUse != null &&
+    !isAbsentVerifiedLeaf(input.landUse) &&
+    "code" in input.landUse;
   const facetCoverage = {
     baseFacts: baseFacts.apn != null || baseFacts.situsAddress != null,
-    landUse: input.landUse != null,
+    landUse: landUseHasCode,
     acreage: acreage != null,
     zoning: zoning != null,
     // Anti-zombie (WDLL 3.7): Tier-1 never counts envelope as product coverage.
@@ -356,7 +369,10 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
     provenance: {
       parcelSource: input.parcelSource,
       parcelVintage: str(input.parcelVintage),
-      landUseSource: input.landUse ? input.landUse.source : null,
+      landUseSource:
+        landUseHasCode && input.landUse && "source" in input.landUse
+          ? (input.landUse.source ?? null)
+          : null,
       landUseAddressRecovered: input.landUseAddressRecovered,
       roadsPending: true,
       tierNote: TIER_NOTE,
