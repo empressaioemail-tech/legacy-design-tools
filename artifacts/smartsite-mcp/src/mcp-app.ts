@@ -1,6 +1,6 @@
 /** P-91 Wave I — Open turn and parcel draw. I1/I5/I6. No fourteenth tool. */
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p556.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p558.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_HOST_TOOLS = [
   "create_screen",
@@ -37,6 +37,9 @@ export type OverlayRow = {
   state: string;
   label: string;
   reason?: string;
+  /** D4: flood only; absent when the wire does not state it. */
+  sfha?: boolean;
+  draw?: string;
 };
 
 export type RingPt = { x: number; y: number };
@@ -53,6 +56,19 @@ export type DrawEdge = {
   ft?: number | null;
   lengthFt?: number | null;
   bearing?: string | null;
+};
+
+export type DrawZoning = {
+  v: string;
+  jurisdiction: string | null;
+  state: string;
+  /** First https citation of the brief's zoning section; null prints the district without a link. */
+  url: string | null;
+};
+
+export type DrawFrame = {
+  units: string | null;
+  quality: string | null;
 };
 
 export type PanelKind = "board" | "parcel" | "empty" | "miss" | "refused" | "unreadable";
@@ -78,6 +94,8 @@ export type PanelModel = {
   misses?: MissRow[];
   refused?: RefusedRow[];
   stubsDegraded?: boolean;
+  zoning?: DrawZoning;
+  frame?: DrawFrame;
 };
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
@@ -280,7 +298,128 @@ export function edgeHasRoad(edge: DrawEdge): boolean {
   return Boolean(edge.roadNode || edge.road);
 }
 
-export function ringSvg(ring: RingPt[], edges: DrawEdge[]): string {
+/** D1: adjacency and role words. Keys are the wire enum; any other value prints verbatim. */
+export const EDGE_WORDS: Record<string, string> = {
+  front: "front",
+  side: "side",
+  rear: "rear",
+  side_corner: "corner side",
+  alley: "alley",
+  ROW: "right of way",
+  "neighbor-parcel": "neighbor",
+  unmapped: "unmapped",
+};
+/** D2 / O3: a neighbor across a ROW is named, never opened. */
+export const ACROSS_ROW = "across the right of way";
+/** Tip at rest. UI copy, not a parcel fact. */
+export const EDGE_TIP_HINT = "Point at a property line to read it. Click a line to keep it.";
+/** D7: the scale bar is the one derived thing on the drawing, and it is labelled as such. */
+export const UNIT_REFERENCE = "unit reference";
+export const SCALE_BAR_FT = [200, 100, 50, 25, 10] as const;
+export type ZoneFamily = "residential" | "commercial" | "mixed" | "public";
+/** D3: family tints are existing Stone tokens; residential is the ring's own stroke. */
+export const ZONE_TINT: Record<ZoneFamily, string> = {
+  residential: "--ss-t3",
+  commercial: "--ss-blue",
+  mixed: "--ss-atom",
+  public: "--ss-t5",
+};
+
+export function edgeWord(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const word = EDGE_WORDS[value];
+  return typeof word === "string" ? word : value;
+}
+
+export function edgeIsRow(edge: DrawEdge): boolean {
+  return edge.adjacency === "ROW";
+}
+
+/** D2: a shared line is a door only when the wire names a neighbor and the line is not a ROW. */
+export function edgeDoor(edge: DrawEdge): string | null {
+  return edge.neighbor && !edgeIsRow(edge) ? edge.neighbor : null;
+}
+
+/** D1 tooltip. Every value is the edge object's own; ft prints only when the wire carries it (I7). */
+export function edgeTipHtml(edge: DrawEdge, index: number): string {
+  const bits: string[] = [];
+  const role = edgeWord(edge.role);
+  const adj = edgeWord(edge.adjacency);
+  if (role) bits.push(`<span class="tw">${escapeHtml(role)}</span>`);
+  if (adj && adj !== role) bits.push(`<span class="tw">${escapeHtml(adj)}</span>`);
+  const ft = edge.ft ?? edge.lengthFt;
+  if (ft != null) bits.push(`<span class="tf">${escapeHtml(ft)} ft</span>`);
+  if (edge.bearing) bits.push(`<span class="tb">${escapeHtml(edge.bearing)}</span>`);
+  const roadId = edge.roadNode || edge.road;
+  const roadBits = roadId
+    ? `<span class="tn">${escapeHtml(roadId)}</span>${edge.roadClass ? `<span class="tw">${escapeHtml(edge.roadClass)}</span>` : ""}`
+    : "";
+  if (edgeIsRow(edge)) {
+    if (roadBits) bits.push(roadBits);
+    if (edge.neighbor) {
+      bits.push(`<span class="tn">${escapeHtml(edge.neighbor)}</span><span class="tw">${ACROSS_ROW}</span>`);
+    }
+  } else if (edge.neighbor) {
+    bits.push(`<span class="tn">${escapeHtml(edge.neighbor)}</span>`);
+  } else if (roadBits) {
+    bits.push(roadBits);
+  }
+  const door = edgeDoor(edge);
+  const open = door
+    ? `<button type="button" class="btn" data-act="open" data-node="${escapeHtml(door)}" onclick="window.__ss&&window.__ss.open(this)">Open</button>`
+    : "";
+  return `<span class="tipbody" data-edge-tip="${index}">${bits.join("")}${open}</span>`;
+}
+
+export function zoneFamily(district: string | null | undefined): ZoneFamily | null {
+  const v = typeof district === "string" ? district.trim().toUpperCase() : "";
+  if (!v) return null;
+  if (/^(SF|R)-/.test(v)) return "residential";
+  if (/^GC(-|$)/.test(v) || /^C-/.test(v)) return "commercial";
+  if (/^MU(-|$)/.test(v)) return "mixed";
+  if (/^PI(-|$)/.test(v) || /^P\/OS(-|$)/.test(v)) return "public";
+  return null;
+}
+
+export type FloodTint = "light" | "heavy";
+
+/** D4: tint only on a tint-ring overlay whose sfha the wire states; MINIMAL never tints. */
+export function floodTint(flood: OverlayRow | null | undefined): FloodTint | null {
+  if (!flood || flood.draw !== "tint-ring") return null;
+  if (/MINIMAL/i.test(flood.label)) return null;
+  if (flood.sfha === true) return "heavy";
+  if (flood.sfha === false) return "light";
+  return null;
+}
+
+/** The zone of a producer label ("Zone AE FLOODWAY" prints as "Zone AE floodway"); any other label prints verbatim. */
+export function floodZoneLabel(label: string): string {
+  const m = /^Zone\s+(\S+)(.*)$/i.exec(label.trim());
+  if (!m) return label.trim();
+  const zone = `Zone ${m[1]}`;
+  return /floodway/i.test(m[2] ?? "") ? `${zone} floodway` : zone;
+}
+
+export function floodOverlayOf(overlays: OverlayRow[]): OverlayRow | null {
+  for (const o of overlays) if (o.id === "flood") return o;
+  return null;
+}
+
+/** D7: the largest round length that fits half the ring's east-west extent; 10 when nothing does. */
+export function scaleBarFt(extentFt: number): number {
+  for (const n of SCALE_BAR_FT) if (n <= extentFt / 2) return n;
+  return SCALE_BAR_FT[SCALE_BAR_FT.length - 1] ?? 10;
+}
+
+export function edgeEnds(edge: DrawEdge, fallback: number, n: number): [number, number] {
+  const a = edgeIndex(edge, fallback);
+  const b = edge.seg && typeof edge.seg[1] === "number" ? edge.seg[1] : (a + 1) % n;
+  return [a, b];
+}
+
+export type DrawCues = { zoning?: DrawZoning | null; flood?: OverlayRow | null; frame?: DrawFrame | null };
+
+export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): string {
   if (ring.length < 3) return "";
   const xs = ring.map((p) => p.x);
   const ys = ring.map((p) => p.y);
@@ -288,12 +427,10 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[]): string {
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
-  const pad = 18;
+  const pad = 28;
   const w = 320;
   const h = 220;
-  const sx = (w - pad * 2) / Math.max(maxX - minX, 1);
-  const sy = (h - pad * 2) / Math.max(maxY - minY, 1);
-  const s = Math.min(sx, sy);
+  const s = Math.min((w - pad * 2) / Math.max(maxX - minX, 1), (h - pad * 2) / Math.max(maxY - minY, 1));
   const ox = (w - (maxX - minX) * s) / 2;
   const oy = (h - (maxY - minY) * s) / 2;
   const pt = (p: RingPt) => {
@@ -302,28 +439,85 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[]): string {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   };
   const pts = ring.map(pt).join(" ");
+  const n = ring.length;
+  const seg = (e: DrawEdge, i: number): string | null => {
+    const ends = edgeEnds(e, i, n);
+    const a = ring[ends[0]];
+    const b = ring[ends[1]];
+    return a && b ? `${pt(a)} ${pt(b)}` : null;
+  };
   const road = edges
     .map((e, i) => {
-      const idx = edgeIndex(e, i);
-      if (!edgeHasRoad(e) || !ring[idx] || !ring[(idx + 1) % ring.length]) return "";
-      return `<polyline points="${pt(ring[idx])} ${pt(ring[(idx + 1) % ring.length])}" fill="none" stroke="var(--ss-t3)" stroke-width="7" stroke-linecap="square" opacity=".35"/>`;
+      const p = seg(e, i);
+      if (!edgeHasRoad(e) || !p) return "";
+      return `<polyline points="${p}" fill="none" stroke="var(--ss-t3)" stroke-width="7" stroke-linecap="square" opacity=".35"/>`;
     })
     .join("");
   const neigh = edges
     .map((e, i) => {
-      const idx = edgeIndex(e, i);
-      if (!e.neighbor || edgeHasRoad(e) || !ring[idx] || !ring[(idx + 1) % ring.length]) return "";
-      return `<polyline points="${pt(ring[idx])} ${pt(ring[(idx + 1) % ring.length])}" fill="none" stroke="var(--ss-t6)" stroke-width="2" stroke-dasharray="4 3"/>`;
+      const p = seg(e, i);
+      if (!e.neighbor || edgeHasRoad(e) || !p) return "";
+      return `<polyline points="${p}" fill="none" stroke="var(--ss-t6)" stroke-width="2" stroke-dasharray="4 3"/>`;
     })
     .join("");
-  return `<svg class="ring" viewBox="0 0 ${w} ${h}" aria-label="parcel ring">${road}${neigh}<polygon points="${pts}" fill="var(--ss-void)" fill-opacity=".55" stroke="var(--ss-t3)" stroke-width="2"/></svg>`;
+  const zoning = cues && cues.zoning && cues.zoning.state === "present" && cues.zoning.v ? cues.zoning : null;
+  const family = zoning ? zoneFamily(zoning.v) : null;
+  const stroke = family ? ZONE_TINT[family] : "--ss-t3";
+  const ringPoly = `<polygon class="ring-fill" points="${pts}" fill="var(--ss-void)" fill-opacity=".55" stroke="var(${stroke})" stroke-width="2"${family ? ` data-zone-family="${family}"` : ""}/>`;
+  const flood = cues && cues.flood ? cues.flood : null;
+  const tint = floodTint(flood);
+  const tintPoly = tint
+    ? `<polygon class="flood-tint" data-flood-tint="${tint}" points="${pts}" fill="var(--ss-blue)" fill-opacity="${tint === "heavy" ? ".32" : ".14"}"/>`
+    : "";
+  const zoneText = tint && flood ? escapeHtml(floodZoneLabel(flood.label)) : "";
+  const floodText = zoneText
+    ? `<text class="fz" data-flood-zone="${zoneText}" x="${(w / 2).toFixed(1)}" y="${(oy - 6).toFixed(1)}" text-anchor="middle">${zoneText}</text>`
+    : "";
+  const hits = edges
+    .map((e, i) => {
+      const p = seg(e, i);
+      return p ? `<polyline class="edge" data-edge="${i}" points="${p}"/>` : "";
+    })
+    .join("");
+  const district = zoning
+    ? `<text class="zn${zoning.url ? " link" : ""}" data-zoning="${escapeHtml(zoning.v)}"${zoning.url ? ` data-zoning-url="${escapeHtml(zoning.url)}"` : ""} x="${(w / 2).toFixed(1)}" y="${(h / 2).toFixed(1)}" text-anchor="middle">${escapeHtml(zoning.v)}</text>${
+        zoning.jurisdiction
+          ? `<text class="zj" x="${(w / 2).toFixed(1)}" y="${(h / 2 + 15).toFixed(1)}" text-anchor="middle">${escapeHtml(zoning.jurisdiction)}</text>`
+          : ""
+      }`
+    : "";
+  const frame = cues && cues.frame ? cues.frame : null;
+  const north = frame
+    ? `<g class="north" data-north="up"><line x1="${w - 22}" y1="24" x2="${w - 22}" y2="9" stroke="var(--ss-t5)" stroke-width="1.5"/><polygon points="${w - 26},13 ${w - 22},6 ${w - 18},13" fill="var(--ss-t5)"/><text x="${w - 14}" y="22">N</text></g>`
+    : "";
+  const barFt = frame && frame.units === "ft" ? scaleBarFt(maxX - minX) : null;
+  let scale = "";
+  if (barFt !== null) {
+    const x2 = (pad + barFt * s).toFixed(1);
+    const y = h - 12;
+    scale = `<g class="scale" data-scale-ft="${barFt}"><line x1="${pad}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--ss-t5)" stroke-width="2"/><line x1="${pad}" y1="${y - 4}" x2="${pad}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><line x1="${x2}" y1="${y - 4}" x2="${x2}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><text class="sl" x="${pad}" y="${y - 7}">${barFt} ft <tspan class="sm">${UNIT_REFERENCE}</tspan></text></g>`;
+  }
+  return `<svg class="ring" viewBox="0 0 ${w} ${h}" aria-label="parcel ring">${road}${neigh}${ringPoly}${tintPoly}${hits}${floodText}${district}${north}${scale}</svg>`;
 }
 
-export function renderParcelDraw(model: Pick<PanelModel, "ring" | "edges" | "overlays" | "label" | "parcelNodeId">): string {
+/** D7: frame.quality printed as it arrives, under the drawing. */
+export function frameNoteHtml(frame: DrawFrame | null | undefined): string {
+  if (!frame || !frame.quality) return "";
+  return `<div class="fnote" data-frame-quality="${escapeHtml(frame.quality)}">frame ${escapeHtml(frame.quality)}</div>`;
+}
+
+export function renderParcelDraw(
+  model: Pick<PanelModel, "ring" | "edges" | "overlays" | "label" | "parcelNodeId" | "zoning" | "frame">,
+): string {
   const node = model.parcelNodeId
     ? `<div class="pn atom">${escapeHtml(model.parcelNodeId)}</div>`
     : "";
-  const svg = ringSvg(model.ring ?? [], model.edges ?? []);
+  const svg = ringSvg(model.ring ?? [], model.edges ?? [], {
+    zoning: model.zoning ?? null,
+    flood: floodOverlayOf(model.overlays),
+    frame: model.frame ?? null,
+  });
+  const tip = svg ? `<div class="tip" data-tip="1">${EDGE_TIP_HINT}</div>${frameNoteHtml(model.frame ?? null)}` : "";
   const edgeList = (model.edges ?? []).length
     ? `<ul class="edges">${(model.edges ?? [])
         .map((e) => `<li>${escapeHtml(edgeCaption(e))}</li>`)
@@ -339,7 +533,7 @@ export function renderParcelDraw(model: Pick<PanelModel, "ring" | "edges" | "ove
       return `<div class="ovl${extra}"><span class="g ${glyphClass(railState(o.state))}"></span> <span class="key">${escapeHtml(o.id)}</span> <span class="lbl">${escapeHtml(o.label)}</span>${why}</div>`;
     })
     .join("");
-  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${svg}${edgeList}${rows}`;
+  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${svg}${tip}${edgeList}${rows}`;
 }
 
 function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
@@ -353,9 +547,47 @@ function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
     const label = typeof rec.label === "string" ? rec.label : id;
     const reason = typeof rec.reason === "string" ? rec.reason : undefined;
     if (!id) continue;
-    rows.push({ id, state, label, reason });
+    const row: OverlayRow = { id, state, label, reason };
+    if (typeof rec.sfha === "boolean") row.sfha = rec.sfha;
+    const drawKind = stringOrNull(rec.draw);
+    if (drawKind) row.draw = drawKind;
+    rows.push(row);
   }
   return rows;
+}
+
+function zoningCitationUrl(host: Record<string, unknown>): string | null {
+  const brief = asRecord(host.brief);
+  const sections = brief && Array.isArray(brief.sections) ? brief.sections : [];
+  for (const raw of sections) {
+    const section = asRecord(raw);
+    if (!section || section.id !== "zoning") continue;
+    for (const c of stringList(section.citations)) {
+      if (/^https:\/\//i.test(c.trim())) return c.trim();
+    }
+    return null;
+  }
+  return null;
+}
+
+function zoningFromDraw(draw: Record<string, unknown>, host: Record<string, unknown>): DrawZoning | null {
+  const attrs = asRecord(draw.attrs);
+  const zoning = attrs ? asRecord(attrs.zoning) : null;
+  if (!zoning) return null;
+  const v = stringOrNull(zoning.v);
+  if (!v) return null;
+  return {
+    v,
+    jurisdiction: stringOrNull(zoning.jurisdiction),
+    state: stringOrNull(zoning.state) ?? "unknown",
+    url: zoningCitationUrl(host),
+  };
+}
+
+function frameFromDraw(draw: Record<string, unknown>): DrawFrame | null {
+  const frame = asRecord(draw.frame);
+  if (!frame) return null;
+  return { units: stringOrNull(frame.units), quality: stringOrNull(frame.quality) };
 }
 
 function batchRowsFrom(rec: Record<string, unknown>): BoardRow[] | null {
@@ -448,7 +680,7 @@ export function parseToolResult(text: string): PanelModel {
         : typeof rec.label === "string"
           ? rec.label
           : parcelNodeId;
-    return {
+    const model: PanelModel = {
       kind: "parcel",
       rows: [],
       overlays: overlaysFromDraw(parcelDraw),
@@ -457,6 +689,11 @@ export function parseToolResult(text: string): PanelModel {
       parcelNodeId,
       label,
     };
+    const zoning = zoningFromDraw(parcelDraw, draw ? rec : (firstParcel ?? rec));
+    if (zoning) model.zoning = zoning;
+    const frame = frameFromDraw(parcelDraw);
+    if (frame) model.frame = frame;
+    return model;
   }
 
   const refused = refusedRowsFrom(rec);
@@ -527,6 +764,24 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   parseToolResult,
   firstTextPart,
   parseToolContent,
+  zoningCitationUrl,
+  zoningFromDraw,
+  frameFromDraw,
+  edgeCaption,
+  edgeIndex,
+  edgeHasRoad,
+  edgeEnds,
+  edgeWord,
+  edgeIsRow,
+  edgeDoor,
+  edgeTipHtml,
+  zoneFamily,
+  floodTint,
+  floodZoneLabel,
+  floodOverlayOf,
+  scaleBarFt,
+  ringSvg,
+  frameNoteHtml,
 ];
 
 export function inlineSharedSource(): string {
@@ -723,6 +978,15 @@ export function htmlContractViolations(html: string): string[] {
   if (/Not read yet/.test(html)) {
     violations.push("hatch_labeled_unread");
   }
+  if (!html.includes('addEventListener("pointerenter"') || !html.includes('data-edge="')) {
+    violations.push("edge_hover_unbound");
+  }
+  if (!/adjacency\s*===\s*"ROW"/.test(html) || !html.includes(ACROSS_ROW)) {
+    violations.push("row_door_unguarded");
+  }
+  if (!html.includes('method:"ui/open-link"')) {
+    violations.push("open_link_unbound");
+  }
   const boundCopy = [
     NOTHING_TO_OPEN,
     OPEN_DID_NOT_REACH_ME,
@@ -800,6 +1064,20 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
 .edges li{margin:0 0 4px}
 .why{display:block;color:var(--ss-slate);margin-top:2px}
 .reason{color:var(--ss-slate)}
+.edge{fill:none;stroke:var(--ss-t3);stroke-opacity:0;stroke-width:10;stroke-linecap:round;pointer-events:stroke;cursor:pointer}
+.edge.hot{stroke-opacity:1;stroke-width:4}
+svg.ring text{font:var(--ss-fs-meta) ui-monospace,Consolas,monospace;fill:var(--ss-t5);pointer-events:none}
+svg.ring .zn{font:600 var(--ss-fs-body) var(--ss-ui);fill:var(--ss-t3);pointer-events:auto}
+svg.ring .zn.link{cursor:pointer;text-decoration:underline}
+svg.ring .fz{fill:var(--ss-blue)}
+svg.ring .sm{fill:var(--ss-t6)}
+.flood-tint,.north,.scale{pointer-events:none}
+.tip{font:var(--ss-fs-meta)/1.6 ui-monospace,Consolas,monospace;color:var(--ss-t5);margin:0 0 8px;min-height:1.6em}
+.tip span{margin-right:8px}
+.tip .tn{color:var(--ss-atom)}
+.tip .tf,.tip .tb{color:var(--ss-t3)}
+.tip .btn{padding:3px 8px;font-size:var(--ss-fs-meta)}
+.fnote{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin:0 0 8px}
 .acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:8px 10px 12px;flex:0 0 auto;position:sticky;bottom:0;background:var(--ss-ink);z-index:2}
 .btn{font:var(--ss-fs-body)/1.2 var(--ss-ui);border:1px solid var(--ss-line-14);background:var(--ss-raised);color:var(--ss-t3);border-radius:8px;padding:7px 12px;cursor:pointer}
 .btn.primary{background:var(--ss-blue);color:var(--ss-void);border-color:var(--ss-blue)}
@@ -847,6 +1125,12 @@ svg.ring{display:block;width:100%;height:auto;margin:8px 0}
   var COUNTY_UNKNOWN=${JSON.stringify(COUNTY_UNKNOWN)};
   var NOT_ON_FILE_PREFIX=${JSON.stringify(NOT_ON_FILE_PREFIX)};
   var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(NO_BAKED_SNAPSHOT_PREFIX)};
+  var EDGE_WORDS=${JSON.stringify(EDGE_WORDS)};
+  var ACROSS_ROW=${JSON.stringify(ACROSS_ROW)};
+  var EDGE_TIP_HINT=${JSON.stringify(EDGE_TIP_HINT)};
+  var UNIT_REFERENCE=${JSON.stringify(UNIT_REFERENCE)};
+  var SCALE_BAR_FT=${JSON.stringify(SCALE_BAR_FT)};
+  var ZONE_TINT=${JSON.stringify(ZONE_TINT)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
@@ -858,6 +1142,8 @@ ${inlineSharedSource()}
   var sortKey="query";
   var sortDir=1;
   var listingAck=null;
+  var hotEl=null;
+  var pinnedEl=null;
   var rpcId=1;
   var initId=rpcId++;
   var ready=false;
@@ -917,46 +1203,57 @@ ${inlineSharedSource()}
     if(reason===["atom","path","pending"].join("_")) return "Withheld, setbacks unruled";
     return reason;
   }
-  function edgeCaption(e){
-    var bits=[];
-    if(e.role) bits.push(e.role);
-    if(e.adjacency) bits.push(e.adjacency);
-    if(e.neighbor) bits.push(e.neighbor);
-    if(e.roadNode) bits.push(e.roadNode);
-    if(e.road) bits.push(e.road);
-    var ft=e.ft!=null?e.ft:e.lengthFt;
-    if(ft!=null) bits.push(ft+" ft");
-    if(e.bearing) bits.push(e.bearing);
-    return bits.join(" · ");
+  function openLink(url){
+    if(!url) return;
+    parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/open-link",params:{url:url}},"*");
   }
-  function edgeIndex(e,i){
-    if(typeof e.i==="number") return e.i;
-    if(e.seg&&typeof e.seg[0]==="number") return e.seg[0];
-    return i;
+  function tipEl(){
+    var root=document.getElementById("root");
+    return root&&typeof root.querySelector==="function"?root.querySelector("[data-tip]"):null;
   }
-  function edgeHasRoad(e){return !!(e.roadNode||e.road)}
-  function ringSvg(ring,edges){
-    if(!ring||ring.length<3) return "";
-    var xs=ring.map(function(p){return p.x}), ys=ring.map(function(p){return p.y});
-    var minX=Math.min.apply(null,xs), maxX=Math.max.apply(null,xs), minY=Math.min.apply(null,ys), maxY=Math.max.apply(null,ys);
-    var pad=18,w=320,h=220;
-    var s=Math.min((w-pad*2)/Math.max(maxX-minX,1),(h-pad*2)/Math.max(maxY-minY,1));
-    var ox=(w-(maxX-minX)*s)/2, oy=(h-(maxY-minY)*s)/2;
-    function pt(p){
-      return (ox+(p.x-minX)*s).toFixed(1)+","+(h-(oy+(p.y-minY)*s)).toFixed(1);
+  function showEdge(n){
+    var idx=Number(n.getAttribute("data-edge"));
+    var e=model.edges&&model.edges[idx];
+    if(!e) return;
+    if(hotEl&&hotEl!==n) hotEl.setAttribute("class","edge");
+    n.setAttribute("class","edge hot");
+    hotEl=n;
+    var tip=tipEl();
+    if(tip){ tip.innerHTML=edgeTipHtml(e,idx); tip.setAttribute("data-edge-shown",String(idx)); }
+  }
+  function clearEdge(){
+    if(hotEl) hotEl.setAttribute("class","edge");
+    hotEl=null;
+    var tip=tipEl();
+    if(tip){ tip.innerHTML=EDGE_TIP_HINT; tip.setAttribute("data-edge-shown","none"); }
+  }
+  function edgeEnter(n){ showEdge(n); }
+  function edgeLeave(n){
+    if(pinnedEl){ if(pinnedEl!==n) showEdge(pinnedEl); return; }
+    clearEdge();
+  }
+  function edgeToggle(n){
+    if(pinnedEl===n){ pinnedEl=null; clearEdge(); return; }
+    pinnedEl=n;
+    showEdge(n);
+  }
+  function bindDrawing(){
+    hotEl=null;
+    pinnedEl=null;
+    var root=document.getElementById("root");
+    if(!root||typeof root.querySelectorAll!=="function") return;
+    var lines=root.querySelectorAll("[data-edge]");
+    for(var i=0;i<lines.length;i++){
+      (function(n){
+        n.addEventListener("pointerenter",function(){ edgeEnter(n); });
+        n.addEventListener("pointerleave",function(){ edgeLeave(n); });
+        n.addEventListener("pointerdown",function(){ edgeToggle(n); });
+      })(lines[i]);
     }
-    var pts=ring.map(pt).join(" ");
-    var road=(edges||[]).map(function(e,i){
-      var idx=edgeIndex(e,i);
-      if(!edgeHasRoad(e)||!ring[idx]||!ring[(idx+1)%ring.length]) return "";
-      return '<polyline points="'+pt(ring[idx])+" "+pt(ring[(idx+1)%ring.length])+'" fill="none" stroke="var(--ss-t3)" stroke-width="7" stroke-linecap="square" opacity=".35"/>';
-    }).join("");
-    var neigh=(edges||[]).map(function(e,i){
-      var idx=edgeIndex(e,i);
-      if(!e.neighbor||edgeHasRoad(e)||!ring[idx]||!ring[(idx+1)%ring.length]) return "";
-      return '<polyline points="'+pt(ring[idx])+" "+pt(ring[(idx+1)%ring.length])+'" fill="none" stroke="var(--ss-t6)" stroke-width="2" stroke-dasharray="4 3"/>';
-    }).join("");
-    return '<svg class="ring" viewBox="0 0 '+w+" "+h+'" aria-label="parcel ring">'+road+neigh+'<polygon points="'+pts+'" fill="var(--ss-void)" fill-opacity=".55" stroke="var(--ss-t3)" stroke-width="2"/></svg>';
+    var links=root.querySelectorAll("[data-zoning-url]");
+    for(var k=0;k<links.length;k++){
+      (function(n){ n.addEventListener("click",function(){ openLink(n.getAttribute("data-zoning-url")); }); })(links[k]);
+    }
   }
   function fingerprint(m){
     return JSON.stringify({kind:m.kind,screenId:m.screenId||null,rows:m.rows,parcelNodeId:m.parcelNodeId||null,overlays:m.overlays,ring:m.ring||[],edges:(m.edges||[]).map(edgeCaption)});
@@ -1015,9 +1312,11 @@ ${inlineSharedSource()}
         return '<div class="ovl'+extra+'">'+glyph(o.state)+' <span class="key">'+esc(o.id)+'</span> <span class="lbl">'+esc(o.label)+"</span>"+why+"</div>";
       }).join("")||'<p class="empty">No overlays on this draw.</p>';
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
-      var svg=ringSvg(model.ring||[],model.edges||[]);
+      var flood=floodOverlayOf(model.overlays);
+      var svg=ringSvg(model.ring||[],model.edges||[],{zoning:model.zoning||null,flood:flood,frame:model.frame||null});
+      var tip=svg?'<div class="tip" data-tip="1">'+EDGE_TIP_HINT+"</div>"+frameNoteHtml(model.frame||null):"";
       var edgeList=(model.edges&&model.edges.length)?'<ul class="edges">'+model.edges.map(function(e){return "<li>"+esc(edgeCaption(e))+"</li>"}).join("")+"</ul>":"";
-      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),'<div class="well">'+node+svg+edgeList+ov+"</div>"+
+      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+svg+tip+edgeList+ov+"</div>"+
         '<div class="acts"><button type="button" class="btn" data-act="save" onclick="window.__ss&&window.__ss.save()">Save property</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
       var listing=root.querySelector('[data-act="listing"]');
       if(listing&&listingAck){
@@ -1026,6 +1325,7 @@ ${inlineSharedSource()}
         listing.setAttribute("data-listing-ack","1");
         listing.setAttribute("data-listing-chars",String(listingAck.chars));
       }
+      bindDrawing();
     } else if(model.kind==="miss"){
       root.innerHTML=card("lookup",'<div class="well">'+(model.misses||[]).map(missLine).join("")+"</div>");
     } else if(model.kind==="refused"){

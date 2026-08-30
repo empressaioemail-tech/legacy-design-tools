@@ -46,6 +46,19 @@ import {
   renderParcelDraw,
   ringSvg,
   unresolvedCaption,
+  ACROSS_ROW,
+  EDGE_TIP_HINT,
+  UNIT_REFERENCE,
+  edgeDoor,
+  edgeIsRow,
+  edgeTipHtml,
+  edgeWord,
+  floodOverlayOf,
+  floodTint,
+  floodZoneLabel,
+  frameNoteHtml,
+  scaleBarFt,
+  zoneFamily,
 } from "../src/mcp-app.js";
 import { registerTools } from "../src/tools.js";
 
@@ -102,7 +115,7 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("String(d.id)===String(initId)");
     expect(html).toContain("pending.push");
     expect(html).not.toContain('id:rpcId++,method:"ui/initialize"');
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p556.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p558.html");
     expect(html).toContain("function fitHost");
     expect(html).toContain("ui/notifications/size-changed");
     expect(html).not.toMatch(/html,body\{[^}]*height:100%/);
@@ -181,6 +194,16 @@ describe("mcp-app contracts", () => {
           .replace("if(ev.source!==window.parent)", "var d=ev.data;if(ev.source!==window.parent)"),
       ),
     ).toContain("origin_unchecked");
+    expect(
+      htmlContractViolations(clean.replace('addEventListener("pointerenter"', 'addEventListener("pointerenterx"')),
+    ).toContain("edge_hover_unbound");
+    expect(htmlContractViolations(clean.replace(/adjacency\s*===\s*"ROW"/g, 'adjacency === "NOPE"'))).toContain(
+      "row_door_unguarded",
+    );
+    expect(htmlContractViolations(clean.split(ACROSS_ROW).join(""))).toContain("row_door_unguarded");
+    expect(htmlContractViolations(clean.replace('method:"ui/open-link"', 'method:"ui/open-url"'))).toContain(
+      "open_link_unbound",
+    );
     for (const sentence of [
       OPEN_DID_NOT_REACH_ME,
       OPEN_SENT,
@@ -663,6 +686,214 @@ describe("Wave J honesty", () => {
     expect(drawn).not.toContain("<b>x</b>");
     expect(drawn).not.toContain('data-pwn="1"');
     expect(drawn).toContain("g-unread");
+  });
+});
+
+/*
+ * P-91 v2 drawing, exported twins. Ids, districts, jurisdictions and flood
+ * states are the fixture doc's (2026-08-30_p91_fixture_set_bastrop.md); the
+ * gold ring, ft and road nodes are the recorded v1 fixture above. Every other
+ * coordinate, bearing and roadClass is a synthetic test input, not a parcel fact.
+ */
+const GOLD_V2_EDGES = [
+  { id: "e0", role: "rear", seg: [0, 1] as [number, number], ft: 98.98, bearing: "S 89°52' W", adjacency: "alley", roadNode: "48021:road:925036023", roadClass: "alley" },
+  { id: "e1", role: "side", seg: [1, 2] as [number, number], ft: 167.99, bearing: "S 0°27' W", adjacency: "neighbor-parcel", roadNode: null, neighbor: "48021:34169" },
+  { id: "e2", role: "front", seg: [2, 3] as [number, number], ft: 99.92, bearing: "N 89°28' E", adjacency: "ROW", roadNode: "48021:road:15113284", roadClass: "local", neighbor: "48021:34121" },
+  { id: "e3", role: "side_corner", seg: [3, 0] as [number, number], ft: 167.32, bearing: "N 0°45' W", adjacency: "ROW", roadNode: "48021:road:129017865", roadClass: "local" },
+];
+const ZONING_URL = "https://gis.example.test/bastrop/zoning/layer/0";
+const GOLD_V2 = {
+  parcelNodeId: "48021:34137",
+  brief: {
+    sections: [
+      { id: "zoning", disposition: "present", data: { district: "SF-1" }, citations: ["http://plain.example.test/first", ZONING_URL, "https://gis.example.test/second"] },
+      { id: "flood", disposition: "present", data: {}, citations: [], citationsDegraded: true },
+    ],
+  },
+  draw: {
+    label: "908 PINE , BASTROP, TX 78602",
+    frame: { units: "ft", origin: "centroid", yAxis: "true-north", quality: "gis-approximate" },
+    ring: GOLD_RING,
+    edges: GOLD_V2_EDGES,
+    attrs: { zoning: { v: "SF-1", jurisdiction: "bastrop_city_tx", state: "present" } },
+    overlays: [
+      { id: "flood", label: "Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD", sfha: false, geom: "none", draw: "tint-ring", state: "present", citations: [], citationsDegraded: true },
+      { id: "envelope", state: "refused", reason: "atom_path_pending", label: "Buildable envelope not computed", draw: "suppress-setback-line" },
+    ],
+  },
+};
+
+describe("P-91 v2 drawing (exported twins)", () => {
+  it("D1: the tooltip carries the edge object's words, ft, bearing, and neighbor or road; ft is omitted when absent, never measured", () => {
+    const e0 = edgeTipHtml(GOLD_V2_EDGES[0]!, 0);
+    expect(e0).toContain("rear");
+    expect(e0).toContain("alley");
+    expect(e0).toContain("98.98 ft");
+    expect(e0).toContain("S 89°52&#39; W");
+    expect(e0).toContain("48021:road:925036023");
+    expect(e0).toContain('data-edge-tip="0"');
+    expect(e0).not.toContain('data-act="open"');
+    const e3 = edgeTipHtml(GOLD_V2_EDGES[3]!, 3);
+    expect(e3).toContain("corner side");
+    expect(e3).toContain("right of way");
+    expect(e3).toContain("48021:road:129017865");
+    expect(e3).toContain("local");
+    expect(e3).not.toContain(ACROSS_ROW);
+    expect(edgeWord("side_corner")).toBe("corner side");
+    expect(edgeWord("neighbor-parcel")).toBe("neighbor");
+    expect(edgeWord("ROW")).toBe("right of way");
+    expect(edgeWord("something-else")).toBe("something-else");
+    expect(edgeWord(null)).toBeNull();
+    const noFt = edgeTipHtml({ ...GOLD_V2_EDGES[1]!, ft: null }, 1);
+    expect(noFt).not.toMatch(/\d ft/);
+    expect(noFt).toContain("48021:34169");
+    const unmapped = edgeTipHtml({ role: "side", adjacency: "unmapped", ft: 40.5 }, 5);
+    expect(unmapped).toContain("unmapped");
+    expect(unmapped).toContain("40.5 ft");
+    expect(unmapped).not.toContain("48021:");
+  });
+
+  it("D2: a shared line is a door; a ROW line names the neighbor across the right of way and is never a door", () => {
+    const door = edgeTipHtml(GOLD_V2_EDGES[1]!, 1);
+    expect(door).toContain('data-act="open"');
+    expect(door).toContain('data-node="48021:34169"');
+    expect(door).toContain('onclick="window.__ss&&window.__ss.open(this)"');
+    expect(door).toContain("neighbor");
+    expect(door).not.toContain("48021:road:");
+    expect(edgeDoor(GOLD_V2_EDGES[1]!)).toBe("48021:34169");
+    const row = edgeTipHtml(GOLD_V2_EDGES[2]!, 2);
+    expect(row).toContain("48021:34121");
+    expect(row).toContain(ACROSS_ROW);
+    expect(row).toContain("48021:road:15113284");
+    expect(row).not.toContain('data-act="open"');
+    expect(edgeIsRow(GOLD_V2_EDGES[2]!)).toBe(true);
+    expect(edgeDoor(GOLD_V2_EDGES[2]!)).toBeNull();
+    expect(edgeDoor({ neighbor: "48021:1", adjacency: "side" })).toBe("48021:1");
+    expect(edgeDoor({ adjacency: "side" })).toBeNull();
+  });
+
+  it("D3: districts map to a family by prefix; the tint is an existing Stone token; unknown prefixes take none", () => {
+    expect(zoneFamily("SF-1")).toBe("residential");
+    expect(zoneFamily("R-2")).toBe("residential");
+    expect(zoneFamily("GC")).toBe("commercial");
+    expect(zoneFamily("C-1")).toBe("commercial");
+    expect(zoneFamily("MU")).toBe("mixed");
+    expect(zoneFamily("PI")).toBe("public");
+    expect(zoneFamily("P/OS")).toBe("public");
+    expect(zoneFamily("PDD")).toBeNull();
+    expect(zoneFamily("")).toBeNull();
+    expect(zoneFamily(null)).toBeNull();
+    expect(zoneFamily("GCX")).toBeNull();
+    const cues = (v: string) => ({ zoning: { v, jurisdiction: "bastrop_city_tx", state: "present", url: null } });
+    const ring = GOLD_RING.map(([x, y]) => ({ x, y }));
+    expect(ringSvg(ring, [], cues("SF-1"))).toContain('stroke="var(--ss-t3)" stroke-width="2" data-zone-family="residential"');
+    expect(ringSvg(ring, [], cues("GC"))).toContain('stroke="var(--ss-blue)" stroke-width="2" data-zone-family="commercial"');
+    expect(ringSvg(ring, [], cues("MU"))).toContain('stroke="var(--ss-atom)" stroke-width="2" data-zone-family="mixed"');
+    expect(ringSvg(ring, [], cues("P/OS"))).toContain('stroke="var(--ss-t5)" stroke-width="2" data-zone-family="public"');
+    const pdd = ringSvg(ring, [], cues("PDD"));
+    expect(pdd).toContain('stroke="var(--ss-t3)" stroke-width="2"/>');
+    expect(pdd).not.toContain("data-zone-family");
+    expect(pdd).toContain('data-zoning="PDD"');
+    expect(pdd).toContain(">bastrop_city_tx</text>");
+    const notPresent = ringSvg(ring, [], { zoning: { v: "SF-1", jurisdiction: "x", state: "unknown", url: null } });
+    expect(notPresent).not.toContain("data-zoning");
+    expect(notPresent).not.toContain("data-zone-family");
+    expect(notPresent).not.toContain("SF-1");
+    const linked = ringSvg(ring, [], { zoning: { v: "SF-1", jurisdiction: "x", state: "present", url: ZONING_URL } });
+    expect(linked).toContain(`data-zoning-url="${ZONING_URL}"`);
+    expect(linked).toContain('class="zn link"');
+    expect(ringSvg(ring, [], cues("SF-1"))).not.toContain("data-zoning-url");
+  });
+
+  it("D4: tint-ring tints light for sfha false, heavy for sfha true, none for MINIMAL or an unstated sfha; the zone prints from the label", () => {
+    expect(floodTint({ id: "flood", state: "present", label: "Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD", sfha: false, draw: "tint-ring" })).toBe("light");
+    expect(floodTint({ id: "flood", state: "present", label: "Zone A", sfha: true, draw: "tint-ring" })).toBe("heavy");
+    expect(floodTint({ id: "flood", state: "present", label: "Zone AE FLOODWAY", sfha: true, draw: "tint-ring" })).toBe("heavy");
+    expect(floodTint({ id: "flood", state: "present", label: "Zone X AREA OF MINIMAL FLOOD HAZARD", sfha: false, draw: "tint-ring" })).toBeNull();
+    expect(floodTint({ id: "flood", state: "present", label: "Zone A", draw: "tint-ring" })).toBeNull();
+    expect(floodTint({ id: "flood", state: "unknown", label: "Flood record not checked", draw: "legend-only" })).toBeNull();
+    expect(floodTint(null)).toBeNull();
+    expect(floodZoneLabel("Zone AE FLOODWAY")).toBe("Zone AE floodway");
+    expect(floodZoneLabel("Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD")).toBe("Zone X");
+    expect(floodZoneLabel("Zone A")).toBe("Zone A");
+    expect(floodZoneLabel("Flood record not checked")).toBe("Flood record not checked");
+    expect(floodOverlayOf([{ id: "envelope", state: "refused", label: "x" }, { id: "flood", state: "present", label: "Zone A" }])?.label).toBe("Zone A");
+    expect(floodOverlayOf([])).toBeNull();
+    const ring = GOLD_RING.map(([x, y]) => ({ x, y }));
+    const heavy = ringSvg(ring, [], { flood: { id: "flood", state: "present", label: "Zone AE FLOODWAY", sfha: true, draw: "tint-ring" } });
+    expect(heavy).toContain('data-flood-tint="heavy"');
+    expect(heavy).toContain('fill="var(--ss-blue)" fill-opacity=".32"');
+    expect(heavy).toContain('data-flood-zone="Zone AE floodway"');
+    const light = ringSvg(ring, [], { flood: { id: "flood", state: "present", label: "Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD", sfha: false, draw: "tint-ring" } });
+    expect(light).toContain('data-flood-tint="light"');
+    expect(light).toContain('fill="var(--ss-blue)" fill-opacity=".14"');
+    expect(light).toContain('data-flood-zone="Zone X"');
+    const none = ringSvg(ring, [], { flood: { id: "flood", state: "present", label: "Zone X AREA OF MINIMAL FLOOD HAZARD", sfha: false, draw: "tint-ring" } });
+    expect(none).not.toContain("data-flood-tint");
+    expect(none).not.toContain("data-flood-zone");
+  });
+
+  it("D7: the scale bar is a round number from the ring extent, drawn at the ring's pixel scale and labelled as a unit reference; no units means no bar", () => {
+    expect(scaleBarFt(101.21)).toBe(50);
+    expect(scaleBarFt(300)).toBe(100);
+    expect(scaleBarFt(28)).toBe(10);
+    expect(scaleBarFt(500)).toBe(200);
+    expect(scaleBarFt(50)).toBe(25);
+    expect(scaleBarFt(19)).toBe(10);
+    const ring = GOLD_RING.map(([x, y]) => ({ x, y }));
+    const withFrame = ringSvg(ring, [], { frame: { units: "ft", quality: "gis-approximate" } });
+    expect(withFrame).toContain('data-north="up"');
+    expect(withFrame).toContain('data-scale-ft="50"');
+    expect(withFrame).toContain(`50 ft <tspan class="sm">${UNIT_REFERENCE}</tspan>`);
+    const poly = /<polygon class="ring-fill" points="([^"]+)"/.exec(withFrame)?.[1] ?? "";
+    const xs = poly.split(" ").map((p) => Number(p.split(",")[0]));
+    const ringPx = Math.max(...xs) - Math.min(...xs);
+    const bar = /<g class="scale" data-scale-ft="50"><line x1="([\d.]+)" y1="\d+" x2="([\d.]+)"/.exec(withFrame);
+    expect(bar).not.toBeNull();
+    const barPx = Number(bar![2]) - Number(bar![1]);
+    expect(Math.abs(barPx / ringPx - 50 / 101.21)).toBeLessThan(0.005);
+    const noUnits = ringSvg(ring, [], { frame: { units: null, quality: "gis-approximate" } });
+    expect(noUnits).toContain('data-north="up"');
+    expect(noUnits).not.toContain("data-scale-ft");
+    const noFrame = ringSvg(ring, []);
+    expect(noFrame).not.toContain("data-north");
+    expect(noFrame).not.toContain("data-scale-ft");
+    expect(frameNoteHtml({ units: "ft", quality: "gis-approximate" })).toContain('data-frame-quality="gis-approximate"');
+    expect(frameNoteHtml({ units: "ft", quality: null })).toBe("");
+    expect(frameNoteHtml(null)).toBe("");
+  });
+
+  it("parses attrs.zoning, the zoning section's first https citation, frame, and the flood overlay's sfha and draw", () => {
+    const model = parseToolResult(JSON.stringify(GOLD_V2));
+    expect(model.kind).toBe("parcel");
+    expect(model.zoning).toEqual({ v: "SF-1", jurisdiction: "bastrop_city_tx", state: "present", url: ZONING_URL });
+    expect(model.frame).toEqual({ units: "ft", quality: "gis-approximate" });
+    expect(model.overlays[0]).toMatchObject({ id: "flood", sfha: false, draw: "tint-ring" });
+    expect(model.overlays[1]?.sfha).toBeUndefined();
+    const httpOnly = parseToolResult(
+      JSON.stringify({ ...GOLD_V2, brief: { sections: [{ id: "zoning", citations: ["http://plain.example.test/only"] }] } }),
+    );
+    expect(httpOnly.zoning?.url).toBeNull();
+    const noBrief = parseToolResult(JSON.stringify({ parcelNodeId: GOLD_V2.parcelNodeId, draw: GOLD_V2.draw }));
+    expect(noBrief.zoning?.url).toBeNull();
+    expect(noBrief.zoning?.v).toBe("SF-1");
+    const noAttrs = parseToolResult(JSON.stringify({ parcelNodeId: GOLD_V2.parcelNodeId, draw: { ...GOLD_V2.draw, attrs: {} } }));
+    expect(noAttrs.zoning).toBeUndefined();
+    const emptyDistrict = parseToolResult(
+      JSON.stringify({ parcelNodeId: GOLD_V2.parcelNodeId, draw: { ...GOLD_V2.draw, attrs: { zoning: { v: "", state: "present" } } } }),
+    );
+    expect(emptyDistrict.zoning).toBeUndefined();
+    const noFrame = parseToolResult(JSON.stringify({ parcelNodeId: GOLD_V2.parcelNodeId, draw: { ...GOLD_V2.draw, frame: undefined } }));
+    expect(noFrame.frame).toBeUndefined();
+    const batchNode = parseToolResult(JSON.stringify({ parcels: [{ parcelNodeId: GOLD_V2.parcelNodeId, brief: GOLD_V2.brief, draw: GOLD_V2.draw }] }));
+    expect(batchNode.zoning?.url).toBe(ZONING_URL);
+    const drawn = renderParcelDraw(model);
+    expect(drawn).toContain(EDGE_TIP_HINT);
+    expect(drawn).toContain('data-frame-quality="gis-approximate"');
+    expect(drawn).toContain('data-edge="1"');
+    expect(drawn).toContain('data-zoning="SF-1"');
+    expect(drawn).toContain('data-flood-tint="light"');
+    expect(drawn).not.toContain("atom_path_pending");
   });
 });
 
