@@ -17,6 +17,13 @@ import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
 import { setPeAccessTierFromStripe } from "./peIdentity";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
+import {
+  configuredExtraSeatPriceId,
+  configuredTeamPriceIds,
+  extractStripePriceItems,
+  parseMetadataSeats,
+  resolveTeamSeatsPurchased,
+} from "./peTeamSeatsFromStripe";
 
 /** 30-day unlock bound (LOCKED 2026-08-10 ladder: "$15, 30 days — not forever"). */
 const PE_UNLOCK_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -281,6 +288,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
   checkoutKind: string | null;
   parcelNodeId: string | null;
   subscriptionTierRaw: string | null;
+  seatsPurchased: number | null;
 } {
   const meta = obj.metadata;
   if (!meta || typeof meta !== "object") {
@@ -289,6 +297,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       checkoutKind: null,
       parcelNodeId: null,
       subscriptionTierRaw: null,
+      seatsPurchased: null,
     };
   }
   const record = meta as Record<string, unknown>;
@@ -302,6 +311,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       typeof record.subscription_tier === "string"
         ? record.subscription_tier
         : null,
+    seatsPurchased: parseMetadataSeats(record.seats_purchased),
   };
 }
 
@@ -450,6 +460,12 @@ export async function handleStripeWebhook(
         subscriptionTier: grantTier,
         source,
         stripeCustomerId: customerId,
+        seatsPurchased: await seatsPurchasedForPeGrant({
+          grantTier,
+          obj,
+          metadataSeats: peMeta.seatsPurchased,
+          subscriptionId,
+        }),
       });
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
@@ -506,6 +522,14 @@ export async function handleStripeWebhook(
         subscriptionTier: active ? grantTier : null,
         source: "stripe_sub",
         stripeCustomerId: typeof obj.customer === "string" ? obj.customer : null,
+        seatsPurchased: active
+          ? await seatsPurchasedForPeGrant({
+              grantTier,
+              obj,
+              metadataSeats: peMeta.seatsPurchased,
+              subscriptionId: typeof obj.id === "string" ? obj.id : null,
+            })
+          : null,
       });
       return {
         handled: true,
@@ -586,6 +610,38 @@ function periodEndFromStripe(obj: Record<string, unknown>): Date | null {
   const end = obj.current_period_end;
   if (typeof end === "number") return new Date(end * 1000);
   return null;
+}
+
+async function seatsPurchasedForPeGrant(input: {
+  grantTier: PeSubscriptionTier | null;
+  obj: Record<string, unknown>;
+  metadataSeats: number | null;
+  subscriptionId: string | null;
+}): Promise<number | null> {
+  let items = extractStripePriceItems(input.obj);
+  if (
+    input.grantTier === "team" &&
+    items.length === 0 &&
+    input.subscriptionId &&
+    isStripeConfigured()
+  ) {
+    try {
+      const sub = await fetchStripeSubscription(input.subscriptionId);
+      items = extractStripePriceItems(sub);
+    } catch (err) {
+      logger.warn(
+        { err, subscriptionId: input.subscriptionId },
+        "stripe: team seats subscription fetch failed",
+      );
+    }
+  }
+  return resolveTeamSeatsPurchased({
+    grantTier: input.grantTier,
+    metadataSeats: input.metadataSeats,
+    items,
+    teamPriceIds: configuredTeamPriceIds(),
+    extraSeatPriceId: configuredExtraSeatPriceId(),
+  });
 }
 
 async function fetchStripeSubscription(

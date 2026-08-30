@@ -191,6 +191,51 @@ export interface AddressLandUseEntry {
 }
 
 /**
+ * CAD roll keyed by normalized situs address at the DECLARED vintage — the
+ * lookup `resolveAddressLandUse` consumes. DISTINCT ON collapses address
+ * collisions within that year only (deterministic prop_id tie-break). The
+ * owner is used ONLY for the per-match gate and never enters a payload.
+ * READ-ONLY.
+ */
+export async function fetchCountyLandUseByAddress(
+  pool: QueryablePool,
+  fips: string,
+): Promise<Map<string, AddressLandUseEntry>> {
+  const out = new Map<string, AddressLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
+  if (!(await tableExists(pool, "cad_property"))) return out;
+  const r = await pool.query<{
+    naddr: string;
+    property_use_code: string;
+    source_vintage: string;
+    owner_name: string | null;
+  }>(
+    `SELECT DISTINCT ON (upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')))
+            upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) AS naddr,
+            property_use_code, source_vintage, owner_name
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL
+        AND situs_address IS NOT NULL
+        AND situs_address <> ''
+      ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
+               prop_id`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    if (!row.naddr) continue;
+    out.set(row.naddr, {
+      code: row.property_use_code,
+      vintage: row.source_vintage,
+      owner: row.owner_name,
+    });
+  }
+  return out;
+}
+
+/**
  * Resolve a situs-address-matched land-use through the per-match owner gate.
  *
  * Returns the CAD entry ONLY when an address match exists AND the TxGIO owner

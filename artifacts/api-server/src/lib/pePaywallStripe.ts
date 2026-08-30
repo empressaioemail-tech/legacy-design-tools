@@ -11,12 +11,12 @@
  * with brokerageStripe.ts):
  *   STRIPE_SOLO_PRICE_ID           Smart Site Solo   $49/mo
  *   STRIPE_STUDIO_PRICE_ID         Smart Site Studio $129/mo
- *   STRIPE_TEAM_PRICE_ID           Smart Site Team   $299/mo (covers 10 seats)
+ *   STRIPE_TEAM_PRICE_ID           Smart Site Team   $299/mo (covers 3 seats)
  *   STRIPE_TEAM_SEAT_PRICE_ID      Smart Site Team additional seat $25/mo
  *   STRIPE_PE_UNLOCK_PRICE_ID      $15 one-time 30-day property unlock
  *   STRIPE_SOLO_ANNUAL_PRICE_ID    Smart Site Solo   $490/yr  (ruled 2026-08-24)
  *   STRIPE_STUDIO_ANNUAL_PRICE_ID  Smart Site Studio $1,290/yr
- *   STRIPE_TEAM_ANNUAL_PRICE_ID    Smart Site Team   $2,990/yr (covers 10 seats)
+ *   STRIPE_TEAM_ANNUAL_PRICE_ID    Smart Site Team   $2,990/yr (covers 3 seats)
  *
  * FAIL CLOSED: a tier whose price id is not configured refuses checkout
  * (PeCheckoutConfigError -> 503) rather than defaulting to any other
@@ -36,9 +36,9 @@ import {
   type StripeCheckoutResult,
 } from "./brokerageStripe";
 import { setPeStripeCustomerId } from "./peIdentity";
+import { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
-/** Seats included in the Team base price (LOCKED ladder: "$299/mo for up to 10 seats"). */
-export const PE_TEAM_INCLUDED_SEATS = 10;
+export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
 /** 30-day bound on the $15 per-property unlock (LOCKED ladder). */
 export const PE_PROPERTY_UNLOCK_DURATION_DAYS = 30;
@@ -84,7 +84,7 @@ const TIER_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> = {
  * Annual prices, ratified by operator ruling 2026-08-24
  * (`_decisions/2026-08-24_stripe_annual_pricing_and_live_activation.md`):
  * two months free — Solo $490/yr, Studio $1,290/yr, Team $2,990/yr (base
- * covers 10 seats). There is NO annual extra-seat price: extra seats stay
+ * covers 3 seats). There is NO annual extra-seat price: extra seats stay
  * monthly $25, and because Stripe Checkout requires every recurring line
  * item in one subscription to share a billing interval, an annual Team
  * checkout with more than the included seats is REFUSED rather than
@@ -317,7 +317,7 @@ export async function createPeSubscriptionCheckoutSession(input: {
     // base monthly. Route zod schema already rejects this with 400; this
     // guards programmatic callers.
     throw new Error(
-      "annual Team checkout supports at most the 10 included seats — extra seats bill monthly only",
+      `annual Team checkout supports at most the ${PE_TEAM_INCLUDED_SEATS} included seats — extra seats bill monthly only`,
     );
   }
 
@@ -388,6 +388,11 @@ export async function createPeSubscriptionCheckoutSession(input: {
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   };
+  if (tier === "team") {
+    const billedSeats = String(PE_TEAM_INCLUDED_SEATS + extraSeats);
+    params["metadata[seats_purchased]"] = billedSeats;
+    params["subscription_data[metadata][seats_purchased]"] = billedSeats;
+  }
   applyPeCheckoutUiMode(params, input);
   if (extraSeats > 0 && seatPriceId) {
     params["line_items[1][price]"] = seatPriceId;

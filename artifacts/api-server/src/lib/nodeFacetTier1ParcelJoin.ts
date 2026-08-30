@@ -171,3 +171,30 @@ export async function fetchParcelRowsByPropIds(
   );
   return r.rows;
 }
+
+/**
+ * Parcel rows for a list of NORMALIZED situs keys (`normalizeSitusAddress`)
+ * in one county. The situs-address recovery path uses this when the
+ * county's prop_id join is gate-blocked. Owner is selected (the per-match
+ * gate needs it); it is never copied into a payload. DISTINCT ON
+ * feature_index, ordered by feature_index. A situs with several features
+ * returns several rows; the caller keeps the first.
+ */
+export async function fetchParcelRowsBySitusKeys(
+  pool: QueryablePool,
+  fips: string,
+  src: ParcelTableSource,
+  situsKeys: readonly string[],
+): Promise<ParcelJoinRow[]> {
+  if (situsKeys.length === 0) return [];
+  const r = await pool.query<ParcelJoinRow>(
+    `SELECT DISTINCT ON (feature_index)
+            ${parcelSelectList(src, true)}
+       FROM ${src.table}
+      WHERE county_fips = $1
+        AND upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) = ANY($2::text[])
+      ORDER BY feature_index`,
+    [fips, [...situsKeys]],
+  );
+  return r.rows;
+}
