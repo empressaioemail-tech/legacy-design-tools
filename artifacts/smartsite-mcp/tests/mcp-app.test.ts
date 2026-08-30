@@ -80,6 +80,33 @@ import {
   sourceOf,
   whyMessage,
   whyQuestion,
+  DECLARED_STATUSES,
+  DUP_NOT_ADDED,
+  LOOK_UP_LABEL,
+  NOT_IMPLEMENTED_PREFIX,
+  NOT_READY_INFIX,
+  NOT_RETURNED,
+  NO_SCREENS_YET,
+  REFUSED_PREFIX,
+  STUB_READ_NOTE,
+  UNRESOLVED_GROUP,
+  USE_THIS_LABEL,
+  boardGroups,
+  candidateControlsHtml,
+  candidateFor,
+  countyFipsOf,
+  declaredLineHtml,
+  degradedNotesHtml,
+  knownRank,
+  lookupControlHtml,
+  lookupMessage,
+  lookupRowFor,
+  reopenScreenMessage,
+  screenSummaryFor,
+  screensListHtml,
+  sortBoardRows,
+  stubReadNoteHtml,
+  useCandidateMessage,
 } from "../src/mcp-app.js";
 import { registerTools } from "../src/tools.js";
 
@@ -1177,5 +1204,313 @@ describe("mcp-app registration", () => {
     }
     await client.close();
     await server.close();
+  });
+});
+
+/*
+ * P-91 v2 board (S8), exported twins. Screen rows in the p543 wire shape
+ * (peScreenSave.ts ScreenRow: candidates on an ambiguous row, stubRead,
+ * degraded.duplicates and degraded.timedOut; ScreenSummary for the bare
+ * list_screens), and every declared body the p558 server emits (tools.ts,
+ * tool-honesty.ts, export-instrument.ts, entitlement.ts). The ids and labels
+ * for 908 Pine, 111 Rainmaker Cv and 927 Main are the fixture doc's; every
+ * other id, label, date, count and status number is a SYNTHETIC test input.
+ */
+const S8_STUB = { situs: "present", zoning: "present", landUse: "absent", flood: "present", drainage: "unknown", envelope: "refused" };
+const S8_ROWS = [
+  { id: "r1", ordinal: 0, query: "908 Pine, Bastrop TX", parcelNodeId: "48021:34137", resolution: "resolved", source: "pasted", stub: S8_STUB, stubRead: "ok" },
+  /* a contradictory wire: a stub claiming present under an errored read; the panel refuses the claim */
+  { id: "r2", ordinal: 1, query: "111 Rainmaker Cv, Bastrop TX", parcelNodeId: "48021:8720522", resolution: "resolved", source: "pasted", stub: S8_STUB, stubRead: "error" },
+  { id: "r3", ordinal: 2, query: "100 Main St", parcelNodeId: null, resolution: "ambiguous", source: "pasted", candidates: [{ parcelNodeId: "48021:33223", label: "927 MAIN ST , BASTROP, TX 78602" }, { parcelNodeId: "48209:700001", label: "100 MAIN ST , KYLE, TX 78640", countyFips: "48209" }] },
+  { id: "r4", ordinal: 3, query: "zzzz-not-a-situs-99999", parcelNodeId: null, resolution: "unresolved", source: "pasted" },
+  { id: "r5", ordinal: 4, query: "48021:900001", parcelNodeId: null, resolution: "unresolved", source: "pasted" },
+  { id: "r6", ordinal: 5, query: "500 Slow Ln", parcelNodeId: null, resolution: "unresolved", source: "pasted", resolveTimedOut: true },
+];
+const S8_SCREEN = {
+  screen: {
+    id: "scr-s8",
+    name: "Higgins block",
+    createdAt: "2026-08-30T09:00:00.000Z",
+    updatedAt: "2026-08-30T09:05:00.000Z",
+    rows: S8_ROWS,
+    stubsDegraded: true,
+    degraded: {
+      timedOut: ["500 Slow Ln"],
+      duplicates: [{ query: "111 Rainmaker Cove, Bastrop TX", parcelNodeId: "48021:8720522", keptQuery: "111 Rainmaker Cv, Bastrop TX" }],
+    },
+  },
+};
+const S8_SCREENS = {
+  screens: [
+    { id: "scr-a", name: "Older", rowCount: 3, createdAt: "2026-08-28T09:00:00.000Z", updatedAt: "2026-08-28T09:00:00.000Z" },
+    { id: "scr-c", name: "Newest", rowCount: 1, createdAt: "2026-08-30T09:00:00.000Z", updatedAt: "2026-08-30T09:05:00.000Z" },
+    { id: "scr-b", name: "Uncounted", createdAt: "2026-08-29T09:00:00.000Z", updatedAt: "2026-08-29T09:00:00.000Z" },
+    { id: "scr-d", name: "Undated" },
+  ],
+};
+const S8_ALL_UNREAD = { situs: "unread", zoning: "unread", landUse: "unread", flood: "unread", drainage: "unread", envelope: "unread" };
+const S8_DECLARED = {
+  errorJson: { status: "error", reason: "not_found", upstreamStatus: 404, error: "not_found", upstreamBodyStatus: "gone" },
+  errorUnmeasured: { status: "error", reason: "export_failed", upstreamStatus: "unmeasured", message: "The export proxy did not answer." },
+  nonJson: { status: "error", reason: "upstream_non_json", upstreamStatus: 502, brief: "<html>502 Bad Gateway</html>" },
+  cap: { status: "refused", reason: "parcel_batch_cap", cap: 25, received: 30, depth: "node" },
+  screenId: { status: "refused", reason: "screen_id_not_accepted", error: "screen_id_not_accepted" },
+  hop1: { status: "not_implemented", reason: "depth_not_implemented", depth: "hop1" },
+  cortex: { status: "degraded", reason: "cortex_not_configured", message: "Smart Site MCP cannot reach the workbench backend." },
+  exportDown: { status: "degraded", tool: "export_instrument", reason: "hauska_mcp_unavailable", dependency: "hauska-mcp", message: "Export is temporarily unavailable because Hauska MCP is unreachable.", hauska: { state: "down" } },
+  notReady: { status: "not_ready", tool: "export_instrument", reason: "P-87 export honesty", message: "export_instrument is not available on Smart Site MCP yet." },
+  upgrade: { status: "upgrade_required", reason: "deep_report", tier: "free", subscriptionTier: null, message: "Deep report needs Solo or above." },
+};
+
+describe("P-91 v2 board (exported twins)", () => {
+  it("parses candidates, stubRead, degraded and the screen id off a create_screen body; an errored read forces every rail to unread", () => {
+    const model = parseToolResult(JSON.stringify(S8_SCREEN));
+    expect(model.kind).toBe("board");
+    expect(model.screenId).toBe("scr-s8");
+    expect(model.stubsDegraded).toBe(true);
+    expect(model.rows).toHaveLength(6);
+    expect(model.rows[0]).toEqual({ query: "908 Pine, Bastrop TX", parcelNodeId: "48021:34137", resolution: "resolved", rails: { situs: "present", zoning: "present", landUse: "absent-verified", flood: "present", drainage: "unknown", envelope: "refused" }, stubRead: "ok" });
+    expect(model.rows[1]).toEqual({ query: "111 Rainmaker Cv, Bastrop TX", parcelNodeId: "48021:8720522", resolution: "resolved", rails: S8_ALL_UNREAD, stubRead: "error" });
+    expect(model.rows[2]).toEqual({
+      query: "100 Main St",
+      parcelNodeId: null,
+      resolution: "ambiguous",
+      rails: S8_ALL_UNREAD,
+      candidates: [
+        { parcelNodeId: "48021:33223", label: "927 MAIN ST , BASTROP, TX 78602" },
+        { parcelNodeId: "48209:700001", label: "100 MAIN ST , KYLE, TX 78640", countyFips: "48209" },
+      ],
+    });
+    expect(model.rows[3]).toEqual({ query: "zzzz-not-a-situs-99999", parcelNodeId: null, resolution: "unresolved", rails: S8_ALL_UNREAD });
+    expect(model.rows[5]).toEqual({ query: "500 Slow Ln", parcelNodeId: null, resolution: "unresolved", rails: S8_ALL_UNREAD });
+    expect(model.degraded).toEqual({
+      timedOut: ["500 Slow Ln"],
+      duplicates: [{ query: "111 Rainmaker Cove, Bastrop TX", parcelNodeId: "48021:8720522", keptQuery: "111 Rainmaker Cv, Bastrop TX" }],
+    });
+    /* a skipped read with no stub: unread and the read state; an unknown read state is not carried */
+    const skipped = parseToolResult(JSON.stringify({ id: "s", rows: [{ query: "q", parcelNodeId: "48021:1", resolution: "resolved", stubRead: "skipped" }, { query: "r", parcelNodeId: "48021:2", stubRead: "maybe", stub: { situs: "present" } }] }));
+    expect(skipped.rows[0]).toEqual({ query: "q", parcelNodeId: "48021:1", resolution: "resolved", rails: S8_ALL_UNREAD, stubRead: "skipped" });
+    expect(skipped.rows[1]?.stubRead).toBeUndefined();
+    expect(skipped.rows[1]?.rails.situs).toBe("present");
+    expect(skipped.degraded).toBeUndefined();
+    /* the wire's explicit null is a resolution; a row id is never a node; the legacy id fallback binds only a node-shaped id when parcelNodeId is absent */
+    expect(parseToolResult(JSON.stringify({ rows: [{ query: "q", id: "r9" }] })).rows[0]?.parcelNodeId).toBeNull();
+    expect(parseToolResult(JSON.stringify({ rows: [{ query: "q", parcelNodeId: null, id: "48021:1" }] })).rows[0]?.parcelNodeId).toBeNull();
+    expect(parseToolResult(JSON.stringify({ rows: [{ query: "q", id: "48021:1" }] })).rows[0]?.parcelNodeId).toBe("48021:1");
+    /* candidates that name no node are dropped; a duplicate missing a slot is dropped; a timedOut that is not a list is dropped */
+    const junk = parseToolResult(JSON.stringify({ screen: { id: "j", rows: [{ query: "q", resolution: "ambiguous", candidates: [{ parcelNodeId: 7 }, { label: "x" }, "y", { parcelNodeId: "48021:1" }] }], degraded: { timedOut: "x", duplicates: [{ query: "a" }, { query: "a", parcelNodeId: "48021:1", keptQuery: "b" }] } } }));
+    expect(junk.rows[0]?.candidates).toEqual([{ parcelNodeId: "48021:1", label: "48021:1" }]);
+    expect(junk.degraded).toEqual({ duplicates: [{ query: "a", parcelNodeId: "48021:1", keptQuery: "b" }] });
+    expect(panelFingerprint(model)).toBe(panelFingerprint(parseToolResult(JSON.stringify(S8_SCREEN))));
+  });
+
+  it("B1: an ambiguous row paints each candidate with Use this and drafts the add turn for the chosen id only; an unresolved situs offers Look this up; a node id that is not on file offers nothing", () => {
+    const model = parseToolResult(JSON.stringify(S8_SCREEN));
+    const amb = model.rows[2]!;
+    const html = candidateControlsHtml(amb);
+    expect(html).toContain('data-candidates="100 Main St"');
+    expect(html).toContain('data-candidate="48021:33223"');
+    expect(html).toContain('data-candidate="48209:700001"');
+    expect(html).toContain("927 MAIN ST , BASTROP, TX 78602");
+    expect(html).toContain(`data-act="usecand" data-node="48021:33223" data-query="100 Main St" onclick="window.__ss&&window.__ss.useCandidate(this)">${USE_THIS_LABEL}</button>`);
+    expect(html.match(/data-act="usecand"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-act="open"');
+    const first = html.slice(html.indexOf('data-candidate="48021:33223"'), html.indexOf('data-candidate="48209:700001"'));
+    expect(first).not.toContain("data-candidate-county");
+    const second = html.slice(html.indexOf('data-candidate="48209:700001"'));
+    expect(second).toContain('data-candidate-county="48209"');
+    expect(second).toContain(">Hays</span>");
+    /* an unknown fips prints the fips itself, never a county it does not map to */
+    expect(candidateControlsHtml({ query: "q", resolution: "ambiguous", candidates: [{ parcelNodeId: "99999:1", label: "x", countyFips: "99999" }] })).toContain(">99999</span>");
+    expect(candidateControlsHtml(model.rows[0]!)).toBe("");
+    expect(candidateControlsHtml({ query: "q", resolution: "ambiguous", candidates: [] })).toBe("");
+    expect(candidateControlsHtml({ query: "q", resolution: "unresolved", candidates: [{ parcelNodeId: "48021:1", label: "x" }] })).toBe("");
+    expect(lookupControlHtml(model.rows[3]!)).toBe(`<button type="button" class="btn" data-act="lookup" data-query="zzzz-not-a-situs-99999" onclick="window.__ss&&window.__ss.lookup(this)">${LOOK_UP_LABEL}</button>`);
+    expect(lookupControlHtml(model.rows[4]!)).toBe("");
+    expect(lookupControlHtml(amb)).toBe("");
+    expect(lookupControlHtml(model.rows[0]!)).toBe("");
+    expect(useCandidateMessage("48021:33223", "100 Main St")).toBe('Add 48021:33223 to this screen with add_to_screen, source pasted. It is the parcel for "100 Main St". Do not save it.');
+    expect(lookupMessage("zzzz-not-a-situs-99999")).toBe('Run find_parcel for "zzzz-not-a-situs-99999". Do not add anything to a screen yet.');
+    expect(candidateFor(model, "48021:33223", "100 Main St")).toEqual({ parcelNodeId: "48021:33223", label: "927 MAIN ST , BASTROP, TX 78602" });
+    expect(candidateFor(model, "48021:34137", "100 Main St")).toBeNull();
+    expect(candidateFor(model, "48021:33223", "908 Pine, Bastrop TX")).toBeNull();
+    expect(candidateFor(model, null, "100 Main St")).toBeNull();
+    expect(lookupRowFor(model, "zzzz-not-a-situs-99999")?.query).toBe("zzzz-not-a-situs-99999");
+    expect(lookupRowFor(model, "100 Main St")).toBeNull();
+    expect(lookupRowFor(model, "48021:900001")).toBeNull();
+    expect(lookupRowFor(model, "908 Pine, Bastrop TX")).toBeNull();
+    expect(lookupRowFor(model, null)).toBeNull();
+  });
+
+  it("B2: one note per duplicate and per timed-out query, every slot the wire's; an errored or skipped read is named beside the row", () => {
+    const model = parseToolResult(JSON.stringify(S8_SCREEN));
+    const notes = degradedNotesHtml(model.degraded);
+    expect(notes).toContain('<p class="note" data-duplicate="48021:8720522">"111 Rainmaker Cove, Bastrop TX" is the same parcel as "111 Rainmaker Cv, Bastrop TX" (48021:8720522); not added twice.</p>');
+    expect(notes).toContain('<p class="note" data-timed-out="500 Slow Ln">"500 Slow Ln" did not resolve in time; unresolved for now.</p>');
+    expect(degradedNotesHtml(null)).toBe("");
+    expect(degradedNotesHtml(undefined)).toBe("");
+    expect(degradedNotesHtml({})).toBe("");
+    expect(degradedNotesHtml({ duplicates: [{ query: 'a"b', parcelNodeId: "48021:1", keptQuery: "<c>" }] })).toContain('"a&quot;b" is the same parcel as "&lt;c&gt;" (48021:1); not added twice.');
+    expect(stubReadNoteHtml({ stubRead: "error" })).toBe(`<span class="why" data-stub-read="error"><span class="key">${STUB_READ_NOTE}</span> <span class="reason">error</span></span>`);
+    expect(stubReadNoteHtml({ stubRead: "skipped" })).toContain('data-stub-read="skipped"');
+    expect(stubReadNoteHtml({ stubRead: "ok" })).toBe("");
+    expect(stubReadNoteHtml({})).toBe("");
+  });
+
+  it("B3: a bare list_screens parses newest first with the row count only when carried; the list paints one reopen per screen; an empty list paints its own sentence, never the empty board copy", () => {
+    const model = parseToolResult(JSON.stringify(S8_SCREENS));
+    expect(model.kind).toBe("screens");
+    expect(model.rows).toEqual([]);
+    expect(model.screens).toEqual([
+      { id: "scr-c", name: "Newest", rowCount: 1, updatedAt: "2026-08-30T09:05:00.000Z", createdAt: "2026-08-30T09:00:00.000Z" },
+      { id: "scr-b", name: "Uncounted", updatedAt: "2026-08-29T09:00:00.000Z", createdAt: "2026-08-29T09:00:00.000Z" },
+      { id: "scr-a", name: "Older", rowCount: 3, updatedAt: "2026-08-28T09:00:00.000Z", createdAt: "2026-08-28T09:00:00.000Z" },
+      { id: "scr-d", name: "Undated", updatedAt: null, createdAt: null },
+    ]);
+    const html = screensListHtml(model.screens!);
+    expect([...html.matchAll(/data-act="reopen" data-screen="([^"]+)"/g)].map((m) => m[1])).toEqual(["scr-c", "scr-b", "scr-a", "scr-d"]);
+    expect(html).toContain('data-row-count="1">1 row</span>');
+    expect(html).toContain('data-row-count="3">3 rows</span>');
+    expect(html.match(/data-row-count=/g)).toHaveLength(2);
+    expect(html).toContain('data-updated="2026-08-30"');
+    expect(html).not.toContain("T09:05");
+    expect(html).toContain(">Newest</span>");
+    expect(html).toContain('onclick="window.__ss&&window.__ss.reopen(this)">Open</button>');
+    expect(html).not.toContain('data-act="open"');
+    const empty = screensListHtml([]);
+    expect(empty).toContain(NO_SCREENS_YET);
+    expect(empty).toContain("Paste addresses in the chat to make one.");
+    expect(empty).not.toContain(EMPTY_BOARD_TITLE);
+    expect(NO_SCREENS_YET).not.toContain(EMPTY_BOARD_TITLE);
+    expect(parseToolResult('{"screens":[]}')).toEqual({ kind: "screens", rows: [], overlays: [], ring: [], edges: [], screens: [] });
+    expect(parseToolResult('{"screens":"x"}').kind).toBe("empty");
+    expect(parseToolResult(JSON.stringify({ screens: [{ id: 7 }, "x", null, { id: "ok", rowCount: "3" }] })).screens).toEqual([{ id: "ok", name: "ok", updatedAt: null, createdAt: null }]);
+    const zero = parseToolResult(JSON.stringify({ screens: [{ id: "z", rowCount: 0 }] }));
+    expect(zero.screens?.[0]?.rowCount).toBe(0);
+    expect(screensListHtml(zero.screens!)).toContain('data-row-count="0">0 rows</span>');
+    expect(reopenScreenMessage("scr-c")).toBe("Reopen screen scr-c with list_screens. Do not create a new screen.");
+    expect(screenSummaryFor(model, "scr-b")?.name).toBe("Uncounted");
+    expect(screenSummaryFor(model, "scr-z")).toBeNull();
+    expect(screenSummaryFor(model, null)).toBeNull();
+    expect(screenSummaryFor({ screens: undefined }, "scr-b")).toBeNull();
+  });
+
+  it("B4: rows group by county prefix only when more than one county is present; unresolved rows close the board under their own title; a county the map does not name prints its fips", () => {
+    const rows = parseToolResult(JSON.stringify({ id: "x", rows: [
+      { query: "hays", parcelNodeId: "48209:1", resolution: "resolved", stub: S8_STUB },
+      { query: "bastrop", parcelNodeId: "48021:34137", resolution: "resolved", stub: S8_STUB },
+      { query: "zzzz-not-a-situs-99999", parcelNodeId: null, resolution: "unresolved" },
+      { query: "elsewhere", parcelNodeId: "99999:1", resolution: "resolved" },
+      { query: "bastrop 2", parcelNodeId: "48021:33223", resolution: "resolved" },
+    ] })).rows;
+    const g = boardGroups(rows);
+    expect(g.grouped).toBe(true);
+    expect(g.groups.map((x) => [x.fips, x.title, x.rows.map((r) => r.query)])).toEqual([
+      ["48021", "Bastrop", ["bastrop", "bastrop 2"]],
+      ["48209", "Hays", ["hays"]],
+      ["99999", "99999", ["elsewhere"]],
+      [null, UNRESOLVED_GROUP, ["zzzz-not-a-situs-99999"]],
+    ]);
+    const single = rows.filter((r) => countyFipsOf(r.parcelNodeId) !== "48209" && countyFipsOf(r.parcelNodeId) !== "99999");
+    const one = boardGroups(single);
+    expect(one).toEqual({ grouped: false, groups: [{ fips: null, title: null, rows: single }] });
+    expect(one.groups[0]!.rows.map((r) => r.query)).toEqual(["bastrop", "zzzz-not-a-situs-99999", "bastrop 2"]);
+    expect(boardGroups([]).grouped).toBe(false);
+    /* two counties is the boundary: grouped, and no Unresolved group when every row resolved */
+    const two = boardGroups(rows.filter((r) => countyFipsOf(r.parcelNodeId) === "48021" || countyFipsOf(r.parcelNodeId) === "48209"));
+    expect(two.grouped).toBe(true);
+    expect(two.groups.map((x) => x.title)).toEqual(["Bastrop", "Hays"]);
+    expect(countyFipsOf("48021:34137")).toBe("48021");
+    expect(countyFipsOf(" 48209:1 ")).toBe("48209");
+    expect(countyFipsOf("not-an-id")).toBeNull();
+    expect(countyFipsOf(null)).toBeNull();
+    expect(JSON.stringify(g)).not.toMatch(/count|total|\d+ of \d+/);
+  });
+
+  it("B5: the default order is fewest present rails first, ties by query; the query and node sorts still work; the input is never mutated", () => {
+    const model = parseToolResult(JSON.stringify({ id: "x", rows: [
+      { query: "c", parcelNodeId: "48021:3", resolution: "resolved", stub: { situs: "present", zoning: "present", landUse: "present", flood: "present" } },
+      { query: "a", parcelNodeId: "48021:1", resolution: "resolved", stub: { situs: "present" } },
+      { query: "e", parcelNodeId: "48021:5", resolution: "resolved", stub: S8_STUB },
+      { query: "d", parcelNodeId: null, resolution: "unresolved" },
+      { query: "b", parcelNodeId: "48021:2", resolution: "resolved", stub: { flood: "present", zoning: "absent" } },
+    ] }));
+    const rows = model.rows;
+    const before = JSON.stringify(rows);
+    const fp = panelFingerprint(model);
+    expect(rows.map(knownRank)).toEqual([4, 1, 3, 0, 1]);
+    expect(sortBoardRows(rows, "completeness", 1).map((r) => r.query)).toEqual(["d", "a", "b", "e", "c"]);
+    expect(sortBoardRows(rows, "completeness", -1).map((r) => r.query)).toEqual(["c", "e", "a", "b", "d"]);
+    expect(sortBoardRows(rows, "query", 1).map((r) => r.query)).toEqual(["a", "b", "c", "d", "e"]);
+    expect(sortBoardRows(rows, "query", -1).map((r) => r.query)).toEqual(["e", "d", "c", "b", "a"]);
+    expect(sortBoardRows(rows, "id", 1).map((r) => r.parcelNodeId)).toEqual([null, "48021:1", "48021:2", "48021:3", "48021:5"]);
+    expect(JSON.stringify(rows)).toBe(before);
+    expect(rows.map((r) => r.query)).toEqual(["c", "a", "e", "d", "b"]);
+    expect(panelFingerprint(model)).toBe(fp);
+  });
+
+  it("H1: every declared body parses to its own kind with the fields it carries and paints one sentence in the five-state language; a status off the enum is not declared", () => {
+    const parse = (b: unknown) => parseToolResult(JSON.stringify(b));
+    expect(parse(S8_DECLARED.errorJson)).toEqual({ kind: "declared", rows: [], overlays: [], ring: [], edges: [], declared: { status: "error", reason: "not_found", upstreamStatus: 404 } });
+    expect(parse(S8_DECLARED.errorUnmeasured).declared).toEqual({ status: "error", reason: "export_failed", upstreamStatus: "unmeasured", message: "The export proxy did not answer." });
+    expect(parse(S8_DECLARED.nonJson).declared).toEqual({ status: "error", reason: "upstream_non_json", upstreamStatus: 502, brief: "<html>502 Bad Gateway</html>" });
+    expect(parse(S8_DECLARED.cap).declared).toEqual({ status: "refused", reason: "parcel_batch_cap", cap: 25, received: 30, depth: "node" });
+    expect(parse(S8_DECLARED.screenId).declared).toEqual({ status: "refused", reason: "screen_id_not_accepted" });
+    expect(parse(S8_DECLARED.hop1).declared).toEqual({ status: "not_implemented", reason: "depth_not_implemented", depth: "hop1" });
+    expect(parse(S8_DECLARED.cortex).declared).toEqual({ status: "degraded", reason: "cortex_not_configured", message: "Smart Site MCP cannot reach the workbench backend." });
+    expect(parse(S8_DECLARED.exportDown).declared).toEqual({ status: "degraded", reason: "hauska_mcp_unavailable", tool: "export_instrument", message: "Export is temporarily unavailable because Hauska MCP is unreachable." });
+    expect(parse(S8_DECLARED.notReady).declared).toEqual({ status: "not_ready", reason: "P-87 export honesty", tool: "export_instrument", message: "export_instrument is not available on Smart Site MCP yet." });
+    expect(parse(S8_DECLARED.upgrade).declared).toEqual({ status: "upgrade_required", reason: "deep_report", tier: "free", message: "Deep report needs Solo or above." });
+    /* a brief outside upstream_non_json is not shown; junk fields are not carried; a status off the enum is not declared */
+    expect(parse({ status: "error", reason: "x", brief: "y", cap: "25", upstreamStatus: "502", tool: 4 }).declared).toEqual({ status: "error", reason: "x" });
+    expect(parse({ status: "error" }).declared).toEqual({ status: "error", reason: null });
+    expect(parse({ status: "weird", reason: "x" }).kind).toBe("empty");
+    expect(parse({ status: "ok", rows: [{ query: "q", parcelNodeId: "48021:1" }] }).kind).toBe("board");
+    expect(DECLARED_STATUSES).toEqual(["error", "refused", "not_implemented", "degraded", "not_ready", "upgrade_required"]);
+    const line = (b: unknown) => declaredLineHtml(parse(b).declared!);
+    expect(line(S8_DECLARED.errorJson)).toBe(`<div class="miss" data-declared="error" data-reason="not_found"><b>${NOT_RETURNED}: not_found</b><span class="mono" data-upstream-status="404">upstream 404</span></div>`);
+    const unmeasured = line(S8_DECLARED.errorUnmeasured);
+    expect(unmeasured).toContain(`<b>${NOT_RETURNED}: export_failed</b>`);
+    expect(unmeasured).not.toContain("upstream");
+    expect(unmeasured).toContain("The export proxy did not answer.");
+    const nonJson = line(S8_DECLARED.nonJson);
+    expect(nonJson).toContain(`<b>${NOT_RETURNED}: upstream_non_json</b>`);
+    expect(nonJson).toContain('data-upstream-status="502"');
+    expect(nonJson).toContain('<pre class="brief" data-brief="1">&lt;html&gt;502 Bad Gateway&lt;/html&gt;</pre>');
+    expect(nonJson).not.toContain("<html>");
+    const cap = line(S8_DECLARED.cap);
+    expect(cap).toContain(`<b>${REFUSED_PREFIX}: parcel_batch_cap</b>`);
+    expect(cap).toContain('data-cap="25">cap 25</span>');
+    expect(cap).toContain('data-received="30">received 30</span>');
+    expect(cap).toContain('<span class="key">depth</span> <span class="reason">node</span>');
+    expect(line(S8_DECLARED.screenId)).toBe(`<div class="miss" data-declared="refused" data-reason="screen_id_not_accepted"><b>${REFUSED_PREFIX}: screen_id_not_accepted</b></div>`);
+    expect(line(S8_DECLARED.hop1)).toBe(`<div class="miss" data-declared="not_implemented" data-reason="depth_not_implemented"><b>${NOT_IMPLEMENTED_PREFIX}: hop1</b></div>`);
+    expect(line({ status: "not_implemented", reason: "x" })).toContain(`<b>${NOT_IMPLEMENTED_PREFIX}: x</b>`);
+    const cortex = line(S8_DECLARED.cortex);
+    expect(cortex).toContain(`<b>${NOT_RETURNED}: cortex_not_configured</b>`);
+    expect(cortex).toContain("Smart Site MCP cannot reach the workbench backend.");
+    const exportDown = line(S8_DECLARED.exportDown);
+    expect(exportDown).toContain(`<b>${NOT_RETURNED}: hauska_mcp_unavailable</b>`);
+    expect(exportDown).toContain('<span class="key">tool</span> <span class="reason">export_instrument</span>');
+    expect(line(S8_DECLARED.notReady)).toContain(`<b>export_instrument ${NOT_READY_INFIX}: P-87 export honesty</b>`);
+    expect(line({ status: "not_ready", reason: "x" })).toContain(`<b>This tool ${NOT_READY_INFIX}: x</b>`);
+    const up = line(S8_DECLARED.upgrade);
+    expect(up).toContain(`<b>${UPGRADE_TO_OPEN}</b>`);
+    expect(up).toContain('<span class="key">reason</span> <span class="reason">deep_report</span>');
+    expect(up).toContain('<span class="key">tier</span> <span class="reason">free</span>');
+    expect(up).toContain("Deep report needs Solo or above.");
+    expect(line({ status: "error" })).toContain(`<b>${NOT_RETURNED}: unstated</b>`);
+    for (const b of Object.values(S8_DECLARED)) expect(line(b)).not.toContain(EMPTY_BOARD_TITLE);
+  });
+
+  it("htmlContractViolations: the S8 checks fire on violated copies", () => {
+    const clean = buildAppHtml();
+    expect(htmlContractViolations(clean)).toEqual([]);
+    expect(htmlContractViolations(clean.replace(/function sendUseCandidate/g, "function sendPick"))).toContain("candidate_control_unbound");
+    expect(htmlContractViolations(clean.split(DUP_NOT_ADDED).join("added once"))).toContain("duplicate_note_unbound");
+    expect(htmlContractViolations(clean.replace(/function sendReopen/g, "function sendAgain"))).toContain("reopen_opener_unbound");
+    expect(htmlContractViolations(clean.replace(/function boardGroups/g, "function boardParts"))).toContain("county_group_unmarked");
+    expect(htmlContractViolations(clean.replace('var sortKey="completeness"', 'var sortKey="query"'))).toContain("completeness_sort_unbound");
+    expect(htmlContractViolations(clean.replace(/function declaredLineHtml/g, "function declaredLine"))).toContain("declared_body_unbound");
   });
 });

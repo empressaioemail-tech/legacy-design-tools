@@ -25,11 +25,20 @@ export type CellState =
   | "refused"
   | "unread";
 
+/** B1: a candidate on an ambiguous screen row, as the wire carries it (peScreenSave ScreenCandidate). */
+export type ScreenCandidate = { parcelNodeId: string; label: string; countyFips?: string };
+/** B2: how a row's stub was obtained (peScreenSave StubReadState). */
+export type StubReadState = "ok" | "error" | "skipped";
+
 export type BoardRow = {
   query: string;
   parcelNodeId: string | null;
   resolution: "resolved" | "ambiguous" | "unresolved";
   rails: Record<RailName, CellState>;
+  /** B1: present only on an ambiguous row that carries candidates. */
+  candidates?: ScreenCandidate[];
+  /** B2: present when the wire states it; error and skipped force every rail to unread. */
+  stubRead?: StubReadState;
 };
 
 export type OverlayRow = {
@@ -108,7 +117,7 @@ export type DrawFrame = {
   quality: string | null;
 };
 
-export type PanelKind = "board" | "parcel" | "empty" | "miss" | "refused" | "unreadable";
+export type PanelKind = "board" | "parcel" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
 export type MissClass = "absent" | "unbaked" | "unstated";
 export type MissRow = {
   parcelNodeId: string;
@@ -118,6 +127,27 @@ export type MissRow = {
   parcelExists: boolean | "unmeasured";
 };
 export type RefusedRow = { parcelNodeId: string; reason: string };
+/** B2: a later query that resolved to a node an earlier query already held; declared, never written (peScreenSave ScreenDuplicate). */
+export type ScreenDuplicate = { query: string; parcelNodeId: string; keptQuery: string };
+export type ScreenDegraded = { timedOut?: string[]; duplicates?: ScreenDuplicate[] };
+/** B3: one row of the bare list_screens summary; rowCount only when the wire carries a whole number. */
+export type ScreenSummary = { id: string; name: string; rowCount?: number; updatedAt: string | null; createdAt: string | null };
+/** H1: the top-level status words the p558 server emits on a body that names its own state. */
+export const DECLARED_STATUSES = ["error", "refused", "not_implemented", "degraded", "not_ready", "upgrade_required"] as const;
+export type DeclaredStatus = (typeof DECLARED_STATUSES)[number];
+export type DeclaredBody = {
+  status: DeclaredStatus;
+  reason: string | null;
+  message?: string;
+  cap?: number;
+  received?: number;
+  depth?: string;
+  tool?: string;
+  upstreamStatus?: number | "unmeasured";
+  tier?: string;
+  /** Only under upstream_non_json: the upstream text, shown verbatim and escaped. */
+  brief?: string;
+};
 
 export type PanelModel = {
   kind: PanelKind;
@@ -135,6 +165,12 @@ export type PanelModel = {
   frame?: DrawFrame;
   /** F1 F2 F6 R1: the brief's sections in wire order; absent when the result carries none. */
   sections?: BriefSection[];
+  /** B2: declared degradation on a create_screen response; absent when the wire declares none. */
+  degraded?: ScreenDegraded;
+  /** B3: the bare list_screens summary, newest updatedAt first. */
+  screens?: ScreenSummary[];
+  /** H1: a body that names its own state. */
+  declared?: DeclaredBody;
 };
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
@@ -181,6 +217,23 @@ export const OPEN_REFUSED = "Open refused";
 export const RESULT_NOT_READABLE = "Result not readable";
 export const RESULT_NOT_READABLE_BODY = "The tool result carried no JSON text part. Ask again in the chat.";
 export const RAILS_PARTLY_UNREAD = "Some rails on this screen were not read";
+/* P-91 v2 board (S8) copy. UI words, never parcel facts. */
+export const USE_THIS_LABEL = "Use this";
+export const LOOK_UP_LABEL = "Look this up";
+/** The wire's own resolution word, printed as the caption of a row that has candidates and no node. */
+export const AMBIGUOUS_CAPTION = "ambiguous";
+export const NO_SCREENS_YET = "No screens yet.";
+export const NO_SCREENS_BODY = "Paste addresses in the chat to make one.";
+export const UNRESOLVED_GROUP = "Unresolved";
+export const STUB_READ_NOTE = "rails not read";
+export const DUP_SAME_PARCEL = "is the same parcel as";
+export const DUP_NOT_ADDED = "not added twice.";
+export const TIMED_OUT_NOTE = "did not resolve in time; unresolved for now.";
+export const REFUSED_PREFIX = "Refused";
+export const NOT_IMPLEMENTED_PREFIX = "Not implemented";
+export const NOT_READY_INFIX = "is not ready";
+export const UPSTREAM_KEY = "upstream";
+export const SORT_COMPLETENESS_LABEL = "by completeness";
 
 /** CAPCOG county names by fips prefix. Source: artifacts/api-server/src/countyCoverageScoreCli.ts. */
 export const COUNTY_BY_FIPS: Record<string, string> = {
@@ -228,14 +281,36 @@ function emptyModel(kind: PanelKind): PanelModel {
   return { kind, rows: [], overlays: [], ring: [], edges: [] };
 }
 
+function stubReadOf(value: unknown): StubReadState | undefined {
+  return value === "ok" || value === "error" || value === "skipped" ? value : undefined;
+}
+
+/** B1: a candidate must name a node; the label falls back to the node id; county only when carried. */
+function candidatesFrom(value: unknown): ScreenCandidate[] {
+  const out: ScreenCandidate[] = [];
+  if (!Array.isArray(value)) return out;
+  for (const raw of value) {
+    const c = asRecord(raw);
+    if (!c) continue;
+    const parcelNodeId = stringOrNull(c.parcelNodeId);
+    if (!parcelNodeId) continue;
+    const cand: ScreenCandidate = { parcelNodeId, label: stringOrNull(c.label) ?? parcelNodeId };
+    const fips = stringOrNull(c.countyFips);
+    if (fips) cand.countyFips = fips;
+    out.push(cand);
+  }
+  return out;
+}
+
 function rowFromUnknown(raw: unknown): BoardRow | null {
   const rec = asRecord(raw);
   if (!rec) return null;
   const query = typeof rec.query === "string" ? rec.query : "";
+  /* An explicit null is the wire saying no node; the legacy id fallback binds only when parcelNodeId is absent and the id has the node shape. A row id is never a node. */
   const parcelNodeId =
     typeof rec.parcelNodeId === "string"
       ? rec.parcelNodeId
-      : typeof rec.id === "string"
+      : rec.parcelNodeId === undefined && typeof rec.id === "string" && looksLikeParcelNodeId(rec.id)
         ? rec.id
         : null;
   const resolution =
@@ -247,12 +322,19 @@ function rowFromUnknown(raw: unknown): BoardRow | null {
         ? "resolved"
         : "unresolved";
   const stub = asRecord(rec.stub) ?? asRecord(rec.rails) ?? asRecord(rec.d);
+  const stubRead = stubReadOf(rec.stubRead);
+  /* B2: a stub under an errored or skipped read is a claim that read did not make; every rail stays unread */
+  const readable = stubRead !== "error" && stubRead !== "skipped";
   const rails = {} as Record<RailName, CellState>;
   for (const rail of RAILS) {
-    rails[rail] = stub ? railState(stub[rail]) : "unread";
+    rails[rail] = stub && readable ? railState(stub[rail]) : "unread";
   }
   if (!query && !parcelNodeId) return null;
-  return { query: query || parcelNodeId || "situs unresolved", parcelNodeId, resolution, rails };
+  const row: BoardRow = { query: query || parcelNodeId || "situs unresolved", parcelNodeId, resolution, rails };
+  const candidates = candidatesFrom(rec.candidates);
+  if (candidates.length > 0) row.candidates = candidates;
+  if (stubRead) row.stubRead = stubRead;
+  return row;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -881,6 +963,192 @@ export function addToScreenMessage(neighbor: string): string {
   return `Add ${neighbor} to the screen this parcel was opened from with add_to_screen, source walk. Do not save it.`;
 }
 
+/*
+ * P-91 v2 board (S8). Candidates, declared degradation, the reopen picker,
+ * county groups, the completeness order and the declared bodies. Same rule
+ * as S7: every function here is embedded by source (INLINE_SHARED), so no
+ * spread and nothing that needs a transpiler helper; every slot painted is
+ * a wire field or a literal fallback word.
+ */
+
+export function countyFipsOf(id: string | null | undefined): string | null {
+  const m = typeof id === "string" ? /^(\d{5}):/.exec(id.trim()) : null;
+  return m && m[1] ? m[1] : null;
+}
+
+export type BoardGroup = { fips: string | null; title: string | null; rows: BoardRow[] };
+
+/** B4: one group per county prefix when there is more than one, in fips order; unresolved rows last; one county paints no group. */
+export function boardGroups(rows: BoardRow[]): { grouped: boolean; groups: BoardGroup[] } {
+  const byFips: Record<string, BoardRow[]> = {};
+  const order: string[] = [];
+  const loose: BoardRow[] = [];
+  for (const r of rows) {
+    const f = countyFipsOf(r.parcelNodeId);
+    if (!f) {
+      loose.push(r);
+      continue;
+    }
+    let list = byFips[f];
+    if (!list) {
+      list = [];
+      byFips[f] = list;
+      order.push(f);
+    }
+    list.push(r);
+  }
+  if (order.length < 2) return { grouped: false, groups: [{ fips: null, title: null, rows }] };
+  order.sort();
+  const groups: BoardGroup[] = [];
+  for (const f of order) {
+    const name = COUNTY_BY_FIPS[f];
+    groups.push({ fips: f, title: typeof name === "string" ? name : f, rows: byFips[f] || [] });
+  }
+  if (loose.length > 0) groups.push({ fips: null, title: UNRESOLVED_GROUP, rows: loose });
+  return { grouped: true, groups };
+}
+
+/** B5: how many rails are present on a row. Orders rows only; never painted (I2). */
+export function knownRank(row: Pick<BoardRow, "rails">): number {
+  let n = 0;
+  for (const rail of RAILS) if (row.rails[rail] === "present") n += 1;
+  return n;
+}
+
+/** B5: a new array; completeness is fewest present first with ties by query; query and id are the v1 sorts. */
+export function sortBoardRows(rows: BoardRow[], key: string, dir: number): BoardRow[] {
+  const out = rows.slice();
+  out.sort((a, b) => {
+    if (key === "completeness") {
+      const d = knownRank(a) - knownRank(b);
+      if (d !== 0) return d * dir;
+      return a.query < b.query ? -1 : a.query > b.query ? 1 : 0;
+    }
+    const av = key === "id" ? a.parcelNodeId || "" : a.query;
+    const bv = key === "id" ? b.parcelNodeId || "" : b.query;
+    return av < bv ? -dir : av > bv ? dir : 0;
+  });
+  return out;
+}
+
+/** B1: the draft names the chosen node and the query it answers; the screen is the one Claude holds. */
+export function useCandidateMessage(node: string, query: string): string {
+  return `Add ${node} to this screen with add_to_screen, source pasted. It is the parcel for "${query}". Do not save it.`;
+}
+
+export function lookupMessage(query: string): string {
+  return `Run find_parcel for "${query}". Do not add anything to a screen yet.`;
+}
+
+/** B3: a reopen is an Open on a screen; it never creates one. */
+export function reopenScreenMessage(id: string): string {
+  return `Reopen screen ${id} with list_screens. Do not create a new screen.`;
+}
+
+/** B1: a forged control drafts nothing; the candidate must sit on the ambiguous row the panel painted for that query. */
+export function candidateFor(model: Pick<PanelModel, "rows">, node: string | null, query: string | null): ScreenCandidate | null {
+  if (!node || query === null) return null;
+  for (const r of model.rows) {
+    if (r.query !== query || r.resolution !== "ambiguous" || !r.candidates) continue;
+    for (const c of r.candidates) if (c.parcelNodeId === node) return c;
+  }
+  return null;
+}
+
+/** B1: only a situs that resolved to nothing is looked up; a node id that is not on file is not a search. */
+export function lookupRowFor(model: Pick<PanelModel, "rows">, query: string | null): BoardRow | null {
+  if (query === null) return null;
+  for (const r of model.rows) {
+    if (r.query === query && r.parcelNodeId === null && !(r.candidates && r.candidates.length > 0) && !looksLikeParcelNodeId(r.query)) return r;
+  }
+  return null;
+}
+
+export function screenSummaryFor(model: Pick<PanelModel, "screens">, id: string | null): ScreenSummary | null {
+  if (!id) return null;
+  for (const s of model.screens ? model.screens : []) if (s.id === id) return s;
+  return null;
+}
+
+/** B1: the candidates of an ambiguous row, each with Use this; the row itself gets no Open and nothing is picked. County only when the wire carries it. */
+export function candidateControlsHtml(row: Pick<BoardRow, "query" | "resolution" | "candidates">): string {
+  if (row.resolution !== "ambiguous" || !row.candidates || row.candidates.length === 0) return "";
+  let items = "";
+  for (const c of row.candidates) {
+    const fips = c.countyFips ? c.countyFips : null;
+    const named = fips ? COUNTY_BY_FIPS[fips] : undefined;
+    const county = fips ? `<span class="mono" data-candidate-county="${escapeHtml(fips)}">${escapeHtml(typeof named === "string" ? named : fips)}</span>` : "";
+    items += `<div class="cand" data-candidate="${escapeHtml(c.parcelNodeId)}"><span class="pn atom">${escapeHtml(c.parcelNodeId)}</span> <span class="lbl">${escapeHtml(c.label)}</span>${county ? ` ${county}` : ""} <button type="button" class="btn" data-act="usecand" data-node="${escapeHtml(c.parcelNodeId)}" data-query="${escapeHtml(row.query)}" onclick="window.__ss&&window.__ss.useCandidate(this)">${USE_THIS_LABEL}</button></div>`;
+  }
+  return `<div class="cands" data-candidates="${escapeHtml(row.query)}">${items}</div>`;
+}
+
+/** B1: an unresolved situs offers a lookup beside the slot; a node id that is not on file offers nothing. */
+export function lookupControlHtml(row: Pick<BoardRow, "query" | "parcelNodeId" | "candidates">): string {
+  if (row.parcelNodeId || (row.candidates && row.candidates.length > 0) || looksLikeParcelNodeId(row.query)) return "";
+  return `<button type="button" class="btn" data-act="lookup" data-query="${escapeHtml(row.query)}" onclick="window.__ss&&window.__ss.lookup(this)">${LOOK_UP_LABEL}</button>`;
+}
+
+/** B2: a row whose stub was not read says so beside the query; ok and absent say nothing. */
+export function stubReadNoteHtml(row: Pick<BoardRow, "stubRead">): string {
+  if (row.stubRead !== "error" && row.stubRead !== "skipped") return "";
+  return reasonLineHtml(STUB_READ_NOTE, row.stubRead, `data-stub-read="${row.stubRead}"`);
+}
+
+/** B2: one note per declared duplicate and per timed-out query. Every slot is the wire's; the sentence is the panel's. */
+export function degradedNotesHtml(degraded: ScreenDegraded | null | undefined): string {
+  if (!degraded) return "";
+  let out = "";
+  for (const d of degraded.duplicates ? degraded.duplicates : []) {
+    out += `<p class="note" data-duplicate="${escapeHtml(d.parcelNodeId)}">"${escapeHtml(d.query)}" ${DUP_SAME_PARCEL} "${escapeHtml(d.keptQuery)}" (${escapeHtml(d.parcelNodeId)}); ${DUP_NOT_ADDED}</p>`;
+  }
+  for (const q of degraded.timedOut ? degraded.timedOut : []) {
+    out += `<p class="note" data-timed-out="${escapeHtml(q)}">"${escapeHtml(q)}" ${TIMED_OUT_NOTE}</p>`;
+  }
+  return out;
+}
+
+/** B3: newest first (ordered at parse); name, the row count only when carried, the updated date; one Open per screen. */
+export function screensListHtml(screens: ScreenSummary[]): string {
+  if (screens.length === 0) return `<p class="empty" data-screens="none"><b>${NO_SCREENS_YET}</b>${NO_SCREENS_BODY}</p>`;
+  let out = "";
+  for (const s of screens) {
+    const count = typeof s.rowCount === "number" ? `<span class="mono" data-row-count="${s.rowCount}">${s.rowCount} ${s.rowCount === 1 ? "row" : "rows"}</span>` : "";
+    const updated = dateOnly(s.updatedAt);
+    const when = updated ? `<span class="mono" data-updated="${escapeHtml(updated)}"><span class="key">updated</span> ${escapeHtml(updated)}</span>` : "";
+    out += `<div class="scr" data-screen="${escapeHtml(s.id)}"><span class="pl">${escapeHtml(s.name)}</span> <span class="pn">${escapeHtml(s.id)}</span>${count ? ` ${count}` : ""}${when ? ` ${when}` : ""} <button type="button" class="btn" data-act="reopen" data-screen="${escapeHtml(s.id)}" onclick="window.__ss&&window.__ss.reopen(this)">Open</button></div>`;
+  }
+  return `<div class="screens" data-screens="list">${out}</div>`;
+}
+
+/** H1: one sentence per declared body, in the five-state language; nothing painted that the body does not carry. */
+export function declaredLineHtml(d: DeclaredBody): string {
+  const reason = d.reason ? d.reason : UNSTATED;
+  const bits: string[] = [];
+  let head = "";
+  if (d.status === "error" || d.status === "degraded") {
+    head = `${NOT_RETURNED}: ${escapeHtml(reason)}`;
+    if (typeof d.upstreamStatus === "number") bits.push(`<span class="mono" data-upstream-status="${d.upstreamStatus}">${UPSTREAM_KEY} ${d.upstreamStatus}</span>`);
+    if (d.tool) bits.push(reasonLineHtml("tool", d.tool));
+  } else if (d.status === "refused") {
+    head = `${REFUSED_PREFIX}: ${escapeHtml(reason)}`;
+    if (typeof d.cap === "number") bits.push(`<span class="mono" data-cap="${d.cap}">cap ${d.cap}</span>`);
+    if (typeof d.received === "number") bits.push(`<span class="mono" data-received="${d.received}">received ${d.received}</span>`);
+    if (d.depth) bits.push(reasonLineHtml("depth", d.depth));
+  } else if (d.status === "not_implemented") {
+    head = `${NOT_IMPLEMENTED_PREFIX}: ${escapeHtml(d.depth ? d.depth : reason)}`;
+  } else if (d.status === "not_ready") {
+    head = `${escapeHtml(d.tool ? d.tool : "This tool")} ${NOT_READY_INFIX}: ${escapeHtml(reason)}`;
+  } else {
+    head = UPGRADE_TO_OPEN;
+    bits.push(reasonLineHtml("reason", reason));
+    if (d.tier) bits.push(reasonLineHtml("tier", d.tier));
+  }
+  if (d.message) bits.push(reasonLineHtml("message", d.message));
+  const brief = d.brief ? `<pre class="brief" data-brief="1">${escapeHtml(d.brief)}</pre>` : "";
+  return `<div class="miss" data-declared="${d.status}" data-reason="${escapeHtml(reason)}"><b>${head}</b>${bits.join("")}${brief}</div>`;
+}
+
 /** Sections in wire order. A section with no id names nothing and is skipped; every field is read or left null. */
 function sectionsFromBrief(host: Record<string, unknown>): BriefSection[] {
   const brief = asRecord(host.brief);
@@ -1070,6 +1338,78 @@ function refusedRowsFrom(rec: Record<string, unknown>): RefusedRow[] | null {
   return out.length > 0 ? out : null;
 }
 
+/** B2: timedOut as a string list; a duplicate needs all three slots or it is dropped; null when nothing is declared. */
+function degradedFrom(value: unknown): ScreenDegraded | null {
+  const d = asRecord(value);
+  if (!d) return null;
+  const out: ScreenDegraded = {};
+  const timedOut = stringList(d.timedOut);
+  if (timedOut.length > 0) out.timedOut = timedOut;
+  const dups: ScreenDuplicate[] = [];
+  if (Array.isArray(d.duplicates)) {
+    for (const raw of d.duplicates) {
+      const r = asRecord(raw);
+      if (!r) continue;
+      const query = stringOrNull(r.query);
+      const parcelNodeId = stringOrNull(r.parcelNodeId);
+      const keptQuery = stringOrNull(r.keptQuery);
+      if (!query || !parcelNodeId || !keptQuery) continue;
+      dups.push({ query, parcelNodeId, keptQuery });
+    }
+  }
+  if (dups.length > 0) out.duplicates = dups;
+  return out.timedOut || out.duplicates ? out : null;
+}
+
+/** B3: a screen needs a string id; rowCount only as a whole number; newest updatedAt first, undated last. */
+function screensFrom(value: unknown): ScreenSummary[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: ScreenSummary[] = [];
+  for (const raw of value) {
+    const s = asRecord(raw);
+    if (!s) continue;
+    const id = stringOrNull(s.id);
+    if (!id) continue;
+    const row: ScreenSummary = { id, name: stringOrNull(s.name) ?? id, updatedAt: stringOrNull(s.updatedAt), createdAt: stringOrNull(s.createdAt) };
+    const n = numberOrNull(s.rowCount);
+    if (n !== null && n >= 0 && Math.floor(n) === n) row.rowCount = n;
+    out.push(row);
+  }
+  out.sort((a, b) => {
+    const au = a.updatedAt ? a.updatedAt : "";
+    const bu = b.updatedAt ? b.updatedAt : "";
+    return bu < au ? -1 : bu > au ? 1 : 0;
+  });
+  return out;
+}
+
+/** H1: a top-level status in the declared enum, with only the fields the body carries in the shape the server emits them. */
+function declaredFrom(rec: Record<string, unknown>): DeclaredBody | null {
+  const status = rec.status;
+  if (typeof status !== "string" || (DECLARED_STATUSES as readonly string[]).indexOf(status) < 0) return null;
+  const out: DeclaredBody = { status: status as DeclaredStatus, reason: stringOrNull(rec.reason) };
+  const message = stringOrNull(rec.message);
+  if (message) out.message = message;
+  const cap = numberOrNull(rec.cap);
+  if (cap !== null) out.cap = cap;
+  const received = numberOrNull(rec.received);
+  if (received !== null) out.received = received;
+  const depth = stringOrNull(rec.depth);
+  if (depth) out.depth = depth;
+  const tool = stringOrNull(rec.tool);
+  if (tool) out.tool = tool;
+  const up = rec.upstreamStatus;
+  if (typeof up === "number" && Number.isFinite(up)) out.upstreamStatus = up;
+  else if (up === "unmeasured") out.upstreamStatus = "unmeasured";
+  const tier = stringOrNull(rec.tier);
+  if (tier) out.tier = tier;
+  if (out.reason === "upstream_non_json") {
+    const brief = stringOrNull(rec.brief);
+    if (brief) out.brief = brief;
+  }
+  return out;
+}
+
 /**
  * Board source is a screen or a batch stub result. Saved-list payloads are
  * ignored even if they appear in the same JSON. This is also the served parser:
@@ -1130,6 +1470,14 @@ export function parseToolResult(text: string): PanelModel {
   if (misses) return { kind: "miss", rows: [], overlays: [], ring: [], edges: [], misses };
   const batch = batchRowsFrom(rec);
   if (batch) return { kind: "board", rows: batch, overlays: [], ring: [], edges: [] };
+  /* H1: a body that names its own state paints that state, never the empty copy */
+  const declared = declaredFrom(rec);
+  if (declared) return { kind: "declared", rows: [], overlays: [], ring: [], edges: [], declared };
+  /* B3: the bare list_screens summary */
+  const screens = screensFrom(rec.screens);
+  if (screens && !Array.isArray(rec.rows) && !asRecord(rec.screen)) {
+    return { kind: "screens", rows: [], overlays: [], ring: [], edges: [], screens };
+  }
 
   const screen = asRecord(rec.screen) ?? rec;
   const rawRows = Array.isArray(rec.rows) ? rec.rows : Array.isArray(screen.rows) ? screen.rows : [];
@@ -1144,6 +1492,9 @@ export function parseToolResult(text: string): PanelModel {
     const degraded = typeof rec.stubsDegraded === "boolean" ? rec.stubsDegraded : screen.stubsDegraded;
     const model: PanelModel = { kind: "board", screenId, rows, overlays: [], ring: [], edges: [] };
     if (typeof degraded === "boolean") model.stubsDegraded = degraded;
+    /* B2: the create_screen response's declared duplicates and timeouts */
+    const declaredDegradation = degradedFrom(rec.degraded !== undefined ? rec.degraded : screen.degraded);
+    if (declaredDegradation) model.degraded = declaredDegradation;
     return model;
   }
   return emptyModel("empty");
@@ -1234,6 +1585,29 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   saveMessage,
   addToScreenMessage,
   sectionsFromBrief,
+  /* S8 board */
+  looksLikeParcelNodeId,
+  stubReadOf,
+  candidatesFrom,
+  degradedFrom,
+  screensFrom,
+  declaredFrom,
+  countyFipsOf,
+  boardGroups,
+  knownRank,
+  sortBoardRows,
+  useCandidateMessage,
+  lookupMessage,
+  reopenScreenMessage,
+  candidateFor,
+  lookupRowFor,
+  screenSummaryFor,
+  candidateControlsHtml,
+  lookupControlHtml,
+  stubReadNoteHtml,
+  degradedNotesHtml,
+  screensListHtml,
+  declaredLineHtml,
 ];
 
 export function inlineSharedSource(): string {
@@ -1460,6 +1834,51 @@ export function htmlContractViolations(html: string): string[] {
   if (!html.includes('data-act="addscreen"') || !html.includes("add_to_screen") || !html.includes("function sendAddToScreen")) {
     violations.push("add_to_screen_unbound");
   }
+  /* S8 board: each item's mechanism must be present in the served script, or the item is a claim */
+  if (
+    !html.includes('data-act="usecand"') ||
+    !html.includes("function sendUseCandidate") ||
+    !html.includes(JSON.stringify(USE_THIS_LABEL)) ||
+    !html.includes("source pasted") ||
+    !html.includes('data-act="lookup"') ||
+    !html.includes(JSON.stringify(LOOK_UP_LABEL))
+  ) {
+    violations.push("candidate_control_unbound");
+  }
+  if (
+    !html.includes("data-duplicate=") ||
+    !html.includes("data-timed-out=") ||
+    !html.includes("data-stub-read=") ||
+    !html.includes(JSON.stringify(DUP_NOT_ADDED)) ||
+    !html.includes(JSON.stringify(TIMED_OUT_NOTE))
+  ) {
+    violations.push("duplicate_note_unbound");
+  }
+  if (
+    !html.includes('data-act="reopen"') ||
+    !html.includes("function sendReopen") ||
+    !html.includes("Reopen screen") ||
+    !html.includes("Do not create a new screen") ||
+    !html.includes(JSON.stringify(NO_SCREENS_YET))
+  ) {
+    violations.push("reopen_opener_unbound");
+  }
+  if (!html.includes("data-county-group=") || !html.includes("function boardGroups") || !html.includes(JSON.stringify(UNRESOLVED_GROUP))) {
+    violations.push("county_group_unmarked");
+  }
+  if (!html.includes('var sortKey="completeness"') || !html.includes("function sortBoardRows") || !html.includes('data-k="completeness"')) {
+    violations.push("completeness_sort_unbound");
+  }
+  if (
+    !html.includes("data-declared=") ||
+    !html.includes("data-brief=") ||
+    !html.includes("function declaredLineHtml") ||
+    !html.includes(JSON.stringify(REFUSED_PREFIX)) ||
+    !html.includes(JSON.stringify(NOT_IMPLEMENTED_PREFIX)) ||
+    !html.includes(JSON.stringify(NOT_READY_INFIX))
+  ) {
+    violations.push("declared_body_unbound");
+  }
   const boundCopy = [
     NOTHING_TO_OPEN,
     OPEN_DID_NOT_REACH_ME,
@@ -1585,6 +2004,16 @@ svg.ring .sm{fill:var(--ss-t6)}
 .guide{color:var(--ss-t5);font-size:var(--ss-fs-meta);margin-top:2px}
 .savegrp{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;margin-right:auto}
 .btn.on{border-color:var(--ss-blue);color:var(--ss-blue)}
+.grp th{font:var(--ss-fs-meta)/1.2 var(--ss-ui);letter-spacing:0;text-transform:none;color:var(--ss-t3);padding:10px 6px 4px;border-bottom:1px solid var(--ss-line-14);cursor:default}
+.cands{margin-top:4px}
+.cand{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:3px 0;font-size:var(--ss-fs-meta)}
+.cand .btn,.slot+.btn{padding:3px 8px;font-size:var(--ss-fs-meta)}
+.screens{display:flex;flex-direction:column}
+.scr{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--ss-line-06)}
+.scr:last-child{border-bottom:none}
+.scr .btn{margin-left:auto}
+.sortc{cursor:pointer;text-decoration:underline dotted;margin-left:6px}
+.brief{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t5);background:var(--ss-void);border-radius:6px;padding:8px;margin:6px 0 0;white-space:pre-wrap;word-break:break-word;overflow-x:auto}
 </style>
 </head>
 <body>
@@ -1639,6 +2068,24 @@ svg.ring .sm{fill:var(--ss-t6)}
   var NO_BRIEF=${JSON.stringify(NO_BRIEF)};
   var STATE_WORDS=${JSON.stringify(STATE_WORDS)};
   var SECTION_FOR_OVERLAY=${JSON.stringify(SECTION_FOR_OVERLAY)};
+  var NOT_RETURNED=${JSON.stringify(NOT_RETURNED)};
+  var UPGRADE_TO_OPEN=${JSON.stringify(UPGRADE_TO_OPEN)};
+  var USE_THIS_LABEL=${JSON.stringify(USE_THIS_LABEL)};
+  var LOOK_UP_LABEL=${JSON.stringify(LOOK_UP_LABEL)};
+  var AMBIGUOUS_CAPTION=${JSON.stringify(AMBIGUOUS_CAPTION)};
+  var NO_SCREENS_YET=${JSON.stringify(NO_SCREENS_YET)};
+  var NO_SCREENS_BODY=${JSON.stringify(NO_SCREENS_BODY)};
+  var UNRESOLVED_GROUP=${JSON.stringify(UNRESOLVED_GROUP)};
+  var STUB_READ_NOTE=${JSON.stringify(STUB_READ_NOTE)};
+  var DUP_SAME_PARCEL=${JSON.stringify(DUP_SAME_PARCEL)};
+  var DUP_NOT_ADDED=${JSON.stringify(DUP_NOT_ADDED)};
+  var TIMED_OUT_NOTE=${JSON.stringify(TIMED_OUT_NOTE)};
+  var REFUSED_PREFIX=${JSON.stringify(REFUSED_PREFIX)};
+  var NOT_IMPLEMENTED_PREFIX=${JSON.stringify(NOT_IMPLEMENTED_PREFIX)};
+  var NOT_READY_INFIX=${JSON.stringify(NOT_READY_INFIX)};
+  var UPSTREAM_KEY=${JSON.stringify(UPSTREAM_KEY)};
+  var SORT_COMPLETENESS_LABEL=${JSON.stringify(SORT_COMPLETENESS_LABEL)};
+  var DECLARED_STATUSES=${JSON.stringify(DECLARED_STATUSES)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
@@ -1647,7 +2094,7 @@ ${inlineSharedSource()}
   var openSent=null;
   var openTimer=null;
   function clearOpenTimer(){ if(openTimer){ clearTimeout(openTimer); openTimer=null; } }
-  var sortKey="query";
+  var sortKey="completeness";
   var sortDir=1;
   var listingAck=null;
   var hotEl=null;
@@ -1769,11 +2216,12 @@ ${inlineSharedSource()}
     return JSON.stringify({kind:m.kind,screenId:m.screenId||null,rows:m.rows,parcelNodeId:m.parcelNodeId||null,overlays:m.overlays,ring:m.ring||[],edges:(m.edges||[]).map(edgeCaption)});
   }
   function looksNode(q){return NODE_RE.test(String(q||"").trim())}
+  /* B1 B2: a resolved row carries its read state; an ambiguous row keeps the typed query and offers its candidates; an unresolved row stays as typed */
   function queryCell(r){
-    if(r.resolution!=="unresolved") return '<div class="pl">'+esc(r.query)+"</div>";
+    if(r.resolution==="resolved") return '<div class="pl">'+esc(r.query)+"</div>"+stubReadNoteHtml(r);
+    if(r.resolution==="ambiguous") return '<div class="unres">'+AMBIGUOUS_CAPTION+'</div><div class="pn">'+esc(r.query)+"</div>"+candidateControlsHtml(r);
     var cap=looksNode(r.query)?"node unresolved":"situs unresolved";
-    var cls="pn";
-    return '<div class="unres">'+cap+'</div><div class="'+cls+'">'+esc(r.query)+"</div>";
+    return '<div class="unres">'+cap+'</div><div class="pn">'+esc(r.query)+"</div>";
   }
   function glyph(state){
     var s=railState(state);
@@ -1799,24 +2247,26 @@ ${inlineSharedSource()}
   function render(){
     var root=document.getElementById("root");
     if(model.kind==="board"){
-      var rows=model.rows.slice().sort(function(a,b){
-        var av=sortKey==="query"?a.query:(a.parcelNodeId||"");
-        var bv=sortKey==="query"?b.query:(b.parcelNodeId||"");
-        return av<bv?-sortDir:av>bv?sortDir:0;
-      });
-      var head="<tr><th data-k=query>Query</th><th data-k=id>Node</th>"+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
-      var body=rows.map(function(r,i){
-        var open=r.parcelNodeId
+      /* B4 B5: groups by county prefix when there is more than one; each group in the local sort order; Open only on a resolved row */
+      var grouping=boardGroups(model.rows);
+      var head='<tr><th data-k="query">Query</th><th data-k="id">Node</th>'+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
+      var pos=0;
+      var body=grouping.groups.map(function(grp){
+        var hdr=grouping.grouped?'<tr class="grp" data-county-group="'+esc(grp.fips||"unresolved")+'"><th colspan="'+(RAILS.length+3)+'">'+esc(grp.title)+"</th></tr>":"";
+        return hdr+sortBoardRows(grp.rows,sortKey,sortDir).map(function(r){
+        var i=pos++;
+        var open=r.parcelNodeId&&r.resolution==="resolved"
           ?'<button type="button" class="btn" data-act="open" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
-          :'<div class="slot">'+${JSON.stringify(NOTHING_TO_OPEN)}+"</div>";
+          :'<div class="slot">'+${JSON.stringify(NOTHING_TO_OPEN)}+"</div>"+lookupControlHtml(r);
         return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){
           var g=glyph(r.rails[k]);
           var ask=r.parcelNodeId?whyControlHtml("rail",railState(r.rails[k]),{rail:k,node:r.parcelNodeId},g):"";
           return "<td>"+(ask||g)+"</td>";
         }).join("")+"<td>"+open+"</td></tr>";
+        }).join("");
       }).join("");
       var note=model.stubsDegraded===true?'<p class="note">'+${JSON.stringify(RAILS_PARTLY_UNREAD)}+"</p>":"";
-      root.innerHTML=card("screen board",stateLines()+note+'<div class="well"><div class="req">Rows</div><table><thead>'+head+"</thead><tbody>"+body+"</tbody></table></div>"+
+      root.innerHTML=card("screen board",stateLines()+'<div class="well"><div class="req">Rows <span class="sortc" data-k="completeness" data-sort-active="'+(sortKey==="completeness"?"1":"0")+'">'+SORT_COMPLETENESS_LABEL+'</span></div><table data-sort="'+esc(sortKey)+'" data-dir="'+sortDir+'"><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+degradedNotesHtml(model.degraded||null)+"</div>"+note+
         '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>");
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("")||'<p class="empty">No overlays on this draw.</p>';
@@ -1843,6 +2293,10 @@ ${inlineSharedSource()}
       root.innerHTML=card("lookup",'<div class="well">'+(model.misses||[]).map(missLine).join("")+"</div>");
     } else if(model.kind==="refused"){
       root.innerHTML=card("refused",'<div class="well">'+(model.refused||[]).map(refusedLine).join("")+"</div>");
+    } else if(model.kind==="screens"){
+      root.innerHTML=card("screens",stateLines()+'<div class="well"><div class="req">Screens</div>'+screensListHtml(model.screens||[])+"</div>");
+    } else if(model.kind==="declared"){
+      root.innerHTML=card(esc(model.declared?model.declared.status:"result"),stateLines()+'<div class="well">'+(model.declared?declaredLineHtml(model.declared):"")+"</div>");
     } else if(model.kind==="unreadable"){
       root.innerHTML=card("result",'<p class="empty"><b>'+${JSON.stringify(RESULT_NOT_READABLE)}+"</b>"+${JSON.stringify(RESULT_NOT_READABLE_BODY)}+"</p>");
     } else {
@@ -1883,11 +2337,9 @@ ${inlineSharedSource()}
     host.sendMessage(text);
     if(fingerprint(model)!==before) throw new Error("i5_panel_mutated");
   }
-  function sendOpen(btn){
-    var node=btn&&btn.getAttribute("data-node");
-    if(!node) return;
+  function armOpenWait(key){
     clearOpenTimer();
-    openWait=node;
+    openWait=key;
     openFail=null;
     openSent=null;
     openTimer=setTimeout(function(){
@@ -1897,7 +2349,31 @@ ${inlineSharedSource()}
         render();
       }
     },${OPEN_DEAD_MS});
+  }
+  function sendOpen(btn){
+    var node=btn&&btn.getAttribute("data-node");
+    if(!node) return;
+    armOpenWait(node);
     host.sendMessage(openParcelMessage(node));
+  }
+  /* B3: a reopen is an Open on a screen the panel painted; same timer, same Sent line, never a new screen. */
+  function sendReopen(btn){
+    var id=attr(btn,"data-screen");
+    if(!screenSummaryFor(model,id)) return;
+    armOpenWait(id);
+    host.sendMessage(reopenScreenMessage(id));
+  }
+  /* B1: a candidate is used only from the ambiguous row that carries it; the panel picks nothing. */
+  function sendUseCandidate(btn){
+    var node=attr(btn,"data-node");
+    var query=attr(btn,"data-query");
+    if(!candidateFor(model,node,query)) return;
+    host.sendMessage(useCandidateMessage(node,query));
+  }
+  function sendLookup(btn){
+    var query=attr(btn,"data-query");
+    if(!lookupRowFor(model,query)) return;
+    host.sendMessage(lookupMessage(query));
   }
   function attr(btn,name){
     return btn&&typeof btn.getAttribute==="function"?btn.getAttribute(name):null;
@@ -1932,11 +2408,11 @@ ${inlineSharedSource()}
     reportOpen=!reportOpen;
     render();
   }
-  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,parse:parseToolResult};
+  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,fp:function(){return fingerprint(model)},parse:parseToolResult};
   document.body.addEventListener("click",function(ev){
     var el=ev.target;
     if(!el||!el.closest) return;
-    var th=el.closest("th[data-k]");
+    var th=el.closest("[data-k]");
     if(th){
       sortKey=th.getAttribute("data-k");
       sortDir*=-1;
@@ -1949,6 +2425,8 @@ ${inlineSharedSource()}
     openFail=null;
     openSent=null;
     reportOpen=false;
+    sortKey="completeness";
+    sortDir=1;
     model=parseToolContent(result);
     render();
   }

@@ -1853,3 +1853,480 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(app.htmlContractViolations(clean.replace(/function sendAddToScreen/g, "function sendAdd"))).toContain("add_to_screen_unbound");
   });
 });
+
+/*
+ * P-91 v2 board (S8), served. Screen rows in the p543 wire shape
+ * (peScreenSave.ts ScreenRow: candidates on an ambiguous row, stubRead,
+ * degraded.duplicates and degraded.timedOut), the bare list_screens summary
+ * (ScreenSummary), and every declared body the p558 server emits (tools.ts,
+ * tool-honesty.ts, export-instrument.ts, entitlement.ts). The ids and labels
+ * for 908 Pine, 111 Rainmaker Cv and 927 Main are the fixture doc's; every
+ * other id, label, date, count and status number is a SYNTHETIC test input.
+ * Sentences are literal on purpose (two derivations: the brief's text here,
+ * the module constants there).
+ */
+const COPY3 = {
+  useThis: "Use this",
+  lookUp: "Look this up",
+  ambiguous: "ambiguous",
+  noScreens: "No screens yet. Paste addresses in the chat to make one.",
+  unresolvedGroup: "Unresolved",
+  railsNotRead: "rails not read",
+  notReturned: "Not returned",
+  refused: "Refused",
+  notImplemented: "Not implemented",
+  notReady: "is not ready",
+  byCompleteness: "by completeness",
+  useDraft: (node: string, q: string) => `Add ${node} to this screen with add_to_screen, source pasted. It is the parcel for "${q}". Do not save it.`,
+  lookupDraft: (q: string) => `Run find_parcel for "${q}". Do not add anything to a screen yet.`,
+  reopenDraft: (id: string) => `Reopen screen ${id} with list_screens. Do not create a new screen.`,
+  dup: (q: string, kept: string, node: string) => `"${q}" is the same parcel as "${kept}" (${node}); not added twice.`,
+  timedOut: (q: string) => `"${q}" did not resolve in time; unresolved for now.`,
+};
+const SCREEN_S8 = {
+  screen: {
+    id: "scr-s8",
+    name: "Higgins block",
+    createdAt: "2026-08-30T09:00:00.000Z",
+    updatedAt: "2026-08-30T09:05:00.000Z",
+    rows: [
+      { id: "r1", ordinal: 0, query: "908 Pine, Bastrop TX", parcelNodeId: "48021:34137", resolution: "resolved", source: "pasted", stub: STUB_SIX, stubRead: "ok" },
+      /* a contradictory wire: a stub claiming present under an errored read; the panel refuses the claim */
+      { id: "r2", ordinal: 1, query: "111 Rainmaker Cv, Bastrop TX", parcelNodeId: "48021:8720522", resolution: "resolved", source: "pasted", stub: STUB_SIX, stubRead: "error" },
+      { id: "r3", ordinal: 2, query: "100 Main St", parcelNodeId: null, resolution: "ambiguous", source: "pasted", candidates: [{ parcelNodeId: "48021:33223", label: "927 MAIN ST , BASTROP, TX 78602" }, { parcelNodeId: "48209:700001", label: "100 MAIN ST , KYLE, TX 78640", countyFips: "48209" }] },
+      { id: "r4", ordinal: 3, query: "zzzz-not-a-situs-99999", parcelNodeId: null, resolution: "unresolved", source: "pasted" },
+      { id: "r5", ordinal: 4, query: "48021:900001", parcelNodeId: null, resolution: "unresolved", source: "pasted" },
+      { id: "r6", ordinal: 5, query: "500 Slow Ln", parcelNodeId: null, resolution: "unresolved", source: "pasted", resolveTimedOut: true },
+    ],
+    stubsDegraded: true,
+    degraded: {
+      timedOut: ["500 Slow Ln"],
+      duplicates: [{ query: "111 Rainmaker Cove, Bastrop TX", parcelNodeId: "48021:8720522", keptQuery: "111 Rainmaker Cv, Bastrop TX" }],
+    },
+  },
+};
+const SCREENS_S8 = {
+  screens: [
+    { id: "scr-a", name: "Older", rowCount: 3, createdAt: "2026-08-28T09:00:00.000Z", updatedAt: "2026-08-28T09:00:00.000Z" },
+    { id: "scr-c", name: "Newest", rowCount: 1, createdAt: "2026-08-30T09:00:00.000Z", updatedAt: "2026-08-30T09:05:00.000Z" },
+    { id: "scr-b", name: "Uncounted", createdAt: "2026-08-29T09:00:00.000Z", updatedAt: "2026-08-29T09:00:00.000Z" },
+    { id: "scr-d", name: "Undated" },
+  ],
+};
+const BOARD_CROSS = {
+  id: "cross",
+  rows: [
+    { query: "908 Pine, Bastrop TX", parcelNodeId: "48021:34137", resolution: "resolved", stub: STUB_SIX },
+    { query: "100 Main St, Kyle TX", parcelNodeId: "48209:1", resolution: "resolved", stub: { situs: "present" } },
+    { query: "zzzz-not-a-situs-99999", parcelNodeId: null, resolution: "unresolved" },
+    { query: "elsewhere", parcelNodeId: "99999:1", resolution: "resolved" },
+    { query: "927 Main St, Bastrop TX", parcelNodeId: "48021:33223", resolution: "resolved", stub: { flood: "present" } },
+  ],
+};
+const BOARD_MIXED = {
+  id: "mixed",
+  rows: [
+    { query: "c", parcelNodeId: "48021:3", resolution: "resolved", stub: { situs: "present", zoning: "present", landUse: "present", flood: "present" } },
+    { query: "a", parcelNodeId: "48021:1", resolution: "resolved", stub: { situs: "present" } },
+    { query: "e", parcelNodeId: "48021:5", resolution: "resolved", stub: STUB_SIX },
+    { query: "d", parcelNodeId: null, resolution: "unresolved" },
+    { query: "b", parcelNodeId: "48021:2", resolution: "resolved", stub: { flood: "present", zoning: "absent" } },
+  ],
+};
+const DECLARED_S8 = {
+  errorJson: { status: "error", reason: "not_found", upstreamStatus: 404, error: "not_found", upstreamBodyStatus: "gone" },
+  errorUnmeasured: { status: "error", reason: "export_failed", upstreamStatus: "unmeasured", message: "The export proxy did not answer." },
+  nonJson: { status: "error", reason: "upstream_non_json", upstreamStatus: 502, brief: "<html>502 Bad Gateway</html>" },
+  cap: { status: "refused", reason: "parcel_batch_cap", cap: 25, received: 30, depth: "node" },
+  screenId: { status: "refused", reason: "screen_id_not_accepted", error: "screen_id_not_accepted" },
+  hop1: { status: "not_implemented", reason: "depth_not_implemented", depth: "hop1" },
+  cortex: { status: "degraded", reason: "cortex_not_configured", message: "Smart Site MCP cannot reach the workbench backend." },
+  exportDown: { status: "degraded", tool: "export_instrument", reason: "hauska_mcp_unavailable", dependency: "hauska-mcp", message: "Export is temporarily unavailable because Hauska MCP is unreachable.", hauska: { state: "down" } },
+  notReady: { status: "not_ready", tool: "export_instrument", reason: "P-87 export honesty", message: "export_instrument is not available on Smart Site MCP yet." },
+  upgrade: { status: "upgrade_required", reason: "deep_report", tier: "free", subscriptionTier: null, message: "Deep report needs Solo or above." },
+};
+const PARITY_S8: Record<string, unknown> = {
+  screenS8: SCREEN_S8,
+  screensList: SCREENS_S8,
+  screensEmpty: { screens: [] },
+  screensJunk: { screens: [{ id: 7 }, "x", null, { id: "ok", rowCount: "3" }, { id: "z", rowCount: 0 }] },
+  screensNotArray: { screens: "x" },
+  boardCross: BOARD_CROSS,
+  boardMixed: BOARD_MIXED,
+  candidatesJunk: { screen: { id: "j", rows: [{ query: "q", resolution: "ambiguous", candidates: [{ parcelNodeId: 7 }, { label: "x" }, "y", { parcelNodeId: "48021:1" }] }] } },
+  stubReadJunk: { rows: [{ query: "q", parcelNodeId: "48021:1", stubRead: "maybe", stub: { situs: "present" } }, { query: "r", parcelNodeId: "48021:2", stubRead: "skipped", stub: { situs: "present" } }] },
+  degradedJunk: { screen: { id: "s", rows: [{ query: "q", parcelNodeId: "48021:1" }], degraded: { timedOut: "x", duplicates: [{ query: "a" }, { query: "a", parcelNodeId: "48021:1", keptQuery: "b" }] } } },
+  ...DECLARED_S8,
+  statusWeird: { status: "weird", reason: "x" },
+  statusBare: { status: "error" },
+  statusJunkFields: { status: "error", reason: "x", brief: "y", cap: "25", upstreamStatus: "502", tool: 4 },
+  statusOkBoard: { status: "ok", rows: [{ query: "q", parcelNodeId: "48021:1" }] },
+  rowIdNotNode: { rows: [{ query: "q", id: "r9" }] },
+  rowNullWithNodeId: { rows: [{ query: "q", parcelNodeId: null, id: "48021:1" }] },
+};
+
+/** the <tr ...>...</tr> segment containing a needle, on the flat painted html */
+function rowHtml(html: string, needle: string): string {
+  const row = html
+    .split("<tr")
+    .map((seg) => seg.split("</tr>")[0] ?? "")
+    .find((seg) => seg.includes(needle));
+  if (!row) throw new Error(`no table row containing ${needle}`);
+  return row;
+}
+/** the painted query of every board row, in paint order */
+function rowQueries(html: string): string[] {
+  return html
+    .split('<tr class="row"')
+    .slice(1)
+    .map((seg) => {
+      const m = /<div class="pl">([^<]*)<\/div>|<div class="pn">([^<]*)<\/div>/.exec(seg);
+      return (m?.[1] ?? m?.[2] ?? "").trim();
+    });
+}
+
+describe("P-91 v2 board (served)", () => {
+  it("B1 candidates: an ambiguous row paints each candidate with Use this, keeps the typed query with no Open, and drafts the add turn for the chosen id only; an unresolved situs offers Look this up; a node id that is not on file offers only the slot", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SCREEN_S8);
+    expect(f.openButtons()).toBe(2);
+    const amb = rowHtml(f.root.innerHTML, 'data-candidates="100 Main St"');
+    expect(amb).toContain('data-candidate="48021:33223"');
+    expect(amb).toContain('data-candidate="48209:700001"');
+    expect((amb.match(/data-act="usecand"/g) ?? []).length).toBe(2);
+    expect(amb).not.toContain('data-act="open"');
+    expect(amb).not.toContain('data-act="lookup"');
+    expect(f.strip(amb)).toContain(COPY3.ambiguous);
+    expect(f.strip(amb)).toContain("100 Main St");
+    expect(f.strip(amb)).toContain("927 MAIN ST , BASTROP, TX 78602");
+    expect(f.strip(amb)).toContain("100 MAIN ST , KYLE, TX 78640");
+    expect(f.strip(amb)).toContain(COPY3.useThis);
+    expect(f.strip(amb)).toContain(COPY.nothingToOpen);
+    expect(amb).toContain('data-candidate-county="48209"');
+    expect(f.strip(amb)).toContain("Hays");
+    expect(amb.slice(0, amb.indexOf('data-candidate="48209:700001"'))).not.toContain("data-candidate-county");
+    const before = f.root.innerHTML;
+    const fp = () => (f.sandbox.__ss as { fp: () => string }).fp();
+    const fp0 = fp();
+    const use = f.all('[data-act="usecand"]');
+    expect(use.map((b) => b.getAttribute("data-node"))).toEqual(["48021:33223", "48209:700001"]);
+    f.ss().useCandidate(use[0]);
+    expect(f.lastText()).toBe(COPY3.useDraft("48021:33223", "100 Main St"));
+    f.ss().useCandidate(use[1]);
+    expect(f.lastText()).toBe(COPY3.useDraft("48209:700001", "100 Main St"));
+    expect(f.messages()).toHaveLength(2);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.text()).not.toContain(COPY.sent);
+    expect(f.root.innerHTML).toBe(before);
+    expect(fp()).toBe(fp0);
+    /* forged: a resolved node is not a candidate; a candidate under another query is not; a missing slot is not */
+    f.ss().useCandidate(f.btn({ "data-node": "48021:34137", "data-query": "100 Main St" }));
+    f.ss().useCandidate(f.btn({ "data-node": "48021:33223", "data-query": "908 Pine, Bastrop TX" }));
+    f.ss().useCandidate(f.btn({ "data-node": "48021:33223" }));
+    f.ss().useCandidate(f.btn({}));
+    expect(f.messages()).toHaveLength(2);
+    /* the unresolved situs offers Look this up beside the slot; the node id that is not on file offers only the slot */
+    const situs = rowHtml(f.root.innerHTML, "zzzz-not-a-situs-99999");
+    expect(situs).toContain('data-act="lookup" data-query="zzzz-not-a-situs-99999"');
+    expect(f.strip(situs)).toContain(COPY3.lookUp);
+    expect(f.strip(situs)).toContain(COPY.nothingToOpen);
+    expect(f.strip(situs)).toContain("situs unresolved");
+    const node = rowHtml(f.root.innerHTML, "48021:900001");
+    expect(node).not.toContain('data-act="lookup"');
+    expect(f.strip(node)).toContain(COPY.nodeUnresolved);
+    expect(f.strip(node)).toContain(COPY.nothingToOpen);
+    const look = f.all('[data-act="lookup"]');
+    expect(look.map((b) => b.getAttribute("data-query")).sort()).toEqual(["500 Slow Ln", "zzzz-not-a-situs-99999"]);
+    f.ss().lookup(look.find((b) => b.getAttribute("data-query") === "zzzz-not-a-situs-99999"));
+    expect(f.lastText()).toBe(COPY3.lookupDraft("zzzz-not-a-situs-99999"));
+    f.ss().lookup(f.btn({ "data-query": "100 Main St" }));
+    f.ss().lookup(f.btn({ "data-query": "908 Pine, Bastrop TX" }));
+    f.ss().lookup(f.btn({ "data-query": "48021:900001" }));
+    f.ss().lookup(f.btn({}));
+    expect(f.messages()).toHaveLength(3);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.text()).not.toContain(COPY.empty);
+    expect(f.root.innerHTML).toBe(before);
+  });
+
+  it("B2 declared degradation: one note per duplicate and per timed-out query beneath the board; an errored or skipped read paints every rail unread and names the read state on the row; stubsDegraded stays one line, above the legend", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SCREEN_S8);
+    const html = f.root.innerHTML;
+    expect(f.text()).toContain(COPY3.dup("111 Rainmaker Cove, Bastrop TX", "111 Rainmaker Cv, Bastrop TX", "48021:8720522"));
+    expect(f.text()).toContain(COPY3.timedOut("500 Slow Ln"));
+    expect(html).toContain('data-duplicate="48021:8720522"');
+    expect(html).toContain('data-timed-out="500 Slow Ln"');
+    expect(html.indexOf("data-duplicate=")).toBeGreaterThan(html.indexOf("</table>"));
+    expect(html.indexOf("data-duplicate=")).toBeLessThan(html.indexOf('<div class="legend"'));
+    expect(html.indexOf("data-timed-out=")).toBeGreaterThan(html.indexOf("</table>"));
+    /* the errored read: every rail unread despite the stub's claim, and the read state named on the row */
+    expect(rowGlyphs(html, 'data-node="48021:8720522"')).toEqual(ALL_UNREAD);
+    expect(rowGlyphs(html, 'data-node="48021:34137"')).toEqual(STUB_SIX_GLYPHS);
+    const err = rowHtml(html, 'data-node="48021:8720522"');
+    expect(err).toContain('data-stub-read="error"');
+    expect(f.strip(err)).toContain(`${COPY3.railsNotRead} error`);
+    expect(rowHtml(html, 'data-node="48021:34137"')).not.toContain("data-stub-read");
+    /* stubsDegraded: the carried sentence, one line, above the legend */
+    expect(f.text()).toContain(COPY.railsPartlyUnread);
+    expect((f.text().match(/Some rails/g) ?? []).length).toBe(1);
+    expect(html.indexOf(COPY.railsPartlyUnread)).toBeGreaterThan(html.indexOf("</table>"));
+    expect(html.indexOf(COPY.railsPartlyUnread)).toBeLessThan(html.indexOf('<div class="legend"'));
+    expect(f.text()).not.toContain(COPY.empty);
+    expect(f.openButtons()).toBe(2);
+    /* a skipped read names skipped; a screen with no degraded block paints no note */
+    const g = fresh();
+    g.init();
+    g.toolResult({ id: "s", rows: [{ query: "q", parcelNodeId: "48021:1", resolution: "resolved", stubRead: "skipped", stub: { situs: "present" } }] });
+    expect(g.root.innerHTML).toContain('data-stub-read="skipped"');
+    expect(g.strip(rowHtml(g.root.innerHTML, 'data-node="48021:1"'))).toContain(`${COPY3.railsNotRead} skipped`);
+    expect(rowGlyphs(g.root.innerHTML, 'data-node="48021:1"')).toEqual(ALL_UNREAD);
+    expect(g.root.innerHTML).not.toContain("data-duplicate=");
+    expect(g.root.innerHTML).not.toContain("data-timed-out=");
+    expect(g.text()).not.toContain(COPY.railsPartlyUnread);
+    expect(g.text()).not.toContain("not added twice");
+  });
+
+  it("B3 reopen picker: a bare list_screens paints the screens newest first with name, row count when carried and updated date; Open drafts the reopen turn on the board's own path with the 12 s timer and the Sent line; an empty list paints its own sentence, never the empty board copy", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SCREENS_S8);
+    expect(f.openButtons()).toBe(0);
+    const reopen = f.all('[data-act="reopen"]');
+    expect(reopen.map((b) => b.getAttribute("data-screen"))).toEqual(["scr-c", "scr-b", "scr-a", "scr-d"]);
+    expect(f.text()).toContain("Newest");
+    expect(f.text()).toContain("Uncounted");
+    expect(f.text()).toContain("Undated");
+    expect(f.root.innerHTML).toContain('data-row-count="1">1 row</span>');
+    expect(f.root.innerHTML).toContain('data-row-count="3">3 rows</span>');
+    expect((f.root.innerHTML.match(/data-row-count=/g) ?? []).length).toBe(2);
+    expect(f.root.innerHTML).toContain('data-updated="2026-08-30"');
+    expect(f.text()).toContain("updated 2026-08-30");
+    expect(f.text()).not.toContain("T09:05");
+    expect(f.text()).not.toContain(COPY3.noScreens);
+    for (const s of ALL_SENTENCES) expect(f.text(), s).not.toContain(s);
+    const before = f.posted.length;
+    f.ss().reopen(reopen[0]);
+    const msg = f.messages().pop();
+    expect(msg?.method).toBe("ui/message");
+    expect(f.lastText()).toBe(COPY3.reopenDraft("scr-c"));
+    expect(f.posted.length).toBe(before + 1);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(1);
+    f.deliver({ jsonrpc: "2.0", id: msg?.id, result: {} });
+    expect(f.boot.textContent).toContain("reply=ok");
+    expect(f.text()).toContain(COPY.sent);
+    expect(f.text()).not.toContain(COPY.dead);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.all('[data-act="reopen"]')).toHaveLength(4);
+    /* the reopened screen replaces the list and clears the line */
+    f.toolResult(BOARD);
+    expect(f.text()).not.toContain(COPY.sent);
+    expect(f.all('[data-act="reopen"]')).toHaveLength(0);
+    expect(f.openButtons()).toBe(2);
+    /* dead: no reply in 12 s; the list stays */
+    const g = fresh();
+    g.init();
+    g.toolResult(SCREENS_S8);
+    g.ss().reopen(g.all('[data-act="reopen"]')[1]);
+    expect(g.lastText()).toBe(COPY3.reopenDraft("scr-b"));
+    expect(g.fire(OPEN_DEAD_MS)).toBe(1);
+    expect(g.text()).toContain(COPY.dead);
+    expect(g.all('[data-act="reopen"]')).toHaveLength(4);
+    /* a forged control naming a screen the panel did not paint drafts nothing and arms nothing */
+    g.ss().reopen(g.btn({ "data-screen": "scr-z" }));
+    g.ss().reopen(g.btn({}));
+    expect(g.messages()).toHaveLength(1);
+    expect(g.armed(OPEN_DEAD_MS)).toBe(0);
+    /* empty: its own sentence */
+    const e = fresh();
+    e.init();
+    e.toolResult({ screens: [] });
+    expect(e.text()).toContain(COPY3.noScreens);
+    expect(e.text()).not.toContain(COPY.empty);
+    expect(e.all('[data-act="reopen"]')).toHaveLength(0);
+    expect(e.openButtons()).toBe(0);
+  });
+
+  it("B4 cross-county grouping: more than one county prefix paints one group per county named from the map (else the fips) and an Unresolved group last; rails and the slot stay per parcel; no group carries a count; a single-county board paints no group at all", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(BOARD_CROSS);
+    const html = f.root.innerHTML;
+    expect(f.all("[data-county-group]").map((g) => g.getAttribute("data-county-group"))).toEqual(["48021", "48209", "99999", "unresolved"]);
+    const titles = [...html.matchAll(/data-county-group="[^"]+"><th colspan="9">([^<]+)<\/th>/g)].map((m) => m[1]);
+    expect(titles).toEqual(["Bastrop", "Hays", "99999", COPY3.unresolvedGroup]);
+    const bastrop = f.segment('data-county-group="48021"', 'data-county-group="48209"');
+    expect(bastrop).toContain('data-node="48021:34137"');
+    expect(bastrop).toContain('data-node="48021:33223"');
+    expect(bastrop).not.toContain('data-node="48209:1"');
+    expect(f.segment('data-county-group="48209"', 'data-county-group="99999"')).toContain('data-node="48209:1"');
+    expect(f.segment('data-county-group="99999"', 'data-county-group="unresolved"')).toContain('data-node="99999:1"');
+    const loose = f.segment('data-county-group="unresolved"', "</tbody>");
+    expect(loose).toContain("zzzz-not-a-situs-99999");
+    expect(loose).not.toContain("data-node=");
+    expect(f.strip(loose)).toContain(COPY.nothingToOpen);
+    expect(rowGlyphs(html, 'data-node="48021:34137"')).toEqual(STUB_SIX_GLYPHS);
+    expect(rowGlyphs(html, 'data-node="48209:1"')).toEqual(["present", "unread", "unread", "unread", "unread", "unread"]);
+    expect(rowGlyphs(html, 'data-node="99999:1"')).toEqual(ALL_UNREAD);
+    expect(f.openButtons()).toBe(4);
+    for (const t of titles) expect(t).not.toMatch(/\d\s*(present|of|\/)/);
+    expect(f.text()).not.toMatch(/\d+ of \d+|\d+\/6/);
+    expect(f.text()).not.toContain(COPY.empty);
+    const g = fresh();
+    g.init();
+    g.toolResult(BOARD);
+    expect(g.root.innerHTML).not.toContain("data-county-group");
+    expect(g.text()).not.toContain(COPY3.unresolvedGroup);
+    const h = fresh();
+    h.init();
+    h.toolResult(LIVE_BATCH);
+    expect(h.root.innerHTML).not.toContain("data-county-group");
+    expect(h.openButtons()).toBe(2);
+    /* two counties is the boundary: grouped, and no Unresolved group when every row resolved */
+    const two = fresh();
+    two.init();
+    two.toolResult({ id: "two", rows: [BOARD_CROSS.rows[0], BOARD_CROSS.rows[1]] });
+    expect(two.all("[data-county-group]").map((g) => g.getAttribute("data-county-group"))).toEqual(["48021", "48209"]);
+    expect(two.text()).toContain("Bastrop");
+    expect(two.text()).toContain("Hays");
+    expect(two.text()).not.toContain(COPY3.unresolvedGroup);
+  });
+
+  it("B5 default sort by completeness: the board opens fewest-present first, ties by query; the header sorts still work and the completeness control returns; every sort is local and paints no count", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(BOARD_MIXED);
+    expect(rowQueries(f.root.innerHTML)).toEqual(["d", "a", "b", "e", "c"]);
+    expect(f.root.querySelector("table")?.getAttribute("data-sort")).toBe("completeness");
+    expect(f.root.querySelector("table")?.getAttribute("data-dir")).toBe("1");
+    expect(f.text()).toContain(COPY3.byCompleteness);
+    const fp = () => (f.sandbox.__ss as { fp: () => string }).fp();
+    const fp0 = fp();
+    const turns = () => f.posted.filter((m) => m.method === "ui/message" || m.method === "ui/open-link").length;
+    const t0 = turns();
+    f.root.querySelector('[data-k="completeness"]')!.dispatch("click");
+    expect(rowQueries(f.root.innerHTML)).toEqual(["c", "e", "a", "b", "d"]);
+    expect(f.root.querySelector("table")?.getAttribute("data-dir")).toBe("-1");
+    f.root.querySelector('[data-k="query"]')!.dispatch("click");
+    expect(rowQueries(f.root.innerHTML)).toEqual(["a", "b", "c", "d", "e"]);
+    expect(f.root.querySelector("table")?.getAttribute("data-sort")).toBe("query");
+    f.root.querySelector('[data-k="query"]')!.dispatch("click");
+    expect(rowQueries(f.root.innerHTML)).toEqual(["e", "d", "c", "b", "a"]);
+    f.root.querySelector('[data-k="id"]')!.dispatch("click");
+    expect(rowQueries(f.root.innerHTML)).toEqual(["d", "a", "b", "c", "e"]);
+    expect(f.root.querySelector("table")?.getAttribute("data-sort")).toBe("id");
+    f.root.querySelector('[data-k="completeness"]')!.dispatch("click");
+    expect(rowQueries(f.root.innerHTML)).toEqual(["c", "e", "a", "b", "d"]);
+    expect(fp()).toBe(fp0);
+    expect(turns()).toBe(t0);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.text()).not.toMatch(/\d+\s*(present|known|of 6|\/6)/);
+    expect(f.root.innerHTML).not.toMatch(/data-(rank|present-count|known)=/);
+    /* a later result opens on the default order again */
+    f.toolResult(BOARD_MIXED);
+    expect(rowQueries(f.root.innerHTML)).toEqual(["d", "a", "b", "e", "c"]);
+    expect(f.root.querySelector("table")?.getAttribute("data-sort")).toBe("completeness");
+    expect(rowGlyphs(f.root.innerHTML, 'data-node="48021:5"')).toEqual(STUB_SIX_GLYPHS);
+  });
+
+  it("H1 every body has a sentence: each declared body paints its own line, never the empty copy; the brief is verbatim and escaped; upstream prints only when numeric; an isError reply to Open is a result; a status off the enum is not declared; the v1 refused shape still paints per parcel", () => {
+    const cases: Array<[string, Record<string, unknown>, string[]]> = [
+      ["errorJson", DECLARED_S8.errorJson, [`${COPY3.notReturned}: not_found`, "upstream 404"]],
+      ["errorUnmeasured", DECLARED_S8.errorUnmeasured, [`${COPY3.notReturned}: export_failed`, "The export proxy did not answer."]],
+      ["nonJson", DECLARED_S8.nonJson, [`${COPY3.notReturned}: upstream_non_json`, "upstream 502", "<html>502 Bad Gateway</html>"]],
+      ["cap", DECLARED_S8.cap, [`${COPY3.refused}: parcel_batch_cap`, "cap 25", "received 30", "depth node"]],
+      ["screenId", DECLARED_S8.screenId, [`${COPY3.refused}: screen_id_not_accepted`]],
+      ["hop1", DECLARED_S8.hop1, [`${COPY3.notImplemented}: hop1`]],
+      ["cortex", DECLARED_S8.cortex, [`${COPY3.notReturned}: cortex_not_configured`, "Smart Site MCP cannot reach the workbench backend."]],
+      ["exportDown", DECLARED_S8.exportDown, [`${COPY3.notReturned}: hauska_mcp_unavailable`, "tool export_instrument", "Export is temporarily unavailable because Hauska MCP is unreachable."]],
+      ["notReady", DECLARED_S8.notReady, [`export_instrument ${COPY3.notReady}: P-87 export honesty`, "export_instrument is not available on Smart Site MCP yet."]],
+      ["upgrade", DECLARED_S8.upgrade, [COPY.refused, "reason deep_report", "tier free", "Deep report needs Solo or above."]],
+    ];
+    for (const [name, body, sentences] of cases) {
+      const f = fresh();
+      f.init();
+      f.toolResult(body);
+      for (const s of sentences) expect(f.text(), `${name}: ${s}`).toContain(s);
+      expect(f.text(), name).not.toContain(COPY.empty);
+      expect(f.openButtons(), name).toBe(0);
+      expect(f.root.innerHTML, name).toContain(`data-declared="${String(body.status)}"`);
+      const allowed = name === "upgrade" ? [COPY.refused] : [];
+      for (const s of ALL_SENTENCES) if (!allowed.includes(s)) expect(f.text(), `${name}: ${s}`).not.toContain(s);
+    }
+    const nj = fresh();
+    nj.init();
+    nj.toolResult(DECLARED_S8.nonJson);
+    expect(nj.root.innerHTML).toContain('<pre class="brief" data-brief="1">&lt;html&gt;502 Bad Gateway&lt;/html&gt;</pre>');
+    expect(nj.root.innerHTML).not.toContain("<html>502");
+    const um = fresh();
+    um.init();
+    um.toolResult(DECLARED_S8.errorUnmeasured);
+    expect(um.root.innerHTML).not.toContain("data-upstream-status");
+    expect(um.text()).not.toContain("upstream");
+    /* an isError reply to the Open turn is a result: the declared line replaces the board, the timer clears, nothing is dead or sent */
+    const f = fresh();
+    f.init();
+    f.toolResult(BOARD);
+    const msg = f.open("48021:34137");
+    expect(f.armed(OPEN_DEAD_MS)).toBe(1);
+    f.deliver({ jsonrpc: "2.0", id: msg?.id, result: { isError: true, content: [{ type: "text", text: JSON.stringify(DECLARED_S8.cap) }] } });
+    expect(f.boot.textContent).toContain("reply=isError");
+    expect(f.text()).toContain(`${COPY3.refused}: parcel_batch_cap`);
+    expect(f.armed(OPEN_DEAD_MS)).toBe(0);
+    expect(f.fire(OPEN_DEAD_MS)).toBe(0);
+    expect(f.text()).not.toContain(COPY.dead);
+    expect(f.text()).not.toContain(COPY.sent);
+    expect(f.text()).not.toContain(COPY.empty);
+    /* a status off the enum names no state the panel knows: it is not declared */
+    const w = fresh();
+    w.init();
+    w.toolResult({ status: "weird", reason: "x" });
+    expect(w.root.innerHTML).not.toContain("data-declared");
+    expect(w.text()).toContain(COPY.empty);
+    /* the v1 refused shape (parcels plus refused rows) still paints per parcel, not a declared line */
+    const r = fresh();
+    r.init();
+    r.toolResult(REFUSED);
+    expect(r.text()).toContain(COPY.refused);
+    expect(r.text()).toContain("48021:34137");
+    expect(r.root.innerHTML).not.toContain("data-declared");
+  });
+
+  it("one parser (S8): the served parse agrees with the exported parseToolResult on every board fixture", () => {
+    const f = fresh();
+    const served = (f.sandbox.__ss as { parse: (t: string) => unknown }).parse;
+    const diffs: string[] = [];
+    for (const [name, fx] of Object.entries(PARITY_S8)) {
+      const text = JSON.stringify(fx);
+      const a = JSON.stringify(served(text));
+      const b = JSON.stringify(app.parseToolResult(text));
+      if (a !== b) diffs.push(`${name}\n  served:   ${a}\n  exported: ${b}`);
+    }
+    expect(diffs).toEqual([]);
+    expect(app.parseToolResult(JSON.stringify(PARITY_S8.screenS8)).rows[2]?.candidates).toHaveLength(2);
+    expect(app.parseToolResult(JSON.stringify(PARITY_S8.screensList)).kind).toBe("screens");
+    expect(app.parseToolResult(JSON.stringify(PARITY_S8.screensJunk)).screens).toHaveLength(2);
+    expect(app.parseToolResult(JSON.stringify(PARITY_S8.cap)).kind).toBe("declared");
+    expect(app.parseToolResult(JSON.stringify(PARITY_S8.statusWeird)).kind).toBe("empty");
+    expect(app.parseToolResult(JSON.stringify(PARITY_S8.stubReadJunk)).rows.map((r) => r.rails.situs)).toEqual(["present", "unread"]);
+  });
+
+  it("htmlContractViolations: the S8 checks fire on violated copies of the served html", () => {
+    const clean = app.buildAppHtml();
+    expect(app.htmlContractViolations(clean)).toEqual([]);
+    expect(app.htmlContractViolations(clean.replace(/data-act="usecand"/g, 'data-act="pick"'))).toContain("candidate_control_unbound");
+    expect(app.htmlContractViolations(clean.split(COPY3.lookUp).join("Find it"))).toContain("candidate_control_unbound");
+    expect(app.htmlContractViolations(clean.replace(/data-duplicate=/g, "data-dup="))).toContain("duplicate_note_unbound");
+    expect(app.htmlContractViolations(clean.split("did not resolve in time; unresolved for now.").join("was slow"))).toContain("duplicate_note_unbound");
+    expect(app.htmlContractViolations(clean.replace(/data-act="reopen"/g, 'data-act="again"'))).toContain("reopen_opener_unbound");
+    expect(app.htmlContractViolations(clean.split("No screens yet.").join("Nothing here."))).toContain("reopen_opener_unbound");
+    expect(app.htmlContractViolations(clean.replace(/data-county-group=/g, "data-group="))).toContain("county_group_unmarked");
+    expect(app.htmlContractViolations(clean.split(`"${COPY3.unresolvedGroup}"`).join('"Loose"'))).toContain("county_group_unmarked");
+    expect(app.htmlContractViolations(clean.replace(/function sortBoardRows/g, "function orderRows"))).toContain("completeness_sort_unbound");
+    expect(app.htmlContractViolations(clean.replace('data-k="completeness"', 'data-k="known"'))).toContain("completeness_sort_unbound");
+    expect(app.htmlContractViolations(clean.replace(/data-declared=/g, "data-state="))).toContain("declared_body_unbound");
+    expect(app.htmlContractViolations(clean.split(`"${COPY3.refused}"`).join('"Declined"'))).toContain("declared_body_unbound");
+  });
+});
