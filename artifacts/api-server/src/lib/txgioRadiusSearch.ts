@@ -2,9 +2,12 @@
  * Point + radius parcel set search over txgio_parcel.
  *
  * Geometry is jsonb GeoJSON with bbox columns, not PostGIS. Candidates
- * are bbox-overlap with the search circle's bbox. A parcel is in the
- * set when the point is inside the polygon or the point-to-bbox
- * distance is <= radiusFt.
+ * are bbox-overlap with the search circle's bbox, constrained first to
+ * the one or two counties whose tx_county_boundary bbox overlaps, then
+ * to the covering tile_key cells (the pk). A statewide county IN list
+ * seq-scans 16M rows; that is the hang this file used to ship.
+ * A parcel is in the set when the point is inside the polygon or the
+ * point-to-bbox distance is <= radiusFt.
  *
  * Truncation is a field. A silent first-N is the defect this route
  * exists to not repeat. A candidate ceiling that fires is a refuse,
@@ -12,18 +15,19 @@
  */
 
 import { and, gte, inArray, lte } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { db as defaultDb, txgioParcel } from "@workspace/db";
+import { db as defaultDb, txCountyBoundary, txgioParcel } from "@workspace/db";
 import {
+  cellKeysForBbox,
   pointInGeometry,
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
 import { parcelNodeId } from "./parcelNodeId";
-import { texasCountyFipsList } from "./txgioAddressNormalize";
 
 export const RADIUS_SEARCH_CAP = 50;
 export const RADIUS_SEARCH_MAX_FT = 5280;
 export const RADIUS_SEARCH_CANDIDATE_CEILING = 2000;
+/** Same cell ceiling as txgioParcelStore. A 5280 ft box is a handful of cells. */
+export const RADIUS_SEARCH_MAX_TILE_CELLS = 256;
 
 export type RadiusSearchHit = {
   parcelNodeId: string;
@@ -45,16 +49,25 @@ export type RadiusSearchRefuse = {
   code:
     | "radius_invalid"
     | "radius_exceeds_max"
-    | "radius_unbounded";
+    | "radius_unbounded"
+    | "radius_county_unresolved";
   reason: string;
 };
 
 export type RadiusSearchResult = RadiusSearchOk | RadiusSearchRefuse;
 
-export type RadiusSearchDb = Pick<
-  NodePgDatabase<Record<string, unknown>>,
-  "select"
->;
+/** Structural so tests can stub select/from/where without a live drizzle session. */
+export type RadiusWhereResult = Promise<unknown[]> & {
+  limit: (n: number) => Promise<unknown[]>;
+};
+
+export type RadiusSearchDb = {
+  select: (fields?: unknown) => {
+    from: (table: unknown) => {
+      where: (cond: unknown) => RadiusWhereResult;
+    };
+  };
+};
 
 const FT_PER_DEG_LAT = 364000;
 const EARTH_RADIUS_FT = 20_902_231;
@@ -186,6 +199,35 @@ function clampCap(raw: number | undefined): number {
   );
 }
 
+/**
+ * Counties whose stored bbox overlaps the search box. tx_county_boundary
+ * is 254 rows; a 50-foot circle in Bastrop must not consider Amarillo.
+ * Bbox overlap is conservative (Lee's rectangle can cover a Bastrop
+ * interior point) and is the one-or-two-county bound, not a PIP claim.
+ */
+export async function countiesOverlappingBbox(
+  box: { westLng: number; southLat: number; eastLng: number; northLat: number },
+  database: RadiusSearchDb,
+): Promise<string[]> {
+  const rows = (await database
+    .select({ countyFips: txCountyBoundary.countyFips })
+    .from(txCountyBoundary)
+    .where(
+      and(
+        lte(txCountyBoundary.westLng, box.eastLng),
+        gte(txCountyBoundary.eastLng, box.westLng),
+        lte(txCountyBoundary.southLat, box.northLat),
+        gte(txCountyBoundary.northLat, box.southLat),
+      ),
+    )) as { countyFips: string | null }[];
+  const out: string[] = [];
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    if (fips && !out.includes(fips)) out.push(fips);
+  }
+  return out;
+}
+
 export async function searchParcelsByRadius(input: {
   lat: number;
   lng: number;
@@ -219,27 +261,43 @@ export async function searchParcelsByRadius(input: {
   const box = circleBbox(input.lat, input.lng, input.radiusFt);
   const database = input.database ?? defaultDb;
 
+  const counties = await countiesOverlappingBbox(box, database);
+  if (counties.length === 0) {
+    return {
+      refused: true,
+      code: "radius_county_unresolved",
+      reason:
+        "No Texas county boundary overlaps the search box. Refusing rather than scanning every county.",
+    };
+  }
+
+  const cells = cellKeysForBbox(box, undefined, RADIUS_SEARCH_MAX_TILE_CELLS);
+  const parcelColumns = {
+    countyFips: txgioParcel.countyFips,
+    propId: txgioParcel.propId,
+    situsAddress: txgioParcel.situsAddress,
+    geometry: txgioParcel.geometry,
+    westLng: txgioParcel.westLng,
+    southLat: txgioParcel.southLat,
+    eastLng: txgioParcel.eastLng,
+    northLat: txgioParcel.northLat,
+  };
+  const bboxPred = and(
+    inArray(txgioParcel.countyFips, counties),
+    lte(txgioParcel.westLng, box.eastLng),
+    gte(txgioParcel.eastLng, box.westLng),
+    lte(txgioParcel.southLat, box.northLat),
+    gte(txgioParcel.northLat, box.southLat),
+  );
+  const parcelWhere =
+    cells !== null && cells.length > 0
+      ? and(bboxPred, inArray(txgioParcel.tileKey, cells))
+      : bboxPred;
+
   const rows = (await database
-    .select({
-      countyFips: txgioParcel.countyFips,
-      propId: txgioParcel.propId,
-      situsAddress: txgioParcel.situsAddress,
-      geometry: txgioParcel.geometry,
-      westLng: txgioParcel.westLng,
-      southLat: txgioParcel.southLat,
-      eastLng: txgioParcel.eastLng,
-      northLat: txgioParcel.northLat,
-    })
+    .select(parcelColumns)
     .from(txgioParcel)
-    .where(
-      and(
-        inArray(txgioParcel.countyFips, texasCountyFipsList()),
-        lte(txgioParcel.westLng, box.eastLng),
-        gte(txgioParcel.eastLng, box.westLng),
-        lte(txgioParcel.southLat, box.northLat),
-        gte(txgioParcel.northLat, box.southLat),
-      ),
-    )
+    .where(parcelWhere)
     .limit(RADIUS_SEARCH_CANDIDATE_CEILING + 1)) as {
     countyFips: string | null;
     propId: string | null;
