@@ -6,7 +6,7 @@
  * that keeps the two shapes in step is PANEL_ANCHOR_ACCEPTS_WIRE below. */
 import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p561.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p562.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 
 /* p559 probe: three channels for the map-ground decision (v3 scoping measurement 6).
@@ -1414,9 +1414,16 @@ export function multiDrawnHtml(placed: PlacedParcel[]): string {
  * Every parcel that is NOT on the canvas, named with its reason. This list is
  * the card: a canvas that quietly shows four of seven is the defect, and the
  * only thing that stops it is an enumeration of the other three.
+ *
+ * M-5: the title is a parameter because the SAME list is now painted in a
+ * second place, under a panel with no canvas at all. One renderer, two titles,
+ * so a fix to the row shape cannot reach one caller and miss the other. The
+ * parameter is optional rather than defaulted: a default value would be a
+ * second place the canvas title is written.
  */
-export function multiUndrawnHtml(list: UndrawnParcel[]): string {
+export function multiUndrawnHtml(list: UndrawnParcel[], title?: string): string {
   if (list.length === 0) return "";
+  const head = title ? title : MULTI_UNDRAWN_TITLE;
   let rows = "";
   for (let i = 0; i < list.length; i++) {
     const u = list[i];
@@ -1427,7 +1434,7 @@ export function multiUndrawnHtml(list: UndrawnParcel[]): string {
       '<span class="lbl">' + escapeHtml(u.label) + "</span> " +
       '<span class="reason">' + escapeHtml(u.reason) + "</span></div>";
   }
-  return '<div class="pset-list"><div class="req">' + MULTI_UNDRAWN_TITLE + " (" + list.length + ")</div>" + rows + "</div>";
+  return '<div class="pset-list"><div class="req">' + escapeHtml(head) + " (" + list.length + ")</div>" + rows + "</div>";
 }
 
 /** Why there is no ground under this canvas. Empty when there is one. */
@@ -1472,6 +1479,222 @@ export function renderParcelSet(
     multiDrawnHtml(m.placed) +
     multiUndrawnHtml(m.undrawn)
   );
+}
+
+/*
+ * P-91 v3 M-5 item 1: what could not be drawn is named whether or not there is
+ * a canvas.
+ *
+ * M-4 shipped the naming CONDITIONAL on the canvas existing. Below two drawable
+ * parcels the parser hands the body to the single parcel branch, that branch
+ * paints parcels[0] alone, and the other rows were named nowhere. A seven parcel
+ * result with one drawable parcel said nothing at all about the other six, which
+ * is the exact silent omission M-4 exists to end, surviving inside M-4's own
+ * fallback.
+ *
+ * The rule here is not "name the undrawable ones". It is: every parcel the
+ * result carried that this panel did not draw is named with a reason. That
+ * covers the case the narrower rule misses, where parcels[0] is itself
+ * undrawable and a DRAWABLE parcel further down the array is the one going
+ * unnamed. Both are omissions and only one of them is an undrawable row.
+ */
+
+/** The list's title when there is no canvas. Not the canvas title: there is no canvas. */
+export const MULTI_OFF_CANVAS_TITLE = "Not drawn here";
+
+/** Why a drawable parcel is still not drawn: this panel drew a different one and there is no canvas. */
+export const MULTI_NO_CANVAS = "drawable; no canvas under " + MULTI_MIN_DRAWN + " drawable parcels";
+
+export const MULTI_NO_CANVAS_PREFIX = "No canvas:";
+export const MULTI_NO_CANVAS_DRAWABLE = "parcels could be drawn;";
+export const MULTI_NO_CANVAS_NEEDED = "are needed.";
+
+/** "No canvas: 1 of 7 parcels could be drawn; 2 are needed." */
+export function multiNoCanvasWords(drawable: number, total: number): string {
+  return (
+    MULTI_NO_CANVAS_PREFIX + " " + drawable + " of " + total + " " +
+    MULTI_NO_CANVAS_DRAWABLE + " " + MULTI_MIN_DRAWN + " " + MULTI_NO_CANVAS_NEEDED
+  );
+}
+
+export function multiNoCanvasNoteHtml(drawable: number, total: number): string {
+  return (
+    '<div class="gnote" data-no-canvas="' + drawable + '" data-parcels-in-result="' + total + '">' +
+    escapeHtml(multiNoCanvasWords(drawable, total)) + "</div>"
+  );
+}
+
+/**
+ * Every parcel this panel did not draw, with why. `shownId` is the parcel the
+ * single parcel panel painted; it is excluded ONLY when it actually has a ring
+ * and an anchor, because a shown parcel that could not be drawn is still a
+ * parcel nobody can see and has to be named like the rest.
+ *
+ * undrawnReason is the same predicate multiDrawableCount and multiParcelPlan
+ * ask. There is no second definition of drawable here.
+ */
+export function offCanvasParcels(parcels: PanelParcel[], shownId: string | null): UndrawnParcel[] {
+  const out: UndrawnParcel[] = [];
+  for (let i = 0; i < parcels.length; i++) {
+    const p = parcels[i];
+    if (!p) continue;
+    const why = undrawnReason(p);
+    if (why === null && p.parcelNodeId === shownId) continue;
+    out.push({
+      parcelNodeId: p.parcelNodeId,
+      label: p.label,
+      reason: why === null ? MULTI_NO_CANVAS : why,
+    });
+  }
+  return out;
+}
+
+/**
+ * The block a single parcel panel carries when its result held more than one
+ * parcel. Silent on a genuine single parcel result, because there is nothing
+ * omitted to declare.
+ */
+export function offCanvasHtml(
+  model: Pick<PanelModel, "parcels" | "anchorBatch" | "parcelNodeId">,
+): string {
+  const parcels = model.parcels ? model.parcels : [];
+  if (parcels.length < 2) return "";
+  const others = offCanvasParcels(parcels, model.parcelNodeId ? model.parcelNodeId : null);
+  return (
+    multiNoCanvasNoteHtml(multiDrawableCount(parcels), parcels.length) +
+    anchorBatchNoteHtml(model.anchorBatch ? model.anchorBatch : null) +
+    multiUndrawnHtml(others, MULTI_OFF_CANVAS_TITLE)
+  );
+}
+
+/*
+ * P-91 v3 M-5 item 2: the paint only preview channel.
+ *
+ * The panel already holds every parcel in its own result. The one thing it does
+ * NOT hold is the neighbour a shared boundary edge names: the edge carries a
+ * `neighbor` id and nothing else about that parcel. Learning anything about it
+ * costs a conversation turn. So a dwell on a door tooltip may read that
+ * neighbour's stub rails through an app initiated tools/call and paint them,
+ * and ONLY paint them.
+ *
+ * Two invariants, both mechanised below and in htmlContractViolations:
+ *
+ * 1. A paint only result never claims to be in the conversation. The block is
+ *    visually distinct from tool result facts (its own class, its own rule) and
+ *    carries an explicit line saying it was not sent to the chat. Every state
+ *    carries that line, so it cannot be lost by taking one branch.
+ *
+ * 2. Anything acted on still drafts a turn. The Open and Add to screen controls
+ *    in the door tooltip are untouched: they draft the ordinary ui/message and
+ *    the user still sends it. Nothing here populates, pre-fills, or shortcuts a
+ *    turn, and the preview is never an argument to one.
+ *
+ * Fail closed is the whole difficulty. serverTools is UNMEASURED: the p559 probe
+ * measured resources/read, which is a different method. So every path where the
+ * channel does not work states that no preview is available and why, in one
+ * line, and emits no rail glyph at all. An empty rail set would be
+ * indistinguishable from a parcel with no data, which is the confusion this
+ * program exists to prevent.
+ */
+
+/** The tool the preview reads. Already in APP_HOST_TOOLS; the catalog stays at 13. */
+export const PREVIEW_TOOL = "get_smart_site";
+/** An array argument reads at stub depth. Stated rather than defaulted. */
+export const PREVIEW_DEPTH = "stub";
+
+/**
+ * Dwell before a preview fires, in ms. A pointer crossing an edge on its way
+ * somewhere else is on it for well under 200 ms; a hover held past 350 ms is a
+ * decision. Below that the panel would call on transit, which is the behaviour
+ * the card refuses.
+ */
+export const PREVIEW_DWELL_MS = 350;
+
+/**
+ * How long a preview waits before it declares itself unanswered, in ms. Shorter
+ * than the p559 probe's 6000 and much shorter than OPEN_DEAD_MS, because those
+ * two wait on a panel a user is looking at, while this waits on a tooltip a
+ * user is holding a pointer over. Past about four seconds the hover is gone and
+ * a late answer would paint into a tooltip that no longer asked.
+ */
+export const PREVIEW_TIMEOUT_MS = 4000;
+
+export const PREVIEW_TITLE = "Preview of";
+/** Invariant 1, in one sentence, on every state. */
+export const PREVIEW_NOT_IN_CHAT = "Not sent to the chat. Claude cannot see this.";
+export const PREVIEW_PENDING = "Reading stub rails.";
+export const PREVIEW_UNSUPPORTED = "No preview available: this host does not offer app tool calls.";
+export const PREVIEW_TIMED_OUT = "No preview available: the tool call did not answer in time.";
+export const PREVIEW_ERROR = "No preview available: the tool call returned an error";
+export const PREVIEW_DECLINED = "No preview available: the tool declined this read.";
+export const PREVIEW_EMPTY = "No preview available: the result carried no rails for this parcel.";
+export const PREVIEW_BUSY = "No preview available: another preview is still open.";
+/** Fail closed on a state word nothing above names. Never an empty block. */
+export const PREVIEW_UNSTATED = "No preview available: state not stated.";
+
+/** One short line per state. Never blank: a blank line is a silent nothing. */
+export function previewLine(state: string, code: string | null): string {
+  if (state === "pending") return PREVIEW_PENDING;
+  if (state === "unsupported") return PREVIEW_UNSUPPORTED;
+  if (state === "timeout") return PREVIEW_TIMED_OUT;
+  if (state === "busy") return PREVIEW_BUSY;
+  if (state === "declined") return PREVIEW_DECLINED;
+  if (state === "empty") return PREVIEW_EMPTY;
+  if (state === "error") return code ? PREVIEW_ERROR + " " + code : PREVIEW_ERROR + ".";
+  return PREVIEW_UNSTATED;
+}
+
+/** The six rails, as glyphs, from the row the same parser produced. */
+export function previewRailsHtml(row: Pick<BoardRow, "rails">): string {
+  let out = "";
+  for (let i = 0; i < RAILS.length; i++) {
+    const k = RAILS[i];
+    if (!k) continue;
+    const s = railState(row.rails[k]);
+    out +=
+      '<span class="pvr"><span class="g ' + glyphClass(s) + '" title="' + escapeHtml(s) + '"></span>' +
+      escapeHtml(k) + "</span>";
+  }
+  return out;
+}
+
+/**
+ * The block itself. Rails paint under exactly one condition, "ok" with a row;
+ * every other state paints one stated line and NO glyph. There is no third
+ * branch, so there is no path that renders an empty rail set.
+ */
+export function previewBlockHtml(
+  node: string,
+  state: string,
+  row: Pick<BoardRow, "rails"> | null,
+  code: string | null,
+): string {
+  const id = escapeHtml(node);
+  const drawn = state === "ok" && row ? true : false;
+  const body = drawn && row
+    ? '<span class="pvrails">' + previewRailsHtml(row) + "</span>"
+    : '<span class="pvmiss">' + escapeHtml(previewLine(state, code)) + "</span>";
+  return (
+    '<span class="pv" data-preview="' + id + '" data-preview-state="' + escapeHtml(state) + '">' +
+    '<span class="pvt">' + PREVIEW_TITLE + " " + id + "</span>" + body +
+    '<span class="pvnote">' + PREVIEW_NOT_IN_CHAT + "</span></span>"
+  );
+}
+
+/**
+ * The neighbour's row out of a tools/call result, through the SAME parser the
+ * panel uses on a tool result it was handed. A body that does not parse as a
+ * board, or that carries no row for the id asked for, is no row at all: the
+ * caller states an absence rather than painting a shape.
+ */
+export function previewRowFrom(result: unknown, node: string): BoardRow | null {
+  const m = parseToolContent(result);
+  if (m.kind !== "board") return null;
+  for (let i = 0; i < m.rows.length; i++) {
+    const r = m.rows[i];
+    if (r && r.parcelNodeId === node) return r;
+  }
+  return null;
 }
 
 /*
@@ -1993,7 +2216,20 @@ function sectionsFromBrief(host: Record<string, unknown>): BriefSection[] {
 export function renderParcelDraw(
   model: Pick<
     PanelModel,
-    "ring" | "edges" | "overlays" | "label" | "parcelNodeId" | "zoning" | "frame" | "sections" | "anchor" | "anchorRead"
+    | "ring"
+    | "edges"
+    | "overlays"
+    | "label"
+    | "parcelNodeId"
+    | "zoning"
+    | "frame"
+    | "sections"
+    | "anchor"
+    | "anchorRead"
+    /* M-5: the rest of the result's parcels, so the panel can name what it did
+     * not draw. Absent on a genuine single parcel result and silent then. */
+    | "parcels"
+    | "anchorBatch"
   >,
   groundOn?: boolean,
 ): string {
@@ -2028,7 +2264,7 @@ export function renderParcelDraw(
       break;
     }
   }
-  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${drawn}${tip}${edgeList}${rows}${floodFacts}`;
+  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${drawn}${tip}${edgeList}${rows}${floodFacts}${offCanvasHtml(model)}`;
 }
 
 function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
@@ -2402,6 +2638,15 @@ export function parseToolResult(text: string): PanelModel {
       const anchor = anchorFrom(rec.anchor, anchorRead);
       if (anchor) model.anchor = anchor;
     }
+    /* M-5: this branch paints parcels[0] alone. When the body carried more than
+     * one parcel, the whole set travels with the model so the panel can name
+     * every parcel it did not draw. The set is attached, never drawn: the canvas
+     * still needs MULTI_MIN_DRAWN drawable parcels and that test is unchanged. */
+    if (parcelSet && parcelSet.length > 1) {
+      model.parcels = parcelSet;
+      const setBatch = anchorBatchFrom(rec.anchorBatch);
+      if (setBatch) model.anchorBatch = setBatch;
+    }
     return model;
   }
 
@@ -2532,6 +2777,16 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   multiGroundNoteHtml,
   anchorBatchNoteHtml,
   renderParcelSet,
+  /* M-5 off canvas naming */
+  multiNoCanvasWords,
+  multiNoCanvasNoteHtml,
+  offCanvasParcels,
+  offCanvasHtml,
+  /* M-5 paint only preview */
+  previewLine,
+  previewRailsHtml,
+  previewBlockHtml,
+  previewRowFrom,
   /* S7 facts and actions */
   glyphClass,
   knownVintage,
@@ -2853,6 +3108,129 @@ export function htmlContractViolations(html: string): string[] {
   ) {
     violations.push("multi_canvas_unbound");
   }
+  /* M-5: the off canvas list must be in the served script and must NOT be
+   * reachable only through the canvas. Separate code from multi_canvas_unbound
+   * so a page that keeps the canvas and drops the fallback naming is
+   * distinguishable from one that dropped the canvas. */
+  {
+    /* The call site, not the definition. `function offCanvasHtml(model) {` is
+     * itself a substring match for "offCanvasHtml(model)", so a presence check
+     * on that text is satisfied by the declaration and passes on a page that
+     * never calls it. Found by mutation on this file's own first pass. An
+     * occurrence preceded by "function " is the declaration and is not counted. */
+    let calls = 0;
+    let at = html.indexOf("offCanvasHtml(model)");
+    while (at >= 0) {
+      if (!html.slice(at - "function ".length, at).endsWith("function ")) calls += 1;
+      at = html.indexOf("offCanvasHtml(model)", at + 1);
+    }
+    if (
+      calls < 1 ||
+      !html.includes("function offCanvasParcels") ||
+      !html.includes("function offCanvasHtml") ||
+      !html.includes("function multiNoCanvasWords") ||
+      !html.includes("data-no-canvas=") ||
+      !html.includes(MULTI_OFF_CANVAS_TITLE) ||
+      !html.includes(MULTI_NO_CANVAS)
+    ) {
+      violations.push("off_canvas_list_unbound");
+    }
+  }
+  {
+    /* M-5: the app initiated tool call. Two independently derived readings of
+     * the same page have to agree: where the markers are, and where the literal
+     * method name is. A second call site outside the block, or a block that
+     * moved off the call, fails; and unlike the p559 net block this one is NOT
+     * exempted from direct_network, so a fetch smuggled inside it still fires. */
+    const begin = html.split("/*P561_TOOLS_BEGIN*/").length - 1;
+    const end = html.split("/*P561_TOOLS_END*/").length - 1;
+    const calls = html.split('method:"tools/call"').length - 1;
+    if (begin !== 1 || end !== 1 || calls !== 1) {
+      violations.push("tools_call_unmarked");
+    } else {
+      const at = html.indexOf('method:"tools/call"');
+      const from = html.indexOf("/*P561_TOOLS_BEGIN*/");
+      const to = html.indexOf("/*P561_TOOLS_END*/");
+      if (!(from < at && at < to)) violations.push("tools_call_unmarked");
+    }
+  }
+  /* M-5 invariant 1 and the fail closed lines. Both rules read the BODY of the
+   * served function rather than the page, because every sentence below is also
+   * a `var` declaration in the served scope: a presence check on the page is
+   * satisfied by the declaration whether or not anything paints it. Deleting the
+   * not-in-conversation line from previewBlockHtml left the page still
+   * containing that sentence, and the first version of these rules passed on it.
+   * The helper cuts one embedded function out of the page; inlineSharedSource
+   * emits each at exactly two spaces of indent, which is the boundary. */
+  const servedFn = (name: string): string => {
+    const at = html.indexOf("function " + name);
+    if (at < 0) return "";
+    const next = html.indexOf("\n  function ", at + 1);
+    return next < 0 ? html.slice(at) : html.slice(at, next);
+  };
+  {
+    const block = servedFn("previewBlockHtml");
+    if (
+      block.length === 0 ||
+      !block.includes("PREVIEW_NOT_IN_CHAT") ||
+      !block.includes('class="pv"') ||
+      !block.includes("data-preview-state=") ||
+      !block.includes("previewRailsHtml(") ||
+      !block.includes("previewLine(") ||
+      !html.includes(".tip .pv{") ||
+      !html.includes(PREVIEW_NOT_IN_CHAT)
+    ) {
+      violations.push("preview_not_marked");
+    }
+  }
+  {
+    /* Every state the channel can reach has a sentence, and previewLine is what
+     * reaches for it. A word declared and never read is a state that paints an
+     * empty block. */
+    const line = servedFn("previewLine");
+    const names = [
+      "PREVIEW_UNSUPPORTED",
+      "PREVIEW_TIMED_OUT",
+      "PREVIEW_ERROR",
+      "PREVIEW_DECLINED",
+      "PREVIEW_EMPTY",
+      "PREVIEW_BUSY",
+      "PREVIEW_UNSTATED",
+      "PREVIEW_PENDING",
+    ];
+    const copy = [
+      PREVIEW_UNSUPPORTED,
+      PREVIEW_TIMED_OUT,
+      PREVIEW_ERROR,
+      PREVIEW_DECLINED,
+      PREVIEW_EMPTY,
+      PREVIEW_BUSY,
+      PREVIEW_UNSTATED,
+      PREVIEW_PENDING,
+    ];
+    if (
+      line.length === 0 ||
+      names.some((n) => !line.includes(n)) ||
+      copy.some((c) => !html.includes(c)) ||
+      !html.includes("function previewRowFrom")
+    ) {
+      violations.push("preview_absence_unstated");
+    }
+  }
+  /* M-5: the dwell, the single flight, the timeout and the boot token. A
+   * preview fired on pointer transit, or one with no bound, is the behaviour
+   * the card refuses; each has a named mechanism here. */
+  if (
+    !html.includes("var PREVIEW_DWELL_MS=" + PREVIEW_DWELL_MS) ||
+    !html.includes("var PREVIEW_TIMEOUT_MS=" + PREVIEW_TIMEOUT_MS) ||
+    !html.includes("function armPreviewDwell") ||
+    !html.includes("armPreviewDwell(door)") ||
+    !html.includes("previewInFlight") ||
+    !html.includes('var toolsText="tools=unread"') ||
+    !html.includes('"data-tools"')
+  ) {
+    violations.push("preview_unbounded");
+  }
   if (!html.includes('data-act="addscreen"') || !html.includes("add_to_screen") || !html.includes("function sendAddToScreen")) {
     violations.push("add_to_screen_unbound");
   }
@@ -3016,6 +3394,18 @@ svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointe
 .tip .tn{color:var(--ss-atom)}
 .tip .tf,.tip .tb{color:var(--ss-t3)}
 .tip .btn{padding:3px 8px;font-size:var(--ss-fs-meta)}
+/* M-5 paint only preview. Invariant 1 is carried visually here: the block sits
+   on its own line behind a dashed rail, in italic, in the dimmest text colour,
+   and none of its parts use .tn, .tf or .tb, the three classes that mark facts
+   that came from the tool result. A reader cannot mistake one for the other,
+   and the pvnote line says so in words as well. */
+.tip .pv{display:block;margin-top:6px;padding-left:8px;border-left:2px dashed var(--ss-line-14);color:var(--ss-t6);font-style:italic}
+.tip .pv .pvt{display:block;color:var(--ss-slate)}
+.tip .pv .pvrails{display:block;font-style:normal}
+.tip .pv .pvr{margin-right:10px;white-space:nowrap}
+.tip .pv .pvr .g{margin-right:4px}
+.tip .pv .pvmiss{display:block;color:var(--ss-slate)}
+.tip .pv .pvnote{display:block;color:var(--ss-warn)}
 .fnote{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin:0 0 8px}
 .acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:8px 10px 12px;flex:0 0 auto;position:sticky;bottom:0;background:var(--ss-ink);z-index:2}
 .btn{font:var(--ss-fs-body)/1.2 var(--ss-ui);border:1px solid var(--ss-line-14);background:var(--ss-raised);color:var(--ss-t3);border-radius:8px;padding:7px 12px;cursor:pointer}
@@ -3077,6 +3467,12 @@ svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointe
   var netText="net=unread";
   var glText="gl=unread";
   var bridgeText="bridge=unread";
+  /* M-5 item 3: the fourth channel. p559 measured net, gl and resources/read;
+   * an app initiated tools/call is a DIFFERENT method and was never measured.
+   * This token says what happened to one: unread until a door dwell fires one
+   * (the panel makes no unrequested tool call), then pending, then ok, err<code>
+   * or timeout; unsupported the moment the handshake settles without serverTools. */
+  var toolsText="tools=unread";
   var pendingMsg=Object.create(null);
   function paintBoot(){
     if(!boot) return;
@@ -3089,7 +3485,8 @@ svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointe
     boot.setAttribute("data-net",netText.slice(4));
     boot.setAttribute("data-gl",glText.slice(3));
     boot.setAttribute("data-bridge",bridgeText.slice(7));
-    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText,"foreign="+foreignCount,netText,glText,bridgeText].join(" ");
+    boot.setAttribute("data-tools",toolsText.slice(6));
+    boot.textContent=["script-ran","handshake="+handshake,capText,msgCap,replyText,"foreign="+foreignCount,netText,glText,bridgeText,toolsText].join(" ");
   }
   paintBoot();
   /*P559_PROBE_BEGIN*/
@@ -3220,6 +3617,27 @@ svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointe
   var MULTI_GROUND_TOO_WIDE_PREFIX=${JSON.stringify(MULTI_GROUND_TOO_WIDE_PREFIX)};
   var MULTI_GROUND_TOO_WIDE_SUFFIX=${JSON.stringify(MULTI_GROUND_TOO_WIDE_SUFFIX)};
   var MULTI_REF_ZOOM=${JSON.stringify(MULTI_REF_ZOOM)};
+  /* M-5 off canvas naming and the paint only preview. Same rule again: the
+   * served scope reads the constants the tested helpers read. */
+  var MULTI_OFF_CANVAS_TITLE=${JSON.stringify(MULTI_OFF_CANVAS_TITLE)};
+  var MULTI_NO_CANVAS=${JSON.stringify(MULTI_NO_CANVAS)};
+  var MULTI_NO_CANVAS_PREFIX=${JSON.stringify(MULTI_NO_CANVAS_PREFIX)};
+  var MULTI_NO_CANVAS_DRAWABLE=${JSON.stringify(MULTI_NO_CANVAS_DRAWABLE)};
+  var MULTI_NO_CANVAS_NEEDED=${JSON.stringify(MULTI_NO_CANVAS_NEEDED)};
+  var PREVIEW_TOOL=${JSON.stringify(PREVIEW_TOOL)};
+  var PREVIEW_DEPTH=${JSON.stringify(PREVIEW_DEPTH)};
+  var PREVIEW_DWELL_MS=${JSON.stringify(PREVIEW_DWELL_MS)};
+  var PREVIEW_TIMEOUT_MS=${JSON.stringify(PREVIEW_TIMEOUT_MS)};
+  var PREVIEW_TITLE=${JSON.stringify(PREVIEW_TITLE)};
+  var PREVIEW_NOT_IN_CHAT=${JSON.stringify(PREVIEW_NOT_IN_CHAT)};
+  var PREVIEW_PENDING=${JSON.stringify(PREVIEW_PENDING)};
+  var PREVIEW_UNSUPPORTED=${JSON.stringify(PREVIEW_UNSUPPORTED)};
+  var PREVIEW_TIMED_OUT=${JSON.stringify(PREVIEW_TIMED_OUT)};
+  var PREVIEW_ERROR=${JSON.stringify(PREVIEW_ERROR)};
+  var PREVIEW_DECLINED=${JSON.stringify(PREVIEW_DECLINED)};
+  var PREVIEW_EMPTY=${JSON.stringify(PREVIEW_EMPTY)};
+  var PREVIEW_BUSY=${JSON.stringify(PREVIEW_BUSY)};
+  var PREVIEW_UNSTATED=${JSON.stringify(PREVIEW_UNSTATED)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
@@ -3252,6 +3670,9 @@ ${inlineSharedSource()}
       msgCap="message=none";
       return;
     }
+    /* M-5: the ONE place the preview channel's precondition is read. Absent,
+     * null or false is not a capability; only a declared serverTools is. */
+    serverToolsCap=hc.serverTools!=null&&hc.serverTools!==false;
     var keys=[];
     for(var k in hc){if(Object.prototype.hasOwnProperty.call(hc,k)&&k!=="message") keys.push(k)}
     capText="caps="+(keys.length?keys.join(","):"empty");
@@ -3280,6 +3701,10 @@ ${inlineSharedSource()}
     while(pending.length) postMessage(pending.shift());
     if(handshake==="ready"){ startBridgeProbe(); }
     else { bridgeText="bridge=nohost"; paintBoot(); }
+    /* M-5: one place decides the negative case, so a handshake that errored, a
+     * handshake that timed out and a host that simply does not advertise
+     * serverTools all report the same measured word. Never left at unread. */
+    if(!serverToolsCap){ toolsText="tools=unsupported"; paintBoot(); }
   }
   var host={
     sendMessage:function(text){
@@ -3302,6 +3727,93 @@ ${inlineSharedSource()}
     if(!url) return;
     parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/open-link",params:{url:url}},"*");
   }
+  /* M-5 paint only preview channel. Bounds, all four stated in the module doc:
+   * one dwell before any call, one call in flight at a time, one call per
+   * neighbour per panel instance (previewState[node] is set the moment a call
+   * is issued and never cleared except by accept()), and one timeout after
+   * which the tooltip says the call went unanswered. No state below is ever an
+   * argument to a turn; the Open and Add to screen controls are untouched. */
+  var serverToolsCap=false;
+  var previewState=Object.create(null);
+  var previewCode=Object.create(null);
+  var previewRow=Object.create(null);
+  var previewIds=Object.create(null);
+  var previewInFlight=null;
+  var previewBusyFor=null;
+  var previewDwell=null;
+  var previewWait=null;
+  var previewNode=null;
+  var previewEl=null;
+  function toolsSeen(word){
+    toolsText="tools="+word;
+    paintBoot();
+  }
+  /* null means no block at all. A tooltip with no preview claims nothing; an
+   * empty block would claim the neighbour has nothing. */
+  function previewStateOf(node){
+    var s=previewState[node];
+    if(s!==undefined) return s;
+    if(previewBusyFor===node) return "busy";
+    return null;
+  }
+  function previewBlockFor(node){
+    if(!node) return "";
+    var s=previewStateOf(node);
+    if(s===null) return "";
+    return previewBlockHtml(node,s,s==="ok"?(previewRow[node]||null):null,previewCode[node]||null);
+  }
+  function cancelPreviewDwell(){
+    if(previewDwell){clearTimeout(previewDwell);previewDwell=null;}
+  }
+  function repaintTip(){
+    if(previewEl) showEdge(previewEl);
+  }
+  function armPreviewDwell(node){
+    cancelPreviewDwell();
+    previewDwell=setTimeout(function(){previewDwell=null;firePreview(node);},PREVIEW_DWELL_MS);
+  }
+  /* A door that waited out a busy window gets its dwell back once the channel
+   * is free, but only while the pointer is still on it. */
+  function releasePreviewBusy(){
+    if(previewBusyFor===null) return;
+    var n=previewBusyFor;
+    previewBusyFor=null;
+    if(previewNode===n&&previewState[n]===undefined) armPreviewDwell(n);
+  }
+  function firePreview(node){
+    if(!node) return;
+    if(previewState[node]!==undefined) return;
+    if(!serverToolsCap){previewState[node]="unsupported";toolsSeen("unsupported");repaintTip();return;}
+    if(previewInFlight){previewBusyFor=node;repaintTip();return;}
+    previewState[node]="pending";
+    previewInFlight=node;
+    var pid=rpcId++;
+    previewIds[pid]=node;
+    previewIds[String(pid)]=node;
+    toolsSeen("pending");
+    previewWait=setTimeout(function(){
+      previewWait=null;
+      if(previewInFlight!==node) return;
+      previewInFlight=null;
+      previewState[node]="timeout";
+      toolsSeen("timeout");
+      releasePreviewBusy();
+      repaintTip();
+    },PREVIEW_TIMEOUT_MS);
+    sendToolsCall(pid,node);
+    repaintTip();
+  }
+  /*P561_TOOLS_BEGIN*/
+  /* The ONE app initiated tool call in this page. It is postMessage, not fetch,
+   * so this block is deliberately NOT exempted from the direct_network rule the
+   * way the p559 net probe is; the markers exist so the contract can prove there
+   * is exactly one tools/call site and that it is this one. The reply is routed
+   * by id in the message listener and never reaches accept(), so a preview can
+   * neither repaint the panel nor enter the conversation. */
+  function sendToolsCall(pid,node){
+    parent.postMessage({jsonrpc:"2.0",id:pid,method:"tools/call",params:{name:PREVIEW_TOOL,arguments:{parcelNodeId:[node],depth:PREVIEW_DEPTH}}},"*");
+  }
+  /*P561_TOOLS_END*/
   function tipEl(){
     var root=document.getElementById("root");
     return root&&typeof root.querySelector==="function"?root.querySelector("[data-tip]"):null;
@@ -3313,12 +3825,27 @@ ${inlineSharedSource()}
     if(hotEl&&hotEl!==n) hotEl.setAttribute("class","edge");
     n.setAttribute("class","edge hot");
     hotEl=n;
+    /* M-5: only a door carries a preview. The dwell is cancelled unconditionally
+     * first, so moving from one door to another cannot leave the first door's
+     * timer armed and starve the second. */
+    var door=edgeDoor(e);
+    cancelPreviewDwell();
+    previewNode=door;
+    previewEl=door?n:null;
+    /* Arming is not the bound. This decides only whether the line is a door;
+     * firePreview is the ONE place that decides whether a call happens, so the
+     * once per neighbour rule has a single enforcement site rather than two,
+     * one of which no fixture could reach. */
+    if(door) armPreviewDwell(door);
     var tip=tipEl();
-    if(tip){ tip.innerHTML=edgeTipHtml(e,idx); tip.setAttribute("data-edge-shown",String(idx)); }
+    if(tip){ tip.innerHTML=edgeTipHtml(e,idx)+previewBlockFor(door); tip.setAttribute("data-edge-shown",String(idx)); }
   }
   function clearEdge(){
     if(hotEl) hotEl.setAttribute("class","edge");
     hotEl=null;
+    cancelPreviewDwell();
+    previewNode=null;
+    previewEl=null;
     var tip=tipEl();
     if(tip){ tip.innerHTML=EDGE_TIP_HINT; tip.setAttribute("data-edge-shown","none"); }
   }
@@ -3419,7 +3946,10 @@ ${inlineSharedSource()}
       var floodFacts="";
       for(var fi=0;fi<secs.length;fi++){ if(secs[fi].id==="flood"){ floodFacts=floodFactsHtml(secs[fi],fi); break; } }
       var report=reportOpen?reportHtml(secs):"";
-      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+drawn+tip+edgeList+ov+floodFacts+report+"</div>"+
+      /* M-5: what this panel did NOT draw, whenever the result carried more than
+       * one parcel. Not conditional on a canvas: the canvas is exactly what this
+       * branch does not have. */
+      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+drawn+tip+edgeList+ov+floodFacts+report+offCanvasHtml(model)+"</div>"+
         '<div class="acts">'+saveChooserHtml()+'<button type="button" class="btn'+(reportOpen?" on":"")+'" data-act="report" data-report-open="'+(reportOpen?"1":"0")+'" onclick="window.__ss&&window.__ss.report()">'+REPORT_TOGGLE+'</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
       var listing=root.querySelector('[data-act="listing"]');
       if(listing&&listingAck){
@@ -3578,6 +4108,19 @@ ${inlineSharedSource()}
     groundOn=true;
     sortKey="completeness";
     sortDir=1;
+    /* M-5: a new result is a new panel instance, so the per neighbour once
+     * budget resets with it and no preview of the previous parcel's neighbours
+     * can survive into this one. */
+    cancelPreviewDwell();
+    if(previewWait){clearTimeout(previewWait);previewWait=null;}
+    previewState=Object.create(null);
+    previewCode=Object.create(null);
+    previewRow=Object.create(null);
+    previewIds=Object.create(null);
+    previewInFlight=null;
+    previewBusyFor=null;
+    previewNode=null;
+    previewEl=null;
     model=parseToolContent(result);
     render();
   }
@@ -3605,6 +4148,38 @@ ${inlineSharedSource()}
       else if(d.result!==undefined){bridgeText="bridge=empty";}
       else {bridgeText="bridge=odd";}
       paintBoot();
+      return;
+    }
+    /* M-5: an app initiated tools/call reply. Routed by id and handled here, so
+     * it can never reach accept(): a preview repaints one tooltip and nothing
+     * else. A reply for a previous panel instance finds no id (accept() drops
+     * them) and falls through to be ignored. */
+    if(d.id!=null&&previewIds[d.id]!==undefined){
+      var pnode=previewIds[d.id];
+      delete previewIds[d.id];delete previewIds[String(d.id)];
+      if(previewWait){clearTimeout(previewWait);previewWait=null;}
+      if(previewInFlight===pnode) previewInFlight=null;
+      if(d.error){
+        var pcode=d.error.code!=null?String(d.error.code):"";
+        previewState[pnode]="error";
+        previewCode[pnode]=pcode;
+        toolsSeen("err"+pcode);
+      } else if(d.result&&d.result.isError){
+        /* The CHANNEL worked and the tool declined. The token measures the
+         * channel; the tooltip states the decline. */
+        previewState[pnode]="declined";
+        toolsSeen("ok");
+      } else if(d.result!==undefined){
+        var prow=previewRowFrom(d.result,pnode);
+        if(prow){previewRow[pnode]=prow;previewState[pnode]="ok";}
+        else{previewState[pnode]="empty";}
+        toolsSeen("ok");
+      } else {
+        previewState[pnode]="empty";
+        toolsSeen("ok");
+      }
+      releasePreviewBusy();
+      repaintTip();
       return;
     }
     if(d.id!=null&&pendingMsg[d.id]){

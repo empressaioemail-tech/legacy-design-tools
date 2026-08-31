@@ -2596,3 +2596,580 @@ describe("P-91 v3 M-4 parcel set (served)", () => {
     expect(f.root.innerHTML).toContain('data-act="listing"');
   });
 });
+
+/*
+ * P-91 v3 M-5 (served).
+ *
+ * Item 1: what this panel did not draw is named whether or not there is a
+ * canvas. Item 2: the paint only preview channel on a door tooltip, and its two
+ * invariants. Item 3: the tools= token on the boot strip.
+ *
+ * Every id below is a SYNTHETIC test input. What is asserted is what the panel
+ * paints given a recorded wire shape, never that a number is true of Bastrop.
+ */
+const OFF_UNDRAWABLE = { anchor: undefined, anchorRead: { status: "absent", reason: "no_latlng_for_parcel" } } as unknown as Json;
+const OFF_SEVEN_IDS = ["48021:70001", "48021:70002", "48021:70003", "48021:70004", "48021:70005", "48021:70006", "48021:70007"];
+function offBody(drawable: number): Json {
+  const rows: Json[] = [];
+  for (let i = 0; i < OFF_SEVEN_IDS.length; i++) {
+    const id = OFF_SEVEN_IDS[i] as string;
+    rows.push(i < drawable ? setRow(id, SET_LAT, SET_LON + i * 0.0004) : setRow(id, SET_LAT, SET_LON, OFF_UNDRAWABLE));
+  }
+  return { parcels: rows, notFound: [] } as unknown as Json;
+}
+function namedOff(html: string): string[] {
+  return [...html.matchAll(/data-undrawn="([^"]+)"/g)].map((m) => m[1] ?? "");
+}
+
+describe("P-91 v3 M-5 item 1 (served): the fallback names what it did not draw", () => {
+  it("seven parcels with ONE drawable: the single parcel panel, plus all six named with reasons", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(offBody(1));
+    const html = f.root.innerHTML;
+    /* still the single parcel panel: no canvas */
+    expect(html).not.toContain("data-parcels=");
+    expect(html).toContain('data-act="listing"');
+    expect(namedOff(html).sort()).toEqual(OFF_SEVEN_IDS.slice(1).sort());
+    expect(f.strip(html)).toContain(app.MULTI_OFF_CANVAS_TITLE);
+    expect(f.strip(html)).toContain(app.multiNoCanvasWords(1, 7));
+    expect((html.match(/no_latlng_for_parcel/g) ?? []).length).toBe(6);
+  });
+
+  it("seven parcels with ZERO drawable: all seven are named, the painted one included", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(offBody(0));
+    const html = f.root.innerHTML;
+    expect(namedOff(html).sort()).toEqual([...OFF_SEVEN_IDS].sort());
+    expect(f.strip(html)).toContain(app.multiNoCanvasWords(0, 7));
+  });
+
+  it("seven parcels with TWO drawable: a canvas, and the five still named", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(offBody(2));
+    const html = f.root.innerHTML;
+    expect(html).toContain('data-parcels="2"');
+    expect(namedOff(html).sort()).toEqual(OFF_SEVEN_IDS.slice(2).sort());
+    expect(f.strip(html)).toContain(app.MULTI_UNDRAWN_TITLE);
+    expect(f.strip(html)).not.toContain(app.MULTI_OFF_CANVAS_TITLE);
+  });
+
+  it("a genuine single parcel result declares nothing", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    expect(f.root.innerHTML).not.toContain("data-undrawn=");
+    expect(f.root.innerHTML).not.toContain("data-no-canvas=");
+  });
+});
+
+/* The door on GOLD_NODE edge 1. NODE_34121 carries four doors, used for the
+ * single flight bound below. */
+const DOOR_NODE = "48021:34169";
+const DOOR_EDGE = 1;
+const PREVIEW_STUB = {
+  parcels: [
+    {
+      parcelNodeId: DOOR_NODE,
+      label: "111 RAINMAKER CV, BASTROP, TX 78602",
+      situs: "present",
+      zoning: "present",
+      landUse: "unknown",
+      flood: "present",
+      drainage: "unread",
+      envelope: "refused",
+    },
+  ],
+  notFound: [],
+};
+const PREVIEW_GLYPHS = ["present", "present", "unknown", "present", "unread", "refused"];
+
+/*
+ * The preview sentences, literal on purpose. Same two derivation rule as COPY
+ * at the top of this file: the words are here, the constants are in the module,
+ * and the equality below is what makes the panel assertions non circular. A
+ * fixture that reads app.PREVIEW_* and asserts the panel printed app.PREVIEW_*
+ * passes on any edit to the constant, including one that deletes the promise.
+ */
+const PV_COPY = {
+  notInChat: "Not sent to the chat. Claude cannot see this.",
+  pending: "Reading stub rails.",
+  unsupported: "No preview available: this host does not offer app tool calls.",
+  timedOut: "No preview available: the tool call did not answer in time.",
+  error: "No preview available: the tool call returned an error",
+  declined: "No preview available: the tool declined this read.",
+  empty: "No preview available: the result carried no rails for this parcel.",
+  busy: "No preview available: another preview is still open.",
+};
+
+describe("P-91 v3 M-5: the preview sentences are what this card says they are", () => {
+  it("every constant equals the sentence written here", () => {
+    expect(app.PREVIEW_NOT_IN_CHAT).toBe(PV_COPY.notInChat);
+    expect(app.PREVIEW_PENDING).toBe(PV_COPY.pending);
+    expect(app.PREVIEW_UNSUPPORTED).toBe(PV_COPY.unsupported);
+    expect(app.PREVIEW_TIMED_OUT).toBe(PV_COPY.timedOut);
+    expect(app.PREVIEW_ERROR).toBe(PV_COPY.error);
+    expect(app.PREVIEW_DECLINED).toBe(PV_COPY.declined);
+    expect(app.PREVIEW_EMPTY).toBe(PV_COPY.empty);
+    expect(app.PREVIEW_BUSY).toBe(PV_COPY.busy);
+  });
+
+  it("the not-in-conversation promise is on EVERY state the block can paint", () => {
+    /* one derivation is the panel, the other is the sentence above */
+    for (const st of ["ok", "pending", "unsupported", "timeout", "busy", "declined", "empty", "error", "nonsense"]) {
+      const html = app.previewBlockHtml("48021:1", st, st === "ok" ? { rails: { situs: "present", zoning: "unread", landUse: "unread", flood: "unread", drainage: "unread", envelope: "unread" } } : null, null);
+      expect(html, st).toContain(PV_COPY.notInChat);
+    }
+  });
+
+  it("no state but ok paints a rail glyph, and an unknown state word still says something", () => {
+    for (const st of ["pending", "unsupported", "timeout", "busy", "declined", "empty", "error", "nonsense"]) {
+      const html = app.previewBlockHtml("48021:1", st, null, null);
+      expect(html, st).not.toContain('class="g g-');
+      expect(html.length, st).toBeGreaterThan(0);
+    }
+    expect(app.previewBlockHtml("48021:1", "nonsense", null, null)).toContain(app.PREVIEW_UNSTATED);
+    /* a row handed in under a non-ok state is still not painted */
+    const row = { rails: { situs: "present", zoning: "present", landUse: "present", flood: "present", drainage: "present", envelope: "present" } };
+    expect(app.previewBlockHtml("48021:1", "timeout", row, null)).not.toContain('class="g g-');
+    expect(app.previewBlockHtml("48021:1", "timeout", row, null)).toContain(PV_COPY.timedOut);
+  });
+});
+
+type Harness = ReturnType<typeof fresh>;
+const toolCalls = (f: Harness) => f.posted.filter((m) => m.method === "tools/call");
+function replyTo(f: Harness, id: unknown, payload: unknown): void {
+  f.deliver({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(payload) }] } });
+}
+/** The preview block sliced off the end of the tooltip. Throws when absent. */
+function pvBlock(f: Harness): string {
+  const h = f.tip().innerHTML;
+  const at = h.indexOf('<span class="pv"');
+  if (at < 0) throw new Error("no preview block in the tooltip");
+  return h.slice(at);
+}
+function hasPv(f: Harness): boolean {
+  return f.tip().innerHTML.indexOf('<span class="pv"') >= 0;
+}
+/** A host that answers the handshake WITHOUT serverTools. */
+function initNoTools(f: Harness): void {
+  f.deliver({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2026-01-26", hostCapabilities: { message: {} } } });
+}
+
+describe("P-91 v3 M-5 item 2 (served): the paint only preview channel", () => {
+  it("pointer transit fires nothing: the call needs the dwell, and leaving cancels it", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    expect(toolCalls(f)).toHaveLength(0);
+    expect(hasPv(f)).toBe(false);
+    expect(f.armed(app.PREVIEW_DWELL_MS)).toBe(1);
+    f.leave(DOOR_EDGE);
+    expect(f.armed(app.PREVIEW_DWELL_MS)).toBe(0);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(0);
+    expect(toolCalls(f)).toHaveLength(0);
+  });
+
+  it("a held hover fires exactly one tools/call, naming the neighbour at stub depth", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(1);
+    const calls = toolCalls(f);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.params?.name).toBe(app.PREVIEW_TOOL);
+    expect(calls[0]?.params?.arguments).toEqual({ parcelNodeId: [DOOR_NODE], depth: app.PREVIEW_DEPTH });
+    /* the tool is one the catalog already has; no fourteenth tool */
+    expect(app.APP_HOST_TOOLS).toContain(app.PREVIEW_TOOL);
+    expect(f.boot.textContent).toContain("tools=pending");
+    expect(f.armed(app.PREVIEW_TIMEOUT_MS)).toBe(1);
+    /* pending is stated, and no rail glyph is painted for it */
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.pending);
+    expect(pvBlock(f)).not.toContain('class="g g-');
+  });
+
+  it("the answer paints the neighbour's six rails and NEVER enters the conversation", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    const before = f.messages().length;
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    replyTo(f, toolCalls(f)[0]?.id, PREVIEW_STUB);
+    const pv = pvBlock(f);
+    expect(pv).toContain('data-preview="' + DOOR_NODE + '"');
+    expect(pv).toContain('data-preview-state="ok"');
+    expect([...pv.matchAll(/class="g g-([a-z-]+)"/g)].map((m) => m[1])).toEqual(PREVIEW_GLYPHS);
+    /* invariant 1, in words */
+    expect(f.strip(pv)).toContain(PV_COPY.notInChat);
+    /* invariant 1, mechanically: nothing was drafted, sent, or queued */
+    expect(f.messages()).toHaveLength(before);
+    expect(f.boot.textContent).toContain("tools=ok");
+    expect(f.armed(app.PREVIEW_TIMEOUT_MS)).toBe(0);
+  });
+
+  it("the preview is visually distinct: none of its parts wear the tool result fact classes", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    replyTo(f, toolCalls(f)[0]?.id, PREVIEW_STUB);
+    const pv = pvBlock(f);
+    /* the tooltip's own facts use tn, tf, tb and tw; the preview uses none */
+    for (const cls of ['class="tn"', 'class="tf"', 'class="tb"', 'class="tw"']) {
+      expect(pv, cls).not.toContain(cls);
+    }
+    /* and the facts above it still do */
+    const facts = f.tip().innerHTML.slice(0, f.tip().innerHTML.indexOf('<span class="pv"'));
+    expect(facts).toContain('class="tn"');
+    /* the block has a rule of its own in the page, not the tooltip's */
+    expect(app.buildAppHtml()).toContain(".tip .pv{");
+  });
+
+  it("invariant 2: acting on the door still drafts the ordinary turn, unchanged by the preview", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    replyTo(f, toolCalls(f)[0]?.id, PREVIEW_STUB);
+    const posted = f.open(DOOR_NODE);
+    const content = posted?.params?.content as Array<{ text: string }>;
+    /* byte identical to the turn the same door drafts with no preview at all */
+    expect(content[0]?.text).toBe(app.openParcelMessage(DOOR_NODE));
+    expect(content[0]?.text).not.toContain(app.PREVIEW_TITLE);
+    expect(content[0]?.text).not.toContain("present");
+    /* and the add_to_screen door control is equally untouched */
+    f.ss().addToScreen(f.btn({ "data-node": DOOR_NODE }));
+    expect(f.lastText()).toBe(app.addToScreenMessage(DOOR_NODE));
+  });
+
+  it("invariant 2, a second way: the drafted turn is byte identical with and without a preview", () => {
+    /* Independent of app.openParcelMessage. Two panels, the same door, the same
+     * click; one of them saw a preview first. If a preview can reach a turn at
+     * all, these two strings differ. */
+    const withPreview = fresh();
+    withPreview.init();
+    withPreview.toolResult(GOLD_NODE);
+    withPreview.hover(DOOR_EDGE);
+    withPreview.fire(app.PREVIEW_DWELL_MS);
+    replyTo(withPreview, toolCalls(withPreview)[0]?.id, PREVIEW_STUB);
+    const a = (withPreview.open(DOOR_NODE)?.params?.content as Array<{ text: string }>)[0]?.text;
+
+    const without = fresh();
+    without.init();
+    without.toolResult(GOLD_NODE);
+    without.hover(DOOR_EDGE);
+    const b = (without.open(DOOR_NODE)?.params?.content as Array<{ text: string }>)[0]?.text;
+    expect(toolCalls(without)).toHaveLength(0);
+    expect(a).toBe(b);
+    expect((a ?? "").length).toBe((b ?? "").length);
+  });
+
+  it("invariant 2, a third way: a preview changes no panel state at all", () => {
+    /* The I5 fingerprint is the panel's own model. A preview that entered it
+     * would move this string, and a preview that can move the model is a
+     * preview that can reach a turn through some other control later. */
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    const fp = (f.sandbox.__ss as { fp: () => string }).fp();
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    replyTo(f, toolCalls(f)[0]?.id, PREVIEW_STUB);
+    expect(pvBlock(f)).toContain('data-preview-state="ok"');
+    expect((f.sandbox.__ss as { fp: () => string }).fp()).toBe(fp);
+  });
+
+  it("one call per neighbour per panel instance; a new result resets the budget", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    replyTo(f, toolCalls(f)[0]?.id, PREVIEW_STUB);
+    f.leave(DOOR_EDGE);
+    f.hover(DOOR_EDGE);
+    /* the answer is still there, and a second dwell fires and buys nothing:
+     * the bound is in firePreview, not in whether a timer was armed */
+    expect(pvBlock(f)).toContain('data-preview-state="ok"');
+    expect(f.armed(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(toolCalls(f)).toHaveLength(1);
+    expect(pvBlock(f)).toContain('data-preview-state="ok"');
+    /* a new accepted result is a new panel instance */
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    expect(hasPv(f)).toBe(false);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(toolCalls(f)).toHaveLength(2);
+  });
+
+  it("one in flight at a time: a second door states the wait rather than calling", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(NODE_34121);
+    f.hover(1);
+    f.fire(app.PREVIEW_DWELL_MS);
+    expect(toolCalls(f)).toHaveLength(1);
+    f.hover(2);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(toolCalls(f)).toHaveLength(1);
+    expect(pvBlock(f)).toContain('data-preview-state="busy"');
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.busy);
+    expect(pvBlock(f)).not.toContain('class="g g-');
+    /* when the first answers, the door still under the pointer gets its dwell back */
+    replyTo(f, toolCalls(f)[0]?.id, { parcels: [], notFound: [] });
+    expect(f.armed(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(toolCalls(f)).toHaveLength(2);
+  });
+
+  it("a timeout states it and paints no rails", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    expect(f.fire(app.PREVIEW_TIMEOUT_MS)).toBe(1);
+    expect(pvBlock(f)).toContain('data-preview-state="timeout"');
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.timedOut);
+    expect(pvBlock(f)).not.toContain('class="g g-');
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.notInChat);
+    expect(f.boot.textContent).toContain("tools=timeout");
+  });
+
+  it("an error reply states the code, on the tooltip and on the strip", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    f.deliver({ jsonrpc: "2.0", id: toolCalls(f)[0]?.id, error: { code: -32601, message: "no such method" } });
+    expect(pvBlock(f)).toContain('data-preview-state="error"');
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.error);
+    expect(f.strip(pvBlock(f))).toContain("-32601");
+    expect(pvBlock(f)).not.toContain('class="g g-');
+    expect(f.boot.textContent).toContain("tools=err-32601");
+  });
+
+  it("a host with no serverTools never calls, says so on the tooltip, and says so on the strip", () => {
+    const f = fresh();
+    initNoTools(f);
+    expect(f.boot.textContent).toContain("tools=unsupported");
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(1);
+    expect(toolCalls(f)).toHaveLength(0);
+    expect(pvBlock(f)).toContain('data-preview-state="unsupported"');
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.unsupported);
+    expect(pvBlock(f)).not.toContain('class="g g-');
+  });
+
+  it("a handshake that never answers leaves the token measured, not unread", () => {
+    const f = fresh();
+    expect(f.boot.textContent).toContain("tools=unread");
+    expect(f.fire(2000)).toBe(1);
+    expect(f.boot.textContent).toContain("handshake=timeout");
+    expect(f.boot.textContent).toContain("tools=unsupported");
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    expect(toolCalls(f)).toHaveLength(0);
+    expect(pvBlock(f)).toContain('data-preview-state="unsupported"');
+  });
+
+  it("a result carrying no row for the id asked is a stated absence, not an empty rail set", () => {
+    const empty = fresh();
+    empty.init();
+    empty.toolResult(GOLD_NODE);
+    empty.hover(DOOR_EDGE);
+    empty.fire(app.PREVIEW_DWELL_MS);
+    replyTo(empty, toolCalls(empty)[0]?.id, { parcels: [], notFound: [] });
+    expect(pvBlock(empty)).toContain('data-preview-state="empty"');
+    expect(empty.strip(pvBlock(empty))).toContain(PV_COPY.empty);
+    expect(pvBlock(empty)).not.toContain('class="g g-');
+
+    /* second derivation: a well formed board that answers about a DIFFERENT
+     * parcel is equally not an answer about this one */
+    const wrong = fresh();
+    wrong.init();
+    wrong.toolResult(GOLD_NODE);
+    wrong.hover(DOOR_EDGE);
+    wrong.fire(app.PREVIEW_DWELL_MS);
+    replyTo(wrong, toolCalls(wrong)[0]?.id, {
+      parcels: [{ ...PREVIEW_STUB.parcels[0], parcelNodeId: "48021:99999" }],
+      notFound: [],
+    });
+    expect(pvBlock(wrong)).toContain('data-preview-state="empty"');
+    expect(pvBlock(wrong)).not.toContain('class="g g-');
+  });
+
+  it("a declined tool call is a decline, and the channel still measured ok", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    f.deliver({
+      jsonrpc: "2.0",
+      id: toolCalls(f)[0]?.id,
+      result: { isError: true, content: [{ type: "text", text: JSON.stringify({ status: "refused", reason: "tier" }) }] },
+    });
+    expect(pvBlock(f)).toContain('data-preview-state="declined"');
+    expect(f.strip(pvBlock(f))).toContain(PV_COPY.declined);
+    expect(pvBlock(f)).not.toContain('class="g g-');
+    expect(f.boot.textContent).toContain("tools=ok");
+  });
+
+  it("a preview never repaints the panel and a late reply for a retired panel is dropped", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    const staleId = toolCalls(f)[0]?.id;
+    /* a new result retires the panel instance */
+    f.toolResult(NODE_34121);
+    const painted = f.root.innerHTML;
+    replyTo(f, staleId, PREVIEW_STUB);
+    expect(f.root.innerHTML).toBe(painted);
+    expect(f.root.innerHTML).not.toContain("data-preview=");
+  });
+
+  it("no stale preview: a road edge and a cleared hover carry no block at all", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    f.hover(DOOR_EDGE);
+    f.fire(app.PREVIEW_DWELL_MS);
+    replyTo(f, toolCalls(f)[0]?.id, PREVIEW_STUB);
+    expect(hasPv(f)).toBe(true);
+    /* edge 0 is an alley with a road and no neighbor: not a door */
+    f.hover(0);
+    expect(hasPv(f)).toBe(false);
+    expect(f.armed(app.PREVIEW_DWELL_MS)).toBe(0);
+    f.leave(0);
+    expect(f.tipText()).toBe(COPY.tipHint);
+    expect(hasPv(f)).toBe(false);
+  });
+
+  it("a ROW edge is not a door, so it never previews", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_NODE);
+    /* edge 2 is a ROW that DOES name a neighbor; edgeDoor still refuses it */
+    f.hover(2);
+    expect(f.tip().innerHTML).toContain("48021:34121");
+    expect(hasPv(f)).toBe(false);
+    expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(0);
+    expect(toolCalls(f)).toHaveLength(0);
+  });
+});
+
+describe("P-91 v3 M-5: verify by violation", () => {
+  const clean = app.buildAppHtml();
+  const mut = (from: string, to: string): string => {
+    const out = clean.split(from).join(to);
+    if (out === clean) throw new Error("mutation changed nothing: " + from);
+    return out;
+  };
+
+  it("the clean page carries no violation, old or new", () => {
+    expect(app.htmlContractViolations(clean)).toEqual([]);
+  });
+
+  it("invariant 1 mutations fire preview_not_marked", () => {
+    expect(app.htmlContractViolations(mut(app.PREVIEW_NOT_IN_CHAT, "Fresh from the record."))).toContain("preview_not_marked");
+    expect(app.htmlContractViolations(mut('class="pv"', 'class="tn"'))).toContain("preview_not_marked");
+    expect(app.htmlContractViolations(mut(".tip .pv{", ".tip .zz{"))).toContain("preview_not_marked");
+    expect(app.htmlContractViolations(mut("data-preview-state=", "data-pstate="))).toContain("preview_not_marked");
+    expect(app.htmlContractViolations(mut("function previewBlockHtml", "function previewBox"))).toContain("preview_not_marked");
+    /* the mutation the FIRST version of this rule passed on: the line is deleted
+     * from the block, and the sentence is still in the page as a var. */
+    const noNote = mut(`'<span class="pvnote">' + PREVIEW_NOT_IN_CHAT + "</span></span>"`, `"</span>"`);
+    expect(noNote).toContain(app.PREVIEW_NOT_IN_CHAT);
+    expect(app.htmlContractViolations(noNote)).toContain("preview_not_marked");
+    expect(app.htmlContractViolations(mut("previewRailsHtml(row)", "railsOf(row)"))).toContain("preview_not_marked");
+  });
+
+  it("a lost absence sentence fires preview_absence_unstated", () => {
+    expect(app.htmlContractViolations(mut(app.PREVIEW_TIMED_OUT, "No data."))).toContain("preview_absence_unstated");
+    expect(app.htmlContractViolations(mut(app.PREVIEW_UNSUPPORTED, "No data."))).toContain("preview_absence_unstated");
+    expect(app.htmlContractViolations(mut(app.PREVIEW_UNSTATED, "No data."))).toContain("preview_absence_unstated");
+    expect(app.htmlContractViolations(mut("function previewLine", "function pLine"))).toContain("preview_absence_unstated");
+    expect(app.htmlContractViolations(mut("function previewRowFrom", "function pRow"))).toContain("preview_absence_unstated");
+    /* a state word that stops being reached, with its sentence still declared */
+    const noFallback = mut("  return PREVIEW_UNSTATED;", '  return "";');
+    expect(noFallback).toContain(app.PREVIEW_UNSTATED);
+    expect(app.htmlContractViolations(noFallback)).toContain("preview_absence_unstated");
+    const noBusy = mut('if (state === "busy") return PREVIEW_BUSY;', "");
+    expect(noBusy).toContain(app.PREVIEW_BUSY);
+    expect(app.htmlContractViolations(noBusy)).toContain("preview_absence_unstated");
+  });
+
+  it("dropping the dwell, the single flight or the token fires preview_unbounded", () => {
+    expect(app.htmlContractViolations(mut("function armPreviewDwell", "function armNow"))).toContain("preview_unbounded");
+    expect(app.htmlContractViolations(mut("armPreviewDwell(door)", "firePreview(door)"))).toContain("preview_unbounded");
+    expect(
+      app.htmlContractViolations(mut("var PREVIEW_DWELL_MS=" + app.PREVIEW_DWELL_MS, "var PREVIEW_DWELL_MS=0")),
+    ).toContain("preview_unbounded");
+    expect(
+      app.htmlContractViolations(mut("var PREVIEW_TIMEOUT_MS=" + app.PREVIEW_TIMEOUT_MS, "var PREVIEW_TIMEOUT_MS=0")),
+    ).toContain("preview_unbounded");
+    expect(app.htmlContractViolations(mut("previewInFlight", "pFlight"))).toContain("preview_unbounded");
+    expect(app.htmlContractViolations(mut('var toolsText="tools=unread"', 'var toolsText="tools=ok"'))).toContain("preview_unbounded");
+    expect(app.htmlContractViolations(mut('"data-tools"', '"data-tls"'))).toContain("preview_unbounded");
+  });
+
+  it("a second, missing or misplaced tools/call site fires tools_call_unmarked", () => {
+    /* a second call anywhere */
+    expect(app.htmlContractViolations(mut("  function tipEl(){", '  function tipEl(){parent.postMessage({method:"tools/call"},"*");'))).toContain(
+      "tools_call_unmarked",
+    );
+    /* the markers gone */
+    expect(app.htmlContractViolations(mut("/*P561_TOOLS_BEGIN*/", ""))).toContain("tools_call_unmarked");
+    expect(app.htmlContractViolations(mut("/*P561_TOOLS_END*/", ""))).toContain("tools_call_unmarked");
+    /* the markers intact but no longer around the call */
+    const outside = clean
+      .replace("/*P561_TOOLS_BEGIN*/", "")
+      .replace("/*P561_TOOLS_END*/", "")
+      .replace("})();", "/*P561_TOOLS_BEGIN*/ /*P561_TOOLS_END*/\n})();");
+    expect(outside).not.toBe(clean);
+    expect(app.htmlContractViolations(outside)).toContain("tools_call_unmarked");
+  });
+
+  it("the P561 block is NOT exempt: a fetch inside it still fires direct_network", () => {
+    const planted = mut("function sendToolsCall(pid,node){", 'function sendToolsCall(pid,node){fetch("https://x.example/");');
+    const v = app.htmlContractViolations(planted);
+    expect(v).toContain("direct_network");
+    expect(v).not.toContain("tools_call_unmarked");
+  });
+
+  it("making the off canvas list conditional on the canvas fires off_canvas_list_unbound", () => {
+    /* The mutation that caught a VACUOUS check on this file's own first pass.
+     * The rule was a presence check on the text "offCanvasHtml(model)", which
+     * the emitted declaration `function offCanvasHtml(model) {` satisfies, so a
+     * page that defined the list and never painted it passed. The rule now
+     * counts CALL sites, and the declaration does not count as one. */
+    const dropped = mut("+offCanvasHtml(model)+", "+");
+    expect(dropped).toContain("function offCanvasHtml(model)");
+    expect(app.htmlContractViolations(dropped)).toContain("off_canvas_list_unbound");
+    expect(app.htmlContractViolations(mut("function offCanvasParcels", "function otherParcels"))).toContain("off_canvas_list_unbound");
+    expect(app.htmlContractViolations(mut("function offCanvasHtml", "function otherHtml"))).toContain("off_canvas_list_unbound");
+    expect(app.htmlContractViolations(mut("data-no-canvas=", "data-nc="))).toContain("off_canvas_list_unbound");
+    expect(app.htmlContractViolations(mut(app.MULTI_OFF_CANVAS_TITLE, "Other parcels"))).toContain("off_canvas_list_unbound");
+    expect(app.htmlContractViolations(mut(app.MULTI_NO_CANVAS, "not drawn"))).toContain("off_canvas_list_unbound");
+  });
+
+  it("the M-4 canvas rule is untouched and the tool catalog is still 13", () => {
+    expect(app.htmlContractViolations(mut(app.MULTI_UNDRAWN_TITLE, "Other parcels"))).toContain("multi_canvas_unbound");
+    expect(clean).not.toContain("get_parcel_set");
+    expect(clean).not.toContain("preview_parcel");
+  });
+});

@@ -30,7 +30,9 @@ import {
   MULTI_GROUND_MAX_EXTENT_FT,
   MULTI_MIN_DRAWN,
   MULTI_NO_ANCHOR,
+  MULTI_NO_CANVAS,
   MULTI_NO_RING,
+  MULTI_OFF_CANVAS_TITLE,
   MULTI_TOO_FEW_REASON,
   MULTI_UNDRAWN_TITLE,
   NOT_RETURNED,
@@ -40,7 +42,10 @@ import {
   htmlContractViolations,
   multiCanvasSvg,
   multiDrawableCount,
+  multiNoCanvasWords,
   multiParcelPlan,
+  offCanvasHtml,
+  offCanvasParcels,
   parseToolResult,
   renderParcelDraw,
   renderParcelSet,
@@ -374,7 +379,7 @@ describe("M-4 fewer than two drawable: no canvas at all", () => {
     expect(MULTI_MIN_DRAWN).toBe(2);
   });
 
-  it("a batch with one anchored parcel falls back to today's single parcel panel", () => {
+  it("a batch with one anchored parcel falls back to today's single parcel panel, and now NAMES the other row", () => {
     const rows = [
       row(CENTRE),
       row(EAST, { anchor: undefined, anchorRead: { status: "error", reason: "anchor_read_timeout" } }),
@@ -383,9 +388,23 @@ describe("M-4 fewer than two drawable: no canvas at all", () => {
     expect(model.kind).toBe("parcel");
     expect(model.parcelNodeId).toBe(CENTRE.id);
     expect(renderParcelSet(model)).toBe("");
-    /* byte identical to the same first parcel with the second row absent */
+    /* M-5: the drawing itself is still byte identical to the same first parcel
+     * with the second row absent. What changed is that the off canvas block is
+     * appended after it, so the panel is today's panel PLUS the naming, not a
+     * different panel. Two derivations of the same claim: the prefix, and the
+     * exact suffix. */
     const alone = parseToolResult(body([row(CENTRE)]));
-    expect(renderParcelDraw(model)).toBe(renderParcelDraw(alone));
+    const one = renderParcelDraw(alone);
+    const two = renderParcelDraw(model);
+    expect(two.startsWith(one)).toBe(true);
+    expect(two.slice(one.length)).toBe(offCanvasHtml(model));
+    expect(two).not.toBe(one);
+    expect(two).toContain('data-undrawn="' + EAST.id + '"');
+    expect(two).toContain("anchor_read_timeout");
+    /* and a genuine single parcel result still says nothing, because nothing
+     * was omitted from it */
+    expect(offCanvasHtml(alone)).toBe("");
+    expect(one).not.toContain(MULTI_OFF_CANVAS_TITLE);
   });
 
   it("a single id result is untouched: one parcel, with its own ground", () => {
@@ -408,18 +427,18 @@ describe("M-4 fewer than two drawable: no canvas at all", () => {
     expect(multiParcelPlan(model.parcels ?? []).multi?.placed).toHaveLength(3);
   });
 
-  it("the fallback is today's panel, and today's panel does NOT name the other rows", () => {
-    /* Known, deliberate and recorded so it is a fixture rather than a later
-     * discovery. Below MULTI_MIN_DRAWN the card says fall back to what the panel
-     * does today, and today's panel paints parcels[0] alone. In that one state
-     * the other rows are named nowhere. Widening it is a separate card. */
+  it("M-5: the fallback is still today's panel, but the whole set travels with it", () => {
+    /* This fixture recorded the M-4 gap: below MULTI_MIN_DRAWN the parser fell
+     * through to the single parcel branch, that branch painted parcels[0] alone,
+     * and model.parcels was dropped, so the other rows were named nowhere. M-5
+     * closes it by carrying the set on the model. The routing is unchanged. */
     const half = parseToolResult(
       body([row(WEST), row(CENTRE, { anchor: undefined, anchorRead: { status: "absent", reason: "x" } })]),
     );
     expect(half.kind).toBe("parcel");
-    expect(half.parcels).toBeUndefined();
+    expect(half.parcels).toHaveLength(2);
     expect(half.parcelNodeId).toBe(WEST.id);
-    expect(renderParcelDraw(half)).not.toContain(CENTRE.id);
+    expect(renderParcelDraw(half)).toContain(CENTRE.id);
   });
 });
 
@@ -515,6 +534,173 @@ describe("M-4 extent: a set too wide for the imagery gets rings and says so", ()
   it("the ground toggle is off the page entirely when there is no ground", () => {
     const html = renderParcelSet(parseToolResult(body([row(REC_31254), row(REC_82112)])));
     expect(html).not.toContain('data-act="ground"');
+  });
+});
+
+/*
+ * M-5 item 1. The M-4 naming was conditional on the canvas existing. These
+ * fixtures hold the wider rule: a result carrying more than one parcel names
+ * every parcel this panel did not draw, with a reason, canvas or no canvas.
+ *
+ * Seven ids, all SYNTHETIC test inputs. The three cases the card names are one
+ * drawable, zero drawable and two drawable, and a fourth is added below because
+ * the first three all happen to have the drawable parcel first in the array,
+ * which is the arrangement under which a narrower rule would still pass.
+ */
+const SEVEN = ["48021:70001", "48021:70002", "48021:70003", "48021:70004", "48021:70005", "48021:70006", "48021:70007"];
+
+/** A drawable row: recorded ring, an anchor, an ok read. */
+function drawableRow(id: string, lonOffsetFt: number): Record<string, unknown> {
+  return {
+    parcelNodeId: id,
+    brief: { sections: [] },
+    draw: drawOf(id + " label"),
+    anchor: {
+      lat: CENTRE.lat,
+      lon: eastOf(CENTRE.lat, CENTRE.lon, lonOffsetFt),
+      precision: "1e-5-deg",
+      source: "bake-latlng-index",
+    },
+    anchorRead: { status: "ok" },
+  };
+}
+/** Undrawable, and the reason differs by kind so the list cannot be a constant. */
+function noRingRow(id: string): Record<string, unknown> {
+  return {
+    parcelNodeId: id,
+    brief: { sections: [] },
+    draw: { label: id + " label", frame: FRAME, ring: [], edges: [], overlays: [] },
+    anchor: { lat: CENTRE.lat, lon: CENTRE.lon, precision: "1e-5-deg", source: "bake-latlng-index" },
+    anchorRead: { status: "ok" },
+  };
+}
+function noAnchorRow(id: string): Record<string, unknown> {
+  return {
+    parcelNodeId: id,
+    brief: { sections: [] },
+    draw: drawOf(id + " label"),
+    anchorRead: { status: "absent", reason: "no_latlng_for_parcel" },
+  };
+}
+
+function namedOffCanvas(html: string): string[] {
+  return [...html.matchAll(/data-undrawn="([^"]+)"/g)].map((m) => m[1] ?? "");
+}
+/** The reason cell painted beside one id. Throws rather than returning "" on a miss. */
+function reasonPainted(html: string, id: string): string {
+  const at = html.indexOf('data-undrawn="' + id + '"');
+  if (at < 0) throw new Error(id + " is named nowhere on this page");
+  const cell = html.slice(at, html.indexOf("</div>", at));
+  const m = /<span class="reason">([^<]*)<\/span>/.exec(cell);
+  if (!m) throw new Error(id + " is named with no reason");
+  return m[1] ?? "";
+}
+
+describe("M-5 item 1: what was not drawn is named, canvas or no canvas", () => {
+  it("seven parcels, ONE drawable: the other six are each named by id with a reason", () => {
+    const rows: Array<Record<string, unknown>> = [drawableRow(SEVEN[0]!, 0)];
+    for (let i = 1; i < 4; i++) rows.push(noRingRow(SEVEN[i]!));
+    for (let i = 4; i < 7; i++) rows.push(noAnchorRow(SEVEN[i]!));
+    const model = parseToolResult(body(rows));
+    /* routing is UNCHANGED: below two drawable parcels this is still the single
+     * parcel panel, not a canvas */
+    expect(model.kind).toBe("parcel");
+    expect(model.parcelNodeId).toBe(SEVEN[0]);
+    expect(multiDrawableCount(model.parcels ?? [])).toBe(1);
+    const html = renderParcelDraw(model);
+    expect(html).not.toContain('data-parcels="');
+    expect(namedOffCanvas(html).sort()).toEqual(SEVEN.slice(1).sort());
+    for (let i = 1; i < 4; i++) expect(reasonPainted(html, SEVEN[i]!)).toContain(MULTI_NO_RING);
+    for (let i = 4; i < 7; i++) {
+      expect(reasonPainted(html, SEVEN[i]!)).toContain(MULTI_NO_ANCHOR);
+      expect(reasonPainted(html, SEVEN[i]!)).toContain("no_latlng_for_parcel");
+    }
+    expect(html).toContain(MULTI_OFF_CANVAS_TITLE);
+    expect(html).toContain(multiNoCanvasWords(1, 7));
+    expect(html).toContain('data-no-canvas="1"');
+    expect(html).toContain('data-parcels-in-result="7"');
+  });
+
+  it("seven parcels, ZERO drawable: all SEVEN are named, including the one the panel painted", () => {
+    /* The painted parcel is undrawable too, so excluding it would be the same
+     * omission one row further in. */
+    const rows = SEVEN.map((id, i) => (i < 4 ? noRingRow(id) : noAnchorRow(id)));
+    const model = parseToolResult(body(rows));
+    expect(model.kind).toBe("parcel");
+    expect(model.parcelNodeId).toBe(SEVEN[0]);
+    expect(multiDrawableCount(model.parcels ?? [])).toBe(0);
+    const html = renderParcelDraw(model);
+    expect(namedOffCanvas(html).sort()).toEqual([...SEVEN].sort());
+    for (const id of SEVEN) expect(reasonPainted(html, id).length).toBeGreaterThan(0);
+    expect(html).toContain(multiNoCanvasWords(0, 7));
+  });
+
+  it("seven parcels, TWO drawable: there IS a canvas, and the five are still each named with a reason", () => {
+    const rows: Array<Record<string, unknown>> = [drawableRow(SEVEN[0]!, 0), drawableRow(SEVEN[1]!, LOT_W)];
+    for (let i = 2; i < 5; i++) rows.push(noRingRow(SEVEN[i]!));
+    for (let i = 5; i < 7; i++) rows.push(noAnchorRow(SEVEN[i]!));
+    const model = parseToolResult(body(rows));
+    expect(model.kind).toBe("parcels");
+    const html = renderParcelSet(model);
+    expect(html).toContain('data-parcels="2"');
+    expect(namedOffCanvas(html).sort()).toEqual(SEVEN.slice(2).sort());
+    for (const id of SEVEN.slice(2)) expect(reasonPainted(html, id).length).toBeGreaterThan(0);
+    expect(html).toContain(MULTI_UNDRAWN_TITLE);
+    /* the canvas list, not the no-canvas one: there is a canvas */
+    expect(html).not.toContain(MULTI_OFF_CANVAS_TITLE);
+    expect(html).not.toContain('data-no-canvas="');
+  });
+
+  it("the DRAWABLE parcel that is not the one painted is named too", () => {
+    /* The case a narrower rule ("name the undrawable ones") misses entirely.
+     * parcels[0] cannot be drawn, so the panel paints an empty card for it, and
+     * the one parcel with a ring and an anchor is somewhere further down. Naming
+     * only undrawable rows would leave that one unmentioned. */
+    const rows: Array<Record<string, unknown>> = [noRingRow(SEVEN[0]!), noRingRow(SEVEN[1]!), drawableRow(SEVEN[2]!, 0)];
+    const model = parseToolResult(body(rows));
+    expect(model.kind).toBe("parcel");
+    expect(model.parcelNodeId).toBe(SEVEN[0]);
+    expect(multiDrawableCount(model.parcels ?? [])).toBe(1);
+    const html = renderParcelDraw(model);
+    expect(namedOffCanvas(html).sort()).toEqual(SEVEN.slice(0, 3).sort());
+    expect(reasonPainted(html, SEVEN[2]!)).toBe(MULTI_NO_CANVAS);
+    expect(offCanvasParcels(model.parcels ?? [], SEVEN[0]!)).toHaveLength(3);
+  });
+
+  it("a notFound id is named off canvas too, and the truncation note travels with the list", () => {
+    const rows: Array<Record<string, unknown>> = [drawableRow(SEVEN[0]!, 0), noRingRow(SEVEN[1]!)];
+    const model = parseToolResult(
+      body(rows, {
+        notFound: ["48021:404404"],
+        anchorBatch: { cap: 12, received: 20, attempted: 12, notAttempted: 8, reason: "anchor_read_batch_cap" },
+      }),
+    );
+    expect(model.kind).toBe("parcel");
+    const html = renderParcelDraw(model);
+    expect(html).toContain('data-undrawn="48021:404404"');
+    expect(reasonPainted(html, "48021:404404")).toContain(NOT_RETURNED);
+    expect(html).toContain('data-anchor-not-read="8"');
+    expect(html).toContain("anchor_read_batch_cap");
+  });
+
+  it("a genuine single parcel result is untouched: nothing was omitted, so nothing is declared", () => {
+    const model = parseToolResult(body([drawableRow(SEVEN[0]!, 0)]));
+    expect(model.kind).toBe("parcel");
+    expect(model.parcels).toBeUndefined();
+    const html = renderParcelDraw(model);
+    expect(html).not.toContain("data-undrawn=");
+    expect(html).not.toContain("data-no-canvas=");
+    expect(offCanvasHtml(model)).toBe("");
+  });
+
+  it("offCanvasParcels asks undrawnReason, so the drawable predicate has ONE definition", () => {
+    const parcels = (parseToolResult(body([drawableRow(SEVEN[0]!, 0), noRingRow(SEVEN[1]!)])).parcels ?? []);
+    const off = offCanvasParcels(parcels, SEVEN[0]!);
+    expect(off).toHaveLength(1);
+    expect(off[0]!.reason).toBe(MULTI_NO_RING);
+    /* the same row, asked the same question by the plan */
+    expect(multiParcelPlan(parcels).reason).toBe(MULTI_TOO_FEW_REASON);
+    expect(multiDrawableCount(parcels)).toBe(1);
   });
 });
 
