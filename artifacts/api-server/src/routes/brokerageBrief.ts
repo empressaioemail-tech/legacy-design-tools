@@ -139,6 +139,8 @@ import {
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildableEnvelope";
 import { brokeragePlaceSitusSearchRouter } from "./brokeragePlaceSitusSearch";
+import { brokeragePlaceRadiusSearchRouter } from "./brokeragePlaceRadiusSearch";
+import { brokeragePlaceStreetSearchRouter } from "./brokeragePlaceStreetSearch";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
 import { propertyExplorerBillingRouter } from "./propertyExplorerBilling";
@@ -323,6 +325,8 @@ brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceBuildableEnvelopeRouter);
 brokerageV1.use("/place", brokeragePlaceSitusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceRadiusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceStreetSearchRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
