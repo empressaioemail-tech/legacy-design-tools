@@ -5,8 +5,16 @@ vi.mock("@workspace/db", () => ({
   txgioParcel: {
     countyFips: "county_fips",
     propId: "prop_id",
+    tileKey: "tile_key",
     situsAddress: "situs_address",
     geometry: "geometry",
+    westLng: "west_lng",
+    southLat: "south_lat",
+    eastLng: "east_lng",
+    northLat: "north_lat",
+  },
+  txCountyBoundary: {
+    countyFips: "county_fips",
     westLng: "west_lng",
     southLat: "south_lat",
     eastLng: "east_lng",
@@ -16,12 +24,20 @@ vi.mock("@workspace/db", () => ({
 
 const {
   RADIUS_SEARCH_CAP,
+  RADIUS_SEARCH_CANDIDATE_CEILING,
   circleBbox,
+  countiesOverlappingBbox,
   haversineFeet,
   pointToBboxDistanceFt,
   rankRadiusHits,
+  searchParcelsByRadius,
   sliceRadiusHits,
 } = await import("./txgioRadiusSearch");
+const { cellKeysForBbox } = await import("@workspace/cad-ingest/txgio-geo");
+const { texasCountyFipsList } = await import("./txgioAddressNormalize");
+const src = await import("node:fs").then((fs) =>
+  fs.readFileSync(new URL("./txgioRadiusSearch.ts", import.meta.url), "utf8"),
+);
 
 const GOLD_PT = { lat: 30.10981, lng: -97.31654 };
 
@@ -139,5 +155,137 @@ describe("rankRadiusHits", () => {
     expect(ranked).toHaveLength(1);
     expect(ranked[0]?.parcelNodeId).toBe("48021:34137");
     expect(ranked[0]?.distanceFt).toBe(0);
+  });
+});
+
+const HUNG_PT = { lat: 30.10592, lng: -97.32528 };
+
+function mockRadiusDb(
+  counties: string[],
+  parcels: Array<{
+    countyFips: string;
+    propId: string;
+    situsAddress: string | null;
+    geometry: unknown;
+    westLng: number;
+    southLat: number;
+    eastLng: number;
+    northLat: number;
+  }>,
+) {
+  return {
+    select: () => ({
+      from: (table: { propId?: unknown }) => ({
+        where: () => {
+          if (table.propId !== undefined) {
+            return { limit: async () => parcels };
+          }
+          return Promise.resolve(counties.map((countyFips) => ({ countyFips })));
+        },
+      }),
+    }),
+  };
+}
+
+describe("countiesOverlappingBbox", () => {
+  it("returns the trimmed FIPS the county query yielded", async () => {
+    const db = mockRadiusDb(["48021", "48287"], []);
+    const box = circleBbox(HUNG_PT.lat, HUNG_PT.lng, 500);
+    await expect(countiesOverlappingBbox(box, db)).resolves.toEqual([
+      "48021",
+      "48287",
+    ]);
+  });
+});
+
+describe("searchParcelsByRadius county bound", () => {
+  const inRange = {
+    countyFips: "48021",
+    propId: "34137",
+    situsAddress: "908 PINE , BASTROP, TX 78602",
+    geometry: {
+      type: "Polygon" as const,
+      coordinates: [
+        [
+          [HUNG_PT.lng - 0.0002, HUNG_PT.lat - 0.0002],
+          [HUNG_PT.lng + 0.0002, HUNG_PT.lat - 0.0002],
+          [HUNG_PT.lng + 0.0002, HUNG_PT.lat + 0.0002],
+          [HUNG_PT.lng - 0.0002, HUNG_PT.lat + 0.0002],
+          [HUNG_PT.lng - 0.0002, HUNG_PT.lat - 0.0002],
+        ],
+      ],
+    },
+    westLng: HUNG_PT.lng - 0.0002,
+    southLat: HUNG_PT.lat - 0.0002,
+    eastLng: HUNG_PT.lng + 0.0002,
+    northLat: HUNG_PT.lat + 0.0002,
+  };
+
+  it("returns hits when the county bound is one FIPS", async () => {
+    const result = await searchParcelsByRadius({
+      lat: HUNG_PT.lat,
+      lng: HUNG_PT.lng,
+      radiusFt: 500,
+      database: mockRadiusDb(["48021"], [inRange]),
+    });
+    expect("refused" in result).toBe(false);
+    if ("refused" in result) return;
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]?.parcelNodeId).toBe("48021:34137");
+  });
+
+  it("refuses when no county boundary overlaps rather than scanning 254", async () => {
+    const result = await searchParcelsByRadius({
+      lat: HUNG_PT.lat,
+      lng: HUNG_PT.lng,
+      radiusFt: 500,
+      database: mockRadiusDb([], [inRange]),
+    });
+    expect(result).toMatchObject({
+      refused: true,
+      code: "radius_county_unresolved",
+    });
+  });
+
+  it("refuses when the candidate ceiling is exceeded", async () => {
+    const overflow = Array.from(
+      { length: RADIUS_SEARCH_CANDIDATE_CEILING + 1 },
+      (_, i) => ({ ...inRange, propId: String(i + 1) }),
+    );
+    const result = await searchParcelsByRadius({
+      lat: HUNG_PT.lat,
+      lng: HUNG_PT.lng,
+      radiusFt: 500,
+      database: mockRadiusDb(["48021"], overflow),
+    });
+    expect(result).toMatchObject({
+      refused: true,
+      code: "radius_unbounded",
+    });
+  });
+});
+
+describe("radius search does not use the 254-county IN list", () => {
+  it("txgioRadiusSearch.ts no longer imports texasCountyFipsList", () => {
+    expect(src).not.toMatch(/texasCountyFipsList/);
+    expect(texasCountyFipsList()).toHaveLength(254);
+  });
+
+  it("50 ft and 500 ft at the hung point cover one cell, not a statewide scan", () => {
+    for (const radiusFt of [50, 500]) {
+      const box = circleBbox(HUNG_PT.lat, HUNG_PT.lng, radiusFt);
+      const cells = cellKeysForBbox(box, undefined, 256);
+      expect(cells).not.toBeNull();
+      expect(cells!.length).toBe(1);
+      expect(cells![0]).toBe("g0.02:-97.34000,30.10000");
+    }
+  });
+
+  it("the 5280 ft ceiling still fits the tile-cell IN list", () => {
+    const box = circleBbox(HUNG_PT.lat, HUNG_PT.lng, 5280);
+    const cells = cellKeysForBbox(box, undefined, 256);
+    expect(cells).not.toBeNull();
+    expect(cells!.length).toBeGreaterThan(0);
+    expect(cells!.length).toBeLessThanOrEqual(16);
   });
 });

@@ -73,6 +73,20 @@ describe("GET /api/brokerage/v1/place/radius-search", () => {
     expect(res.body.error).toBe("radius_unbounded");
   });
 
+  it("422s when no county overlaps the search box", async () => {
+    searchMock.mockResolvedValue({
+      refused: true,
+      code: "radius_county_unresolved",
+      reason: "No Texas county boundary overlaps the search box.",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/radius-search")
+      .query({ lat: 0, lng: 0, radiusFt: 500 });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("radius_county_unresolved");
+  });
+
   it("400s when radiusFt is missing", async () => {
     const res = await request(buildApp())
       .get("/api/brokerage/v1/place/radius-search")
