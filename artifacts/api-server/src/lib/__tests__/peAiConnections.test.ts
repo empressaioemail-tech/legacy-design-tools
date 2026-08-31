@@ -32,6 +32,23 @@ describe("isClaudeClient", () => {
     expect(isClaudeClient("acme-claude-bridge")).toBe(false);
     expect(isClaudeClient("my claude helper")).toBe(false);
   });
+
+  // THE THREE STRINGS A REAL CONNECT ACTUALLY WROTE, 2026-08-31. These are
+  // transcribed from pe_ai_connections in production, not invented. Two of the
+  // three failed the original `claude`-only predicate, which is the whole
+  // reason the anthropic/ prefix exists.
+  it("matches every client name a real Claude connect produced", () => {
+    expect(isClaudeClient("claude-ai")).toBe(true);
+    expect(isClaudeClient("Anthropic/ClaudeAI")).toBe(true);
+    expect(isClaudeClient("Anthropic/Toolbox")).toBe(true);
+  });
+
+  it("the anthropic/ prefix needs the SLASH — it is a namespace, not a word", () => {
+    // Otherwise any third party with "anthropic" in its name reads as Claude.
+    expect(isClaudeClient("anthropicity")).toBe(false);
+    expect(isClaudeClient("Anthropic Helper")).toBe(false);
+    expect(isClaudeClient("not-anthropic/thing")).toBe(false);
+  });
 });
 
 describe("pickClaude", () => {
@@ -43,6 +60,15 @@ describe("pickClaude", () => {
   it("finds Claude alongside other clients (NOT VACUOUS)", () => {
     const picked = pickClaude([conn("Cursor"), conn("claude-ai")]);
     expect(picked?.client).toBe("claude-ai");
+  });
+
+  it("resolves connected from an Anthropic-namespaced row ALONE", () => {
+    // The masked case: if a surface writes only Anthropic/ClaudeAI and no
+    // claude-ai row, the account is still connected. Under the original
+    // predicate this returned null and the card showed setup instructions to
+    // someone who was already set up.
+    const picked = pickClaude([conn("Anthropic/ClaudeAI")]);
+    expect(picked?.client).toBe("Anthropic/ClaudeAI");
   });
 
   it("prefers the most recently seen Claude surface", () => {
