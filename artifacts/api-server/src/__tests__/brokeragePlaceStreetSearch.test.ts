@@ -11,6 +11,8 @@ const { searchMock } = vi.hoisted(() => ({
       cap: 50,
       received: 0,
       truncated: false,
+      match: "exact",
+      streets: [],
     }),
   ),
 }));
@@ -40,6 +42,8 @@ describe("GET /api/brokerage/v1/place/street-search", () => {
       cap: 50,
       received: 1,
       truncated: false,
+      match: "exact",
+      streets: ["PINE"],
     });
   });
 

@@ -16,6 +16,8 @@ const {
   STREET_SEARCH_CAP,
   searchParcelsByBareStreet,
   sliceStreetHits,
+  streetNameFromSitus,
+  declareStreetMatch,
 } = await import("./txgioStreetSearch");
 const {
   normalizeBareStreetLine,
@@ -105,5 +107,67 @@ describe("searchParcelsByBareStreet refuse", () => {
     expect(result.hits).toHaveLength(2);
     expect(result.received).toBe(2);
     expect(result.truncated).toBe(true);
+    expect(result.match).toBe("exact");
+    expect(result.streets).toEqual(["PINE ST"]);
+  });
+});
+
+describe("declareStreetMatch (keep the breadth, declare the fragment)", () => {
+  const pineFragmentHits = [
+    {
+      parcelNodeId: "48021:111146",
+      situsAddress: "178 PINEHILL DR , BASTROP, TX 78602",
+      countyFips: "48021",
+    },
+    {
+      parcelNodeId: "48021:117885",
+      situsAddress: "190 PINE TREE LOOP UNIT, BASTROP, TX 78602",
+      countyFips: "48021",
+    },
+    {
+      parcelNodeId: "48021:133055",
+      situsAddress: "121 PINECREST DR, BASTROP, TX 78602",
+      countyFips: "48021",
+    },
+    {
+      parcelNodeId: "48021:140877",
+      situsAddress: "155 ROYAL PINES DR, BASTROP, TX 78602",
+      countyFips: "48021",
+    },
+  ];
+
+  it("names the four live Pine fragment streets", () => {
+    expect(streetNameFromSitus(pineFragmentHits[0]!.situsAddress)).toBe("PINEHILL DR");
+    expect(streetNameFromSitus(pineFragmentHits[1]!.situsAddress)).toBe("PINE TREE LOOP");
+    expect(streetNameFromSitus(pineFragmentHits[2]!.situsAddress)).toBe("PINECREST DR");
+    expect(streetNameFromSitus(pineFragmentHits[3]!.situsAddress)).toBe("ROYAL PINES DR");
+  });
+
+  it("FALSIFIER: four fragment streets must be fuzzy, never exact or silent", () => {
+    const declared = declareStreetMatch(pineFragmentHits, "Pine St, Bastrop");
+    expect(declared.match).toBe("fuzzy");
+    expect(declared.matchBasis).toBe("name-fragment");
+    expect(declared.streets).toEqual([
+      "PINEHILL DR",
+      "PINE TREE LOOP",
+      "PINECREST DR",
+      "ROYAL PINES DR",
+    ]);
+  });
+
+  it("CAD situs without a street type on real Pine is exact", () => {
+    const declared = declareStreetMatch(
+      [
+        {
+          parcelNodeId: "48021:34137",
+          situsAddress: "908 PINE , BASTROP, TX 78602",
+          countyFips: "48021",
+        },
+      ],
+      "Pine St, Bastrop",
+    );
+    expect(declared.match).toBe("exact");
+    expect(declared.streets).toEqual(["PINE"]);
+    expect(declared.matchBasis).toBeUndefined();
   });
 });
