@@ -215,14 +215,32 @@ export function declareUpstreamNonOk(
   };
 }
 
+/**
+ * P-91 v3 item 1. `present | refused | absent | unread` is what
+ * artifacts/api-server's own R1BriefSectionDisposition type carries today
+ * (r1BriefCompose.ts) and is the only shape `buildR1Brief` emits: no code
+ * path there returns `unknown`, and WDLL item 5 names `absent-verified` as
+ * explicitly withheld at section level pending a positive typed result no
+ * section carries yet. `unknown` and `absent-verified` are added to THIS
+ * union anyway, so that if a section ever DOES carry one of them -- today,
+ * from a future cortex change, or from any other producer this MCP server
+ * proxies -- `sectionDisposition` below preserves it instead of silently
+ * strengthening it into `absent` (the defect this item closes: a claimed
+ * state this union could not name was discarded and re-derived, and the
+ * re-derivation is always a claim strength the wire never made). Widening
+ * the union is a promise about what THIS SERVER can say, not a claim about
+ * what cortex sends today.
+ */
 export type ExternalBriefSectionDisposition =
   | "present"
   | "refused"
   | "absent"
-  | "unread";
+  | "unread"
+  | "unknown"
+  | "absent-verified";
 
 const EXTERNAL_BRIEF_SECTION_DISPOSITIONS: readonly ExternalBriefSectionDisposition[] =
-  ["present", "refused", "absent", "unread"];
+  ["present", "refused", "absent", "unread", "unknown", "absent-verified"];
 
 function asExplicitDisposition(
   value: unknown,
@@ -261,6 +279,13 @@ function derivedSectionDisposition(
  * one claim it rewrites is `present` without data, which the section does
  * not support, and that falls to the derived state (refused if a refusal
  * rides along, else absent). A missing or unrecognised disposition derives.
+ *
+ * P-91 v3 item 1. `claimed` now recognises `unknown` and `absent-verified`
+ * (see the union's own comment above): neither is `present`, so both fall
+ * straight through the one downgrade check below and are RETURNED AS
+ * CLAIMED, never re-derived. That is the fix -- this function's body did
+ * not otherwise need to change, because the strengthening lived entirely in
+ * `asExplicitDisposition` rejecting a state it had no member for.
  */
 function sectionDisposition(section: Record<string, unknown>): ExternalBriefSectionDisposition {
   const derived = derivedSectionDisposition(section);
@@ -268,6 +293,79 @@ function sectionDisposition(section: Record<string, unknown>): ExternalBriefSect
   if (claimed === null) return derived;
   if (claimed === "present" && derived !== "present") return derived;
   return claimed;
+}
+
+/**
+ * P-91 v3 item 1 follow-up. The check the defect card asked for: the stub
+ * rail and the node section disposition for one facet, on one parcel, are
+ * two SEPARATE wire reads (get_smart_site depth "stub" and depth "node" are
+ * two different tool calls; on cortex's own side, artifacts/api-server's
+ * assembleStubBody and assembleNodeBriefBody each call
+ * loadBakedNodeFacetSnapshot / loadFloodHazardFactAtom independently -- see
+ * artifacts/api-server/src/routes/propertyExplorer.ts), so a race, a cache,
+ * or a divergence introduced by a future change to either read path can
+ * make them disagree even though the transform between them is shared code
+ * today. That is what this function is checking: agreement across two
+ * independently-fetched reads, not internal consistency within one payload
+ * a single producer could fabricate both halves of.
+ *
+ * The expected relationship is NOT equality, and this is the correction to
+ * the defect card's own framing: per api-server's
+ * railStateFromSectionDisposition (src/lib/smartSiteStub.ts, read from the
+ * write path, not inferred from output), a node section with no
+ * determination (`absent`) is DESIGNED to read as `unknown` at stub depth.
+ * That pairing -- confirmed for all five brief-backed facets: zoning,
+ * land-use, flood, drainage and setbacks-envelope share the one
+ * `railStateFromSectionDisposition` projection end to end -- is the
+ * intended, shared derivation, not the strengthening bug item 1 fixes
+ * above. A check that expected `unknown` at stub to equal `unknown` at node
+ * would fail on every healthy parcel with an absent facet; that is not this
+ * check. `unknown` and `absent-verified` are still listed on the node side
+ * of the table below even though no section carries them today (same
+ * forward posture as the union widening above): if a section ever DOES
+ * claim one, the table states plainly what the stub rail is expected to
+ * say next to it.
+ *
+ * `situs` is deliberately excluded: it is not one of api-server's five
+ * R1BriefSectionId facets (composeSitusLabel is a label compose, not a
+ * disposition), so it has no node-depth disposition to agree with.
+ */
+export const STUB_RAIL_FOR_NODE_DISPOSITION: Record<
+  ExternalBriefSectionDisposition,
+  string
+> = {
+  present: "present",
+  refused: "refused",
+  unread: "unread",
+  absent: "unknown",
+  unknown: "unknown",
+  "absent-verified": "absent-verified",
+};
+
+/** Stub rail key -> node section id, for the five facets both depths carry. */
+export const STUB_RAIL_TO_NODE_SECTION_ID: Record<
+  "zoning" | "landUse" | "flood" | "drainage" | "envelope",
+  string
+> = {
+  zoning: "zoning",
+  landUse: "land-use",
+  flood: "flood",
+  drainage: "drainage",
+  envelope: "setbacks-envelope",
+};
+
+/**
+ * True when a stub rail's word is what api-server's own projection says it
+ * should be, given the node section's disposition for the same facet. Two
+ * independently-fetched inputs in, one boolean out; see the comment on
+ * STUB_RAIL_FOR_NODE_DISPOSITION above for why the relationship is a
+ * mapping and not equality.
+ */
+export function stubRailAgreesWithNodeDisposition(
+  stubRailValue: string,
+  nodeDisposition: ExternalBriefSectionDisposition,
+): boolean {
+  return STUB_RAIL_FOR_NODE_DISPOSITION[nodeDisposition] === stubRailValue;
 }
 
 /**

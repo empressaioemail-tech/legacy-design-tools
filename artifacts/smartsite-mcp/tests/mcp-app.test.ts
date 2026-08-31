@@ -107,6 +107,7 @@ import {
   sortBoardRows,
   stubReadNoteHtml,
   useCandidateMessage,
+  type BriefSection,
 } from "../src/mcp-app.js";
 import { registerTools } from "../src/tools.js";
 
@@ -1031,6 +1032,13 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
     expect(sectionPaint("absent", AS_OF_V2, { sourceVintage: "2026-07" })).toEqual({ paint: "absent-verified" });
     expect(sectionPaint("absent", AS_OF_V2, { sourceVintage: "UNKNOWN" })).toEqual({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
     expect(sectionPaint("absent", AS_OF_V2, null)).toEqual({ paint: "unknown", paintReason: ABSENCE_UNVERIFIED });
+    /* P-91 v3 item 1: a section that already claims unknown or absent-verified
+     * is trusted as claimed, not re-earned -- no paintReason on either, unlike
+     * the "absent" branch above, because there is nothing left to verify. */
+    expect(sectionPaint("unknown", AS_OF_V2, null)).toEqual({ paint: "unknown" });
+    expect(sectionPaint("unknown", null, { sourceVintage: "UNKNOWN" })).toEqual({ paint: "unknown" });
+    expect(sectionPaint("absent-verified", AS_OF_V2, null)).toEqual({ paint: "absent-verified" });
+    expect(sectionPaint("absent-verified", null, { sourceVintage: "UNKNOWN" })).toEqual({ paint: "absent-verified" });
     expect(sectionPaint("Present", AS_OF_V2, {}).paint).toBe("unread");
     expect(sectionPaint("unstated", AS_OF_V2, {}).paint).toBe("unread");
     expect(dateOnly(AS_OF_V2)).toBe("2026-08-29");
@@ -1130,6 +1138,13 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
     expect(report).not.toContain("SF-1");
     expect(report).not.toContain("372.5");
     expect(report).not.toContain("atom_path_pending");
+    /* P-91 v3 item 2: the flood row's own zone subtype is the one value the
+     * "no values" row now carries, so two present findings that would
+     * otherwise paint the same (0.2% shaded X vs minimal-hazard X) do not.
+     * GOLD_FACTS_V2's flood section is Zone AE FLOODWAY (present); every
+     * other section stays value-free, per the not.toContain checks above. */
+    expect(report).toContain('data-flood-subtype="FLOODWAY"');
+    expect(report).toContain(">FLOODWAY<");
     expect(reportHtml([])).toContain("No brief sections on this result");
     /* overlays: 0 flood, 1 envelope, 2 pipeline, 3 special-district */
     const pipe = overlayRowHtml(model.overlays[2]!, 2);
@@ -1155,6 +1170,61 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
     expect(door.indexOf('data-act="open"')).toBeLessThan(door.indexOf('data-act="addscreen"'));
     expect(edgeTipHtml(GOLD_V2_EDGES[2]!, 2)).not.toContain("addscreen");
     expect(edgeTipHtml(GOLD_V2_EDGES[0]!, 0)).not.toContain("addscreen");
+  });
+
+  it("P-91 v3 item 2: reportHtml's flood row carries zoneSubtype and nothing else does", () => {
+    const floodBase: BriefSection = {
+      id: "flood",
+      title: "Flood",
+      disposition: "present",
+      asOf: AS_OF_V2,
+      data: { floodZone: "X", zoneSubtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD", baseFloodElevation: null },
+      citations: [],
+      citationsDegraded: false,
+      paint: "present",
+    };
+    const minimal: BriefSection = {
+      ...floodBase,
+      data: { floodZone: "X", zoneSubtype: "AREA OF MINIMAL FLOOD HAZARD", baseFloodElevation: null },
+    };
+    const shaded = reportHtml([floodBase]);
+    const min = reportHtml([minimal]);
+    // The exact defect: two materially different flood findings must not
+    // render the same row now that one carries its own subtype text.
+    expect(shaded).not.toBe(min);
+    expect(shaded).toContain('data-flood-subtype="0.2 PCT ANNUAL CHANCE FLOOD HAZARD"');
+    expect(min).toContain('data-flood-subtype="AREA OF MINIMAL FLOOD HAZARD"');
+
+    // No zoneSubtype on the wire: no span at all, never an "unstated" filler
+    // leaking into the one row that is supposed to stay value-free.
+    const noSubtype = reportHtml([{ ...floodBase, data: { floodZone: "X" } }]);
+    expect(noSubtype).not.toContain("fsub");
+    expect(noSubtype).not.toContain("data-flood-subtype");
+
+    // Gate 1: id !== "flood" -- a coincidental zoneSubtype on another
+    // facet's data is never printed; the "no values" rule still holds.
+    const zoningWithStrayField: BriefSection = {
+      id: "zoning",
+      title: "Zoning",
+      disposition: "present",
+      asOf: AS_OF_V2,
+      data: { district: "SF-1", zoneSubtype: "should never print" },
+      citations: [],
+      citationsDegraded: false,
+      paint: "present",
+    };
+    expect(reportHtml([zoningWithStrayField])).not.toContain("should never print");
+
+    // Gate 2: paint !== "present" -- flood refused still carries the same
+    // data.zoneSubtype in this fixture (a stale/leftover value would not
+    // happen from normalizeR1BodyForExternal in practice, but the row must
+    // not trust data it has no business printing under a non-present paint).
+    const refusedFlood: BriefSection = {
+      ...floodBase,
+      paint: "refused",
+      refusal: { code: "declined-in-bake", producer: "p", declineReason: null, reason: "x" },
+    };
+    expect(reportHtml([refusedFlood])).not.toContain("0.2 PCT ANNUAL CHANCE");
   });
 
   it("htmlContractViolations: the S7 checks fire on violated copies", () => {
