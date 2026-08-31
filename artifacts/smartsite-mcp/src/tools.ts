@@ -15,6 +15,13 @@ import {
   refuseStudioReport,
   snapshotFromAuth,
 } from "./entitlement.js";
+import {
+  attachAnchorToResponseText,
+  readParcelAnchor,
+  skippedAnchorForBatch,
+  skippedAnchorForStub,
+  type AnchorOutcome,
+} from "./parcel-anchor.js";
 import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
@@ -393,8 +400,13 @@ export function registerTools(server: McpServer): void {
             }
             const briefBody: Record<string, unknown> = { parcelNodeId };
             if (depth) briefBody.depth = depth;
+            // M-1: only a single-id node read carries an anchor. An array is
+            // never fanned out into N facets reads, and a stub row has no
+            // draw for an anchor to hold.
+            const readsAnchor =
+              !Array.isArray(parcelNodeId) && effectiveDepth === "node";
             return withCortex(async (config) => {
-              const res = await cortexFetch(
+              const briefPromise = cortexFetch(
                 config,
                 `/api/property-explorer/v1/research/brief`,
                 {
@@ -403,6 +415,18 @@ export function registerTools(server: McpServer): void {
                   body: JSON.stringify(briefBody),
                 },
               );
+              // Issued with the brief, never after it, and joined once the
+              // brief has landed, so the panel waits max(brief, anchor).
+              // readParcelAnchor never rejects, so this is safe to leave
+              // unawaited on the non-OK returns below.
+              const anchorPromise: Promise<AnchorOutcome> = readsAnchor
+                ? readParcelAnchor(config, parcelNodeId as string)
+                : Promise.resolve(
+                    Array.isArray(parcelNodeId)
+                      ? skippedAnchorForBatch(ids.length)
+                      : skippedAnchorForStub(),
+                  );
+              const res = await briefPromise;
               const body = await res.text();
               if (!res.ok) {
                 // Wire contract 4.1: a declared miss or refusal is a result
@@ -420,11 +444,13 @@ export function registerTools(server: McpServer): void {
                 Array.isArray(parcelNodeId) || depth === "stub"
                   ? "stub-or-batch"
                   : "single-node";
+              const normalized = normalizeGetSmartSiteResponseText(body, mode);
+              const anchorOutcome = await anchorPromise;
               return {
                 content: [
                   {
                     type: "text" as const,
-                    text: normalizeGetSmartSiteResponseText(body, mode),
+                    text: attachAnchorToResponseText(normalized, anchorOutcome),
                   },
                 ],
                 isError: false,
