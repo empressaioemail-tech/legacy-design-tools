@@ -42,7 +42,7 @@ describe("p559 probe vs the direct_network contract", () => {
 
 describe("p559 probe constants", () => {
   it("pins the p559 URIs", () => {
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p559.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p560.html");
     expect(PROBE_RESOURCE_URI).toBe("ui://smartsite/probe-p559.txt");
   });
 

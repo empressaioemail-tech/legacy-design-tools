@@ -2330,3 +2330,127 @@ describe("P-91 v2 board (served)", () => {
     expect(app.htmlContractViolations(clean.split(`"${COPY3.refused}"`).join('"Declined"'))).toContain("declared_body_unbound");
   });
 });
+
+/*
+ * P-91 v3 M-2: the aerial ground, in the SERVED panel. The exported twin's
+ * arithmetic is proved in tests/mcp-app-ground.test.ts; what is proved here is
+ * that the iframe composes it, resets it on every accepted result, and paints
+ * nothing when the anchor was not read.
+ */
+const GROUND_ANCHOR = { lat: 30.10592, lon: -97.32528, precision: "1e-5-deg", source: "bake-latlng-index" };
+const GOLD_ANCHORED = goldWith((_d, b) => {
+  b.anchor = GROUND_ANCHOR;
+  b.anchorRead = { status: "ok" };
+});
+const GOLD_ANCHOR_ABSENT = goldWith((_d, b) => {
+  b.anchorRead = { status: "absent", reason: "city_limits_fact_absent" };
+});
+const GOLD_ANCHOR_ERROR = goldWith((_d, b) => {
+  b.anchorRead = { status: "error", reason: "anchor_read_timeout" };
+});
+const GOLD_ANCHOR_SKIPPED = goldWith((_d, b) => {
+  b.anchorRead = { status: "skipped", reason: "anchor_read_batch_cap" };
+});
+
+describe("P-91 v3 M-2 aerial ground (served)", () => {
+  it("an ok anchor paints tiles under the drawing, with the drawing untouched on top", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_ANCHORED);
+    const html = f.root.innerHTML;
+    const plan = app.groundPlan(
+      app.parseToolResult(JSON.stringify(GOLD_ANCHORED)).ring ?? [],
+      GROUND_ANCHOR,
+      { status: "ok", reason: null },
+    ).plan;
+    expect(plan).not.toBeNull();
+    expect((html.match(/<img class="gt"/g) ?? []).length).toBe(plan?.tiles.length);
+    expect(html).toContain('data-ground="on"');
+    expect(html).toContain(app.GROUND_TILE_ORIGIN);
+    /* the drawing is byte identical to the one the panel paints with no ground */
+    const bare = fresh();
+    bare.init();
+    bare.toolResult(GOLD_ANCHOR_ABSENT);
+    const svgOf = (h: string) => h.slice(h.indexOf("<svg"), h.indexOf("</svg>") + 6);
+    expect(svgOf(html)).toBe(svgOf(bare.root.innerHTML));
+    /* and it sits behind the drawing, not over it */
+    expect(html.indexOf('<div class="ground"')).toBeLessThan(html.indexOf("<svg"));
+  });
+
+  it("every non ok read paints the void ground and puts no tile request in the html", () => {
+    for (const payload of [GOLD_ANCHOR_ABSENT, GOLD_ANCHOR_ERROR, GOLD_ANCHOR_SKIPPED, GOLD_NODE]) {
+      const f = fresh();
+      f.init();
+      f.toolResult(payload);
+      const html = f.root.innerHTML;
+      expect(html).not.toContain("<img");
+      expect(html).not.toContain("arcgisonline");
+      expect(html).not.toContain("gwrap");
+      expect(html).not.toContain('data-act="ground"');
+    }
+  });
+
+  it("a coordinate arriving under a non ok read is dropped, never placed", () => {
+    const forged = goldWith((_d, b) => {
+      b.anchor = GROUND_ANCHOR;
+      b.anchorRead = { status: "error", reason: "anchor_read_timeout" };
+    });
+    const f = fresh();
+    f.init();
+    f.toolResult(forged);
+    expect(f.root.innerHTML).not.toContain("arcgisonline");
+  });
+
+  it("the toggle is local view state: it repaints and sends nothing", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_ANCHORED);
+    const before = f.messages().length;
+    const fp = (f.sandbox.__ss as { fp: () => string }).fp();
+    f.ss().ground();
+    expect(f.root.innerHTML).not.toContain("<img");
+    expect(f.root.innerHTML).toContain('data-ground="off"');
+    expect(f.root.innerHTML).toContain('data-ground-on="0"');
+    /* the way back is still there, and the drawing is still there */
+    expect(f.root.innerHTML).toContain('data-act="ground"');
+    expect(f.root.innerHTML).toContain("<svg");
+    f.ss().ground();
+    expect(f.root.innerHTML).toContain("<img");
+    expect(f.root.innerHTML).toContain('data-ground="on"');
+    expect(f.messages()).toHaveLength(before);
+    expect((f.sandbox.__ss as { fp: () => string }).fp()).toBe(fp);
+  });
+
+  it("the toggle resets to on with every accepted result", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_ANCHORED);
+    f.ss().ground();
+    expect(f.root.innerHTML).toContain('data-ground="off"');
+    f.toolResult(GOLD_ANCHORED);
+    expect(f.root.innerHTML).toContain('data-ground="on"');
+    expect(f.root.innerHTML).toContain("<img");
+  });
+
+  it("the ground does not disturb the drawing's own controls", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(GOLD_ANCHORED);
+    expect(f.edges().length).toBeGreaterThan(0);
+    f.hover(1);
+    expect(f.tipText()).toContain("167.99 ft");
+    f.leave(1);
+    expect(f.tipText()).toBe(COPY.tipHint);
+    expect(f.root.innerHTML).toContain('data-north="up"');
+    expect(f.root.innerHTML).toContain("data-scale-ft=");
+    expect(f.root.innerHTML).toContain("data-flood-tint=");
+    expect(f.all('[data-act="report"]')).toHaveLength(1);
+  });
+
+  it("the ground toggle is not offered on a board", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult({ id: "scr_1", rows: [{ query: "1 Main", parcelNodeId: "48021:34137", resolution: "resolved", situs: "present" }] });
+    expect(f.all('[data-act="ground"]')).toHaveLength(0);
+  });
+});
