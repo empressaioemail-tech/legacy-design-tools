@@ -41,8 +41,10 @@ import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
 import { normalizeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
 import {
   fetchCountyLandUseByAddress,
+  fetchCountyLandUseRoll,
   loadLedgerBlockedFips,
   resolveAddressLandUse,
+  type CountyLandUseRoll,
 } from "./lib/joinIntegrityGate.js";
 import { addressJoinKey, normalizeSitusAddress } from "./lib/joinNormalize.js";
 import { ringCentroid } from "./lib/nodeFacetBakeTier1.js";
@@ -55,6 +57,7 @@ import {
   type ParcelTableSource,
 } from "./lib/nodeFacetTier1ParcelJoin.js";
 import {
+  assertLandUseAbsenceEarned,
   assertNoOwnerKey,
   buildConformantTier1Payload,
   parcelNodeIdFromBody,
@@ -217,6 +220,23 @@ async function main() {
   const addressLandUse = joinGateBlocked
     ? await fetchCountyLandUseByAddress(neondb, county)
     : null;
+  // The CAD roll on the prop_id key: the upstream the OLD bake joined, and
+  // the reason this bake stopped writing land use at all when the Factory
+  // moved the claim to a flat body without propertyUseCode. CAD-to-CAD:
+  // seed does NOT apply (seed risk was TxGIO-to-CAD). 48209 and 48491 are
+  // clear on this join. Do not re-impose the seed. Join key is prop_id.
+  // Not read for a county whose TxGIO parcel join is gate-blocked: that
+  // refuse is the cross-namespace gate, and recovery runs on situs address.
+  const landUseRoll: CountyLandUseRoll | null = joinGateBlocked
+    ? null
+    : await fetchCountyLandUseRoll(neondb, county);
+  if (landUseRoll) {
+    console.log(
+      `[node-facet-bake-t1-conformant] cad_property land-use rows for ${county}: ` +
+        `${landUseRoll.byPropId.size} (consulted=${landUseRoll.consulted} ` +
+        `declaredTaxYear=${landUseRoll.declaredTaxYear ?? "none"})`,
+    );
+  }
   if (joinGateBlocked && parcelTable) {
     const situsKeys = [
       ...new Set(
@@ -252,6 +272,13 @@ async function main() {
   let txgioJoined = 0;
   let txgioNoRow = 0;
   const facetHits = { landUse: 0, acreage: 0, zoning: 0, envelopeDerived: 0 };
+  const landUseOrigins = {
+    claim: 0,
+    cadPropertyPropIdJoin: 0,
+    addressJoin: 0,
+    absentVerified: 0,
+    lookupFailed: 0,
+  };
   const publishRunId = publishRunIdFromEnv();
   const nowIso = new Date().toISOString();
   const countyName = COUNTY_NAMES[county] ?? county;
@@ -316,6 +343,8 @@ async function main() {
             },
           }
         : {}),
+      ...(landUseRoll ? { landUseRoll } : {}),
+      blockedFips: blockedSet,
       nowIso,
       onSitusFallback: ({ cityKey, situsCity }) => {
         console.warn(
@@ -327,6 +356,22 @@ async function main() {
     // Owner is never baked: the claim carries ownerName and the builder never
     // reads it; this refuses the write if any owner-shaped key slipped in.
     assertNoOwnerKey(payload);
+    // A null land use with no earned absence is refused, not written: the
+    // coverage flag is a scoring field and must not read false where the value
+    // exists (OPS-19 A-025 items 1 and 5).
+    assertLandUseAbsenceEarned(payload);
+
+    if (payload.provenance.landUseOrigin === "claim") landUseOrigins.claim += 1;
+    else if (payload.provenance.landUseOrigin === "cad-property-prop-id-join") {
+      landUseOrigins.cadPropertyPropIdJoin += 1;
+    } else if (payload.provenance.landUseOrigin === "cad-roll-address-join") {
+      landUseOrigins.addressJoin += 1;
+    }
+    if (payload.provenance.landUseAbsence?.verdict === "absent-verified") {
+      landUseOrigins.absentVerified += 1;
+    } else if (payload.provenance.landUseAbsence?.verdict === "lookup-failed") {
+      landUseOrigins.lookupFailed += 1;
+    }
 
     if (payload.facetCoverage.landUse) facetHits.landUse += 1;
     if (payload.facetCoverage.acreage) facetHits.acreage += 1;
@@ -385,6 +430,9 @@ async function main() {
       txgioJoined,
       txgioNoRow,
       txgioMultiFeature,
+      landUseRollRows: landUseRoll ? landUseRoll.byPropId.size : null,
+      landUseRollConsulted: landUseRoll ? landUseRoll.consulted : false,
+      landUseOrigins,
       facetHits,
     }),
   );

@@ -102,6 +102,7 @@ import {
   LANDUSE_JOIN_DISABLED_FIPS_SEED,
 } from "./lib/joinNormalize";
 import {
+  fetchCountyLandUseRoll,
   loadLedgerBlockedFips,
   resolveAddressLandUse,
   type AddressLandUseEntry,
@@ -300,33 +301,16 @@ interface LandUse {
   landUseVintage: string;
 }
 
+// The query itself lives in `./lib/joinIntegrityGate.ts` so the conformant
+// bake reads the SAME upstream through the SAME function. One derivation, no
+// second copy to drift (F-06 land-use projection, 2026-08-31). CAD-to-CAD:
+// seed does NOT apply. Seed risk was TxGIO-to-CAD. 48209 and 48491 are
+// clear. Do not re-impose the seed. Join key is prop_id, never seed.
 async function fetchCountyLandUse(
   pool: pg.Pool,
   fips: string,
 ): Promise<Map<string, LandUse>> {
-  const out = new Map<string, LandUse>();
-  const declared = tryResolveDeclaredCadVintage(fips);
-  if (!declared) return out;
-  if (!(await tableExists(pool, "cad_property"))) return out;
-  const r = await pool.query<{
-    prop_id: string;
-    property_use_code: string;
-    source_vintage: string;
-  }>(
-    `SELECT prop_id, property_use_code, source_vintage
-       FROM cad_property
-      WHERE county_fips = $1
-        AND tax_year = $2
-        AND property_use_code IS NOT NULL`,
-    [declared.countyFips, declared.taxYear],
-  );
-  for (const row of r.rows) {
-    out.set(row.prop_id, {
-      landUseCode: row.property_use_code,
-      landUseVintage: row.source_vintage,
-    });
-  }
-  return out;
+  return (await fetchCountyLandUseRoll(pool, fips)).byPropId;
 }
 
 // ---------------------------------------------------------------------------
