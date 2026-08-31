@@ -6,7 +6,7 @@ import type { RadiusSearchResult } from "../lib/txgioRadiusSearch";
 
 const { searchMock } = vi.hoisted(() => ({
   searchMock: vi.fn(
-    async (): Promise<RadiusSearchResult> => ({
+    async (_input?: unknown): Promise<RadiusSearchResult> => ({
       hits: [],
       cap: 50,
       received: 0,

@@ -6,7 +6,7 @@ import type { StreetSearchResult } from "../lib/txgioStreetSearch";
 
 const { searchMock } = vi.hoisted(() => ({
   searchMock: vi.fn(
-    async (): Promise<StreetSearchResult> => ({
+    async (_input?: unknown): Promise<StreetSearchResult> => ({
       hits: [],
       cap: 50,
       received: 0,
