@@ -57,12 +57,14 @@ export type RadiusSearchRefuse = {
 export type RadiusSearchResult = RadiusSearchOk | RadiusSearchRefuse;
 
 /** Structural so tests can stub select/from/where without a live drizzle session. */
+export type RadiusWhereResult = Promise<unknown[]> & {
+  limit: (n: number) => Promise<unknown[]>;
+};
+
 export type RadiusSearchDb = {
   select: (fields?: unknown) => {
     from: (table: unknown) => {
-      where: (
-        cond: unknown,
-      ) => Promise<unknown[]> | { limit: (n: number) => Promise<unknown[]> };
+      where: (cond: unknown) => RadiusWhereResult;
     };
   };
 };

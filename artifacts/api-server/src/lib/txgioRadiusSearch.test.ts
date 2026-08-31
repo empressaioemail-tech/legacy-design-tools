@@ -177,10 +177,14 @@ function mockRadiusDb(
     select: () => ({
       from: (table: { propId?: unknown }) => ({
         where: () => {
-          if (table.propId !== undefined) {
-            return { limit: async () => parcels };
-          }
-          return Promise.resolve(counties.map((countyFips) => ({ countyFips })));
+          const countyRows = counties.map((countyFips) => ({ countyFips }));
+          const p = Promise.resolve(
+            table.propId !== undefined ? parcels : countyRows,
+          ) as Promise<unknown[]> & {
+            limit: (n: number) => Promise<unknown[]>;
+          };
+          p.limit = async () => parcels;
+          return p;
         },
       }),
     }),
