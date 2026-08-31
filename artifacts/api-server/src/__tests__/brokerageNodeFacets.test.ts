@@ -2150,6 +2150,120 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
   });
 
+  it("serves classified setback on the wire: road-class refused, dimensional value, placeholder unknown", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-edge-setback-disposition",
+    });
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 15,
+              provenance: "road-class-setback-table",
+              atomCitation: "bastrop_tx",
+            },
+          },
+        },
+      ]),
+    );
+    const refused = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(refused.status).toBe(200);
+    expect(refused.body.boundaryEdgeFact.setback.state).toBe("refused");
+    expect(refused.body.boundaryEdgeFact.setback.basis).toMatch(
+      /retired road-class derivation/,
+    );
+    expect(refused.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "road-class-setback-table",
+    );
+    expect(refused.body.boundaryEdgeFact.setback.feet).toBeUndefined();
+    expect(refused.body.boundaryEdgeFact.edges[0].setback.state).toBe("refused");
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 30,
+              provenance: "bastrop-per-parcel-record-layer-23",
+            },
+          },
+        },
+      ]),
+    );
+    const valued = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(valued.status).toBe(200);
+    expect(valued.body.boundaryEdgeFact.setback.state).toBe("value");
+    expect(valued.body.boundaryEdgeFact.setback.feet).toBe(30);
+    expect(valued.body.boundaryEdgeFact.setback.provenance).toBe(
+      "bastrop-per-parcel-record-layer-23",
+    );
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 0,
+              provenance: "storage-port-proof/phase-1a",
+            },
+          },
+        },
+      ]),
+    );
+    const unknown = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(unknown.status).toBe(200);
+    expect(unknown.body.boundaryEdgeFact.setback.state).toBe("unknown");
+    expect(unknown.body.boundaryEdgeFact.setback.basis).toMatch(
+      /phase-1a storage-port proof/,
+    );
+    expect(unknown.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "storage-port-proof/phase-1a",
+    );
+    expect(JSON.stringify(unknown.body.boundaryEdgeFact.setback)).not.toContain(
+      "absent-verified",
+    );
+  });
+
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
     // Comal has only a Tier-1 row. `tier2: null` now means exactly one thing —
     // no Tier-2 row exists — and is distinct from the refusal above.
