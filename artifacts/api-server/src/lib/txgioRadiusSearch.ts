@@ -15,7 +15,6 @@
  */
 
 import { and, gte, inArray, lte } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db as defaultDb, txCountyBoundary, txgioParcel } from "@workspace/db";
 import {
   cellKeysForBbox,
@@ -57,10 +56,16 @@ export type RadiusSearchRefuse = {
 
 export type RadiusSearchResult = RadiusSearchOk | RadiusSearchRefuse;
 
-export type RadiusSearchDb = Pick<
-  NodePgDatabase<Record<string, unknown>>,
-  "select"
->;
+/** Structural so tests can stub select/from/where without a live drizzle session. */
+export type RadiusSearchDb = {
+  select: (fields?: unknown) => {
+    from: (table: unknown) => {
+      where: (
+        cond: unknown,
+      ) => Promise<unknown[]> | { limit: (n: number) => Promise<unknown[]> };
+    };
+  };
+};
 
 const FT_PER_DEG_LAT = 364000;
 const EARTH_RADIUS_FT = 20_902_231;
