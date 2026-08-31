@@ -208,6 +208,7 @@ describe("D2 stub is a projection of node", () => {
     verifiedAbsence: null,
     sourceTier: "public",
     sourceAdapter: "fema-nfhl-bulk-v1",
+    sourceVintage: null,
   };
   const floodAtomMiss: FloodHazardFactRead = {
     state: "refused",
