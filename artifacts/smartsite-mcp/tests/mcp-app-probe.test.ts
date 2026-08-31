@@ -42,7 +42,7 @@ describe("p559 probe vs the direct_network contract", () => {
 
 describe("p559 probe constants", () => {
   it("pins the p559 URIs", () => {
-    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p561.html");
+    expect(APP_RESOURCE_URI).toBe("ui://smartsite/app-p562.html");
     expect(PROBE_RESOURCE_URI).toBe("ui://smartsite/probe-p559.txt");
   });
 
@@ -70,7 +70,10 @@ describe("p559 probe in the served page", () => {
     expect(html).toContain('"data-net"');
     expect(html).toContain('"data-gl"');
     expect(html).toContain('"data-bridge"');
-    expect(html).toContain(",netText,glText,bridgeText].join");
+    /* M-5 added a fourth channel to the same strip. */
+    expect(html).toContain('var toolsText="tools=unread"');
+    expect(html).toContain('"data-tools"');
+    expect(html).toContain(",netText,glText,bridgeText,toolsText].join");
   });
 
   it("carries each probe URL verbatim", () => {
