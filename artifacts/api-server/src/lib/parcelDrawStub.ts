@@ -30,7 +30,9 @@ export type DrawOverlay = {
   citationsDegraded?: boolean;
 };
 
-export type DrawEdge = {
+export type DrawFrameAnchor = { lat: number; lng: number };
+
+type DrawEdgeBase = {
   id: string;
   role: string;
   seg: [number, number];
@@ -39,9 +41,39 @@ export type DrawEdge = {
   adjacency: string | null;
   roadNode: string | null;
   roadClass?: string;
-  neighbor?: string;
-  state: "present";
+  sourceAdapter: string | null;
 };
+
+/**
+ * X2: edge disposition is a discriminated union, not a check.
+ * `present` with a neighbour id requires `reciprocity: "pass"` — the old
+ * `{ state: "present" }` literal is not assignable. No neighbour id is
+ * `unknown`, not present. A neighbour nobody cross-checked is `unknown`.
+ * A payload that positively contradicts is `refused` with `agentGuidance`.
+ * `neighbor` is always keyed.
+ */
+export type DrawEdge =
+  | (DrawEdgeBase & {
+      state: "present";
+      neighbor: string;
+      reciprocity: "pass";
+    })
+  | (DrawEdgeBase & {
+      state: "unknown";
+      neighbor: string | null;
+      reason: string;
+    })
+  | (DrawEdgeBase & {
+      state: "refused";
+      neighbor: string | null;
+      reason: string;
+      agentGuidance: string;
+    });
+
+export type NeighborCheck =
+  | { result: "reciprocal" }
+  | { result: "contradicted"; agentGuidance: string }
+  | { result: "unchecked" };
 
 export type ParcelDrawStub = {
   node: string;
@@ -56,6 +88,8 @@ export type ParcelDrawStub = {
     convertedFrom: "local-enu-m";
     factor: "us-survey-foot";
     quality: "gis-approximate";
+    /** Absolute centroid. Null when the bake coord index is missing. */
+    anchor: DrawFrameAnchor | null;
   };
   ring?: [number, number][];
   ringOrder?: "ccw";
@@ -80,6 +114,9 @@ export type DrawBoundaryEdgeIn = {
     bearing: string | null;
     distanceFeet: number | null;
   } | null;
+  sourceAdapter: string | null;
+  status?: string | null;
+  neighborCheck?: NeighborCheck;
 };
 
 export type AssembleParcelDrawInput = {
@@ -89,7 +126,13 @@ export type AssembleParcelDrawInput = {
   countyFips: string | null;
   zoning: unknown;
   landUse: unknown;
-  yearBuilt: number | null;
+  yearBuilt: {
+    v: number;
+    source: "cad_property";
+    sourceVintage: string | null;
+  } | null;
+  /** Absolute centroid of the local-ENU frame. Null if unknown. */
+  anchor: DrawFrameAnchor | null;
   boundary:
     | { state: "present"; edges: DrawBoundaryEdgeIn[] }
     | { state: "refused" | "absent"; code?: string };
@@ -308,6 +351,22 @@ function zoningAttrs(zoning: unknown): Record<string, unknown> | null {
   };
 }
 
+function taxYearFromLandUse(rec: Record<string, unknown>): number | null {
+  if (typeof rec.taxYear === "number" && Number.isFinite(rec.taxYear)) {
+    return rec.taxYear;
+  }
+  if (typeof rec.taxYear === "string" && /^\d{4}$/.test(rec.taxYear.trim())) {
+    return Number(rec.taxYear.trim());
+  }
+  if (typeof rec.vintage === "string") {
+    const trimmed = rec.vintage.trim();
+    if (/^\d{4}$/.test(trimmed)) return Number(trimmed);
+    const leading = trimmed.match(/^(\d{4})\b/);
+    return leading ? Number(leading[1]) : null;
+  }
+  return null;
+}
+
 function landUseAttrs(landUse: unknown): Record<string, unknown> | null {
   const rec = asRecord(landUse);
   if (!rec) return null;
@@ -319,13 +378,9 @@ function landUseAttrs(landUse: unknown): Record<string, unknown> | null {
   const desc =
     (typeof rec.landUseDescription === "string" && rec.landUseDescription) ||
     (typeof rec.desc === "string" && rec.desc) ||
+    (typeof rec.description === "string" && rec.description) ||
     null;
-  const taxYear =
-    typeof rec.taxYear === "number"
-      ? rec.taxYear
-      : typeof rec.taxYear === "string" && /^\d{4}$/.test(rec.taxYear)
-        ? Number(rec.taxYear)
-        : null;
+  const taxYear = taxYearFromLandUse(rec);
   const citations = citationPosture(httpCitationUrls(landUse));
   return {
     v: code,
@@ -402,6 +457,28 @@ export function assertDrawStub(draw: ParcelDrawStub): void {
       );
     }
   }
+  if (draw.edges) {
+    for (const edge of draw.edges) {
+      if (edge.state === "present" && !edge.neighbor) {
+        throw new Error(`${edge.id} is present without a neighbour id`);
+      }
+      if (
+        edge.state === "present" &&
+        edge.neighbor !== null &&
+        edge.reciprocity !== "pass"
+      ) {
+        throw new Error(
+          `${edge.id} is present with a neighbour id but no reciprocity pass`,
+        );
+      }
+      if (edge.state === "unknown" && !edge.reason?.trim()) {
+        throw new Error(`${edge.id} is unknown without a reason`);
+      }
+      if (edge.state === "refused" && (!edge.reason?.trim() || !edge.agentGuidance.trim())) {
+        throw new Error(`${edge.id} is refused without reason and agentGuidance`);
+      }
+    }
+  }
   const landUse = asRecord(draw.attrs.landUse);
   if (landUse && presentCitationDishonest(landUse)) {
     throw new Error(
@@ -418,6 +495,84 @@ export function assertDrawStub(draw: ParcelDrawStub): void {
   }
 }
 
+function thisPropIdFromNode(parcelNodeId: string): string | null {
+  const idx = parcelNodeId.indexOf(":");
+  if (idx < 0) return null;
+  const rest = parcelNodeId.slice(idx + 1);
+  const padded = rest.endsWith(".00000000")
+    ? rest.slice(0, -".00000000".length)
+    : rest;
+  return padded || null;
+}
+
+function neighborNodeId(
+  parcelNeighborPropId: string | null,
+  fips: string | null,
+): string | null {
+  if (!parcelNeighborPropId || !fips) return null;
+  return `${fips}:${parcelNeighborPropId}`;
+}
+
+/**
+ * X2 leaf disposition. A neighbour nobody cross-checked is unknown. A
+ * neighbour the payload positively contradicts is refused. Reciprocity
+ * pass is the only path to present-with-id.
+ */
+export function disposeDrawEdgeNeighbor(args: {
+  parcelNodeId: string;
+  parcelNeighborPropId: string | null;
+  fips: string | null;
+  neighborCheck?: NeighborCheck;
+}):
+  | { state: "present"; neighbor: string; reciprocity: "pass" }
+  | { state: "unknown"; neighbor: string | null; reason: string }
+  | {
+      state: "refused";
+      neighbor: string | null;
+      reason: string;
+      agentGuidance: string;
+    } {
+  const neighbor = neighborNodeId(args.parcelNeighborPropId, args.fips);
+  const self = thisPropIdFromNode(args.parcelNodeId);
+  if (args.parcelNeighborPropId && self && args.parcelNeighborPropId === self) {
+    return {
+      state: "refused",
+      neighbor,
+      reason: "neighbour id names this parcel",
+      agentGuidance:
+        "Neighbor id names this parcel. The payload contradicts a shared-boundary claim.",
+    };
+  }
+  const check = args.neighborCheck ?? { result: "unchecked" };
+  if (check.result === "contradicted") {
+    return {
+      state: "refused",
+      neighbor,
+      reason: "neighbour claim contradicted",
+      agentGuidance: check.agentGuidance,
+    };
+  }
+  if (neighbor === null) {
+    return {
+      state: "unknown",
+      neighbor: null,
+      reason: "no neighbour of record",
+    };
+  }
+  if (check.result === "reciprocal") {
+    return { state: "present", neighbor, reciprocity: "pass" };
+  }
+  return {
+    state: "unknown",
+    neighbor,
+    reason: "neighbour not cross-checked",
+  };
+}
+
+export function isRetiredEdgeStatus(status: string | null | undefined): boolean {
+  return (status ?? "").trim() === "retired";
+}
+
 export function assembleParcelDraw(
   input: AssembleParcelDrawInput,
 ): ParcelDrawStub {
@@ -429,15 +584,24 @@ export function assembleParcelDraw(
   if (zoning) attrs.zoning = zoning;
   const landUse = landUseAttrs(input.landUse);
   if (landUse) attrs.landUse = landUse;
-  if (typeof input.yearBuilt === "number" && Number.isFinite(input.yearBuilt)) {
-    attrs.yearBuilt = { v: input.yearBuilt, state: "present" };
+  if (
+    input.yearBuilt &&
+    typeof input.yearBuilt.v === "number" &&
+    Number.isFinite(input.yearBuilt.v)
+  ) {
+    attrs.yearBuilt = {
+      v: input.yearBuilt.v,
+      state: "present",
+      source: input.yearBuilt.source,
+      sourceVintage: input.yearBuilt.sourceVintage,
+    };
   }
 
   overlays.push(floodOverlay(input.flood));
 
   const yearLabel =
-    typeof input.yearBuilt === "number"
-      ? `Structure of record (${input.yearBuilt}), footprint unmeasured`
+    input.yearBuilt && Number.isFinite(input.yearBuilt.v)
+      ? `Structure of record (${input.yearBuilt.v}), footprint unmeasured`
       : "Structure footprint unmeasured";
   overlays.push({
     id: "footprint",
@@ -553,6 +717,7 @@ export function assembleParcelDraw(
       convertedFrom: "local-enu-m",
       factor: "us-survey-foot",
       quality: "gis-approximate",
+      anchor: input.anchor,
     },
     attrs,
     overlays,
@@ -571,9 +736,20 @@ export function assembleParcelDraw(
     return draw;
   }
 
-  const sorted = [...input.boundary.edges].sort(
-    (a, b) => a.edgeIndex - b.edgeIndex,
-  );
+  const sorted = [...input.boundary.edges]
+    .filter((e) => !isRetiredEdgeStatus(e.status))
+    .sort((a, b) => a.edgeIndex - b.edgeIndex);
+  if (sorted.length === 0) {
+    overlays.unshift({
+      id: "boundary",
+      label: "Parcel boundary unmeasured",
+      geom: "none",
+      draw: "hatch-interior",
+      state: "unknown",
+    });
+    assertDrawStub(draw);
+    return draw;
+  }
   const ringMetres: [number, number][] = [];
   const edges: DrawEdge[] = [];
 
@@ -593,11 +769,13 @@ export function assembleParcelDraw(
     }
     if (i === 0) ringMetres.push(pair[0]);
     ringMetres.push(pair[1]);
-    const neighbor =
-      edge.parcelNeighborPropId && fips
-        ? `${fips}:${edge.parcelNeighborPropId}`
-        : undefined;
     const roadClass = edge.facingRoad?.classification ?? undefined;
+    const disposition = disposeDrawEdgeNeighbor({
+      parcelNodeId: input.parcelNodeId,
+      parcelNeighborPropId: edge.parcelNeighborPropId,
+      fips,
+      neighborCheck: edge.neighborCheck,
+    });
     edges.push({
       id: edge.entityId,
       role: edge.role ?? `index-${edge.edgeIndex}`,
@@ -614,9 +792,9 @@ export function assembleParcelDraw(
       bearing: edge.propertyLineTags?.bearing ?? null,
       adjacency: edge.adjacencyKind,
       roadNode: edge.facingRoad?.roadNodeId ?? null,
+      sourceAdapter: edge.sourceAdapter,
       ...(roadClass ? { roadClass } : {}),
-      ...(neighbor ? { neighbor } : {}),
-      state: "present",
+      ...disposition,
     });
   }
 

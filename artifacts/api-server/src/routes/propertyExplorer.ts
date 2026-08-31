@@ -56,6 +56,7 @@ import { loadWellFactAtom } from "../lib/wellFactRead";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
+import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import { buildR1Brief } from "../lib/r1BriefCompose";
 import {
   isPunctuationOnlySitus,
@@ -167,6 +168,7 @@ async function assembleNodeBriefBody(
     facets: snapshot.facets,
     bakedAt,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    queryPoint: snapshot.queryPoint ?? null,
     boundary: boundaryFact,
     flood: floodHazardFact,
     pipeline: pipelineFact,
@@ -220,37 +222,30 @@ async function attachStubsForResponse(screen: Screen): Promise<Screen> {
   });
 }
 
-function manifestLayers(facets: unknown, tier2: unknown): {
+function manifestLayers(
+  envelopeBriefRefusal: EnvelopeBriefRefusal,
+  tier2: unknown,
+): {
   layers: Array<Record<string, unknown>>;
   degraded: boolean;
   reason?: string;
 } {
-  const envelope = asRecord(facets)?.envelope;
-  const envelopeGeojson = asRecord(envelope)?.geojson;
-  // No flood layer is emitted from a baked snapshot any more: the Tier-2 flood
-  // facet is retired at the read path (SS-W16). The disposition is read only to
-  // make the degrade reason name the retirement instead of implying the data
-  // was never there.
+  // The loader nulls facets.envelope before this runs. Reading geojson off
+  // the stripped snapshot is empty by construction and can never report a
+  // missing layer. Refuse with the pre-strip envelope refusal.
   const floodRefusal = asRecord(asRecord(tier2)?.floodDisposition);
-  const layers: Array<Record<string, unknown>> = [];
-  if (envelopeGeojson) {
-    layers.push({
-      id: "buildable-envelope",
-      kind: "geojson",
-      feature: envelopeGeojson,
-      source: "baked-snapshot",
-    });
-  }
-  return layers.length > 0
-    ? { layers, degraded: false }
-    : {
-        layers,
-        degraded: true,
-        reason: floodRefusal
-          ? "Baked snapshot has no envelope geometry, and its Tier-2 flood facet is refused: " +
-            String(floodRefusal.reason ?? floodRefusal.code)
-          : "Baked snapshot has no envelope geometry, and no Tier-2 row exists for this node.",
-      };
+  const floodNote = floodRefusal
+    ? " Tier-2 flood facet is refused: " +
+      String(floodRefusal.reason ?? floodRefusal.code)
+    : " No Tier-2 row exists for this node.";
+  return {
+    layers: [],
+    degraded: true,
+    reason:
+      envelopeBriefRefusal.reason +
+      " Envelope geometry is not served on this path." +
+      floodNote,
+  };
 }
 
 function ownerScope(req: Request): { tenantId: string; ownerUserId: string } | null {
@@ -1103,7 +1098,10 @@ router.get(
       });
       return;
     }
-    const manifest = manifestLayers(snapshot.facets, snapshot.tier2);
+    const manifest = manifestLayers(
+      snapshot.envelopeBriefRefusal,
+      snapshot.tier2,
+    );
     res.json({
       runId,
       contract: "layer-manifest-v1",

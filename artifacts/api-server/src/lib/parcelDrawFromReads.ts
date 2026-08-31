@@ -1,6 +1,9 @@
 /**
  * Map live fact reads + bake facets onto assembleParcelDraw.
  * Serializer refuse → omit draw (fail closed). Never invent a ring.
+ *
+ * X2 + item 4 ship together: edge disposition is chosen by the union;
+ * absent overlay reads carry sourceVintage so absent-verified is reachable.
  */
 
 import type { BoundaryEdgeFactRead } from "./boundaryEdgeFactRead";
@@ -14,6 +17,7 @@ import {
   assembleParcelDraw,
   httpCitationUrls,
   type AssembleParcelDrawInput,
+  type DrawFrameAnchor,
   type ParcelDrawStub,
 } from "./parcelDrawStub";
 import { firstPresentSitusLabel } from "./situsCompose";
@@ -35,20 +39,16 @@ function situsLabel(parcelNodeId: string, facets: unknown): string {
   ]).label;
 }
 
-function yearBuiltFromBake(facets: unknown): number | null {
-  const root = asRecord(facets);
-  const base = asRecord(root?.baseFacts);
-  const raw = root?.yearBuilt ?? base?.yearBuilt;
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  const rec = asRecord(raw);
-  if (typeof rec?.v === "number" && Number.isFinite(rec.v)) return rec.v;
-  return null;
-}
-
-function yearBuiltFromStructural(read: StructuralFactRead): number | null {
+function yearBuiltFromStructural(
+  read: StructuralFactRead,
+): AssembleParcelDrawInput["yearBuilt"] {
   if ("state" in read && read.state === "present") {
     return typeof read.yearBuilt === "number" && Number.isFinite(read.yearBuilt)
-      ? read.yearBuilt
+      ? {
+          v: read.yearBuilt,
+          source: "cad_property",
+          sourceVintage: read.sourceVintage,
+        }
       : null;
   }
   return null;
@@ -59,6 +59,12 @@ function envelopeReason(refusal: EnvelopeBriefRefusal | null | undefined): strin
   if (refusal.declineReason?.trim()) return refusal.declineReason.trim();
   if (refusal.code === "declined-in-bake") return "atom_path_pending";
   return refusal.code;
+}
+
+function vintageFromRead(read: {
+  sourceVintage?: string | null;
+}): string | null {
+  return typeof read.sourceVintage === "string" ? read.sourceVintage : null;
 }
 
 function boundaryInput(
@@ -86,6 +92,8 @@ function boundaryInput(
               distanceFeet: edge.propertyLineTags.distanceFeet,
             }
           : null,
+        sourceAdapter: edge.sourceAdapter,
+        status: edge.status,
       })),
     };
   }
@@ -105,7 +113,10 @@ function floodInput(read: FloodHazardFactRead): AssembleParcelDrawInput["flood"]
       citations: httpCitationUrls(read),
     };
   }
-  return { state: read.state === "absent" ? "absent" : "refused" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
+  return { state: "refused" };
 }
 
 function pipelineInput(
@@ -119,12 +130,17 @@ function pipelineInput(
       sourceVintage: read.sourceVintage,
     };
   }
-  return { state: read.state === "absent" ? "absent" : "refused" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
+  return { state: "refused" };
 }
 
 function wellInput(read: WellFactRead): AssembleParcelDrawInput["well"] {
   if (read.state === "present") return { state: "present" };
-  if (read.state === "absent") return { state: "absent" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
   return { state: "refused", code: read.code };
 }
 
@@ -138,8 +154,37 @@ function specialDistrictInput(
       districtId: read.districtId,
     };
   }
-  if (read.state === "absent") return { state: "absent" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
   return { state: "refused", code: read.code };
+}
+
+function anchorFromQueryPoint(queryPoint: unknown): DrawFrameAnchor | null {
+  const rec = asRecord(queryPoint);
+  if (!rec) return null;
+  const lat =
+    typeof rec.latitude === "number"
+      ? rec.latitude
+      : typeof rec.lat === "number"
+        ? rec.lat
+        : null;
+  const lng =
+    typeof rec.longitude === "number"
+      ? rec.longitude
+      : typeof rec.lng === "number"
+        ? rec.lng
+        : null;
+  if (
+    lat == null ||
+    lng == null ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    (lat === 0 && lng === 0)
+  ) {
+    return null;
+  }
+  return { lat, lng };
 }
 
 export function tryAssembleParcelDrawFromReads(args: {
@@ -147,6 +192,7 @@ export function tryAssembleParcelDrawFromReads(args: {
   facets: unknown;
   bakedAt: string | null;
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
+  queryPoint?: { latitude: number; longitude: number } | null;
   boundary: BoundaryEdgeFactRead;
   flood: FloodHazardFactRead;
   pipeline: PipelineFactRead;
@@ -164,8 +210,8 @@ export function tryAssembleParcelDrawFromReads(args: {
       countyFips: args.parcelNodeId.split(":")[0] ?? null,
       zoning: root.zoning ?? null,
       landUse: baseFacts.landUse ?? null,
-      yearBuilt:
-        yearBuiltFromStructural(args.structural) ?? yearBuiltFromBake(args.facets),
+      yearBuilt: yearBuiltFromStructural(args.structural),
+      anchor: anchorFromQueryPoint(args.queryPoint),
       boundary: boundaryInput(args.boundary),
       flood: floodInput(args.flood),
       envelopeRefusalReason: envelopeReason(args.envelopeBriefRefusal),
