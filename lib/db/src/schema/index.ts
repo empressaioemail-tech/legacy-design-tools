@@ -87,6 +87,7 @@ export * from "./peUserIdentities";
 export * from "./peUserEntitlements";
 export * from "./peTeamMembers";
 export * from "./peTeamInvitations";
+export * from "./peAiConnections";
 export * from "./peSavedProperties";
 export * from "./peScreens";
 export * from "./pePropertyUnlocks";

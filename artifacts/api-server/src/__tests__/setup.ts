@@ -42,6 +42,8 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "saved_workspace_spaces",
   "pe_user_identities",
   "pe_user_entitlements",
+  // P-87 Claude Sync -- written by the MCP server, read by the PE card.
+  "pe_ai_connections",
   "pe_team_members",
   "pe_team_invitations",
   "pe_saved_properties",

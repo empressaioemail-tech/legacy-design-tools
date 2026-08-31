@@ -219,6 +219,10 @@ describe("lib/db schema integration", () => {
         // R1 paywall (LOCK 2026-07-29) — signed-in-free chat counter +
         // per-property unlock record. Listed alphabetically to match
         // `ORDER BY tablename`.
+        // P-87 Claude Sync — MCP clients that have authenticated against
+        // this account. Sorts first in the `pe_` block (`_a` < `_c`) per
+        // `ORDER BY tablename`.
+        "pe_ai_connections",
         "pe_chat_message_counts",
         "pe_property_unlocks",
         "pe_saved_properties",
