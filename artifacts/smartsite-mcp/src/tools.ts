@@ -16,8 +16,11 @@ import {
   snapshotFromAuth,
 } from "./entitlement.js";
 import {
+  ANCHOR_TIMEOUT_MS,
+  anchorFromFacetsBody,
   attachAnchorToResponseText,
   attachBatchAnchorsToResponseText,
+  parcelFacetsPath,
   readParcelAnchor,
   readParcelAnchorsForBatch,
   skippedAnchorForStub,
@@ -29,6 +32,7 @@ import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
 import {
   buildRunReportEnvelope,
+  declarePlaceSearchRefusal,
   declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
   normalizeGetSmartSiteResponseText,
@@ -60,6 +64,29 @@ function batchCapFor(depth: ImplementedDepth): number {
 }
 const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
 const SCREEN_ROW_SOURCES = ["walk", "saved", "pasted"] as const;
+
+/**
+ * P-91 v3 Q1. Mirrors PARCEL_NODE_ID_RE in
+ * artifacts/api-server/src/routes/brokeragePlaceSitusSearch.ts (read
+ * 2026-08-31): county FIPS, colon, county-assigned parcel id. Used to pick
+ * find_parcel's `near` centre-point path — a parcel node id reads the
+ * anchor (node facets) route the same way M-1 does; anything else geocodes
+ * as free text via place/resolve.
+ */
+const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Mirror RADIUS_SEARCH_CAP / STREET_SEARCH_CAP in
+ * artifacts/api-server/src/lib/txgioRadiusSearch.ts /
+ * txgioStreetSearch.ts (both 50, read 2026-08-31). Bounds the LOCAL `cap`
+ * argument at the MCP schema so a caller mistake on cap fails at the tool
+ * boundary instead of a round trip. Deliberately NOT applied to
+ * `near.radiusFt`: that bound is exactly what radius_exceeds_max exists to
+ * refuse, and pre-validating it here would make that refusal code
+ * unreachable through this tool.
+ */
+const FIND_PARCEL_NEAR_CAP_MAX = 50;
+const FIND_PARCEL_STREET_CAP_MAX = 50;
 
 const ASK_THE_MAP_REFUSAL = "ask_the_map accepts parcelNodeId and message.";
 const ASK_THE_MAP_STRICT = z
@@ -178,6 +205,30 @@ function upstreamErrorResult(httpStatus: number, bodyText: string): ToolResult {
   };
 }
 
+/**
+ * A refusal this server itself makes (as opposed to one it relays from an
+ * upstream serve_refused body — see declarePlaceSearchRefusal in
+ * tool-honesty.ts for that case, which carries its own shape). `reason` is
+ * a machine token, matching this file's own convention (parcel_batch_cap,
+ * screen_id_not_accepted); `extra` carries any additional declared fields
+ * (e.g. the parcelNodeId and anchorRead a near centre-point miss names).
+ */
+function declaredRefusalResult(
+  reason: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ status: "refused", reason, message, ...extra }),
+      },
+    ],
+    isError: true,
+  };
+}
+
 function isDeclaredErrorText(text: string): boolean {
   try {
     const parsed: unknown = JSON.parse(text);
@@ -230,10 +281,130 @@ async function withCortex(
   return fn(config);
 }
 
+type CenterPointOutcome =
+  | { ok: true; lat: number; lng: number }
+  | { ok: false; result: ToolResult };
+
+/**
+ * P-91 v3 Q1. find_parcel's `near` needs one absolute point to search a
+ * radius around. Three ways to get one exist on cortex today: situs-search
+ * address-point hits carry latitude/longitude; POST place/resolve geocodes
+ * any address; the node facets route serves cityLimitsFact.queryPoint per
+ * parcel (parcel-anchor.ts's M-1 anchor).
+ *
+ * situs-search is not used here. Its parcel-situs hits — the common case
+ * when `query` already names a known parcel — carry no coordinate at all
+ * (SitusSearchHit in txgioAddressResolve.ts has no lat/lng field; only the
+ * rarer address-point hits do), so routing through it would still need a
+ * second lookup for the common case and buys nothing over calling the
+ * right one of the other two directly.
+ *
+ * A parcel node id reads the same facets route M-1's anchor already reads,
+ * reusing anchorFromFacetsBody's own honesty rules verbatim: no 0,0
+ * sentinel, no centroid guess, a miss is declared rather than defaulted. A
+ * free-text query geocodes through place/resolve.
+ */
+async function resolveNearCenterPoint(
+  config: CortexClientConfig,
+  query: string,
+  userId: string | undefined,
+): Promise<CenterPointOutcome> {
+  if (PARCEL_NODE_ID_RE.test(query)) {
+    const res = await cortexFetch(config, parcelFacetsPath(query), {
+      userId,
+      timeoutMs: ANCHOR_TIMEOUT_MS,
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      return { ok: false, result: upstreamErrorResult(res.status, body) };
+    }
+    const outcome = anchorFromFacetsBody(body);
+    if (!outcome.anchor) {
+      return {
+        ok: false,
+        result: declaredRefusalResult(
+          "near_center_absent",
+          "No centre point on file for that parcel to search a radius around.",
+          { parcelNodeId: query, anchorRead: outcome.anchorRead },
+        ),
+      };
+    }
+    return { ok: true, lat: outcome.anchor.lat, lng: outcome.anchor.lon };
+  }
+
+  const res = await cortexFetch(config, "/api/brokerage/v1/place/resolve", {
+    method: "POST",
+    userId,
+    body: JSON.stringify({ address: query }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  const geocode =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).geocode
+      : undefined;
+  const point =
+    geocode && typeof geocode === "object" && !Array.isArray(geocode)
+      ? (geocode as Record<string, unknown>)
+      : undefined;
+  const lat = point?.lat;
+  const lng = point?.lng;
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
+    // place/resolve answered 200 with a body this tool cannot read as a
+    // coordinate. Declared as an upstream problem (H1), not fabricated as
+    // a near-specific refusal: resolve itself made no refusal claim here.
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  return { ok: true, lat, lng };
+}
+
 function inputSchemaFor(name: SmartsiteToolName) {
   switch (name) {
     case "find_parcel":
-      return z.object({ query: z.string().min(1) });
+      // P-91 v3 Q1. query, near, and street are three alternate modes on
+      // one tool; exactly one is required, enforced in the handler (not
+      // here via .refine()) so a caller gets a declared refusal naming the
+      // problem instead of a raw zod validation error. radiusFt carries no
+      // local bound: that ceiling is exactly what radius_exceeds_max
+      // exists to refuse, and pre-validating it here would make that
+      // refusal code unreachable through this tool.
+      return z
+        .object({
+          query: z.string().min(1).optional(),
+          near: z
+            .object({
+              query: z.string().min(1),
+              radiusFt: z.number(),
+              cap: z.number().int().min(1).max(FIND_PARCEL_NEAR_CAP_MAX).optional(),
+            })
+            .strict()
+            .optional(),
+          street: z
+            .object({
+              query: z.string().min(1),
+              cap: z.number().int().min(1).max(FIND_PARCEL_STREET_CAP_MAX).optional(),
+              countyFips: z
+                .string()
+                .regex(/^\d{5}$/)
+                .optional(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict();
     case "list_my_properties":
       return z.object({}).passthrough();
     case "create_screen":
@@ -363,7 +534,115 @@ export function registerTools(server: McpServer): void {
 
         switch (tool.name) {
           case "find_parcel": {
-            const { query } = args as { query: string };
+            const { query, near, street } = args as {
+              query?: string;
+              near?: { query: string; radiusFt: number; cap?: number };
+              street?: { query: string; cap?: number; countyFips?: string };
+            };
+            const modesGiven = [query, near, street].filter(
+              (v) => v !== undefined,
+            ).length;
+            if (modesGiven === 0) {
+              return declaredRefusalResult(
+                "find_parcel_mode_missing",
+                "Provide one of query, near, or street.",
+              );
+            }
+            if (modesGiven > 1) {
+              return declaredRefusalResult(
+                "find_parcel_mode_ambiguous",
+                "Provide exactly one of query, near, or street, not more than one.",
+              );
+            }
+
+            if (near !== undefined) {
+              return withCortex(async (config) => {
+                const center = await resolveNearCenterPoint(
+                  config,
+                  near.query,
+                  auth.userId,
+                );
+                if (!center.ok) return center.result;
+                const qs = new URLSearchParams({
+                  lat: String(center.lat),
+                  lng: String(center.lng),
+                  radiusFt: String(near.radiusFt),
+                });
+                if (near.cap !== undefined) qs.set("cap", String(near.cap));
+                const res = await cortexFetch(
+                  config,
+                  `/api/brokerage/v1/place/radius-search?${qs.toString()}`,
+                  { userId: auth.userId },
+                );
+                const body = await res.text();
+                if (!res.ok) {
+                  if (res.status === 422) {
+                    const refusal = declarePlaceSearchRefusal(body);
+                    if (refusal) {
+                      return {
+                        content: [
+                          { type: "text" as const, text: JSON.stringify(refusal) },
+                        ],
+                        isError: true,
+                      };
+                    }
+                  }
+                  return upstreamErrorResult(res.status, body);
+                }
+                // 200: cap, received, truncated, radiusFt, hits pass through
+                // verbatim. Truncation is a field cortex already puts on
+                // the wire; this tool must not strip it.
+                return {
+                  content: [{ type: "text" as const, text: body }],
+                  isError: false,
+                };
+              });
+            }
+
+            if (street !== undefined) {
+              return withCortex(async (config) => {
+                const qs = new URLSearchParams({ q: street.query });
+                if (street.cap !== undefined) qs.set("cap", String(street.cap));
+                if (street.countyFips !== undefined) {
+                  qs.set("countyFips", street.countyFips);
+                }
+                const res = await cortexFetch(
+                  config,
+                  `/api/brokerage/v1/place/street-search?${qs.toString()}`,
+                  { userId: auth.userId },
+                );
+                const body = await res.text();
+                if (!res.ok) {
+                  if (res.status === 422) {
+                    const refusal = declarePlaceSearchRefusal(body);
+                    if (refusal) {
+                      return {
+                        content: [
+                          { type: "text" as const, text: JSON.stringify(refusal) },
+                        ],
+                        isError: true,
+                      };
+                    }
+                  }
+                  return upstreamErrorResult(res.status, body);
+                }
+                // 200: cap, received, truncated, hits pass through verbatim.
+                return {
+                  content: [{ type: "text" as const, text: body }],
+                  isError: false,
+                };
+              });
+            }
+
+            if (typeof query !== "string") {
+              // Unreachable given the modesGiven checks above (near and
+              // street are both undefined on this path), kept so `query`
+              // is narrowed to `string` below without a non-null assertion.
+              return declaredRefusalResult(
+                "find_parcel_mode_missing",
+                "Provide one of query, near, or street.",
+              );
+            }
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,

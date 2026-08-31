@@ -1361,6 +1361,324 @@ describe("find_parcel hits carry parcel records only (P-91 QA 2026-08-30 D1)", (
 });
 
 /**
+ * P-91 v3 Q1. find_parcel gains `near` and `street`, both consuming the
+ * cortex radius-search / street-search routes. The load-bearing distinction
+ * this whole card turns on: a 422 serve_refused is a DECLARED REFUSAL
+ * (status "refused", reason the code, reasonDisplayText the human word),
+ * never folded into the generic H1 upstream-error envelope; a 400 is a
+ * caller bug and does fold into it; and cap/received/truncated (radiusFt
+ * too, for near) reach the caller unmodified on a 200.
+ */
+describe("find_parcel near/street (P-91 v3 Q1)", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+    mockLoadCortexConfig.mockReturnValue(CORTEX_TEST_CONFIG);
+  });
+
+  function callResponses(
+    ...bodies: Array<{ status: number; body: unknown }>
+  ): void {
+    for (const { status, body } of bodies) {
+      mockCortexFetch.mockResolvedValueOnce(
+        new Response(typeof body === "string" ? body : JSON.stringify(body), {
+          status,
+        }),
+      );
+    }
+  }
+
+  async function callFindParcel(args: Record<string, unknown>) {
+    let out: { isError?: boolean; text: string } | null = null;
+    await withTestClient(async (client) => {
+      const result = await client.callTool({ name: "find_parcel", arguments: args });
+      out = {
+        isError: result.isError as boolean | undefined,
+        text: (result.content?.[0] as { text: string }).text,
+      };
+    });
+    return out!;
+  }
+
+  const RADIUS_HITS_BODY = {
+    cap: 10,
+    received: 2,
+    truncated: false,
+    radiusFt: 1000,
+    hits: [
+      { parcelNodeId: "48021:1", situsAddress: "1 PINE ST", countyFips: "48021", distanceFt: 12 },
+      { parcelNodeId: "48021:2", situsAddress: "2 PINE ST", countyFips: "48021", distanceFt: 40 },
+    ],
+  };
+
+  it("near with a free-text address: geocodes via place/resolve, then radius-searches, passing cap/received/truncated/radiusFt/hits through verbatim", async () => {
+    callResponses(
+      { status: 200, body: { placeKey: "coord:30.1:-97.3", geocode: { lat: 30.1, lng: -97.3, city: "Bastrop", state: "TX", confidence: "high" } } },
+      { status: 200, body: RADIUS_HITS_BODY },
+    );
+    const res = await callFindParcel({ near: { query: "123 Main St, Bastrop TX", radiusFt: 1000, cap: 10 } });
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.text)).toEqual(RADIUS_HITS_BODY);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(2);
+    const [firstCall, secondCall] = mockCortexFetch.mock.calls as Array<
+      [unknown, string, RequestInit & { userId?: string }]
+    >;
+    expect(firstCall[1]).toBe("/api/brokerage/v1/place/resolve");
+    expect(firstCall[2]?.method).toBe("POST");
+    expect(JSON.parse(String(firstCall[2]?.body))).toEqual({ address: "123 Main St, Bastrop TX" });
+    expect(secondCall[1]).toContain("/api/brokerage/v1/place/radius-search?");
+    const qs = new URLSearchParams(secondCall[1].split("?")[1]);
+    expect(qs.get("lat")).toBe("30.1");
+    expect(qs.get("lng")).toBe("-97.3");
+    expect(qs.get("radiusFt")).toBe("1000");
+    expect(qs.get("cap")).toBe("10");
+  });
+
+  it("near with a parcel node id: reads the same facets route M-1's anchor reads, never place/resolve", async () => {
+    callResponses(
+      { status: 200, body: { cityLimitsFact: { queryPoint: { longitude: -97.35, latitude: 30.15 } } } },
+      { status: 200, body: { ...RADIUS_HITS_BODY, received: 1, hits: [RADIUS_HITS_BODY.hits[0]] } },
+    );
+    const res = await callFindParcel({ near: { query: "48021:34137", radiusFt: 500 } });
+    expect(res.isError).toBe(false);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(2);
+    const [firstCall, secondCall] = mockCortexFetch.mock.calls as Array<[unknown, string]>;
+    expect(firstCall[1]).toBe("/api/brokerage/v1/place/node/48021%3A34137/facets");
+    const qs = new URLSearchParams(secondCall[1].split("?")[1]);
+    expect(qs.get("lat")).toBe("30.15");
+    expect(qs.get("lng")).toBe("-97.35");
+  });
+
+  it("near: an upstream failure on the centre-point read (facets 502) is the ordinary H1 declared error, radius-search never called", async () => {
+    callResponses({ status: 502, body: "<html>bad gateway</html>" });
+    const res = await callFindParcel({ near: { query: "48021:34137", radiusFt: 500 } });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.text)).toEqual({
+      status: "error",
+      reason: "upstream_non_json",
+      upstreamStatus: 502,
+      brief: "<html>bad gateway</html>",
+    });
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("near: a parcel with no centre point on file (facets 200, no cityLimitsFact) is a declared refusal, not an error, radius-search never called", async () => {
+    callResponses({ status: 200, body: { someOtherField: true } });
+    const res = await callFindParcel({ near: { query: "48021:34137", radiusFt: 500 } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expect(parsed).toMatchObject({
+      status: "refused",
+      reason: "near_center_absent",
+      parcelNodeId: "48021:34137",
+    });
+    expect(parsed.anchorRead).toMatchObject({ status: "absent", reason: "city_limits_fact_absent" });
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("near: place/resolve's own geocode_miss 422 is the ordinary H1 declared error (status error), NOT a place-search refusal — that shape is reserved for radius-search/street-search's five codes", async () => {
+    callResponses({
+      status: 422,
+      body: { errorClass: "geocode_miss", error: "geocode_miss", message: "Could not geocode the provided address" },
+    });
+    const res = await callFindParcel({ near: { query: "not a real address at all", radiusFt: 500 } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.status).toBe("error");
+    expect(parsed).not.toHaveProperty("reasonDisplayText");
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("near: radius-search's 422 radius_unbounded is a DECLARED REFUSAL (status refused, reasonDisplayText present), never folded into the generic upstream-error envelope", async () => {
+    callResponses(
+      { status: 200, body: { geocode: { lat: 30.1, lng: -97.3 } } },
+      {
+        status: 422,
+        body: {
+          error: "radius_unbounded",
+          errorClass: "serve_refused",
+          message: "Candidate set exceeded 2000. Refusing rather than returning a silently short neighbourhood.",
+        },
+      },
+    );
+    const res = await callFindParcel({ near: { query: "123 Main St", radiusFt: 5000 } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.status).toBe("refused");
+    expect(parsed.reason).toBe("radius_unbounded");
+    expect(parsed.message).toContain("Candidate set exceeded 2000");
+    expect(typeof parsed.reasonDisplayText).toBe("string");
+    expect(parsed.reasonDisplayText.length).toBeGreaterThan(0);
+    // Never the upstream-error shape.
+    expect(parsed).not.toHaveProperty("upstreamStatus");
+  });
+
+  it("near: radius-search's 400 (a caller bug) is the ordinary H1 declared error", async () => {
+    callResponses(
+      { status: 200, body: { geocode: { lat: 30.1, lng: -97.3 } } },
+      {
+        status: 400,
+        body: { error: "invalid_request", errorClass: "validation_error", message: "radiusFt max 5280" },
+      },
+    );
+    const res = await callFindParcel({ near: { query: "123 Main St", radiusFt: 999999 } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("invalid_request");
+    expect(parsed.upstreamStatus).toBe(400);
+  });
+
+  it("street: success passes cap/received/truncated/hits through verbatim, q/cap/countyFips reach the query string", async () => {
+    const streetBody = { cap: 25, received: 3, truncated: true, hits: [{ parcelNodeId: "48021:9", situsAddress: "9 PINE ST", countyFips: "48021" }] };
+    callResponses({ status: 200, body: streetBody });
+    const res = await callFindParcel({ street: { query: "Pine St", cap: 25, countyFips: "48021" } });
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.text)).toEqual(streetBody);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    const [call] = mockCortexFetch.mock.calls as Array<[unknown, string]>;
+    const qs = new URLSearchParams(call[1].split("?")[1]);
+    expect(qs.get("q")).toBe("Pine St");
+    expect(qs.get("cap")).toBe("25");
+    expect(qs.get("countyFips")).toBe("48021");
+  });
+
+  it("street: bare_street_unbounded is a DECLARED REFUSAL, never an error", async () => {
+    callResponses({
+      status: 422,
+      body: {
+        error: "bare_street_unbounded",
+        errorClass: "serve_refused",
+        message: "Bare street search requires a city, ZIP, or countyFips. Refusing an unbounded contains.",
+      },
+    });
+    const res = await callFindParcel({ street: { query: "Pine St" } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.status).toBe("refused");
+    expect(parsed.reason).toBe("bare_street_unbounded");
+    expect(typeof parsed.reasonDisplayText).toBe("string");
+  });
+
+  it("street: bare_street_not_a_street is a DECLARED REFUSAL, never an error", async () => {
+    callResponses({
+      status: 422,
+      body: {
+        error: "bare_street_not_a_street",
+        errorClass: "serve_refused",
+        message: "q is not a bare street. A house-number-prefixed query belongs on situs-search.",
+      },
+    });
+    const res = await callFindParcel({ street: { query: "908 Pine St", countyFips: "48021" } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    // `reason` alone is not meaning-shaped here: declareUpstreamNonOk's
+    // fold-through would ALSO set reason to body.error when body.reason is
+    // absent (see declareUpstreamNonOk's `nonEmptyString(rest.error)`
+    // branch), so a reason-only check cannot tell the two paths apart —
+    // caught by literally running this exact mutation. `status` and
+    // `reasonDisplayText` are what only the correct path produces.
+    expect(parsed.status).toBe("refused");
+    expect(parsed.reason).toBe("bare_street_not_a_street");
+    expect(typeof parsed.reasonDisplayText).toBe("string");
+    expect(parsed.reasonDisplayText.length).toBeGreaterThan(0);
+  });
+
+  it("street: a 400 is the ordinary H1 declared error", async () => {
+    callResponses({
+      status: 400,
+      body: { error: "invalid_request", errorClass: "validation_error", message: "countyFips must be 5 digits" },
+    });
+    const res = await callFindParcel({ street: { query: "Pine St", countyFips: "48021" } });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.status).toBe("error");
+    expect(parsed.upstreamStatus).toBe(400);
+  });
+
+  it("mode missing: no query, near, or street is a declared refusal, zero cortex calls", async () => {
+    const res = await callFindParcel({});
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.text)).toEqual({
+      status: "refused",
+      reason: "find_parcel_mode_missing",
+      message: "Provide one of query, near, or street.",
+    });
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("mode ambiguous: more than one of query/near/street is a declared refusal, zero cortex calls", async () => {
+    const combos: Array<Record<string, unknown>> = [
+      { query: "908 Pine", near: { query: "908 Pine", radiusFt: 500 } },
+      { query: "908 Pine", street: { query: "Pine St" } },
+      { near: { query: "908 Pine", radiusFt: 500 }, street: { query: "Pine St" } },
+    ];
+    for (const args of combos) {
+      const res = await callFindParcel(args);
+      expect(res.isError, JSON.stringify(args)).toBe(true);
+      expect(JSON.parse(res.text)).toEqual({
+        status: "refused",
+        reason: "find_parcel_mode_ambiguous",
+        message: "Provide exactly one of query, near, or street, not more than one.",
+      });
+    }
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("near/street reject an unrecognised key at the schema, before any cortex call (strict object)", async () => {
+    const res = await callFindParcel({ near: { query: "908 Pine", radiusFt: 500, bogus: true } });
+    expect(res.isError).toBe(true);
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("near.cap and street.cap above the local max (50) are rejected at the schema, before any cortex call", async () => {
+    const overCap = await callFindParcel({ near: { query: "908 Pine", radiusFt: 500, cap: 51 } });
+    expect(overCap.isError).toBe(true);
+    const overCapStreet = await callFindParcel({ street: { query: "Pine St", cap: 51 } });
+    expect(overCapStreet.isError).toBe(true);
+    expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+
+  it("near.radiusFt carries NO local bound: an absurdly large value still reaches cortex rather than being schema-rejected, so radius_exceeds_max stays reachable through this tool", async () => {
+    callResponses(
+      { status: 200, body: { geocode: { lat: 30.1, lng: -97.3 } } },
+      {
+        status: 422,
+        body: {
+          error: "radius_exceeds_max",
+          errorClass: "serve_refused",
+          message: "radiusFt 999999999 exceeds the stated max",
+        },
+      },
+    );
+    const res = await callFindParcel({ near: { query: "123 Main St", radiusFt: 999999999 } });
+    expect(mockCortexFetch).toHaveBeenCalledTimes(2);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.status).toBe("refused");
+    expect(parsed.reason).toBe("radius_exceeds_max");
+  });
+
+  it("plain query is unaffected: still hits situs-search and still splits address-point hits (regression)", async () => {
+    callResponses({
+      status: 200,
+      body: {
+        hits: [
+          { parcelNodeId: "48021:8720522", situsAddress: "111 RAINMAKER CV", countyFips: "48021", source: "parcel-situs" },
+          { parcelNodeId: null, label: "9999 Nowhere Ln", countyFips: "48021", latitude: 30.2, longitude: -97.4, source: "address-point" },
+        ],
+      },
+    });
+    const res = await callFindParcel({ query: "908 Pine" });
+    expect(res.isError).toBe(false);
+    const parsed = JSON.parse(res.text);
+    expect(parsed.hits).toHaveLength(1);
+    expect(parsed.hits[0].parcelNodeId).toBe("48021:8720522");
+    const [call] = mockCortexFetch.mock.calls as Array<[unknown, string]>;
+    expect(call[1]).toContain("/api/brokerage/v1/place/situs-search?q=");
+  });
+});
+
+/**
  * H2 (measured 2026-08-30): a node body averages 4,711 chars (largest 5,549);
  * a 50-id node batch is about 235,000 chars, past the roughly 150,000 at which
  * the host writes the result to a file and hands the panel a pointer. Node
@@ -1614,6 +1932,12 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
   /** Every cortex-backed tool with legal arguments. */
   const CORTEX_CALLS: Array<[string, Record<string, unknown>]> = [
     ["find_parcel", { query: "908 Pine" }],
+    // P-91 v3 Q1: both new find_parcel modes fail on their FIRST cortex
+    // call under a uniform non-OK mock (near's centre-point read for a
+    // parcel-node-id query; street's single street-search call), so both
+    // conform to the default expectedCortexCalls of 1 below.
+    ["find_parcel", { near: { query: "48021:34137", radiusFt: 500 } }],
+    ["find_parcel", { street: { query: "Pine St", countyFips: "48021" } }],
     ["get_smart_site", { parcelNodeId: "48021:34137" }],
     ["get_smart_site", { parcelNodeId: ["48021:34137", "48021:34169"], depth: "stub" }],
     ["list_my_properties", {}],

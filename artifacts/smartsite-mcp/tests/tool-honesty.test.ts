@@ -4,16 +4,20 @@ import {
   ASK_THE_MAP_INTERNAL_FIELD_NAMES,
   askTheMapArgsLeakInternalFields,
   buildRunReportEnvelope,
+  declarePlaceSearchRefusal,
   declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
   normalizeGetSmartSiteResponseText,
   normalizeR1BodyForExternal,
+  placeSearchRefusalDisplayText,
   sanitizeAskTheMapErrorBody,
   STUB_RAIL_FOR_NODE_DISPOSITION,
   stripSavedPropertiesForExternal,
   stubRailAgreesWithNodeDisposition,
   type ExternalBriefSectionDisposition,
+  type PlaceSearchRefusalCode,
 } from "../src/tool-honesty.js";
+import { VOCABULARY } from "../src/vocabulary.js";
 
 const GOLD_DRAW_A3 = {
   node: "48021:34137",
@@ -990,5 +994,139 @@ describe("P-91 v3 V4: facet-scoped agentGuidance on every non-present facet", ()
   it("falsifier: the facet-scoping check fails if every facet shared one guidance string", () => {
     const bogus = FACETS.map(() => "One shared sentence for every facet.");
     expect(new Set(bogus).size).not.toBe(FACETS.length);
+  });
+});
+
+/**
+ * P-91 v3 Q1. A radius-search / street-search 422 is
+ * `{error, errorClass: "serve_refused", message}` (gtmErrorBody shape).
+ * These are the five closed codes near/street consume; the whole point of
+ * declarePlaceSearchRefusal is that this shape must never collapse into
+ * declareUpstreamNonOk's generic `status: "error"` envelope.
+ */
+describe("declarePlaceSearchRefusal / placeSearchRefusalDisplayText (P-91 v3 Q1)", () => {
+  const FIVE_CODES: PlaceSearchRefusalCode[] = [
+    "radius_invalid",
+    "radius_exceeds_max",
+    "radius_unbounded",
+    "bare_street_unbounded",
+    "bare_street_not_a_street",
+  ];
+
+  function serveRefusedBody(code: string, message: string): string {
+    return JSON.stringify({ error: code, errorClass: "serve_refused", message });
+  }
+
+  it("maps all five closed codes to a declared refusal, never an error", () => {
+    for (const code of FIVE_CODES) {
+      const declared = declarePlaceSearchRefusal(
+        serveRefusedBody(code, `${code} message`),
+      );
+      expect(declared, code).not.toBeNull();
+      expect(declared!.status).toBe("refused");
+      expect(declared!.reason).toBe(code);
+      expect(declared!.message).toBe(`${code} message`);
+      expect(declared!.reasonDisplayText.length).toBeGreaterThan(0);
+      // The display text is never the bare token standing in for its own
+      // translation (the exact failure mode a missing vocab row would
+      // otherwise silently produce).
+      expect(declared!.reasonDisplayText).not.toBe(code);
+    }
+  });
+
+  it("radius_unbounded's display text says too many candidates, not that the search failed", () => {
+    const declared = declarePlaceSearchRefusal(
+      serveRefusedBody(
+        "radius_unbounded",
+        "Candidate set exceeded 2000. Refusing rather than returning a silently short neighbourhood.",
+      ),
+    );
+    expect(declared?.reasonDisplayText.toLowerCase()).toContain("too many");
+    expect(declared?.reasonDisplayText.toLowerCase()).not.toContain("fail");
+  });
+
+  it("returns null for a non-serve_refused errorClass (e.g. place/resolve's geocode_miss) — falls through to the ordinary declared-error path", () => {
+    const geocodeMiss = JSON.stringify({
+      errorClass: "geocode_miss",
+      error: "geocode_miss",
+      message: "Could not geocode the provided address",
+    });
+    expect(declarePlaceSearchRefusal(geocodeMiss)).toBeNull();
+  });
+
+  it("returns null for a validation_error 400 body (a caller bug, not a refusal)", () => {
+    const badRequest = JSON.stringify({
+      error: "invalid_request",
+      errorClass: "validation_error",
+      message: "lat, lng, and radiusFt are required",
+    });
+    expect(declarePlaceSearchRefusal(badRequest)).toBeNull();
+  });
+
+  it("returns null for an unrecognised code under serve_refused (drift guard: a sixth code this file does not know)", () => {
+    expect(
+      declarePlaceSearchRefusal(
+        serveRefusedBody("some_future_code", "a message"),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for non-JSON, non-object, and missing/empty message bodies", () => {
+    expect(declarePlaceSearchRefusal("<html>502</html>")).toBeNull();
+    expect(declarePlaceSearchRefusal("[]")).toBeNull();
+    expect(
+      declarePlaceSearchRefusal(
+        JSON.stringify({ error: "radius_unbounded", errorClass: "serve_refused" }),
+      ),
+    ).toBeNull();
+    expect(
+      declarePlaceSearchRefusal(
+        JSON.stringify({ error: "radius_unbounded", errorClass: "serve_refused", message: "" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("falsifier: a 422 serve_refused body folded through declareUpstreamNonOk instead is NOT the same declared shape (the exact regression this function exists to prevent)", () => {
+    const body = serveRefusedBody(
+      "radius_unbounded",
+      "Candidate set exceeded 2000. Refusing rather than returning a silently short neighbourhood.",
+    );
+    const declared = declarePlaceSearchRefusal(body)!;
+    const foldedAsError = declareUpstreamNonOk(422, body);
+    // The defect: status becomes "error" (not "refused"), and reason
+    // becomes the raw code standing in for a human explanation because
+    // declareUpstreamNonOk has no concept of this envelope's `message`
+    // field carrying the human text — it only recognises a body's own
+    // `reason` key, which serve_refused bodies do not have.
+    expect(foldedAsError.status).toBe("error");
+    expect(declared.status).toBe("refused");
+    expect(foldedAsError.status).not.toBe(declared.status);
+    expect(foldedAsError).not.toHaveProperty("reasonDisplayText");
+  });
+
+  it("placeSearchRefusalDisplayText reads every one of the five codes from the real, shared VOCABULARY without throwing", () => {
+    for (const code of FIVE_CODES) {
+      expect(() => placeSearchRefusalDisplayText(code)).not.toThrow();
+    }
+  });
+
+  it("verify by violation: a vocabulary table missing one of the five codes' rows makes the display path fail rather than print the raw token", () => {
+    const withoutRadiusUnbounded = VOCABULARY.filter(
+      (e) => e.token !== "radius_unbounded",
+    );
+    expect(withoutRadiusUnbounded.length).toBe(VOCABULARY.length - 1);
+    expect(() =>
+      placeSearchRefusalDisplayText("radius_unbounded", withoutRadiusUnbounded),
+    ).toThrow(/no entry for place-search refusal code "radius_unbounded"/);
+    // The full declare path propagates the same failure rather than
+    // swallowing it into a fabricated refusal.
+    expect(() =>
+      declarePlaceSearchRefusal(
+        serveRefusedBody("radius_unbounded", "message"),
+        withoutRadiusUnbounded,
+      ),
+    ).toThrow(/no entry for place-search refusal code "radius_unbounded"/);
+    // Restored (the real export, untouched by the filter above): green again.
+    expect(() => placeSearchRefusalDisplayText("radius_unbounded")).not.toThrow();
   });
 });
