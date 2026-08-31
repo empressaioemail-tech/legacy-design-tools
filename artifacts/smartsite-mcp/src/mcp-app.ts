@@ -6,7 +6,7 @@
  * that keeps the two shapes in step is PANEL_ANCHOR_ACCEPTS_WIRE below. */
 import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
 
-export const APP_RESOURCE_URI = "ui://smartsite/app-p560.html";
+export const APP_RESOURCE_URI = "ui://smartsite/app-p561.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 
 /* p559 probe: three channels for the map-ground decision (v3 scoping measurement 6).
@@ -168,7 +168,39 @@ export type PanelAnchorRead = {
 export type PanelAnchorAcceptsWire = ParcelAnchor extends PanelAnchor ? true : never;
 export const PANEL_ANCHOR_ACCEPTS_WIRE: PanelAnchorAcceptsWire = true;
 
-export type PanelKind = "board" | "parcel" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
+/**
+ * M-4: the array's anchor phase as the producer declared it. `attempted` counts
+ * reads issued, not reads that returned a coordinate, so this object is never
+ * read as coverage; whether one parcel has a coordinate is on that parcel.
+ */
+export type PanelAnchorBatch = {
+  cap: number;
+  received: number;
+  attempted: number;
+  notAttempted: number;
+  reason: string | null;
+};
+
+/**
+ * M-4: one parcel of a node-depth array, exactly as the wire carried it. A row
+ * with no draw is kept, with an empty ring, because a parcel that cannot be
+ * drawn has to be nameable; dropping it here is how a canvas quietly shows four
+ * of seven.
+ */
+export type PanelParcel = {
+  parcelNodeId: string;
+  label: string;
+  ring: RingPt[];
+  edges: DrawEdge[];
+  zoning: DrawZoning | null;
+  frame: DrawFrame | null;
+  anchor: PanelAnchor | null;
+  anchorRead: PanelAnchorRead | null;
+  /** False only for an id the lookup did not return at all. */
+  returned: boolean;
+};
+
+export type PanelKind = "board" | "parcel" | "parcels" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
 export type MissClass = "absent" | "unbaked" | "unstated";
 export type MissRow = {
   parcelNodeId: string;
@@ -226,6 +258,10 @@ export type PanelModel = {
   anchor?: PanelAnchor;
   /** M-2: the declared outcome of the anchor read, absent when the wire carried none. */
   anchorRead?: PanelAnchorRead;
+  /** M-4: every parcel a node-depth array returned, drawable or not. */
+  parcels?: PanelParcel[];
+  /** M-4: what the array's anchor phase did, as the producer declared it. */
+  anchorBatch?: PanelAnchorBatch;
 };
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
@@ -1072,6 +1108,373 @@ export function groundWrapHtml(svg: string, plan: GroundPlan | null, on: boolean
 }
 
 /*
+ * P-91 v3 M-4: more than one parcel on one canvas.
+ *
+ * Each parcel's ring arrives in its OWN local foot frame, origin at that
+ * parcel's own centroid, so two rings drawn straight from the wire stack on one
+ * point. The anchor is what breaks the tie: M-1 puts a real latitude and
+ * longitude on each single-id read and M-4 puts one on each row of a node
+ * array, and two rings composed from their own anchors land in correct relative
+ * position by construction. Nobody invents a shared origin: the origin IS the
+ * first drawable parcel's anchor, a coordinate that was read.
+ *
+ * There is no new projection here and no second copy of the fit. The parcels
+ * are composed into ONE foot frame and handed to ringFit, ringPixel and
+ * groundPlan, the same three functions that place a single parcel. That is why
+ * the ground registers with the rings: it is the same arithmetic, not a second
+ * arithmetic kept in step.
+ *
+ * The honesty rules are the point of the card. A parcel that cannot be drawn is
+ * NAMED with its reason beside the canvas and never omitted. Fewer than two
+ * drawable parcels is no canvas at all. A set too wide for the imagery gets its
+ * rings and no ground, with the threshold stated. Nothing here counts anything
+ * as coverage, averages a position, or calls a bounding box a location.
+ */
+
+/** Two rings are the smallest thing that can show relative position. One is a parcel. */
+export const MULTI_MIN_DRAWN = 2;
+
+/**
+ * The widest set extent, in feet, the aerial ground is painted under. One mile.
+ *
+ * Two independent reasons, and this is the smaller of the two bounds, so it
+ * binds first and the refusal can be stated in feet rather than surfacing as a
+ * tile count nobody can interpret.
+ *
+ * Legibility. The drawing area is 264 viewBox units wide (320 less two 28 unit
+ * pads). At a one mile extent a 120 foot frontage is 264 * 120 / 5280 = 6 units.
+ * Below that a ring is a dot and imagery under dots is decoration.
+ *
+ * Imagery. At the zoom floor (GROUND_ZOOM_MIN) and Texas latitude the ground
+ * resolution is about 8.3 m per map pixel, and a one mile extent mosaics in a
+ * handful of tiles, well inside GROUND_MAX_TILES. So the tile cap is still
+ * armed and still fails closed, but it is not what a user meets first.
+ */
+export const MULTI_GROUND_MAX_EXTENT_FT = 5280;
+
+export const MULTI_GROUND_EXTENT_REASON = "multi_ground_extent";
+export const MULTI_TOO_FEW_REASON = "multi_fewer_than_two_drawable";
+export const MULTI_NO_PARCELS_REASON = "multi_no_parcels";
+
+/** Reasons a parcel is named beside the canvas instead of drawn on it. */
+export const MULTI_NO_RING = "no ring on the wire";
+export const MULTI_NO_ANCHOR = "no anchor";
+export const MULTI_ANCHOR_UNDECLARED = "no anchor read on the wire";
+
+export const MULTI_UNDRAWN_TITLE = "Not on this canvas";
+export const MULTI_DRAWN_TITLE = "On this canvas";
+export const MULTI_CARD_TITLE = "parcel set";
+export const MULTI_ANCHORS_READ = "Anchors read for";
+export const MULTI_ANCHORS_NOT_READ = "not read";
+export const MULTI_GROUND_TOO_WIDE_PREFIX = "Set spans more than";
+export const MULTI_GROUND_TOO_WIDE_SUFFIX = "ft; rings drawn without imagery.";
+
+/**
+ * The zoom the composition arithmetic runs at. Web Mercator world pixels are
+ * exactly proportional to 2**z, so the composed frame has the same shape at
+ * every level and this choice cannot change a relative position. It is fixed
+ * only so the numbers are reproducible.
+ */
+export const MULTI_REF_ZOOM = GROUND_ZOOM_MAX;
+
+export type PlacedParcel = {
+  parcelNodeId: string;
+  label: string;
+  /** The ring in viewBox units of the SET's fit, not of its own. */
+  vb: RingPt[];
+  /** The parcel's own anchor in viewBox units. Where its label sits. */
+  at: RingPt;
+};
+
+export type UndrawnParcel = { parcelNodeId: string; label: string; reason: string };
+
+export type MultiPlan = {
+  fit: RingFit;
+  extentXFt: number;
+  extentYFt: number;
+  placed: PlacedParcel[];
+  undrawn: UndrawnParcel[];
+  /** Null exactly when groundReason is set. Never both, never neither. */
+  ground: GroundPlan | null;
+  groundReason: string | null;
+};
+
+export type MultiOutcome = { multi: MultiPlan | null; reason: string | null };
+
+/** How the wire's read reads in a sentence beside the canvas. */
+export function anchorReadWords(read: PanelAnchorRead | null): string {
+  if (!read) return MULTI_ANCHOR_UNDECLARED;
+  return read.reason ? read.status + ": " + read.reason : read.status;
+}
+
+/**
+ * Why a parcel cannot go on the canvas, or null when it can. Both reasons are
+ * reported when both apply: a row that has neither a ring nor an anchor is two
+ * separate absences and naming one of them hides the other.
+ */
+export function undrawnReason(p: PanelParcel): string | null {
+  const parts: string[] = [];
+  if (!p.returned) parts.push(NOT_RETURNED);
+  if (!p.ring || p.ring.length < 3) parts.push(MULTI_NO_RING);
+  if (!p.anchor) parts.push(MULTI_NO_ANCHOR + " (" + anchorReadWords(p.anchorRead) + ")");
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
+/** The one predicate. The parser and the plan ask the same question of the same function. */
+export function multiDrawableCount(parcels: PanelParcel[]): number {
+  let n = 0;
+  for (let i = 0; i < parcels.length; i++) {
+    const p = parcels[i];
+    if (p && undrawnReason(p) === null) n++;
+  }
+  return n;
+}
+
+/** The sentence under a canvas whose set is too wide for the imagery to mean anything. */
+export function multiGroundReasonWords(reason: string): string {
+  if (reason === MULTI_GROUND_EXTENT_REASON) {
+    return (
+      MULTI_GROUND_TOO_WIDE_PREFIX +
+      " " +
+      MULTI_GROUND_MAX_EXTENT_FT +
+      " " +
+      MULTI_GROUND_TOO_WIDE_SUFFIX
+    );
+  }
+  return reason;
+}
+
+/**
+ * Compose the drawable parcels into one foot frame and place them.
+ *
+ * The frame's origin is the FIRST drawable parcel's anchor, which is a read
+ * coordinate. It is never a mean of the anchors and never a bounding box
+ * centre: an invented point would be indistinguishable from a read one once it
+ * reached the fit, and there is no need for one.
+ *
+ * Each parcel's own feet are converted into reference feet by the ratio of the
+ * two Mercator scales. Over a block that ratio is one to about seven decimal
+ * places, and applying it costs nothing and is correct at any separation, so it
+ * is applied rather than assumed away.
+ */
+export function multiParcelPlan(parcels: PanelParcel[]): MultiOutcome {
+  if (!parcels || parcels.length === 0) return { multi: null, reason: MULTI_NO_PARCELS_REASON };
+  const undrawn: UndrawnParcel[] = [];
+  const drawable: Array<{ p: PanelParcel; anchor: PanelAnchor }> = [];
+  for (let i = 0; i < parcels.length; i++) {
+    const p = parcels[i];
+    if (!p) continue;
+    const why = undrawnReason(p);
+    if (why !== null) {
+      undrawn.push({ parcelNodeId: p.parcelNodeId, label: p.label, reason: why });
+      continue;
+    }
+    const a = p.anchor;
+    if (!a) {
+      /* Unreachable while undrawnReason names a null anchor. Declared rather
+       * than dropped, so a future edit that splits the two cannot lose a row. */
+      undrawn.push({ parcelNodeId: p.parcelNodeId, label: p.label, reason: MULTI_NO_ANCHOR });
+      continue;
+    }
+    drawable.push({ p: p, anchor: a });
+  }
+  if (drawable.length < MULTI_MIN_DRAWN) return { multi: null, reason: MULTI_TOO_FEW_REASON };
+
+  const ref = drawable[0];
+  if (!ref) return { multi: null, reason: MULTI_TOO_FEW_REASON };
+  const refLat = ref.anchor.lat;
+  const refLon = ref.anchor.lon;
+  const refW = groundWorldPixel(refLat, refLon, MULTI_REF_ZOOM);
+  const refPpf = groundPixelsPerFoot(refLat, MULTI_REF_ZOOM);
+  if (!(refPpf > 0)) return { multi: null, reason: "multi_scale_unresolved" };
+
+  const composed: RingPt[] = [];
+  const frames: Array<{ p: PanelParcel; pts: RingPt[]; at: RingPt }> = [];
+  for (let i = 0; i < drawable.length; i++) {
+    const d = drawable[i];
+    if (!d) continue;
+    const w = groundWorldPixel(d.anchor.lat, d.anchor.lon, MULTI_REF_ZOOM);
+    const ppf = groundPixelsPerFoot(d.anchor.lat, MULTI_REF_ZOOM);
+    /* World pixel y grows SOUTHWARD and the draw frame's y is true north, so
+     * the north component inverts here. Dropping this inversion mirrors every
+     * parcel about the reference and still looks like a plausible block. */
+    const at: RingPt = { x: (w.wx - refW.wx) / refPpf, y: -(w.wy - refW.wy) / refPpf };
+    const scale = ppf / refPpf;
+    const pts: RingPt[] = [];
+    for (let j = 0; j < d.p.ring.length; j++) {
+      const q = d.p.ring[j];
+      if (!q) continue;
+      const c: RingPt = { x: at.x + q.x * scale, y: at.y + q.y * scale };
+      pts.push(c);
+      composed.push(c);
+    }
+    frames.push({ p: d.p, pts: pts, at: at });
+  }
+
+  const fit = ringFit(composed);
+  if (!fit) return { multi: null, reason: "multi_no_ring" };
+
+  const placed: PlacedParcel[] = [];
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    if (!f) continue;
+    const vb: RingPt[] = [];
+    for (let j = 0; j < f.pts.length; j++) {
+      const q = f.pts[j];
+      if (!q) continue;
+      vb.push(ringPixel(fit, q.x, q.y));
+    }
+    placed.push({
+      parcelNodeId: f.p.parcelNodeId,
+      label: f.p.label,
+      vb: vb,
+      at: ringPixel(fit, f.at.x, f.at.y),
+    });
+  }
+
+  const extentXFt = fit.maxX - fit.minX;
+  const extentYFt = fit.maxY - fit.minY;
+  let ground: GroundPlan | null = null;
+  let groundReason: string | null = null;
+  if (Math.max(extentXFt, extentYFt) > MULTI_GROUND_MAX_EXTENT_FT) {
+    groundReason = MULTI_GROUND_EXTENT_REASON;
+  } else {
+    /* The SAME constructor a single parcel's ground uses, on the composed ring
+     * and the reference anchor. Its own ringFit call reproduces `fit`, so the
+     * tiles and the rings are placed by one fit and cannot drift. */
+    const outcome = groundPlan(composed, ref.anchor, { status: "ok", reason: null });
+    ground = outcome.plan;
+    groundReason = outcome.reason;
+  }
+
+  return {
+    multi: {
+      fit: fit,
+      extentXFt: extentXFt,
+      extentYFt: extentYFt,
+      placed: placed,
+      undrawn: undrawn,
+      ground: ground,
+      groundReason: groundReason,
+    },
+    reason: null,
+  };
+}
+
+/**
+ * The canvas. One polygon per drawn parcel in its correct relative position,
+ * each labelled with its node id and each clickable. The click drafts the
+ * ordinary Open turn through the existing handler: nothing is fetched behind
+ * the user's back, and there is no second open path to keep in step.
+ */
+export function multiCanvasSvg(m: MultiPlan): string {
+  let out = "";
+  for (let i = 0; i < m.placed.length; i++) {
+    const p = m.placed[i];
+    if (!p) continue;
+    let pts = "";
+    for (let j = 0; j < p.vb.length; j++) {
+      const q = p.vb[j];
+      if (!q) continue;
+      pts += (j > 0 ? " " : "") + q.x.toFixed(1) + "," + q.y.toFixed(1);
+    }
+    const id = escapeHtml(p.parcelNodeId);
+    out +=
+      '<g class="pset" data-parcel="' + id + '">' +
+      '<polygon class="ring-fill" points="' + pts + '" fill="var(--ss-void)" fill-opacity=".55" stroke="var(--ss-t3)" stroke-width="2"/>' +
+      '<polygon class="phit" data-act="open" data-node="' + id + '" points="' + pts + '"' +
+      ' onclick="window.__ss&&window.__ss.open(this)"><title>' + escapeHtml(p.label) + "</title></polygon>" +
+      '<text class="plbl" x="' + p.at.x.toFixed(1) + '" y="' + p.at.y.toFixed(1) + '" text-anchor="middle">' + id + "</text>" +
+      "</g>";
+  }
+  return (
+    '<svg class="ring set" viewBox="0 0 ' + m.fit.w + " " + m.fit.h + '" aria-label="parcel set"' +
+    ' data-parcels="' + m.placed.length + '">' + out + "</svg>"
+  );
+}
+
+/** Every parcel that IS on the canvas, named in full with its own Open. */
+export function multiDrawnHtml(placed: PlacedParcel[]): string {
+  if (placed.length === 0) return "";
+  let rows = "";
+  for (let i = 0; i < placed.length; i++) {
+    const p = placed[i];
+    if (!p) continue;
+    const id = escapeHtml(p.parcelNodeId);
+    rows +=
+      '<div class="pcell" data-drawn="' + id + '"><span class="pn atom">' + id + "</span> " +
+      '<span class="lbl">' + escapeHtml(p.label) + "</span> " +
+      '<button type="button" class="btn" data-act="open" data-node="' + id + '"' +
+      ' onclick="window.__ss&&window.__ss.open(this)">Open</button></div>';
+  }
+  return '<div class="pset-list"><div class="req">' + MULTI_DRAWN_TITLE + " (" + placed.length + ")</div>" + rows + "</div>";
+}
+
+/**
+ * Every parcel that is NOT on the canvas, named with its reason. This list is
+ * the card: a canvas that quietly shows four of seven is the defect, and the
+ * only thing that stops it is an enumeration of the other three.
+ */
+export function multiUndrawnHtml(list: UndrawnParcel[]): string {
+  if (list.length === 0) return "";
+  let rows = "";
+  for (let i = 0; i < list.length; i++) {
+    const u = list[i];
+    if (!u) continue;
+    rows +=
+      '<div class="pcell" data-undrawn="' + escapeHtml(u.parcelNodeId) + '">' +
+      '<span class="pn atom">' + escapeHtml(u.parcelNodeId) + "</span> " +
+      '<span class="lbl">' + escapeHtml(u.label) + "</span> " +
+      '<span class="reason">' + escapeHtml(u.reason) + "</span></div>";
+  }
+  return '<div class="pset-list"><div class="req">' + MULTI_UNDRAWN_TITLE + " (" + list.length + ")</div>" + rows + "</div>";
+}
+
+/** Why there is no ground under this canvas. Empty when there is one. */
+export function multiGroundNoteHtml(m: MultiPlan): string {
+  if (!m.groundReason) return "";
+  return (
+    '<div class="gnote" data-ground-refused="' + escapeHtml(m.groundReason) + '"' +
+    ' data-extent-ft="' + Math.round(Math.max(m.extentXFt, m.extentYFt)) + '">' +
+    escapeHtml(multiGroundReasonWords(m.groundReason)) + "</div>"
+  );
+}
+
+/**
+ * The truncation, stated. Silent when nothing truncated, because there is
+ * nothing to declare; loud the moment one parcel went unread.
+ */
+export function anchorBatchNoteHtml(b: PanelAnchorBatch | null): string {
+  if (!b || b.notAttempted <= 0) return "";
+  return (
+    '<div class="fnote" data-anchor-attempted="' + b.attempted + '"' +
+    ' data-anchor-not-read="' + b.notAttempted + '"' +
+    ' data-anchor-cap="' + b.cap + '">' +
+    MULTI_ANCHORS_READ + " " + b.attempted + " of " + b.received + "; " +
+    b.notAttempted + " " + MULTI_ANCHORS_NOT_READ +
+    (b.reason ? " (" + escapeHtml(b.reason) + ")" : "") + "</div>"
+  );
+}
+
+/** The whole set: canvas over ground, then who is on it, then who is not. */
+export function renderParcelSet(
+  model: Pick<PanelModel, "parcels" | "anchorBatch">,
+  groundOn?: boolean,
+): string {
+  const outcome = multiParcelPlan(model.parcels ?? []);
+  const m = outcome.multi;
+  if (!m) return "";
+  const drawn = groundWrapHtml(multiCanvasSvg(m), m.ground, groundOn === undefined ? true : groundOn);
+  return (
+    drawn +
+    multiGroundNoteHtml(m) +
+    anchorBatchNoteHtml(model.anchorBatch ?? null) +
+    multiDrawnHtml(m.placed) +
+    multiUndrawnHtml(m.undrawn)
+  );
+}
+
+/*
  * P-91 v2 facts and actions (S7). Everything below the drawing reads a field
  * off the tool result or prints a literal fallback word; the panel never
  * composes prose and never fills a slot the wire left empty. Every function
@@ -1723,6 +2126,75 @@ function anchorFrom(value: unknown, read: PanelAnchorRead | null): PanelAnchor |
   return { lat: lat, lon: lon, precision: stringOrNull(rec.precision), source: stringOrNull(rec.source) };
 }
 
+/**
+ * M-4: the array's own declaration of what its anchor phase did. A body whose
+ * anchorBatch is not an object with whole-number counts is read as no
+ * declaration, which prints no truncation note rather than a made up one.
+ */
+function anchorBatchFrom(value: unknown): PanelAnchorBatch | null {
+  const rec = asRecord(value);
+  if (!rec) return null;
+  const cap = numberOrNull(rec.cap);
+  const received = numberOrNull(rec.received);
+  const attempted = numberOrNull(rec.attempted);
+  const notAttempted = numberOrNull(rec.notAttempted);
+  if (cap === null || received === null || attempted === null || notAttempted === null) return null;
+  return {
+    cap: cap,
+    received: received,
+    attempted: attempted,
+    notAttempted: notAttempted,
+    reason: stringOrNull(rec.reason),
+  };
+}
+
+/**
+ * M-4: every parcel a node-depth array returned, plus every id it did not.
+ *
+ * A row with no draw is KEPT with an empty ring, and a notFound id is kept with
+ * `returned` false, because the whole point of the set view is that a parcel
+ * which cannot be drawn is named rather than dropped. Filtering here is how a
+ * canvas quietly shows four of seven.
+ */
+function parcelsFromBatch(rec: Record<string, unknown>): PanelParcel[] | null {
+  if (!Array.isArray(rec.parcels)) return null;
+  const out: PanelParcel[] = [];
+  for (const raw of rec.parcels) {
+    const row = asRecord(raw);
+    if (!row) continue;
+    const id = typeof row.parcelNodeId === "string" ? row.parcelNodeId : "";
+    if (id.length === 0) continue;
+    const draw = asRecord(row.draw);
+    const label = draw && typeof draw.label === "string" && draw.label.length > 0 ? draw.label : id;
+    const read = anchorReadFrom(row.anchorRead);
+    out.push({
+      parcelNodeId: id,
+      label: label,
+      ring: draw ? ringFromDraw(draw) : [],
+      edges: draw ? edgesFromDraw(draw) : [],
+      zoning: draw ? zoningFromDraw(draw, row) : null,
+      frame: draw ? frameFromDraw(draw) : null,
+      anchor: anchorFrom(row.anchor, read),
+      anchorRead: read,
+      returned: true,
+    });
+  }
+  for (const id of stringList(rec.notFound)) {
+    out.push({
+      parcelNodeId: id,
+      label: id,
+      ring: [],
+      edges: [],
+      zoning: null,
+      frame: null,
+      anchor: null,
+      anchorRead: null,
+      returned: false,
+    });
+  }
+  return out.length > 0 ? out : null;
+}
+
 function batchRowsFrom(rec: Record<string, unknown>): BoardRow[] | null {
   if (!Array.isArray(rec.parcels)) return null;
   const rows: BoardRow[] = [];
@@ -1867,6 +2339,26 @@ export function parseToolResult(text: string): PanelModel {
   if (!rec) return emptyModel("unreadable");
   if (Array.isArray(rec.savedProperties) && !rec.rows && !rec.screens) {
     return emptyModel("empty");
+  }
+
+  /* M-4: a node array with two or more DRAWABLE parcels is a set, and it is
+   * read before the single-parcel branch below, because that branch takes
+   * parcels[0] and paints it alone. Painting one of three is the silent
+   * omission this card exists to end. Fewer than two drawable parcels falls
+   * through to that branch and renders exactly as it does today. */
+  const parcelSet = parcelsFromBatch(rec);
+  if (parcelSet && multiDrawableCount(parcelSet) >= MULTI_MIN_DRAWN) {
+    const model: PanelModel = {
+      kind: "parcels",
+      rows: [],
+      overlays: [],
+      ring: [],
+      edges: [],
+      parcels: parcelSet,
+    };
+    const batch = anchorBatchFrom(rec.anchorBatch);
+    if (batch) model.anchorBatch = batch;
+    return model;
   }
 
   const draw = asRecord(rec.draw);
@@ -2026,6 +2518,20 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   groundLayerHtml,
   groundNoteHtml,
   groundWrapHtml,
+  /* M-4 multi parcel canvas */
+  anchorBatchFrom,
+  parcelsFromBatch,
+  anchorReadWords,
+  undrawnReason,
+  multiDrawableCount,
+  multiGroundReasonWords,
+  multiParcelPlan,
+  multiCanvasSvg,
+  multiDrawnHtml,
+  multiUndrawnHtml,
+  multiGroundNoteHtml,
+  anchorBatchNoteHtml,
+  renderParcelSet,
   /* S7 facts and actions */
   glyphClass,
   knownVintage,
@@ -2329,6 +2835,24 @@ export function htmlContractViolations(html: string): string[] {
   if (!html.includes("/tile/{z}/{y}/{x}") || html.includes("/tile/{z}/{x}/{y}")) {
     violations.push("ground_tile_axis_transposed");
   }
+  /* M-4: the canvas, the two named lists and the truncation note must each be in
+   * the served script, or the set view is a claim. The undrawn list is checked
+   * by name because it is the control that stops a canvas showing four of
+   * seven, and a canvas without it is worse than no canvas. */
+  if (
+    !html.includes("function multiParcelPlan") ||
+    !html.includes("function multiCanvasSvg") ||
+    !html.includes("function renderParcelSet") ||
+    !html.includes("function multiUndrawnHtml") ||
+    !html.includes("function anchorBatchNoteHtml") ||
+    !html.includes("data-parcels=") ||
+    !html.includes("data-undrawn=") ||
+    !html.includes("data-drawn=") ||
+    !html.includes(MULTI_UNDRAWN_TITLE) ||
+    !html.includes(MULTI_DRAWN_TITLE)
+  ) {
+    violations.push("multi_canvas_unbound");
+  }
   if (!html.includes('data-act="addscreen"') || !html.includes("add_to_screen") || !html.includes("function sendAddToScreen")) {
     violations.push("add_to_screen_unbound");
   }
@@ -2476,6 +3000,17 @@ svg.ring .sm{fill:var(--ss-t6)}
 .gwrap[data-ground="on"] .ring-fill{fill-opacity:.16}
 .gnote{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .gnote .btn{padding:3px 8px;font-size:var(--ss-fs-meta)}
+/* M-4 set canvas. The rings reuse .ring-fill, so the ground-on scrim rule above
+   applies to them unchanged. The hit polygon carries no paint of its own: it is
+   the click target and nothing else, so it can never be mistaken for a drawn
+   parcel boundary. */
+svg.ring.set .plbl{font:var(--ss-fs-meta) ui-monospace,Consolas,monospace;fill:var(--ss-t3);paint-order:stroke;stroke:var(--ss-void);stroke-width:3px;stroke-linejoin:round}
+svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}
+.pset-list{margin:0 0 10px}
+.pcell{padding:5px 0;border-bottom:1px solid var(--ss-line-06);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pcell:last-child{border-bottom:none}
+.pcell .lbl{color:var(--ss-t5);font-size:var(--ss-fs-meta)}
+.pcell .reason{color:var(--ss-slate);font-size:var(--ss-fs-meta)}
 .tip{font:var(--ss-fs-meta)/1.6 ui-monospace,Consolas,monospace;color:var(--ss-t5);margin:0 0 8px;min-height:1.6em}
 .tip span{margin-right:8px}
 .tip .tn{color:var(--ss-atom)}
@@ -2666,6 +3201,25 @@ svg.ring .sm{fill:var(--ss-t6)}
   var GROUND_SOURCE_LABEL=${JSON.stringify(GROUND_SOURCE_LABEL)};
   var GROUND_VINTAGE_NOTE=${JSON.stringify(GROUND_VINTAGE_NOTE)};
   var GROUND_TOGGLE_LABEL=${JSON.stringify(GROUND_TOGGLE_LABEL)};
+  /* M-4 multi parcel canvas. Same rule as the ground constants above: the served
+   * scope reads the constants the tested helpers read, so the cap, the extent
+   * threshold and every sentence have one source. */
+  var MULTI_MIN_DRAWN=${JSON.stringify(MULTI_MIN_DRAWN)};
+  var MULTI_GROUND_MAX_EXTENT_FT=${JSON.stringify(MULTI_GROUND_MAX_EXTENT_FT)};
+  var MULTI_GROUND_EXTENT_REASON=${JSON.stringify(MULTI_GROUND_EXTENT_REASON)};
+  var MULTI_TOO_FEW_REASON=${JSON.stringify(MULTI_TOO_FEW_REASON)};
+  var MULTI_NO_PARCELS_REASON=${JSON.stringify(MULTI_NO_PARCELS_REASON)};
+  var MULTI_NO_RING=${JSON.stringify(MULTI_NO_RING)};
+  var MULTI_NO_ANCHOR=${JSON.stringify(MULTI_NO_ANCHOR)};
+  var MULTI_ANCHOR_UNDECLARED=${JSON.stringify(MULTI_ANCHOR_UNDECLARED)};
+  var MULTI_UNDRAWN_TITLE=${JSON.stringify(MULTI_UNDRAWN_TITLE)};
+  var MULTI_DRAWN_TITLE=${JSON.stringify(MULTI_DRAWN_TITLE)};
+  var MULTI_CARD_TITLE=${JSON.stringify(MULTI_CARD_TITLE)};
+  var MULTI_ANCHORS_READ=${JSON.stringify(MULTI_ANCHORS_READ)};
+  var MULTI_ANCHORS_NOT_READ=${JSON.stringify(MULTI_ANCHORS_NOT_READ)};
+  var MULTI_GROUND_TOO_WIDE_PREFIX=${JSON.stringify(MULTI_GROUND_TOO_WIDE_PREFIX)};
+  var MULTI_GROUND_TOO_WIDE_SUFFIX=${JSON.stringify(MULTI_GROUND_TOO_WIDE_SUFFIX)};
+  var MULTI_REF_ZOOM=${JSON.stringify(MULTI_REF_ZOOM)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
@@ -2875,6 +3429,10 @@ ${inlineSharedSource()}
         listing.setAttribute("data-listing-chars",String(listingAck.chars));
       }
       bindDrawing();
+    } else if(model.kind==="parcels"){
+      /* M-4: the same helpers the exported twin uses. A set that cannot make a
+       * canvas never reaches here: the parser hands it back as a single parcel. */
+      root.innerHTML=card(MULTI_CARD_TITLE,stateLines()+'<div class="well">'+renderParcelSet(model,groundOn)+"</div>");
     } else if(model.kind==="miss"){
       root.innerHTML=card("lookup",'<div class="well">'+(model.misses||[]).map(missLine).join("")+"</div>");
     } else if(model.kind==="refused"){
@@ -2996,7 +3554,7 @@ ${inlineSharedSource()}
   }
   /* M-2: local toggle, R1's pattern. Off removes every tile from the html; it does not hide them. */
   function toggleGround(){
-    if(model.kind!=="parcel") return;
+    if(model.kind!=="parcel"&&model.kind!=="parcels") return;
     groundOn=!groundOn;
     render();
   }

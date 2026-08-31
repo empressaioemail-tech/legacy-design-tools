@@ -17,10 +17,12 @@ import {
 } from "./entitlement.js";
 import {
   attachAnchorToResponseText,
+  attachBatchAnchorsToResponseText,
   readParcelAnchor,
-  skippedAnchorForBatch,
+  readParcelAnchorsForBatch,
   skippedAnchorForStub,
   type AnchorOutcome,
+  type BatchAnchorOutcome,
 } from "./parcel-anchor.js";
 import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
@@ -400,11 +402,15 @@ export function registerTools(server: McpServer): void {
             }
             const briefBody: Record<string, unknown> = { parcelNodeId };
             if (depth) briefBody.depth = depth;
-            // M-1: only a single-id node read carries an anchor. An array is
-            // never fanned out into N facets reads, and a stub row has no
-            // draw for an anchor to hold.
+            // M-1: a single-id node read carries one anchor. M-4: a node-depth
+            // ARRAY carries one anchor per parcel, bounded by
+            // ANCHOR_BATCH_READ_CAP and declared when it truncates, because a
+            // shared canvas cannot place two rings without two coordinates.
+            // A stub row still has no draw for an anchor to hold, at any arity.
             const readsAnchor =
               !Array.isArray(parcelNodeId) && effectiveDepth === "node";
+            const readsAnchorBatch =
+              Array.isArray(parcelNodeId) && effectiveDepth === "node";
             return withCortex(async (config) => {
               const briefPromise = cortexFetch(
                 config,
@@ -415,17 +421,23 @@ export function registerTools(server: McpServer): void {
                   body: JSON.stringify(briefBody),
                 },
               );
-              // Issued with the brief, never after it, and joined once the
-              // brief has landed, so the panel waits max(brief, anchor).
-              // readParcelAnchor never rejects, so this is safe to leave
-              // unawaited on the non-OK returns below.
+              // Both anchor reads are issued WITH the brief, never after it, and
+              // joined once the brief has landed, so the panel waits
+              // max(brief, anchors) and the batch's twelve run concurrently
+              // rather than in series. Neither rejects, so both are safe to
+              // leave unawaited on the non-OK returns below.
+              //
+              // The single top-level outcome: a stub row carries no draw at any
+              // arity, so a stub read declares that and reads nothing. A node
+              // ARRAY never reaches this value, because the batch branch below
+              // is taken instead and attaches per parcel.
               const anchorPromise: Promise<AnchorOutcome> = readsAnchor
                 ? readParcelAnchor(config, parcelNodeId as string)
-                : Promise.resolve(
-                    Array.isArray(parcelNodeId)
-                      ? skippedAnchorForBatch(ids.length)
-                      : skippedAnchorForStub(),
-                  );
+                : Promise.resolve(skippedAnchorForStub());
+              const batchPromise: Promise<BatchAnchorOutcome | null> =
+                readsAnchorBatch
+                  ? readParcelAnchorsForBatch(config, ids)
+                  : Promise.resolve(null);
               const res = await briefPromise;
               const body = await res.text();
               if (!res.ok) {
@@ -445,14 +457,12 @@ export function registerTools(server: McpServer): void {
                   ? "stub-or-batch"
                   : "single-node";
               const normalized = normalizeGetSmartSiteResponseText(body, mode);
-              const anchorOutcome = await anchorPromise;
+              const batchOutcome = await batchPromise;
+              const anchored = batchOutcome
+                ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
+                : attachAnchorToResponseText(normalized, await anchorPromise);
               return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: attachAnchorToResponseText(normalized, anchorOutcome),
-                  },
-                ],
+                content: [{ type: "text" as const, text: anchored }],
                 isError: false,
               };
             });
