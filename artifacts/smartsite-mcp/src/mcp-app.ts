@@ -96,7 +96,8 @@ export type SectionRefusal = {
 export type BriefSection = {
   id: string;
   title: string;
-  /** The wire's word (present | refused | absent | unread) or "unstated" when it carries none. */
+  /** The wire's word: present | refused | absent | unread, or (P-91 v3 item 1) unknown |
+   * absent-verified when a section claims one of those directly, or "unstated" when it carries none. */
   disposition: string;
   asOf: string | null;
   reason?: string;
@@ -543,7 +544,7 @@ export const CITATION_DEGRADED = "citation degraded";
 export const AS_OF_MISSING = "as-of missing";
 /** F5: an absence claim with neither provenance nor a known vintage paints unknown; only when the wire carries no reason of its own. */
 export const ABSENCE_UNVERIFIED = "absence unverified; no provenance on the wire";
-/** A section whose disposition is not one of the wire's four words paints unread and says why. */
+/** A section whose disposition is not one of the wire's six words paints unread and says why. */
 export const DISPOSITION_UNSTATED = "disposition not on the wire";
 /** F2: base flood elevation when the record carries null. */
 export const BFE_NONE = "none on record";
@@ -1362,13 +1363,85 @@ export function multiParcelPlan(parcels: PanelParcel[]): MultiOutcome {
 }
 
 /**
+ * M-4 item 4 (P-91 v3 operator walk). `.plbl`'s font is `--ss-fs-meta`,
+ * 12.5px, set via CSS inside this SVG's own coordinate system: an SVG
+ * text element's CSS font-size resolves in the SVG's user units, the same
+ * units the viewBox and every ring/edge coordinate in this file are
+ * already in, so 12.5 here is 12.5 of those units, not 12.5 CSS reference
+ * pixels of whatever width the host renders the panel at. ui-monospace and
+ * Consolas average close to 0.6em advance width per character; MULTI_LABEL_H
+ * is font-size plus a small margin for descenders and the declutter gap.
+ */
+export const MULTI_LABEL_CHAR_W = 7.5;
+export const MULTI_LABEL_H = 14;
+/** Vertical step a colliding label is pushed down by. */
+export const MULTI_LABEL_STEP = MULTI_LABEL_H + 3;
+/** Bound on how many times one label is pushed before the loop gives up and
+ * leaves it where it landed: a crowded label is legible, an infinite loop
+ * is not, and a label pushed off the bottom of the canvas is worse than
+ * either -- see the clamp in resolveLabelPositions below. */
+export const MULTI_LABEL_MAX_PUSH = 8;
+
+/**
+ * M-4 item 4. Every parcel keeps its own full label; none is ever dropped
+ * to solve a collision (an unlabelled ring is worse than a crowded one,
+ * because the reader can no longer tell which parcel they are looking at).
+ * A label whose estimated box would overlap one already placed is pushed
+ * straight down, in fixed steps, until it clears every label placed before
+ * it, the push bound is reached, or it would leave the viewBox, whichever
+ * comes first. `placed[i].at` (the true anchor, used for the ring and the
+ * click target) is never altered; this returns where the TEXT sits, one
+ * point per input parcel, same order, same length.
+ */
+export function resolveLabelPositions(placed: PlacedParcel[], fit: RingFit): RingPt[] {
+  type LabelBox = { minX: number; maxX: number; minY: number; maxY: number };
+  const boxAt = (id: string, at: RingPt): LabelBox => {
+    const halfW = (id.length * MULTI_LABEL_CHAR_W) / 2;
+    return { minX: at.x - halfW, maxX: at.x + halfW, minY: at.y - MULTI_LABEL_H, maxY: at.y };
+  };
+  const overlap = (a: LabelBox, b: LabelBox): boolean =>
+    a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
+  const maxY = fit.h - fit.pad;
+  const boxes: LabelBox[] = [];
+  const out: RingPt[] = [];
+  for (let i = 0; i < placed.length; i++) {
+    const p = placed[i];
+    if (!p) {
+      out.push({ x: 0, y: 0 });
+      continue;
+    }
+    let at = p.at;
+    let box = boxAt(p.parcelNodeId, at);
+    let pushes = 0;
+    while (
+      pushes < MULTI_LABEL_MAX_PUSH &&
+      at.y + MULTI_LABEL_STEP <= maxY &&
+      boxes.some((b) => overlap(box, b))
+    ) {
+      at = { x: at.x, y: at.y + MULTI_LABEL_STEP };
+      box = boxAt(p.parcelNodeId, at);
+      pushes++;
+    }
+    boxes.push(box);
+    out.push(at);
+  }
+  return out;
+}
+
+/**
  * The canvas. One polygon per drawn parcel in its correct relative position,
  * each labelled with its node id and each clickable. The click drafts the
  * ordinary Open turn through the existing handler: nothing is fetched behind
  * the user's back, and there is no second open path to keep in step.
+ *
+ * Item 4: the label TEXT is placed at resolveLabelPositions's declutter
+ * point, not always the raw anchor; a thin leader line ties a displaced
+ * label back to its ring whenever the two differ, so a pushed-down label
+ * cannot be misread as belonging to whichever ring it now sits nearest.
  */
 export function multiCanvasSvg(m: MultiPlan): string {
   let out = "";
+  const labelAt = resolveLabelPositions(m.placed, m.fit);
   for (let i = 0; i < m.placed.length; i++) {
     const p = m.placed[i];
     if (!p) continue;
@@ -1379,12 +1452,19 @@ export function multiCanvasSvg(m: MultiPlan): string {
       pts += (j > 0 ? " " : "") + q.x.toFixed(1) + "," + q.y.toFixed(1);
     }
     const id = escapeHtml(p.parcelNodeId);
+    const lp = labelAt[i] ?? p.at;
+    const moved = lp.x !== p.at.x || lp.y !== p.at.y;
+    const leader = moved
+      ? '<line class="pll" x1="' + p.at.x.toFixed(1) + '" y1="' + p.at.y.toFixed(1) + '"' +
+        ' x2="' + lp.x.toFixed(1) + '" y2="' + lp.y.toFixed(1) + '"/>'
+      : "";
     out +=
       '<g class="pset" data-parcel="' + id + '">' +
       '<polygon class="ring-fill" points="' + pts + '" fill="var(--ss-void)" fill-opacity=".55" stroke="var(--ss-t3)" stroke-width="2"/>' +
       '<polygon class="phit" data-act="open" data-node="' + id + '" points="' + pts + '"' +
       ' onclick="window.__ss&&window.__ss.open(this)"><title>' + escapeHtml(p.label) + "</title></polygon>" +
-      '<text class="plbl" x="' + p.at.x.toFixed(1) + '" y="' + p.at.y.toFixed(1) + '" text-anchor="middle">' + id + "</text>" +
+      leader +
+      '<text class="plbl" data-label-moved="' + (moved ? "1" : "0") + '" x="' + lp.x.toFixed(1) + '" y="' + lp.y.toFixed(1) + '" text-anchor="middle">' + id + "</text>" +
       "</g>";
   }
   return (
@@ -1746,7 +1826,22 @@ function refusalFrom(value: unknown): SectionRefusal | undefined {
   };
 }
 
-/** F6 and F5 for a section: present needs an as-of; absent needs a known vintage on its data; a word off the wire's four paints unread. */
+/**
+ * F6 and F5 for a section: present needs an as-of; absent needs a known
+ * vintage on its data to earn absent-verified, else it paints the more
+ * conservative unknown; a word off the wire's six paints unread.
+ *
+ * P-91 v3 item 1. `unknown` and `absent-verified` are now wire words a
+ * section can claim directly (tool-honesty.ts sectionDisposition), and both
+ * are trusted as claimed, not re-earned here: `absent`'s vintage check
+ * exists because a bare `absent` is a WEAK claim the panel independently
+ * verifies before it will paint the stronger absent-verified; a section
+ * that already claims `absent-verified` is claiming the stronger state
+ * itself, and re-deriving over a claim this union recognises is exactly the
+ * strengthen-by-discarding defect item 1 fixed on the wire side. `unknown`
+ * has nothing to earn -- it is already the most conservative paint there
+ * is -- so it passes straight through too.
+ */
 export function sectionPaint(
   disposition: string,
   asOf: string | null,
@@ -1755,6 +1850,8 @@ export function sectionPaint(
   if (disposition === "present") return asOf ? { paint: "present" } : { paint: "unknown", paintReason: AS_OF_MISSING };
   if (disposition === "refused") return { paint: "refused" };
   if (disposition === "unread") return { paint: "unread" };
+  if (disposition === "unknown") return { paint: "unknown" };
+  if (disposition === "absent-verified") return { paint: "absent-verified" };
   if (disposition === "absent") {
     const vintage = data ? (data.sourceVintage !== undefined ? data.sourceVintage : data.vintage) : null;
     return knownVintage(vintage) !== null
@@ -1877,7 +1974,21 @@ export function floodFactsHtml(s: BriefSection, i: number): string {
   return `<div class="facts flood" data-flood-state="present">${head}${cites ? ` ${cites}` : ""}${meta}<div class="kvs">${rows}</div>${summary}${why}${note}</div>`;
 }
 
-/** R1 (fork 3.1 narrow): every section in wire order with title, glyph and word, as-of, source, citation control, guidance. No values, no prose. */
+/**
+ * R1 (fork 3.1 narrow): every section in wire order with title, glyph and
+ * word, as-of, source, citation control, guidance. No values, no prose.
+ *
+ * P-91 v3 item 2 exception, flood only. Zone X shaded (0.2% annual-chance
+ * band) and Zone X unshaded (minimal flood hazard) both carry disposition
+ * present and, until now, this row painted them identically: same glyph,
+ * same word "present", nothing else. Those are two materially different
+ * findings, and this is the one row every depth-node caller reads, not the
+ * facts card under the drawing (floodFactsHtml) which only ever shows for
+ * a caller who opens the panel and scrolls to it. The fix carries the
+ * source's own classification word, `data.zoneSubtype`, next to the state
+ * word on the flood row only -- not a ranking, not a computed risk level,
+ * the same string floodFactsHtml already prints, read the same way.
+ */
 export function reportHtml(sections: BriefSection[]): string {
   if (sections.length === 0) return `<div class="report" data-report="1"><p class="empty">${NO_BRIEF}</p></div>`;
   const rows = sections
@@ -1887,7 +1998,11 @@ export function reportHtml(sections: BriefSection[]): string {
       const ask = whyControlHtml("section", s.paint, { i: String(i) });
       const note = s.paintReason ? reasonLineHtml("note", s.paintReason, `data-paint-reason="${escapeHtml(s.paintReason)}"`) : "";
       const guide = s.agentGuidance ? `<div class="guide" data-agent-guidance="1">${escapeHtml(s.agentGuidance)}</div>` : "";
-      return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${stateWord(s.paint)}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
+      const subtype = s.id === "flood" && s.paint === "present" ? stringOrNull(s.data ? s.data.zoneSubtype : null) : null;
+      const subtypeHtml = subtype
+        ? ` <span class="fsub" data-flood-subtype="${escapeHtml(subtype)}">${escapeHtml(subtype)}</span>`
+        : "";
+      return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${stateWord(s.paint)}</span>${subtypeHtml}${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
     })
     .join("");
   return `<div class="report" data-report="1"><div class="req">${REPORT_TOGGLE}</div>${rows}</div>`;
@@ -2771,6 +2886,7 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   multiDrawableCount,
   multiGroundReasonWords,
   multiParcelPlan,
+  resolveLabelPositions,
   multiCanvasSvg,
   multiDrawnHtml,
   multiUndrawnHtml,
@@ -3384,6 +3500,7 @@ svg.ring .sm{fill:var(--ss-t6)}
    parcel boundary. */
 svg.ring.set .plbl{font:var(--ss-fs-meta) ui-monospace,Consolas,monospace;fill:var(--ss-t3);paint-order:stroke;stroke:var(--ss-void);stroke-width:3px;stroke-linejoin:round}
 svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}
+svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointer-events:none}
 .pset-list{margin:0 0 10px}
 .pcell{padding:5px 0;border-bottom:1px solid var(--ss-line-06);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pcell:last-child{border-bottom:none}
@@ -3431,6 +3548,7 @@ svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointe
 .meta{display:block;font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin-top:2px}
 .meta span{margin-right:10px}
 .sw{color:var(--ss-t5);font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace}
+.fsub{color:var(--ss-t6);font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace}
 .facts{padding:8px 0;border-top:1px solid var(--ss-line-06);margin-top:6px}
 .kvs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace}
 .fsum{color:var(--ss-t5);margin-top:4px}
@@ -3617,6 +3735,10 @@ svg.ring.set .phit{fill:transparent;stroke:none;pointer-events:all;cursor:pointe
   var MULTI_GROUND_TOO_WIDE_PREFIX=${JSON.stringify(MULTI_GROUND_TOO_WIDE_PREFIX)};
   var MULTI_GROUND_TOO_WIDE_SUFFIX=${JSON.stringify(MULTI_GROUND_TOO_WIDE_SUFFIX)};
   var MULTI_REF_ZOOM=${JSON.stringify(MULTI_REF_ZOOM)};
+  var MULTI_LABEL_CHAR_W=${JSON.stringify(MULTI_LABEL_CHAR_W)};
+  var MULTI_LABEL_H=${JSON.stringify(MULTI_LABEL_H)};
+  var MULTI_LABEL_STEP=${JSON.stringify(MULTI_LABEL_STEP)};
+  var MULTI_LABEL_MAX_PUSH=${JSON.stringify(MULTI_LABEL_MAX_PUSH)};
   /* M-5 off canvas naming and the paint only preview. Same rule again: the
    * served scope reads the constants the tested helpers read. */
   var MULTI_OFF_CANVAS_TITLE=${JSON.stringify(MULTI_OFF_CANVAS_TITLE)};

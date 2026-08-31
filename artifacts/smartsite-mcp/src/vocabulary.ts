@@ -44,18 +44,29 @@ export type VocabularyEntry = {
 /**
  * Wire-level section disposition words (tool-honesty.ts sectionDisposition
  * / ExternalBriefSectionDisposition). Distinct from the panel's five-state
- * PAINT vocabulary (mcp-app.ts STATE_WORDS / CellState): the wire only ever
- * carries these four before the panel's own provenance/vintage check earns,
- * or does not earn, "absent-verified" out of a bare "absent" claim.
+ * PAINT vocabulary (mcp-app.ts STATE_WORDS / CellState), though as of P-91
+ * v3 item 1 the two now overlap: `unknown` and `absent-verified` are the
+ * union's own display words, not the panel's earned-locally versions of
+ * them (a section that CLAIMS one of those two is preserved as claimed, not
+ * re-derived -- see tool-honesty.ts sectionDisposition). Cortex does not
+ * emit either at section level today (confirmed against
+ * artifacts/api-server's own R1BriefSectionDisposition type and the WDLL
+ * item 5 ruling withholding absent-verified there), so in practice the wire
+ * still only ever carries the original four; this table's other two rows
+ * exist so the display text is correct the day a section does. Both rows
+ * reuse STATE_WORDS' own strings rather than retype them, so the panel's
+ * word and the wire's word for the same token cannot drift apart.
  */
 export const WIRE_DISPOSITION_DISPLAY_TEXT: Record<
-  "present" | "refused" | "absent" | "unread",
+  "present" | "refused" | "absent" | "unread" | "unknown" | "absent-verified",
   string
 > = {
   present: "Present",
   refused: "Refused",
   absent: "Reported absent",
   unread: "Not read",
+  unknown: STATE_WORDS.unknown,
+  "absent-verified": STATE_WORDS["absent-verified"],
 };
 
 /**

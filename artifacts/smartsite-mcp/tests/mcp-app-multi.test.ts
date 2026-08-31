@@ -28,6 +28,10 @@ import {
   MULTI_DRAWN_TITLE,
   MULTI_GROUND_EXTENT_REASON,
   MULTI_GROUND_MAX_EXTENT_FT,
+  MULTI_LABEL_CHAR_W,
+  MULTI_LABEL_H,
+  MULTI_LABEL_MAX_PUSH,
+  MULTI_LABEL_STEP,
   MULTI_MIN_DRAWN,
   MULTI_NO_ANCHOR,
   MULTI_NO_CANVAS,
@@ -49,10 +53,12 @@ import {
   parseToolResult,
   renderParcelDraw,
   renderParcelSet,
+  resolveLabelPositions,
   ringPixel,
   type MultiPlan,
   type PanelParcel,
   type PlacedParcel,
+  type RingFit,
 } from "../src/mcp-app.js";
 import { ANCHOR_BATCH_READ_CAP } from "../src/parcel-anchor.js";
 
@@ -266,6 +272,103 @@ describe("M-4 composition: two parcels land in correct relative position", () =>
     const svg = multiCanvasSvg(m);
     expect(svg).toContain('onclick="window.__ss&&window.__ss.open(this)"');
     expect(svg).not.toMatch(/fetch\(|XMLHttpRequest|WebSocket/);
+  });
+});
+
+describe("M-4 item 4 (P-91 v3 operator walk): colliding labels are pushed apart, never merged or dropped", () => {
+  /* A flat, unit-scale fit: viewBox units equal the numbers below one-to-one,
+   * so a distance in this fixture is a distance in the SVG, no ringFit math
+   * needed to reason about it. */
+  const fit: RingFit = { w: 320, h: 220, pad: 28, s: 1, ox: 0, oy: 0, minX: 0, minY: 0, maxX: 0, maxY: 0 };
+
+  function placedAt(id: string, x: number, y: number): PlacedParcel {
+    return { parcelNodeId: id, label: id + " label", vb: [], at: { x, y } };
+  }
+
+  it("48021:34169 and 48021:34137 (the operator's own pair) close enough to garble are pushed apart on y, never on x", () => {
+    // The reported symptom: two labels rendered as "48021:34169021:34137",
+    // which is what these two 11-character labels look like concatenated
+    // with no gap -- exactly what a shared baseline this close produces.
+    const a = placedAt("48021:34169", 100, 100);
+    const b = placedAt("48021:34137", 110, 100);
+    const out = resolveLabelPositions([a, b], fit);
+    expect(out[0]).toEqual({ x: 100, y: 100 });
+    expect(out[1]!.x).toBe(110);
+    expect(out[1]!.y).toBeGreaterThan(100);
+    expect(out[1]!.y - 100).toBeGreaterThanOrEqual(MULTI_LABEL_STEP);
+  });
+
+  it("labels far enough apart are left exactly where they were: no needless movement", () => {
+    const a = placedAt("48021:34169", 40, 100);
+    const b = placedAt("48021:34137", 280, 100);
+    const out = resolveLabelPositions([a, b], fit);
+    expect(out[0]).toEqual({ x: 40, y: 100 });
+    expect(out[1]).toEqual({ x: 280, y: 100 });
+  });
+
+  it("a chain of three mutually-colliding labels stacks into three distinct, non-overlapping rows", () => {
+    const rows = [placedAt("48021:1", 100, 100), placedAt("48021:2", 105, 100), placedAt("48021:3", 95, 100)];
+    const out = resolveLabelPositions(rows, fit);
+    const ys = out.map((p) => p.y);
+    expect(new Set(ys).size).toBe(3);
+    expect(ys[0]).toBe(100);
+    expect(ys[1]!).toBeGreaterThan(ys[0]!);
+    expect(ys[2]!).toBeGreaterThan(ys[1]!);
+  });
+
+  it("every input parcel still gets a label: none is ever dropped to resolve a collision", () => {
+    const rows: PlacedParcel[] = [];
+    for (let i = 0; i < 15; i++) rows.push(placedAt("48021:" + i, 160, 100));
+    const out = resolveLabelPositions(rows, fit);
+    expect(out).toHaveLength(rows.length);
+  });
+
+  it("falsifier: a crowd stays inside the viewBox even when the push bound is hit -- no label pushed off the bottom", () => {
+    const rows: PlacedParcel[] = [];
+    for (let i = 0; i < 15; i++) rows.push(placedAt("48021:" + i, 160, 100));
+    const out = resolveLabelPositions(rows, fit);
+    for (const p of out) {
+      expect(p.y).toBeLessThanOrEqual(fit.h - fit.pad);
+    }
+    // With the bound this tight, some pair in a crowd this size is expected
+    // to still collide once the clamp stops the push -- that is the accepted
+    // trade (crowded beats off-canvas), not silently declared solved.
+  });
+
+  it("resolveLabelPositions never touches placed[i].at: the true anchor used for the ring and the click target is unchanged", () => {
+    const a = placedAt("48021:34169", 100, 100);
+    const b = placedAt("48021:34137", 110, 100);
+    resolveLabelPositions([a, b], fit);
+    expect(a.at).toEqual({ x: 100, y: 100 });
+    expect(b.at).toEqual({ x: 110, y: 100 });
+  });
+
+  it("multiCanvasSvg draws a leader line and flags data-label-moved only for a label that actually moved", () => {
+    const m: MultiPlan = {
+      fit,
+      extentXFt: 10,
+      extentYFt: 10,
+      placed: [placedAt("48021:34169", 100, 100), placedAt("48021:34137", 110, 100)],
+      undrawn: [],
+      ground: null,
+      groundReason: "multi_ground_extent",
+    };
+    const svg = multiCanvasSvg(m);
+    expect(svg).toContain('data-label-moved="0"');
+    expect(svg).toContain('data-label-moved="1"');
+    expect((svg.match(/class="pll"/g) ?? []).length).toBe(1);
+    const ys = [...svg.matchAll(/class="plbl"[^>]*\sy="([\d.]+)"/g)].map((mm) => mm[1]);
+    expect(ys).toHaveLength(2);
+    expect(new Set(ys).size).toBe(2);
+    // both full ids still print in full: the fix is a push, never a truncation
+    expect(svg).toContain(">48021:34169<");
+    expect(svg).toContain(">48021:34137<");
+  });
+
+  it("MULTI_LABEL_STEP clears a label box's own height, so one push always resolves a two-way collision", () => {
+    expect(MULTI_LABEL_STEP).toBeGreaterThan(MULTI_LABEL_H);
+    expect(MULTI_LABEL_CHAR_W).toBeGreaterThan(0);
+    expect(MULTI_LABEL_MAX_PUSH).toBeGreaterThan(0);
   });
 });
 

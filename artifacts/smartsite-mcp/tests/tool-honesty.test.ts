@@ -9,7 +9,10 @@ import {
   normalizeGetSmartSiteResponseText,
   normalizeR1BodyForExternal,
   sanitizeAskTheMapErrorBody,
+  STUB_RAIL_FOR_NODE_DISPOSITION,
   stripSavedPropertiesForExternal,
+  stubRailAgreesWithNodeDisposition,
+  type ExternalBriefSectionDisposition,
 } from "../src/tool-honesty.js";
 
 const GOLD_DRAW_A3 = {
@@ -378,7 +381,7 @@ describe("normalizeR1BodyForExternal", () => {
       expect(out[1]?.reason).toBe("no record");
     });
 
-    it("a disposition outside present | refused | absent | unread is ignored and derived", () => {
+    it("a disposition outside the six recognised words is ignored and derived", () => {
       const body = normalizeR1BodyForExternal({
         brief: {
           sections: [
@@ -459,6 +462,96 @@ describe("normalizeR1BodyForExternal", () => {
         },
       }),
     );
+  });
+});
+
+describe("P-91 v3 item 1: unknown and absent-verified are preserved, not strengthened", () => {
+  type Section = { id?: string; disposition: string; dispositionDisplayText?: string };
+  const sectionsOf = (body: Record<string, unknown>): Section[] =>
+    (body.brief as { sections: Section[] }).sections;
+
+  it("a section claiming unknown with no data comes out unknown, not absent (the defect card's own repro)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [{ id: "land-use", data: null, citations: [], disposition: "unknown" }],
+      },
+    });
+    const out = sectionsOf(body)[0]!;
+    expect(out.disposition).toBe("unknown");
+    expect(out.disposition).not.toBe("absent");
+    expect(out.dispositionDisplayText).toBe("unknown");
+  });
+
+  it("a section claiming absent-verified with no data keeps the verified qualifier, not degraded to absent", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [
+          { id: "flood", data: null, citations: [], disposition: "absent-verified" },
+        ],
+      },
+    });
+    const out = sectionsOf(body)[0]!;
+    expect(out.disposition).toBe("absent-verified");
+    expect(out.disposition).not.toBe("absent");
+    expect(out.dispositionDisplayText).toBe("absent, verified");
+  });
+
+  it("present-with-no-data still weakens to absent even now that unknown is a member (the one permitted rewrite is unchanged)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [{ id: "zoning", data: null, citations: [], disposition: "present" }],
+      },
+    });
+    expect(sectionsOf(body)[0]?.disposition).toBe("absent");
+  });
+
+  describe("stubRailAgreesWithNodeDisposition: two independently-fetched reads, not one payload read twice", () => {
+    it("agrees on the four states stub and node share directly", () => {
+      expect(stubRailAgreesWithNodeDisposition("present", "present")).toBe(true);
+      expect(stubRailAgreesWithNodeDisposition("refused", "refused")).toBe(true);
+      expect(stubRailAgreesWithNodeDisposition("unread", "unread")).toBe(true);
+    });
+
+    it("node absent agreeing with stub unknown is the CORRECT, designed pairing, not a disagreement", () => {
+      // This is the exact pair the defect card's own W2 harness observed
+      // (land-use: unknown at stub, absent at node) and read as a bug. Read
+      // from api-server's write path (railStateFromSectionDisposition,
+      // src/lib/smartSiteStub.ts: `case "absent": return "unknown"`), it is
+      // the documented, shared projection: stub deliberately prints a more
+      // conservative glance word for a node section with no determination.
+      // A check that failed this case would be wrong on every healthy
+      // parcel with an absent facet, which is the opposite of a check.
+      expect(stubRailAgreesWithNodeDisposition("unknown", "absent")).toBe(true);
+      expect(STUB_RAIL_FOR_NODE_DISPOSITION.absent).toBe("unknown");
+    });
+
+    it("falsifier: verify by violation -- a genuine disagreement is reported, not waved through", () => {
+      // stub claims present, node genuinely has no determination: a real
+      // divergence (stale cache, a race between the two separate reads, or
+      // a bug in either projection), not the designed absent/unknown pair.
+      expect(stubRailAgreesWithNodeDisposition("present", "absent")).toBe(false);
+      // stub still says refused after node came back present: also a real
+      // divergence, and the mirror-image direction of the case above.
+      expect(stubRailAgreesWithNodeDisposition("refused", "present")).toBe(false);
+      // stub and node both claim a state peer to unknown/absent-verified,
+      // but not the SAME one: absent-verified cannot silently pass as
+      // unknown or vice versa, so an upgrade-in-transit is still caught.
+      expect(stubRailAgreesWithNodeDisposition("unknown", "absent-verified")).toBe(false);
+    });
+
+    it("every node disposition has a stated expected stub word; the table is total, not partial", () => {
+      const dispositions: ExternalBriefSectionDisposition[] = [
+        "present",
+        "refused",
+        "unread",
+        "absent",
+        "unknown",
+        "absent-verified",
+      ];
+      for (const d of dispositions) {
+        expect(typeof STUB_RAIL_FOR_NODE_DISPOSITION[d]).toBe("string");
+      }
+    });
   });
 });
 

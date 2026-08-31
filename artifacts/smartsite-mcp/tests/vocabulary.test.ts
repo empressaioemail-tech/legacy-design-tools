@@ -132,14 +132,26 @@ describe("VOCABULARY (V1)", () => {
     );
   });
 
-  it("WIRE_DISPOSITION_DISPLAY_TEXT has exactly the four wire disposition words, each distinct", () => {
+  it("WIRE_DISPOSITION_DISPLAY_TEXT has exactly the six disposition words the union can carry, each distinct", () => {
+    /* P-91 v3 item 1: unknown and absent-verified are node-union members now
+     * (tool-honesty.ts ExternalBriefSectionDisposition) even though cortex's
+     * own R1BriefSectionDisposition never emits them today; this table's
+     * two new rows must byte-match STATE_WORDS, the same table VOCABULARY's
+     * own unknown/absent-verified rows read from, so the wire's word and
+     * the panel's word for the same token cannot drift apart. */
     expect(WIRE_DISPOSITION_DISPLAY_TEXT).toEqual({
       present: "Present",
       refused: "Refused",
       absent: "Reported absent",
       unread: "Not read",
+      unknown: "unknown",
+      "absent-verified": "absent, verified",
     });
-    expect(new Set(Object.values(WIRE_DISPOSITION_DISPLAY_TEXT)).size).toBe(4);
+    expect(WIRE_DISPOSITION_DISPLAY_TEXT.unknown).toBe(entryFor("unknown").displayText);
+    expect(WIRE_DISPOSITION_DISPLAY_TEXT["absent-verified"]).toBe(
+      entryFor("absent-verified").displayText,
+    );
+    expect(new Set(Object.values(WIRE_DISPOSITION_DISPLAY_TEXT)).size).toBe(6);
   });
 });
 
