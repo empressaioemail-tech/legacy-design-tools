@@ -217,6 +217,16 @@ jobs:
           # --set-env-vars is authoritative-replace. A missing key here deletes
           # any manual Cloud Run value. CORTEX_USER_DAILY_API_LIMIT=50000 is the
           # bake (2026-08-28). 10000 locked the operator out of the product twice.
+          # DATABASE_URL binds DEPLOYMENT_DATABASE_URL_DIRECT, not
+          # DEPLOYMENT_DATABASE_URL. The Neon pooler injected
+          # SET default_transaction_read_only = on for this database on
+          # 2026-08-31, killing every write while reads stayed green.
+          # A hand-applied fix was reverted by this workflow the same day
+          # (--set-secrets is authoritative-replace) and broke customer
+          # login for ~10 hours before anyone noticed. REVERT to
+          # DEPLOYMENT_DATABASE_URL only when Neon explains the injection
+          # and the pooler is restored. Running unpooled is a cost, not a
+          # resting state. See doc_repo _inbox/2026-08-31_neon_pooler_readonly_incident.md
           gcloud run deploy "$SVC" \
             --region="$RGN" \
             --image="${IMAGE}" \
@@ -320,6 +330,8 @@ jobs:
         # `::add-mask::` keeps the connection string out of the GHA log.
         # The deploy SA has `roles/secretmanager.secretAccessor` per
         # docs/deploy.md §4; the same binding the Cloud Run runtime uses.
+        # Reads DEPLOYMENT_DATABASE_URL_DIRECT: migrations are writes and
+        # fail read-only through the Neon pooler (incident 2026-08-31).
         run: |
           set -euo pipefail
           URL=$(gcloud secrets versions access latest \
