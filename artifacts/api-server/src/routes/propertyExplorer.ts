@@ -33,6 +33,7 @@ import {
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
 import { setPeDevRole } from "../lib/peIdentity";
+import { readAiConnections } from "../lib/peAiConnections";
 import {
   cancelTeamInvitation,
   createTeamInvitation,
@@ -1872,6 +1873,35 @@ const PeTeamRoleBodySchema = z.object({
 function teamUserId(req: Request): string | null {
   return resolvePeOwnerUserId(req);
 }
+
+/**
+ * P-87 Claude Sync — which AI clients have connected to this account.
+ *
+ * Written by the Smart Site MCP server on a naming `initialize`. The PE card
+ * reads `claude` to decide between its setup state and its sync state, and an
+ * account with no row reads as `claude: null`, which the card renders as
+ * setup instructions. That is the fail-closed direction: an unread or empty
+ * signal shows someone how to connect, never a Sync button for a connection
+ * that was never made.
+ *
+ * Signed in only. There is no account-less answer to this question.
+ */
+router.get(
+  "/property-explorer/v1/ai-connections",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const ownerUserId = resolvePeOwnerUserId(req);
+    if (!ownerUserId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      res.status(200).json(await readAiConnections(ownerUserId));
+    } catch {
+      res.status(500).json({ error: "ai_connections_unavailable" });
+    }
+  },
+);
 
 router.get(
   "/property-explorer/v1/team/members",

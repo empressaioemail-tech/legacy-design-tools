@@ -6,6 +6,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
+import { recordMcpClientDetached } from "./connection-record.js";
 import { resolveSmartsiteUserFromClaims, type IdentityClaims } from "./identity.js";
 import { wwwAuthenticateHeader } from "./oauth-metadata.js";
 import { runWithAuth, type SmartsiteAuthContext } from "./request-context.js";
@@ -145,6 +146,12 @@ export function buildMcpAuthMiddleware(config: AuthConfig = loadAuthConfig()) {
       subscriptionTier: resolved.entitlement.subscriptionTier,
       devRole: resolved.entitlement.devRole,
     };
+
+    // P-87 Claude Sync — the connected signal. Only an `initialize` that
+    // NAMES its client writes anything, and a failed write never reaches this
+    // response. `express.json` is mounted ahead of this middleware in app.ts,
+    // so `req.body` is parsed here.
+    recordMcpClientDetached(ctx.userId, req.body);
 
     runWithAuth(ctx, () => next());
   };

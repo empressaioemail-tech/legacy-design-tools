@@ -1247,6 +1247,17 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: pe_ai_connections; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_ai_connections (
+    owner_user_id text NOT NULL,
+    client_name text NOT NULL,
+    client_version text,
+    first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: pe_chat_message_counts; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
@@ -3735,6 +3746,16 @@ CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: pe_ai_connections_owner_client_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id, client_name);
+
+
+-- Name: pe_ai_connections_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_ai_connections_owner_idx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id);
+
+
 -- Name: pe_saved_properties_owner_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, updated_at);
@@ -4491,6 +4512,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
+
+
+-- Name: pe_ai_connections pe_ai_connections_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_ai_connections
+    ADD CONSTRAINT pe_ai_connections_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
