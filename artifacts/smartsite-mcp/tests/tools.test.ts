@@ -6,6 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { SERVER_NAME, SMARTSITE_MCP_TOOLS } from "../src/constants.js";
 import type { SmartsiteAuthContext } from "../src/request-context.js";
 import { sanitizeAskTheMapErrorBody } from "../src/tool-honesty.js";
+import { ANCHOR_BATCH_READ_CAP } from "../src/parcel-anchor.js";
 import { registerTools, splitFindParcelHits } from "../src/tools.js";
 
 const mockCortexFetch = vi.fn();
@@ -1370,8 +1371,23 @@ describe("H2: node-depth array cap 25", () => {
     return out!;
   }
 
+  /* M-4: a node array now issues the brief AND up to ANCHOR_BATCH_READ_CAP
+   * facets reads, so counting every cortex call no longer measures "one brief
+   * went out". Split by path: the brief count is the H2 assertion, the facets
+   * count is the anchor fan, and each is asserted against its own bound. */
+  const BRIEF_PATH = "/api/property-explorer/v1/research/brief";
+  function callsTo(path: string): unknown[][] {
+    return mockCortexFetch.mock.calls.filter((c) => String(c[1]).startsWith(path));
+  }
+  function briefCalls(): unknown[][] {
+    return callsTo(BRIEF_PATH);
+  }
+  function facetsCalls(): unknown[][] {
+    return callsTo("/api/brokerage/v1/place/node/");
+  }
+
   function cortexBodySent(): Record<string, unknown> {
-    const init = mockCortexFetch.mock.calls[0]?.[2] as { body?: string } | undefined;
+    const init = briefCalls()[0]?.[2] as { body?: string } | undefined;
     return JSON.parse(init?.body ?? "{}");
   }
 
@@ -1391,15 +1407,38 @@ describe("H2: node-depth array cap 25", () => {
   it("25 ids at depth node pass to cortex with depth node", async () => {
     const res = await call(idsOf(25), "node");
     expect(res.isError).toBe(false);
-    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect(briefCalls()).toHaveLength(1);
     expect(cortexBodySent()).toMatchObject({ depth: "node" });
     expect((cortexBodySent().parcelNodeId as string[]).length).toBe(25);
+  });
+
+  it("a 25 id node array fans anchors to the cap and declares the truncation", async () => {
+    const res = await call(idsOf(25), "node");
+    expect(facetsCalls()).toHaveLength(ANCHOR_BATCH_READ_CAP);
+    expect(JSON.parse(res.text).anchorBatch).toEqual({
+      cap: ANCHOR_BATCH_READ_CAP,
+      received: 25,
+      attempted: ANCHOR_BATCH_READ_CAP,
+      notAttempted: 25 - ANCHOR_BATCH_READ_CAP,
+      reason: "anchor_read_batch_cap",
+    });
+  });
+
+  it("a stub array reads no facets at any length, and declares why", async () => {
+    const res = await call(idsOf(50), "stub");
+    expect(facetsCalls()).toHaveLength(0);
+    expect(JSON.parse(res.text).anchorRead).toEqual({
+      status: "skipped",
+      reason: "anchor_read_stub_depth",
+    });
+    expect(JSON.parse(res.text)).not.toHaveProperty("anchorBatch");
   });
 
   it("26 ids at depth stub pass to cortex", async () => {
     const res = await call(idsOf(26), "stub");
     expect(res.isError).toBe(false);
     expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect(briefCalls()).toHaveLength(1);
     expect((cortexBodySent().parcelNodeId as string[]).length).toBe(26);
   });
 

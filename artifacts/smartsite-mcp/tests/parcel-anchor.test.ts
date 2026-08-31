@@ -5,13 +5,15 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { SERVER_NAME } from "../src/constants.js";
 import {
+  ANCHOR_BATCH_READ_CAP,
   ANCHOR_PRECISION,
-  ANCHOR_READ_CAP,
   ANCHOR_SOURCE,
   ANCHOR_TIMEOUT_MS,
   PARCEL_FACETS_PATH_TEMPLATE,
   anchorFromFacetsBody,
+  attachBatchAnchorsToResponseText,
   parcelFacetsPath,
+  readParcelAnchorsForBatch,
 } from "../src/parcel-anchor.js";
 import type { SmartsiteAuthContext } from "../src/request-context.js";
 import { registerTools } from "../src/tools.js";
@@ -118,7 +120,11 @@ function withQueryPoint(parcelNodeId: string, queryPoint: unknown): string {
 
 type Served = {
   brief: Response | (() => Response);
-  facets?: Response | (() => Response) | (() => Promise<Response>);
+  /* M-4: a batch issues one facets call per parcel, so the facets side is given
+   * the path. A single shared Response cannot serve N reads: its body is read
+   * once, and handing every parcel the same body is how a fixture would agree
+   * with itself while the code under test never distinguished the parcels. */
+  facets?: Response | ((path: string) => Response | Promise<Response>);
 };
 
 /** Route the mock by path so brief and anchor get distinct responses. */
@@ -129,12 +135,42 @@ function serve(served: Served): void {
         throw new Error(`unexpected facets call: ${path}`);
       }
       const value =
-        typeof served.facets === "function" ? served.facets() : served.facets;
+        typeof served.facets === "function" ? served.facets(path) : served.facets;
       return Promise.resolve(value);
     }
     const value =
       typeof served.brief === "function" ? served.brief() : served.brief;
     return Promise.resolve(value);
+  });
+}
+
+/** A node-depth array body: one row per id, each with the same shaped draw. */
+function batchBriefBody(ids: ReadonlyArray<string>, notFound: ReadonlyArray<string> = []): string {
+  return JSON.stringify({
+    parcels: ids.map((id) => ({
+      parcelNodeId: id,
+      brief: { sections: [], disclosure: [] },
+      draw: GOOD_DRAW,
+    })),
+    notFound: notFound,
+  });
+}
+
+/** Every facets read answers with the coordinate recorded for THAT parcel. */
+function serveBatch(ids: ReadonlyArray<string>, notFound: ReadonlyArray<string> = []): void {
+  serve({
+    brief: () => new Response(batchBriefBody(ids, notFound), { status: 200 }),
+    facets: (path: string) => {
+      for (const a of REAL_ANCHORS) {
+        if (path.includes(encodeURIComponent(a.id))) {
+          return new Response(
+            withQueryPoint(a.id, { longitude: a.longitude, latitude: a.latitude }),
+            { status: 200 },
+          );
+        }
+      }
+      return new Response(JSON.stringify({ error: "parcel_not_found" }), { status: 404 });
+    },
   });
 }
 
@@ -475,38 +511,173 @@ describe("M-1 anchor: no coordinate that was not read", () => {
   });
 });
 
-describe("M-1 anchor: scope", () => {
-  it("an array at node depth is skipped with the cap named and reads no facets", async () => {
-    const ids = REAL_ANCHORS.map((p) => p.id);
-    serve({
-      brief: new Response(
-        JSON.stringify({
-          parcels: ids.map((id) => ({
-            parcelNodeId: id,
-            brief: { sections: [], disclosure: [] },
-          })),
-          notFound: [],
-        }),
-        { status: 200 },
-      ),
+describe("M-4 batch anchor: the cap is a cap", () => {
+  const ids = Array.from({ length: 20 }, (_, i) => `48021:${70000 + i}`);
+
+  it("reads exactly the first ANCHOR_BATCH_READ_CAP ids, in request order", async () => {
+    const seen: string[] = [];
+    const outcome = await readParcelAnchorsForBatch(
+      CORTEX_TEST_CONFIG,
+      ids,
+      (async (_c: unknown, path: string) => {
+        seen.push(path);
+        return new Response(
+          withQueryPoint("x", { longitude: -97.3, latitude: 30.1 }),
+          { status: 200 },
+        );
+      }) as never,
+    );
+    expect(seen).toEqual(ids.slice(0, ANCHOR_BATCH_READ_CAP).map((id) => parcelFacetsPath(id)));
+    expect(outcome.reads.map((r) => r.parcelNodeId)).toEqual(ids.slice(0, ANCHOR_BATCH_READ_CAP));
+    expect(outcome.declaration).toEqual({
+      cap: ANCHOR_BATCH_READ_CAP,
+      received: 20,
+      attempted: ANCHOR_BATCH_READ_CAP,
+      notAttempted: 20 - ANCHOR_BATCH_READ_CAP,
+      reason: "anchor_read_batch_cap",
     });
+  });
+
+  it("one parcel's failure is that parcel's declared absence and never its neighbours'", async () => {
+    const three = ids.slice(0, 3);
+    const outcome = await readParcelAnchorsForBatch(
+      CORTEX_TEST_CONFIG,
+      three,
+      (async (_c: unknown, path: string) => {
+        if (path.includes(encodeURIComponent(three[1]!))) {
+          throw Object.assign(new Error("aborted"), { name: "AbortError" });
+        }
+        return new Response(
+          withQueryPoint("x", { longitude: -97.3, latitude: 30.1 }),
+          { status: 200 },
+        );
+      }) as never,
+    );
+    expect(outcome.reads.map((r) => r.outcome.anchorRead.status)).toEqual(["ok", "error", "ok"]);
+    expect(outcome.reads[1]?.outcome.anchorRead.reason).toBe("anchor_read_timeout");
+    expect(outcome.reads[0]?.outcome.anchor).toBeDefined();
+    expect(outcome.reads[2]?.outcome.anchor).toBeDefined();
+  });
+
+  it("every row past the cap carries its own declared skip, not silence", async () => {
+    const outcome = await readParcelAnchorsForBatch(
+      CORTEX_TEST_CONFIG,
+      ids,
+      (async () =>
+        new Response(withQueryPoint("x", { longitude: -97.3, latitude: 30.1 }), {
+          status: 200,
+        })) as never,
+    );
+    const wire = attachBatchAnchorsToResponseText(
+      JSON.stringify({ parcels: ids.map((id) => ({ parcelNodeId: id })), notFound: [] }),
+      outcome,
+    );
+    const rows = JSON.parse(wire).parcels as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(20);
+    for (let i = 0; i < rows.length; i++) {
+      expect(rows[i]).toHaveProperty("anchorRead");
+      if (i < ANCHOR_BATCH_READ_CAP) {
+        expect(rows[i]!.anchorRead).toEqual({ status: "ok" });
+      } else {
+        expect(rows[i]!.anchorRead).toEqual({
+          status: "skipped",
+          reason: "anchor_read_batch_cap",
+          cap: ANCHOR_BATCH_READ_CAP,
+          received: 20,
+        });
+        expect(rows[i]).not.toHaveProperty("anchor");
+      }
+    }
+  });
+
+  it("an upstream anchor or anchorRead on a row is dropped before ours is written", async () => {
+    const outcome = await readParcelAnchorsForBatch(
+      CORTEX_TEST_CONFIG,
+      [ids[0]!],
+      (async () =>
+        new Response(withQueryPoint("x", { longitude: -97.3, latitude: 30.1 }), {
+          status: 200,
+        })) as never,
+    );
+    const wire = attachBatchAnchorsToResponseText(
+      JSON.stringify({
+        anchor: { lat: 1, lon: 1 },
+        anchorRead: { status: "ok" },
+        parcels: [{ parcelNodeId: ids[0], anchor: { lat: 9, lon: 9 }, anchorRead: { status: "ok" } }],
+      }),
+      outcome,
+    );
+    const parsed = JSON.parse(wire);
+    expect(parsed).not.toHaveProperty("anchor");
+    expect(parsed).not.toHaveProperty("anchorRead");
+    expect(parsed.parcels[0].anchor).toEqual({
+      lat: 30.1,
+      lon: -97.3,
+      precision: ANCHOR_PRECISION,
+      source: ANCHOR_SOURCE,
+    });
+  });
+});
+
+describe("M-1 anchor: scope", () => {
+  /*
+   * M-4 changed this deliberately. M-1 skipped every array because nobody had
+   * bounded the fan; M-4 bounds it at ANCHOR_BATCH_READ_CAP and reads it, so a
+   * node array now carries one anchor per parcel and no top-level anchorRead.
+   * The stub path is unchanged: a stub row has no draw for an anchor to hold.
+   */
+  it("an array at node depth reads one anchor per parcel, in request order", async () => {
+    const ids = REAL_ANCHORS.map((p) => p.id);
+    serveBatch(ids);
     const { isError, parsed } = await callGetSmartSite({
       parcelNodeId: ids,
       depth: "node",
     });
     expect(isError).toBe(false);
     expect(parsed).not.toHaveProperty("anchor");
-    expect(parsed.anchorRead).toEqual({
-      status: "skipped",
-      reason: "anchor_read_batch_cap",
-      cap: ANCHOR_READ_CAP,
-      received: 3,
-    });
-    expect(facetsCallPaths()).toEqual([]);
-    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+    expect(parsed).not.toHaveProperty("anchorRead");
+    expect(facetsCallPaths()).toEqual(ids.map((id) => parcelFacetsPath(id)));
+    const rows = parsed.parcels as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.anchor)).toEqual(
+      REAL_ANCHORS.map((a) => ({
+        lat: a.latitude,
+        lon: a.longitude,
+        precision: ANCHOR_PRECISION,
+        source: ANCHOR_SOURCE,
+      })),
+    );
+    expect(rows.map((r) => r.anchorRead)).toEqual([
+      { status: "ok" },
+      { status: "ok" },
+      { status: "ok" },
+    ]);
   });
 
-  it("a one-element array is still a batch and still reads no facets", async () => {
+  it("under the cap, the batch declares that nothing truncated and carries no reason", async () => {
+    const ids = REAL_ANCHORS.map((p) => p.id);
+    serveBatch(ids);
+    const { parsed } = await callGetSmartSite({ parcelNodeId: ids, depth: "node" });
+    expect(parsed.anchorBatch).toEqual({
+      cap: ANCHOR_BATCH_READ_CAP,
+      received: 3,
+      attempted: 3,
+      notAttempted: 0,
+    });
+  });
+
+  it("a one-element array at node depth reads its one anchor", async () => {
+    const id = REAL_ANCHORS[0].id;
+    serveBatch([id]);
+    const { parsed } = await callGetSmartSite({
+      parcelNodeId: [id],
+      depth: "node",
+    });
+    expect(facetsCallPaths()).toEqual([parcelFacetsPath(id)]);
+    const rows = parsed.parcels as Array<Record<string, unknown>>;
+    expect(rows[0]?.anchorRead).toEqual({ status: "ok" });
+  });
+
+  it("an array at stub depth still reads no facets and declares the stub reason", async () => {
     serve({
       brief: new Response(
         JSON.stringify({ parcels: [], notFound: [] }),
@@ -514,16 +685,16 @@ describe("M-1 anchor: scope", () => {
       ),
     });
     const { parsed } = await callGetSmartSite({
-      parcelNodeId: [REAL_ANCHORS[0].id],
-      depth: "node",
+      parcelNodeId: REAL_ANCHORS.map((p) => p.id),
+      depth: "stub",
     });
     expect(parsed.anchorRead).toEqual({
       status: "skipped",
-      reason: "anchor_read_batch_cap",
-      cap: ANCHOR_READ_CAP,
-      received: 1,
+      reason: "anchor_read_stub_depth",
     });
+    expect(parsed).not.toHaveProperty("anchorBatch");
     expect(facetsCallPaths()).toEqual([]);
+    expect(mockCortexFetch).toHaveBeenCalledTimes(1);
   });
 
   it("a single id at stub depth is skipped and reads no facets", async () => {

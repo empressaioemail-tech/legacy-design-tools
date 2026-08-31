@@ -2454,3 +2454,145 @@ describe("P-91 v3 M-2 aerial ground (served)", () => {
     expect(f.all('[data-act="ground"]')).toHaveLength(0);
   });
 });
+
+/*
+ * P-91 v3 M-4: the SET, in the served panel. The composition arithmetic is
+ * proved in tests/mcp-app-multi.test.ts; what is proved here is that the iframe
+ * composes it, paints both named lists, resets the ground on every accepted
+ * result, and hands the click to the same Open handler a single parcel uses.
+ *
+ * 48021:34137 at 30.11021, -97.31631 is a live read (2026-08-30). The second
+ * anchor is SYNTHETIC, one recorded lot width (98.97 ft) east of it, expressed
+ * in degrees so this file does not borrow the module's own arithmetic.
+ */
+const SET_LAT = 30.11021;
+const SET_LON = -97.31631;
+const SET_LON_EAST = SET_LON + (98.97 * (1200 / 3937)) / (((Math.PI * 6378137) / 180) * Math.cos((SET_LAT * Math.PI) / 180));
+function setRow(id: string, lat: number, lon: number, over: Json = {}): Json {
+  const base = {
+    parcelNodeId: id,
+    brief: { sections: [] },
+    draw: { label: id + " label", frame: FRAME, ring: GOLD_NODE.draw.ring, edges: [], overlays: [] },
+    anchor: { lat: lat, lon: lon, precision: "1e-5-deg", source: "bake-latlng-index" },
+    anchorRead: { status: "ok" },
+  } as unknown as Json;
+  return Object.assign(base, over) as Json;
+}
+const SET_BODY = {
+  parcels: [setRow("48021:34137", SET_LAT, SET_LON), setRow("48021:34161", SET_LAT, SET_LON_EAST)],
+  notFound: [],
+} as unknown as Json;
+const SET_WITH_MISSES = {
+  parcels: [
+    setRow("48021:34137", SET_LAT, SET_LON),
+    setRow("48021:34161", SET_LAT, SET_LON_EAST),
+    setRow("48021:34169", SET_LAT, SET_LON, {
+      anchor: undefined,
+      anchorRead: { status: "error", reason: "anchor_read_timeout" },
+    }),
+  ],
+  notFound: ["48021:404404"],
+  anchorBatch: { cap: 12, received: 20, attempted: 12, notAttempted: 8, reason: "anchor_read_batch_cap" },
+} as unknown as Json;
+
+describe("P-91 v3 M-4 parcel set (served)", () => {
+  it("two anchored parcels paint one canvas with two rings over the aerial ground", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_BODY);
+    const html = f.root.innerHTML;
+    expect(html).toContain('data-parcels="2"');
+    expect((html.match(/class="phit"/g) ?? []).length).toBe(2);
+    expect(html).toContain('data-parcel="48021:34137"');
+    expect(html).toContain('data-parcel="48021:34161"');
+    expect(html).toContain('data-ground="on"');
+    expect(html).toContain(app.GROUND_TILE_ORIGIN);
+    /* one canvas, not two single-parcel drawings */
+    expect((html.match(/<svg/g) ?? []).length).toBe(1);
+  });
+
+  it("the two rings are at DIFFERENT x, so they are placed and not stacked", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_BODY);
+    const labels = f.root.querySelectorAll("[data-parcel]");
+    expect(labels).toHaveLength(2);
+    const polys = f.root.innerHTML.match(/class="ring-fill" points="([^"]+)"/g) ?? [];
+    expect(polys).toHaveLength(2);
+    expect(polys[0]).not.toBe(polys[1]);
+  });
+
+  it("a parcel that could not be drawn is named on the page with its reason", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_WITH_MISSES);
+    const html = f.root.innerHTML;
+    expect(html).toContain('data-undrawn="48021:34169"');
+    expect(html).toContain('data-undrawn="48021:404404"');
+    expect(html).toContain("anchor_read_timeout");
+    expect(html).toContain('data-drawn="48021:34137"');
+    expect(html).toContain('data-drawn="48021:34161"');
+    expect(f.strip(html)).toContain(app.MULTI_UNDRAWN_TITLE);
+  });
+
+  it("the truncation is stated on the page when the batch capped", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_WITH_MISSES);
+    expect(f.root.innerHTML).toContain('data-anchor-not-read="8"');
+    expect(f.strip(f.root.innerHTML)).toContain(app.MULTI_ANCHORS_READ);
+  });
+
+  it("clicking a parcel on the canvas drafts the ordinary Open turn", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_BODY);
+    const hit = f.root.querySelector('[data-act="open"]');
+    expect(hit?.getAttribute("data-node")).toBe("48021:34137");
+    expect(f.root.innerHTML).toContain('onclick="window.__ss&&window.__ss.open(this)"');
+    const posted = f.open("48021:34161");
+    const parts = posted?.params?.content as Array<{ text?: string }> | undefined;
+    expect(parts?.[0]?.text).toContain("48021:34161");
+    expect(parts?.[0]?.text).toContain(app.OPEN_TURN_OPENER);
+  });
+
+  it("the ground toggle works on a set and removes every tile from the html", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_BODY);
+    expect(f.root.innerHTML).toContain(app.GROUND_TILE_ORIGIN);
+    f.ss().ground();
+    expect(f.root.innerHTML).not.toContain(app.GROUND_TILE_ORIGIN);
+    expect(f.root.innerHTML).toContain('data-ground="off"');
+    /* still a canvas, still both parcels */
+    expect(f.root.innerHTML).toContain('data-parcels="2"');
+  });
+
+  it("the ground resets to on for the next accepted result", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(SET_BODY);
+    f.ss().ground();
+    expect(f.root.innerHTML).toContain('data-ground="off"');
+    f.toolResult(SET_BODY);
+    expect(f.root.innerHTML).toContain('data-ground="on"');
+  });
+
+  it("a batch with one drawable parcel paints today's single parcel panel, not a canvas", () => {
+    const one = {
+      parcels: [
+        setRow("48021:34137", SET_LAT, SET_LON),
+        setRow("48021:34161", SET_LAT, SET_LON_EAST, {
+          anchor: undefined,
+          anchorRead: { status: "absent", reason: "city_limits_fact_absent" },
+        }),
+      ],
+      notFound: [],
+    } as unknown as Json;
+    const f = fresh();
+    f.init();
+    f.toolResult(one);
+    expect(f.root.innerHTML).not.toContain("data-parcels=");
+    expect(f.root.innerHTML).toContain('data-act="listing"');
+  });
+});
