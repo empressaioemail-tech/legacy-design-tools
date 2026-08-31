@@ -36,6 +36,10 @@ import {
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
 import { appMetaFor, registerMcpApp } from "./mcp-app.js";
+import {
+  registerVocabularyResource,
+  STANDING_VOCAB_CONTENT_PART,
+} from "./vocabulary.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 /**
@@ -308,8 +312,28 @@ function annotationsFor(name: SmartsiteToolName) {
   return { readOnlyHint: true };
 }
 
+type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
+
+/**
+ * V2 (P-91 v3), payload half, standing-block leg. Every tool result gets
+ * one extra content entry: the vocabulary lookup block, byte-identical on
+ * every call. content[0] — the tool's own JSON — is never touched or
+ * reordered, so every existing caller that reads content[0] sees exactly
+ * what it saw before this wrapper existed; this is purely additive.
+ */
+function attachStandingVocabBlock(handler: ToolHandler): ToolHandler {
+  return async (args) => {
+    const result = await handler(args);
+    return {
+      ...result,
+      content: [...result.content, STANDING_VOCAB_CONTENT_PART],
+    };
+  };
+}
+
 export function registerTools(server: McpServer): void {
   registerMcpApp(server);
+  registerVocabularyResource(server);
   for (const tool of SMARTSITE_MCP_TOOLS) {
     const uiMeta = appMetaFor(tool.name);
     server.registerTool(
@@ -321,7 +345,7 @@ export function registerTools(server: McpServer): void {
         annotations: annotationsFor(tool.name),
         ...(uiMeta ? { _meta: uiMeta } : {}),
       },
-      async (args: Record<string, unknown>) => {
+      attachStandingVocabBlock(async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();
         const entitlement = snapshotFromAuth(auth);
 
@@ -687,7 +711,7 @@ export function registerTools(server: McpServer): void {
           // here that builds the chat subject from the bake and keeps
           // sanitizeAskTheMapErrorBody on the cortex error path.
         }
-      },
+      }),
     );
   }
 }

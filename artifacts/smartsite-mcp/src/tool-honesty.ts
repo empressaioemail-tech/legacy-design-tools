@@ -1,3 +1,9 @@
+import { envelopeHuman } from "./mcp-app.js";
+import {
+  DERIVED_FIGURES_POLICY,
+  WIRE_DISPOSITION_DISPLAY_TEXT,
+} from "./vocabulary.js";
+
 const PUNCTUATION_ONLY_SITUS_RE = /^[\s,.\-;:'"`]+$/;
 
 export function isPunctuationOnlySitusLabel(value: unknown): boolean {
@@ -233,6 +239,8 @@ export type ExternalBriefSection = {
   data: unknown;
   refusal?: unknown;
   disposition: ExternalBriefSectionDisposition;
+  /** V3 (P-91 v3). The exact string next to the machine code, so a caller never has to translate `disposition` itself. */
+  dispositionDisplayText: string;
   agentGuidance?: string | null;
   [key: string]: unknown;
 };
@@ -262,6 +270,40 @@ function sectionDisposition(section: Record<string, unknown>): ExternalBriefSect
   return claimed;
 }
 
+/**
+ * V4 (P-91 v3). What not to invent, per facet. Keyed by the real section
+ * ids read out of the wire and this package's own tests (zoning, land-use,
+ * flood, drainage, setbacks-envelope); an id outside this map still gets a
+ * generic instruction rather than none, so the mechanism cannot go starved
+ * just because a new facet id ships before this map is updated.
+ */
+const FACET_TOPIC: Record<string, string> = {
+  zoning: "a zoning district, jurisdiction, or permitted-use table",
+  "land-use": "a land-use code or description",
+  flood: "a flood zone, SFHA status, or base flood elevation",
+  drainage: "drainage infrastructure, capacity, or a compliance state",
+  "setbacks-envelope": "a setback distance or a buildable-envelope polygon",
+};
+const GENERIC_FACET_TOPIC = "a value for this facet";
+
+/**
+ * V4 (P-91 v3). Facet-scoped agentGuidance on every non-present section.
+ * Previously shipped on exactly one facet (setbacks-envelope, refused
+ * only) as a hand-written sentence; this generalizes the same instruction
+ * shape to every facet and every non-present disposition. The disposition
+ * word in the sentence is read off WIRE_DISPOSITION_DISPLAY_TEXT, the same
+ * table dispositionDisplayText is read from below, so the two can never
+ * disagree about what state this section is in.
+ */
+function facetGuidance(
+  id: string | undefined,
+  disposition: ExternalBriefSectionDisposition,
+): string {
+  const topic = (id && FACET_TOPIC[id]) ?? GENERIC_FACET_TOPIC;
+  const state = WIRE_DISPOSITION_DISPLAY_TEXT[disposition].toLowerCase();
+  return `This facet is ${state} for this parcel on this call. Do not invent ${topic}.`;
+}
+
 function isHttpCitation(value: unknown): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
@@ -272,6 +314,36 @@ function presentCitationDishonest(rail: Record<string, unknown>): boolean {
     ? rail.citations.filter(isHttpCitation)
     : [];
   return citations.length === 0 && rail.citationsDegraded !== true;
+}
+
+/**
+ * V3 (P-91 v3). `reasonDisplayText` next to an overlay's raw `reason`, read
+ * through envelopeHuman — the exact function the panel itself calls — so
+ * the text the model reads in the tool result and the text the panel paints
+ * can never be two different sentences. This is the direct fix for the
+ * live-session finding: `reason: "atom_path_pending"` traveled to the model
+ * with no display string attached, because envelopeHuman was wired to the
+ * panel only. The raw `reason` is left untouched (additive).
+ *
+ * V6 (P-91 v3). Where `state` is "unknown", `finding` is explicit `null`
+ * (this file's own convention for SectionRefusal: a missing field is null,
+ * never a default), never the overlay's `label`. A finding-shaped label
+ * ("No pipeline within 500 ft") on an unknown-state overlay is a caption
+ * about what was NOT checked, not a result; no consumer that reads
+ * `finding` before treating a value as a result can mistake one for the
+ * other. Scoped to "unknown" only, per the v3 build plan: every other state
+ * already prints an unambiguous state word next to its label.
+ */
+function honestOverlay(overlay: Record<string, unknown>): Record<string, unknown> {
+  const reason = typeof overlay.reason === "string" ? overlay.reason : undefined;
+  const withReason: Record<string, unknown> =
+    reason !== undefined
+      ? { ...overlay, reasonDisplayText: envelopeHuman(reason) ?? reason }
+      : overlay;
+  if (withReason.state === "unknown") {
+    return { ...withReason, finding: null };
+  }
+  return withReason;
 }
 
 /**
@@ -322,7 +394,22 @@ export function sanitizeExternalDraw(raw: unknown): unknown | undefined {
   ) {
     return undefined;
   }
-  return draw;
+  // V3/V6: rebuild overlays (reasonDisplayText, unknown-state finding split)
+  // only on the surviving path; every omission check above still reads the
+  // raw, unmapped overlays. V5: the derived-figures deny travels on every
+  // draw that reaches the wire, not as a convention but as a payload field.
+  const honestOverlays = Array.isArray(overlays)
+    ? overlays.map((item) =>
+        item && typeof item === "object" && !Array.isArray(item)
+          ? honestOverlay(item as Record<string, unknown>)
+          : item,
+      )
+    : undefined;
+  return {
+    ...draw,
+    ...(honestOverlays ? { overlays: honestOverlays } : {}),
+    derivedFigures: DERIVED_FIGURES_POLICY,
+  };
 }
 
 /**
@@ -351,23 +438,27 @@ export function normalizeR1BodyForExternal(
       return {
         data: raw,
         disposition: "absent",
+        dispositionDisplayText: WIRE_DISPOSITION_DISPLAY_TEXT.absent,
+        agentGuidance: facetGuidance(undefined, "absent"),
       };
     }
     const section = raw as Record<string, unknown>;
     const disposition = sectionDisposition(section);
+    const id = typeof section.id === "string" ? section.id : undefined;
+    // V4: every non-present facet gets guidance, not only setbacks-envelope
+    // refused. A wire-supplied agentGuidance always wins (never overwritten).
     const agentGuidance =
       typeof section.agentGuidance === "string"
         ? section.agentGuidance
-        : disposition === "refused" &&
-            section.id === "setbacks-envelope" &&
-            section.refusal &&
-            typeof section.refusal === "object"
-          ? "Setbacks and buildable envelope are refused on this read path. Do not invent distances or polygons."
+        : disposition !== "present"
+          ? facetGuidance(id, disposition)
           : undefined;
     return {
       ...section,
       data: section.data ?? null,
       disposition,
+      // V3: the exact display string beside the machine code, additive.
+      dispositionDisplayText: WIRE_DISPOSITION_DISPLAY_TEXT[disposition],
       ...(agentGuidance ? { agentGuidance } : {}),
     } as ExternalBriefSection;
   });
