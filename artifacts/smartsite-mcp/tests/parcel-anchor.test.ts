@@ -80,6 +80,21 @@ const GOOD_DRAW = {
   overlays: [],
 };
 
+/**
+ * P-91 v3 V5: normalizeR1BodyForExternal now attaches derivedFigures to
+ * every draw that reaches the wire. GOOD_DRAW stays the pure upstream
+ * fixture (what "cortex" sends); this is what the server is expected to
+ * hand back, so the anchor tests below assert against this, not GOOD_DRAW.
+ */
+const EXPECTED_GOOD_DRAW = {
+  ...GOOD_DRAW,
+  derivedFigures: {
+    denies: ["area", "coverage_ratio", "lot_coverage_pct", "setback_distance", "buildable_area"],
+    reason:
+      "ring, edges, and overlays are for rendering only. Do not compute an area, a coverage ratio, a percentage, or a distance from them; use a brief section's own figure, or say the figure is not on record.",
+  },
+};
+
 function briefBody(parcelNodeId: string): string {
   return JSON.stringify({
     runId: "r1-anchor-fixture",
@@ -224,7 +239,7 @@ describe("M-1 anchor: the three live parcels", () => {
       });
       expect(parsed.anchorRead).toEqual({ status: "ok" });
       // The anchor is a sibling of draw, and draw is untouched.
-      expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(GOOD_DRAW));
+      expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(EXPECTED_GOOD_DRAW));
     });
   }
 
@@ -313,7 +328,7 @@ describe("M-1 anchor: no coordinate that was not read", () => {
     });
     // A failed anchor read never fails the panel.
     expect(isError).toBe(false);
-    expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(GOOD_DRAW));
+    expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(EXPECTED_GOOD_DRAW));
     expect(parsed).not.toHaveProperty("anchor");
     return parsed;
   }
@@ -430,7 +445,7 @@ describe("M-1 anchor: no coordinate that was not read", () => {
       status: "error",
       reason: "anchor_read_timeout",
     });
-    expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(GOOD_DRAW));
+    expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(EXPECTED_GOOD_DRAW));
   });
 
   it("a non-abort transport failure is a declared error", async () => {
@@ -456,7 +471,7 @@ describe("M-1 anchor: no coordinate that was not read", () => {
       parcelNodeId: parcel.id,
     });
     expect(isError).toBe(false);
-    expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(GOOD_DRAW));
+    expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(EXPECTED_GOOD_DRAW));
     expect(parsed.runId).toBe("r1-anchor-fixture");
     expect(parsed).not.toHaveProperty("anchor");
   });

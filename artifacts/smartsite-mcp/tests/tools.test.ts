@@ -8,6 +8,7 @@ import type { SmartsiteAuthContext } from "../src/request-context.js";
 import { sanitizeAskTheMapErrorBody } from "../src/tool-honesty.js";
 import { ANCHOR_BATCH_READ_CAP } from "../src/parcel-anchor.js";
 import { registerTools, splitFindParcelHits } from "../src/tools.js";
+import { VOCABULARY_MIME, VOCABULARY_RESOURCE_URI } from "../src/vocabulary.js";
 
 const mockCortexFetch = vi.fn();
 const CORTEX_TEST_CONFIG = { baseUrl: "http://cortex.test", serviceApiKey: "test-key" };
@@ -653,7 +654,7 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
     mockCortexFetch.mockReset();
   });
 
-  it("A3: single-id node path keeps gold draw byte-identical", async () => {
+  it("A3: single-id node path keeps gold draw's own facts byte-identical; V3/V5 add reasonDisplayText and derivedFigures only", async () => {
     const cortexBody = {
       runId: "r1-gold",
       reportFamily: "R1",
@@ -674,7 +675,28 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
       });
       expect(result.isError).toBe(false);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(JSON.stringify(parsed.draw)).toBe(JSON.stringify(GOLD_DRAW));
+      // V3: the raw machine token on the envelope overlay's `reason` field
+      // (this is the exact live-session bug: "atom_path_pending" reaching
+      // the model with no display string) now carries the panel's own
+      // translation beside it, unchanged and additive.
+      expect(parsed.draw.overlays[1]).toEqual({
+        ...GOLD_DRAW.overlays[1],
+        reasonDisplayText: "Withheld, setbacks unruled",
+      });
+      expect(JSON.stringify(parsed.draw)).toBe(
+        JSON.stringify({
+          ...GOLD_DRAW,
+          overlays: [
+            GOLD_DRAW.overlays[0],
+            { ...GOLD_DRAW.overlays[1], reasonDisplayText: "Withheld, setbacks unruled" },
+          ],
+          derivedFigures: {
+            denies: ["area", "coverage_ratio", "lot_coverage_pct", "setback_distance", "buildable_area"],
+            reason:
+              "ring, edges, and overlays are for rendering only. Do not compute an area, a coverage ratio, a percentage, or a distance from them; use a brief section's own figure, or say the figure is not on record.",
+          },
+        }),
+      );
       expect(mockCortexFetch.mock.calls[0]?.[2]).toMatchObject({
         body: JSON.stringify({ parcelNodeId: "48021:34137" }),
       });
@@ -1726,5 +1748,97 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
       brief: "<html>500</html>",
     });
     expect(mockCortexFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("P-91 v3 V2: standing vocabulary block and resource", () => {
+  beforeEach(() => {
+    mockAuth = { ...defaultAuth };
+    mockCortexFetch.mockReset();
+  });
+
+  it("every successful tool result carries the standing vocabulary block as an additional content entry; content[0] is untouched", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ hits: [] }), { status: 200 }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "find_parcel",
+        arguments: { query: "908 pine" },
+      });
+      expect(result.isError).toBe(false);
+      expect(result.content).toHaveLength(2);
+      const first = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(first).toEqual({ hits: [] });
+      const second = JSON.parse((result.content?.[1] as { text: string }).text) as {
+        smartSiteVocabulary: Array<{ token: string; displayText: string; meaning: string }>;
+        resource: string;
+      };
+      expect(second.resource).toBe(VOCABULARY_RESOURCE_URI);
+      expect(second.smartSiteVocabulary.length).toBeGreaterThanOrEqual(15);
+      expect(second.smartSiteVocabulary.some((e) => e.token === "unknown")).toBe(true);
+    });
+  });
+
+  it("the standing block also rides on a blocked / not_ready result", async () => {
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "check_request",
+        arguments: { jobId: "job-1" },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(2);
+      const first = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(first.status).toBe("not_ready");
+      const second = JSON.parse((result.content?.[1] as { text: string }).text);
+      expect(second.resource).toBe(VOCABULARY_RESOURCE_URI);
+    });
+  });
+
+  it("the standing block also rides on a declared upstream error result", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ error: "internal" }), { status: 500 }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "find_parcel",
+        arguments: { query: "908 pine" },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(2);
+      const second = JSON.parse((result.content?.[1] as { text: string }).text);
+      expect(second.resource).toBe(VOCABULARY_RESOURCE_URI);
+    });
+  });
+
+  it("falsifier: a naive caller reading content[0] as the vocabulary block would fail — it never carries smartSiteVocabulary", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ hits: [] }), { status: 200 }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "find_parcel",
+        arguments: { query: "x" },
+      });
+      const first = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(first).not.toHaveProperty("smartSiteVocabulary");
+    });
+  });
+
+  it("registers the vocabulary resource on a real server, readable via readResource", async () => {
+    await withTestClient(async (client) => {
+      const resources = await client.listResources();
+      const uris = resources.resources.map((r) => r.uri);
+      expect(uris).toContain(VOCABULARY_RESOURCE_URI);
+      const read = await client.readResource({ uri: VOCABULARY_RESOURCE_URI });
+      const body = read.contents[0];
+      expect(body?.mimeType).toBe(VOCABULARY_MIME);
+      if (body && "text" in body && typeof body.text === "string") {
+        const parsed = JSON.parse(body.text) as { vocabulary: Array<{ token: string }> };
+        expect(parsed.vocabulary.length).toBeGreaterThanOrEqual(15);
+      } else {
+        throw new Error("resource text missing");
+      }
+    });
   });
 });

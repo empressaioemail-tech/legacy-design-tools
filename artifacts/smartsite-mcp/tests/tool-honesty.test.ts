@@ -168,6 +168,9 @@ describe("buildRunReportEnvelope", () => {
           data: null,
           citations: [],
           disposition: "absent",
+          dispositionDisplayText: "Reported absent",
+          agentGuidance:
+            "This facet is reported absent for this parcel on this call. Do not invent a zoning district, jurisdiction, or permitted-use table.",
         },
       ],
       disclosure: [],
@@ -319,7 +322,10 @@ describe("normalizeR1BodyForExternal", () => {
         data: null,
         citations: [],
         disposition: "unread",
+        dispositionDisplayText: "Not read",
         reason: "drainage facet not yet baked for this parcel",
+        agentGuidance:
+          "This facet is not read for this parcel on this call. Do not invent drainage infrastructure, capacity, or a compliance state.",
       });
     });
 
@@ -438,12 +444,21 @@ describe("normalizeR1BodyForExternal", () => {
     });
   });
 
-  it("A3: gold draw is byte-identical after honesty normalize", () => {
+  it("A3: gold draw's own facts are byte-identical after honesty normalize; V5 adds derivedFigures only", () => {
     const body = normalizeR1BodyForExternal({
       brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
       draw: GOLD_DRAW_A3,
     });
-    expect(JSON.stringify(body.draw)).toBe(JSON.stringify(GOLD_DRAW_A3));
+    expect(JSON.stringify(body.draw)).toBe(
+      JSON.stringify({
+        ...GOLD_DRAW_A3,
+        derivedFigures: {
+          denies: ["area", "coverage_ratio", "lot_coverage_pct", "setback_distance", "buildable_area"],
+          reason:
+            "ring, edges, and overlays are for rendering only. Do not compute an area, a coverage ratio, a percentage, or a distance from them; use a brief section's own figure, or say the figure is not on record.",
+        },
+      }),
+    );
   });
 });
 
@@ -586,7 +601,14 @@ describe("normalizeR1BodyForExternal remainder", () => {
       brief: { sections: [{ id: "flood", data: { floodZone: "X" } }] },
       draw,
     });
-    expect(body.draw).toEqual(draw);
+    expect(body.draw).toEqual({
+      ...draw,
+      derivedFigures: {
+        denies: ["area", "coverage_ratio", "lot_coverage_pct", "setback_distance", "buildable_area"],
+        reason:
+          "ring, edges, and overlays are for rendering only. Do not compute an area, a coverage ratio, a percentage, or a distance from them; use a brief section's own figure, or say the figure is not on record.",
+      },
+    });
   });
 });
 
@@ -678,5 +700,202 @@ describe("mapGetSmartSiteNonOk (P-91 build plan 4.1)", () => {
     void reason;
     expect(stripped).not.toHaveProperty("reason");
     expect(stripped).not.toEqual(mapped);
+  });
+});
+
+describe("P-91 v3 V3: dispositionDisplayText on every section", () => {
+  type Section = { id?: string; disposition: string; dispositionDisplayText?: string };
+  const sectionsOf = (body: Record<string, unknown>): Section[] =>
+    (body.brief as { sections: Section[] }).sections;
+
+  it("attaches the exact display text for each of the four wire dispositions", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [
+          { id: "zoning", data: { district: "SF-1" } },
+          { id: "land-use", data: null, disposition: "absent" },
+          { id: "flood", data: null, refusal: { code: "not-in-bake" } },
+          { id: "drainage", data: null, disposition: "unread" },
+        ],
+      },
+    });
+    const sections = sectionsOf(body);
+    expect(sections.map((s) => [s.disposition, s.dispositionDisplayText])).toEqual([
+      ["present", "Present"],
+      ["absent", "Reported absent"],
+      ["refused", "Refused"],
+      ["unread", "Not read"],
+    ]);
+  });
+
+  it("falsifier: a section whose dispositionDisplayText is missing is not the shape this normalizer promises", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+    });
+    const section = sectionsOf(body)[0]!;
+    expect(section).toHaveProperty("dispositionDisplayText");
+    const { dispositionDisplayText, ...stripped } = section;
+    void dispositionDisplayText;
+    expect(stripped).not.toHaveProperty("dispositionDisplayText");
+    expect(stripped).not.toEqual(section);
+  });
+});
+
+describe("P-91 v3 V3/V6: overlay reasonDisplayText and the unknown-state finding split", () => {
+  it("the live-session bug, reproduced and fixed: an envelope overlay's raw atom_path_pending reason now carries the panel's own display text beside it, unchanged", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [
+          {
+            id: "envelope",
+            label: "Buildable envelope not computed",
+            draw: "suppress-setback-line",
+            state: "refused",
+            reason: "atom_path_pending",
+          },
+        ],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]?.reason).toBe("atom_path_pending");
+    expect(draw.overlays[0]?.reasonDisplayText).toBe("Withheld, setbacks unruled");
+  });
+
+  it("an overlay reason with no special mapping still gets reasonDisplayText, equal to the raw reason (envelopeHuman's pass-through)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [
+          { id: "drainage", label: "Drainage not evaluated", state: "unread", reason: "not_yet_baked" },
+        ],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]?.reasonDisplayText).toBe("not_yet_baked");
+  });
+
+  it("an overlay with no reason at all gets no reasonDisplayText key (additive, never a fabricated one)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [{ id: "flood", label: "Zone X", state: "present", citations: [], citationsDegraded: true }],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]).not.toHaveProperty("reasonDisplayText");
+  });
+
+  it("V6: an unknown-state overlay's finding-shaped label never becomes a printable finding — finding is explicit null, label is untouched", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [
+          {
+            id: "pipeline",
+            label: "No pipeline within 500 ft",
+            draw: "legend-only",
+            state: "unknown",
+          },
+        ],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]?.label).toBe("No pipeline within 500 ft");
+    expect(draw.overlays[0]).toHaveProperty("finding");
+    expect(draw.overlays[0]?.finding).toBeNull();
+  });
+
+  it("V6 is scoped to state unknown only: a present-state overlay gets no finding key at all", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "flood", data: { floodZone: "X" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [
+          {
+            id: "flood",
+            label: "Zone X 0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+            draw: "tint-ring",
+            state: "present",
+            citations: [],
+            citationsDegraded: true,
+          },
+        ],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]).not.toHaveProperty("finding");
+  });
+
+  it("falsifier: the finding-split check fails on an overlay that leaks its unknown-state label as finding", () => {
+    const bogus = { state: "unknown", label: "No pipeline within 500 ft", finding: "No pipeline within 500 ft" };
+    expect(bogus.finding).not.toBeNull();
+  });
+});
+
+describe("P-91 v3 V4: facet-scoped agentGuidance on every non-present facet", () => {
+  const FACETS = ["zoning", "land-use", "flood", "drainage", "setbacks-envelope"] as const;
+  const TOPIC_WORD: Record<(typeof FACETS)[number], string> = {
+    zoning: "zoning district",
+    "land-use": "land-use code",
+    flood: "flood zone",
+    drainage: "drainage infrastructure",
+    "setbacks-envelope": "setback distance",
+  };
+
+  it("every known facet gets non-empty, facet-specific guidance when absent", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: FACETS.map((id) => ({ id, data: null, disposition: "absent" })),
+      },
+    });
+    const sections = (body.brief as { sections: Array<{ id: string; agentGuidance?: string }> }).sections;
+    for (const section of sections) {
+      const id = section.id as (typeof FACETS)[number];
+      expect(section.agentGuidance).toBeTruthy();
+      expect(section.agentGuidance).toContain("Do not invent");
+      expect(section.agentGuidance).toContain(TOPIC_WORD[id]);
+    }
+    // Facet-scoped, not one shared blob: no two facets get the same sentence.
+    expect(new Set(sections.map((s) => s.agentGuidance)).size).toBe(FACETS.length);
+  });
+
+  it("a present facet gets no agentGuidance (mechanism fires only on the non-present branch)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+    });
+    const sections = (body.brief as { sections: Array<{ agentGuidance?: string }> }).sections;
+    expect(sections[0]?.agentGuidance).toBeUndefined();
+  });
+
+  it("a wire-supplied agentGuidance always wins over the derived one", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: {
+        sections: [
+          { id: "zoning", data: null, disposition: "absent", agentGuidance: "Custom upstream guidance." },
+        ],
+      },
+    });
+    const sections = (body.brief as { sections: Array<{ agentGuidance?: string }> }).sections;
+    expect(sections[0]?.agentGuidance).toBe("Custom upstream guidance.");
+  });
+
+  it("an id outside the known facet map still gets guidance (starved-mechanism guard), generic topic", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "some-future-facet", data: null, disposition: "unread" }] },
+    });
+    const sections = (body.brief as { sections: Array<{ agentGuidance?: string }> }).sections;
+    expect(sections[0]?.agentGuidance).toBe(
+      "This facet is not read for this parcel on this call. Do not invent a value for this facet.",
+    );
+  });
+
+  it("falsifier: the facet-scoping check fails if every facet shared one guidance string", () => {
+    const bogus = FACETS.map(() => "One shared sentence for every facet.");
+    expect(new Set(bogus).size).not.toBe(FACETS.length);
   });
 });
