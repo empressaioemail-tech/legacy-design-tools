@@ -59,9 +59,13 @@
  * DB-free: the CLI owns I/O; tests import this module directly.
  */
 
-import type { AddressLandUseEntry } from "./joinIntegrityGate";
+import type { AddressLandUseEntry, PropIdLandUseEntry } from "./joinIntegrityGate";
 import { resolveAddressLandUse } from "./joinIntegrityGate";
-import { addressJoinKey, LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
+import {
+  addressJoinKey,
+  landUseJoinKey,
+  LANDUSE_JOIN_DISABLED_FIPS_SEED,
+} from "./joinNormalize";
 import {
   assembleTier1Payload,
   COUNTY_NAMES,
@@ -78,6 +82,34 @@ export const TIER1_CONFORMANT_FACET_SCHEMA_VERSION =
   "node-facets-tier1-conformant-v1";
 /** The literal the Factory walk rejects as the old-shape baseline. */
 export const OLD_SHAPE_SCHEMA_VERSION_REJECTED_BY_WALK = "node-facets-tier1-v1";
+
+// ---------------------------------------------------------------------------
+// LAND USE (2026-08-31). Until this change the ONLY land-use source here was
+// `claim.propertyUseCode`, while the old bake joined `cad_property` on the
+// gated prop_id key. The flat bodies the Factory stores carry that claim field
+// null on production rows, so the bake wrote `baseFacts.landUse: null` and
+// `facetCoverage.landUse: false` for parcels whose CAD roll carries A1 —
+// verified live on 48021:34137, 48021:8720522 and two Travis parcels. A
+// coverage flag that reads false where the value exists is not a rendering
+// bug: every consumer of the facet body (get_smart_site, the walk, reports,
+// any surface built later) reads the same null, and anything scoring coverage
+// from that flag under-counts land use across six counties.
+//
+// The bake now resolves land use in this order, and NEVER defaults it:
+//   1. the claim's own `propertyUseCode` (no join, no collision risk);
+//   2. the county CAD roll on the prop_id key (CAD-to-CAD, same
+//      `cad_property` read the old bake used, passed in by the CLI).
+//      Seed does NOT apply to this join. Seed risk was TxGIO-to-CAD.
+//      48209 and 48491 are clear. Do not re-impose the seed. Join key
+//      stays prop_id, never seed.
+//   3. on a prop_id-gate-blocked county only, the owner-gated situs-address
+//      recovery that was already here (that gate is TxGIO-to-CAD).
+// Where none of the three resolves, the bake writes an EARNED absence
+// (`provenance.landUseAbsence`: verdict, authority, scopeSearched, an
+// evaluation-time asOf and a per-parcel basis) rather than a bare null, and
+// `assertLandUseAbsenceEarned` REFUSES the write if a null ever reaches a
+// payload without one. The land-use ATOM is not read here: the bake projects
+// from its claim and its roll, and the atom is a separate surface.
 
 const SQFT_PER_ACRE = 43_560;
 
@@ -215,6 +247,52 @@ export type ParcelJoinRecord =
   | { table: string; state: "no-row"; basis: string }
   | { table: string; state: "gate-blocked"; basis: string };
 
+export type { PropIdLandUseEntry };
+
+/**
+ * WHICH upstream supplied a projected land use. `source` on the facet stays
+ * the two-value `LandUseSource` the ledger and card already read; this names
+ * the derivation so a claim-carried value and a roll-joined one are tellable
+ * apart without changing that enum.
+ */
+export type LandUseOrigin =
+  | "claim"
+  | "cad-property-prop-id-join"
+  | "cad-roll-address-join";
+
+/**
+ * An EARNED absence for the land-use facet, in the shape
+ * `19_the_instrument_contract.md` requires of a layer that is absent.
+ *
+ * `absent-verified` means the authority WAS consulted in the stated scope and
+ * the parcel genuinely carries no land use. `lookup-failed` means we could
+ * not look — an undeclared CAD vintage, an absent `cad_property`, a roll the
+ * caller never read, or a gate-blocked county whose situs recovery did not
+ * accept — and must never be reported as the former. `asOf` is the bake's own
+ * evaluation clock (the instant this decision was made), never a request
+ * clock. `basis` names THIS parcel; a basis identical across parcels is a
+ * ceremony, not a justification, and the guard below refuses it.
+ */
+export interface LandUseAbsence {
+  verdict: "absent-verified" | "lookup-failed";
+  authority: string;
+  scopeSearched: string;
+  asOf: string;
+  basis: string;
+}
+
+/**
+ * The county CAD roll the bake may consult for land use, as
+ * `fetchCountyLandUseRoll` returns it. `consulted: false` means the read did
+ * not happen (no declared vintage / no `cad_property`): an empty map is not
+ * evidence of absence, and this bake will not treat it as one.
+ */
+export interface ConformantLandUseRoll {
+  byPropId: ReadonlyMap<string, PropIdLandUseEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
 export interface ConformantTier1Payload extends Omit<
   Tier1FacetPayload,
   "facetCoverage" | "provenance"
@@ -229,7 +307,13 @@ export interface ConformantTier1Payload extends Omit<
     base: { parcelNodeId: string; situsAddress: string | null; apn: string | null };
   };
   facetCoverage: Tier1FacetPayload["facetCoverage"] & { tier1: "populated" };
-  provenance: Tier1FacetPayload["provenance"] & { parcelJoin: ParcelJoinRecord };
+  provenance: Tier1FacetPayload["provenance"] & {
+    parcelJoin: ParcelJoinRecord;
+    /** Which upstream supplied the land use; null when none did. */
+    landUseOrigin: LandUseOrigin | null;
+    /** The earned absence when no land use was projected; null when one was. */
+    landUseAbsence: LandUseAbsence | null;
+  };
 }
 
 export interface ConformantTier1BuildInput {
@@ -267,6 +351,23 @@ export interface ConformantTier1BuildInput {
     txgioOwner?: string | null;
     blockedFips?: ReadonlySet<string>;
   };
+  /**
+   * The county CAD roll on the prop_id key (`fetchCountyLandUseRoll`) — the
+   * SAME `cad_property` upstream the old bake joined. Consulted only when the
+   * claim carries no `propertyUseCode` AND the county prop_id join is not
+   * gate-blocked. OMITTING it means the caller did not read the roll, and the
+   * resulting absence is `lookup-failed`, never `absent-verified`.
+   */
+  landUseRoll?: ConformantLandUseRoll;
+  /**
+   * Optional block set threaded into `landUseJoinKey` for key normalization.
+   * Seed does NOT apply to the CAD-to-CAD landUse prop_id roll join (both
+   * sides CAD; seed risk was TxGIO-to-CAD). 48209 and 48491 are clear on
+   * that join. Do not re-impose LANDUSE_JOIN_DISABLED_FIPS_SEED here. The
+   * join key is prop_id, never seed. Ledger `block` verdicts still apply
+   * to the TxGIO-to-CAD parcel join and situs recovery, not to this roll.
+   */
+  blockedFips?: ReadonlySet<string>;
   nowIso: string;
   onSitusFallback?: (info: {
     cityKey: string;
@@ -305,6 +406,7 @@ export function buildConformantTier1Payload(
   let situsRecoveryAccepted = false;
 
   const code = claim.propertyUseCode;
+  let landUseOrigin: LandUseOrigin | null = code ? "claim" : null;
   let landUse: BaseFacts["landUse"] = code
     ? {
         code,
@@ -313,6 +415,29 @@ export function buildConformantTier1Payload(
         vintage: claim.taxYear != null ? String(claim.taxYear) : null,
       }
     : null;
+
+  // The CAD roll on the prop_id key (CAD-to-CAD; the old bake's upstream).
+  // Seed does NOT apply to this join. Seed risk was TxGIO-to-CAD. 48209 and
+  // 48491 are clear. Do not re-impose the seed. Join key stays prop_id.
+  // Runs only when the claim carried nothing AND the county is not
+  // gate-blocked on the TxGIO parcel join (that county recovers on situs
+  // address below instead).
+  const effectiveBlocked = input.blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED;
+  const rollJoinKey =
+    !code && !gateBlocked ? landUseJoinKey(countyFips, apn, effectiveBlocked) : null;
+  const rollConsulted = input.landUseRoll?.consulted === true;
+  if (rollJoinKey != null && rollConsulted) {
+    const hit = input.landUseRoll?.byPropId.get(rollJoinKey) ?? null;
+    if (hit) {
+      landUse = {
+        code: hit.landUseCode,
+        description: ptadLandUseDescription(hit.landUseCode) ?? null,
+        source: "cad-roll",
+        vintage: hit.landUseVintage,
+      };
+      landUseOrigin = "cad-property-prop-id-join";
+    }
+  }
 
   if (gateBlocked && input.situsRecovery) {
     const blocked =
@@ -335,6 +460,7 @@ export function buildConformantTier1Payload(
         vintage: hit.vintage,
       };
       landUseAddressRecovered = true;
+      landUseOrigin = "cad-roll-address-join";
       situsRecoveryAccepted = true;
       row = input.parcelJoin.situsRow ?? null;
     } else {
@@ -342,10 +468,26 @@ export function buildConformantTier1Payload(
       // or no address match): honest null, never the claim code as a silent
       // fallback, never the offered prop_id row.
       landUse = null;
+      landUseOrigin = null;
       landUseAddressRecovered = false;
       row = null;
     }
   }
+
+  const landUseAbsence: LandUseAbsence | null = landUse
+    ? null
+    : buildLandUseAbsence({
+        parcelNodeId,
+        countyFips,
+        countyName,
+        apn,
+        access: input.access,
+        gateBlocked,
+        situsRecoveryOffered: input.situsRecovery != null,
+        roll: input.landUseRoll,
+        rollJoinKey,
+        nowIso,
+      });
 
   const ring = row ? firstRing(row.geometry) : null;
 
@@ -418,7 +560,7 @@ export function buildConformantTier1Payload(
         };
 
   const { facetCoverage, provenance, ...rest } = tier1;
-  return {
+  const payload: ConformantTier1Payload = {
     shapeSource: CONFORMANT_SHAPE_SOURCE,
     baked: true,
     source: CONFORMANT_TIER1_SOURCE,
@@ -436,8 +578,190 @@ export function buildConformantTier1Payload(
     },
     ...rest,
     facetCoverage: { ...facetCoverage, tier1: "populated" },
-    provenance: { ...provenance, parcelJoin },
+    provenance: { ...provenance, parcelJoin, landUseOrigin, landUseAbsence },
   };
+  // Fail closed at the builder as well as at the write: a null land use that
+  // reaches a payload without an earned absence never leaves this function.
+  assertLandUseAbsenceEarned(payload);
+  return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Earned land-use absence.
+// ---------------------------------------------------------------------------
+
+interface LandUseAbsenceInput {
+  parcelNodeId: string;
+  countyFips: string;
+  countyName: string;
+  apn: string | null;
+  access: { discoverability: string; entitlement: string };
+  gateBlocked: boolean;
+  situsRecoveryOffered: boolean;
+  roll: ConformantLandUseRoll | undefined;
+  rollJoinKey: string | null;
+  nowIso: string;
+}
+
+/**
+ * Build the absence block for a parcel with no land use. Every branch states
+ * what was asked, where we looked, and why THIS parcel has nothing — and only
+ * the branch that actually consulted the roll may say `absent-verified`.
+ */
+function buildLandUseAbsence(input: LandUseAbsenceInput): LandUseAbsence {
+  const { parcelNodeId, countyFips, countyName, apn, roll, rollJoinKey, nowIso } = input;
+  const year = roll?.declaredTaxYear ?? null;
+  const entitlement = `${input.access.discoverability}/${input.access.entitlement}`;
+  const authority =
+    `${countyName} County CAD roll (cad_property) for county_fips ${countyFips}` +
+    (year != null ? ` at declared tax_year ${year}` : " (no declared CAD tax year)");
+
+  if (input.gateBlocked) {
+    return {
+      verdict: "lookup-failed",
+      authority,
+      scopeSearched:
+        `conformant-v1 cad-parcel-roll claim.propertyUseCode; cad_property ` +
+        `prop_id join REFUSED for county_fips ${countyFips} by the owner-match ` +
+        `integrity gate; situs-address recovery ` +
+        (input.situsRecoveryOffered ? "attempted" : "not supplied") +
+        `; entitlement bound ${entitlement}`,
+      asOf: nowIso,
+      basis:
+        `${parcelNodeId}: the prop_id land-use join is gate-blocked for county ` +
+        `${countyFips}, and situs-address recovery ` +
+        (input.situsRecoveryOffered
+          ? "did not accept (owners disagree, blank owner, blank situs, or no address match)"
+          : "was not supplied to the bake") +
+        "; land use is unmeasured here, not verified absent",
+    };
+  }
+
+  const scopeSearched =
+    `conformant-v1 cad-parcel-roll claim.propertyUseCode; cad_property prop_id ` +
+    `join key ${rollJoinKey ?? "unavailable"} at county_fips ${countyFips}` +
+    (year != null ? ` tax_year ${year}` : "") +
+    `; entitlement bound ${entitlement}`;
+
+  if (rollJoinKey == null) {
+    return {
+      verdict: "lookup-failed",
+      authority,
+      scopeSearched,
+      asOf: nowIso,
+      basis:
+        `${parcelNodeId}: claim.propertyUseCode is absent and no cad_property ` +
+        `join key could be formed for apn ${apn ?? "unresolved"}, so the CAD ` +
+        "roll was never consulted for this parcel",
+    };
+  }
+
+  if (roll == null || !roll.consulted) {
+    return {
+      verdict: "lookup-failed",
+      authority,
+      scopeSearched,
+      asOf: nowIso,
+      basis:
+        `${parcelNodeId}: claim.propertyUseCode is absent and the CAD roll for ` +
+        `county ${countyFips} was not consulted (` +
+        (roll == null
+          ? "no roll was supplied to the bake"
+          : "the county declares no CAD vintage, or cad_property is absent from this database") +
+        `), so join key ${rollJoinKey} was never looked up`,
+    };
+  }
+
+  return {
+    verdict: "absent-verified",
+    authority,
+    scopeSearched,
+    asOf: nowIso,
+    basis:
+      `${parcelNodeId}: claim.propertyUseCode is absent and the ${countyName} ` +
+      `CAD roll${year != null ? ` at tax_year ${year}` : ""} carries no coded ` +
+      `row for prop_id join key ${rollJoinKey} (${roll.byPropId.size} coded rows ` +
+      `read for county_fips ${countyFips})`,
+  };
+}
+
+const LAND_USE_ABSENCE_FIELDS = [
+  "verdict",
+  "authority",
+  "scopeSearched",
+  "asOf",
+  "basis",
+] as const;
+
+const LAND_USE_ABSENCE_VERDICTS: ReadonlySet<string> = new Set([
+  "absent-verified",
+  "lookup-failed",
+]);
+
+/**
+ * Refuse (throw, code LANDUSE_ABSENCE_UNEARNED) a payload whose land-use facet
+ * and coverage flag do not agree, or whose null land use carries no earned
+ * absence. This is the control that makes `landUse: null` +
+ * `facetCoverage.landUse: false` — the live shape — a write refusal rather
+ * than a silently under-counted facet. Verified by violation in
+ * `../nodeFacetBakeTier1ConformantLandUse.test.ts`.
+ */
+export function assertLandUseAbsenceEarned(payload: unknown): void {
+  const refuse = (why: string): never => {
+    throw Object.assign(new Error(`land-use facet: ${why}`), {
+      code: "LANDUSE_ABSENCE_UNEARNED",
+    });
+  };
+  const rec = asRecord(payload);
+  if (!rec) return refuse("payload is not an object");
+  const baseFacts = asRecord(rec.baseFacts);
+  const facetCoverage = asRecord(rec.facetCoverage);
+  const provenance = asRecord(rec.provenance);
+  if (!baseFacts || !facetCoverage || !provenance) {
+    return refuse("baseFacts, facetCoverage and provenance are all required");
+  }
+  const parcelNodeId = typeof rec.parcelNodeId === "string" ? rec.parcelNodeId.trim() : "";
+  if (!parcelNodeId) return refuse("parcelNodeId is required to check a per-parcel basis");
+  const covered = facetCoverage.landUse;
+  if (typeof covered !== "boolean") return refuse("facetCoverage.landUse must be a boolean");
+
+  if (baseFacts.landUse != null) {
+    if (covered !== true) {
+      return refuse(`${parcelNodeId} projects a land use but scores facetCoverage.landUse false`);
+    }
+    if (provenance.landUseAbsence != null) {
+      return refuse(`${parcelNodeId} projects a land use AND carries an absence record`);
+    }
+    return;
+  }
+
+  if (covered !== false) {
+    return refuse(`${parcelNodeId} has a null land use but scores facetCoverage.landUse true`);
+  }
+  const absence = asRecord(provenance.landUseAbsence);
+  if (!absence) {
+    return refuse(
+      `${parcelNodeId} has landUse null and facetCoverage.landUse false with no earned ` +
+        "absence at provenance.landUseAbsence; a bare null is not an absent-verified",
+    );
+  }
+  for (const field of LAND_USE_ABSENCE_FIELDS) {
+    const v = absence[field];
+    if (typeof v !== "string" || v.trim() === "") {
+      return refuse(`provenance.landUseAbsence.${field} is missing or blank for ${parcelNodeId}`);
+    }
+  }
+  if (!LAND_USE_ABSENCE_VERDICTS.has(absence.verdict as string)) {
+    return refuse(
+      `provenance.landUseAbsence.verdict is ${String(absence.verdict)}, not absent-verified or lookup-failed`,
+    );
+  }
+  if (!(absence.basis as string).includes(parcelNodeId)) {
+    return refuse(
+      `provenance.landUseAbsence.basis does not name ${parcelNodeId}; a basis identical ` +
+        "across parcels is a ceremony, not a justification",
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +852,8 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   "facets.base",
   "facetCoverage.tier1",
   "provenance.parcelJoin",
+  "provenance.landUseOrigin",
+  "provenance.landUseAbsence",
 ];
 
 function underPrefix(path: string, prefix: string): boolean {

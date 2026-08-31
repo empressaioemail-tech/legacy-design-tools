@@ -236,6 +236,77 @@ export async function fetchCountyLandUseByAddress(
 }
 
 /**
+ * A CAD roll land-use entry on the normalized prop_id join key. The field
+ * names are the ones the old txgio-keyed bake built its map with, so both
+ * bakes read one shape.
+ */
+export interface PropIdLandUseEntry {
+  landUseCode: string;
+  landUseVintage: string;
+}
+
+/**
+ * The county CAD roll on the prop_id key, PLUS what the read actually did.
+ *
+ * `consulted` is false when the county declares no CAD vintage or
+ * `cad_property` is not present in this database. Absent, zero and unmeasured
+ * are three different states: an empty map is NOT evidence that a parcel has
+ * no land use, and a caller that collapses the two would turn "we could not
+ * look" into "we looked and it is not there". `declaredTaxYear` is the
+ * vintage the read was pinned to, never a max(tax_year) fallback.
+ */
+export interface CountyLandUseRoll {
+  byPropId: Map<string, PropIdLandUseEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
+/**
+ * CAD roll keyed by prop_id at the DECLARED vintage. The SAME query the old
+ * Tier-1 bake ran for its land-use join, lifted here so the conformant bake
+ * reads the identical upstream through one function. READ-ONLY.
+ *
+ * This is a CAD-to-CAD join (cad_property.prop_id to the CAD parcel id).
+ * Seed does NOT apply. Seed risk was TxGIO-to-CAD (cross-namespace). One
+ * namespace, both sides CAD. 48209 and 48491 are clear on this join. Do not
+ * re-impose LANDUSE_JOIN_DISABLED_FIPS_SEED here. The join key is prop_id,
+ * never seed.
+ *
+ * Undeclared counties and a missing `cad_property` return `consulted: false`
+ * with an empty map (honest), never a max-year fallback.
+ */
+export async function fetchCountyLandUseRoll(
+  pool: QueryablePool,
+  fips: string,
+): Promise<CountyLandUseRoll> {
+  const byPropId = new Map<string, PropIdLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byPropId, declaredTaxYear: null, consulted: false };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byPropId, declaredTaxYear: declared.taxYear, consulted: false };
+  }
+  const r = await pool.query<{
+    prop_id: string;
+    property_use_code: string;
+    source_vintage: string;
+  }>(
+    `SELECT prop_id, property_use_code, source_vintage
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    byPropId.set(row.prop_id, {
+      landUseCode: row.property_use_code,
+      landUseVintage: row.source_vintage,
+    });
+  }
+  return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
+}
+
+/**
  * Resolve a situs-address-matched land-use through the per-match owner gate.
  *
  * Returns the CAD entry ONLY when an address match exists AND the TxGIO owner

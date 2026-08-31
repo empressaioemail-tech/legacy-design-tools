@@ -451,7 +451,16 @@ describe("the divergence instrument fails when it should", () => {
       ["access", "accessNormalizedFrom", "baked", "publishRunId", "shapeSource", "source"].sort(),
     );
     expect([...DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES].sort()).toEqual(
-      ["facetCoverage.tier1", "facets.base", "provenance.parcelJoin"].sort(),
+      [
+        "facetCoverage.tier1",
+        "facets.base",
+        "provenance.parcelJoin",
+        // Land-use projection (2026-08-31): which upstream supplied the value,
+        // and the earned absence written when none did. Both are new-shape
+        // only, so the old-versus-new leaf diff still compares strictly.
+        "provenance.landUseOrigin",
+        "provenance.landUseAbsence",
+      ].sort(),
     );
   });
 });
