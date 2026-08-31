@@ -15,6 +15,7 @@ import { parcelNodeId } from "./parcelNodeId";
 import {
   buildNormalizedStreetSql,
   localityFromStoredAddress,
+  normalizeStreetLine,
   parsePlaceSearchLocality,
   placeSearchLocalityMatches,
   situsSearchBareStreetVariants,
@@ -35,6 +36,12 @@ export type StreetSearchOk = {
   cap: number;
   received: number;
   truncated: boolean;
+  /** exact = every hit is the queried street. fuzzy = name-fragment match. */
+  match: "exact" | "fuzzy";
+  /** Distinct streets present in the returned hits. Empty when there are no hits. */
+  streets: string[];
+  /** Present only when match is fuzzy. Names the silence this field exists to kill. */
+  matchBasis?: "name-fragment";
 };
 
 export type StreetSearchRefuse = {
@@ -80,6 +87,35 @@ export function sliceStreetHits(
 ): { hits: StreetSearchHit[]; truncated: boolean } {
   const truncated = hits.length > cap;
   return { hits: hits.slice(0, cap), truncated };
+}
+
+/** House-number-stripped street from a stored situs. Null if unparseable. */
+export function streetNameFromSitus(situs: string): string | null {
+  const line = normalizeStreetLine(situs);
+  if (!line) return null;
+  const tokens = line.split(" ").filter(Boolean);
+  if (tokens.length < 2) return null;
+  return tokens.slice(1).join(" ");
+}
+
+/**
+ * Keep the broad PINE-token match. Declare it when the hits are not the
+ * queried street. Falsifier: four fragment streets with match absent or exact.
+ */
+export function declareStreetMatch(
+  hits: ReadonlyArray<StreetSearchHit>,
+  query: string,
+): Pick<StreetSearchOk, "match" | "streets" | "matchBasis"> {
+  const variants = new Set(situsSearchBareStreetVariants(query));
+  const streets: string[] = [];
+  for (const hit of hits) {
+    const name = streetNameFromSitus(hit.situsAddress);
+    if (name && !streets.includes(name)) streets.push(name);
+  }
+  const exact =
+    streets.length === 0 || streets.every((street) => variants.has(street));
+  if (exact) return { match: "exact", streets };
+  return { match: "fuzzy", streets, matchBasis: "name-fragment" };
 }
 
 export async function searchParcelsByBareStreet(input: {
@@ -184,6 +220,7 @@ export async function searchParcelsByBareStreet(input: {
     cap,
     received: hits.length,
     truncated,
+    ...declareStreetMatch(hits, input.query),
   };
 }
 
