@@ -1,7 +1,9 @@
 import { envelopeHuman } from "./mcp-app.js";
 import {
   DERIVED_FIGURES_POLICY,
+  VOCABULARY,
   WIRE_DISPOSITION_DISPLAY_TEXT,
+  type VocabularyEntry,
 } from "./vocabulary.js";
 
 const PUNCTUATION_ONLY_SITUS_RE = /^[\s,.\-;:'"`]+$/;
@@ -778,4 +780,121 @@ export function normalizeR1ResponseText(cortexBodyText: string): string {
     // pass through non-JSON errors
   }
   return cortexBodyText;
+}
+
+/**
+ * P-91 v3 Q1. Mirrors RadiusSearchRefuse["code"] /
+ * StreetSearchRefuse["code"] in artifacts/api-server/src/lib/
+ * txgioRadiusSearch.ts / txgioStreetSearch.ts (read 2026-08-31). Not
+ * imported: this package has no workspace dependency on api-server (HTTP
+ * boundary only — see cortex-client.ts); it is a separate deployed
+ * service, not a library. If either source union grows a member, this one
+ * goes stale until updated by hand; declarePlaceSearchRefusal below fails
+ * closed on that drift (returns null, so the caller falls through to the
+ * ordinary declared-error path) rather than inventing a refusal shape for
+ * a code it does not recognise.
+ */
+export type RadiusSearchRefusalCode =
+  | "radius_invalid"
+  | "radius_exceeds_max"
+  | "radius_unbounded";
+
+export type StreetSearchRefusalCode =
+  | "bare_street_unbounded"
+  | "bare_street_not_a_street";
+
+export type PlaceSearchRefusalCode =
+  | RadiusSearchRefusalCode
+  | StreetSearchRefusalCode;
+
+const PLACE_SEARCH_REFUSAL_CODES: readonly PlaceSearchRefusalCode[] = [
+  "radius_invalid",
+  "radius_exceeds_max",
+  "radius_unbounded",
+  "bare_street_unbounded",
+  "bare_street_not_a_street",
+];
+
+function isPlaceSearchRefusalCode(
+  value: unknown,
+): value is PlaceSearchRefusalCode {
+  return (
+    typeof value === "string" &&
+    (PLACE_SEARCH_REFUSAL_CODES as readonly string[]).includes(value)
+  );
+}
+
+export type DeclaredPlaceSearchRefusal = {
+  status: "refused";
+  reason: PlaceSearchRefusalCode;
+  message: string;
+  reasonDisplayText: string;
+};
+
+/**
+ * The display text for one of the five closed place-search refusal codes,
+ * read from VOCABULARY (vocabulary.ts) — the one table both the wire and
+ * the panel read from, per that file's own stated design. Throws rather
+ * than falling back to the raw token: per vocabulary.ts's own
+ * requireString convention, a closed code with no display row is a defect
+ * in this package, not a value to paper over with the machine token
+ * standing in for its own translation. `vocabulary` is injectable so a
+ * test can observe that failure against a table missing one row, without
+ * mutating the real, shared VOCABULARY export.
+ */
+export function placeSearchRefusalDisplayText(
+  code: PlaceSearchRefusalCode,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): string {
+  const entry = vocabulary.find((e) => e.token === code);
+  if (!entry) {
+    throw new Error(
+      `vocabulary: no entry for place-search refusal code "${code}"`,
+    );
+  }
+  return entry.displayText;
+}
+
+/**
+ * P-91 v3 Q1. A 422 from radius-search or street-search is
+ * `{error, errorClass: "serve_refused", message}` (gtmErrorBody shape —
+ * gtmErrorClass.ts, brokeragePlaceRadiusSearch.ts,
+ * brokeragePlaceStreetSearch.ts): the producer looked at the request and
+ * answered honestly that it cannot bound the result. That is a DECLARED
+ * REFUSAL, not an upstream fault, and must never be folded into
+ * declareUpstreamNonOk's generic `status: "error"` envelope — doing so
+ * would file `radius_unbounded` next to a 502 gateway timeout under the
+ * same word, which is exactly the defect this function exists to not
+ * repeat (see the P-91 v3 Q1 build brief).
+ *
+ * Returns null for anything that is not one of the five closed codes
+ * (wrong errorClass, missing or empty message, or an unrecognised code) so
+ * the caller falls through to the ordinary declared-error path instead of
+ * inventing a refusal shape for a body that was never one.
+ */
+export function declarePlaceSearchRefusal(
+  bodyText: string,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): DeclaredPlaceSearchRefusal | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body.errorClass !== "serve_refused") return null;
+  if (!isPlaceSearchRefusalCode(body.error)) return null;
+  if (typeof body.message !== "string" || body.message.length === 0) {
+    return null;
+  }
+  return {
+    status: "refused",
+    reason: body.error,
+    message: body.message,
+    reasonDisplayText: placeSearchRefusalDisplayText(body.error, vocabulary),
+  };
 }

@@ -231,6 +231,50 @@ export const VOCABULARY: readonly VocabularyEntry[] = [
     meaning:
       "refusal.code: this facet was never attempted in the bake that produced this snapshot.",
   },
+  /**
+   * P-91 v3 Q1. The five closed refusal codes radius-search and
+   * street-search return as a 422 `serve_refused` body (gtmErrorClass.ts,
+   * txgioRadiusSearch.ts, txgioStreetSearch.ts, read 2026-08-31). Every one
+   * of these is a DECLARED REFUSAL, not an upstream fault: the producer
+   * looked at the request and answered honestly that it will not (or
+   * cannot) bound the result. tool-honesty.ts's declarePlaceSearchRefusal
+   * reads the display text for these five back out of this table, so the
+   * word the model sees and the word documented here cannot drift apart.
+   * No numeric threshold (the radius max, the candidate ceiling) is
+   * hardcoded into any meaning below: those values live in api-server, a
+   * repo this package has no dependency on and cannot verify was not
+   * bumped since this was written.
+   */
+  {
+    token: "radius_invalid",
+    displayText: "Invalid radius search input",
+    meaning:
+      "serve_refused reason (near): lat, lng, or radiusFt was missing, non-finite, or radiusFt was not a positive number. A caller-input problem on this specific call, not a claim about the area.",
+  },
+  {
+    token: "radius_exceeds_max",
+    displayText: "Radius exceeds the maximum",
+    meaning:
+      "serve_refused reason (near): radiusFt exceeded the stated maximum this search allows. Lower the radius and retry; not a claim that no parcels exist out there.",
+  },
+  {
+    token: "radius_unbounded",
+    displayText: "Too many parcels in that radius",
+    meaning:
+      "serve_refused reason (near): the candidate parcel count for that point and radius exceeded what this search can bound honestly. Too many parcels in that radius to answer, not that the search failed; narrow the radius or lower cap.",
+  },
+  {
+    token: "bare_street_unbounded",
+    displayText: "Street name needs a locality",
+    meaning:
+      "serve_refused reason (street): a bare street name with no city, ZIP, or countyFips was refused rather than run as an unbounded contains across every county in coverage. Add a city, ZIP, or countyFips and retry.",
+  },
+  {
+    token: "bare_street_not_a_street",
+    displayText: "Not a bare street name",
+    meaning:
+      "serve_refused reason (street): the query reads as a house-number-prefixed address, not a bare street name. Use find_parcel's plain query (or near) for one specific address instead of street.",
+  },
 ] as const;
 
 export const VOCABULARY_RESOURCE_URI = "docs://smartsite/vocabulary-p91v3.json";

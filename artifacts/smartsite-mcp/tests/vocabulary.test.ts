@@ -42,6 +42,11 @@ const REQUIRED_TOKENS = [
   "depth_not_implemented",
   "declined-in-bake",
   "not-in-bake",
+  "radius_invalid",
+  "radius_exceeds_max",
+  "radius_unbounded",
+  "bare_street_unbounded",
+  "bare_street_not_a_street",
 ] as const;
 
 function entryFor(token: string): VocabularyEntry {
@@ -51,9 +56,15 @@ function entryFor(token: string): VocabularyEntry {
 }
 
 describe("VOCABULARY (V1)", () => {
-  it("has between 15 and 20 entries", () => {
+  it("has between 15 and 25 entries", () => {
+    // P-91 v3 Q1 added the five closed place-search refusal codes
+    // (radius_invalid, radius_exceeds_max, radius_unbounded,
+    // bare_street_unbounded, bare_street_not_a_street), 19 -> 24. The
+    // upper bound moved from 20 to 25 to admit that and leave one slot;
+    // it is not re-derived from VOCABULARY.length itself (that would make
+    // this check unable to fail on an unbounded table).
     expect(VOCABULARY.length).toBeGreaterThanOrEqual(15);
-    expect(VOCABULARY.length).toBeLessThanOrEqual(20);
+    expect(VOCABULARY.length).toBeLessThanOrEqual(25);
   });
 
   it("every token is unique", () => {
