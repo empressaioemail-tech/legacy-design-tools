@@ -34,6 +34,11 @@ import {
 } from "../lib/peEntitlement";
 import { setPeDevRole } from "../lib/peIdentity";
 import { readAiConnections } from "../lib/peAiConnections";
+import { readActiveUnlocks } from "../lib/peUnlocksRead";
+import {
+  parseActivationEvent,
+  recordActivationEvent,
+} from "../lib/peActivationEvents";
 import {
   cancelTeamInvitation,
   createTeamInvitation,
@@ -2015,6 +2020,90 @@ router.patch(
     } catch (err) {
       const mapped = teamErrorBody(err);
       res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+/**
+ * P-98 — every ACTIVE unlock on this account, with its expiry.
+ *
+ * `GET /entitlement` with `?parcelNodeId=` answers "is this one parcel
+ * unlocked". It cannot answer "what is unlocked, and what is about to lapse",
+ * which is the next-action rail's highest-intent rung. This route is that
+ * read, and it is a sibling of `/entitlement` rather than a widening of it:
+ * the existing route's shape is pinned by the R1 contract and stays untouched.
+ *
+ * Signed in only. There is no account-less answer to an account question.
+ * Anonymous callers get 401, not an empty list — an empty list would say
+ * "you have unlocked nothing", which is a claim about an account that was
+ * never identified.
+ *
+ * IMPORTANT, CLIENT SIDE: this path must be in `DEEP_GET_EXACT` in
+ * hauska-map `apps/property-explorer/api/_lib/deep-allowlist.ts` or it
+ * returns 403 and the rail reads that as a failed read.
+ */
+router.get(
+  "/property-explorer/v1/entitlement/unlocks",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const ownerUserId = resolvePeOwnerUserId(req);
+    if (!ownerUserId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      res.status(200).json(await readActiveUnlocks(ownerUserId));
+    } catch {
+      // Fail LOUD. An unreadable unlock list must not degrade to an empty
+      // one: the rail would then go quiet, which is indistinguishable from
+      // an account that genuinely has nothing expiring.
+      res.status(500).json({ error: "unlocks_unavailable" });
+    }
+  },
+);
+
+/**
+ * P-98 — record one activation event (a ladder rung was shown, or acted on).
+ *
+ * Scoped to the signed-in PE user. `gtm_events` is keyed on `install_id` for
+ * the browser extension and cannot answer a question about an account.
+ *
+ * Body: `{ event_type: "shown" | "acted", action_id, surface? }`.
+ *
+ * REFUSES rather than defaults. An unknown `event_type` or `action_id` is a
+ * 400 naming the allowed set, never a row written under a substituted value:
+ * this table is the only activation measurement that will exist, and a
+ * fabricated row is indistinguishable from a real one once written. The 400
+ * body carries the vocabulary so a client/server drift explains itself the
+ * first time anyone reads a response.
+ *
+ * The SERVER always declares its failures. The client is separately
+ * instructed to drop failed events silently, which is an acceptable
+ * degradation only because it is deliberate on that side and declared here.
+ *
+ * IMPORTANT, CLIENT SIDE: this path must be in `DEEP_POST_EXACT` in
+ * hauska-map `apps/property-explorer/api/_lib/deep-allowlist.ts` or it
+ * returns 403 and no activation event is ever recorded.
+ */
+router.post(
+  "/property-explorer/v1/activation-events",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const ownerUserId = resolvePeOwnerUserId(req);
+    if (!ownerUserId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = parseActivationEvent(req.body);
+    if (!parsed.ok) {
+      res.status(400).json(parsed.refusal);
+      return;
+    }
+    try {
+      const event = await recordActivationEvent(ownerUserId, parsed.value);
+      res.status(201).json({ ok: true, event });
+    } catch {
+      res.status(500).json({ error: "activation_event_not_recorded" });
     }
   },
 );

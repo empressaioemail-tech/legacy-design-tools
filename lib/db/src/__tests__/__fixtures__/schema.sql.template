@@ -1247,6 +1247,21 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: pe_activation_events; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_activation_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_user_id text NOT NULL,
+    event_type text NOT NULL,
+    action_id text NOT NULL,
+    surface text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_activation_events_action_id_chk CHECK ((action_id <> ''::text)),
+    CONSTRAINT pe_activation_events_event_type_chk CHECK ((event_type = ANY (ARRAY['shown'::text, 'acted'::text]))),
+    CONSTRAINT pe_activation_events_surface_chk CHECK (((surface IS NULL) OR (surface <> ''::text)))
+);
+
+
 -- Name: pe_ai_connections; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_ai_connections (
@@ -2787,6 +2802,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_activation_events pe_activation_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
+    ADD CONSTRAINT pe_activation_events_pkey PRIMARY KEY (id);
+
+
 -- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
@@ -3746,6 +3767,16 @@ CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: pe_activation_events_action_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (action_id, created_at);
+
+
+-- Name: pe_activation_events_owner_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_activation_events_owner_user_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (owner_user_id, created_at);
+
+
 -- Name: pe_ai_connections_owner_client_uidx; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id, client_name);
@@ -4512,6 +4543,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
+
+
+-- Name: pe_activation_events pe_activation_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
+    ADD CONSTRAINT pe_activation_events_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_ai_connections pe_ai_connections_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
