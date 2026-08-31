@@ -24,16 +24,32 @@ export type PeAiConnectionsRead = {
 /**
  * Does this client name identify a Claude host?
  *
- * Case-insensitive prefix on the trimmed name. Claude hosts announce
- * themselves as `claude-ai` (web and desktop), `claude-code`, and
- * `Claude Desktop` depending on surface, and a prefix covers all of them
- * without enumerating a list that goes stale the next time one is renamed.
+ * TWO PREFIXES, and the second one was MEASURED, not guessed. The first cut of
+ * this function matched only `claude`, reasoning from the names I knew:
+ * `claude-ai`, `claude-code`, `Claude Desktop`. Then a real connect was
+ * observed on 2026-08-31 and wrote THREE rows for one account:
  *
- * A PREFIX, not a substring: substring would match any client with "claude"
- * anywhere in its name, including a third-party tool that merely mentions it.
+ *   claude-ai           v0.1.0
+ *   Anthropic/ClaudeAI  v1.0.0
+ *   Anthropic/Toolbox   v1.0.0
+ *
+ * Two of the three do not begin with "claude". Today that is masked, because
+ * the same connect also writes `claude-ai` and one match is enough. It is
+ * still a live false-negative: a surface that announced only `Anthropic/...`
+ * would read as "no Claude connected" while the connector was working, and the
+ * card would show setup instructions to someone already set up.
+ *
+ * `anthropic/` carries the SLASH deliberately. It is what makes this a vendor
+ * namespace rather than a word: "anthropicity" or a third party calling itself
+ * "Anthropic Helper" does not match, but every first-party `Anthropic/X`
+ * client does, including ones not yet named here.
+ *
+ * Both are PREFIXES, never substrings: a substring match would accept any
+ * client that merely mentions Claude or Anthropic somewhere in its name.
  */
 export function isClaudeClient(clientName: string): boolean {
-  return clientName.trim().toLowerCase().startsWith("claude");
+  const n = clientName.trim().toLowerCase();
+  return n.startsWith("claude") || n.startsWith("anthropic/");
 }
 
 /**
