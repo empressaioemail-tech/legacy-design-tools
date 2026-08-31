@@ -79,4 +79,19 @@ describe("parseSubdivisionLotBlockFromLegal", () => {
       subdivision: null,
     });
   });
+
+  it("extracts BLOCK in full — the retired BLK(?:OCK)? pattern cannot", () => {
+    const retired = /\bBLK(?:OCK)?\.?\s+(\d+[A-Z]?)\b/i;
+    expect(retired.test("BLOCK 3")).toBe(false);
+    expect(retired.test("PECAN GROVE BLOCK 3 LOT 5")).toBe(false);
+    expect(parseSubdivisionLotBlockFromLegal("BLOCK 3").block).toBe("3");
+    expect(parseSubdivisionLotBlockFromLegal("BLOCK 12A").block).toBe("12A");
+    expect(
+      parseSubdivisionLotBlockFromLegal("PECAN GROVE BLOCK 3 LOT 5"),
+    ).toEqual({
+      lot: "5",
+      block: "3",
+      subdivision: null,
+    });
+  });
 });
