@@ -14,6 +14,10 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { platform } from "node:process";
 
 const require = createRequire(
   join(dirname(fileURLToPath(import.meta.url)), "../../lib/db/package.json"),
@@ -45,6 +49,46 @@ const CURRENT_BLOCK_PATTERN = /\bBL(?:OC)?K\.?\s+(\d+[A-Z]?)\b/i;
 function parseBlock(legal) {
   if (!legal?.trim()) return null;
   return legal.trim().match(CURRENT_BLOCK_PATTERN)?.[1]?.trim() ?? null;
+}
+
+async function invokeWorkerRun(jobId) {
+  if (platform === "win32") {
+    const bodyPath = join(tmpdir(), `records-worker-run-${jobId}.json`);
+    writeFileSync(bodyPath, JSON.stringify({ jobId }));
+    try {
+      const body = execFileSync(
+        "curl.exe",
+        [
+          "-s",
+          "-w",
+          "\n%{http_code}",
+          "-X",
+          "POST",
+          WORKER_URL,
+          "-H",
+          "Content-Type: application/json",
+          "--data-binary",
+          `@${bodyPath}`,
+        ],
+        { encoding: "utf8" },
+      );
+      const lines = body.trimEnd().split("\n");
+      const httpStatus = Number(lines.pop());
+      return { httpStatus, body: lines.join("\n") };
+    } finally {
+      try {
+        unlinkSync(bodyPath);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobId }),
+  });
+  return { httpStatus: res.status, body: await res.text() };
 }
 
 const pool = new pg.Pool({ connectionString: DATABASE_URL });
@@ -166,12 +210,7 @@ async function main() {
     );
     const jobId = inserted.rows[0].id;
 
-    const workerRes = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId }),
-    });
-    const workerBody = await workerRes.text();
+    const { httpStatus, body: workerBody } = await invokeWorkerRun(jobId);
 
     const final = await waitForTerminal(jobId);
 
@@ -192,7 +231,7 @@ async function main() {
       ...plan,
       action: "ran",
       jobId,
-      workerHttpStatus: workerRes.status,
+      workerHttpStatus: httpStatus,
       workerBodySnippet: workerBody.slice(0, 300),
       finalStatus: final.status,
       errorCode: final.error_code,
