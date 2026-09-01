@@ -121,6 +121,7 @@ import {
   type LandUseSource,
   type Tier1FacetPayload,
 } from "./lib/nodeFacetTier1Assemble";
+import { cadRollFromClaim } from "./lib/cadRollValue";
 import {
   columnExists,
   fetchParcelRowsByPropIds,
@@ -503,6 +504,14 @@ export function buildTier1Payload(
     situsState: str(row.situs_state),
     situsZip: str(row.situs_zip),
     landUse: luFacet,
+    cadRoll: cadRollFromClaim({
+      taxYear: null,
+      marketValue: null,
+      assessedValue: null,
+      landValue: null,
+      improvementValue: null,
+      livingAreaSqft: null,
+    }),
     landUseAddressRecovered,
     landUseGateBlocked,
     ring,
