@@ -252,6 +252,150 @@ describe("GET /entitlement property block (pinned contract)", () => {
   });
 });
 
+/**
+ * P-98: `parcelNodeId` became OPTIONAL so account-scoped Settings can read
+ * entitlement at all. Before this the route returned early without one and
+ * Settings showed Access as "Not read" for every account, paid included.
+ *
+ * The keys asserted here are `origin/main`'s, in `origin/main`'s order. The
+ * with-parcel response must not move; only the authenticated-no-parcel path
+ * changes.
+ */
+describe("GET /entitlement without a parcel (P-98 account scope)", () => {
+  const MAIN_BASE_KEYS = [
+    "authenticated",
+    "tier",
+    "subscriptionTier",
+    "tenantId",
+    "userId",
+    "devRole",
+    "entitlementSource",
+  ];
+
+  it("authenticated + no parcel returns the account block with no property key", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({
+        subscriptionTier: "team",
+        seatsPurchased: 5,
+        billingInterval: "month",
+        entitlementSource: "stripe_sub",
+      })
+      .where(eq(peUserEntitlements.ownerUserId, USER_PAID));
+
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([
+      ...MAIN_BASE_KEYS,
+      "seatsPurchased",
+      "billingInterval",
+    ]);
+    expect(res.body.tier).toBe("paid");
+    expect(res.body.seatsPurchased).toBe(5);
+    expect(res.body.billingInterval).toBe("month");
+    expect("property" in res.body).toBe(false);
+  });
+
+  it("VIOLATION: a subscriber with no stored interval reads null, not month", async () => {
+    // Every row written before migration 0092, and anyone whose billed price
+    // id matched nothing we configured. Nothing backfills them, on purpose.
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.billingInterval).toBeNull();
+    expect(res.body.seatsPurchased).toBeNull();
+  });
+
+  it("VIOLATION: the WITH-parcel response keys are unchanged by P-98", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({ billingInterval: "year", seatsPurchased: 3 })
+      .where(eq(peUserEntitlements.ownerUserId, USER_PAID));
+
+    const res = await asUser(
+      request(getApp()).get(
+        `/api/property-explorer/v1/entitlement?parcelNodeId=${encodeURIComponent(PARCEL)}`,
+      ),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([...MAIN_BASE_KEYS, "property"]);
+    expect(Object.keys(res.body.property)).toEqual([
+      "parcelNodeId",
+      "unlocked",
+      "freeMessagesUsed",
+      "freeMessagesLimit",
+    ]);
+    expect("billingInterval" in res.body).toBe(false);
+    expect("seatsPurchased" in res.body).toBe(false);
+  });
+
+  it("VIOLATION: anonymous + no parcel keeps today's body, no account fields", async () => {
+    const res = await request(getApp()).get(
+      "/api/property-explorer/v1/entitlement",
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([...MAIN_BASE_KEYS]);
+    expect(res.body.authenticated).toBe(false);
+  });
+
+  it("VIOLATION: an anonymous caller with a MALFORMED parcel still gets 200, not 400", async () => {
+    // Guard precedence. On origin/main the anonymous check and the parcel
+    // check were one compound condition, so an anonymous caller never
+    // reached the validity check. Splitting them must not reorder that.
+    const res = await request(getApp()).get(
+      "/api/property-explorer/v1/entitlement?parcelNodeId=not-a-node-id",
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([...MAIN_BASE_KEYS]);
+  });
+
+  it("an AUTHENTICATED caller with a malformed parcel still gets 400", async () => {
+    const res = await asUser(
+      request(getApp()).get(
+        "/api/property-explorer/v1/entitlement?parcelNodeId=not-a-node-id",
+      ),
+      USER_PAID,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_parcel_node_id");
+  });
+
+  it("an empty parcelNodeId= is treated as absent, not as malformed", async () => {
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement?parcelNodeId="),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect("property" in res.body).toBe(false);
+    expect("billingInterval" in res.body).toBe(true);
+  });
+
+  it("VIOLATION: dev role does not synthesise seats or an interval", async () => {
+    // resolvePeEntitlement elevates tier and subscriptionTier for dev role.
+    // It must NOT invent billing facts: an operator account bought nothing.
+    await db
+      .update(peUserEntitlements)
+      .set({ devRole: true })
+      .where(eq(peUserEntitlements.ownerUserId, USER_FREE));
+
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_FREE,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.tier).toBe("paid");
+    expect(res.body.subscriptionTier).toBe("team");
+    expect(res.body.billingInterval).toBeNull();
+    expect(res.body.seatsPurchased).toBeNull();
+  });
+});
+
 describe("paid-OR-property-unlocked gate on report routes", () => {
   it("free user still 402s on research/brief", async () => {
     const res = await asUser(

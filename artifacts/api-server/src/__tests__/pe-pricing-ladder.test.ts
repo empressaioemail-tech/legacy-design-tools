@@ -633,6 +633,175 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     expect(subscriptionTierGrantsStudio(row?.subscriptionTier ?? null)).toBe(false);
   });
 
+  /**
+   * P-98: `billing_interval` is derived from the BILLED price id through our
+   * own configured env price ids -- the inverse of stripePriceIdForPeTier --
+   * never from a Stripe API field like price.recurring.interval or
+   * current_period_end, whose shapes track the API version this repo does
+   * not pin. The column is nullable and never defaulted: a fabricated
+   * "month" would make the rail offer "switch to annual" to somebody who
+   * already bought annual.
+   *
+   * No payload below sets `subscription`, so the empty-items fallback never
+   * reaches the network.
+   */
+  it("P-98: an annual checkout stores billing_interval=year", async () => {
+    process.env.STRIPE_SOLO_ANNUAL_PRICE_ID = SOLO_ANNUAL_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_year",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+        },
+        line_items: { data: [{ price: { id: SOLO_ANNUAL_PRICE }, quantity: 1 }] },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.billingInterval).toBe("year");
+  });
+
+  it("P-98: a monthly checkout stores billing_interval=month", async () => {
+    process.env.STRIPE_STUDIO_PRICE_ID = STUDIO_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_month",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "studio",
+        },
+        line_items: { data: [{ price: { id: STUDIO_PRICE }, quantity: 1 }] },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.billingInterval).toBe("month");
+  });
+
+  it("P-98 VIOLATION: an UNMATCHED billed price id stores null, not month", async () => {
+    // The tier still grants -- the grant keys off metadata.subscription_tier
+    // -- but the interval is unknown and says so. This is the whole point of
+    // the nullable column.
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_unknown",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+        },
+        line_items: {
+          data: [{ price: { id: "price_from_some_other_catalogue" }, quantity: 1 }],
+        },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("paid");
+    expect(row?.subscriptionTier).toBe("solo");
+    expect(row?.billingInterval).toBeNull();
+  });
+
+  it("P-98 VIOLATION: no billed items at all stores null, not month", async () => {
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_absent",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+        },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("paid");
+    expect(row?.billingInterval).toBeNull();
+  });
+
+  it("P-98 VIOLATION: metadata[billing_interval] alone does NOT set the column", async () => {
+    // metadata is what we ASKED Stripe for; the price id is what Stripe
+    // BILLED. Persisting the request as though it were the billed fact is
+    // exactly the fabrication this column exists to prevent. The session
+    // below declares "year" in metadata and bills nothing readable.
+    process.env.STRIPE_SOLO_ANNUAL_PRICE_ID = SOLO_ANNUAL_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_meta_only",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+          billing_interval: "year",
+        },
+      }),
+    );
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.billingInterval).toBeNull();
+  });
+
+  it("P-98: subscription.updated re-derives the interval, including monthly -> annual", async () => {
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    process.env.STRIPE_SOLO_ANNUAL_PRICE_ID = SOLO_ANNUAL_PRICE;
+    await db
+      .update(peUserEntitlements)
+      .set({ accessTier: "paid", subscriptionTier: "solo", billingInterval: "month" })
+      .where(eq(peUserEntitlements.ownerUserId, USER));
+
+    const { raw, signature } = signedWebhookPayload({
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_interval_switch",
+          object: "subscription",
+          status: "active",
+          customer: "cus_interval_switch",
+          metadata: { pe_user_id: USER, subscription_tier: "solo" },
+          items: { data: [{ price: { id: SOLO_ANNUAL_PRICE }, quantity: 1 }] },
+        },
+      },
+    });
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    // A stale "month" here is the single worst output: the rail would upsell
+    // annual billing to someone who just bought it.
+    expect(row?.billingInterval).toBe("year");
+  });
+
+  it("P-98 VIOLATION: churn clears the interval rather than leaving it stale", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({ accessTier: "paid", subscriptionTier: "solo", billingInterval: "year" })
+      .where(eq(peUserEntitlements.ownerUserId, USER));
+
+    const { raw, signature } = signedWebhookPayload({
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_interval_churn",
+          object: "subscription",
+          status: "canceled",
+          metadata: { pe_user_id: USER, subscription_tier: "solo" },
+        },
+      },
+    });
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("free");
+    expect(row?.billingInterval).toBeNull();
+  });
+
   it("legacy pro_sub session without subscription_tier maps to solo (never studio/team)", async () => {
     const { raw, signature } = signedWebhookPayload(
       checkoutCompletedEvent({

@@ -1393,7 +1393,9 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
     stripe_customer_id text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     subscription_tier text,
-    seats_purchased integer
+    seats_purchased integer,
+    billing_interval text,
+    CONSTRAINT pe_user_entitlements_billing_interval_chk CHECK (((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))
 );
 
 

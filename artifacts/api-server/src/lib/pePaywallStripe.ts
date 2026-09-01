@@ -27,7 +27,12 @@
  */
 
 import { eq } from "drizzle-orm";
-import { db, peUserEntitlements, type PeSubscriptionTier } from "@workspace/db";
+import {
+  db,
+  peUserEntitlements,
+  type PeBillingInterval,
+  type PeSubscriptionTier,
+} from "@workspace/db";
 import { logger } from "./logger";
 import {
   isStripeConfigured,
@@ -36,7 +41,10 @@ import {
   type StripeCheckoutResult,
 } from "./brokerageStripe";
 import { setPeStripeCustomerId } from "./peIdentity";
-import { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
+import {
+  PE_TEAM_INCLUDED_SEATS,
+  type StripePriceItem,
+} from "./peTeamSeatsFromStripe";
 
 export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
@@ -96,7 +104,13 @@ export const TIER_ANNUAL_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> =
   team: "STRIPE_TEAM_ANNUAL_PRICE_ID",
 };
 
-export type PeBillingInterval = "month" | "year";
+/**
+ * `"month" | "year"`. Defined once, on the column that stores it
+ * (`pe_user_entitlements.billing_interval`, migration 0092), and re-exported
+ * here so checkout, the webhook, and the store cannot drift into two
+ * vocabularies for one fact.
+ */
+export type { PeBillingInterval };
 
 /**
  * Resolve the Stripe price id for a ladder tier + billing interval from
@@ -111,6 +125,80 @@ export function stripePriceIdForPeTier(
   const envName =
     interval === "year" ? TIER_ANNUAL_PRICE_ENV[tier] : TIER_PRICE_ENV[tier];
   return process.env[envName]?.trim() || null;
+}
+
+/**
+ * Every price id we have configured for one interval, across all three
+ * ladder tiers. Read through {@link stripePriceIdForPeTier} rather than
+ * `process.env` directly, so this file has exactly ONE place that knows
+ * which env name carries which (tier, interval) pair. Unset and blank env
+ * vars are dropped by that helper and never enter the set — a sentinel must
+ * not be able to match.
+ */
+function configuredPeTierPriceIds(
+  interval: PeBillingInterval,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const tier of PE_SUBSCRIPTION_TIERS) {
+    const id = stripePriceIdForPeTier(tier, interval);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * INVERSE of {@link stripePriceIdForPeTier}: which interval did WE configure
+ * this price id under? (P-98.)
+ *
+ * The billed price id is an opaque identifier we chose and put in env
+ * ourselves, so mapping it back through our own config is a derivation from
+ * a source we control. That is deliberately NOT `price.recurring.interval`,
+ * `plan.interval`, or `current_period_end`: those are Stripe API fields
+ * whose shape moves with the API version, and nothing in this repo pins a
+ * version.
+ *
+ * FAIL CLOSED. A price id that matches nothing we configured returns null —
+ * never "month". So does a price id configured under BOTH a monthly and an
+ * annual env name: that is a misconfiguration, we cannot tell which one the
+ * customer was billed under, and a guess would be a fabricated fact about
+ * their billing.
+ */
+export function peBillingIntervalForPriceId(
+  priceId: string | null | undefined,
+): PeBillingInterval | null {
+  if (typeof priceId !== "string") return null;
+  const needle = priceId.trim();
+  if (!needle) return null;
+  const isMonthly = configuredPeTierPriceIds("month").has(needle);
+  const isAnnual = configuredPeTierPriceIds("year").has(needle);
+  // Neither (unknown price) and both (ambiguous config) are the same
+  // answer: we do not know, so we say so.
+  if (isMonthly === isAnnual) return null;
+  return isMonthly ? "month" : "year";
+}
+
+/**
+ * The interval a subscription's billed line items were priced at.
+ *
+ * Items that match no configured price id are SKIPPED, not treated as a
+ * refusal — a Team subscription legitimately carries the $25 extra-seat
+ * line alongside its base price, and only the base price is in the tier
+ * config. Two items resolving to DIFFERENT intervals is a contradiction
+ * (Stripe requires one interval per subscription) and refuses with null
+ * rather than taking the first. No matching item at all is also null:
+ * unknown, never "month".
+ */
+export function peBillingIntervalFromPriceItems(
+  items: readonly StripePriceItem[],
+): PeBillingInterval | null {
+  let resolved: PeBillingInterval | null = null;
+  for (const item of items) {
+    const interval = peBillingIntervalForPriceId(item.priceId);
+    if (!interval) continue;
+    if (resolved !== null && resolved !== interval) return null;
+    resolved = interval;
+  }
+  return resolved;
 }
 
 export function stripeTeamSeatPriceId(): string | null {

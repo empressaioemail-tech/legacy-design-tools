@@ -9,12 +9,17 @@ import {
   peUserEntitlements,
   pePropertyUnlocks,
   peChatMessageCounts,
+  type PeBillingInterval,
   type PeSubscriptionTier,
 } from "@workspace/db";
 import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 import { resolvePeUserIdFromTrustedServiceCall } from "./peServiceUserId";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import {
+  peWireBillingInterval,
+  type PeWireBillingInterval,
+} from "./peWireBillingInterval";
 
 /** Signed-in-free chat allowance per property (LOCK ruling 2026-07-29). */
 export const PE_FREE_CHAT_MESSAGE_LIMIT = 3;
@@ -42,6 +47,22 @@ export type PeEntitlementSnapshot = {
     | "stripe_unlock"
     | "dev"
     | null;
+  /**
+   * Checkout seat count on a Team subscription; `null` = unknown or not
+   * Team. NOT synthesised for dev role: `subscriptionTier` reads "team" for
+   * an operator account, but nobody bought seats for it, so this stays at
+   * whatever the row actually holds.
+   */
+  seatsPurchased: number | null;
+  /**
+   * Billing interval of the subscription (P-98, migration 0092), derived in
+   * the webhook from the billed price ids. `null` = UNKNOWN, which is what
+   * every row written before 0092 carries because nothing backfills them,
+   * and what a subscription whose price id matches no configured id carries.
+   * The `annual_upgrade` rung must fire on `"month"` alone; treating `null`
+   * as monthly would upsell annual subscribers.
+   */
+  billingInterval: PeBillingInterval | null;
 };
 
 /**
@@ -84,6 +105,10 @@ export async function resolvePeEntitlement(
       authenticated: false,
       devRole: false,
       entitlementSource: null,
+      // An anonymous caller has no account, so there is nothing to know.
+      // Absent, not zero and not "month".
+      seatsPurchased: null,
+      billingInterval: null,
     };
   }
   const row = await getPeEntitlementRow(userId);
@@ -109,6 +134,69 @@ export async function resolvePeEntitlement(
     authenticated: true,
     devRole: row.devRole,
     entitlementSource: row.devRole ? "dev" : row.entitlementSource,
+    // Passed through from the row, NOT elevated for dev role the way tier
+    // and subscriptionTier are above. A dev-role account bought nothing;
+    // inventing seats or an interval for it would be a fabricated billing
+    // fact, and this column exists precisely to keep those out.
+    seatsPurchased: row.seatsPurchased,
+    billingInterval: row.billingInterval,
+  };
+}
+
+/**
+ * The `GET /entitlement` body every caller has received since the R1 pinned
+ * contract (LOCK 2026-07-29). Field order is part of the contract: the
+ * with-parcel response is this object plus a `property` key, and P-98 must
+ * leave it byte-identical.
+ */
+export function peEntitlementBaseBody(snap: PeEntitlementSnapshot): {
+  authenticated: boolean;
+  tier: "free" | "paid";
+  subscriptionTier: PeSubscriptionTier | null;
+  tenantId: string;
+  userId: string | null;
+  devRole: boolean;
+  entitlementSource: PeEntitlementSnapshot["entitlementSource"];
+} {
+  return {
+    authenticated: snap.authenticated,
+    tier: snap.tier,
+    /** Ladder rung (LOCKED 2026-08-10) — the PE BFF gates Studio-only
+     *  surfaces (CAD, terrain, owner data) on studio|team, never bare tier. */
+    subscriptionTier: snap.subscriptionTier,
+    tenantId: snap.tenantId,
+    userId: snap.userId,
+    devRole: snap.devRole,
+    entitlementSource: snap.entitlementSource,
+  };
+}
+
+/**
+ * The account-scoped answer (P-98), returned when an authenticated caller
+ * asks `GET /entitlement` with no `parcelNodeId`. Settings is account-scoped
+ * and has no parcel to pass, which is why it read "Not read" for everyone
+ * before this: the route refused without one.
+ *
+ * There is deliberately NO `property` key. An omitted block and a block full
+ * of falsy values are different facts — the first says "you did not ask
+ * about a parcel", the second says "we looked and it is locked with zero
+ * messages used" — and the client distinguishes them.
+ *
+ * `tier` keeps its wire name here rather than becoming `accessTier`. It is
+ * the name on the pinned contract, the name anonymous callers already get,
+ * and the name every existing consumer reads; two names for one fact is the
+ * defect, not the fix.
+ */
+export function peEntitlementAccountBody(snap: PeEntitlementSnapshot): ReturnType<
+  typeof peEntitlementBaseBody
+> & {
+  seatsPurchased: number | null;
+  billingInterval: PeWireBillingInterval | null;
+} {
+  return {
+    ...peEntitlementBaseBody(snap),
+    seatsPurchased: snap.seatsPurchased,
+    billingInterval: peWireBillingInterval(snap.billingInterval),
   };
 }
 
