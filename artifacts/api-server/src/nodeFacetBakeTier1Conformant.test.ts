@@ -217,7 +217,12 @@ const PRODUCTION_THIN_ROW_2026_08_28 = {
 describe("old versus new is a test: same fixture parcel through both bakes", () => {
   it("stamp + claim: every leaf the old bake carries is on the conformant payload; nothing unallowed is added", () => {
     const diff = diffTier1KeyPaths(oldPayload(txgioRow()), newPayload(txgioRow()));
-    expect(diff.missing).toEqual([]);
+    // baseFacts.cadRoll is conformant-only populated content from the claim;
+    // the old txgio bake carries the keys as null leaves, the new shape as
+    // objects when values exist — exclude that prefix from the strict diff.
+    expect(diff.missing.filter((p) => !p.startsWith("baseFacts.cadRoll"))).toEqual(
+      [],
+    );
     expect(diff.unexpected).toEqual([]);
     // The old leaf set is not trivially small (zoning + provenance + envelope
     // are all present on a stamped parcel).
@@ -251,6 +256,13 @@ describe("old versus new is a test: same fixture parcel through both bakes", () 
       featureIndex: 24587,
       sourceVintage: "stratmap25-landparcels_48021_bastrop_202503",
     });
+    expect(n.baseFacts.cadRoll.marketValue).toEqual({
+      v: 100000,
+      source: "cad-parcel-roll",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft?.v).toBe(1200);
   });
 
   it("no stamp: zoning is an explicit null, envelope declines no-zoning-stamp, every key stays present", () => {
@@ -264,7 +276,9 @@ describe("old versus new is a test: same fixture parcel through both bakes", () 
     expect(hasKeyPath(n, "zoning")).toBe(true);
     expect(hasKeyPath(n, "envelope")).toBe(true);
     const diff = diffTier1KeyPaths(o, n);
-    expect(diff.missing).toEqual([]);
+    expect(diff.missing.filter((p) => !p.startsWith("baseFacts.cadRoll"))).toEqual(
+      [],
+    );
     expect(diff.unexpected).toEqual([]);
   });
 
@@ -460,6 +474,7 @@ describe("the divergence instrument fails when it should", () => {
         // only, so the old-versus-new leaf diff still compares strictly.
         "provenance.landUseOrigin",
         "provenance.landUseAbsence",
+        "baseFacts.cadRoll",
       ].sort(),
     );
   });
@@ -479,6 +494,11 @@ describe("claim reading and node identity", () => {
       situsZip: "78602",
       landAcres: 0.5,
       propertyUseCode: "B2",
+      marketValue: 100000,
+      assessedValue: 100000,
+      landValue: 10000,
+      improvementValue: 90000,
+      livingAreaSqft: 1200,
     });
     expect(readConformantCadClaim({})).toEqual({
       countyFips: null,
@@ -489,6 +509,11 @@ describe("claim reading and node identity", () => {
       situsZip: null,
       landAcres: null,
       propertyUseCode: null,
+      marketValue: null,
+      assessedValue: null,
+      landValue: null,
+      improvementValue: null,
+      livingAreaSqft: null,
     });
   });
 
@@ -506,6 +531,11 @@ describe("claim reading and node identity", () => {
       situsZip: "78756",
       landAcres: null,
       propertyUseCode: null,
+      marketValue: 2120,
+      assessedValue: null,
+      landValue: 0,
+      improvementValue: 0,
+      livingAreaSqft: null,
     });
     // A flat body with a use code and acreage reaches the bake too (until card F both baked null on every production row).
     const withUse = flatProductionBody("48021", "34137", 2025, { situsAddress: "908 PINE , BASTROP, TX 78602", situsCity: "BASTROP", situsZip: "78602", landAcres: 0.3815, propertyUseCode: "A1" });
@@ -573,11 +603,29 @@ describe("claim reading and node identity", () => {
     expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsZip");
     const thinned = { ...n, baseFacts: Object.fromEntries(Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "situsCity" && k !== "situsZip")) };
     const diff = diffTier1KeyPaths(o, thinned);
-    expect(diff.missing).toEqual(["baseFacts.situsCity", "baseFacts.situsZip"]);
-    expect(diffAgainstRequiredFacetPaths(thinned).missing).toEqual(["baseFacts.situsCity", "baseFacts.situsZip"]);
+    expect(diff.missing).toEqual([
+      "baseFacts.cadRoll.assessedValue",
+      "baseFacts.cadRoll.improvementValue",
+      "baseFacts.cadRoll.landValue",
+      "baseFacts.cadRoll.livingAreaSqft",
+      "baseFacts.cadRoll.marketValue",
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+    ]);
+    expect(diffAgainstRequiredFacetPaths(thinned).missing).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+    ]);
     // The literal 2026-08-28 production row for 48453:493738 (read 19:48Z) carried situsCity null and NO situsZip key.
     const productionRow = { ...n, baseFacts: { apn: "493738", acreage: null, landUse: null, situsCity: null, situsState: null, situsAddress: "4707 SHOALWOOD AVE" } };
-    expect(diffAgainstRequiredFacetPaths(productionRow).missing).toEqual(["baseFacts.situsZip"]);
+    expect(diffAgainstRequiredFacetPaths(productionRow).missing).toEqual([
+      "baseFacts.situsZip",
+      "baseFacts.cadRoll.marketValue",
+      "baseFacts.cadRoll.assessedValue",
+      "baseFacts.cadRoll.landValue",
+      "baseFacts.cadRoll.improvementValue",
+      "baseFacts.cadRoll.livingAreaSqft",
+    ]);
   });
 
   it("conformantAcreageFromClaim refuses zero, negative and non-finite (never a fabricated 0)", () => {

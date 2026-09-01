@@ -6,7 +6,6 @@
  * Unknown hatch overlays require an in-region label or the stub is refused.
  */
 
-export const US_SURVEY_FEET_PER_METRE = 3937 / 1200;
 export const SMARTSITE_PARCEL_URL_PREFIX = "https://smartsite.cloud/p/";
 
 export type DrawOverlayState =
@@ -162,6 +161,8 @@ export type AssembleParcelDrawInput = {
     | { state: "absent"; sourceVintage?: string | null }
     | { state: "refused"; code?: string };
 };
+
+export const US_SURVEY_FEET_PER_METRE = 3937 / 1200;
 
 export function metresToSurveyFeet(metres: number): number {
   return Math.round(metres * US_SURVEY_FEET_PER_METRE * 100) / 100;
