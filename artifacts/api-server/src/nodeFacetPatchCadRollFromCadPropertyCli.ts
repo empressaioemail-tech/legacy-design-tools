@@ -60,12 +60,14 @@ async function main() {
   let legalPresent = 0;
   let assessedPresent = 0;
 
+  type SnapshotPageRow = {
+    place_key: string;
+    payload_json: Record<string, unknown>;
+  };
+
   let afterKey: string | null = null;
   for (;;) {
-    const page = await neondb.query<{
-      place_key: string;
-      payload_json: Record<string, unknown>;
-    }>(
+    const page: pg.QueryResult<SnapshotPageRow> = await neondb.query<SnapshotPageRow>(
       `SELECT place_key, payload_json
          FROM place_layer_snapshots
         WHERE adapter_key = $1

@@ -28,6 +28,7 @@ const BOUNDARY_BODY = {
 const STRUCTURAL_PRESENT: StructuralFactRead = {
   state: "present",
   source: "structural-fact",
+  entityType: "cad_property",
   countyFips: "48021",
   propId: "34137",
   taxYear: 2025,
