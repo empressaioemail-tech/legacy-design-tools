@@ -16,10 +16,6 @@ import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 import { resolvePeUserIdFromTrustedServiceCall } from "./peServiceUserId";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
-import {
-  peWireBillingInterval,
-  type PeWireBillingInterval,
-} from "./peWireBillingInterval";
 
 /** Signed-in-free chat allowance per property (LOCK ruling 2026-07-29). */
 export const PE_FREE_CHAT_MESSAGE_LIMIT = 3;
@@ -186,17 +182,32 @@ export function peEntitlementBaseBody(snap: PeEntitlementSnapshot): {
  * the name on the pinned contract, the name anonymous callers already get,
  * and the name every existing consumer reads; two names for one fact is the
  * defect, not the fix.
+ *
+ * `billingInterval` goes out AS STORED -- `"month"` | `"year"` | `null`,
+ * Stripe's own recurring-interval grammar, the same strings the DDL CHECK in
+ * migration 0092 admits and the same strings `peBillingIntervalForPriceId`
+ * derives. There is deliberately no translation on this path (operator
+ * ruling 2026-08-31, P-98b): the column, the type, the wire and the client
+ * all speak one vocabulary. A short-lived `peWireBillingInterval` mapper
+ * turned these into `"monthly"`/`"annual"` for the client and was deleted
+ * with the ruling. Two vocabularies for one subject, bridged silently, is
+ * the defect class that cost this operation a re-stamp of 6.3M rows.
+ *
+ * The mapper's one real property was totality -- an unrecognised value
+ * yielded `null` rather than passing through. That property now rests on
+ * `pe_user_entitlements_billing_interval_chk`, which binds every writer
+ * including a raw connection, where a TypeScript union binds none of them.
  */
 export function peEntitlementAccountBody(snap: PeEntitlementSnapshot): ReturnType<
   typeof peEntitlementBaseBody
 > & {
   seatsPurchased: number | null;
-  billingInterval: PeWireBillingInterval | null;
+  billingInterval: PeBillingInterval | null;
 } {
   return {
     ...peEntitlementBaseBody(snap),
     seatsPurchased: snap.seatsPurchased,
-    billingInterval: peWireBillingInterval(snap.billingInterval),
+    billingInterval: snap.billingInterval,
   };
 }
 
