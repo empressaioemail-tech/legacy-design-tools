@@ -307,6 +307,104 @@ export async function fetchCountyLandUseRoll(
 }
 
 /**
+ * Full `cad_property` row at the DECLARED vintage, keyed by CAD prop_id.
+ * CAD-to-CAD. Seed does NOT apply. Used for dollar / living / year / legal
+ * / exemption fields. NEVER a cad-parcel-roll atom. ALL parcels at the
+ * declared year (not only those with a property_use_code).
+ *
+ * Undeclared counties and a missing `cad_property` return `consulted: false`.
+ */
+export interface PropIdCadPropertyEntry {
+  propId: string;
+  taxYear: number;
+  sourceVintage: string;
+  marketValue: number | null;
+  assessedValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  livingAreaSqft: number | null;
+  yearBuilt: number | null;
+  legalDescription: string | null;
+  exemptionCodes: string[] | null;
+}
+
+export interface CountyCadPropertyRoll {
+  byPropId: Map<string, PropIdCadPropertyEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
+function numericOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof v === "bigint") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+export async function fetchCountyCadPropertyRoll(
+  pool: QueryablePool,
+  fips: string,
+): Promise<CountyCadPropertyRoll> {
+  const byPropId = new Map<string, PropIdCadPropertyEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byPropId, declaredTaxYear: null, consulted: false };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byPropId, declaredTaxYear: declared.taxYear, consulted: false };
+  }
+  const r = await pool.query<{
+    prop_id: string;
+    tax_year: number;
+    source_vintage: string;
+    market_value: unknown;
+    assessed_value: unknown;
+    land_value: unknown;
+    improvement_value: unknown;
+    living_area_sqft: unknown;
+    year_built: unknown;
+    legal_description: string | null;
+    exemption_codes: string[] | null;
+  }>(
+    `SELECT prop_id, tax_year, source_vintage,
+            market_value, assessed_value, land_value, improvement_value,
+            living_area_sqft, year_built, legal_description, exemption_codes
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    byPropId.set(row.prop_id, {
+      propId: row.prop_id,
+      taxYear: row.tax_year,
+      sourceVintage: row.source_vintage,
+      marketValue: numericOrNull(row.market_value),
+      assessedValue: numericOrNull(row.assessed_value),
+      landValue: numericOrNull(row.land_value),
+      improvementValue: numericOrNull(row.improvement_value),
+      livingAreaSqft: numericOrNull(row.living_area_sqft),
+      yearBuilt: numericOrNull(row.year_built),
+      legalDescription:
+        typeof row.legal_description === "string" && row.legal_description.trim()
+          ? row.legal_description.trim()
+          : null,
+      exemptionCodes: Array.isArray(row.exemption_codes)
+        ? row.exemption_codes.filter(
+            (c): c is string => typeof c === "string" && c.trim() !== "",
+          )
+        : null,
+    });
+  }
+  return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
+}
+
+/**
  * Resolve a situs-address-matched land-use through the per-match owner gate.
  *
  * Returns the CAD entry ONLY when an address match exists AND the TxGIO owner

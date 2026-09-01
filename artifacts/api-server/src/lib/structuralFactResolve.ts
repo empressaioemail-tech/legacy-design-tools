@@ -18,6 +18,7 @@ export const STRUCTURAL_FACT_SOURCE = "structural-fact" as const;
 export type StructuralFactPresent = {
   state: "present";
   source: typeof STRUCTURAL_FACT_SOURCE;
+  entityType: "cad_property";
   countyFips: string;
   propId: string;
   taxYear: number;
@@ -61,7 +62,7 @@ export function structuralFactAbsentVerified(
     asOf,
     basis,
     ...classification,
-    entityType: "cad-parcel-roll",
+    entityType: "cad_property",
     provenanceClass: classification.provenanceClass ?? "Record",
     source: STRUCTURAL_FACT_SOURCE,
   };
@@ -131,9 +132,12 @@ export function resolveStructuralFactRead(opts: {
       opts.asOf,
     );
   }
+  const classification = absenceClassificationForEntityType("cad-parcel-roll");
   return {
     state: "present",
     source: STRUCTURAL_FACT_SOURCE,
+    ...classification,
+    entityType: "cad_property",
     countyFips,
     propId: normalizeCadPropId(propId),
     taxYear: opts.cadRow.taxYear,
