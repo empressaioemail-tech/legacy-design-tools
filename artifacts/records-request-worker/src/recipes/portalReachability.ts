@@ -48,14 +48,19 @@ export function portalReachabilityCompleteScope(
 
 export function portalUnreachableResult(
   step: PortalReachabilityStep,
-  nav: { ok: boolean; status?: number; errorMessage?: string },
+  nav: {
+    ok: boolean;
+    status?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  },
 ): RecordsRecipeResult {
   const detail =
     nav.errorMessage ??
     (nav.status != null ? `HTTP ${nav.status}` : "navigation failed");
   return {
     status: "failed",
-    errorCode: "portal-unreachable",
+    errorCode: nav.errorCode ?? "portal-unreachable",
     errorMessage: `Portal unreachable at step ${step.id} (${step.url}): ${detail}`,
   };
 }

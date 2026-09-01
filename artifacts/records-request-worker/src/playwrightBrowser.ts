@@ -12,6 +12,11 @@ import { applyInfragisticsValueSource } from "./applyInfragisticsValueSource.js"
 import { EXTRACT_RESULT_ROWS_SOURCE } from "./extractResultRowsSource.js";
 import { INSPECT_DOCUMENT_PURCHASE_SOURCE } from "./inspectDocumentPurchaseSource.js";
 import { sha256Hex } from "./lib/captureHash.js";
+import {
+  isPortalAccessBlockedStatus,
+  isWafOrRateLimitPageContent,
+  PORTAL_ACCESS_BLOCKED_CODE,
+} from "./portalAccessBlocked.js";
 import type { DocumentPurchaseSignal } from "./recipes/documentPurchase.js";
 import type {
   BrowserActionResult,
@@ -20,9 +25,16 @@ import type {
   RecordsRecipeBrowser,
   ResultRowExtract,
 } from "./recipes/types.js";
+import {
+  createPortalActionThrottle,
+  type PortalActionThrottle,
+} from "./throttle.js";
 
 const NAV_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 15_000;
+
+export const RECORDS_REQUEST_WORKER_USER_AGENT =
+  "RecordsRequestWorker/1.0 (Smart Site; +https://smartsite.cloud/records-request)";
 
 function actionError(err: unknown): BrowserActionResult {
   return {
@@ -31,9 +43,49 @@ function actionError(err: unknown): BrowserActionResult {
   };
 }
 
-export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
+async function detectPortalAccessBlock(
+  page: Page,
+  status: number | undefined,
+): Promise<PortalNavigationResult | null> {
+  if (status !== undefined && isPortalAccessBlockedStatus(status)) {
+    return {
+      ok: false,
+      status,
+      finalUrl: page.url(),
+      errorCode: PORTAL_ACCESS_BLOCKED_CODE,
+      errorMessage: `HTTP ${status}`,
+    };
+  }
+  try {
+    const content = await page.content();
+    if (isWafOrRateLimitPageContent(content)) {
+      return {
+        ok: false,
+        status,
+        finalUrl: page.url(),
+        errorCode: PORTAL_ACCESS_BLOCKED_CODE,
+        errorMessage: "portal presented WAF or rate-limit challenge",
+      };
+    }
+  } catch {
+    // Content read failure is not a block signal.
+  }
+  return null;
+}
+
+export function createPlaywrightBrowser(
+  page: Page,
+  options?: { throttle?: PortalActionThrottle },
+): RecordsRecipeBrowser {
+  const throttle = options?.throttle ?? createPortalActionThrottle();
+
   return {
+    async beforePortalAction(): Promise<void> {
+      await throttle.beforeAction();
+    },
+
     async goto(url: string): Promise<PortalNavigationResult> {
+      await throttle.beforeAction();
       try {
         const response = await page.goto(url, {
           timeout: NAV_TIMEOUT_MS,
@@ -46,6 +98,10 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
           };
         }
         const status = response.status();
+        const blocked = await detectPortalAccessBlock(page, status);
+        if (blocked) {
+          return blocked;
+        }
         const ok = response.ok() || (status >= 300 && status < 400);
         return {
           ok,
@@ -55,7 +111,15 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (message.includes("ERR_ABORTED") && page.url() && page.url() !== "about:blank") {
+        if (
+          message.includes("ERR_ABORTED") &&
+          page.url() &&
+          page.url() !== "about:blank"
+        ) {
+          const blocked = await detectPortalAccessBlock(page, undefined);
+          if (blocked) {
+            return blocked;
+          }
           return { ok: true, finalUrl: page.url() };
         }
         return {
@@ -151,27 +215,11 @@ export function createPlaywrightBrowser(page: Page): RecordsRecipeBrowser {
   };
 }
 
-/** Major version aligned with Playwright's bundled Chromium (see playwrightBrowser.test.ts). */
-const CHROME_MAJOR = "147";
-
-export const CHROME_USER_AGENT =
-  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_MAJOR}.0.0.0 Safari/537.36`;
-
-/** Client hint headers that match CHROME_USER_AGENT for WAF-sensitive portals (e.g. Travis tccsearch). */
-export const CHROME_CLIENT_HINTS_HEADERS: Readonly<Record<string, string>> = {
-  "sec-ch-ua": `"Google Chrome";v="${CHROME_MAJOR}", "Chromium";v="${CHROME_MAJOR}", "Not_A Brand";v="24"`,
-  "sec-ch-ua-mobile": "?0",
-  "sec-ch-ua-platform": '"Windows"',
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-};
-
 export async function createChromeBrowserContext(
   browser: Browser,
 ): Promise<BrowserContext> {
   return browser.newContext({
-    userAgent: CHROME_USER_AGENT,
-    extraHTTPHeaders: { ...CHROME_CLIENT_HINTS_HEADERS },
+    userAgent: RECORDS_REQUEST_WORKER_USER_AGENT,
     locale: "en-US",
     viewport: { width: 1920, height: 1080 },
   });
@@ -179,13 +227,14 @@ export async function createChromeBrowserContext(
 
 export async function withPlaywrightBrowser<T>(
   fn: (browser: RecordsRecipeBrowser) => Promise<T>,
+  options?: { throttle?: PortalActionThrottle },
 ): Promise<T> {
   let browser: Browser | null = null;
   try {
     browser = await chromium.launch({ headless: true });
     const context = await createChromeBrowserContext(browser);
     const page = await context.newPage();
-    const adapter = createPlaywrightBrowser(page);
+    const adapter = createPlaywrightBrowser(page, options);
     return await fn(adapter);
   } finally {
     if (browser) {

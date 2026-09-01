@@ -12,6 +12,7 @@ import type {
   RecordsRecipeContext,
   RecordsRecipeResult,
 } from "./types.js";
+import { recipeResultFromNavigation } from "../navigationFailure.js";
 
 export const PUBLICSEARCH_RECIPE_VERSION = "p85-publicsearch-v1";
 
@@ -94,12 +95,12 @@ export async function runPublicsearchRecipe(
   const captures: Array<Record<string, unknown>> = [];
 
   const entryNav = await browser.goto(portal.entryUrl);
-  if (!entryNav.ok) {
-    return {
-      status: "failed",
-      errorCode: "portal-unreachable",
-      errorMessage: `publicsearch entry unreachable (${portal.entryUrl}): ${entryNav.errorMessage ?? "navigation failed"}`,
-    };
+  const entryFailure = recipeResultFromNavigation(
+    entryNav,
+    `publicsearch entry unreachable (${portal.entryUrl})`,
+  );
+  if (entryFailure) {
+    return entryFailure;
   }
   stepsReached.push("open-entry");
 
@@ -109,12 +110,12 @@ export async function runPublicsearchRecipe(
   }
 
   const portalNav = await browser.goto(portal.portalUrl);
-  if (!portalNav.ok) {
-    return {
-      status: "failed",
-      errorCode: "portal-unreachable",
-      errorMessage: `publicsearch portal unreachable (${portal.portalUrl}): ${portalNav.errorMessage ?? "navigation failed"}`,
-    };
+  const portalFailure = recipeResultFromNavigation(
+    portalNav,
+    `publicsearch portal unreachable (${portal.portalUrl})`,
+  );
+  if (portalFailure) {
+    return portalFailure;
   }
   stepsReached.push("open-portal");
 
