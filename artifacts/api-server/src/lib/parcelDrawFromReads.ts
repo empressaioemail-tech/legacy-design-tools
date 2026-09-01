@@ -20,6 +20,10 @@ import {
   type DrawFrameAnchor,
   type ParcelDrawStub,
 } from "./parcelDrawStub";
+import {
+  cadRollAttrsFromOnRecord,
+  serializeTwinOnRecord,
+} from "./twinOnRecordSerialize";
 import { firstPresentSitusLabel } from "./situsCompose";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -187,6 +191,20 @@ function anchorFromQueryPoint(queryPoint: unknown): DrawFrameAnchor | null {
   return { lat, lng };
 }
 
+function mergeOnRecordAttrs(
+  draw: ParcelDrawStub,
+  onRecord: ReturnType<typeof serializeTwinOnRecord>,
+): ParcelDrawStub {
+  const attrs = { ...draw.attrs };
+  if (onRecord.apn) attrs.apn = onRecord.apn;
+  if (onRecord.acreage) attrs.acreage = onRecord.acreage;
+  if (onRecord.countyFips) attrs.countyFips = onRecord.countyFips;
+  if (onRecord.countyName) attrs.countyName = onRecord.countyName;
+  if (onRecord.situsState) attrs.situsState = onRecord.situsState;
+  Object.assign(attrs, cadRollAttrsFromOnRecord(onRecord));
+  return { ...draw, attrs };
+}
+
 export function tryAssembleParcelDrawFromReads(args: {
   parcelNodeId: string;
   facets: unknown;
@@ -203,7 +221,7 @@ export function tryAssembleParcelDrawFromReads(args: {
   const root = asRecord(args.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
   try {
-    return assembleParcelDraw({
+    const draw = assembleParcelDraw({
       parcelNodeId: args.parcelNodeId,
       label: situsLabel(args.parcelNodeId, args.facets),
       bakedAt: args.bakedAt,
@@ -219,6 +237,10 @@ export function tryAssembleParcelDrawFromReads(args: {
       well: wellInput(args.well),
       specialDistrict: specialDistrictInput(args.specialDistrict),
     });
+    return mergeOnRecordAttrs(
+      draw,
+      serializeTwinOnRecord(args.facets, args.parcelNodeId),
+    );
   } catch {
     return undefined;
   }

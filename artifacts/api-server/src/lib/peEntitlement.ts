@@ -27,8 +27,17 @@ export type PeEntitlementSnapshot = {
    * team. `null` for free users and unlock-only users. Legacy pre-ladder
    * paid rows (no stored rung) read as "solo" — never silently studio/team.
    * Dev-role users read as "team" so operator accounts clear every gate.
-   * The PE BFF gates Studio-only surfaces (CAD, terrain, owner data) on
-   * {@link subscriptionTierGrantsStudio} over this field.
+   *
+   * This field is RAW LADDER STATE. It is not a gate input for remote
+   * consumers, and P-104 is why: the PE BFF could not express Studio at all
+   * (`PeEntitlementTier = 'free' | 'paid'`), so it gated CAD and terrain on
+   * bare `paid` and served a $49 Solo subscriber the $129 Studio
+   * deliverables from 2026-08-24 until the P-104 fix. Two comments in this
+   * file asserted the opposite for that whole window. The answer a consumer
+   * gates on is now COMPUTED HERE and shipped as `studioGranted` on the
+   * `/entitlement` body — see {@link peEntitlementBaseBody}. A consumer that
+   * re-derives Studio from this field is writing a fourth copy of
+   * {@link subscriptionTierGrantsStudio}, which is the defect, not the fix.
    */
   subscriptionTier: PeSubscriptionTier | null;
   tenantId: string;
@@ -153,17 +162,36 @@ export function peEntitlementBaseBody(snap: PeEntitlementSnapshot): {
   userId: string | null;
   devRole: boolean;
   entitlementSource: PeEntitlementSnapshot["entitlementSource"];
+  studioGranted: boolean;
 } {
   return {
     authenticated: snap.authenticated,
     tier: snap.tier,
-    /** Ladder rung (LOCKED 2026-08-10) — the PE BFF gates Studio-only
-     *  surfaces (CAD, terrain, owner data) on studio|team, never bare tier. */
+    /** Ladder rung (LOCKED 2026-08-10), RAW. Gate on `studioGranted` below,
+     *  never on this field and never on bare `tier`. */
     subscriptionTier: snap.subscriptionTier,
     tenantId: snap.tenantId,
     userId: snap.userId,
     devRole: snap.devRole,
     entitlementSource: snap.entitlementSource,
+    /**
+     * P-104. THE SERVER COMPUTES THE STUDIO PREDICATE; consumers consume the
+     * answer. Studio-only surfaces are site-plan CAD, terrain export and
+     * owner data (LOCKED 2026-08-10 ladder).
+     *
+     * Appended LAST so every field ahead of it, and their order, are
+     * byte-identical to the R1 pinned contract (LOCK 2026-07-29).
+     *
+     * Dev role needs no special case here: `resolvePeEntitlement` already
+     * maps `devRole` to `subscriptionTier: "team"`, so the one predicate
+     * covers operator accounts too.
+     *
+     * A consumer that does not see this key is talking to a cortex-api
+     * older than P-104. Absent is UNMEASURED, not false: a consumer must
+     * refuse with that stated reason rather than silently reading it as a
+     * denied Studio entitlement or, worse, as a granted one.
+     */
+    studioGranted: subscriptionTierGrantsStudio(snap.subscriptionTier),
   };
 }
 
@@ -396,7 +424,10 @@ export async function consumePeFreeChatMessage(
  * property unlock for the parcel resolved from the request. When no
  * parcelNodeId is resolvable the gate degrades to paid-only — identical to
  * the old behavior, never a silent open. Terrain is NOT gated here: terrain
- * stays Pro-only, enforced PE-BFF-side off the `/entitlement` `tier` field.
+ * and site-plan CAD are Studio-only, enforced PE-BFF-side off the
+ * `/entitlement` `studioGranted` field this module computes (P-104). Until
+ * P-104 that sentence read "Pro-only ... off the `tier` field", which was
+ * true of the code and wrong about the product: `tier` is `paid` for Solo.
  */
 export function requirePePaidOrPropertyUnlocked(
   resolveParcelNodeId?: (req: Request) => string | null,
