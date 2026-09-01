@@ -33,8 +33,14 @@ const { peEntitlementAccountBody, peEntitlementBaseBody } = await import(
 type PeEntitlementSnapshot = Parameters<typeof peEntitlementBaseBody>[0];
 
 /**
- * The key list `origin/main` emitted, in `origin/main`'s order. Any addition,
- * removal, or reorder in the with-parcel response breaks the pinned contract.
+ * The key list the R1/P-98 contract emitted, in its order. Any removal or
+ * reorder of THESE keys breaks the pinned contract.
+ *
+ * P-104 DELIBERATELY WIDENS this body by exactly one key, appended last. The
+ * prefix stays frozen and is still asserted separately below, so a reorder or
+ * a drop inside the P-98 prefix still fails even though the total key list
+ * grew. Widening the contract is an amendment; it is recorded here rather
+ * than absorbed by relaxing the assertion.
  */
 const MAIN_BASE_KEYS = [
   "authenticated",
@@ -45,6 +51,9 @@ const MAIN_BASE_KEYS = [
   "devRole",
   "entitlementSource",
 ] as const;
+
+/** The P-104 contract: the P-98 prefix, then the computed Studio answer. */
+const BASE_KEYS = [...MAIN_BASE_KEYS, "studioGranted"] as const;
 
 const MAIN_PROPERTY_KEYS = [
   "parcelNodeId",
@@ -82,7 +91,7 @@ function anonymousSnapshot(): PeEntitlementSnapshot {
 }
 
 describe("with-parcel response (pinned contract, must not move)", () => {
-  it("is byte-identical to what origin/main emitted", () => {
+  it("is byte-identical to the P-104 contract", () => {
     const body = {
       ...peEntitlementBaseBody(paidTeamSnapshot()),
       property: {
@@ -95,11 +104,22 @@ describe("with-parcel response (pinned contract, must not move)", () => {
     expect(JSON.stringify(body)).toBe(
       '{"authenticated":true,"tier":"paid","subscriptionTier":"team",' +
         '"tenantId":"default","userId":"user-p98","devRole":false,' +
-        '"entitlementSource":"stripe_sub","property":{"parcelNodeId":"48055:10068",' +
+        '"entitlementSource":"stripe_sub","studioGranted":true,' +
+        '"property":{"parcelNodeId":"48055:10068",' +
         '"unlocked":true,"freeMessagesUsed":2,"freeMessagesLimit":3}}',
     );
-    expect(Object.keys(body)).toEqual([...MAIN_BASE_KEYS, "property"]);
+    expect(Object.keys(body)).toEqual([...BASE_KEYS, "property"]);
     expect(Object.keys(body.property)).toEqual([...MAIN_PROPERTY_KEYS]);
+  });
+
+  it("VIOLATION: the P-98 prefix is untouched by the P-104 widening", () => {
+    // The widening is exactly one key, appended. If a future change reorders
+    // or drops anything inside the frozen prefix, this fails even though the
+    // total key list would still "contain" studioGranted.
+    const keys = Object.keys(peEntitlementBaseBody(paidTeamSnapshot()));
+    expect(keys.slice(0, MAIN_BASE_KEYS.length)).toEqual([...MAIN_BASE_KEYS]);
+    expect(keys[keys.length - 1]).toBe("studioGranted");
+    expect(keys).toHaveLength(MAIN_BASE_KEYS.length + 1);
   });
 
   it("VIOLATION: the base body does NOT gain the account-only fields", () => {
@@ -107,20 +127,82 @@ describe("with-parcel response (pinned contract, must not move)", () => {
     // billingInterval to `base` would widen every with-parcel response too,
     // silently changing a contract the PE BFF is pinned to.
     const body = peEntitlementBaseBody(paidTeamSnapshot());
-    expect(Object.keys(body)).toEqual([...MAIN_BASE_KEYS]);
+    expect(Object.keys(body)).toEqual([...BASE_KEYS]);
     expect("seatsPurchased" in body).toBe(false);
     expect("billingInterval" in body).toBe(false);
     expect("property" in body).toBe(false);
   });
 
-  it("anonymous body is unchanged from origin/main", () => {
-    // Anonymous callers get the base body with or without a parcel, exactly
-    // as before. They have no account, so there is nothing to add.
+  it("anonymous body carries studioGranted false, never an absent key", () => {
+    // Anonymous callers get the base body with or without a parcel. They have
+    // no account, so studioGranted is a determined false, not an omission:
+    // the BFF distinguishes "server said no" from "server did not say".
     expect(JSON.stringify(peEntitlementBaseBody(anonymousSnapshot()))).toBe(
       '{"authenticated":false,"tier":"free","subscriptionTier":null,' +
         '"tenantId":"default","userId":null,"devRole":false,' +
-        '"entitlementSource":null}',
+        '"entitlementSource":null,"studioGranted":false}',
     );
+  });
+});
+
+describe("P-104 studioGranted — the server computes the predicate", () => {
+  it("VIOLATION: a Solo subscriber is paid and is NOT granted Studio", () => {
+    // The whole P-104 defect in one assertion. tier === "paid" is TRUE for a
+    // $49 Solo subscriber, which is why gating CAD and terrain on bare tier
+    // handed them the $129 deliverables.
+    const solo = peEntitlementBaseBody({
+      ...paidTeamSnapshot(),
+      subscriptionTier: "solo",
+    });
+    expect(solo.tier).toBe("paid");
+    expect(solo.studioGranted).toBe(false);
+  });
+
+  it("Studio and Team are granted", () => {
+    expect(
+      peEntitlementBaseBody({ ...paidTeamSnapshot(), subscriptionTier: "studio" })
+        .studioGranted,
+    ).toBe(true);
+    expect(
+      peEntitlementBaseBody({ ...paidTeamSnapshot(), subscriptionTier: "team" })
+        .studioGranted,
+    ).toBe(true);
+  });
+
+  it("VIOLATION: a paid row with an unknown rung fails CLOSED", () => {
+    // resolvePeEntitlement reads a stored null as "solo", but if a null ever
+    // reaches this function directly it must not read as granted.
+    const body = peEntitlementBaseBody({
+      ...paidTeamSnapshot(),
+      subscriptionTier: null,
+    });
+    expect(body.tier).toBe("paid");
+    expect(body.studioGranted).toBe(false);
+  });
+
+  it("the account body carries the same computed answer", () => {
+    expect(
+      peEntitlementAccountBody({ ...paidTeamSnapshot(), subscriptionTier: "solo" })
+        .studioGranted,
+    ).toBe(false);
+    expect(
+      peEntitlementAccountBody({ ...paidTeamSnapshot(), subscriptionTier: "studio" })
+        .studioGranted,
+    ).toBe(true);
+  });
+
+  it("studioGranted is a boolean on every path, never undefined", () => {
+    // An absent key on the wire is the BFF's "unmeasured" signal. The server
+    // must never produce it: every response here has looked and decided.
+    for (const snap of [
+      paidTeamSnapshot(),
+      anonymousSnapshot(),
+      { ...paidTeamSnapshot(), subscriptionTier: "solo" as const },
+      { ...paidTeamSnapshot(), subscriptionTier: null },
+    ]) {
+      expect(typeof peEntitlementBaseBody(snap).studioGranted).toBe("boolean");
+      expect("studioGranted" in peEntitlementBaseBody(snap)).toBe(true);
+    }
   });
 });
 
@@ -128,7 +210,7 @@ describe("without-parcel account response (P-98)", () => {
   it("carries the account block and OMITS the property key entirely", () => {
     const body = peEntitlementAccountBody(paidTeamSnapshot());
     expect(Object.keys(body)).toEqual([
-      ...MAIN_BASE_KEYS,
+      ...BASE_KEYS,
       "seatsPurchased",
       "billingInterval",
     ]);
