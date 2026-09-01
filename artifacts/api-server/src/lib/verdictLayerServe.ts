@@ -129,7 +129,7 @@ export function buildStructuralLookupFailedAbsence(
       `registry bulk_primary=true; declared vintage tier=${tier}; ` +
       "CAMA bulk export undeclared",
     ...classification,
-    entityType: "cad-parcel-roll",
+    entityType: "cad_property",
     provenanceClass: classification.provenanceClass ?? "Record",
   };
 }
@@ -156,7 +156,7 @@ export function buildCadPropertyJoinMissLookupFailed(
     asOf,
     basis: `No cad_property row at declared vintage for ${parcelNodeId}`,
     ...classification,
-    entityType: "cad-parcel-roll",
+    entityType: "cad_property",
     provenanceClass: classification.provenanceClass ?? "Record",
   };
 }

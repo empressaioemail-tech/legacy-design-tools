@@ -11,6 +11,7 @@
     "parcels-pmtiles-bake": "tsx src/parcelsPmtilesBakeCli.ts",
     "node-facet-bake-tier1": "tsx src/nodeFacetBakeTier1Cli.ts",
     "node-facet-bake-tier1-conformant": "tsx src/nodeFacetBakeTier1ConformantCli.ts",
+    "node-facet-patch-cad-roll": "tsx src/nodeFacetPatchCadRollFromCadPropertyCli.ts",
     "node-facet-bake-tier2": "tsx src/nodeFacetBakeTier2Cli.ts",
     "node-facet-bake-tier2-conformant": "tsx src/nodeFacetBakeTier2ConformantCli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyCadPropertyFactsToPayload,
+  cadPropertyFactsFromRow,
   cadRollFieldToWire,
+  cadRollFromCadProperty,
   cadRollFromClaim,
   cadRollToWire,
   cadRollWireHasPresentValue,
   cadRollWireThreeStatesHold,
+  emptyCadRoll,
   nonNegativeDollarOrNull,
   positiveDollarOrNull,
   positiveSqftOrNull,
@@ -13,6 +17,56 @@ import {
 import { serializeTwinOnRecord } from "../twinOnRecordSerialize";
 
 describe("cadRollValue", () => {
+  it("cadRollFromCadProperty is the bake mapper; source is cad_property", () => {
+    const baked = cadRollFromCadProperty({
+      taxYear: 2025,
+      marketValue: 397260,
+      assessedValue: null,
+      landValue: 80000,
+      improvementValue: 0,
+      livingAreaSqft: 2145,
+    });
+    expect(baked.marketValue?.source).toBe("cad_property");
+    expect(baked.assessedValue).toBeNull();
+    expect(baked.improvementValue).toEqual({
+      v: 0,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(emptyCadRoll().marketValue).toBeNull();
+  });
+
+  it("applyCadPropertyFactsToPayload writes cadRoll/year/legal and does not invent McLennan assessed", () => {
+    const facts = cadPropertyFactsFromRow({
+      taxYear: 2025,
+      marketValue: 88000,
+      assessedValue: null,
+      landValue: 20000,
+      improvementValue: 68000,
+      livingAreaSqft: null,
+      yearBuilt: null,
+      legalDescription: "ABS 12",
+      exemptionCodes: [],
+    });
+    const next = applyCadPropertyFactsToPayload(
+      { zoning: { district: "SF-1" }, baseFacts: { apn: "1", landUse: { code: "A1" } } },
+      facts,
+    );
+    expect(next.zoning).toEqual({ district: "SF-1" });
+    const bf = next.baseFacts as {
+      cadRoll: { assessedValue: unknown; marketValue: { v: number } };
+      yearBuilt: unknown;
+      legalDescription: { v: string };
+      exemptionCodes: unknown;
+    };
+    expect(bf.cadRoll.marketValue.v).toBe(88000);
+    expect(bf.cadRoll.assessedValue).toBeNull();
+    expect(bf.yearBuilt).toBeNull();
+    expect(bf.legalDescription.v).toBe("ABS 12");
+    expect(bf.exemptionCodes).toBeNull();
+  });
+
   it("nonNegativeDollarOrNull / positiveDollarOrNull keep stored 0; reject null and negative", () => {
     expect(nonNegativeDollarOrNull(null)).toBeNull();
     expect(nonNegativeDollarOrNull(-1)).toBeNull();
@@ -41,13 +95,13 @@ describe("cadRollValue", () => {
     });
     expect(baked.marketValue).toEqual({
       v: 397260,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
       valueBasis: "county-assessed",
     });
     expect(baked.livingAreaSqft).toEqual({
       v: 2145,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
     });
   });
@@ -65,13 +119,13 @@ describe("cadRollValue", () => {
     expect(baked.landValue).toBeNull();
     expect(baked.assessedValue).toEqual({
       v: 0,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2026",
       valueBasis: "county-assessed",
     });
     expect(baked.improvementValue).toEqual({
       v: 0,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2026",
       valueBasis: "county-assessed",
     });
@@ -93,7 +147,7 @@ describe("cadRoll falsifier (both arms)", () => {
     });
     expect(baked.improvementValue).toEqual({
       v: 0,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
       valueBasis: "county-assessed",
     });
@@ -101,7 +155,7 @@ describe("cadRoll falsifier (both arms)", () => {
     expect(wire.improvementValue).toMatchObject({
       state: "zero",
       v: 0,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
       valueBasis: "county-assessed",
     });
@@ -176,7 +230,7 @@ describe("cadRoll falsifier (both arms)", () => {
     expect(wire.marketValue).toMatchObject({
       state: "present",
       v: 100000,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
       valueBasis: "county-assessed",
     });
@@ -232,38 +286,38 @@ describe("cadRoll falsifier (both arms)", () => {
 
   it("cadRollWireThreeStatesHold fails on known violations (check verified by violating)", () => {
     const presentZero = {
-      marketValue: { state: "present" as const, v: 0, source: "cad-parcel-roll" as const, vintage: "2025", valueBasis: "county-assessed" as const },
-      assessedValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      landValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      improvementValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      livingAreaSqft: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
+      marketValue: { state: "present" as const, v: 0, source: "cad_property" as const, vintage: "2025", valueBasis: "county-assessed" as const },
+      assessedValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      landValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      improvementValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      livingAreaSqft: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
     } as unknown as CadRollWire;
     expect(cadRollWireThreeStatesHold(presentZero)).toBe(false);
 
     const absentWithV = {
-      marketValue: { state: "absent" as const, v: 0, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      assessedValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      landValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      improvementValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      livingAreaSqft: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
+      marketValue: { state: "absent" as const, v: 0, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      assessedValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      landValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      improvementValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      livingAreaSqft: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
     } as unknown as CadRollWire;
     expect(cadRollWireThreeStatesHold(absentWithV)).toBe(false);
 
     const zeroWrongV = {
-      marketValue: { state: "zero" as const, v: 1, source: "cad-parcel-roll" as const, vintage: "2025", valueBasis: "county-assessed" as const },
-      assessedValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      landValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      improvementValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      livingAreaSqft: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
+      marketValue: { state: "zero" as const, v: 1, source: "cad_property" as const, vintage: "2025", valueBasis: "county-assessed" as const },
+      assessedValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      landValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      improvementValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      livingAreaSqft: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
     } as unknown as CadRollWire;
     expect(cadRollWireThreeStatesHold(zeroWrongV)).toBe(false);
 
     const sqftZero = {
-      marketValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      assessedValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      landValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      improvementValue: { state: "absent" as const, source: "cad-parcel-roll" as const, vintage: "2025", basis: "x" },
-      livingAreaSqft: { state: "zero" as const, v: 0, source: "cad-parcel-roll" as const, vintage: "2025" },
+      marketValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      assessedValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      landValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      improvementValue: { state: "absent" as const, source: "cad_property" as const, vintage: "2025", basis: "x" },
+      livingAreaSqft: { state: "zero" as const, v: 0, source: "cad_property" as const, vintage: "2025" },
     } as CadRollWire;
     expect(cadRollWireThreeStatesHold(sqftZero)).toBe(false);
   });

@@ -274,7 +274,7 @@ describe("parcelDrawFromReads one-liners", () => {
           cadRoll: {
             marketValue: {
               v: 100000,
-              source: "cad-parcel-roll",
+              source: "cad_property",
               vintage: "2025",
               valueBasis: "county-assessed",
             },
@@ -289,7 +289,7 @@ describe("parcelDrawFromReads one-liners", () => {
     expect(draw?.attrs.marketValue).toMatchObject({
       state: "present",
       v: 100000,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
       valueBasis: "county-assessed",
     });
@@ -308,25 +308,25 @@ describe("parcelDrawFromReads one-liners", () => {
           cadRoll: {
             marketValue: {
               v: 45000,
-              source: "cad-parcel-roll",
+              source: "cad_property",
               vintage: "2025",
               valueBasis: "county-assessed",
             },
             assessedValue: {
               v: 45000,
-              source: "cad-parcel-roll",
+              source: "cad_property",
               vintage: "2025",
               valueBasis: "county-assessed",
             },
             landValue: {
               v: 45000,
-              source: "cad-parcel-roll",
+              source: "cad_property",
               vintage: "2025",
               valueBasis: "county-assessed",
             },
             improvementValue: {
               v: 0,
-              source: "cad-parcel-roll",
+              source: "cad_property",
               vintage: "2025",
               valueBasis: "county-assessed",
             },
@@ -338,7 +338,7 @@ describe("parcelDrawFromReads one-liners", () => {
     expect(draw?.attrs.improvementValue).toMatchObject({
       state: "zero",
       v: 0,
-      source: "cad-parcel-roll",
+      source: "cad_property",
       vintage: "2025",
       valueBasis: "county-assessed",
     });

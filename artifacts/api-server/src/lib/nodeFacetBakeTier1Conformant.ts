@@ -73,7 +73,7 @@ import {
   type BaseFacts,
   type Tier1FacetPayload,
 } from "./nodeFacetTier1Assemble";
-import { cadRollFromClaim } from "./cadRollValue";
+import { cadPropertyFactsFromRow } from "./cadRollValue";
 import type { ParcelJoinRow } from "./nodeFacetTier1ParcelJoin";
 import { ptadLandUseDescription } from "./ptadLandUse";
 
@@ -304,6 +304,31 @@ export interface ConformantLandUseRoll {
   consulted: boolean;
 }
 
+/**
+ * Declared-vintage `cad_property` rows keyed by CAD prop_id. Dollar / living
+ * / year / legal / exemption fields read ONLY from here. Seed does not
+ * apply. A missing input means the caller did not consult CAD and every
+ * cadRoll field bakes null (honest), never an atom claim.
+ */
+export interface ConformantCadPropertyRoll {
+  byPropId: ReadonlyMap<
+    string,
+    {
+      taxYear: number | null;
+      marketValue: unknown;
+      assessedValue: unknown;
+      landValue: unknown;
+      improvementValue: unknown;
+      livingAreaSqft: unknown;
+      yearBuilt?: unknown;
+      legalDescription?: unknown;
+      exemptionCodes?: unknown;
+    }
+  >;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
 export interface ConformantTier1Payload extends Omit<
   Tier1FacetPayload,
   "facetCoverage" | "provenance"
@@ -370,6 +395,13 @@ export interface ConformantTier1BuildInput {
    * resulting absence is `lookup-failed`, never `absent-verified`.
    */
   landUseRoll?: ConformantLandUseRoll;
+  /**
+   * Declared-vintage `cad_property` for dollar / living / year / legal /
+   * exemption. ALWAYS consulted when the CLI read the table. Seed does not
+   * apply (CAD-to-CAD on the parcel node's own CAD prop_id). OMITTING it
+   * bakes null cadRoll fields, never the atom claim.
+   */
+  cadPropertyRoll?: ConformantCadPropertyRoll;
   /**
    * Optional block set threaded into `landUseJoinKey` for key normalization.
    * Seed does NOT apply to the CAD-to-CAD landUse prop_id roll join (both
@@ -502,6 +534,16 @@ export function buildConformantTier1Payload(
 
   const ring = row ? firstRing(row.geometry) : null;
 
+  // CAD-to-CAD on the parcel node's own prop_id. landUseJoinKey is the
+  // TxGIO-to-CAD gate and returns null for Hays/Williamson — using it here
+  // would starve the two hollow-atom counties this card exists to fill.
+  const cadPropConsulted = input.cadPropertyRoll?.consulted === true;
+  const cadPropRow =
+    apn && cadPropConsulted
+      ? (input.cadPropertyRoll?.byPropId.get(apn) ?? null)
+      : null;
+  const cadFacts = cadPropertyFactsFromRow(cadPropRow);
+
   const tier1 = assembleTier1Payload({
     nodeId: parcelNodeId,
     countyFips,
@@ -513,7 +555,10 @@ export function buildConformantTier1Payload(
     situsState: row?.situs_state ?? null,
     situsZip: claim.situsZip,
     landUse,
-    cadRoll: cadRollFromClaim(claim),
+    cadRoll: cadFacts.cadRoll,
+    yearBuilt: cadFacts.yearBuilt,
+    legalDescription: cadFacts.legalDescription,
+    exemptionCodes: cadFacts.exemptionCodes,
     landUseAddressRecovered,
     // The land-use is the claim's own field or a recovered address join;
     // the prop_id join gate is recorded on provenance.parcelJoin instead.
@@ -867,6 +912,9 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   "provenance.landUseOrigin",
   "provenance.landUseAbsence",
   "baseFacts.cadRoll",
+  "baseFacts.yearBuilt",
+  "baseFacts.legalDescription",
+  "baseFacts.exemptionCodes",
 ];
 
 function underPrefix(path: string, prefix: string): boolean {
@@ -943,6 +991,9 @@ export const REQUIRED_TIER1_FACET_PATHS: readonly string[] = [
   "baseFacts.cadRoll.landValue",
   "baseFacts.cadRoll.improvementValue",
   "baseFacts.cadRoll.livingAreaSqft",
+  "baseFacts.yearBuilt",
+  "baseFacts.legalDescription",
+  "baseFacts.exemptionCodes",
   "zoning",
   "envelope",
   "facetCoverage.baseFacts",

@@ -105,7 +105,7 @@ describe("verdictLayerServe", () => {
       serveLayer: "cad",
       chainAnchoring: "backfill",
       subjectKind: "extensional",
-      entityType: "cad-parcel-roll",
+      entityType: "cad_property",
     });
     expect(wire.basis).toContain("bulk_primary=true");
     expect(wire.basis).toContain("stratmap-roll");
