@@ -131,6 +131,23 @@ jobs:
           # DEPLOYMENT_DATABASE_URL only when Neon explains the injection
           # and the pooler is restored. Running unpooled is a cost, not a
           # resting state. See doc_repo _inbox/2026-08-31_neon_pooler_readonly_incident.md
+          # --min-instances=1: this service is what Claude talks to, so a cold
+          # start is a customer-visible failure rather than a slow page.
+          # MEASURED 2026-09-01: eight cold starts in one day, with request
+          # latencies of 81s, 65s, 58s and 47s against a warm path under 4.3s.
+          # No MCP host waits that long, so the first call of a cold session
+          # renders Claude's own "Unable to reach Smart Site" card. That string
+          # is in neither our panel HTML nor our server source; it is the host
+          # giving up. The panel resource, the tools and /health were all
+          # verified healthy in the same window, so warmth was the only
+          # variable.
+          #
+          # This must live HERE rather than in a `gcloud run services update`,
+          # because a workflow deploy is authoritative-replace and would revert
+          # a manually set value on the next deploy. And per the cortex-api
+          # guard: `services update --min-instances` only writes the TEMPLATE,
+          # so verify autoscaling.knative.dev/minScale on the SERVING REVISION,
+          # not the service. Do not set this back to 0.
           gcloud run deploy "$SVC" \
             --region="$RGN" \
             --image="${IMAGE}" \
@@ -139,7 +156,7 @@ jobs:
             --port=8080 \
             --cpu=1 \
             --memory=512Mi \
-            --min-instances=0 \
+            --min-instances=1 \
             --max-instances=5 \
             --concurrency=40 \
             --timeout=120 \
