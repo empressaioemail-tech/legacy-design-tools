@@ -11,7 +11,14 @@
  *   DATABASE_URL=... node scripts/p85/rerun-digit-block-jobs.mjs [--dry-run]
  *   DATABASE_URL=... node scripts/p85/rerun-digit-block-jobs.mjs --apply
  */
-import pg from "pg";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(
+  join(dirname(fileURLToPath(import.meta.url)), "../../lib/db/package.json"),
+);
+const pg = require("pg");
 
 const apply = process.argv.includes("--apply");
 const dryRun = process.argv.includes("--dry-run") || !apply;
