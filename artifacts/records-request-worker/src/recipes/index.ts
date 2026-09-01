@@ -21,6 +21,10 @@ import type {
   RecordsRecipeDefinition,
   RecordsRecipeResult,
 } from "./types.js";
+import {
+  fetchRobotsTxt,
+  robotsTxtScopeRecord,
+} from "../robotsTxt.js";
 
 const AUMENTUM_SEARCH_PORTAL_IDS = new Set([
   "bastrop-aumentum",
@@ -88,9 +92,25 @@ export function resolvePortalIdForJob(
   return P85_DEFAULT_PORTAL_BY_COUNTY[countyFips] ?? null;
 }
 
+function attachRobotsTxtToResult(
+  result: RecordsRecipeResult,
+  robotsTxt: Record<string, unknown>,
+): RecordsRecipeResult {
+  return {
+    ...result,
+    scopeSearched: {
+      ...(result.scopeSearched ?? {}),
+      robotsTxt,
+    },
+  };
+}
+
 export async function runRecipeForJob(
   ctx: RecordsRecipeContext,
   browser: RecordsRecipeBrowser,
+  options?: {
+    fetchRobotsTxtFn?: typeof fetchRobotsTxt;
+  },
 ): Promise<RecordsRecipeResult> {
   const portal = portalConfigById(ctx.portalId);
   const recipe = recipeForPortal(ctx.portalId);
@@ -108,7 +128,13 @@ export async function runRecipeForJob(
       errorMessage: `Portal ${ctx.portalId} is not registered for countyFips=${ctx.countyFips}`,
     };
   }
-  return recipe.run(ctx, browser);
+
+  const fetchRobots = options?.fetchRobotsTxtFn ?? fetchRobotsTxt;
+  const robotsTxtResult = await fetchRobots(portal.entryUrl);
+  const robotsTxtRecord = robotsTxtScopeRecord(robotsTxtResult);
+
+  const recipeResult = await recipe.run(ctx, browser);
+  return attachRobotsTxtToResult(recipeResult, robotsTxtRecord);
 }
 
 export type { RecordsRecipeContext, RecordsRecipeResult, RecordsRecipeBrowser };
