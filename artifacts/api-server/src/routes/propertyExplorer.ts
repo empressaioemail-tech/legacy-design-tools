@@ -64,6 +64,7 @@ import { loadWellFactAtom } from "../lib/wellFactRead";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
+import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import { buildR1Brief } from "../lib/r1BriefCompose";
 import {
@@ -189,6 +190,7 @@ async function assembleNodeBriefBody(
     reportFamily: "R1",
     mode: "baked-facet-intel-v1",
     parcelNodeId,
+    onRecord: serializeTwinOnRecord(snapshot.facets, parcelNodeId),
     brief: {
       sections: brief.sections,
       disclosure: brief.disclosure,

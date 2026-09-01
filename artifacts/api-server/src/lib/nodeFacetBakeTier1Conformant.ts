@@ -73,6 +73,7 @@ import {
   type BaseFacts,
   type Tier1FacetPayload,
 } from "./nodeFacetTier1Assemble";
+import { cadRollFromClaim } from "./cadRollValue";
 import type { ParcelJoinRow } from "./nodeFacetTier1ParcelJoin";
 import { ptadLandUseDescription } from "./ptadLandUse";
 
@@ -139,6 +140,11 @@ export interface ConformantCadClaim {
   situsZip: string | null;
   landAcres: number | null;
   propertyUseCode: string | null;
+  marketValue: number | null;
+  assessedValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  livingAreaSqft: number | null;
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -182,6 +188,11 @@ export function readConformantCadClaim(
     situsZip: strOrNull(claim.situsZip),
     landAcres: finiteOrNull(claim.landAcres),
     propertyUseCode: strOrNull(claim.propertyUseCode),
+    marketValue: finiteOrNull(claim.marketValue),
+    assessedValue: finiteOrNull(claim.assessedValue),
+    landValue: finiteOrNull(claim.landValue),
+    improvementValue: finiteOrNull(claim.improvementValue),
+    livingAreaSqft: finiteOrNull(claim.livingAreaSqft),
   };
 }
 
@@ -502,6 +513,7 @@ export function buildConformantTier1Payload(
     situsState: row?.situs_state ?? null,
     situsZip: claim.situsZip,
     landUse,
+    cadRoll: cadRollFromClaim(claim),
     landUseAddressRecovered,
     // The land-use is the claim's own field or a recovered address join;
     // the prop_id join gate is recorded on provenance.parcelJoin instead.
@@ -854,6 +866,7 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   "provenance.parcelJoin",
   "provenance.landUseOrigin",
   "provenance.landUseAbsence",
+  "baseFacts.cadRoll",
 ];
 
 function underPrefix(path: string, prefix: string): boolean {
@@ -925,6 +938,11 @@ export const REQUIRED_TIER1_FACET_PATHS: readonly string[] = [
   "baseFacts.situsZip",
   "baseFacts.landUse",
   "baseFacts.acreage",
+  "baseFacts.cadRoll.marketValue",
+  "baseFacts.cadRoll.assessedValue",
+  "baseFacts.cadRoll.landValue",
+  "baseFacts.cadRoll.improvementValue",
+  "baseFacts.cadRoll.livingAreaSqft",
   "zoning",
   "envelope",
   "facetCoverage.baseFacts",
