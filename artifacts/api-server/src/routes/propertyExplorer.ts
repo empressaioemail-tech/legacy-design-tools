@@ -29,6 +29,8 @@ import {
   isPePropertyEntitled,
   requirePeAuthenticated,
   requirePePaidOrPropertyUnlocked,
+  peEntitlementAccountBody,
+  peEntitlementBaseBody,
   resolvePeEntitlement,
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
@@ -268,26 +270,32 @@ function ownerScope(req: Request): { tenantId: string; ownerUserId: string } | n
  * `?parcelNodeId=` and an authenticated user, adds the property block the
  * PE BFF consults for per-property gating (site-plan export, locked-bubble
  * state, chat allowance). Anonymous callers keep today's shape.
+ *
+ * `parcelNodeId` is OPTIONAL (P-98). Settings is account-scoped and has no
+ * parcel to pass; the route used to refuse without one, which is why
+ * Settings showed Access as "Not read" for paying accounts. An
+ * authenticated caller with no parcel now gets the ACCOUNT body — the same
+ * fields plus `seatsPurchased` and `billingInterval`, and NO `property`
+ * key at all.
+ *
+ * Exactly one path changed. The anonymous guard is evaluated FIRST and on
+ * its own, so an anonymous caller's response is unchanged with or without a
+ * parcel, and a malformed parcel from an anonymous caller still returns 200
+ * with today's body rather than a 400. Every authenticated with-parcel
+ * response is byte-identical to before.
  */
 router.get("/property-explorer/v1/entitlement", async (req: Request, res: Response) => {
   const snap = await resolvePeEntitlement(req);
-  const base = {
-    authenticated: snap.authenticated,
-    tier: snap.tier,
-    /** Ladder rung (LOCKED 2026-08-10) — the PE BFF gates Studio-only
-     *  surfaces (CAD, terrain, owner data) on studio|team, never bare tier. */
-    subscriptionTier: snap.subscriptionTier,
-    tenantId: snap.tenantId,
-    userId: snap.userId,
-    devRole: snap.devRole,
-    entitlementSource: snap.entitlementSource,
-  };
+  if (!snap.authenticated || !snap.userId) {
+    res.json(peEntitlementBaseBody(snap));
+    return;
+  }
   const parcelNodeIdRaw = req.query.parcelNodeId;
   const parcelNodeId = (
     Array.isArray(parcelNodeIdRaw) ? parcelNodeIdRaw[0] : parcelNodeIdRaw
   );
-  if (!snap.authenticated || !snap.userId || typeof parcelNodeId !== "string" || !parcelNodeId.trim()) {
-    res.json(base);
+  if (typeof parcelNodeId !== "string" || !parcelNodeId.trim()) {
+    res.json(peEntitlementAccountBody(snap));
     return;
   }
   const trimmed = parcelNodeId.trim();
@@ -300,7 +308,7 @@ router.get("/property-explorer/v1/entitlement", async (req: Request, res: Respon
     getPeFreeChatMessagesUsed(snap.userId, trimmed),
   ]);
   res.json({
-    ...base,
+    ...peEntitlementBaseBody(snap),
     property: {
       parcelNodeId: trimmed,
       unlocked,

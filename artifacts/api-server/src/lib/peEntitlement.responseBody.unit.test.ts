@@ -1,0 +1,183 @@
+/**
+ * P-98: the two `GET /api/property-explorer/v1/entitlement` response shapes.
+ *
+ * Deliverable 2 makes `parcelNodeId` optional. The hard requirement is that
+ * the WITH-parcel response stays byte-identical to what it was before, and
+ * the WITHOUT-parcel response carries the account fields while OMITTING the
+ * `property` key entirely -- an omitted block and a block full of falsy
+ * values are different facts.
+ *
+ * The frozen expectations below are transcribed from `origin/main`'s
+ * `routes/propertyExplorer.ts` (the `base` literal at lines 274-285 and the
+ * `property` literal at lines 303-308 of that file), not from the code under
+ * test, so this compares two independent derivations rather than restating
+ * the implementation. Field ORDER is asserted, not just field presence,
+ * because `res.json` serialises in insertion order and "byte-identical" is
+ * the requirement.
+ *
+ * `@workspace/db` is factory-mocked so this file runs without DATABASE_URL.
+ */
+
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@workspace/db", () => ({
+  db: {},
+  peUserEntitlements: {},
+  pePropertyUnlocks: {},
+  peChatMessageCounts: {},
+}));
+
+const { peEntitlementAccountBody, peEntitlementBaseBody } = await import(
+  "./peEntitlement"
+);
+type PeEntitlementSnapshot = Parameters<typeof peEntitlementBaseBody>[0];
+
+/**
+ * The key list `origin/main` emitted, in `origin/main`'s order. Any addition,
+ * removal, or reorder in the with-parcel response breaks the pinned contract.
+ */
+const MAIN_BASE_KEYS = [
+  "authenticated",
+  "tier",
+  "subscriptionTier",
+  "tenantId",
+  "userId",
+  "devRole",
+  "entitlementSource",
+] as const;
+
+const MAIN_PROPERTY_KEYS = [
+  "parcelNodeId",
+  "unlocked",
+  "freeMessagesUsed",
+  "freeMessagesLimit",
+] as const;
+
+function paidTeamSnapshot(): PeEntitlementSnapshot {
+  return {
+    tier: "paid",
+    subscriptionTier: "team",
+    tenantId: "default",
+    userId: "user-p98",
+    authenticated: true,
+    devRole: false,
+    entitlementSource: "stripe_sub",
+    seatsPurchased: 5,
+    billingInterval: "month",
+  };
+}
+
+function anonymousSnapshot(): PeEntitlementSnapshot {
+  return {
+    tier: "free",
+    subscriptionTier: null,
+    tenantId: "default",
+    userId: null,
+    authenticated: false,
+    devRole: false,
+    entitlementSource: null,
+    seatsPurchased: null,
+    billingInterval: null,
+  };
+}
+
+describe("with-parcel response (pinned contract, must not move)", () => {
+  it("is byte-identical to what origin/main emitted", () => {
+    const body = {
+      ...peEntitlementBaseBody(paidTeamSnapshot()),
+      property: {
+        parcelNodeId: "48055:10068",
+        unlocked: true,
+        freeMessagesUsed: 2,
+        freeMessagesLimit: 3,
+      },
+    };
+    expect(JSON.stringify(body)).toBe(
+      '{"authenticated":true,"tier":"paid","subscriptionTier":"team",' +
+        '"tenantId":"default","userId":"user-p98","devRole":false,' +
+        '"entitlementSource":"stripe_sub","property":{"parcelNodeId":"48055:10068",' +
+        '"unlocked":true,"freeMessagesUsed":2,"freeMessagesLimit":3}}',
+    );
+    expect(Object.keys(body)).toEqual([...MAIN_BASE_KEYS, "property"]);
+    expect(Object.keys(body.property)).toEqual([...MAIN_PROPERTY_KEYS]);
+  });
+
+  it("VIOLATION: the base body does NOT gain the account-only fields", () => {
+    // The whole failure mode this test exists for: adding seatsPurchased or
+    // billingInterval to `base` would widen every with-parcel response too,
+    // silently changing a contract the PE BFF is pinned to.
+    const body = peEntitlementBaseBody(paidTeamSnapshot());
+    expect(Object.keys(body)).toEqual([...MAIN_BASE_KEYS]);
+    expect("seatsPurchased" in body).toBe(false);
+    expect("billingInterval" in body).toBe(false);
+    expect("property" in body).toBe(false);
+  });
+
+  it("anonymous body is unchanged from origin/main", () => {
+    // Anonymous callers get the base body with or without a parcel, exactly
+    // as before. They have no account, so there is nothing to add.
+    expect(JSON.stringify(peEntitlementBaseBody(anonymousSnapshot()))).toBe(
+      '{"authenticated":false,"tier":"free","subscriptionTier":null,' +
+        '"tenantId":"default","userId":null,"devRole":false,' +
+        '"entitlementSource":null}',
+    );
+  });
+});
+
+describe("without-parcel account response (P-98)", () => {
+  it("carries the account block and OMITS the property key entirely", () => {
+    const body = peEntitlementAccountBody(paidTeamSnapshot());
+    expect(Object.keys(body)).toEqual([
+      ...MAIN_BASE_KEYS,
+      "seatsPurchased",
+      "billingInterval",
+    ]);
+    expect(body.seatsPurchased).toBe(5);
+    expect(body.billingInterval).toBe("month");
+  });
+
+  it("VIOLATION: `property` is absent, not an empty or defaulted block", () => {
+    const body = peEntitlementAccountBody(paidTeamSnapshot());
+    // `in` distinguishes "key absent" from "key present holding undefined".
+    // res.json drops an explicit undefined, so a body carrying
+    // `property: undefined` would serialise the same and pass a
+    // toBeUndefined() check while being the wrong construction.
+    expect("property" in body).toBe(false);
+    expect(JSON.stringify(body)).not.toContain("property");
+  });
+
+  it("VIOLATION: an unknown interval stays null, never defaulted to month", () => {
+    // The pre-0092 population, and anyone whose billed price id matched no
+    // configured id. Reading null as monthly is what would make the rail
+    // upsell annual subscribers.
+    const body = peEntitlementAccountBody({
+      ...paidTeamSnapshot(),
+      billingInterval: null,
+      seatsPurchased: null,
+    });
+    expect(body.billingInterval).toBeNull();
+    expect(body.seatsPurchased).toBeNull();
+    expect(JSON.stringify(body)).toContain('"billingInterval":null');
+  });
+
+  it("VIOLATION: seats 0 and seats unknown do not collapse", () => {
+    // A stored 0 is a fact (zero seats purchased); null is the absence of
+    // one. The wire must keep them apart, as the column comment requires.
+    expect(
+      peEntitlementAccountBody({ ...paidTeamSnapshot(), seatsPurchased: 0 })
+        .seatsPurchased,
+    ).toBe(0);
+    expect(
+      peEntitlementAccountBody({ ...paidTeamSnapshot(), seatsPurchased: null })
+        .seatsPurchased,
+    ).toBeNull();
+  });
+
+  it("annual subscriber reads year, so the rail can decline to upsell", () => {
+    const body = peEntitlementAccountBody({
+      ...paidTeamSnapshot(),
+      billingInterval: "year",
+    });
+    expect(body.billingInterval).toBe("year");
+  });
+});

@@ -1,11 +1,13 @@
 import {
   boolean,
+  check,
   integer,
   pgTable,
   text,
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { users } from "./users";
 
 /** Property Explorer access tier — distinct from brokerage install-scoped tiers. */
@@ -31,6 +33,20 @@ export type PeEntitlementSource =
   | "stripe_promo"
   | "stripe_unlock"
   | "dev";
+
+/**
+ * Billing interval of a paid subscription (migration 0092). Mirrors the two
+ * price groups we configure in Stripe: the monthly `STRIPE_*_PRICE_ID` set
+ * and the annual `STRIPE_*_ANNUAL_PRICE_ID` set ratified 2026-08-24.
+ *
+ * `null` is a first-class value and means UNKNOWN, not monthly. It is the
+ * value every row written before 0092 carries, the value a subscription
+ * whose billed price id matches nothing we configured carries, and the
+ * value a free or unlock-only account carries. The P-98 `annual_upgrade`
+ * rung must fire on `"month"` alone -- never on `null` -- or it offers
+ * annual billing to people who already bought it.
+ */
+export type PeBillingInterval = "month" | "year";
 
 /**
  * User-scoped entitlement for Property Explorer deep routes.
@@ -74,8 +90,33 @@ export const peUserEntitlements = pgTable(
      * Stripe". A stored 0 is a fact (zero seats purchased).
      */
     seatsPurchased: integer("seats_purchased"),
+    /**
+     * Billing interval of the subscription (migration 0092). Written only
+     * by the Stripe webhook, and only from the inverse of our own
+     * configured price ids (`peBillingIntervalForPriceId`). NULL means
+     * UNKNOWN: pre-0092 rows, free and unlock-only accounts, and any
+     * subscription whose billed price id matches no configured id. There is
+     * deliberately NO DDL default -- a stored `'month'` nobody derived is a
+     * fabricated billing fact, and it would make the P-98 `annual_upgrade`
+     * rung upsell annual subscribers.
+     */
+    billingInterval: text("billing_interval").$type<PeBillingInterval>(),
   },
-  (t) => [index("pe_user_entitlements_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("pe_user_entitlements_tenant_idx").on(t.tenantId),
+    /**
+     * Closed grammar, frozen in DDL so it also binds writers the TypeScript
+     * union never sees: a raw connection, a future job, a psql session. In
+     * particular it refuses `'monthly'`, the plausible-looking string a
+     * hand-written UPDATE reaches for. NULL is admitted (unknown is
+     * legitimate); the empty string is not, so a blank cannot impersonate a
+     * measurement.
+     */
+    check(
+      "pe_user_entitlements_billing_interval_chk",
+      sql`${t.billingInterval} IS NULL OR ${t.billingInterval} IN ('month', 'year')`,
+    ),
+  ],
 );
 
 export type PeUserEntitlement = typeof peUserEntitlements.$inferSelect;
