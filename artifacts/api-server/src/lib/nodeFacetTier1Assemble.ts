@@ -25,7 +25,12 @@
  * graph).
  */
 
-import type { CadRollBaked } from "./cadRollValue";
+import type {
+  CadRollBaked,
+  CadRollBakedCodes,
+  CadRollBakedText,
+  CadRollBakedYear,
+} from "./cadRollValue";
 import {
   computeTier1Envelope,
   parcelAcreage,
@@ -105,10 +110,14 @@ export interface BaseFacts {
   } | null;
   acreage: { value: number; sqft: number; method: AcreageMethod } | null;
   /**
-   * County-assessed roll values from the conformant claim. Each field is the
-   * claim's value or null; nothing is defaulted and zero is never invented.
+   * County-assessed roll values from `cad_property`. Each field is the CAD
+   * table's value or null; nothing is defaulted and zero is never invented.
+   * Atom claims are never the source.
    */
   cadRoll: CadRollBaked;
+  yearBuilt: CadRollBakedYear | null;
+  legalDescription: CadRollBakedText | null;
+  exemptionCodes: CadRollBakedCodes | null;
 }
 
 export interface Tier1FacetPayload {
@@ -235,8 +244,11 @@ export interface Tier1AssemblyInput {
   situsZip: string | null | undefined;
   /** Already-resolved land-use facet (the caller owns the join or the claim). */
   landUse: BaseFacts["landUse"];
-  /** CAD roll values from the conformant claim (all keys, null when absent). */
+  /** CAD roll values from `cad_property` (all keys, null when absent). */
   cadRoll: CadRollBaked;
+  yearBuilt?: CadRollBakedYear | null;
+  legalDescription?: CadRollBakedText | null;
+  exemptionCodes?: CadRollBakedCodes | null;
   landUseAddressRecovered: boolean;
   landUseGateBlocked: boolean;
   /** Parcel ring; null bakes acreage/envelope honestly absent. */
@@ -287,6 +299,9 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
     landUse: input.landUse,
     acreage,
     cadRoll: input.cadRoll,
+    yearBuilt: input.yearBuilt ?? null,
+    legalDescription: input.legalDescription ?? null,
+    exemptionCodes: input.exemptionCodes ?? null,
   };
 
   // --- Zoning (stored column, verbatim; honest null when unstamped) ---

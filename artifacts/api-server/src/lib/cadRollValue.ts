@@ -1,25 +1,49 @@
 /**
- * CAD roll value fields from a `cad-parcel-roll` claim: read, bake, and wire.
+ * CAD roll value fields from `cad_property`: read, bake, and wire.
+ *
+ * NEVER read `cad-parcel-roll` atoms for these fields. Hays / Travis /
+ * Williamson atom bodies are hollow; Bastrop atoms invent livingArea,
+ * assessed, and improvement-$0 coverage the CAD table does not have.
  *
  * Dollar fields are three-state: present (v>0), zero (key present, v===0),
- * absent (key missing, no v, with basis). A stored 0 is CAD's claim, never
+ * absent (key missing, no v, with basis). A stored 0 is CAD's value, never
  * collapsed to absent. livingAreaSqft is not a dollar: positive or absent.
  */
 
-export const CAD_PARCEL_ROLL_SOURCE = "cad-parcel-roll" as const;
+export const CAD_PROPERTY_SOURCE = "cad_property" as const;
+/** @deprecated value is cad_property. The atom name must not be the source. */
+export const CAD_PARCEL_ROLL_SOURCE = CAD_PROPERTY_SOURCE;
 export const COUNTY_ASSESSED_VALUE_BASIS = "county-assessed" as const;
 
 /** One field as stored on `baseFacts.cadRoll` after the bake. */
 export type CadRollBakedDollar = {
   v: number;
-  source: typeof CAD_PARCEL_ROLL_SOURCE;
+  source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
   valueBasis: typeof COUNTY_ASSESSED_VALUE_BASIS;
 };
 
 export type CadRollBakedSqft = {
   v: number;
-  source: typeof CAD_PARCEL_ROLL_SOURCE;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export type CadRollBakedYear = {
+  v: number;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export type CadRollBakedText = {
+  v: string;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export type CadRollBakedCodes = {
+  v: string[];
+  source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
 };
 
@@ -34,7 +58,7 @@ export interface CadRollBaked {
 export type CadRollPresentWire = {
   state: "present";
   v: number;
-  source: typeof CAD_PARCEL_ROLL_SOURCE;
+  source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
   valueBasis?: typeof COUNTY_ASSESSED_VALUE_BASIS;
 };
@@ -42,7 +66,7 @@ export type CadRollPresentWire = {
 export type CadRollZeroWire = {
   state: "zero";
   v: 0;
-  source: typeof CAD_PARCEL_ROLL_SOURCE;
+  source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
   valueBasis?: typeof COUNTY_ASSESSED_VALUE_BASIS;
   basis?: string;
@@ -50,7 +74,7 @@ export type CadRollZeroWire = {
 
 export type CadRollAbsentWire = {
   state: "absent";
-  source: typeof CAD_PARCEL_ROLL_SOURCE;
+  source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
   basis: string;
 };
@@ -111,41 +135,139 @@ function bakedDollar(
   if (dollars == null) return null;
   return {
     v: dollars,
-    source: CAD_PARCEL_ROLL_SOURCE,
+    source: CAD_PROPERTY_SOURCE,
     vintage,
     valueBasis: COUNTY_ASSESSED_VALUE_BASIS,
+  };
+}
+
+export interface CadPropertyBakedFacts {
+  cadRoll: CadRollBaked;
+  yearBuilt: CadRollBakedYear | null;
+  legalDescription: CadRollBakedText | null;
+  exemptionCodes: CadRollBakedCodes | null;
+}
+
+/** Stamp CAD facts onto an existing bake payload. Does not touch zoning/envelope. */
+export function applyCadPropertyFactsToPayload(
+  payload: Record<string, unknown>,
+  facts: CadPropertyBakedFacts,
+): Record<string, unknown> {
+  const base =
+    payload.baseFacts && typeof payload.baseFacts === "object" && !Array.isArray(payload.baseFacts)
+      ? { ...(payload.baseFacts as Record<string, unknown>) }
+      : {};
+  return {
+    ...payload,
+    baseFacts: {
+      ...base,
+      cadRoll: facts.cadRoll,
+      yearBuilt: facts.yearBuilt,
+      legalDescription: facts.legalDescription,
+      exemptionCodes: facts.exemptionCodes,
+    },
+  };
+}
+
+export function cadPropertyFactsFromRow(
+  row: CadPropertyRollSlice | null | undefined,
+): CadPropertyBakedFacts {
+  if (!row) {
+    return {
+      cadRoll: emptyCadRoll(),
+      yearBuilt: null,
+      legalDescription: null,
+      exemptionCodes: null,
+    };
+  }
+  const vintage = row.taxYear != null ? String(row.taxYear) : null;
+  return {
+    cadRoll: cadRollFromCadProperty(row),
+    yearBuilt: bakedYear(row.yearBuilt, vintage),
+    legalDescription: bakedLegal(row.legalDescription, vintage),
+    exemptionCodes: bakedExemptionCodes(row.exemptionCodes, vintage),
   };
 }
 
 function bakedSqft(v: unknown, vintage: string | null): CadRollBakedSqft | null {
   const sqft = positiveSqftOrNull(v);
   if (sqft == null) return null;
-  return { v: sqft, source: CAD_PARCEL_ROLL_SOURCE, vintage };
+  return { v: sqft, source: CAD_PROPERTY_SOURCE, vintage };
 }
 
-export interface CadRollClaimSlice {
+export function bakedYear(v: unknown, vintage: string | null): CadRollBakedYear | null {
+  const n = finiteOrNull(v);
+  if (n == null || n <= 0) return null;
+  return { v: Math.round(n), source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+export function bakedLegal(
+  v: unknown,
+  vintage: string | null,
+): CadRollBakedText | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  if (!t) return null;
+  return { v: t, source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+export function bakedExemptionCodes(
+  v: unknown,
+  vintage: string | null,
+): CadRollBakedCodes | null {
+  if (!Array.isArray(v)) return null;
+  const codes = v
+    .filter((c): c is string => typeof c === "string" && c.trim() !== "")
+    .map((c) => c.trim());
+  if (codes.length === 0) return null;
+  return { v: codes, source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+export interface CadPropertyRollSlice {
   taxYear: number | null;
   marketValue: unknown;
   assessedValue: unknown;
   landValue: unknown;
   improvementValue: unknown;
   livingAreaSqft: unknown;
+  yearBuilt?: unknown;
+  legalDescription?: unknown;
+  exemptionCodes?: unknown;
 }
 
-/** Map claim fields to baked `baseFacts.cadRoll`; every key is present. */
-export function cadRollFromClaim(claim: CadRollClaimSlice): CadRollBaked {
-  const vintage = claim.taxYear != null ? String(claim.taxYear) : null;
+/** Empty cadRoll: every key present, every value null. Used when CAD was not consulted or the row missed. */
+export function emptyCadRoll(): CadRollBaked {
   return {
-    marketValue: bakedDollar(claim.marketValue, vintage),
-    assessedValue: bakedDollar(claim.assessedValue, vintage),
-    landValue: bakedDollar(claim.landValue, vintage),
-    improvementValue: bakedDollar(claim.improvementValue, vintage),
-    livingAreaSqft: bakedSqft(claim.livingAreaSqft, vintage),
+    marketValue: null,
+    assessedValue: null,
+    landValue: null,
+    improvementValue: null,
+    livingAreaSqft: null,
   };
 }
 
+/** Map a `cad_property` row to baked `baseFacts.cadRoll`. Never an atom claim. */
+export function cadRollFromCadProperty(row: CadPropertyRollSlice): CadRollBaked {
+  const vintage = row.taxYear != null ? String(row.taxYear) : null;
+  return {
+    marketValue: bakedDollar(row.marketValue, vintage),
+    assessedValue: bakedDollar(row.assessedValue, vintage),
+    landValue: bakedDollar(row.landValue, vintage),
+    improvementValue: bakedDollar(row.improvementValue, vintage),
+    livingAreaSqft: bakedSqft(row.livingAreaSqft, vintage),
+  };
+}
+
+/**
+ * @deprecated name. Same mapper as cadRollFromCadProperty. The bake must
+ * call cadRollFromCadProperty with a cad_property row, never an atom claim.
+ */
+export function cadRollFromClaim(row: CadPropertyRollSlice): CadRollBaked {
+  return cadRollFromCadProperty(row);
+}
+
 const LAND_VALUE_ZERO_BASIS_SUFFIX =
-  "claim.landValue is 0 on the cad-parcel-roll atom; $0 land looks like missing and is served as zero, not collapsed to absent";
+  "cad_property.land_value is 0; $0 land looks like missing and is served as zero, not collapsed to absent";
 
 export function cadRollFieldToWire(
   baked:
@@ -186,10 +308,9 @@ export function cadRollFieldToWire(
   }
   return {
     state: "absent",
-    source: CAD_PARCEL_ROLL_SOURCE,
+    source: CAD_PROPERTY_SOURCE,
     vintage,
-    basis:
-      `${parcelNodeId}: claim.${fieldName} is absent on the cad-parcel-roll atom`,
+    basis: `${parcelNodeId}: cad_property.${fieldName} is absent`,
   };
 }
 
