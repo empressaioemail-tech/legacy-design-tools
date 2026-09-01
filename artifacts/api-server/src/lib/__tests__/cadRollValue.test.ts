@@ -124,8 +124,10 @@ describe("cadRoll falsifier (both arms)", () => {
     expect(wire.assessedValue).toMatchObject({ state: "zero", v: 0 });
     expect(wire.landValue).toMatchObject({ state: "zero", v: 0 });
     expect(wire.improvementValue).toMatchObject({ state: "zero", v: 0 });
-    expect(wire.landValue.basis).toContain(parcelNodeId);
-    expect(wire.landValue.basis).toContain("$0 land looks like missing");
+    if (wire.landValue.state === "zero") {
+      expect(wire.landValue.basis).toContain(parcelNodeId);
+      expect(wire.landValue.basis).toContain("$0 land looks like missing");
+    }
     expect(wire.livingAreaSqft.state).toBe("absent");
     expect(cadRollWireThreeStatesHold(wire)).toBe(true);
   });
@@ -143,8 +145,10 @@ describe("cadRoll falsifier (both arms)", () => {
     expect(cadRollWireHasPresentValue(wire)).toBe(false);
     for (const field of Object.values(wire)) {
       expect(field.state).toBe("absent");
-      expect(field.basis).toContain(parcelNodeId);
-      expect((field as { v?: unknown }).v).toBeUndefined();
+      if (field.state === "absent") {
+        expect(field.basis).toContain(parcelNodeId);
+        expect((field as { v?: unknown }).v).toBeUndefined();
+      }
     }
     expect(cadRollWireThreeStatesHold(wire)).toBe(true);
   });
@@ -153,7 +157,9 @@ describe("cadRoll falsifier (both arms)", () => {
     const field = cadRollFieldToWire(null, "marketValue", parcelNodeId, "2025", true);
     expect(field.state).toBe("absent");
     expect((field as { v?: unknown }).v).toBeUndefined();
-    expect(field.basis).toContain("marketValue");
+    if (field.state === "absent") {
+      expect(field.basis).toContain("marketValue");
+    }
   });
 
   it("arm 1 leftover: parcel with known CAD values shows present wire with source+vintage", () => {
