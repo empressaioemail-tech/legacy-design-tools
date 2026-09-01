@@ -9,6 +9,7 @@ import {
   peUserIdentities,
   peUserEntitlements,
   users,
+  type PeBillingInterval,
   type PeOidcProvider,
   type PeSubscriptionTier,
 } from "@workspace/db";
@@ -137,6 +138,18 @@ export type PeEntitlementRow = {
   devRole: boolean;
   entitlementSource: "stripe_sub" | "stripe_promo" | "stripe_unlock" | "dev" | null;
   stripeCustomerId: string | null;
+  /**
+   * Checkout seat count on a Team subscription; null = unknown or not Team.
+   * Read here (P-98) so the account-scoped `/entitlement` answer does not
+   * need a second query for it.
+   */
+  seatsPurchased: number | null;
+  /**
+   * Billing interval of the subscription (P-98, migration 0092). Null means
+   * UNKNOWN, which is what every row written before 0092 carries, because
+   * nothing backfills it. A reader must not treat null as monthly.
+   */
+  billingInterval: PeBillingInterval | null;
 };
 
 /** Full entitlement row read (WDLL 2026-08-05 item 1/4) — dev role + provenance. */
@@ -150,6 +163,8 @@ export async function getPeEntitlementRow(
       devRole: peUserEntitlements.devRole,
       entitlementSource: peUserEntitlements.entitlementSource,
       stripeCustomerId: peUserEntitlements.stripeCustomerId,
+      seatsPurchased: peUserEntitlements.seatsPurchased,
+      billingInterval: peUserEntitlements.billingInterval,
     })
     .from(peUserEntitlements)
     .where(eq(peUserEntitlements.ownerUserId, userId))
@@ -160,6 +175,10 @@ export async function getPeEntitlementRow(
     devRole: row?.devRole === true,
     entitlementSource: row?.entitlementSource ?? null,
     stripeCustomerId: row?.stripeCustomerId ?? null,
+    // No row at all, a NULL column, and a stored value are collapsed to the
+    // same two states on purpose: present, or unknown. Neither is defaulted.
+    seatsPurchased: row?.seatsPurchased ?? null,
+    billingInterval: row?.billingInterval ?? null,
   };
 }
 
@@ -219,14 +238,39 @@ export async function setPeAccessTierFromStripe(input: {
   subscriptionTier: PeSubscriptionTier | null;
   source: "stripe_sub" | "stripe_promo";
   stripeCustomerId?: string | null;
+  /**
+   * Team seat count from billed Stripe items. Null on solo/studio, churn,
+   * or a Team grant whose items were not readable. Never omit the column
+   * on update — a leftover number after downgrade is a silent seat grant.
+   */
+  seatsPurchased?: number | null;
+  /**
+   * Billing interval derived from the billed price ids (P-98). Null means
+   * UNKNOWN — an unmatched price id, an unreadable subscription, or a
+   * pre-0092 row. Never omit the column on update, for the same reason the
+   * seat count is never omitted: a leftover "month" after a switch to
+   * annual is a silent false claim about the customer's billing, and it is
+   * the one input that would make the `annual_upgrade` rung upsell an
+   * annual subscriber.
+   */
+  billingInterval?: PeBillingInterval | null;
 }): Promise<void> {
   await ensurePeEntitlement(input.userId);
+  const seatsPurchased =
+    input.tier === "paid" && input.subscriptionTier === "team"
+      ? (input.seatsPurchased ?? null)
+      : null;
   await db
     .update(peUserEntitlements)
     .set({
       accessTier: input.tier,
       subscriptionTier: input.tier === "paid" ? input.subscriptionTier : null,
       entitlementSource: input.tier === "paid" ? input.source : null,
+      seatsPurchased,
+      // Cleared on churn: a free row has no subscription, so it has no
+      // interval. Only a paid grant can carry one.
+      billingInterval:
+        input.tier === "paid" ? (input.billingInterval ?? null) : null,
       ...(input.stripeCustomerId
         ? { stripeCustomerId: input.stripeCustomerId }
         : {}),

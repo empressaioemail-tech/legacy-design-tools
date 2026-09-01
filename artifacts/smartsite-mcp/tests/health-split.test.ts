@@ -11,13 +11,45 @@ describe("P-87 item 17 health split", () => {
     process.env.CORTEX_API_BASE_URL = "https://cortex.test";
     process.env.SERVICE_API_KEY = "svc-test";
     process.env.WORKOS_CLIENT_ID = "client_test";
+    process.env.WORKOS_ISSUER = "https://authkit.test";
     process.env.WORKOS_JWKS_URI = "https://authkit.test/jwks";
     process.env.HAUSKA_MCP_BASE_URL = "https://hauska-mcp.test";
+    delete process.env.SMARTSITE_MCP_DEV_MODE;
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
     vi.restoreAllMocks();
+  });
+
+  it("health agrees with the /mcp gate: WORKOS_ISSUER unset reports degraded", () => {
+    delete process.env.WORKOS_ISSUER;
+    const report = buildHealthReport();
+    expect(report.authConfigured).toBe(false);
+    expect(report.status).toBe("degraded");
+  });
+
+  it("health agrees with the /mcp gate: WORKOS_CLIENT_ID unset alone does not degrade", () => {
+    delete process.env.WORKOS_CLIENT_ID;
+    const report = buildHealthReport();
+    expect(report.authConfigured).toBe(true);
+    expect(report.status).toBe("ok");
+  });
+
+  it("health agrees with the /mcp gate: both derive from the same predicate", async () => {
+    delete process.env.WORKOS_ISSUER;
+    const app = createSmartsiteMcpApp();
+    await withHttpServer(app, async (base) => {
+      const health = await (await fetch(`${base}/health`)).json();
+      const mcp = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer x" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+      });
+      expect(mcp.status).toBe(503);
+      expect(health.status).toBe("degraded");
+      expect(health.authConfigured).toBe(false);
+    });
   });
 
   it("GET /health stays ok when Hauska MCP probe would fail", async () => {

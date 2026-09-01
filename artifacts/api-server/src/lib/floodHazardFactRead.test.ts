@@ -143,6 +143,27 @@ describe("interpretFloodHazardFactRows", () => {
     expect(read.state).toBe("absent");
     if (read.state !== "absent") return;
     expect(read.absence?.kind).toBe("no-flood-coverage");
+    expect(read.sourceVintage).toBeNull();
+  });
+
+  it("carries sourceVintage on a typed absence so the draw can earn absent-verified", () => {
+    const read = interpretFloodHazardFactRows("48021:99999", [
+      {
+        entity_id: "48021:99999",
+        body: {
+          entityType: "flood-hazard-fact",
+          sourceTier: "absent",
+          absence: {
+            kind: "no-flood-coverage",
+            reason: "parcel centroid outside NFHL county tile coverage",
+          },
+          sourceVintage: "NFHL_48_20260101",
+        },
+      },
+    ]);
+    expect(read.state).toBe("absent");
+    if (read.state !== "absent") return;
+    expect(read.sourceVintage).toBe("NFHL_48_20260101");
   });
 
   it("refuses a body that is neither a present finding nor an absence", () => {

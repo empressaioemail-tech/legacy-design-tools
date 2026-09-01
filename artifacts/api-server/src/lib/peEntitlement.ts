@@ -9,6 +9,7 @@ import {
   peUserEntitlements,
   pePropertyUnlocks,
   peChatMessageCounts,
+  type PeBillingInterval,
   type PeSubscriptionTier,
 } from "@workspace/db";
 import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
@@ -26,8 +27,17 @@ export type PeEntitlementSnapshot = {
    * team. `null` for free users and unlock-only users. Legacy pre-ladder
    * paid rows (no stored rung) read as "solo" — never silently studio/team.
    * Dev-role users read as "team" so operator accounts clear every gate.
-   * The PE BFF gates Studio-only surfaces (CAD, terrain, owner data) on
-   * {@link subscriptionTierGrantsStudio} over this field.
+   *
+   * This field is RAW LADDER STATE. It is not a gate input for remote
+   * consumers, and P-104 is why: the PE BFF could not express Studio at all
+   * (`PeEntitlementTier = 'free' | 'paid'`), so it gated CAD and terrain on
+   * bare `paid` and served a $49 Solo subscriber the $129 Studio
+   * deliverables from 2026-08-24 until the P-104 fix. Two comments in this
+   * file asserted the opposite for that whole window. The answer a consumer
+   * gates on is now COMPUTED HERE and shipped as `studioGranted` on the
+   * `/entitlement` body — see {@link peEntitlementBaseBody}. A consumer that
+   * re-derives Studio from this field is writing a fourth copy of
+   * {@link subscriptionTierGrantsStudio}, which is the defect, not the fix.
    */
   subscriptionTier: PeSubscriptionTier | null;
   tenantId: string;
@@ -42,6 +52,22 @@ export type PeEntitlementSnapshot = {
     | "stripe_unlock"
     | "dev"
     | null;
+  /**
+   * Checkout seat count on a Team subscription; `null` = unknown or not
+   * Team. NOT synthesised for dev role: `subscriptionTier` reads "team" for
+   * an operator account, but nobody bought seats for it, so this stays at
+   * whatever the row actually holds.
+   */
+  seatsPurchased: number | null;
+  /**
+   * Billing interval of the subscription (P-98, migration 0092), derived in
+   * the webhook from the billed price ids. `null` = UNKNOWN, which is what
+   * every row written before 0092 carries because nothing backfills them,
+   * and what a subscription whose price id matches no configured id carries.
+   * The `annual_upgrade` rung must fire on `"month"` alone; treating `null`
+   * as monthly would upsell annual subscribers.
+   */
+  billingInterval: PeBillingInterval | null;
 };
 
 /**
@@ -84,6 +110,10 @@ export async function resolvePeEntitlement(
       authenticated: false,
       devRole: false,
       entitlementSource: null,
+      // An anonymous caller has no account, so there is nothing to know.
+      // Absent, not zero and not "month".
+      seatsPurchased: null,
+      billingInterval: null,
     };
   }
   const row = await getPeEntitlementRow(userId);
@@ -109,6 +139,103 @@ export async function resolvePeEntitlement(
     authenticated: true,
     devRole: row.devRole,
     entitlementSource: row.devRole ? "dev" : row.entitlementSource,
+    // Passed through from the row, NOT elevated for dev role the way tier
+    // and subscriptionTier are above. A dev-role account bought nothing;
+    // inventing seats or an interval for it would be a fabricated billing
+    // fact, and this column exists precisely to keep those out.
+    seatsPurchased: row.seatsPurchased,
+    billingInterval: row.billingInterval,
+  };
+}
+
+/**
+ * The `GET /entitlement` body every caller has received since the R1 pinned
+ * contract (LOCK 2026-07-29). Field order is part of the contract: the
+ * with-parcel response is this object plus a `property` key, and P-98 must
+ * leave it byte-identical.
+ */
+export function peEntitlementBaseBody(snap: PeEntitlementSnapshot): {
+  authenticated: boolean;
+  tier: "free" | "paid";
+  subscriptionTier: PeSubscriptionTier | null;
+  tenantId: string;
+  userId: string | null;
+  devRole: boolean;
+  entitlementSource: PeEntitlementSnapshot["entitlementSource"];
+  studioGranted: boolean;
+} {
+  return {
+    authenticated: snap.authenticated,
+    tier: snap.tier,
+    /** Ladder rung (LOCKED 2026-08-10), RAW. Gate on `studioGranted` below,
+     *  never on this field and never on bare `tier`. */
+    subscriptionTier: snap.subscriptionTier,
+    tenantId: snap.tenantId,
+    userId: snap.userId,
+    devRole: snap.devRole,
+    entitlementSource: snap.entitlementSource,
+    /**
+     * P-104. THE SERVER COMPUTES THE STUDIO PREDICATE; consumers consume the
+     * answer. Studio-only surfaces are site-plan CAD, terrain export and
+     * owner data (LOCKED 2026-08-10 ladder).
+     *
+     * Appended LAST so every field ahead of it, and their order, are
+     * byte-identical to the R1 pinned contract (LOCK 2026-07-29).
+     *
+     * Dev role needs no special case here: `resolvePeEntitlement` already
+     * maps `devRole` to `subscriptionTier: "team"`, so the one predicate
+     * covers operator accounts too.
+     *
+     * A consumer that does not see this key is talking to a cortex-api
+     * older than P-104. Absent is UNMEASURED, not false: a consumer must
+     * refuse with that stated reason rather than silently reading it as a
+     * denied Studio entitlement or, worse, as a granted one.
+     */
+    studioGranted: subscriptionTierGrantsStudio(snap.subscriptionTier),
+  };
+}
+
+/**
+ * The account-scoped answer (P-98), returned when an authenticated caller
+ * asks `GET /entitlement` with no `parcelNodeId`. Settings is account-scoped
+ * and has no parcel to pass, which is why it read "Not read" for everyone
+ * before this: the route refused without one.
+ *
+ * There is deliberately NO `property` key. An omitted block and a block full
+ * of falsy values are different facts — the first says "you did not ask
+ * about a parcel", the second says "we looked and it is locked with zero
+ * messages used" — and the client distinguishes them.
+ *
+ * `tier` keeps its wire name here rather than becoming `accessTier`. It is
+ * the name on the pinned contract, the name anonymous callers already get,
+ * and the name every existing consumer reads; two names for one fact is the
+ * defect, not the fix.
+ *
+ * `billingInterval` goes out AS STORED -- `"month"` | `"year"` | `null`,
+ * Stripe's own recurring-interval grammar, the same strings the DDL CHECK in
+ * migration 0092 admits and the same strings `peBillingIntervalForPriceId`
+ * derives. There is deliberately no translation on this path (operator
+ * ruling 2026-08-31, P-98b): the column, the type, the wire and the client
+ * all speak one vocabulary. A short-lived `peWireBillingInterval` mapper
+ * turned these into `"monthly"`/`"annual"` for the client and was deleted
+ * with the ruling. Two vocabularies for one subject, bridged silently, is
+ * the defect class that cost this operation a re-stamp of 6.3M rows.
+ *
+ * The mapper's one real property was totality -- an unrecognised value
+ * yielded `null` rather than passing through. That property now rests on
+ * `pe_user_entitlements_billing_interval_chk`, which binds every writer
+ * including a raw connection, where a TypeScript union binds none of them.
+ */
+export function peEntitlementAccountBody(snap: PeEntitlementSnapshot): ReturnType<
+  typeof peEntitlementBaseBody
+> & {
+  seatsPurchased: number | null;
+  billingInterval: PeBillingInterval | null;
+} {
+  return {
+    ...peEntitlementBaseBody(snap),
+    seatsPurchased: snap.seatsPurchased,
+    billingInterval: snap.billingInterval,
   };
 }
 
@@ -297,7 +424,10 @@ export async function consumePeFreeChatMessage(
  * property unlock for the parcel resolved from the request. When no
  * parcelNodeId is resolvable the gate degrades to paid-only — identical to
  * the old behavior, never a silent open. Terrain is NOT gated here: terrain
- * stays Pro-only, enforced PE-BFF-side off the `/entitlement` `tier` field.
+ * and site-plan CAD are Studio-only, enforced PE-BFF-side off the
+ * `/entitlement` `studioGranted` field this module computes (P-104). Until
+ * P-104 that sentence read "Pro-only ... off the `tier` field", which was
+ * true of the code and wrong about the product: `tier` is `paid` for Solo.
  */
 export function requirePePaidOrPropertyUnlocked(
   resolveParcelNodeId?: (req: Request) => string | null,

@@ -81,7 +81,21 @@
  * Status is incorporated | unincorporated | unmeasured. ETJ is
  * `etjStatus: unresolved` — no buffer, no offset ring. Empty table
  * is unmeasured, never unincorporated. Query point is the bake
- * lat/lng index. Never copy situs city as incorporated place.
+ * lat/lng index and is served on the fact as `queryPoint` (null when
+ * the bake holds the 0,0 sentinel). Never copy situs city as
+ * incorporated place.
+ *
+ * ZONING VERDICT DERIVES FROM CITY LIMITS (CTX card F, 2026-08-28).
+ * For a parcel WITHOUT a zoning stamp, `facets.zoning` is the verdict
+ * `zoningVerdictFromCityLimits` builds from `cityLimitsFact` and the
+ * county roster: `stamp-missing` inside an incorporated place (the
+ * place named), `not-applicable` only when the index is populated, the
+ * point is outside every place, and the county's unincorporated
+ * territory is unzoned; `unmeasured` otherwise, carrying the reason.
+ * `baseFacts.situsCity` is never an input: until this card a null
+ * situsCity (which the conformant bake wrote for every parcel) served
+ * central Austin as `not-applicable: unincorporated`. The land-use
+ * fact receives the same verdict only when it is `not-applicable`.
  *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
  * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
@@ -127,6 +141,7 @@ import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { loadCityLimitsFact } from "../lib/cityLimitsFactRead";
 import { usableCityLimitsQueryPoint } from "@workspace/cad-ingest/city-limits";
 import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
+import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
 import {
   attachVerdictLayersToFacets,
 } from "../lib/structuralFactToFacetsWire";
@@ -636,13 +651,18 @@ brokerageNodeFacetsRouter.get(
     }
     const ownerFact =
       ownerFactLoaded ?? studioGatedOwnerFactRefusal(parcelNodeId);
-    const landUseFact = enrichLandUseFactWithZoningVerdict(
-      landUseFactRaw,
-      parcelNodeId,
-      snapshot?.facets ?? null,
-    );
+    // City limits FIRST: the zoning verdict derives incorporation from this
+    // containment fact and from nothing else (CTX card F). A null situsCity
+    // is not evidence of anything.
     const cityLimitsFact = await loadCityLimitsFact(
       snapshot?.queryPoint ?? null,
+    );
+    const zoningVerdict = snapshot
+      ? zoningVerdictFromCityLimits(parcelNodeId, snapshot.facets, cityLimitsFact)
+      : null;
+    const landUseFact = enrichLandUseFactWithZoningVerdict(
+      landUseFactRaw,
+      zoningVerdict,
     );
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
@@ -668,7 +688,7 @@ brokerageNodeFacetsRouter.get(
       facets: attachVerdictLayersToFacets(
         snapshot.facets as Record<string, unknown>,
         structuralFact,
-        landUseFact,
+        zoningVerdict,
       ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying
@@ -714,7 +734,8 @@ brokerageNodeFacetsRouter.get(
       // counties return present. Never upgrades lookup-failed in transit.
       structuralFact,
       // City limits PIP against tx_city_boundary. Not an atom. Empty
-      // index is unmeasured. ETJ is unresolved, never a buffer.
+      // index is unmeasured. ETJ is unresolved, never a buffer. Carries
+      // the query point the containment (and the zoning verdict) rests on.
       cityLimitsFact,
       }),
     );

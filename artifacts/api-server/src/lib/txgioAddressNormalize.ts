@@ -255,6 +255,52 @@ export function situsSearchStreetKeys(raw: string): string[] {
   return keys;
 }
 
+/**
+ * Bare-street key for "everyone on Pine St". Returns null when the
+ * first-comma segment starts with a house number (that is prefix
+ * search, not this) or when the only token is a street-type suffix.
+ */
+export function normalizeBareStreetLine(raw: string): string | null {
+  const segment = raw.split(",")[0] ?? raw;
+  const cleaned = segment
+    .toUpperCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+
+  const tokens = cleaned.split(" ").filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (/^\d/.test(tokens[0]!)) return null;
+
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (UNIT_DESIGNATORS.has(t) || t.startsWith("#")) break;
+    out.push(DIRECTIONAL_ABBR[t] ?? STREET_TYPE_ABBR[t] ?? t);
+  }
+  if (out.length === 0) return null;
+  if (out.length === 1 && STREET_TYPE_SUFFIXES.has(out[0]!)) return null;
+  return out.join(" ");
+}
+
+/** Primary bare-street needle plus the street-type-stripped form. */
+export function situsSearchBareStreetVariants(raw: string): string[] {
+  const primary = normalizeBareStreetLine(raw);
+  if (!primary) return [];
+  const variants: string[] = [primary];
+  const tokens = primary.split(" ").filter(Boolean);
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) {
+      const stripped = tokens.slice(0, -1).join(" ");
+      if (stripped.length > 0 && !variants.includes(stripped)) {
+        variants.push(stripped);
+      }
+    }
+  }
+  return variants;
+}
+
 /** City / state / ZIP constraints parsed from a typeahead or MCP find query. */
 export type PlaceSearchLocality = {
   city: string | null;
@@ -619,4 +665,24 @@ export function buildNormalizedStreetSql(col: string): string {
   // Final trim + whitespace collapse in case a replacement changed length
   // (it never introduces spaces, but keep the contract identical).
   return `trim(${expr})`;
+}
+
+/**
+ * Every Texas county FIPS (254 codes). The situs functional index is
+ * `(county_fips, <normalized street>)`. A search that omits the leading
+ * column seq-scans `txgio_parcel` (16M rows / 18 GB) and hits the 20 s
+ * budget. `allStoreCounties()` cannot supply this list: it still tags
+ * Bastrop as live-ArcGIS and would drop 48021 while 74k situs rows sit
+ * in the table.
+ *
+ * The odd-number 001..507 assignment is the Census county-code scheme
+ * for Texas, verified 254-of-254 against the statewide roster. This
+ * function is the index bound, not a name directory.
+ */
+export function texasCountyFipsList(): string[] {
+  const out: string[] = [];
+  for (let n = 1; n <= 507; n += 2) {
+    out.push(`48${String(n).padStart(3, "0")}`);
+  }
+  return out;
 }

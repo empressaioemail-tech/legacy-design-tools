@@ -219,11 +219,25 @@ describe("lib/db schema integration", () => {
         // R1 paywall (LOCK 2026-07-29) — signed-in-free chat counter +
         // per-property unlock record. Listed alphabetically to match
         // `ORDER BY tablename`.
+        // P-98 next-action rail — shown/acted per ladder rung, scoped to the
+        // PE USER rather than to `gtm_events`'s install_id. Sorts first in
+        // the whole `pe_` block: `pe_ac` < `pe_ai` (`c` < `i`) per
+        // `ORDER BY tablename`.
+        "pe_activation_events",
+        // P-87 Claude Sync — MCP clients that have authenticated against
+        // this account. Sorts after `pe_activation_events` and before
+        // `pe_chat_message_counts` (`_ai` < `_ch`) per `ORDER BY tablename`.
+        "pe_ai_connections",
         "pe_chat_message_counts",
         "pe_property_unlocks",
         "pe_saved_properties",
+        // P-91 / P-92 Wave B — screens are a different table from saves.
+        "pe_screen_rows",
+        "pe_screens",
         // P-86 — share grant registry. Resolvable URL is /s/{id}.
         "pe_share_grants",
+        "pe_team_invitations",
+        "pe_team_members",
         "pe_user_entitlements",
         "pe_user_identities",
         "pe_workbench_state",

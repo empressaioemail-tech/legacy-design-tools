@@ -64,6 +64,30 @@ describe("PE saved property isolation", () => {
     ]);
   });
 
+  it("GET saved-properties composes punctuation situs to node id + unknown", async () => {
+    await db.insert(peSavedProperties).values({
+      tenantId: DEFAULT_TENANT_ID,
+      ownerUserId: "user-a",
+      parcelNodeId: "48021:25420",
+      label: ", ,",
+      snapshot: { source: "test" },
+    });
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/saved-properties"),
+      "user-a",
+    );
+    expect(res.status).toBe(200);
+    const junk = res.body.find(
+      (row: { parcelNodeId: string }) => row.parcelNodeId === "48021:25420",
+    );
+    expect(junk).toMatchObject({
+      parcelNodeId: "48021:25420",
+      label: "48021:25420",
+      situs: "unknown",
+    });
+    expect(junk.label).not.toMatch(/^[\s,.\-;:'"`]+$/);
+  });
+
   it("GET saved-properties returns only caller's rows", async () => {
     const res = await asUser(
       request(getApp()).get("/api/property-explorer/v1/saved-properties"),

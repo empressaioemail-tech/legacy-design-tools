@@ -102,26 +102,33 @@ import {
   LANDUSE_JOIN_DISABLED_FIPS_SEED,
 } from "./lib/joinNormalize";
 import {
+  fetchCountyLandUseRoll,
   loadLedgerBlockedFips,
   resolveAddressLandUse,
   type AddressLandUseEntry,
 } from "./lib/joinIntegrityGate";
 import { ptadLandUseDescription } from "./lib/ptadLandUse";
 import { contentHashForPayload } from "./lib/placeLayerUtils";
-import {
-  computeTier1Envelope,
-  parcelAcreage,
-  ringCentroid,
-  type Tier1EnvelopeFacet,
-  type Ring,
-} from "./lib/nodeFacetBakeTier1";
+import { ringCentroid, type Ring } from "./lib/nodeFacetBakeTier1";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants";
-import { resolveZoningJurisdiction } from "@workspace/cad-ingest/zoning-layers";
 import {
-  resolveZoningLayerForDistrict,
-  zoningProvenanceFromLayer,
-  type ZoningGisProvenance,
-} from "./lib/zoningProvenance";
+  assembleTier1Payload,
+  COUNTY_NAMES,
+  effectiveBlockedFips,
+  firstRing,
+  TIER1_FACET_SCHEMA_VERSION,
+  type BaseFacts,
+  type LandUseSource,
+  type Tier1FacetPayload,
+} from "./lib/nodeFacetTier1Assemble";
+import { cadRollFromClaim } from "./lib/cadRollValue";
+import {
+  columnExists,
+  fetchParcelRowsByPropIds,
+  parcelSelectList,
+  PARCEL_TABLES,
+  tableExists,
+} from "./lib/nodeFacetTier1ParcelJoin";
 
 const { Pool } = pg;
 
@@ -130,26 +137,21 @@ const { Pool } = pg;
 // entrypoint guard misfires in the prod bundle and crashes boot). The CLI's
 // own uses below are unchanged.
 export { TIER1_ADAPTER_KEY };
-export const TIER1_FACET_SCHEMA_VERSION = "node-facets-tier1-v1";
 
-// The ten Central-TX counties unified in the parcel fabric (Wave D1/D2).
-// Nine carry (or can carry) a CAD land-use roll; Comal (48091) is geometry-
-// only (no roll loaded) and bakes honestly land-use-absent.
-const COUNTY_NAMES: Record<string, string> = {
-  "48209": "Hays",
-  "48091": "Comal",
-  "48453": "Travis",
-  "48491": "Williamson",
-  "48029": "Bexar",
-  "48021": "Bastrop",
-  "48055": "Caldwell",
-  "48187": "Guadalupe",
-  "48027": "Bell",
-  "48309": "McLennan",
+// The payload type, the county names, the ring reader, the effective block
+// set and the schema version moved to `./lib/nodeFacetTier1Assemble.ts` on
+// 2026-08-28 (OPS-19 A-025) so the conformant publish bake runs the SAME
+// assembly by import. Re-exported here so existing importers (the unit test,
+// `nodeFacetBakeTier2Cli.ts`) keep their paths. The conformant bake must NOT
+// import this module: its entrypoint guard is true inside the esbuild publish
+// bundle and would run `main()`.
+export {
+  COUNTY_NAMES,
+  effectiveBlockedFips,
+  firstRing,
+  TIER1_FACET_SCHEMA_VERSION,
 };
-
-/** Tables read, prod winning over staging for a county (same as PMTiles bake). */
-const PARCEL_TABLES = ["txgio_parcel", "txgio_parcel_staging"] as const;
+export type { BaseFacts, LandUseSource, Tier1FacetPayload };
 
 function log(msg: string): void {
   console.log(`[node-facet-bake-t1] ${msg}`);
@@ -233,14 +235,6 @@ function resolveDatabaseUrl(): string {
 // Table + county discovery (prod wins over staging on a collision).
 // ---------------------------------------------------------------------------
 
-async function tableExists(pool: pg.Pool, table: string): Promise<boolean> {
-  const r = await pool.query<{ r: string | null }>(
-    "SELECT to_regclass($1) AS r",
-    [table],
-  );
-  return r.rows[0]?.r != null;
-}
-
 interface CountySource {
   fips: string;
   name: string;
@@ -259,20 +253,6 @@ interface CountySource {
    * Absent on staging / pre-0062 tables — resolve falls back to situs only.
    */
   hasZoningJurisdiction: boolean;
-}
-
-async function columnExists(
-  pool: pg.Pool,
-  table: string,
-  column: string,
-): Promise<boolean> {
-  const r = await pool.query<{ n: string }>(
-    `SELECT count(*) AS n
-       FROM information_schema.columns
-      WHERE table_name = $1 AND column_name = $2`,
-    [table, column],
-  );
-  return Number(r.rows[0]?.n ?? 0) > 0;
 }
 
 async function discoverCounty(
@@ -322,33 +302,16 @@ interface LandUse {
   landUseVintage: string;
 }
 
+// The query itself lives in `./lib/joinIntegrityGate.ts` so the conformant
+// bake reads the SAME upstream through the SAME function. One derivation, no
+// second copy to drift (F-06 land-use projection, 2026-08-31). CAD-to-CAD:
+// seed does NOT apply. Seed risk was TxGIO-to-CAD. 48209 and 48491 are
+// clear. Do not re-impose the seed. Join key is prop_id, never seed.
 async function fetchCountyLandUse(
   pool: pg.Pool,
   fips: string,
 ): Promise<Map<string, LandUse>> {
-  const out = new Map<string, LandUse>();
-  const declared = tryResolveDeclaredCadVintage(fips);
-  if (!declared) return out;
-  if (!(await tableExists(pool, "cad_property"))) return out;
-  const r = await pool.query<{
-    prop_id: string;
-    property_use_code: string;
-    source_vintage: string;
-  }>(
-    `SELECT prop_id, property_use_code, source_vintage
-       FROM cad_property
-      WHERE county_fips = $1
-        AND tax_year = $2
-        AND property_use_code IS NOT NULL`,
-    [declared.countyFips, declared.taxYear],
-  );
-  for (const row of r.rows) {
-    out.set(row.prop_id, {
-      landUseCode: row.property_use_code,
-      landUseVintage: row.source_vintage,
-    });
-  }
-  return out;
+  return (await fetchCountyLandUseRoll(pool, fips)).byPropId;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,94 +368,8 @@ async function fetchCountyLandUseByAddress(
 // Tier-1 facet payload assembly (owner-excluded, honest-absence).
 // ---------------------------------------------------------------------------
 
-interface BaseFacts {
-  apn: string | null;
-  situsAddress: string | null;
-  situsCity: string | null;
-  situsState: string | null;
-  landUse: {
-    code: string;
-    description: string | null;
-    /**
-     * How the land-use was joined. `cad-roll` is the normal prop_id join;
-     * `cad-roll-address-join` is the situs-address RECOVERY join used for
-     * prop_id-gate-blocked counties (Williamson/Hays), where each accepted
-     * match ALSO passed the per-match owner gate. The distinct value lets the
-     * card/ledger show HOW the land-use was verified.
-     */
-    source: LandUseSource;
-    vintage: string;
-  } | null;
-  acreage: { value: number; sqft: number; method: "shoelace-wgs84" } | null;
-}
-
-/** The provenance of a recovered land-use — prop_id join vs address recovery. */
-export type LandUseSource = "cad-roll" | "cad-roll-address-join";
-
-export interface Tier1FacetPayload {
-  facetSchemaVersion: string;
-  tier: 1;
-  parcelNodeId: string;
-  countyFips: string;
-  countyName: string;
-  baseFacts: BaseFacts;
-  zoning: {
-    district: string;
-    /** Hyphen or underscore cityKey from PIP stamp / situs fallback. */
-    jurisdictionKey?: string | null;
-    /**
-     * GIS origin for the district FACT (ZONING_LAYERS layer). Required when
-     * district is present — breadth bake is a TRANSFORM, not the source
-     * (COMPLETE-BASTROP A1 / S-01/S-02).
-     */
-    provenance?: ZoningGisProvenance;
-  } | null;
-  envelope: Tier1EnvelopeFacet | null;
-  /**
-   * Per-facet presence, the load-bearing input to the monotonic scorer. A
-   * true means the facet resolved to real content; a false means honest
-   * absence (no fabrication). `envelope` counts as present only when it
-   * derived a real (or honestly-empty) envelope, not when it declined for a
-   * missing table/district.
-   */
-  facetCoverage: {
-    baseFacts: boolean;
-    landUse: boolean;
-    acreage: boolean;
-    zoning: boolean;
-    envelope: boolean;
-  };
-  provenance: {
-    parcelSource: "txgio";
-    parcelVintage: string | null;
-    landUseSource: LandUseSource | null;
-    /**
-     * True when this node's land-use was recovered via the situs-ADDRESS join
-     * (a prop_id-gate-blocked county) rather than the normal prop_id join, and
-     * the match passed the per-match owner gate. Distinguishes an address-join
-     * land-use from a prop_id-join one at a glance (the ledger/card verification
-     * story). False for a normal prop_id-join land-use or an absent one.
-     */
-    landUseAddressRecovered: boolean;
-    roadsPending: true;
-    tierNote: string;
-    /**
-     * True when this county's land-use join is BLOCKED by the owner-match
-     * integrity gate (ledger `block` verdict / seed). The load-bearing signal
-     * for the monotonic INTEGRITY OVERRIDE: a gate-blocked re-bake must be
-     * allowed to strip a previously-promoted (now-known-fabricated) land-use
-     * even though dropping the facet lowers the monotonic score. See
-     * `shouldPromote`.
-     */
-    landUseGateBlocked: boolean;
-    /**
-     * Top-level twin of zoning.provenance.sourceUrl when a district is
-     * present (COMPLETE-BASTROP A1). Null when zoning is honestly absent.
-     */
-    zoningSource: string | null;
-  };
-  bakedAt: string;
-}
+// `BaseFacts`, `LandUseSource` and `Tier1FacetPayload` live in
+// `./lib/nodeFacetTier1Assemble.ts` (re-exported above).
 
 /**
  * A parcel row as selected for the bake.
@@ -512,6 +389,8 @@ interface ParcelRow {
   situs_address: string | null;
   situs_city: string | null;
   situs_state: string | null;
+  /** Selected by `parcelSelectList` (both parcel tables carry it); optional for fixtures. */
+  situs_zip?: string | null;
   zoning_district: string | null;
   zoning_jurisdiction: string | null;
   source_vintage: string | null;
@@ -520,45 +399,8 @@ interface ParcelRow {
   txgioOwnerForGate?: string | null;
 }
 
-/**
- * First outer ring (lng/lat) out of a GeoJSON Polygon | MultiPolygon
- * geometry. Null when the geometry is not a usable polygon.
- */
-export function firstRing(geometry: unknown): Ring | null {
-  const g = geometry as { type?: string; coordinates?: unknown } | null;
-  if (!g) return null;
-  let ring: unknown = null;
-  if (g.type === "Polygon" && Array.isArray(g.coordinates)) {
-    ring = g.coordinates[0];
-  } else if (g.type === "MultiPolygon" && Array.isArray(g.coordinates)) {
-    const first = g.coordinates[0];
-    ring = Array.isArray(first) ? first[0] : null;
-  }
-  if (!Array.isArray(ring) || ring.length < 4) return null;
-  return ring as Ring;
-}
-
-/**
- * The EFFECTIVE land-use block set the bake acts on: the ledger's computed
- * `block` verdicts UNION the known-fabricated bootstrap seed
- * (`LANDUSE_JOIN_DISABLED_FIPS_SEED`). The seed is a PERMANENT FLOOR — a
- * county in the seed is blocked even if the ledger scores it something other
- * than `block` (e.g. Williamson 48491 scores `insufficient-sample` after the
- * R-strip removal drops its real pairs to ~0, so it is NOT a ledger `block`,
- * yet it is a known fabrication that must never re-acquire a land-use). The
- * ledger ADDS to the seed; it never replaces it.
- *
- * This union is what drives BOTH the honest-absence join (via `landUseJoinKey`)
- * AND `provenance.landUseGateBlocked` (which arms the fabrication-correction
- * override). Passing the raw ledger set instead of this union was the live bug:
- * a seed-blocked-but-ledger-insufficient county (Williamson) kept its fabricated
- * prior because `landUseGateBlocked` stayed false and the override never fired.
- */
-export function effectiveBlockedFips(
-  ledgerBlocked: ReadonlySet<string>,
-): Set<string> {
-  return new Set<string>([...ledgerBlocked, ...LANDUSE_JOIN_DISABLED_FIPS_SEED]);
-}
+// `firstRing` and `effectiveBlockedFips` live in
+// `./lib/nodeFacetTier1Assemble.ts` (re-exported above).
 
 /**
  * Build the Tier-1 payload for one parcel row. Pure. The owner name (when
@@ -648,113 +490,44 @@ export function buildTier1Payload(
     }
   }
 
-  const acreage = ring ? parcelAcreage(ring) : null;
-
-  const baseFacts: BaseFacts = {
+  // --- Zoning, envelope, acreage, coverage, provenance: the SHARED assembly
+  // (`./lib/nodeFacetTier1Assemble.ts`), the same code the conformant publish
+  // bake runs. Byte-for-byte the derivation that used to sit here.
+  return assembleTier1Payload({
+    nodeId,
+    countyFips,
+    countyName,
+    facetSchemaVersion: TIER1_FACET_SCHEMA_VERSION,
     apn: str(row.prop_id),
     situsAddress: str(row.situs_address),
     situsCity: str(row.situs_city),
     situsState: str(row.situs_state),
+    situsZip: str(row.situs_zip),
     landUse: luFacet,
-    acreage,
-  };
-
-  // --- Zoning (stored column, verbatim; honest null when unstamped) ---
-  // Per-parcel jurisdiction: PIP-stamped zoning_jurisdiction is authoritative;
-  // situs_city is a FALLBACK only (overlapping layers / pre-migration rows).
-  const zoningDistrict = str(row.zoning_district);
-  const resolvedCityKey = resolveZoningJurisdiction(
-    {
-      zoningJurisdiction: row.zoning_jurisdiction,
-      situsCity: baseFacts.situsCity,
-      countyFips,
+    cadRoll: cadRollFromClaim({
+      taxYear: null,
+      marketValue: null,
+      assessedValue: null,
+      landValue: null,
+      improvementValue: null,
+      livingAreaSqft: null,
+    }),
+    landUseAddressRecovered,
+    landUseGateBlocked,
+    ring,
+    zoningDistrictRaw: row.zoning_district,
+    zoningJurisdictionRaw: row.zoning_jurisdiction,
+    parcelSource: "txgio",
+    parcelVintage: str(row.source_vintage),
+    nowIso,
+    onSitusFallback: ({ cityKey, situsCity }) => {
+      console.warn(
+        `[node-facet-bake-t1] situs fallback jurisdiction=${cityKey} ` +
+          `situs_city=${situsCity} county=${countyFips} ` +
+          `feature_index=${row.feature_index}`,
+      );
     },
-    {
-      onSitusFallback: ({ cityKey, situsCity }) => {
-        console.warn(
-          `[node-facet-bake-t1] situs fallback jurisdiction=${cityKey} ` +
-            `situs_city=${situsCity} county=${countyFips} ` +
-            `feature_index=${row.feature_index}`,
-        );
-      },
-    },
-  );
-  const jurisdictionFacetKey = resolvedCityKey
-    ? resolvedCityKey.replace(/-/g, "_")
-    : null;
-  // GIS provenance when a district is present (A1). Prefer PIP/situs cityKey;
-  // sole wired layer for the county is the fallback when zj was never written
-  // (Bastrop mold: bastrop-city-tx). Multi-city + no key → no invent.
-  const zoningLayer = zoningDistrict
-    ? resolveZoningLayerForDistrict({
-        resolvedCityKey,
-        countyFips,
-      })
-    : null;
-  const zoningGisProvenance = zoningLayer
-    ? zoningProvenanceFromLayer(zoningLayer, nowIso)
-    : undefined;
-  // Prefer the layer's hyphen cityKey for jurisdiction when sole-layer
-  // fallback filled a missing stamp (keeps setback routing on ZONING_LAYERS).
-  const jurisdictionFromLayer = zoningLayer
-    ? zoningLayer.cityKey.replace(/-/g, "_")
-    : null;
-  const effectiveJurisdictionKey =
-    jurisdictionFacetKey ?? jurisdictionFromLayer;
-  const zoning = zoningDistrict
-    ? {
-        district: zoningDistrict,
-        jurisdictionKey: effectiveJurisdictionKey,
-        ...(zoningGisProvenance ? { provenance: zoningGisProvenance } : {}),
-      }
-    : null;
-
-  const envelope: Tier1EnvelopeFacet | null = ring
-    ? computeTier1Envelope({
-        ring,
-        zoningCode: zoningDistrict,
-        situsCity: baseFacts.situsCity,
-        situsState: baseFacts.situsState,
-        situsAddress: baseFacts.situsAddress,
-        zoningJurisdictionFallback: effectiveJurisdictionKey,
-      })
-    : null;
-
-  const facetCoverage = {
-    baseFacts: baseFacts.apn != null || baseFacts.situsAddress != null,
-    landUse: luFacet != null,
-    acreage: acreage != null,
-    zoning: zoning != null,
-    // Anti-zombie (WDLL 3.7): Tier-1 never counts envelope as product coverage.
-    // Product envelope is the atom-chain path only.
-    envelope: false,
-  };
-
-  return {
-    facetSchemaVersion: TIER1_FACET_SCHEMA_VERSION,
-    tier: 1,
-    parcelNodeId: nodeId,
-    countyFips,
-    countyName,
-    baseFacts,
-    zoning,
-    envelope,
-    facetCoverage,
-    provenance: {
-      parcelSource: "txgio",
-      parcelVintage: str(row.source_vintage),
-      landUseSource: luFacet ? luFacet.source : null,
-      landUseAddressRecovered,
-      roadsPending: true,
-      tierNote:
-        "Tier 1 (deterministic). Buildable envelope product path retired " +
-        "(anti-zombie / atom_path_pending) — read envelope from property atom " +
-        "chain. Tier 2 may still carry flood overlay.",
-      landUseGateBlocked,
-      zoningSource: zoningGisProvenance?.sourceUrl ?? null,
-    },
-    bakedAt: nowIso,
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1301,15 +1074,9 @@ async function bakeCounty(args: {
   const scoped = propIds !== undefined && propIds.size > 0;
   const foundPropIds = new Set<string>();
 
-  const zoningSelect = county.hasZoning
-    ? "zoning_district"
-    : "NULL::text AS zoning_district";
-  const zoningJurisdictionSelect = county.hasZoningJurisdiction
-    ? "zoning_jurisdiction"
-    : "NULL::text AS zoning_jurisdiction";
-  const ownerSelect = needsOwnerForGate
-    ? "owner_name AS txgio_owner_for_gate"
-    : "NULL::text AS txgio_owner_for_gate";
+  // The SELECT list (honest NULL projections for absent columns; owner only
+  // for the address-recovery gate) is shared with the conformant bake.
+  const selectList = parcelSelectList(county, needsOwnerForGate);
 
   /** Process one fetched page of parcel rows (shared by county-wide + scoped). */
   async function processParcelPage(
@@ -1382,21 +1149,19 @@ async function bakeCounty(args: {
     const idList = [...propIds!];
     for (const chunk of chunkItems(idList, pageSize)) {
       if (limit !== undefined && stats.parcelsSeen >= limit) break;
-      const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
-        `SELECT DISTINCT ON (feature_index)
-                feature_index, prop_id, situs_address, situs_city, situs_state,
-                ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
-                source_vintage, geometry
-           FROM ${county.table}
-          WHERE county_fips = $1
-            AND prop_id = ANY($2::text[])
-          ORDER BY feature_index`,
-        [county.fips, chunk],
+      // The scoped read is the shared parcel join (same SELECT the conformant
+      // bake runs, keyed by county + prop_id).
+      const rows = await fetchParcelRowsByPropIds(
+        pool,
+        county.fips,
+        county,
+        chunk,
+        needsOwnerForGate,
       );
-      if (r.rows.length === 0) continue;
+      if (rows.length === 0) continue;
       const remaining =
-        limit !== undefined ? Math.max(0, limit - stats.parcelsSeen) : r.rows.length;
-      await processParcelPage(r.rows.slice(0, remaining));
+        limit !== undefined ? Math.max(0, limit - stats.parcelsSeen) : rows.length;
+      await processParcelPage(rows.slice(0, remaining));
       if (limit !== undefined && stats.parcelsSeen >= limit) break;
     }
     stats.scoped = {
@@ -1414,9 +1179,7 @@ async function bakeCounty(args: {
     const pageLimit = Math.min(pageSize, remaining);
     const r = await pool.query<ParcelRow & { txgio_owner_for_gate: string | null }>(
       `SELECT DISTINCT ON (feature_index)
-              feature_index, prop_id, situs_address, situs_city, situs_state,
-              ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
-              source_vintage, geometry
+              ${selectList}
          FROM ${county.table}
         WHERE county_fips = $1
           AND feature_index > $2

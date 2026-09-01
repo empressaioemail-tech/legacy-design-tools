@@ -42,7 +42,19 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "saved_workspace_spaces",
   "pe_user_identities",
   "pe_user_entitlements",
+  // P-87 Claude Sync -- written by the MCP server, read by the PE card.
+  "pe_ai_connections",
+  // P-98 next-action rail -- shown/acted per ladder rung. Cascades off
+  // `users`, but listed explicitly per the "if a route writes to it, it's in
+  // this list" invariant so the activation-event suite starts empty and a
+  // count assertion cannot pick up another test's rows.
+  "pe_activation_events",
+  "pe_team_members",
+  "pe_team_invitations",
   "pe_saved_properties",
+  // P-91 / P-92 Wave B — screens are a different table from saves.
+  "pe_screens",
+  "pe_screen_rows",
   // R1 paywall (LOCK 2026-07-29) — per-property unlock record + signed-in
   // free chat counter. Both cascade off `users`, but listed explicitly per
   // the "if a route writes to it, it's in this list" invariant so the

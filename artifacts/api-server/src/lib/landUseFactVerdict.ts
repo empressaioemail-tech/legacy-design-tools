@@ -1,19 +1,21 @@
 /**
- * Apply doc 19 layer verdicts to landUseFact when zoning authority is absent
- * by parcel shape (unincorporated / unzoned county doctrine).
+ * Apply the doc 19 zoning verdict to landUseFact when municipal zoning
+ * authority is not applicable to the parcel (unincorporated, unzoned county).
+ *
+ * CTX card F (2026-08-28): the verdict is DERIVED ONCE in the route from the
+ * city-limits containment fact (`zoningVerdictFromCityLimits`) and passed in
+ * here; this module no longer reads baked facets or `baseFacts.situsCity`.
+ * Only a `not-applicable` verdict (index populated, point outside every
+ * incorporated place, county unincorporated territory unzoned) is merged onto
+ * a missing or absent land-use fact. `stamp-missing` and `unmeasured` say
+ * nothing about land use and leave the fact untouched.
  *
  * INTERIM APPLICABILITY (instrument brief 2026-08-22): contract Shape is not
- * armed yet. Until it lands, not-applicable for municipal zoning on
- * unincorporated land uses `isUnincorporatedNoZoningAuthorityShape` plus
- * texas_county_roster_v1 `zoning_regime.unincorporated=unzoned` — declared
- * per-family applicability, not a boolean default.
+ * armed yet; texas_county_roster_v1 `zoning_regime.unincorporated=unzoned`
+ * is the declared per-family applicability, never a boolean default.
  */
 
-import {
-  buildZoningNotApplicableAbsence,
-  isUnincorporatedNoZoningAuthorityShape,
-  mergeLayerVerdict,
-} from "./verdictLayerServe";
+import { mergeLayerVerdict, type LayerAbsenceWire } from "./verdictLayerServe";
 
 const LAND_USE_FACT_SOURCE = "land-use-fact" as const;
 
@@ -45,7 +47,7 @@ function landUseFactEligibleForZoningNotApplicable(
     return true;
   }
   // Baked parcels in unzoned counties carry a bound land-use-fact atom with
-  // state=absent (e.g. no-cad-row) — still unincorporated no-zoning shape.
+  // state=absent (e.g. no-cad-row) — still eligible for not-applicable.
   if (landUseFact.state === "absent") return true;
   return false;
 }
@@ -53,25 +55,24 @@ function landUseFactEligibleForZoningNotApplicable(
 /**
  * When land-use is missing or absent on unincorporated land with no zoning
  * authority, emit not-applicable instead of bare atom-miss / untyped absent
- * (P-63 WDLL item 3).
+ * (P-63 WDLL item 3). The not-applicable decision is the containment-derived
+ * zoning verdict; nothing here derives it.
  */
 export function enrichLandUseFactWithZoningVerdict<T extends LandUseFactVerdictInput>(
   landUseFact: T,
-  parcelNodeId: string,
-  bakedFacets: unknown,
+  zoningVerdict: LayerAbsenceWire | null | undefined,
 ): T {
+  if (!zoningVerdict || zoningVerdict.verdict !== "not-applicable") {
+    return landUseFact;
+  }
   if (!landUseFactEligibleForZoningNotApplicable(landUseFact)) {
     return landUseFact;
   }
-  if (!isUnincorporatedNoZoningAuthorityShape(parcelNodeId, bakedFacets)) {
-    return landUseFact;
-  }
-  const absence = buildZoningNotApplicableAbsence();
   return mergeLayerVerdict(
     {
       ...landUseFact,
       source: LAND_USE_FACT_SOURCE,
     },
-    absence,
+    zoningVerdict,
   ) as T;
 }

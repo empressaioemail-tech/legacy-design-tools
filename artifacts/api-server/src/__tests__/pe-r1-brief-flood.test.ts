@@ -2,6 +2,7 @@
  * R1 research/brief composition — unit tests (no DATABASE_URL required).
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { extractEnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import {
@@ -82,7 +83,8 @@ describe("buildR1Brief composition", () => {
     expect(floodSection?.refusal).toBeUndefined();
     expect(floodSection?.asOf).toBe(atomPresentFixture.evaluatedAt);
     expect(floodSection?.citationsDegraded).toBe(true);
-    expect(floodSection?.zoneExposureSummary).toMatch(/Special Flood Hazard Area/);
+    // F2 (triage D5): the prose is withheld while the citation is degraded.
+    expect(floodSection).not.toHaveProperty("zoneExposureSummary");
     expect(JSON.stringify(brief)).not.toContain("FLOODWAY");
   });
 
@@ -110,7 +112,7 @@ describe("buildR1Brief composition", () => {
     const brief = buildR1Brief(
       { baseFacts: { landUse: { code: "A1" } } },
       null,
-      { floodHazardFact: zoneXShadedFixture },
+      { floodHazardFact: { ...zoneXShadedFixture, sourceCitation: femaCitation } },
     );
     const floodSection = brief.sections.find((section) => section.id === "flood");
     expect(floodSection?.zoneExposureSummary).toBe(summary);
@@ -223,6 +225,29 @@ describe("buildR1Brief composition", () => {
     });
   });
 
+  it("P-91 item 9: present land-use with empty citations is citationsDegraded", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+    );
+    const landUse = brief.sections.find((section) => section.id === "land-use");
+    expect(landUse?.data).toEqual({ code: "A1" });
+    expect(landUse?.citations).toEqual([]);
+    expect(landUse?.citationsDegraded).toBe(true);
+  });
+
+  it("P-91 item 9: present flood with empty citations is citationsDegraded", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: zoneXShadedFixture },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toMatchObject({ state: "present", floodZone: "X" });
+    expect(flood?.citations).toEqual([]);
+    expect(flood?.citationsDegraded).toBe(true);
+  });
+
   it("present wire envelope keeps data and citations", () => {
     const envelope = {
       status: "ok",
@@ -244,5 +269,126 @@ describe("buildR1Brief composition", () => {
     expect(envelopeSection?.refusal).toBeUndefined();
     expect(envelopeSection?.citations).toContain("https://example.test/setbacks");
     expect(envelopeSection?.asOf).toBeNull();
+  });
+});
+
+/**
+ * F2 (v2 card, triage D5). A degraded flood section produced the most
+ * quotable sentence in the brief. While the citation is degraded the prose
+ * is withheld; with a citation it is emitted; and none of it carries an em
+ * dash.
+ */
+describe("F2 flood prose is withheld while the citation is degraded", () => {
+  it("gold-shaped present flood with no citation: citationsDegraded, empty citations, no zoneExposureSummary", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+    expect(flood?.citations).toEqual([]);
+    expect(flood?.citationsDegraded).toBe(true);
+    expect(flood).not.toHaveProperty("zoneExposureSummary");
+  });
+
+  it("the same fact with a citation emits the summary", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: { ...atomPresentFixture, sourceCitation: femaCitation } },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.citations).toEqual([femaCitation]);
+    expect(flood).not.toHaveProperty("citationsDegraded");
+    expect(flood?.zoneExposureSummary).toMatch(/Special Flood Hazard Area/);
+  });
+
+  it("no summary string, emitted or in source, contains an em dash", () => {
+    const source = readFileSync(
+      new URL("../lib/r1BriefCompose.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/—/);
+    const fixtures: FloodHazardFactPresent[] = [
+      atomPresentFixture,
+      zoneXShadedFixture,
+      zoneXUnsubtypedFixture,
+      { ...zoneXShadedFixture, zoneSubtype: "AREA OF MINIMAL FLOOD HAZARD" },
+      { ...zoneXShadedFixture, floodZone: "D" },
+      { ...zoneXShadedFixture, floodZone: "" },
+      { ...atomPresentFixture, baseFloodElevation: 412 },
+    ];
+    for (const fixture of fixtures) {
+      expect(summarizeFloodZoneExposure(fixture) ?? "").not.toMatch(/—/);
+    }
+  });
+});
+
+/**
+ * F7 (v2 card, triage D3). The stub advertises a drainage rail; node depth
+ * must carry a drainage section so the rail can be opened. Until the facet
+ * exists the section is unread with a reason; when the bake carries a
+ * drainage facet the section carries it like the other sections.
+ */
+describe("F7 drainage is a section", () => {
+  const BAKED_AT = "2026-08-20T00:00:00.000Z";
+
+  it("node depth carries a drainage section, unread with a reason, until the facet exists", () => {
+    const brief = buildR1Brief(
+      { bakedAt: BAKED_AT, baseFacts: { landUse: { code: "A1" } } },
+      null,
+    );
+    const drainage = brief.sections.find((section) => section.id === "drainage");
+    expect(drainage).toEqual({
+      id: "drainage",
+      title: "Drainage",
+      data: null,
+      citations: [],
+      asOf: BAKED_AT,
+      disposition: "unread",
+      reason: "drainage facet not produced for this parcel",
+    });
+  });
+
+  it("a bake with a drainage facet carries it present like the other sections", () => {
+    const facet = {
+      catchmentAreaAcres: 1.2,
+      flowLineCount: 2,
+      sourceUrl: "https://example.test/drainage/48021-34137",
+      evaluatedAt: "2026-08-25T00:00:00.000Z",
+    };
+    const brief = buildR1Brief({ bakedAt: BAKED_AT, drainage: facet }, null);
+    const drainage = brief.sections.find((section) => section.id === "drainage");
+    expect(drainage).toMatchObject({
+      id: "drainage",
+      title: "Drainage",
+      data: facet,
+      disposition: "present",
+      citations: ["https://example.test/drainage/48021-34137"],
+      asOf: "2026-08-25T00:00:00.000Z",
+    });
+    expect(drainage).not.toHaveProperty("reason");
+    expect(drainage).not.toHaveProperty("citationsDegraded");
+  });
+
+  it("every section carries a disposition in the four-word vocabulary", () => {
+    const brief = buildR1Brief(
+      { bakedAt: BAKED_AT, zoning: { district: "SF-1" }, baseFacts: { landUse: null } },
+      null,
+      { floodHazardFact: atomMissFixture },
+    );
+    expect(brief.sections.map((section) => section.id)).toEqual([
+      "zoning",
+      "setbacks-envelope",
+      "flood",
+      "land-use",
+      "drainage",
+    ]);
+    for (const section of brief.sections) {
+      expect(["present", "absent", "refused", "unread"]).toContain(
+        (section as { disposition?: unknown }).disposition,
+      );
+    }
   });
 });

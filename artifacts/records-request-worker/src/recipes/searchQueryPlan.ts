@@ -34,7 +34,8 @@ export function parseSubdivisionLotBlockFromLegal(
   }
   const text = legal.trim();
   const lotMatch = text.match(/\bLOT\s+(\d+[A-Z]?)\b/i);
-  const blockMatch = text.match(/\bBLK(?:OCK)?\.?\s+(\d+[A-Z]?)\b/i);
+  /** Matches BLK, BLOCK, and BLKOCK spellings with a digit block id (P-85 audit CURRENT_BLOCK_PATTERN). */
+  const blockMatch = text.match(/\bBL(?:OC)?K\.?\s+(\d+[A-Z]?)\b/i);
   const subMatch = text.match(
     /\b(?:SUBDIVISION|SUBD?\.?|PHASE)\s+([A-Z0-9][A-Z0-9\s.'-]{2,60})/i,
   );

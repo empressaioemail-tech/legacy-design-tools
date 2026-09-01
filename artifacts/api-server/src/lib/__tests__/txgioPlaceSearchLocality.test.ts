@@ -66,9 +66,10 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
         },
       ]) as never,
     });
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
-    expect(hits[0]?.situsAddress).toContain("BASTROP");
+    expect(hits.hits).toHaveLength(1);
+    expect(hits.hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits.hits[0]?.situsAddress).toContain("BASTROP");
+    expect(hits.missClass).toBeUndefined();
   });
 
   it("returns gold 48021:34137 on the exact-key path when CAD omits ST", async () => {
@@ -87,9 +88,9 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
         },
       ]) as never,
     });
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
-    expect(hits[0]?.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
+    expect(hits.hits).toHaveLength(1);
+    expect(hits.hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits.hits[0]?.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
   });
 
   it("returns Bastrop 908 Pine when CAD situs omits street-type suffix", async () => {
@@ -122,9 +123,9 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
       query: "908 Pine St, Bastrop TX 78602",
       database: db as never,
     });
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.parcelNodeId).toBe("48021:34137");
-    expect(hits[0]?.situsAddress).toContain("BASTROP");
+    expect(hits.hits).toHaveLength(1);
+    expect(hits.hits[0]?.parcelNodeId).toBe("48021:34137");
+    expect(hits.hits[0]?.situsAddress).toContain("BASTROP");
   });
 
   it("fail-closes (no unfiltered fallback) when locality matches nothing", async () => {
@@ -138,7 +139,7 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
         },
       ]) as never,
     });
-    expect(hits).toEqual([]);
+    expect(hits).toEqual({ hits: [], missClass: "no-hit" });
   });
 
   it("keeps unconstrained prefix behavior when no locality is present", async () => {
@@ -152,7 +153,7 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
         },
       ]) as never,
     });
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.parcelNodeId).toBe("48491:999999");
+    expect(hits.hits).toHaveLength(1);
+    expect(hits.hits[0]?.parcelNodeId).toBe("48491:999999");
   });
 });

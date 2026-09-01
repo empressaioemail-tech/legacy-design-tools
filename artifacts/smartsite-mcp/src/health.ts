@@ -1,3 +1,4 @@
+import { isAuthConfigured, loadAuthConfig, type AuthConfig } from "./auth.js";
 import { SERVER_NAME, SERVER_VERSION, SMARTSITE_MCP_TOOLS } from "./constants.js";
 import {
   loadHauskaMcpConfig,
@@ -24,10 +25,16 @@ export type DependenciesHealthReport = {
   };
 };
 
-export function buildHealthReport(): HealthReport {
-  const authConfigured =
-    process.env.SMARTSITE_MCP_DEV_MODE === "true" ||
-    Boolean(process.env.WORKOS_CLIENT_ID && process.env.WORKOS_JWKS_URI);
+/**
+ * `authConfigured` is the /mcp gate predicate itself (auth.ts
+ * isAuthConfigured), so /health cannot report ok while /mcp 503s on
+ * auth_not_configured. Pass the app's AuthConfig to keep the two on one
+ * object; the default reads the same env the gate reads at boot.
+ */
+export function buildHealthReport(
+  authConfig: AuthConfig = loadAuthConfig(),
+): HealthReport {
+  const authConfigured = isAuthConfigured(authConfig);
   const cortexConfigured = Boolean(
     process.env.CORTEX_API_BASE_URL && process.env.SERVICE_API_KEY,
   );
@@ -67,7 +74,7 @@ Endpoint: ${publicHost}/mcp
 Protocol: Streamable HTTP (MCP 2025-03-26)
 Authorization: OAuth 2.1 + PKCE against the Smart Site account (WorkOS AuthKit). Bearer-without-OAuth is refused.
 
-Tools (exactly eight):
+Tools (13):
 ${toolLines}
 
 Hauska MCP (mcp.hauska.dev) remains the developer catalog gate. This server is product-owned and lists only Smart Site tools.

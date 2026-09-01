@@ -11,12 +11,26 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, brokerageWallets, type PeSubscriptionTier } from "@workspace/db";
+import {
+  db,
+  brokerageWallets,
+  type PeBillingInterval,
+  type PeSubscriptionTier,
+} from "@workspace/db";
 import { logger } from "./logger";
 import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
 import { setPeAccessTierFromStripe } from "./peIdentity";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
+import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
+import {
+  configuredExtraSeatPriceId,
+  configuredTeamPriceIds,
+  extractStripePriceItems,
+  parseMetadataSeats,
+  resolveTeamSeatsPurchased,
+  type StripePriceItem,
+} from "./peTeamSeatsFromStripe";
 
 /** 30-day unlock bound (LOCKED 2026-08-10 ladder: "$15, 30 days — not forever"). */
 const PE_UNLOCK_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -281,6 +295,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
   checkoutKind: string | null;
   parcelNodeId: string | null;
   subscriptionTierRaw: string | null;
+  seatsPurchased: number | null;
 } {
   const meta = obj.metadata;
   if (!meta || typeof meta !== "object") {
@@ -289,6 +304,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       checkoutKind: null,
       parcelNodeId: null,
       subscriptionTierRaw: null,
+      seatsPurchased: null,
     };
   }
   const record = meta as Record<string, unknown>;
@@ -302,6 +318,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       typeof record.subscription_tier === "string"
         ? record.subscription_tier
         : null,
+    seatsPurchased: parseMetadataSeats(record.seats_purchased),
   };
 }
 
@@ -444,12 +461,22 @@ export async function handleStripeWebhook(
       const source = checkoutSessionHadDiscount(obj)
         ? "stripe_promo"
         : "stripe_sub";
+      // P-98: the interval rides with the tier write that was already here.
+      // No new write path, and both facts come from one read of the items.
+      const billing = await peGrantBillingFacts({
+        grantTier,
+        obj,
+        metadataSeats: peMeta.seatsPurchased,
+        subscriptionId,
+      });
       await setPeAccessTierFromStripe({
         userId: peMeta.peUserId,
         tier: "paid",
         subscriptionTier: grantTier,
         source,
         stripeCustomerId: customerId,
+        seatsPurchased: billing.seatsPurchased,
+        billingInterval: billing.billingInterval,
       });
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
@@ -500,12 +527,28 @@ export async function handleStripeWebhook(
           reason: `unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
         };
       }
+      // P-98: re-derived on EVERY update, including back to null. A plan
+      // change from monthly to annual is exactly this event, so carrying a
+      // previous value forward when this payload does not prove it would
+      // leave a stale "month" on an annual subscriber — and the rail would
+      // then upsell annual billing to someone who already bought it. Same
+      // rule the seat count follows: never omit the column on update.
+      const billing = active
+        ? await peGrantBillingFacts({
+            grantTier,
+            obj,
+            metadataSeats: peMeta.seatsPurchased,
+            subscriptionId: typeof obj.id === "string" ? obj.id : null,
+          })
+        : { seatsPurchased: null, billingInterval: null };
       await setPeAccessTierFromStripe({
         userId: peMeta.peUserId,
         tier: active ? "paid" : "free",
         subscriptionTier: active ? grantTier : null,
         source: "stripe_sub",
         stripeCustomerId: typeof obj.customer === "string" ? obj.customer : null,
+        seatsPurchased: billing.seatsPurchased,
+        billingInterval: billing.billingInterval,
       });
       return {
         handled: true,
@@ -586,6 +629,73 @@ function periodEndFromStripe(obj: Record<string, unknown>): Date | null {
   const end = obj.current_period_end;
   if (typeof end === "number") return new Date(end * 1000);
   return null;
+}
+
+/**
+ * The billed price items behind a PE grant, read ONCE.
+ *
+ * A `checkout.session.completed` payload does not carry `line_items` —
+ * Stripe never expands them on a webhook — so for a brand-new subscription
+ * the items have to be fetched. That fetch already existed here for Team
+ * seats; P-98 widens its condition from "team only" to "any PE subscription
+ * grant whose payload carries no items", because the billing interval is
+ * derived from the same items and, without the widening, every new Solo and
+ * Studio subscriber would store a null interval — starving the exact rung
+ * (`annual_upgrade`) the column was added to feed.
+ *
+ * Widening cannot change the seat count: {@link resolveTeamSeatsPurchased}
+ * returns null on its first line for any non-team grant, with or without
+ * items. It costs at most one extra Stripe call per new subscription.
+ *
+ * A failed fetch returns no items, and every caller reads that as unknown.
+ */
+async function peBilledPriceItems(input: {
+  obj: Record<string, unknown>;
+  subscriptionId: string | null;
+}): Promise<StripePriceItem[]> {
+  const inline = extractStripePriceItems(input.obj);
+  if (inline.length > 0) return inline;
+  if (!input.subscriptionId || !isStripeConfigured()) return [];
+  try {
+    const sub = await fetchStripeSubscription(input.subscriptionId);
+    return extractStripePriceItems(sub);
+  } catch (err) {
+    logger.warn(
+      { err, subscriptionId: input.subscriptionId },
+      "stripe: PE subscription items fetch failed",
+    );
+    return [];
+  }
+}
+
+/**
+ * Seat count and billing interval for a PE grant, both derived from the SAME
+ * reading of the billed items so the two facts can never disagree about what
+ * was on the subscription. Either may be null, and null means unknown.
+ */
+async function peGrantBillingFacts(input: {
+  grantTier: PeSubscriptionTier | null;
+  obj: Record<string, unknown>;
+  metadataSeats: number | null;
+  subscriptionId: string | null;
+}): Promise<{
+  seatsPurchased: number | null;
+  billingInterval: PeBillingInterval | null;
+}> {
+  const items = await peBilledPriceItems({
+    obj: input.obj,
+    subscriptionId: input.subscriptionId,
+  });
+  return {
+    seatsPurchased: resolveTeamSeatsPurchased({
+      grantTier: input.grantTier,
+      metadataSeats: input.metadataSeats,
+      items,
+      teamPriceIds: configuredTeamPriceIds(),
+      extraSeatPriceId: configuredExtraSeatPriceId(),
+    }),
+    billingInterval: peBillingIntervalFromPriceItems(items),
+  };
 }
 
 async function fetchStripeSubscription(

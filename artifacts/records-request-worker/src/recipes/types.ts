@@ -16,6 +16,7 @@ export interface PortalNavigationResult {
   ok: boolean;
   status?: number;
   finalUrl?: string;
+  errorCode?: string;
   errorMessage?: string;
 }
 
@@ -36,10 +37,14 @@ export interface BrowserActionResult {
 export interface ResultRowExtract {
   cells: string[];
   link: string | null;
+  /** Column names the portal published. Null when the grid header cannot be read. */
+  headers: string[] | null;
 }
 
 /** Minimal browser seam — real Playwright adapter in run.ts; mocks in unit tests. */
 export interface RecordsRecipeBrowser {
+  /** Rate limit seam between search queries (no-op when omitted in mocks). */
+  beforePortalAction?(): Promise<void>;
   goto(url: string): Promise<PortalNavigationResult>;
   captureFullPage(label: string): Promise<PageCaptureResult>;
   click(selector: string): Promise<BrowserActionResult>;
@@ -48,6 +53,10 @@ export interface RecordsRecipeBrowser {
   pageIncludes(text: string): Promise<boolean>;
   currentUrl(): Promise<string>;
   extractResultRows(): Promise<ResultRowExtract[]>;
+  /** Document-surface purchase signals. Never raw page HTML. */
+  inspectDocumentPurchase(): Promise<
+    import("./documentPurchase.js").DocumentPurchaseSignal
+  >;
 }
 
 export interface RecordsRecipeResult {

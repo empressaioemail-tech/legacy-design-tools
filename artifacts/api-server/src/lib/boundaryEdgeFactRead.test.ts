@@ -273,6 +273,73 @@ describe("interpretBoundaryEdgeFactRows", () => {
     expect(read).not.toHaveProperty("FOOTPRINT");
     expect(read.source).toBe("property-boundary-edge");
   });
+
+  it("classifies a dimensional gold setback as value on both the lead and every edge", () => {
+    const read = interpretBoundaryEdgeFactRows(
+      GOLD,
+      GOLD_EDGES.map((e) => ({ entity_id: e.entityId, body: e.body })),
+    );
+    expect(read.state).toBe("present");
+    if (read.state !== "present") return;
+    expect(read.setback.state).toBe("value");
+    if (read.setback.state !== "value") return;
+    expect(read.setback.feet).toBe(15);
+    expect(read.setback.provenance).toBe("descriptor-fixture");
+    for (const edge of read.edges) {
+      expect(edge.setback.state).toBe("value");
+      expect(edge.setback).toHaveProperty("feet");
+    }
+  });
+
+  it("serves refused with the retired derivation named when the lead setback is road-class-setback-table", () => {
+    const read = interpretBoundaryEdgeFactRows(GOLD, [
+      {
+        entity_id: GOLD_FRONT,
+        body: goldBody(2, {
+          role: "front",
+          adjacencyKind: "ROW",
+          setback: {
+            feet: 15,
+            provenance: "road-class-setback-table",
+            atomCitation: "bastrop_tx",
+          },
+        }),
+      },
+    ]);
+    expect(read.state).toBe("present");
+    if (read.state !== "present") return;
+    expect(read.setback.state).toBe("refused");
+    expect(read.setback.basis).toMatch(/retired road-class derivation/);
+    expect(read.setback.basis).toMatch(/road class is not a setback/);
+    expect(read.setback.basis).not.toContain("road-class-setback-table");
+    expect(read.setback).not.toHaveProperty("feet");
+    expect(read.edges[0]?.setback.state).toBe("refused");
+    expect(read.edges[0]?.setback).not.toHaveProperty("feet");
+  });
+
+  it("serves unknown, never absent-verified, for storage-port-proof/phase-1a", () => {
+    const read = interpretBoundaryEdgeFactRows(GOLD, [
+      {
+        entity_id: GOLD_FRONT,
+        body: goldBody(2, {
+          role: "front",
+          adjacencyKind: "ROW",
+          setback: {
+            feet: 0,
+            provenance: "storage-port-proof/phase-1a",
+          },
+        }),
+      },
+    ]);
+    expect(read.state).toBe("present");
+    if (read.state !== "present") return;
+    expect(read.setback.state).toBe("unknown");
+    expect(read.setback.basis).toMatch(/phase-1a storage-port proof/);
+    expect(read.setback.basis).not.toContain("storage-port-proof/phase-1a");
+    expect(read.setback.state).not.toBe("absent");
+    expect(JSON.stringify(read.setback)).not.toContain("absent-verified");
+    expect(read.edges[0]?.setback.state).toBe("unknown");
+  });
 });
 
 describe("loadBoundaryEdgeFactAtom — store seam", () => {
@@ -370,5 +437,12 @@ describe("boundaryEdgeFactRead source does not name the retired store", () => {
     expect(select).not.toMatch(/LIKE/);
     expect(select).not.toMatch(/:sd:/);
     expect(select).not.toMatch(/entity_id = ANY/);
+  });
+
+  it("classifies setback at parse; does not copy raw rec.setback onto the item", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(here, "boundaryEdgeFactRead.ts"), "utf8");
+    expect(src).toMatch(/serveBoundaryEdgeSetback\(rec\.setback\)/);
+    expect(src).not.toMatch(/setback:\s*rec\.setback/);
   });
 });

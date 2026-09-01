@@ -864,6 +864,141 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
+  // -----------------------------------------------------------------------
+  // CTX card F (2026-08-28): a parcel without a zoning stamp is served as
+  // unmeasured or as unincorporated by city-limits containment, never as
+  // unincorporated because situsCity was null. The seeded conformant row
+  // below is the production shape of the three unstamped golds (zoning null,
+  // facetCoverage.zoning false, baseFacts.situsCity null) with a real bake
+  // point. Before this card all three cases served `not-applicable` from the
+  // null situsCity; the first and third assertions failed on that code.
+  // -----------------------------------------------------------------------
+  const UNSTAMPED_TRAVIS_NODE_ID = "48453:493738";
+  const unstampedConformantPayload = {
+    shapeSource: "conformant-v1",
+    baked: true,
+    source: "conformant-v1-cad-parcel-roll",
+    access: { discoverability: "catalog-listed", entitlement: "anyone-free" },
+    facets: { base: { parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID, situsAddress: "4707 SHOALWOOD AVE", apn: "493738" } },
+    facetSchemaVersion: "node-facets-tier1-conformant-v1",
+    tier: 1,
+    parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID,
+    countyFips: "48453",
+    countyName: "Travis",
+    baseFacts: {
+      apn: "493738",
+      situsAddress: "4707 SHOALWOOD AVE",
+      situsCity: null,
+      situsState: null,
+      situsZip: null,
+      landUse: null,
+      acreage: null,
+    },
+    zoning: null,
+    envelope: null,
+    facetCoverage: { baseFacts: true, landUse: false, acreage: false, zoning: false, envelope: false, tier1: "populated" },
+    provenance: {
+      parcelSource: "conformant-v1-cad-parcel-roll",
+      parcelVintage: "2026",
+      landUseSource: null,
+      landUseAddressRecovered: false,
+      roadsPending: true,
+      tierNote: "Tier 1 (deterministic).",
+      landUseGateBlocked: false,
+      zoningSource: null,
+      parcelJoin: { table: "txgio_parcel", state: "no-row", basis: "no txgio_parcel row" },
+    },
+    bakedAt: "2026-08-28T18:26:50.293Z",
+  };
+  const AUSTIN_SQUARE = buildCityBoundaryIndex([
+    {
+      geoId: "4805000",
+      cityName: "Austin",
+      gnis: "1389879",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.78, 30.24],
+            [-97.72, 30.24],
+            [-97.72, 30.28],
+            [-97.78, 30.28],
+            [-97.78, 30.24],
+          ],
+        ],
+      },
+    },
+  ]);
+  const seedUnstampedTravis = async (lat: string, lng: string) => {
+    await dbMod.db.insert(placeLayerSnapshots).values([
+      {
+        placeKey: placeKeyForNode(UNSTAMPED_TRAVIS_NODE_ID),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: lat,
+        lngRounded: lng,
+        payloadJson: unstampedConformantPayload,
+        contentHash: "test-hash-unstamped-travis",
+      },
+    ]);
+  };
+  const getUnstampedTravis = () =>
+    request(getApp()).get(`/api/brokerage/v1/place/node/${encodeURIComponent(UNSTAMPED_TRAVIS_NODE_ID)}/facets`);
+
+  it("card F fixture 1: null situsCity with the bake point INSIDE a populated polygon serves stamp-missing for Austin, not not-applicable", async () => {
+    await seedUnstampedTravis("30.26000", "-97.75000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("incorporated");
+    expect(res.body.cityLimitsFact.queryPoint).toEqual({ longitude: -97.75, latitude: 30.26 });
+    expect(res.body.facets.zoning.status).toBe("absent");
+    expect(res.body.facets.zoning.verdict).toBe("stamp-missing");
+    expect(res.body.facets.zoning.authority).toBe("Austin");
+    expect(res.body.facets.zoning.derivation.place.geoId).toBe("4805000");
+    expect(res.body.facets.zoning.verdict).not.toBe("not-applicable");
+    expect(res.body.facets.facetCoverage.zoning).toBe(false);
+    // The land-use fact is NOT told zoning is not applicable.
+    expect(res.body.landUseFact.verdict).toBeUndefined();
+  });
+
+  it("card F fixture 2: the bake point OUTSIDE every polygon of a populated index serves not-applicable with the city-limits basis and source", async () => {
+    await seedUnstampedTravis("30.40000", "-97.90000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
+    expect(res.body.facets.zoning.verdict).toBe("not-applicable");
+    expect(res.body.facets.zoning.authority).toBe("none");
+    expect(res.body.facets.zoning.basis).toContain("tx_city_boundary");
+    expect(res.body.facets.zoning.basis).toContain("county 48453 unincorporated territory is unzoned");
+    expect(res.body.facets.zoning.derivation.source).toBe("tx_city_boundary");
+    expect(res.body.facets.zoning.basis).not.toContain("shape predicate");
+    // Land use (atom-miss here) receives the containment-derived not-applicable.
+    expect(res.body.landUseFact.verdict).toBe("not-applicable");
+  });
+
+  it("card F fixture 3: an EMPTY city-limits index serves unmeasured with the index's reason, never not-applicable", async () => {
+    await seedUnstampedTravis("30.26000", "-97.75000");
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.facets.zoning.verdict).toBe("unmeasured");
+    expect(res.body.facets.zoning.basis).toContain("unmeasured, not unincorporated");
+    expect(res.body.landUseFact.verdict).toBeUndefined();
+  });
+
+  it("card F: the 0,0 bake sentinel (the three unstamped golds as stored on 2026-08-28) serves unmeasured for lack of a query point", async () => {
+    await seedUnstampedTravis("0.00000", "0.00000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.cityLimitsFact.queryPoint).toBeNull();
+    expect(res.body.facets.zoning.verdict).toBe("unmeasured");
+    expect(res.body.facets.zoning.basis).toBe("no usable parcel query point; city limits are unmeasured");
+  });
+
   it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {
     // No atom fixture: the atoms path must name the miss, not copy the snapshot.
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
@@ -2012,6 +2147,120 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
     expect(JSON.stringify(res.body.boundaryEdgeFact)).not.toContain(
       "TXGIO RING MUST NOT LEAK",
+    );
+  });
+
+  it("serves classified setback on the wire: road-class refused, dimensional value, placeholder unknown", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-edge-setback-disposition",
+    });
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 15,
+              provenance: "road-class-setback-table",
+              atomCitation: "bastrop_tx",
+            },
+          },
+        },
+      ]),
+    );
+    const refused = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(refused.status).toBe(200);
+    expect(refused.body.boundaryEdgeFact.setback.state).toBe("refused");
+    expect(refused.body.boundaryEdgeFact.setback.basis).toMatch(
+      /retired road-class derivation/,
+    );
+    expect(refused.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "road-class-setback-table",
+    );
+    expect(refused.body.boundaryEdgeFact.setback.feet).toBeUndefined();
+    expect(refused.body.boundaryEdgeFact.edges[0].setback.state).toBe("refused");
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 30,
+              provenance: "bastrop-per-parcel-record-layer-23",
+            },
+          },
+        },
+      ]),
+    );
+    const valued = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(valued.status).toBe(200);
+    expect(valued.body.boundaryEdgeFact.setback.state).toBe("value");
+    expect(valued.body.boundaryEdgeFact.setback.feet).toBe(30);
+    expect(valued.body.boundaryEdgeFact.setback.provenance).toBe(
+      "bastrop-per-parcel-record-layer-23",
+    );
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 0,
+              provenance: "storage-port-proof/phase-1a",
+            },
+          },
+        },
+      ]),
+    );
+    const unknown = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(unknown.status).toBe(200);
+    expect(unknown.body.boundaryEdgeFact.setback.state).toBe("unknown");
+    expect(unknown.body.boundaryEdgeFact.setback.basis).toMatch(
+      /phase-1a storage-port proof/,
+    );
+    expect(unknown.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "storage-port-proof/phase-1a",
+    );
+    expect(JSON.stringify(unknown.body.boundaryEdgeFact.setback)).not.toContain(
+      "absent-verified",
     );
   });
 

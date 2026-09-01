@@ -9,7 +9,12 @@ import {
   insertRecordsRequestArtifact,
   type NewArtifactRow,
 } from "../artifactStore.js";
+import {
+  PURCHASE_APPROVED_ROUTES_TO_HUMAN,
+  documentRequiresPurchase,
+} from "./documentPurchase.js";
 import type { IndexSearchHit } from "./indexHits.js";
+import { PORTAL_ACCESS_BLOCKED_CODE } from "../portalAccessBlocked.js";
 import type { RecordsRecipeBrowser, RecordsRecipeResult } from "./types.js";
 
 /** Product constant — runs pause and ask before buying above this (cents). */
@@ -53,14 +58,19 @@ export async function acquireIndexHits(
 
     const nav = await input.browser.goto(hit.detailUrl);
     if (!nav.ok) {
+      if (nav.errorCode === PORTAL_ACCESS_BLOCKED_CODE) {
+        return {
+          kind: "failed",
+          errorCode: nav.errorCode,
+          errorMessage: `Portal blocked during acquisition (${hit.detailUrl}): ${nav.errorMessage ?? "navigation failed"}`,
+        };
+      }
       summary.pendingHuman.push(hit);
       continue;
     }
 
-    const purchaseRequired =
-      (await input.browser.pageIncludes("purchase")) ||
-      (await input.browser.pageIncludes("add to cart")) ||
-      (await input.browser.pageIncludes("pay"));
+    const purchaseSignal = await input.browser.inspectDocumentPurchase();
+    const purchaseRequired = documentRequiresPurchase(purchaseSignal);
 
     if (purchaseRequired) {
       if (input.purchaseApproved) {
@@ -115,7 +125,8 @@ export async function acquireIndexHits(
       kind: "needs-human",
       summary,
       reason:
-        "Portal purchase path detected; bot does not drive checkout on this card",
+        "Document-bound purchase control on this instrument; " +
+        PURCHASE_APPROVED_ROUTES_TO_HUMAN,
     };
   }
 
@@ -127,7 +138,7 @@ export async function acquireIndexHits(
     return {
       kind: "needs-human",
       summary,
-      reason: `User approved county fees; human clerk purchase required for ${summary.pendingHuman.length} instrument(s)`,
+      reason: `${PURCHASE_APPROVED_ROUTES_TO_HUMAN} (${summary.pendingHuman.length} instrument(s))`,
     };
   }
 

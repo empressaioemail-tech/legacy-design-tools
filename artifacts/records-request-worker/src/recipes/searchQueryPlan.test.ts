@@ -79,4 +79,48 @@ describe("parseSubdivisionLotBlockFromLegal", () => {
       subdivision: null,
     });
   });
+
+  it("extracts BLOCK in full — the retired BLK(?:OCK)? pattern cannot", () => {
+    const retired = /\bBLK(?:OCK)?\.?\s+(\d+[A-Z]?)\b/i;
+    expect(retired.test("BLOCK 3")).toBe(false);
+    expect(retired.test("PECAN GROVE BLOCK 3 LOT 5")).toBe(false);
+    expect(parseSubdivisionLotBlockFromLegal("BLOCK 3").block).toBe("3");
+    expect(parseSubdivisionLotBlockFromLegal("BLOCK 12A").block).toBe("12A");
+    expect(
+      parseSubdivisionLotBlockFromLegal("PECAN GROVE BLOCK 3 LOT 5"),
+    ).toEqual({
+      lot: "5",
+      block: "3",
+      subdivision: null,
+    });
+  });
+
+  it("extracts BLOCK (not only BLK) from Bastrop Building Block legals", () => {
+    expect(
+      parseSubdivisionLotBlockFromLegal(
+        "Building Block, BLOCK 13 E W ST, ACRES 0.485",
+      ),
+    ).toEqual({
+      lot: null,
+      block: "13",
+      subdivision: null,
+    });
+    expect(
+      parseSubdivisionLotBlockFromLegal("BUILDING BLOCK 49 E W ST, ACRES 1.280"),
+    ).toEqual({
+      lot: null,
+      block: "49",
+      subdivision: null,
+    });
+  });
+
+  it("does not treat letter-only blocks as digit blocks", () => {
+    expect(
+      parseSubdivisionLotBlockFromLegal("Riverside Grove BLOCK A LOT 27"),
+    ).toEqual({
+      lot: "27",
+      block: null,
+      subdivision: null,
+    });
+  });
 });

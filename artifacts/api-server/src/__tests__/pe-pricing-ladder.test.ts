@@ -228,11 +228,11 @@ describe("annual billing (operator ruling 2026-08-24)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("annual Team within the 10 included seats is accepted", async () => {
+  it("annual Team within the included seats is accepted", async () => {
     const res = await asUser(
       request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
       USER,
-    ).send({ tier: "team", interval: "year", seats: 10 });
+    ).send({ tier: "team", interval: "year", seats: 3 });
     expect(res.status).toBe(200);
     expect(res.body.peTier).toBe("team");
     expect(res.body.peInterval).toBe("year");
@@ -501,6 +501,47 @@ describe("custom / hosted checkout chrome (WDLL 3b items 1, 3 keep)", () => {
     expect(form.get("ui_mode")).toBeNull();
     expect(form.get("return_url")).toBeNull();
   });
+
+  it("team checkout declares seats_purchased = included + extras on session and subscription metadata", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_team_seats",
+      url: "https://checkout.stripe.com/c/pay/cs_test_team_seats",
+    });
+    await createPeSubscriptionCheckoutSession({
+      userId: USER,
+      tier: "team",
+      seats: 5,
+      successUrl: "https://x.example/?ok",
+      cancelUrl: "https://x.example/?no",
+    });
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get("metadata[subscription_tier]")).toBe("team");
+    expect(form.get("metadata[seats_purchased]")).toBe("5");
+    expect(form.get("subscription_data[metadata][seats_purchased]")).toBe("5");
+    expect(form.get("line_items[1][quantity]")).toBe("2");
+  });
+
+  it("solo checkout does not set seats_purchased metadata", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_3b";
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_solo_noseats",
+      url: "https://checkout.stripe.com/c/pay/cs_test_solo_noseats",
+    });
+    await createPeSubscriptionCheckoutSession({
+      userId: USER,
+      tier: "solo",
+      successUrl: "https://x.example/?ok",
+      cancelUrl: "https://x.example/?no",
+    });
+    expect(checkoutBodies[0]!.get("metadata[seats_purchased]")).toBeNull();
+  });
 });
 
 describe("webhook entitlement mapping (granular tiers)", () => {
@@ -525,6 +566,7 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     const row = await entitlementRow();
     expect(row?.accessTier).toBe("paid");
     expect(row?.subscriptionTier).toBe("studio");
+    expect(row?.seatsPurchased).toBeNull();
   });
 
   it("VIOLATION: solo checkout must NOT grant studio", async () => {
@@ -591,6 +633,175 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     expect(subscriptionTierGrantsStudio(row?.subscriptionTier ?? null)).toBe(false);
   });
 
+  /**
+   * P-98: `billing_interval` is derived from the BILLED price id through our
+   * own configured env price ids -- the inverse of stripePriceIdForPeTier --
+   * never from a Stripe API field like price.recurring.interval or
+   * current_period_end, whose shapes track the API version this repo does
+   * not pin. The column is nullable and never defaulted: a fabricated
+   * "month" would make the rail offer "switch to annual" to somebody who
+   * already bought annual.
+   *
+   * No payload below sets `subscription`, so the empty-items fallback never
+   * reaches the network.
+   */
+  it("P-98: an annual checkout stores billing_interval=year", async () => {
+    process.env.STRIPE_SOLO_ANNUAL_PRICE_ID = SOLO_ANNUAL_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_year",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+        },
+        line_items: { data: [{ price: { id: SOLO_ANNUAL_PRICE }, quantity: 1 }] },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.billingInterval).toBe("year");
+  });
+
+  it("P-98: a monthly checkout stores billing_interval=month", async () => {
+    process.env.STRIPE_STUDIO_PRICE_ID = STUDIO_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_month",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "studio",
+        },
+        line_items: { data: [{ price: { id: STUDIO_PRICE }, quantity: 1 }] },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.billingInterval).toBe("month");
+  });
+
+  it("P-98 VIOLATION: an UNMATCHED billed price id stores null, not month", async () => {
+    // The tier still grants -- the grant keys off metadata.subscription_tier
+    // -- but the interval is unknown and says so. This is the whole point of
+    // the nullable column.
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_unknown",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+        },
+        line_items: {
+          data: [{ price: { id: "price_from_some_other_catalogue" }, quantity: 1 }],
+        },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("paid");
+    expect(row?.subscriptionTier).toBe("solo");
+    expect(row?.billingInterval).toBeNull();
+  });
+
+  it("P-98 VIOLATION: no billed items at all stores null, not month", async () => {
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_absent",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+        },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("paid");
+    expect(row?.billingInterval).toBeNull();
+  });
+
+  it("P-98 VIOLATION: metadata[billing_interval] alone does NOT set the column", async () => {
+    // metadata is what we ASKED Stripe for; the price id is what Stripe
+    // BILLED. Persisting the request as though it were the billed fact is
+    // exactly the fabrication this column exists to prevent. The session
+    // below declares "year" in metadata and bills nothing readable.
+    process.env.STRIPE_SOLO_ANNUAL_PRICE_ID = SOLO_ANNUAL_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_interval_meta_only",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "solo",
+          billing_interval: "year",
+        },
+      }),
+    );
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.billingInterval).toBeNull();
+  });
+
+  it("P-98: subscription.updated re-derives the interval, including monthly -> annual", async () => {
+    process.env.STRIPE_SOLO_PRICE_ID = SOLO_PRICE;
+    process.env.STRIPE_SOLO_ANNUAL_PRICE_ID = SOLO_ANNUAL_PRICE;
+    await db
+      .update(peUserEntitlements)
+      .set({ accessTier: "paid", subscriptionTier: "solo", billingInterval: "month" })
+      .where(eq(peUserEntitlements.ownerUserId, USER));
+
+    const { raw, signature } = signedWebhookPayload({
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_interval_switch",
+          object: "subscription",
+          status: "active",
+          customer: "cus_interval_switch",
+          metadata: { pe_user_id: USER, subscription_tier: "solo" },
+          items: { data: [{ price: { id: SOLO_ANNUAL_PRICE }, quantity: 1 }] },
+        },
+      },
+    });
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    // A stale "month" here is the single worst output: the rail would upsell
+    // annual billing to someone who just bought it.
+    expect(row?.billingInterval).toBe("year");
+  });
+
+  it("P-98 VIOLATION: churn clears the interval rather than leaving it stale", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({ accessTier: "paid", subscriptionTier: "solo", billingInterval: "year" })
+      .where(eq(peUserEntitlements.ownerUserId, USER));
+
+    const { raw, signature } = signedWebhookPayload({
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_interval_churn",
+          object: "subscription",
+          status: "canceled",
+          metadata: { pe_user_id: USER, subscription_tier: "solo" },
+        },
+      },
+    });
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("free");
+    expect(row?.billingInterval).toBeNull();
+  });
+
   it("legacy pro_sub session without subscription_tier maps to solo (never studio/team)", async () => {
     const { raw, signature } = signedWebhookPayload(
       checkoutCompletedEvent({
@@ -628,6 +839,107 @@ describe("webhook entitlement mapping (granular tiers)", () => {
     const row = await entitlementRow();
     expect(row?.accessTier).toBe("free");
     expect(row?.subscriptionTier).toBeNull();
+    expect(row?.seatsPurchased).toBeNull();
+  });
+
+  it("team checkout with billed extras writes seats_purchased=5", async () => {
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_seats_12",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "team",
+          seats_purchased: "5",
+        },
+        line_items: {
+          data: [
+            { price: { id: TEAM_PRICE }, quantity: 1 },
+            { price: { id: "price_test_team_seat_25" }, quantity: 2 },
+          ],
+        },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result).toMatchObject({ handled: true, eventType: "pe_subscription_active" });
+    const row = await entitlementRow();
+    expect(row?.subscriptionTier).toBe("team");
+    expect(row?.seatsPurchased).toBe(5);
+  });
+
+  it("VIOLATION: team grant with no billed items leaves seats_purchased null, not 3", async () => {
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_seats_unknown",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "team",
+          seats_purchased: "10",
+        },
+      }),
+    );
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("paid");
+    expect(row?.subscriptionTier).toBe("team");
+    expect(row?.seatsPurchased).toBeNull();
+  });
+
+  it("VIOLATION: metadata 3 vs billed 5 refuses the seat write and still grants team", async () => {
+    process.env.STRIPE_TEAM_PRICE_ID = TEAM_PRICE;
+    process.env.STRIPE_TEAM_SEAT_PRICE_ID = "price_test_team_seat_25";
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_seats_disagree",
+        metadata: {
+          pe_user_id: USER,
+          checkout_kind: "pe_sub",
+          subscription_tier: "team",
+          seats_purchased: "3",
+        },
+        line_items: {
+          data: [
+            { price: { id: TEAM_PRICE }, quantity: 1 },
+            { price: { id: "price_test_team_seat_25" }, quantity: 2 },
+          ],
+        },
+      }),
+    );
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.subscriptionTier).toBe("team");
+    expect(row?.seatsPurchased).toBeNull();
+  });
+
+  it("churn clears a planted seats_purchased", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({
+        accessTier: "paid",
+        subscriptionTier: "team",
+        seatsPurchased: 12,
+      })
+      .where(eq(peUserEntitlements.ownerUserId, USER));
+
+    const { raw, signature } = signedWebhookPayload({
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_seats_clear",
+          object: "subscription",
+          status: "canceled",
+          metadata: { pe_user_id: USER, subscription_tier: "team" },
+        },
+      },
+    });
+    await handleStripeWebhook(raw, signature);
+    const row = await entitlementRow();
+    expect(row?.accessTier).toBe("free");
+    expect(row?.seatsPurchased).toBeNull();
   });
 });
 

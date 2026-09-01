@@ -11,12 +11,12 @@
  * with brokerageStripe.ts):
  *   STRIPE_SOLO_PRICE_ID           Smart Site Solo   $49/mo
  *   STRIPE_STUDIO_PRICE_ID         Smart Site Studio $129/mo
- *   STRIPE_TEAM_PRICE_ID           Smart Site Team   $299/mo (covers 10 seats)
+ *   STRIPE_TEAM_PRICE_ID           Smart Site Team   $299/mo (covers 3 seats)
  *   STRIPE_TEAM_SEAT_PRICE_ID      Smart Site Team additional seat $25/mo
  *   STRIPE_PE_UNLOCK_PRICE_ID      $15 one-time 30-day property unlock
  *   STRIPE_SOLO_ANNUAL_PRICE_ID    Smart Site Solo   $490/yr  (ruled 2026-08-24)
  *   STRIPE_STUDIO_ANNUAL_PRICE_ID  Smart Site Studio $1,290/yr
- *   STRIPE_TEAM_ANNUAL_PRICE_ID    Smart Site Team   $2,990/yr (covers 10 seats)
+ *   STRIPE_TEAM_ANNUAL_PRICE_ID    Smart Site Team   $2,990/yr (covers 3 seats)
  *
  * FAIL CLOSED: a tier whose price id is not configured refuses checkout
  * (PeCheckoutConfigError -> 503) rather than defaulting to any other
@@ -27,7 +27,12 @@
  */
 
 import { eq } from "drizzle-orm";
-import { db, peUserEntitlements, type PeSubscriptionTier } from "@workspace/db";
+import {
+  db,
+  peUserEntitlements,
+  type PeBillingInterval,
+  type PeSubscriptionTier,
+} from "@workspace/db";
 import { logger } from "./logger";
 import {
   isStripeConfigured,
@@ -36,9 +41,12 @@ import {
   type StripeCheckoutResult,
 } from "./brokerageStripe";
 import { setPeStripeCustomerId } from "./peIdentity";
+import {
+  PE_TEAM_INCLUDED_SEATS,
+  type StripePriceItem,
+} from "./peTeamSeatsFromStripe";
 
-/** Seats included in the Team base price (LOCKED ladder: "$299/mo for up to 10 seats"). */
-export const PE_TEAM_INCLUDED_SEATS = 10;
+export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
 /** 30-day bound on the $15 per-property unlock (LOCKED ladder). */
 export const PE_PROPERTY_UNLOCK_DURATION_DAYS = 30;
@@ -84,7 +92,7 @@ const TIER_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> = {
  * Annual prices, ratified by operator ruling 2026-08-24
  * (`_decisions/2026-08-24_stripe_annual_pricing_and_live_activation.md`):
  * two months free — Solo $490/yr, Studio $1,290/yr, Team $2,990/yr (base
- * covers 10 seats). There is NO annual extra-seat price: extra seats stay
+ * covers 3 seats). There is NO annual extra-seat price: extra seats stay
  * monthly $25, and because Stripe Checkout requires every recurring line
  * item in one subscription to share a billing interval, an annual Team
  * checkout with more than the included seats is REFUSED rather than
@@ -96,7 +104,13 @@ export const TIER_ANNUAL_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> =
   team: "STRIPE_TEAM_ANNUAL_PRICE_ID",
 };
 
-export type PeBillingInterval = "month" | "year";
+/**
+ * `"month" | "year"`. Defined once, on the column that stores it
+ * (`pe_user_entitlements.billing_interval`, migration 0092), and re-exported
+ * here so checkout, the webhook, and the store cannot drift into two
+ * vocabularies for one fact.
+ */
+export type { PeBillingInterval };
 
 /**
  * Resolve the Stripe price id for a ladder tier + billing interval from
@@ -111,6 +125,80 @@ export function stripePriceIdForPeTier(
   const envName =
     interval === "year" ? TIER_ANNUAL_PRICE_ENV[tier] : TIER_PRICE_ENV[tier];
   return process.env[envName]?.trim() || null;
+}
+
+/**
+ * Every price id we have configured for one interval, across all three
+ * ladder tiers. Read through {@link stripePriceIdForPeTier} rather than
+ * `process.env` directly, so this file has exactly ONE place that knows
+ * which env name carries which (tier, interval) pair. Unset and blank env
+ * vars are dropped by that helper and never enter the set — a sentinel must
+ * not be able to match.
+ */
+function configuredPeTierPriceIds(
+  interval: PeBillingInterval,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const tier of PE_SUBSCRIPTION_TIERS) {
+    const id = stripePriceIdForPeTier(tier, interval);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * INVERSE of {@link stripePriceIdForPeTier}: which interval did WE configure
+ * this price id under? (P-98.)
+ *
+ * The billed price id is an opaque identifier we chose and put in env
+ * ourselves, so mapping it back through our own config is a derivation from
+ * a source we control. That is deliberately NOT `price.recurring.interval`,
+ * `plan.interval`, or `current_period_end`: those are Stripe API fields
+ * whose shape moves with the API version, and nothing in this repo pins a
+ * version.
+ *
+ * FAIL CLOSED. A price id that matches nothing we configured returns null —
+ * never "month". So does a price id configured under BOTH a monthly and an
+ * annual env name: that is a misconfiguration, we cannot tell which one the
+ * customer was billed under, and a guess would be a fabricated fact about
+ * their billing.
+ */
+export function peBillingIntervalForPriceId(
+  priceId: string | null | undefined,
+): PeBillingInterval | null {
+  if (typeof priceId !== "string") return null;
+  const needle = priceId.trim();
+  if (!needle) return null;
+  const isMonthly = configuredPeTierPriceIds("month").has(needle);
+  const isAnnual = configuredPeTierPriceIds("year").has(needle);
+  // Neither (unknown price) and both (ambiguous config) are the same
+  // answer: we do not know, so we say so.
+  if (isMonthly === isAnnual) return null;
+  return isMonthly ? "month" : "year";
+}
+
+/**
+ * The interval a subscription's billed line items were priced at.
+ *
+ * Items that match no configured price id are SKIPPED, not treated as a
+ * refusal — a Team subscription legitimately carries the $25 extra-seat
+ * line alongside its base price, and only the base price is in the tier
+ * config. Two items resolving to DIFFERENT intervals is a contradiction
+ * (Stripe requires one interval per subscription) and refuses with null
+ * rather than taking the first. No matching item at all is also null:
+ * unknown, never "month".
+ */
+export function peBillingIntervalFromPriceItems(
+  items: readonly StripePriceItem[],
+): PeBillingInterval | null {
+  let resolved: PeBillingInterval | null = null;
+  for (const item of items) {
+    const interval = peBillingIntervalForPriceId(item.priceId);
+    if (!interval) continue;
+    if (resolved !== null && resolved !== interval) return null;
+    resolved = interval;
+  }
+  return resolved;
 }
 
 export function stripeTeamSeatPriceId(): string | null {
@@ -317,7 +405,7 @@ export async function createPeSubscriptionCheckoutSession(input: {
     // base monthly. Route zod schema already rejects this with 400; this
     // guards programmatic callers.
     throw new Error(
-      "annual Team checkout supports at most the 10 included seats — extra seats bill monthly only",
+      `annual Team checkout supports at most the ${PE_TEAM_INCLUDED_SEATS} included seats — extra seats bill monthly only`,
     );
   }
 
@@ -388,6 +476,11 @@ export async function createPeSubscriptionCheckoutSession(input: {
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   };
+  if (tier === "team") {
+    const billedSeats = String(PE_TEAM_INCLUDED_SEATS + extraSeats);
+    params["metadata[seats_purchased]"] = billedSeats;
+    params["subscription_data[metadata][seats_purchased]"] = billedSeats;
+  }
   applyPeCheckoutUiMode(params, input);
   if (extraSeats > 0 && seatPriceId) {
     params["line_items[1][price]"] = seatPriceId;

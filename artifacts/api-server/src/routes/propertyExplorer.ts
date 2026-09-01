@@ -9,6 +9,19 @@ import { z } from "zod/v4";
 import { and, desc, eq } from "drizzle-orm";
 import { db, peSavedProperties, peShareGrants, peWorkbenchState } from "@workspace/db";
 import {
+  addToScreen,
+  attachScreenStubs,
+  createScreen,
+  listScreens,
+  saveProperty,
+  setPropertyStatus,
+  type Screen,
+  type ScreenSaveRefuse,
+} from "../lib/peScreenSave";
+import { createDrizzleScreenSaveStore } from "../lib/peScreenSaveDb";
+import { cortexNodeLookup, cortexQueryResolver } from "../lib/peScreenSaveResolve";
+import type { NodeLookup } from "../lib/peScreenSave";
+import {
   PE_FREE_CHAT_MESSAGE_LIMIT,
   createPePropertyUnlock,
   getPeFreeChatMessagesUsed,
@@ -16,10 +29,26 @@ import {
   isPePropertyEntitled,
   requirePeAuthenticated,
   requirePePaidOrPropertyUnlocked,
+  peEntitlementAccountBody,
+  peEntitlementBaseBody,
   resolvePeEntitlement,
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
 import { setPeDevRole } from "../lib/peIdentity";
+import { readAiConnections } from "../lib/peAiConnections";
+import { readActiveUnlocks } from "../lib/peUnlocksRead";
+import {
+  parseActivationEvent,
+  recordActivationEvent,
+} from "../lib/peActivationEvents";
+import {
+  cancelTeamInvitation,
+  createTeamInvitation,
+  patchTeamMemberRole,
+  readTeamRoster,
+  removeTeamMember,
+  teamErrorBody,
+} from "../lib/peTeamRoster";
 import { requireServiceToken } from "../middlewares/serviceAuth";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
@@ -35,7 +64,19 @@ import { loadWellFactAtom } from "../lib/wellFactRead";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
+import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
+import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import { buildR1Brief } from "../lib/r1BriefCompose";
+import {
+  isPunctuationOnlySitus,
+  projectSavedPropertyLabel,
+} from "../lib/situsCompose";
+import { parseSmartSiteBriefRequest } from "../lib/smartSiteBriefRequest";
+import {
+  composeSmartSiteStub,
+  type RailReadInput,
+} from "../lib/smartSiteStub";
+import type { FloodHazardFactRead } from "../lib/floodHazardFactRead";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
@@ -45,6 +86,7 @@ import {
   defaultPeCheckoutCancelUrl,
   defaultPeCheckoutSuccessUrl,
   PeCheckoutConfigError,
+  PE_TEAM_INCLUDED_SEATS,
 } from "../lib/pePaywallStripe";
 import { countyFipsFromParcelNodeId } from "../lib/verdictLayerServe";
 import { isP85CountyFips } from "../lib/p85ClerkPortalRegistry";
@@ -63,6 +105,7 @@ import {
 } from "../lib/recordsRequestPurchaseDecision";
 import { processRecordsRequestJobVisionReads } from "../lib/recordsRequestVisionRead";
 import { notifyRecordsRequestCompletion } from "../lib/recordsRequestCompletionEmail";
+import { loadRecordsRequestArtifactDocumentForUser } from "../lib/recordsRequestDocumentServe";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -92,37 +135,127 @@ function parcelNodeIdFromR1RunId(runId: string): string | null {
   }
 }
 
-function manifestLayers(facets: unknown, tier2: unknown): {
+function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
+  return {
+    attempted: true,
+    state: flood.state,
+    code: flood.state === "refused" ? flood.code : undefined,
+    kind: "flood",
+  };
+}
+
+async function assembleNodeBriefBody(
+  parcelNodeId: string,
+): Promise<Record<string, unknown> | null> {
+  const [
+    snapshot,
+    floodHazardFact,
+    boundaryFact,
+    pipelineFact,
+    wellFact,
+    structuralFact,
+    specialDistrictFact,
+  ] = await Promise.all([
+    loadBakedNodeFacetSnapshot(parcelNodeId),
+    loadFloodHazardFactAtom(parcelNodeId),
+    loadBoundaryEdgeFactAtom(parcelNodeId),
+    loadPipelineFactAtom(parcelNodeId),
+    loadWellFactAtom(parcelNodeId),
+    loadStructuralFactAtom(parcelNodeId),
+    loadSpecialDistrictFactAtom(parcelNodeId),
+  ]);
+  if (!snapshot) return null;
+  const root = asRecord(snapshot.facets);
+  const bakedAt =
+    typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
+  const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
+    floodHazardFact,
+    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+  });
+  const draw = tryAssembleParcelDrawFromReads({
+    parcelNodeId,
+    facets: snapshot.facets,
+    bakedAt,
+    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    queryPoint: snapshot.queryPoint ?? null,
+    boundary: boundaryFact,
+    flood: floodHazardFact,
+    pipeline: pipelineFact,
+    well: wellFact,
+    specialDistrict: specialDistrictFact,
+    structural: structuralFact,
+  });
+  return {
+    runId: buildR1RunId(parcelNodeId, bakedAt),
+    reportFamily: "R1",
+    mode: "baked-facet-intel-v1",
+    parcelNodeId,
+    onRecord: serializeTwinOnRecord(snapshot.facets, parcelNodeId),
+    brief: {
+      sections: brief.sections,
+      disclosure: brief.disclosure,
+    },
+    citations: brief.citations,
+    bakedAt,
+    source: "baked-snapshot",
+    ...(draw ? { draw } : {}),
+  };
+}
+
+async function assembleStubBody(parcelNodeId: string) {
+  const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
+  if (!snapshot) return null;
+  const floodHazardFact = await loadFloodHazardFactAtom(parcelNodeId);
+  return composeSmartSiteStub({
+    parcelNodeId,
+    facets: snapshot.facets,
+    flood: floodReadToRail(floodHazardFact),
+    drainage: { attempted: false },
+    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+  });
+}
+
+/**
+ * P-91 4.3. Rails on a create_screen / list_screens(screenId) response,
+ * read through the same assembler the brief's stub depth serves. No paid
+ * gate on this path by design: the board is the intake surface, and
+ * GET /saved-properties already serves these rails to the same user under
+ * requirePeAuthenticated. Nothing here is stored and updatedAt does not move.
+ */
+async function attachStubsForResponse(screen: Screen): Promise<Screen> {
+  return attachScreenStubs(screen, assembleStubBody, {
+    onReadError: (parcelNodeId, err) =>
+      logger.warn(
+        { err, parcelNodeId, screenId: screen.id },
+        "pe_screen_stub_read_error",
+      ),
+  });
+}
+
+function manifestLayers(
+  envelopeBriefRefusal: EnvelopeBriefRefusal,
+  tier2: unknown,
+): {
   layers: Array<Record<string, unknown>>;
   degraded: boolean;
   reason?: string;
 } {
-  const envelope = asRecord(facets)?.envelope;
-  const envelopeGeojson = asRecord(envelope)?.geojson;
-  // No flood layer is emitted from a baked snapshot any more: the Tier-2 flood
-  // facet is retired at the read path (SS-W16). The disposition is read only to
-  // make the degrade reason name the retirement instead of implying the data
-  // was never there.
+  // The loader nulls facets.envelope before this runs. Reading geojson off
+  // the stripped snapshot is empty by construction and can never report a
+  // missing layer. Refuse with the pre-strip envelope refusal.
   const floodRefusal = asRecord(asRecord(tier2)?.floodDisposition);
-  const layers: Array<Record<string, unknown>> = [];
-  if (envelopeGeojson) {
-    layers.push({
-      id: "buildable-envelope",
-      kind: "geojson",
-      feature: envelopeGeojson,
-      source: "baked-snapshot",
-    });
-  }
-  return layers.length > 0
-    ? { layers, degraded: false }
-    : {
-        layers,
-        degraded: true,
-        reason: floodRefusal
-          ? "Baked snapshot has no envelope geometry, and its Tier-2 flood facet is refused: " +
-            String(floodRefusal.reason ?? floodRefusal.code)
-          : "Baked snapshot has no envelope geometry, and no Tier-2 row exists for this node.",
-      };
+  const floodNote = floodRefusal
+    ? " Tier-2 flood facet is refused: " +
+      String(floodRefusal.reason ?? floodRefusal.code)
+    : " No Tier-2 row exists for this node.";
+  return {
+    layers: [],
+    degraded: true,
+    reason:
+      envelopeBriefRefusal.reason +
+      " Envelope geometry is not served on this path." +
+      floodNote,
+  };
 }
 
 function ownerScope(req: Request): { tenantId: string; ownerUserId: string } | null {
@@ -139,26 +272,32 @@ function ownerScope(req: Request): { tenantId: string; ownerUserId: string } | n
  * `?parcelNodeId=` and an authenticated user, adds the property block the
  * PE BFF consults for per-property gating (site-plan export, locked-bubble
  * state, chat allowance). Anonymous callers keep today's shape.
+ *
+ * `parcelNodeId` is OPTIONAL (P-98). Settings is account-scoped and has no
+ * parcel to pass; the route used to refuse without one, which is why
+ * Settings showed Access as "Not read" for paying accounts. An
+ * authenticated caller with no parcel now gets the ACCOUNT body — the same
+ * fields plus `seatsPurchased` and `billingInterval`, and NO `property`
+ * key at all.
+ *
+ * Exactly one path changed. The anonymous guard is evaluated FIRST and on
+ * its own, so an anonymous caller's response is unchanged with or without a
+ * parcel, and a malformed parcel from an anonymous caller still returns 200
+ * with today's body rather than a 400. Every authenticated with-parcel
+ * response is byte-identical to before.
  */
 router.get("/property-explorer/v1/entitlement", async (req: Request, res: Response) => {
   const snap = await resolvePeEntitlement(req);
-  const base = {
-    authenticated: snap.authenticated,
-    tier: snap.tier,
-    /** Ladder rung (LOCKED 2026-08-10) — the PE BFF gates Studio-only
-     *  surfaces (CAD, terrain, owner data) on studio|team, never bare tier. */
-    subscriptionTier: snap.subscriptionTier,
-    tenantId: snap.tenantId,
-    userId: snap.userId,
-    devRole: snap.devRole,
-    entitlementSource: snap.entitlementSource,
-  };
+  if (!snap.authenticated || !snap.userId) {
+    res.json(peEntitlementBaseBody(snap));
+    return;
+  }
   const parcelNodeIdRaw = req.query.parcelNodeId;
   const parcelNodeId = (
     Array.isArray(parcelNodeIdRaw) ? parcelNodeIdRaw[0] : parcelNodeIdRaw
   );
-  if (!snap.authenticated || !snap.userId || typeof parcelNodeId !== "string" || !parcelNodeId.trim()) {
-    res.json(base);
+  if (typeof parcelNodeId !== "string" || !parcelNodeId.trim()) {
+    res.json(peEntitlementAccountBody(snap));
     return;
   }
   const trimmed = parcelNodeId.trim();
@@ -171,7 +310,7 @@ router.get("/property-explorer/v1/entitlement", async (req: Request, res: Respon
     getPeFreeChatMessagesUsed(snap.userId, trimmed),
   ]);
   res.json({
-    ...base,
+    ...peEntitlementBaseBody(snap),
     property: {
       parcelNodeId: trimmed,
       unlocked,
@@ -196,6 +335,8 @@ router.get(
         parcelNodeId: peSavedProperties.parcelNodeId,
         label: peSavedProperties.label,
         snapshot: peSavedProperties.snapshot,
+        crmStatus: peSavedProperties.crmStatus,
+        note: peSavedProperties.note,
         updatedAt: peSavedProperties.updatedAt,
       })
       .from(peSavedProperties)
@@ -206,7 +347,32 @@ router.get(
         ),
       )
       .orderBy(desc(peSavedProperties.updatedAt));
-    res.json(rows);
+    const stubs = await Promise.all(
+      rows.map(async (row) => {
+        const stub = await assembleStubBody(row.parcelNodeId);
+        return {
+          situs: stub?.situs ?? "unread",
+          zoning: stub?.zoning ?? "unread",
+          landUse: stub?.landUse ?? "unread",
+          flood: stub?.flood ?? "unread",
+          drainage: stub?.drainage ?? "unread",
+          envelope: stub?.envelope ?? "unread",
+        };
+      }),
+    );
+    res.json(
+      rows.map((row, i) => {
+        const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label);
+        return {
+          ...row,
+          label: composed.label,
+          situs: composed.situs,
+          status: row.crmStatus,
+          note: row.note,
+          stub: stubs[i],
+        };
+      }),
+    );
   },
 );
 
@@ -238,7 +404,9 @@ router.put(
       return;
     }
     const snapshot = parsed.data.snapshot ?? {};
-    const label = parsed.data.label ?? null;
+    const labelRaw = parsed.data.label ?? null;
+    const label =
+      labelRaw != null && isPunctuationOnlySitus(labelRaw) ? null : labelRaw;
     const now = new Date();
     await db
       .insert(peSavedProperties)
@@ -294,6 +462,271 @@ router.delete(
       return;
     }
     res.json({ ok: true });
+  },
+);
+
+function screenSaveHttpStatus(error: string): number {
+  if (error === "not_found" || error === "saved_property_not_found") return 404;
+  if (error === "authentication_required") return 401;
+  // The parcel store did not answer an existence lookup. Nothing was
+  // written and the caller retries. Never a 404, never a written absence.
+  if (error === "lookup_unavailable") return 503;
+  return 400;
+}
+
+/**
+ * Screens write-path refuse. The wire body is the refuse's `error`; the
+ * underlying throw behind a `lookup_unavailable` is recorded here and never
+ * sent.
+ */
+function sendScreenSaveRefuse(
+  req: Request,
+  res: Response,
+  refuse: ScreenSaveRefuse,
+): void {
+  const status = screenSaveHttpStatus(refuse.error.error);
+  if (status === 503) {
+    logger.warn(
+      {
+        err: refuse.cause,
+        refuse: refuse.error,
+        path: req.originalUrl?.split("?")[0],
+      },
+      "pe_screen_lookup_unavailable",
+    );
+  }
+  res.status(status).json(refuse.error);
+}
+
+/**
+ * A null assembler result is "no tier1 snapshot", which is two states: the
+ * parcel is not in the store (`parcel_not_found`) or it is and no bake has
+ * run (`baked_snapshot_not_found`). The existence probe splits them. A probe
+ * that throws is a third state (`lookup_unavailable`, 503) and is never
+ * collapsed into either 404.
+ */
+async function sendBriefMiss(res: Response, parcelNodeId: string): Promise<void> {
+  // Same existence seam add_to_screen uses (peScreenSaveResolve.cortexNodeLookup),
+  // never a direct txgioAddressResolve import: that module reads @workspace/db
+  // tables at load, and the route suites mock the seam, not the store.
+  let probe: Awaited<ReturnType<NodeLookup>>;
+  try {
+    probe = await cortexNodeLookup()(parcelNodeId);
+  } catch (err) {
+    logger.warn({ err, parcelNodeId }, "pe_brief_existence_probe_unavailable");
+    res.status(503).json({ error: "lookup_unavailable", parcelNodeId });
+    return;
+  }
+  if (!probe) {
+    res.status(404).json({
+      error: "parcel_not_found",
+      message: "No parcel with this node id exists in the parcel store.",
+      parcelNodeId,
+    });
+    return;
+  }
+  res.status(404).json({
+    error: "baked_snapshot_not_found",
+    message:
+      "The parcel exists but no baked facet snapshot exists for it yet.",
+    parcelNodeId,
+  });
+}
+
+const CreateScreenBodySchema = z.object({
+  name: z.string().optional(),
+  queries: z.array(z.string()),
+  source: z.string(),
+});
+
+const AddScreenRowBodySchema = z.object({
+  parcelNodeId: z.string(),
+  source: z.string(),
+});
+
+const McpSaveBodySchema = z.object({
+  status: z.string().optional(),
+  note: z.string().optional(),
+});
+
+const McpStatusBodySchema = z.object({
+  status: z.string(),
+});
+
+router.post(
+  "/property-explorer/v1/screens",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = CreateScreenBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await createScreen(
+      createDrizzleScreenSaveStore(),
+      scope,
+      parsed.data,
+      cortexQueryResolver(),
+    );
+    if (!result.ok) {
+      sendScreenSaveRefuse(req, res, result);
+      return;
+    }
+    res.json({ screen: await attachStubsForResponse(result.screen) });
+  },
+);
+
+router.get(
+  "/property-explorer/v1/screens",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const result = await listScreens(createDrizzleScreenSaveStore(), scope);
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    if ("screens" in result) {
+      res.json({ screens: result.screens });
+      return;
+    }
+    res.json({ screen: result.screen });
+  },
+);
+
+router.get(
+  "/property-explorer/v1/screens/:screenId",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const screenIdRaw = req.params.screenId;
+    const screenId = Array.isArray(screenIdRaw) ? screenIdRaw[0] : screenIdRaw;
+    const result = await listScreens(
+      createDrizzleScreenSaveStore(),
+      scope,
+      screenId,
+    );
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    if ("screen" in result) {
+      res.json({ screen: await attachStubsForResponse(result.screen) });
+      return;
+    }
+    res.json({ screens: result.screens });
+  },
+);
+
+router.post(
+  "/property-explorer/v1/screens/:screenId/rows",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const screenIdRaw = req.params.screenId;
+    const screenId = Array.isArray(screenIdRaw) ? screenIdRaw[0] : screenIdRaw;
+    const parsed = AddScreenRowBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success || !screenId) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await addToScreen(
+      createDrizzleScreenSaveStore(),
+      scope,
+      {
+        screenId,
+        parcelNodeId: parsed.data.parcelNodeId,
+        source: parsed.data.source,
+      },
+      cortexNodeLookup(),
+    );
+    if (!result.ok) {
+      sendScreenSaveRefuse(req, res, result);
+      return;
+    }
+    res.json({ screenId: result.screenId, row: result.row });
+  },
+);
+
+router.post(
+  "/property-explorer/v1/saved-properties/:parcelNodeId/save",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parcelNodeIdRaw = req.params.parcelNodeId;
+    const parcelNodeId = (Array.isArray(parcelNodeIdRaw)
+      ? parcelNodeIdRaw[0]
+      : parcelNodeIdRaw)?.trim();
+    const parsed = McpSaveBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success || !parcelNodeId) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await saveProperty(createDrizzleScreenSaveStore(), scope, {
+      parcelNodeId,
+      status: parsed.data.status,
+      note: parsed.data.note,
+    });
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    res.json({
+      parcelNodeId: result.parcelNodeId,
+      status: result.status,
+      note: result.note,
+    });
+  },
+);
+
+router.post(
+  "/property-explorer/v1/saved-properties/:parcelNodeId/status",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parcelNodeIdRaw = req.params.parcelNodeId;
+    const parcelNodeId = (Array.isArray(parcelNodeIdRaw)
+      ? parcelNodeIdRaw[0]
+      : parcelNodeIdRaw)?.trim();
+    const parsed = McpStatusBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success || !parcelNodeId) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const result = await setPropertyStatus(createDrizzleScreenSaveStore(), scope, {
+      parcelNodeId,
+      status: parsed.data.status,
+    });
+    if (!result.ok) {
+      res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
+      return;
+    }
+    res.json({ parcelNodeId: result.parcelNodeId, status: result.status });
   },
 );
 
@@ -408,7 +841,11 @@ router.post(
         await db
           .update(peSavedProperties)
           .set({
-            label: existing.label ?? item.label ?? null,
+            label:
+              existing.label ??
+              (item.label != null && isPunctuationOnlySitus(item.label)
+                ? null
+                : item.label ?? null),
             snapshot: mergedSnapshot,
             updatedAt: now,
           })
@@ -424,7 +861,10 @@ router.post(
           tenantId: scope.tenantId,
           ownerUserId: scope.ownerUserId,
           parcelNodeId,
-          label: item.label ?? null,
+          label:
+            item.label != null && isPunctuationOnlySitus(item.label)
+              ? null
+              : item.label ?? null,
           snapshot: item.snapshot ?? {},
           updatedAt: now,
         });
@@ -540,72 +980,74 @@ router.post(
   requirePeAuthenticated,
   requirePePaidOrPropertyUnlocked(),
   async (req: Request, res: Response) => {
-    const parcelNodeId =
-      typeof req.body?.parcelNodeId === "string"
-        ? req.body.parcelNodeId.trim()
-        : "";
-    if (!parcelNodeId || !isValidParcelNodeId(parcelNodeId)) {
+    const parsed = parseSmartSiteBriefRequest(req.body ?? {});
+    if (!parsed.ok) {
+      if (parsed.error === "not_implemented") {
+        res.status(400).json({
+          error: "not_implemented",
+          depth: parsed.depth,
+        });
+        return;
+      }
+      if (parsed.error === "parcel_batch_cap") {
+        res.status(400).json({
+          error: "parcel_batch_cap",
+          cap: parsed.cap,
+          received: parsed.received,
+        });
+        return;
+      }
       res.status(400).json({ error: "invalid_parcel_node_id" });
       return;
     }
-    const [
-      snapshot,
-      floodHazardFact,
-      boundaryFact,
-      pipelineFact,
-      wellFact,
-      structuralFact,
-      specialDistrictFact,
-    ] = await Promise.all([
-      loadBakedNodeFacetSnapshot(parcelNodeId),
-      loadFloodHazardFactAtom(parcelNodeId),
-      loadBoundaryEdgeFactAtom(parcelNodeId),
-      loadPipelineFactAtom(parcelNodeId),
-      loadWellFactAtom(parcelNodeId),
-      loadStructuralFactAtom(parcelNodeId),
-      loadSpecialDistrictFactAtom(parcelNodeId),
-    ]);
-    if (!snapshot) {
-      res.status(404).json({
-        error: "baked_snapshot_not_found",
-        message: "No baked facet snapshot exists for this parcel node.",
-        parcelNodeId,
-      });
+
+    if (parsed.mode === "single") {
+      const parcelNodeId = parsed.ids[0]!;
+      if (!isValidParcelNodeId(parcelNodeId)) {
+        res.status(400).json({ error: "invalid_parcel_node_id" });
+        return;
+      }
+      if (parsed.depth === "stub") {
+        const stub = await assembleStubBody(parcelNodeId);
+        if (!stub) {
+          await sendBriefMiss(res, parcelNodeId);
+          return;
+        }
+        res.json(stub);
+        return;
+      }
+      const body = await assembleNodeBriefBody(parcelNodeId);
+      if (!body) {
+        await sendBriefMiss(res, parcelNodeId);
+        return;
+      }
+      res.json(body);
       return;
     }
-    const root = asRecord(snapshot.facets);
-    const bakedAt =
-      typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
-    const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
-      floodHazardFact,
-      envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-    });
-    const draw = tryAssembleParcelDrawFromReads({
-      parcelNodeId,
-      facets: snapshot.facets,
-      bakedAt,
-      envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-      boundary: boundaryFact,
-      flood: floodHazardFact,
-      pipeline: pipelineFact,
-      well: wellFact,
-      specialDistrict: specialDistrictFact,
-      structural: structuralFact,
-    });
-    res.json({
-      runId: buildR1RunId(parcelNodeId, bakedAt),
-      reportFamily: "R1",
-      mode: "baked-facet-intel-v1",
-      parcelNodeId,
-      brief: {
-        sections: brief.sections,
-        disclosure: brief.disclosure,
-      },
-      citations: brief.citations,
-      bakedAt,
-      source: "baked-snapshot",
-      ...(draw ? { draw } : {}),
-    });
+
+    // Array path: per-id notFound inside a 200, unchanged. No existence
+    // probe here: the ltrim arm of the probe reads a county's index entries
+    // per id, so fifty misses on a large county is not a bounded cost.
+
+    const parcels: unknown[] = [];
+    const notFound: string[] = [];
+    const results = await Promise.all(
+      parsed.ids.map(async (id) => {
+        if (!isValidParcelNodeId(id)) {
+          return { id, row: null };
+        }
+        const row =
+          parsed.depth === "node"
+            ? await assembleNodeBriefBody(id)
+            : await assembleStubBody(id);
+        return { id, row };
+      }),
+    );
+    for (const item of results) {
+      if (item.row) parcels.push(item.row);
+      else notFound.push(item.id);
+    }
+    res.json({ parcels, notFound });
   },
 );
 
@@ -672,7 +1114,10 @@ router.get(
       });
       return;
     }
-    const manifest = manifestLayers(snapshot.facets, snapshot.tier2);
+    const manifest = manifestLayers(
+      snapshot.envelopeBriefRefusal,
+      snapshot.tier2,
+    );
     res.json({
       runId,
       contract: "layer-manifest-v1",
@@ -760,7 +1205,7 @@ const PeCheckoutBodySchema = z
      * the one the customer was shown.
      */
     interval: z.enum(["month", "year"]).optional(),
-    /** Team only: TOTAL seats desired. Base price covers 10; +$25/mo each above. */
+    /** Team only: TOTAL seats desired. Base price covers PE_TEAM_INCLUDED_SEATS; +$25/mo each above. */
     seats: z.number().int().min(1).max(500).optional(),
     /**
      * Checkout chrome. Absent / "hosted" keeps today's hosted redirect
@@ -778,12 +1223,12 @@ const PeCheckoutBodySchema = z
     (body) =>
       body.interval !== "year" ||
       body.seats === undefined ||
-      body.seats <= 10,
+      body.seats <= PE_TEAM_INCLUDED_SEATS,
     {
       // No annual extra-seat price exists (seats stay monthly $25, ruled
       // 2026-08-24) and Stripe cannot mix intervals in one subscription.
       message:
-        "annual Team billing covers at most the 10 included seats; extra seats bill monthly only",
+        `annual Team billing covers at most the ${PE_TEAM_INCLUDED_SEATS} included seats; extra seats bill monthly only`,
     },
   );
 
@@ -1337,6 +1782,38 @@ router.get(
   },
 );
 
+const RecordsRequestArtifactIdParamsSchema = z.object({
+  artifactId: z.string().uuid(),
+});
+
+router.get(
+  "/property-explorer/v1/records-request/artifacts/:artifactId/document",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const scope = ownerScope(req);
+    if (!scope) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = RecordsRequestArtifactIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_artifact_id" });
+      return;
+    }
+    const result = await loadRecordsRequestArtifactDocumentForUser({
+      artifactId: parsed.data.artifactId,
+      userId: scope.ownerUserId,
+    });
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.status(200).send(result.bytes);
+  },
+);
+
 router.get(
   "/property-explorer/v1/records-request/inbox",
   requirePeAuthenticated,
@@ -1396,6 +1873,248 @@ router.post(
       userId: scope.ownerUserId,
     });
     res.status(result.status).json(result.body);
+  },
+);
+
+const PeTeamInviteBodySchema = z.object({
+  email: z.string().min(3).max(320),
+  role: z.enum(["owner", "member"]),
+});
+
+const PeTeamRoleBodySchema = z.object({
+  role: z.enum(["owner", "member"]),
+});
+
+function teamUserId(req: Request): string | null {
+  return resolvePeOwnerUserId(req);
+}
+
+/**
+ * P-87 Claude Sync — which AI clients have connected to this account.
+ *
+ * Written by the Smart Site MCP server on a naming `initialize`. The PE card
+ * reads `claude` to decide between its setup state and its sync state, and an
+ * account with no row reads as `claude: null`, which the card renders as
+ * setup instructions. That is the fail-closed direction: an unread or empty
+ * signal shows someone how to connect, never a Sync button for a connection
+ * that was never made.
+ *
+ * Signed in only. There is no account-less answer to this question.
+ */
+router.get(
+  "/property-explorer/v1/ai-connections",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const ownerUserId = resolvePeOwnerUserId(req);
+    if (!ownerUserId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      res.status(200).json(await readAiConnections(ownerUserId));
+    } catch {
+      res.status(500).json({ error: "ai_connections_unavailable" });
+    }
+  },
+);
+
+router.get(
+  "/property-explorer/v1/team/members",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      const roster = await readTeamRoster(userId);
+      res.status(200).json(roster);
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.post(
+  "/property-explorer/v1/team/invitations",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = PeTeamInviteBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues.some((i) => i.path[0] === "role")
+          ? "invalid_role"
+          : "invalid_email",
+      });
+      return;
+    }
+    try {
+      const created = await createTeamInvitation(userId, parsed.data);
+      res.status(201).json(created);
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.delete(
+  "/property-explorer/v1/team/invitations/:id",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const id = typeof req.params.id === "string" ? req.params.id : "";
+    if (!id) {
+      res.status(400).json({ error: "invitation_not_found" });
+      return;
+    }
+    try {
+      await cancelTeamInvitation(userId, id);
+      res.status(204).end();
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.delete(
+  "/property-explorer/v1/team/members/:email",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const email = typeof req.params.email === "string" ? req.params.email : "";
+    try {
+      await removeTeamMember(userId, email);
+      res.status(204).end();
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+router.patch(
+  "/property-explorer/v1/team/members/:email",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = teamUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = PeTeamRoleBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_role" });
+      return;
+    }
+    const email = typeof req.params.email === "string" ? req.params.email : "";
+    try {
+      await patchTeamMemberRole(userId, email, parsed.data.role);
+      res.status(204).end();
+    } catch (err) {
+      const mapped = teamErrorBody(err);
+      res.status(mapped.status).json(mapped.body);
+    }
+  },
+);
+
+/**
+ * P-98 — every ACTIVE unlock on this account, with its expiry.
+ *
+ * `GET /entitlement` with `?parcelNodeId=` answers "is this one parcel
+ * unlocked". It cannot answer "what is unlocked, and what is about to lapse",
+ * which is the next-action rail's highest-intent rung. This route is that
+ * read, and it is a sibling of `/entitlement` rather than a widening of it:
+ * the existing route's shape is pinned by the R1 contract and stays untouched.
+ *
+ * Signed in only. There is no account-less answer to an account question.
+ * Anonymous callers get 401, not an empty list — an empty list would say
+ * "you have unlocked nothing", which is a claim about an account that was
+ * never identified.
+ *
+ * IMPORTANT, CLIENT SIDE: this path must be in `DEEP_GET_EXACT` in
+ * hauska-map `apps/property-explorer/api/_lib/deep-allowlist.ts` or it
+ * returns 403 and the rail reads that as a failed read.
+ */
+router.get(
+  "/property-explorer/v1/entitlement/unlocks",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const ownerUserId = resolvePeOwnerUserId(req);
+    if (!ownerUserId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    try {
+      res.status(200).json(await readActiveUnlocks(ownerUserId));
+    } catch {
+      // Fail LOUD. An unreadable unlock list must not degrade to an empty
+      // one: the rail would then go quiet, which is indistinguishable from
+      // an account that genuinely has nothing expiring.
+      res.status(500).json({ error: "unlocks_unavailable" });
+    }
+  },
+);
+
+/**
+ * P-98 — record one activation event (a ladder rung was shown, or acted on).
+ *
+ * Scoped to the signed-in PE user. `gtm_events` is keyed on `install_id` for
+ * the browser extension and cannot answer a question about an account.
+ *
+ * Body: `{ event_type: "shown" | "acted", action_id, surface? }`.
+ *
+ * REFUSES rather than defaults. An unknown `event_type` or `action_id` is a
+ * 400 naming the allowed set, never a row written under a substituted value:
+ * this table is the only activation measurement that will exist, and a
+ * fabricated row is indistinguishable from a real one once written. The 400
+ * body carries the vocabulary so a client/server drift explains itself the
+ * first time anyone reads a response.
+ *
+ * The SERVER always declares its failures. The client is separately
+ * instructed to drop failed events silently, which is an acceptable
+ * degradation only because it is deliberate on that side and declared here.
+ *
+ * IMPORTANT, CLIENT SIDE: this path must be in `DEEP_POST_EXACT` in
+ * hauska-map `apps/property-explorer/api/_lib/deep-allowlist.ts` or it
+ * returns 403 and no activation event is ever recorded.
+ */
+router.post(
+  "/property-explorer/v1/activation-events",
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const ownerUserId = resolvePeOwnerUserId(req);
+    if (!ownerUserId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const parsed = parseActivationEvent(req.body);
+    if (!parsed.ok) {
+      res.status(400).json(parsed.refusal);
+      return;
+    }
+    try {
+      const event = await recordActivationEvent(ownerUserId, parsed.value);
+      res.status(201).json({ ok: true, event });
+    } catch {
+      res.status(500).json({ error: "activation_event_not_recorded" });
+    }
   },
 );
 

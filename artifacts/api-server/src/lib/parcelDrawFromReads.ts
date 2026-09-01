@@ -1,6 +1,9 @@
 /**
  * Map live fact reads + bake facets onto assembleParcelDraw.
  * Serializer refuse → omit draw (fail closed). Never invent a ring.
+ *
+ * X2 + item 4 ship together: edge disposition is chosen by the union;
+ * absent overlay reads carry sourceVintage so absent-verified is reachable.
  */
 
 import type { BoundaryEdgeFactRead } from "./boundaryEdgeFactRead";
@@ -12,9 +15,16 @@ import type { StructuralFactRead } from "./structuralFactResolve";
 import type { WellFactRead } from "./wellFactRead";
 import {
   assembleParcelDraw,
+  httpCitationUrls,
   type AssembleParcelDrawInput,
+  type DrawFrameAnchor,
   type ParcelDrawStub,
 } from "./parcelDrawStub";
+import {
+  cadRollAttrsFromOnRecord,
+  serializeTwinOnRecord,
+} from "./twinOnRecordSerialize";
+import { firstPresentSitusLabel } from "./situsCompose";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -22,37 +32,27 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function situsLabel(facets: unknown): string | null {
-  const root = asRecord(facets);
-  if (!root) return null;
-  const base = asRecord(root.baseFacts);
-  for (const candidate of [
-    root.situsAddress,
-    root.address,
-    base?.situsAddress,
-    base?.address,
-  ]) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return null;
-}
-
-function yearBuiltFromBake(facets: unknown): number | null {
+function situsLabel(parcelNodeId: string, facets: unknown): string {
   const root = asRecord(facets);
   const base = asRecord(root?.baseFacts);
-  const raw = root?.yearBuilt ?? base?.yearBuilt;
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  const rec = asRecord(raw);
-  if (typeof rec?.v === "number" && Number.isFinite(rec.v)) return rec.v;
-  return null;
+  return firstPresentSitusLabel(parcelNodeId, [
+    typeof root?.situsAddress === "string" ? root.situsAddress : null,
+    typeof root?.address === "string" ? root.address : null,
+    typeof base?.situsAddress === "string" ? base.situsAddress : null,
+    typeof base?.address === "string" ? base.address : null,
+  ]).label;
 }
 
-function yearBuiltFromStructural(read: StructuralFactRead): number | null {
+function yearBuiltFromStructural(
+  read: StructuralFactRead,
+): AssembleParcelDrawInput["yearBuilt"] {
   if ("state" in read && read.state === "present") {
     return typeof read.yearBuilt === "number" && Number.isFinite(read.yearBuilt)
-      ? read.yearBuilt
+      ? {
+          v: read.yearBuilt,
+          source: "cad_property",
+          sourceVintage: read.sourceVintage,
+        }
       : null;
   }
   return null;
@@ -63,6 +63,12 @@ function envelopeReason(refusal: EnvelopeBriefRefusal | null | undefined): strin
   if (refusal.declineReason?.trim()) return refusal.declineReason.trim();
   if (refusal.code === "declined-in-bake") return "atom_path_pending";
   return refusal.code;
+}
+
+function vintageFromRead(read: {
+  sourceVintage?: string | null;
+}): string | null {
+  return typeof read.sourceVintage === "string" ? read.sourceVintage : null;
 }
 
 function boundaryInput(
@@ -90,6 +96,8 @@ function boundaryInput(
               distanceFeet: edge.propertyLineTags.distanceFeet,
             }
           : null,
+        sourceAdapter: edge.sourceAdapter,
+        status: edge.status,
       })),
     };
   }
@@ -106,9 +114,13 @@ function floodInput(read: FloodHazardFactRead): AssembleParcelDrawInput["flood"]
       floodZone: read.floodZone,
       zoneSubtype: read.zoneSubtype,
       inSpecialFloodHazardArea: read.inSpecialFloodHazardArea,
+      citations: httpCitationUrls(read),
     };
   }
-  return { state: read.state === "absent" ? "absent" : "refused" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
+  return { state: "refused" };
 }
 
 function pipelineInput(
@@ -122,12 +134,17 @@ function pipelineInput(
       sourceVintage: read.sourceVintage,
     };
   }
-  return { state: read.state === "absent" ? "absent" : "refused" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
+  return { state: "refused" };
 }
 
 function wellInput(read: WellFactRead): AssembleParcelDrawInput["well"] {
   if (read.state === "present") return { state: "present" };
-  if (read.state === "absent") return { state: "absent" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
   return { state: "refused", code: read.code };
 }
 
@@ -141,8 +158,51 @@ function specialDistrictInput(
       districtId: read.districtId,
     };
   }
-  if (read.state === "absent") return { state: "absent" };
+  if (read.state === "absent") {
+    return { state: "absent", sourceVintage: vintageFromRead(read) };
+  }
   return { state: "refused", code: read.code };
+}
+
+function anchorFromQueryPoint(queryPoint: unknown): DrawFrameAnchor | null {
+  const rec = asRecord(queryPoint);
+  if (!rec) return null;
+  const lat =
+    typeof rec.latitude === "number"
+      ? rec.latitude
+      : typeof rec.lat === "number"
+        ? rec.lat
+        : null;
+  const lng =
+    typeof rec.longitude === "number"
+      ? rec.longitude
+      : typeof rec.lng === "number"
+        ? rec.lng
+        : null;
+  if (
+    lat == null ||
+    lng == null ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    (lat === 0 && lng === 0)
+  ) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function mergeOnRecordAttrs(
+  draw: ParcelDrawStub,
+  onRecord: ReturnType<typeof serializeTwinOnRecord>,
+): ParcelDrawStub {
+  const attrs = { ...draw.attrs };
+  if (onRecord.apn) attrs.apn = onRecord.apn;
+  if (onRecord.acreage) attrs.acreage = onRecord.acreage;
+  if (onRecord.countyFips) attrs.countyFips = onRecord.countyFips;
+  if (onRecord.countyName) attrs.countyName = onRecord.countyName;
+  if (onRecord.situsState) attrs.situsState = onRecord.situsState;
+  Object.assign(attrs, cadRollAttrsFromOnRecord(onRecord));
+  return { ...draw, attrs };
 }
 
 export function tryAssembleParcelDrawFromReads(args: {
@@ -150,6 +210,7 @@ export function tryAssembleParcelDrawFromReads(args: {
   facets: unknown;
   bakedAt: string | null;
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
+  queryPoint?: { latitude: number; longitude: number } | null;
   boundary: BoundaryEdgeFactRead;
   flood: FloodHazardFactRead;
   pipeline: PipelineFactRead;
@@ -160,15 +221,15 @@ export function tryAssembleParcelDrawFromReads(args: {
   const root = asRecord(args.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
   try {
-    return assembleParcelDraw({
+    const draw = assembleParcelDraw({
       parcelNodeId: args.parcelNodeId,
-      label: situsLabel(args.facets),
+      label: situsLabel(args.parcelNodeId, args.facets),
       bakedAt: args.bakedAt,
       countyFips: args.parcelNodeId.split(":")[0] ?? null,
       zoning: root.zoning ?? null,
       landUse: baseFacts.landUse ?? null,
-      yearBuilt:
-        yearBuiltFromStructural(args.structural) ?? yearBuiltFromBake(args.facets),
+      yearBuilt: yearBuiltFromStructural(args.structural),
+      anchor: anchorFromQueryPoint(args.queryPoint),
       boundary: boundaryInput(args.boundary),
       flood: floodInput(args.flood),
       envelopeRefusalReason: envelopeReason(args.envelopeBriefRefusal),
@@ -176,6 +237,10 @@ export function tryAssembleParcelDrawFromReads(args: {
       well: wellInput(args.well),
       specialDistrict: specialDistrictInput(args.specialDistrict),
     });
+    return mergeOnRecordAttrs(
+      draw,
+      serializeTwinOnRecord(args.facets, args.parcelNodeId),
+    );
   } catch {
     return undefined;
   }

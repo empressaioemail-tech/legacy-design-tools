@@ -89,6 +89,7 @@ export type SpecialDistrictFactTypedAbsence = {
   verifiedAbsence: unknown;
   sourceTier: string | null;
   sourceAdapter: string | null;
+  sourceVintage: string | null;
 };
 
 export type SpecialDistrictFactRefusal = {
@@ -274,6 +275,7 @@ function interpretBody(
       verifiedAbsence: rec.verifiedAbsence ?? null,
       sourceTier: asNullableString(rec.sourceTier),
       sourceAdapter: asNullableString(rec.sourceAdapter),
+      sourceVintage: asNullableString(rec.sourceVintage),
     };
   }
 
