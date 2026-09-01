@@ -64,6 +64,7 @@ function paidTeamSnapshot(): PeEntitlementSnapshot {
     entitlementSource: "stripe_sub",
     seatsPurchased: 5,
     billingInterval: "month",
+    hasBillingAccount: true,
   };
 }
 
@@ -78,6 +79,7 @@ function anonymousSnapshot(): PeEntitlementSnapshot {
     entitlementSource: null,
     seatsPurchased: null,
     billingInterval: null,
+    hasBillingAccount: false,
   };
 }
 
@@ -110,6 +112,10 @@ describe("with-parcel response (pinned contract, must not move)", () => {
     expect(Object.keys(body)).toEqual([...MAIN_BASE_KEYS]);
     expect("seatsPurchased" in body).toBe(false);
     expect("billingInterval" in body).toBe(false);
+    // A-062 joins the same list. The portal card needs this bit on the
+    // ACCOUNT body only; widening `base` would put it on every with-parcel
+    // response the PE BFF is pinned to, which is the defect this test names.
+    expect("hasBillingAccount" in body).toBe(false);
     expect("property" in body).toBe(false);
   });
 
@@ -131,9 +137,49 @@ describe("without-parcel account response (P-98)", () => {
       ...MAIN_BASE_KEYS,
       "seatsPurchased",
       "billingInterval",
+      "hasBillingAccount",
     ]);
     expect(body.seatsPurchased).toBe(5);
     expect(body.billingInterval).toBe("month");
+  });
+
+  it("A-062: hasBillingAccount travels straight through, both ways", () => {
+    // Settings renders a real Manage-billing control on true and the honest
+    // "no billing history" row on false. Nothing here derives it from tier:
+    // a paid account whose customer id never landed is a real state, and a
+    // free account that once subscribed still has a portal to open.
+    expect(peEntitlementAccountBody(paidTeamSnapshot()).hasBillingAccount).toBe(
+      true,
+    );
+    expect(
+      peEntitlementAccountBody({
+        ...paidTeamSnapshot(),
+        hasBillingAccount: false,
+      }).hasBillingAccount,
+    ).toBe(false);
+    // NOT INFERRED FROM TIER. A free snapshot that DOES carry a customer
+    // (subscribed once, cancelled) still reports true, because the portal is
+    // exactly what that person needs and a tier-derived answer would hide it.
+    expect(
+      peEntitlementAccountBody({
+        ...paidTeamSnapshot(),
+        tier: "free",
+        subscriptionTier: null,
+        entitlementSource: null,
+        hasBillingAccount: true,
+      }).hasBillingAccount,
+    ).toBe(true);
+  });
+
+  it("A-062 VIOLATION: the Stripe customer id itself is never on the wire", () => {
+    // The bit, not the value. The portal route refuses a caller-supplied
+    // customer id; serialising the real one here would hand every caller the
+    // exact string that route exists to reject.
+    const json = JSON.stringify(peEntitlementAccountBody(paidTeamSnapshot()));
+    expect(json).not.toContain("stripeCustomerId");
+    expect(json).not.toContain("stripe_customer_id");
+    expect(json).not.toContain("cus_");
+    expect(json).toContain('"hasBillingAccount":true');
   });
 
   it("VIOLATION: `property` is absent, not an empty or defaulted block", () => {

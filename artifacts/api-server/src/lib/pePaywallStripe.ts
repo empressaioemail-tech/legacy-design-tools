@@ -35,6 +35,7 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import {
+  createStripePortalSessionForCustomer,
   isStripeConfigured,
   stripePostForm,
   stripePublishableKey,
@@ -572,4 +573,191 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   }
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, { custom, publishableKey });
+}
+
+// ---------------------------------------------------------------------------
+// A-062 — THE PE USER-SCOPED STRIPE CUSTOMER PORTAL.
+//
+// WHY THIS EXISTS. `apps/property-explorer/public/terms.html` tells every
+// customer "You can cancel a paid plan through the Stripe billing flow in the
+// product." Until this function there was no such flow for a PE user: the only
+// portal in the codebase was `brokerageStripe.createBillingPortalSession`,
+// which is keyed on an EXTENSION INSTALL ID and resolves a
+// `brokerage_wallets.stripe_customer_id`. A PE subscriber's customer lives on
+// `pe_user_entitlements.stripe_customer_id` and the two are different columns
+// on different rows for different subjects. Reusing the install seam for a
+// signed-in web user would open the wrong customer's portal, or create a
+// customer that never pays.
+//
+// WHAT IS SHARED AND WHAT IS NOT. The HTTP call is shared —
+// `createStripePortalSessionForCustomer` in brokerageStripe.ts is the single
+// `/billing_portal/sessions` poster and both seams go through it. The CUSTOMER
+// RESOLUTION is deliberately not shared, because the two seams need opposite
+// behaviour on a missing customer: the install seam creates one, and this one
+// must never create one (acceptance item 2).
+//
+// THE READ IS NOT `getOrCreatePeStripeCustomer`. That function is one letter
+// of intent away and would satisfy every "did we get a customer id" check
+// while silently registering a Stripe customer for a free user who merely
+// clicked "cancel subscription" to see what it said. Asking to manage billing
+// is not a purchase and must leave no trace in Stripe.
+// ---------------------------------------------------------------------------
+
+/**
+ * The path A-062 mounts, exported so the route and its test name the same
+ * string once. The client half (hauska-map `src/lib/portalClient.ts`) carries
+ * the proxy-side spelling of the same path and the two are pinned
+ * independently on each side of the wire.
+ */
+export const PE_BILLING_PORTAL_ROUTE = "/property-explorer/v1/billing/portal";
+
+/**
+ * ABSENT IS NOT AN ERROR AND NOT A ZERO. A signed-in user with no Stripe
+ * customer is the ordinary state of every free account and every account that
+ * abandoned a checkout, so it gets its own arm of the result type rather than
+ * a thrown error or an empty string. The compiler makes every consumer handle
+ * it; no `if (!customerId)` can be forgotten.
+ */
+export type PeBillingPortalResult =
+  | { kind: "portal"; mode: "live"; portalUrl: string }
+  /** The account has never had a Stripe customer. Declared, not fabricated. */
+  | { kind: "no-billing-account" }
+  /**
+   * Stripe is not configured on this deployment, so no portal can be opened.
+   *
+   * DELIBERATELY NOT SIMULATED, unlike the install-scoped seam, which returns
+   * a fake `?simulated_portal=1` bounce. A simulated portal cannot cancel a
+   * subscription, and this route exists precisely because a cancellation
+   * promise the product could not honour was the defect. Handing back a URL
+   * that looks like a portal and cancels nothing would re-create it one layer
+   * down.
+   */
+  | { kind: "not-configured" };
+
+/**
+ * Read-only lookup of the PE user's Stripe customer id.
+ *
+ * Exported so a test can prove the no-customer path without reaching Stripe.
+ * Returns `null` for both "no entitlement row" and "row with a null customer"
+ * because the customer is what the caller needs and both mean it is absent;
+ * the two are not otherwise distinguished by anything downstream.
+ */
+export async function readPeStripeCustomerId(
+  userId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ stripeCustomerId: peUserEntitlements.stripeCustomerId })
+    .from(peUserEntitlements)
+    .where(eq(peUserEntitlements.ownerUserId, userId))
+    .limit(1);
+  const id = row?.stripeCustomerId;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+/**
+ * Open a Stripe Customer Portal session for a signed-in PE user (A-062).
+ *
+ * `userId` MUST come from the authenticated session. The route that calls this
+ * refuses a caller-supplied customer id outright rather than ignoring it, so
+ * there is no path by which a request body reaches this argument.
+ *
+ * `returnUrl` is REQUIRED and has no default here. The historical default,
+ * `peWebAppBaseUrl()`, falls back to the hardcoded
+ * `https://property-explorer-xi.vercel.app` when PE_WEB_APP_BASE_URL is unset,
+ * which would land a Smart Site customer on a stale Vercel host after
+ * cancelling. A required argument makes that a compile error rather than a
+ * silent wrong destination (acceptance item 4).
+ */
+export async function createPeBillingPortalSession(input: {
+  /** Resolved from the authenticated session by the route. Never from a body. */
+  userId: string;
+  /** Explicit. No default — see the note above. */
+  returnUrl: string;
+}): Promise<PeBillingPortalResult> {
+  if (!isStripeConfigured()) {
+    return { kind: "not-configured" };
+  }
+
+  // READ, never get-or-create. See the header note.
+  const customerId = await readPeStripeCustomerId(input.userId);
+  if (!customerId) {
+    logger.info(
+      { userId: input.userId.slice(0, 8) },
+      "pe-stripe: billing portal refused — account has no stripe customer",
+    );
+    return { kind: "no-billing-account" };
+  }
+
+  const session = await createStripePortalSessionForCustomer({
+    customerId,
+    returnUrl: input.returnUrl,
+  });
+  return { kind: "portal", mode: session.mode, portalUrl: session.portalUrl };
+}
+
+/**
+ * Hosts a portal `return_url` may land a customer on (A-062 item 4).
+ *
+ * THIS IS AN ALLOWLIST, NOT A SANITISER. An unrecognised host is refused; it
+ * is never rewritten to a "safe" one, because silently redirecting a customer
+ * somewhere other than where the caller asked is the same class of defect as
+ * the stale hardcoded default this card removes — a wrong destination nobody
+ * is told about.
+ *
+ * Derived, in order: an explicit `PE_PORTAL_RETURN_HOSTS` (comma separated),
+ * else the host of `PE_WEB_APP_BASE_URL` when it is set, plus the Smart Site
+ * production hosts, plus Vercel preview hosts, plus loopback outside
+ * production. The Vercel arm is here because PE checkout ALREADY returns to
+ * `window.location.origin` on a preview deployment; a portal stricter than the
+ * checkout beside it would refuse a flow the product already permits, and a
+ * control that blocks work it was never meant to reach teaches the fleet to
+ * route around it.
+ */
+export function peAllowedReturnHosts(): string[] {
+  const explicit = process.env.PE_PORTAL_RETURN_HOSTS?.trim();
+  if (explicit) {
+    return explicit
+      .split(",")
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+  }
+  const hosts = new Set<string>(["smartsite.cloud", "www.smartsite.cloud"]);
+  const configured = process.env.PE_WEB_APP_BASE_URL?.trim();
+  if (configured) {
+    try {
+      hosts.add(new URL(configured).hostname.toLowerCase());
+    } catch {
+      // A malformed PE_WEB_APP_BASE_URL contributes NOTHING rather than a
+      // guessed host. The two production entries above still stand.
+    }
+  }
+  return [...hosts];
+}
+
+/**
+ * Is this a return URL we will hand to Stripe?
+ *
+ * Pure and exported so the rule is testable without a request. Refuses on a
+ * parse failure, on any scheme other than https (http only on loopback, for
+ * local dev), and on a host outside {@link peAllowedReturnHosts} — with the
+ * Vercel preview and loopback arms named explicitly rather than folded into a
+ * regex nobody can read.
+ */
+export function isAllowedPeReturnUrl(candidate: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    return false;
+  }
+  if (loopback) return process.env.NODE_ENV !== "production";
+  if (peAllowedReturnHosts().includes(host)) return true;
+  // Vercel preview deployments for this app. Exact suffix, so `vercel.app`
+  // itself and `notvercel.app` are both refused.
+  return host.endsWith(".vercel.app");
 }

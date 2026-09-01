@@ -80,11 +80,14 @@ import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
 import {
+  createPeBillingPortalSession,
   createPeSubscriptionCheckoutSession,
   createPePropertyUnlockCheckoutSession,
   defaultPeCheckoutCancelUrl,
   defaultPeCheckoutSuccessUrl,
+  isAllowedPeReturnUrl,
   PeCheckoutConfigError,
+  PE_BILLING_PORTAL_ROUTE,
   PE_TEAM_INCLUDED_SEATS,
 } from "../lib/pePaywallStripe";
 import { countyFipsFromParcelNodeId } from "../lib/verdictLayerServe";
@@ -1287,6 +1290,204 @@ router.post(
       }
       res.status(502).json({
         error: "checkout_failed",
+        message: String((err as Error).message || err),
+        stripeConfigured: isStripeConfigured(),
+      });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// A-062 — THE STRIPE CUSTOMER PORTAL, USER SCOPED.
+//
+// `public/terms.html` promises every customer: "You can cancel a paid plan
+// through the Stripe billing flow in the product." Before this route no such
+// flow existed for a PE user. The terms are the document a customer is held to
+// and holds us to, so the ruling was to keep the promise and build the
+// capability rather than amend the sentence.
+//
+// THE CUSTOMER ID COMES FROM THE SESSION AND NOWHERE ELSE. Not the body, not a
+// header, not the query string. A caller-supplied one is REFUSED with a named
+// 400 rather than ignored: ignoring it is correct behaviour that produces no
+// evidence, so an attempt to open somebody else's portal would look exactly
+// like an ordinary request in every log we keep. A refusal is the same
+// security outcome plus a record.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every spelling of "customer id" a caller might put on the wire. Checked
+ * against the body, the query string and the headers — the three sources the
+ * card names — because the point is not to reject one field name but to make
+ * the whole class unreachable.
+ *
+ * Header spellings carry the `x-` forms an intermediary would add. Express
+ * lowercases header names, so the comparison is done lowercased on both sides.
+ */
+const PE_PORTAL_REJECTED_CUSTOMER_KEYS: readonly string[] = [
+  "customer",
+  "customerid",
+  "customer_id",
+  "stripecustomerid",
+  "stripe_customer_id",
+  "stripecustomer",
+  "stripe_customer",
+];
+
+const PE_PORTAL_REJECTED_CUSTOMER_HEADERS: readonly string[] = [
+  "x-stripe-customer-id",
+  "x-stripe-customer",
+  "x-customer-id",
+  "x-pe-stripe-customer-id",
+];
+
+/**
+ * The first place a caller tried to supply a customer id, or null.
+ *
+ * Returns WHERE it was found rather than a boolean, so the 400 body can name
+ * the source and the log line is diagnostic instead of a bare refusal count.
+ */
+function peSuppliedCustomerIdSource(req: Request): string | null {
+  const body = req.body;
+  if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+    for (const key of Object.keys(body as Record<string, unknown>)) {
+      if (PE_PORTAL_REJECTED_CUSTOMER_KEYS.includes(key.toLowerCase())) {
+        return `body.${key}`;
+      }
+    }
+  }
+  for (const key of Object.keys(req.query ?? {})) {
+    if (PE_PORTAL_REJECTED_CUSTOMER_KEYS.includes(key.toLowerCase())) {
+      return `query.${key}`;
+    }
+  }
+  for (const name of PE_PORTAL_REJECTED_CUSTOMER_HEADERS) {
+    if (req.headers[name] !== undefined) return `header.${name}`;
+  }
+  return null;
+}
+
+/**
+ * `returnUrl` is REQUIRED, which is the whole of acceptance item 4.
+ *
+ * The neighbouring checkout schemas make it optional and fall back to
+ * `defaultPeCheckoutSuccessUrl()`, which resolves through `peWebAppBaseUrl()`
+ * to the hardcoded `https://property-explorer-xi.vercel.app` whenever
+ * `PE_WEB_APP_BASE_URL` is unset. That default would land a Smart Site
+ * customer on a stale Vercel host after cancelling their plan. Making the
+ * field required means the wrong destination is not reachable from this route
+ * at all, rather than reachable-but-unlikely.
+ *
+ * `.strict()` refuses unknown keys. That is what turns the customer-id check
+ * above from a blocklist of spellings into a closed set: a spelling nobody
+ * thought of still fails here, it just fails as `invalid_request` rather than
+ * with the named error.
+ */
+const PeBillingPortalBodySchema = z
+  .object({
+    returnUrl: z.string().url(),
+  })
+  .strict();
+
+/**
+ * Open the Stripe Customer Portal for the signed-in user (A-062).
+ *
+ * Distinct from the install-scoped `POST /api/brokerage/v1/billing/portal`,
+ * which resolves a `brokerage_wallets` customer from an extension install id
+ * and MAY create one. This route resolves `pe_user_entitlements
+ * .stripe_customer_id` for the session's own user and NEVER creates one:
+ * asking to manage billing is not a purchase, and a free user who clicks
+ * "cancel subscription" to see what it says must not acquire a Stripe customer
+ * record as a side effect of the click.
+ *
+ * Status codes, each a distinct state and none of them 500:
+ *   401 authentication_required   no session (requirePeAuthenticated)
+ *   400 customer_id_not_accepted  a caller tried to supply a customer id
+ *   400 invalid_request           bad/absent returnUrl, or an unknown key
+ *   400 return_url_not_allowed    a well-formed URL off the Smart Site hosts
+ *   409 no_billing_account        signed in, never had a Stripe customer
+ *   503 portal_unavailable        Stripe is not configured on this deployment
+ *   502 portal_failed             Stripe answered with an error
+ */
+router.post(
+  PE_BILLING_PORTAL_ROUTE,
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = resolvePeOwnerUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+
+    const suppliedFrom = peSuppliedCustomerIdSource(req);
+    if (suppliedFrom) {
+      res.status(400).json({
+        error: "customer_id_not_accepted",
+        message:
+          "The billing portal always opens on the signed-in account's own Stripe customer. A customer id on the request is refused, never honoured.",
+        source: suppliedFrom,
+      });
+      return;
+    }
+
+    const parsed = PeBillingPortalBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "invalid_request",
+        message:
+          "returnUrl is required and must be an absolute URL. This route has no default return destination on purpose.",
+      });
+      return;
+    }
+    if (!isAllowedPeReturnUrl(parsed.data.returnUrl)) {
+      // REFUSED, never rewritten to a host we prefer. A silently changed
+      // destination is the same defect as the stale default, one layer down.
+      res.status(400).json({
+        error: "return_url_not_allowed",
+        message:
+          "returnUrl must point at a Smart Site host over https. It is refused rather than rewritten.",
+      });
+      return;
+    }
+
+    try {
+      const result = await createPeBillingPortalSession({
+        userId,
+        returnUrl: parsed.data.returnUrl,
+      });
+      if (result.kind === "no-billing-account") {
+        // DECLARED ABSENCE, not an error and not somebody else's portal.
+        // The ordinary state of every free account. `hasBillingAccount` is
+        // spelled out so the client renders the honest row rather than
+        // inferring an account state from a status code.
+        res.status(409).json({
+          error: "no_billing_account",
+          hasBillingAccount: false,
+          message:
+            "This account has no billing history, so there is no Stripe billing portal to open. A plan bought on this account will create one.",
+        });
+        return;
+      }
+      if (result.kind === "not-configured") {
+        // NOT SIMULATED. A fake portal URL would make the terms sentence read
+        // true while cancelling nothing, which is the defect this card exists
+        // to close.
+        res.status(503).json({
+          error: "portal_unavailable",
+          message:
+            "Stripe is not configured on this deployment, so no billing portal can be opened. Nothing was changed.",
+          stripeConfigured: false,
+        });
+        return;
+      }
+      res.json({
+        ok: true,
+        mode: result.mode,
+        portalUrl: result.portalUrl,
+        stripeConfigured: isStripeConfigured(),
+      });
+    } catch (err) {
+      res.status(502).json({
+        error: "portal_failed",
         message: String((err as Error).message || err),
         stripeConfigured: isStripeConfigured(),
       });
