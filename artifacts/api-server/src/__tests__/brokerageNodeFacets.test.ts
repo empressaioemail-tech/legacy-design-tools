@@ -447,21 +447,41 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/landUseFact\s*=\s*.*baseFacts\.landUse/);
   });
 
-  it("the route source wires specialDistrictFact from atoms and does not read bake/CAD/mud-pid", () => {
+  it("the route source wires specialDistrictFact through the PARCEL-B-SLATE1 serve cutover and does not read bake/CAD/mud-pid directly", () => {
+    // F-01, PARCEL-B-SLATE1 (2026-09-02): the route now calls
+    // loadSpecialDistrictFactForServe (specialDistrictFactServeCutover.ts),
+    // mirroring wells' own PARCEL-B-READER cutover -- checks the rail
+    // allowlist (today: legacy for every unslated pair) and delegates to
+    // loadSpecialDistrictFactAtom unchanged. The next test asserts THAT
+    // module's own wiring still lands on atoms, so this file no longer
+    // naming specialDistrictFactRead directly does not weaken the "never
+    // bake/CAD/mud-pid" guarantee -- it moves one hop, verified below.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
     expect(routeSrc).toMatch(
-      /from\s+["']\.\.\/lib\/specialDistrictFactRead["']/,
+      /from\s+["']\.\.\/lib\/specialDistrictFactServeCutover["']/,
     );
-    expect(routeSrc).toMatch(/loadSpecialDistrictFactAtom/);
+    expect(routeSrc).toMatch(/loadSpecialDistrictFactForServe/);
     expect(routeSrc).toMatch(/specialDistrictFact/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
     expect(routeSrc).not.toMatch(
       /specialDistrictFact\s*=\s*.*place_layer_snapshots/,
     );
+  });
+
+  it("specialDistrictFactServeCutover (the PARCEL-B-SLATE1 wrapper) itself wires specialDistrictFact from atoms and does not read bake/CAD/mud-pid", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "specialDistrictFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/specialDistrictFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadSpecialDistrictFactAtom/);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
   });
 
   it("the route source wires pipelineFact from atoms and does not read bake/CAD/GIS", () => {
@@ -580,18 +600,40 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/stripe/i);
   });
 
-  it("the route source wires cityLimitsFact from tx_city_boundary PIP, not an atom or ETJ buffer", () => {
+  it("the route source wires cityLimitsFact through the PARCEL-B-SLATE1 serve cutover, not an atom or ETJ buffer", () => {
+    // F-01, PARCEL-B-SLATE1 (2026-09-02): the route now calls
+    // loadCityLimitsFactForServe (cityLimitsFactServeCutover.ts), mirroring
+    // wells' own PARCEL-B-READER cutover -- checks the rail allowlist
+    // (today: legacy for every unslated pair) and delegates to
+    // loadCityLimitsFact unchanged. The next test asserts THAT module's own
+    // wiring still lands on tx_city_boundary PIP, so this file no longer
+    // naming cityLimitsFactRead directly does not weaken the "not an atom
+    // or ETJ buffer" guarantee -- it moves one hop, verified below.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
-    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/cityLimitsFactRead["']/);
-    expect(routeSrc).toMatch(/loadCityLimitsFact/);
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/cityLimitsFactServeCutover["']/,
+    );
+    expect(routeSrc).toMatch(/loadCityLimitsFactForServe/);
     expect(routeSrc).toMatch(/cityLimitsFact/);
     expect(routeSrc).not.toMatch(/cityLimitsFact\s*=\s*.*situsCity/);
     expect(routeSrc).not.toMatch(/offset\s*2\s*miles/i);
     expect(routeSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
     expect(routeSrc).not.toMatch(/--apply/);
+  });
+
+  it("cityLimitsFactServeCutover (the PARCEL-B-SLATE1 wrapper) itself wires cityLimitsFact from tx_city_boundary PIP, not an atom or ETJ buffer", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "cityLimitsFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/cityLimitsFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadCityLimitsFact/);
+    expect(wrapperSrc).not.toMatch(/offset\s*2\s*miles/i);
+    expect(wrapperSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
+    expect(wrapperSrc).not.toMatch(/--apply/);
   });
 });
 
