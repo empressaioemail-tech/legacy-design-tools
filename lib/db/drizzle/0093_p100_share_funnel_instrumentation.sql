@@ -54,7 +54,7 @@
 -- prevent.
 
 CREATE TABLE IF NOT EXISTS pe_share_attributions (
-  recipient_user_id text PRIMARY KEY
+  recipient_user_id text CONSTRAINT pe_share_attributions_recipient_user_id_pk PRIMARY KEY
     CONSTRAINT pe_share_attributions_recipient_user_id_users_id_fk
     REFERENCES users(id) ON DELETE CASCADE,
   grant_id text NOT NULL
