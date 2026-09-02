@@ -37,6 +37,7 @@ import type {
   RecordsRecipeContext,
   RecordsRecipeResult,
 } from "./types.js";
+import { recipeResultFromNavigation } from "../navigationFailure.js";
 
 export const AUMENTUM_INDEX_SEARCH_RECIPE_VERSION = "p85-aumentum-index-search-v3";
 
@@ -150,15 +151,12 @@ async function openSearchTermsSurface(
   const disclaimer = disclaimerUrlForPortal(portal);
   if (disclaimer) {
     const nav = await browser.goto(disclaimer);
-    if (!nav.ok) {
-      return {
-        ok: false,
-        result: {
-          status: "failed",
-          errorCode: "portal-unreachable",
-          errorMessage: `Aumentum disclaimer unreachable (${disclaimer}): ${nav.errorMessage ?? "navigation failed"}`,
-        },
-      };
+    const navFailure = recipeResultFromNavigation(
+      nav,
+      `Aumentum disclaimer unreachable (${disclaimer})`,
+    );
+    if (navFailure) {
+      return { ok: false, result: navFailure };
     }
     stepsReached.push("open-disclaimer");
     if (!(await tryClickFirst(browser, TERMS_ACCEPT_SELECTORS))) {
@@ -178,30 +176,24 @@ async function openSearchTermsSurface(
     let url = await browser.currentUrl();
     if (!url.includes("SearchEntry.aspx")) {
       const entryNav = await browser.goto(bastropSearchEntryUrl(portal));
-      if (!entryNav.ok) {
-        return {
-          ok: false,
-          result: {
-            status: "failed",
-            errorCode: "portal-unreachable",
-            errorMessage: `Bastrop search entry unreachable: ${entryNav.errorMessage ?? "navigation failed"}`,
-          },
-        };
+      const entryFailure = recipeResultFromNavigation(
+        entryNav,
+        "Bastrop search entry unreachable",
+      );
+      if (entryFailure) {
+        return { ok: false, result: entryFailure };
       }
     }
     stepsReached.push("open-search-entry");
   } else {
     const searchTermsUrl = searchTermsUrlForPortal(portal);
     const nav = await browser.goto(searchTermsUrl);
-    if (!nav.ok) {
-      return {
-        ok: false,
-        result: {
-          status: "failed",
-          errorCode: "portal-unreachable",
-          errorMessage: `Aumentum search terms unreachable (${searchTermsUrl}): ${nav.errorMessage ?? "navigation failed"}`,
-        },
-      };
+    const navFailure = recipeResultFromNavigation(
+      nav,
+      `Aumentum search terms unreachable (${searchTermsUrl})`,
+    );
+    if (navFailure) {
+      return { ok: false, result: navFailure };
     }
     stepsReached.push("open-search-terms");
     if (await tryClickFirst(browser, TERMS_ACCEPT_SELECTORS)) {
@@ -254,15 +246,12 @@ async function prepareBastropSearchForm(
     return { ok: true };
   }
   const nav = await browser.goto(bastropSearchEntryUrl(portal));
-  if (!nav.ok) {
-    return {
-      ok: false,
-      result: {
-        status: "failed",
-        errorCode: "portal-unreachable",
-        errorMessage: `Bastrop search entry unreachable: ${nav.errorMessage ?? "navigation failed"}`,
-      },
-    };
+  const navFailure = recipeResultFromNavigation(
+    nav,
+    "Bastrop search entry unreachable",
+  );
+  if (navFailure) {
+    return { ok: false, result: navFailure };
   }
   return { ok: true };
 }
@@ -280,6 +269,7 @@ async function runBastropSearchEntryQuery(
     }
   | { ok: false; result: RecordsRecipeResult }
 > {
+  await browser.beforePortalAction?.();
   const prepared = await prepareBastropSearchForm(portal, browser);
   if (!prepared.ok) {
     return prepared;
@@ -396,7 +386,14 @@ async function runSingleQuery(
     return runBastropSearchEntryQuery(portal, browser, planned);
   }
 
-  await browser.goto(searchTermsUrl);
+  const nav = await browser.goto(searchTermsUrl);
+  const navFailure = recipeResultFromNavigation(
+    nav,
+    `Aumentum search terms unreachable (${searchTermsUrl})`,
+  );
+  if (navFailure) {
+    return { ok: false, result: navFailure };
+  }
 
   let entryOk = false;
   let fillSelectors: readonly string[] = NAME_INPUT_SELECTORS;
@@ -595,6 +592,7 @@ export async function runAumentumIndexSearch(
   const searchTermsUrl = searchTermsUrlForPortal(portal);
 
   for (const planned of plan) {
+    await browser.beforePortalAction?.();
     const result = await runSingleQuery(portal, browser, planned, searchTermsUrl);
     if (!result.ok) {
       if (

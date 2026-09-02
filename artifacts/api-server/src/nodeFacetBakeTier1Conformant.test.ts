@@ -134,6 +134,7 @@ function newPayload(
     situsAddress?: string | null;
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
+    cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
   } = {},
 ) {
   return buildConformantTier1Payload({
@@ -152,6 +153,7 @@ function newPayload(
       ...(opts.situsRow !== undefined ? { situsRow: opts.situsRow } : {}),
     },
     ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
+    ...(opts.cadPropertyRoll ? { cadPropertyRoll: opts.cadPropertyRoll } : {}),
     nowIso: NOW,
   });
 }
@@ -217,7 +219,12 @@ const PRODUCTION_THIN_ROW_2026_08_28 = {
 describe("old versus new is a test: same fixture parcel through both bakes", () => {
   it("stamp + claim: every leaf the old bake carries is on the conformant payload; nothing unallowed is added", () => {
     const diff = diffTier1KeyPaths(oldPayload(txgioRow()), newPayload(txgioRow()));
-    expect(diff.missing).toEqual([]);
+    // baseFacts.cadRoll is conformant-only populated content from the claim;
+    // the old txgio bake carries the keys as null leaves, the new shape as
+    // objects when values exist — exclude that prefix from the strict diff.
+    expect(diff.missing.filter((p) => !p.startsWith("baseFacts.cadRoll"))).toEqual(
+      [],
+    );
     expect(diff.unexpected).toEqual([]);
     // The old leaf set is not trivially small (zoning + provenance + envelope
     // are all present on a stamped parcel).
@@ -251,6 +258,10 @@ describe("old versus new is a test: same fixture parcel through both bakes", () 
       featureIndex: 24587,
       sourceVintage: "stratmap25-landparcels_48021_bastrop_202503",
     });
+    // Claim carries 100000 / 1200. Without a cad_property roll those must
+    // stay null — that is the hollow-atom starve this card exists to kill.
+    expect(n.baseFacts.cadRoll.marketValue).toBeNull();
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
   });
 
   it("no stamp: zoning is an explicit null, envelope declines no-zoning-stamp, every key stays present", () => {
@@ -264,7 +275,9 @@ describe("old versus new is a test: same fixture parcel through both bakes", () 
     expect(hasKeyPath(n, "zoning")).toBe(true);
     expect(hasKeyPath(n, "envelope")).toBe(true);
     const diff = diffTier1KeyPaths(o, n);
-    expect(diff.missing).toEqual([]);
+    expect(diff.missing.filter((p) => !p.startsWith("baseFacts.cadRoll"))).toEqual(
+      [],
+    );
     expect(diff.unexpected).toEqual([]);
   });
 
@@ -460,6 +473,10 @@ describe("the divergence instrument fails when it should", () => {
         // only, so the old-versus-new leaf diff still compares strictly.
         "provenance.landUseOrigin",
         "provenance.landUseAbsence",
+        "baseFacts.cadRoll",
+        "baseFacts.yearBuilt",
+        "baseFacts.legalDescription",
+        "baseFacts.exemptionCodes",
       ].sort(),
     );
   });
@@ -479,6 +496,11 @@ describe("claim reading and node identity", () => {
       situsZip: "78602",
       landAcres: 0.5,
       propertyUseCode: "B2",
+      marketValue: 100000,
+      assessedValue: 100000,
+      landValue: 10000,
+      improvementValue: 90000,
+      livingAreaSqft: 1200,
     });
     expect(readConformantCadClaim({})).toEqual({
       countyFips: null,
@@ -489,6 +511,11 @@ describe("claim reading and node identity", () => {
       situsZip: null,
       landAcres: null,
       propertyUseCode: null,
+      marketValue: null,
+      assessedValue: null,
+      landValue: null,
+      improvementValue: null,
+      livingAreaSqft: null,
     });
   });
 
@@ -506,6 +533,11 @@ describe("claim reading and node identity", () => {
       situsZip: "78756",
       landAcres: null,
       propertyUseCode: null,
+      marketValue: 2120,
+      assessedValue: null,
+      landValue: 0,
+      improvementValue: 0,
+      livingAreaSqft: null,
     });
     // A flat body with a use code and acreage reaches the bake too (until card F both baked null on every production row).
     const withUse = flatProductionBody("48021", "34137", 2025, { situsAddress: "908 PINE , BASTROP, TX 78602", situsCity: "BASTROP", situsZip: "78602", landAcres: 0.3815, propertyUseCode: "A1" });
@@ -573,11 +605,27 @@ describe("claim reading and node identity", () => {
     expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsZip");
     const thinned = { ...n, baseFacts: Object.fromEntries(Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "situsCity" && k !== "situsZip")) };
     const diff = diffTier1KeyPaths(o, thinned);
-    expect(diff.missing).toEqual(["baseFacts.situsCity", "baseFacts.situsZip"]);
-    expect(diffAgainstRequiredFacetPaths(thinned).missing).toEqual(["baseFacts.situsCity", "baseFacts.situsZip"]);
+    expect(diff.missing).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+    ]);
+    expect(diffAgainstRequiredFacetPaths(thinned).missing).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+    ]);
     // The literal 2026-08-28 production row for 48453:493738 (read 19:48Z) carried situsCity null and NO situsZip key.
     const productionRow = { ...n, baseFacts: { apn: "493738", acreage: null, landUse: null, situsCity: null, situsState: null, situsAddress: "4707 SHOALWOOD AVE" } };
-    expect(diffAgainstRequiredFacetPaths(productionRow).missing).toEqual(["baseFacts.situsZip"]);
+    expect(diffAgainstRequiredFacetPaths(productionRow).missing).toEqual([
+      "baseFacts.situsZip",
+      "baseFacts.cadRoll.marketValue",
+      "baseFacts.cadRoll.assessedValue",
+      "baseFacts.cadRoll.landValue",
+      "baseFacts.cadRoll.improvementValue",
+      "baseFacts.cadRoll.livingAreaSqft",
+      "baseFacts.yearBuilt",
+      "baseFacts.legalDescription",
+      "baseFacts.exemptionCodes",
+    ]);
   });
 
   it("conformantAcreageFromClaim refuses zero, negative and non-finite (never a fabricated 0)", () => {
@@ -919,5 +967,186 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
     expect(() => assertNoOwnerKey(poisoned)).toThrow(
       expect.objectContaining({ code: "OWNER_KEY_IN_PAYLOAD" }),
     );
+  });
+});
+
+function cadPropertyRollFor(
+  propId: string,
+  row: {
+    taxYear: number;
+    marketValue?: number | null;
+    assessedValue?: number | null;
+    landValue?: number | null;
+    improvementValue?: number | null;
+    livingAreaSqft?: number | null;
+    yearBuilt?: number | null;
+    legalDescription?: string | null;
+    exemptionCodes?: string[] | null;
+  },
+): ConformantTier1BuildInput["cadPropertyRoll"] {
+  return {
+    consulted: true,
+    declaredTaxYear: row.taxYear,
+    byPropId: new Map([
+      [
+        propId,
+        {
+          taxYear: row.taxYear,
+          marketValue: row.marketValue ?? null,
+          assessedValue: row.assessedValue ?? null,
+          landValue: row.landValue ?? null,
+          improvementValue: row.improvementValue ?? null,
+          livingAreaSqft: row.livingAreaSqft ?? null,
+          yearBuilt: row.yearBuilt ?? null,
+          legalDescription: row.legalDescription ?? null,
+          exemptionCodes: row.exemptionCodes ?? null,
+        },
+      ],
+    ]),
+  };
+}
+
+describe("Wave R: cad_property is the only dollar source", () => {
+  it("reads market/living/year/legal from cad_property and stamps source cad_property", () => {
+    const n = newPayload(txgioRow(), {
+      cadPropertyRoll: cadPropertyRollFor("34137", {
+        taxYear: 2025,
+        marketValue: 397260,
+        assessedValue: 397260,
+        landValue: 80000,
+        improvementValue: 317260,
+        livingAreaSqft: 2145,
+        yearBuilt: 1910,
+        legalDescription: "LOT 1 BLK 2",
+        exemptionCodes: ["HS"],
+      }),
+    });
+    expect(n.baseFacts.cadRoll.marketValue).toEqual({
+      v: 397260,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft?.v).toBe(2145);
+    expect(n.baseFacts.yearBuilt).toEqual({
+      v: 1910,
+      source: "cad_property",
+      vintage: "2025",
+    });
+    expect(n.baseFacts.legalDescription?.v).toBe("LOT 1 BLK 2");
+    expect(n.baseFacts.exemptionCodes?.v).toEqual(["HS"]);
+  });
+
+  it("hollow-atom county: Hays claim dollars are ignored; cad_property supplies the value", () => {
+    const hollowClaim = conformantBody({
+      claim: {
+        kind: "cad-parcel-roll",
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "135570", taxYear: 2025 },
+        marketValue: null,
+        assessedValue: null,
+        landValue: null,
+        improvementValue: null,
+        livingAreaSqft: null,
+        yearBuilt: null,
+        propertyUseCode: null,
+      },
+    });
+    const starved = newPayload(null, {
+      body: hollowClaim,
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      gateBlocked: true,
+    });
+    expect(starved.baseFacts.cadRoll.marketValue).toBeNull();
+    expect(starved.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+    expect(starved.baseFacts.yearBuilt).toBeNull();
+
+    const filled = newPayload(null, {
+      body: hollowClaim,
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      gateBlocked: true,
+      cadPropertyRoll: cadPropertyRollFor("135570", {
+        taxYear: 2025,
+        marketValue: 412000,
+        livingAreaSqft: 2444,
+        yearBuilt: 2018,
+      }),
+    });
+    expect(filled.baseFacts.cadRoll.marketValue?.v).toBe(412000);
+    expect(filled.baseFacts.cadRoll.marketValue?.source).toBe("cad_property");
+    expect(filled.baseFacts.cadRoll.livingAreaSqft?.v).toBe(2444);
+    expect(filled.baseFacts.yearBuilt?.v).toBe(2018);
+  });
+
+  it("Bastrop atom overcount is refused: claim living 2184 does not bake when cad_property is null", () => {
+    const inventingClaim = conformantBody({
+      claim: {
+        livingAreaSqft: 2184,
+        assessedValue: 77053,
+        improvementValue: 0,
+        marketValue: 100000,
+      },
+    });
+    const n = newPayload(txgioRow(), {
+      body: inventingClaim,
+      cadPropertyRoll: cadPropertyRollFor("34137", {
+        taxYear: 2025,
+        marketValue: 100000,
+        assessedValue: null,
+        improvementValue: null,
+        livingAreaSqft: null,
+      }),
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+    expect(n.baseFacts.cadRoll.assessedValue).toBeNull();
+    expect(n.baseFacts.cadRoll.improvementValue).toBeNull();
+    expect(n.baseFacts.cadRoll.marketValue?.v).toBe(100000);
+  });
+
+  it("McLennan assessed stays null when cad_property.assessed_value is null (source gap, not filled)", () => {
+    const n = newPayload(txgioRow(), {
+      countyFips: "48309",
+      countyName: "McLennan",
+      parcelNodeId: "48309:1",
+      cadPropertyRoll: cadPropertyRollFor("1", {
+        taxYear: 2025,
+        marketValue: 88000,
+        assessedValue: null,
+        landValue: 20000,
+        improvementValue: 68000,
+        livingAreaSqft: null,
+        yearBuilt: null,
+      }),
+    });
+    expect(n.baseFacts.cadRoll.marketValue?.v).toBe(88000);
+    expect(n.baseFacts.cadRoll.assessedValue).toBeNull();
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+    expect(n.baseFacts.yearBuilt).toBeNull();
+  });
+
+  it("Caldwell stored improvement $0 bakes as v:0, never collapsed to absent", () => {
+    const n = newPayload(txgioRow(), {
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      cadPropertyRoll: cadPropertyRollFor("1", {
+        taxYear: 2025,
+        marketValue: 45000,
+        landValue: 45000,
+        improvementValue: 0,
+        livingAreaSqft: null,
+      }),
+    });
+    expect(n.baseFacts.cadRoll.improvementValue).toEqual({
+      v: 0,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
   });
 });

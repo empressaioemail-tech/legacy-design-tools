@@ -40,10 +40,12 @@ import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
 import { normalizeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
 import {
+  fetchCountyCadPropertyRoll,
   fetchCountyLandUseByAddress,
   fetchCountyLandUseRoll,
   loadLedgerBlockedFips,
   resolveAddressLandUse,
+  type CountyCadPropertyRoll,
   type CountyLandUseRoll,
 } from "./lib/joinIntegrityGate.js";
 import { addressJoinKey, normalizeSitusAddress } from "./lib/joinNormalize.js";
@@ -237,6 +239,17 @@ async function main() {
         `declaredTaxYear=${landUseRoll.declaredTaxYear ?? "none"})`,
     );
   }
+  // Dollar / living / year / legal / exemption: ALWAYS read cad_property.
+  // Gate-block is TxGIO-to-CAD and must not starve Hays/Williamson.
+  const cadPropertyRoll: CountyCadPropertyRoll = await fetchCountyCadPropertyRoll(
+    neondb,
+    county,
+  );
+  console.log(
+    `[node-facet-bake-t1-conformant] cad_property dollar-roll rows for ${county}: ` +
+      `${cadPropertyRoll.byPropId.size} (consulted=${cadPropertyRoll.consulted} ` +
+      `declaredTaxYear=${cadPropertyRoll.declaredTaxYear ?? "none"})`,
+  );
   if (joinGateBlocked && parcelTable) {
     const situsKeys = [
       ...new Set(
@@ -344,6 +357,7 @@ async function main() {
           }
         : {}),
       ...(landUseRoll ? { landUseRoll } : {}),
+      cadPropertyRoll,
       blockedFips: blockedSet,
       nowIso,
       onSitusFallback: ({ cityKey, situsCity }) => {
@@ -432,6 +446,8 @@ async function main() {
       txgioMultiFeature,
       landUseRollRows: landUseRoll ? landUseRoll.byPropId.size : null,
       landUseRollConsulted: landUseRoll ? landUseRoll.consulted : false,
+      cadPropertyRollRows: cadPropertyRoll.byPropId.size,
+      cadPropertyRollConsulted: cadPropertyRoll.consulted,
       landUseOrigins,
       facetHits,
     }),
