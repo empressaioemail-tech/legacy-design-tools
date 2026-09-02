@@ -9,7 +9,12 @@ import {
   type FloodHazardFactPresent,
   type FloodHazardFactRefusal,
 } from "../lib/floodHazardFactRead";
-import { buildR1Brief, summarizeFloodZoneExposure } from "../lib/r1BriefCompose";
+import type { ParcelRecordFloodRead } from "../lib/parcelRecordFactRead";
+import {
+  buildR1Brief,
+  summarizeFloodZoneExposure,
+  summarizeParcelRecordFloodZoneExposure,
+} from "../lib/r1BriefCompose";
 
 const tier2RetiredFloodDisposition = {
   state: "refused" as const,
@@ -322,6 +327,130 @@ describe("F2 flood prose is withheld while the citation is degraded", () => {
     for (const fixture of fixtures) {
       expect(summarizeFloodZoneExposure(fixture) ?? "").not.toMatch(/—/);
     }
+  });
+});
+
+/**
+ * PARCEL-C-REPORT (2026-09-02). parcel_record is preferred for flood when it
+ * has earned a determination (value or absent-verified); the atoms path
+ * (floodHazardFact) is the fallback, never silently dropped. No "drainage"
+ * rail exists in parcel_record -- the drainage section is untouched by any
+ * of this and is covered by its own describe block below.
+ */
+describe("parcel_record flood preferred over the atoms path when earned", () => {
+  const parcelRecordValue: ParcelRecordFloodRead = {
+    state: "value",
+    source: "parcel_record",
+    placeKey: "48309:100000",
+    floodZone: "X",
+    floodway: false,
+    baseFloodElevation: null,
+    method: "point-on-surface",
+    sourceVintage: "NFHL_48_20260101",
+  };
+
+  it("a parcel_record value wins over an atoms present fixture, and carries the reconciled zone/floodway/BFE in data", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: parcelRecordValue },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("present");
+    expect(flood?.data).toEqual(parcelRecordValue);
+    expect(flood?.data).not.toEqual(atomPresentFixture);
+  });
+
+  it("floodway true renders a distinct sentence naming the regulatory floodway (a real boolean the atoms path never carries)", () => {
+    const floodwayFact: ParcelRecordFloodRead = {
+      ...parcelRecordValue,
+      floodZone: "AE",
+      floodway: true,
+      baseFloodElevation: 512.3,
+    };
+    const summary = summarizeParcelRecordFloodZoneExposure(
+      floodwayFact as Extract<ParcelRecordFloodRead, { state: "value" }>,
+    );
+    expect(summary).toMatch(/floodway/i);
+    expect(summary).toMatch(/512\.3/);
+  });
+
+  it("BFE renders only where a real value exists -- null stays out of the sentence, never coerced (dispatch step 4)", () => {
+    const summary = summarizeParcelRecordFloodZoneExposure(
+      parcelRecordValue as Extract<ParcelRecordFloodRead, { state: "value" }>,
+    );
+    expect(summary).not.toMatch(/Base flood elevation/);
+  });
+
+  it("a parcel_record value with no citation is citationsDegraded (F2 discipline applies here too): data still ships, prose is withheld", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { parcelRecordFloodFact: parcelRecordValue },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.citationsDegraded).toBe(true);
+    expect(flood).not.toHaveProperty("zoneExposureSummary");
+    expect(flood?.data).toEqual(parcelRecordValue);
+  });
+
+  it("absent-verified maps to disposition absent -- a real determination, never promoted past absent at section level (same rule as the atoms path's own typed absence)", () => {
+    const absentVerified: ParcelRecordFloodRead = {
+      state: "absent-verified",
+      source: "parcel_record",
+      placeKey: "48491:R005971",
+      basis: { source: "tx_fema_nfhl_flood_zone", method: "point-on-surface-sweep" },
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { parcelRecordFloodFact: absentVerified },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("absent");
+    expect(flood?.data).toEqual(absentVerified);
+  });
+
+  it("unaccounted falls through to the atoms path -- nothing has looked yet in parcel_record is not a reason to drop the existing determination (falsifier: this must not silently win over a real atoms present)", () => {
+    const unaccounted: ParcelRecordFloodRead = {
+      state: "unaccounted",
+      source: "parcel_record",
+      placeKey: "48021:34137",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: unaccounted },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+  });
+
+  it("a parcel_record refusal falls through to the atoms path -- a store-not-configured or cell-miss on the new source must not blank out a working old one", () => {
+    const refused: ParcelRecordFloodRead = {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: "parcel_record",
+      placeKey: null,
+      reason: "FACTORY_DATABASE_URL not configured.",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: refused },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+  });
+
+  it("neither source provided behaves exactly as before this card (no regression on the zero-flood-fact path)", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      { floodDisposition: tier2RetiredFloodDisposition },
+      {},
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.refusal).toEqual(tier2RetiredFloodDisposition);
   });
 });
 
