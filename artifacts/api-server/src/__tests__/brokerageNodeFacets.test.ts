@@ -482,13 +482,21 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/specialDistrictFactFromCortexRoot/);
   });
 
-  it("the route source wires wellFact from atoms and does not read bake/CAD/GIS/texas-rrc", () => {
+  it("the route source wires wellFact through the PARCEL-B-READER serve cutover and does not read bake/CAD/GIS/texas-rrc directly", () => {
+    // F-01, PARCEL-B-READER (2026-09-02): the route now calls
+    // loadWellFactForServe (wellFactServeCutover.ts), which checks the
+    // rail allowlist (today: always 'legacy', PARCEL_RECORD_SLATE is
+    // empty) and then delegates to loadWellFactAtom unchanged. The next
+    // test asserts THAT module's own wiring still lands on atoms, so this
+    // one file's source no longer needing to name wellFactRead directly
+    // does not weaken the "never bake/CAD/GIS/texas-rrc" guarantee -- it
+    // moves one hop, verified below.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
-    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/wellFactRead["']/);
-    expect(routeSrc).toMatch(/loadWellFactAtom/);
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/wellFactServeCutover["']/);
+    expect(routeSrc).toMatch(/loadWellFactForServe/);
     expect(routeSrc).toMatch(/wellFact/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
@@ -496,6 +504,19 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*place_layer_snapshots/);
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*texas-rrc/);
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*tx_rrc_well/);
+  });
+
+  it("wellFactServeCutover (the PARCEL-B-READER wrapper) itself wires wellFact from atoms and does not read bake/CAD/GIS/texas-rrc", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "wellFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/wellFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadWellFactAtom/);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_well[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
   });
 
   it("the route source wires buildingFootprintFact from atoms and does not read bake/CAD/GIS", () => {

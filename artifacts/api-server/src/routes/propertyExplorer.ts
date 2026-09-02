@@ -58,6 +58,7 @@ import {
 import {
   loadFloodHazardFactAtom,
 } from "../lib/floodHazardFactRead";
+import { loadParcelRecordFloodFact } from "../lib/parcelRecordFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactAtom } from "../lib/wellFactRead";
@@ -155,6 +156,7 @@ async function assembleNodeBriefBody(
     wellFact,
     structuralFact,
     specialDistrictFact,
+    parcelRecordFloodFact,
   ] = await Promise.all([
     loadBakedNodeFacetSnapshot(parcelNodeId),
     loadFloodHazardFactAtom(parcelNodeId),
@@ -163,6 +165,7 @@ async function assembleNodeBriefBody(
     loadWellFactAtom(parcelNodeId),
     loadStructuralFactAtom(parcelNodeId),
     loadSpecialDistrictFactAtom(parcelNodeId),
+    loadParcelRecordFloodFact(parcelNodeId),
   ]);
   if (!snapshot) return null;
   const root = asRecord(snapshot.facets);
@@ -170,6 +173,7 @@ async function assembleNodeBriefBody(
     typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
   const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
     floodHazardFact,
+    parcelRecordFloodFact,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
   });
   const draw = tryAssembleParcelDrawFromReads({

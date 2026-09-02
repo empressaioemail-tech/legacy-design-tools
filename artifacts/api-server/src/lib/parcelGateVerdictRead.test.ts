@@ -1,0 +1,67 @@
+/**
+ * The verdict-store reader PARCEL-B-READER and PARCEL-B-GATE-SCHED share.
+ * Every branch here resolves to null on failure — never throws — because
+ * the allowlist depends on that to fail closed without its own try/catch.
+ */
+
+import { describe, expect, it } from "vitest";
+import {
+  loadParcelGateVerdict,
+  memoryParcelGateVerdicts,
+  memoryParcelGateVerdictsThatFails,
+} from "./parcelGateVerdictRead";
+
+describe("loadParcelGateVerdict", () => {
+  it("returns null when the store is not configured", async () => {
+    const result = await loadParcelGateVerdict(null, "48021", "cityLimits");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when no row matches the (county, rail) pair", async () => {
+    const store = memoryParcelGateVerdicts([]);
+    const result = await loadParcelGateVerdict(store, "48021", "cityLimits");
+    expect(result).toBeNull();
+  });
+
+  it("FALSIFIER: a query error (e.g. relation does not exist) resolves to null, never throws", async () => {
+    const store = memoryParcelGateVerdictsThatFails();
+    await expect(loadParcelGateVerdict(store, "48021", "cityLimits")).resolves.toBeNull();
+  });
+
+  it("returns the real verdict row shape, field-mapped from snake_case to camelCase", async () => {
+    const store = memoryParcelGateVerdicts([
+      {
+        countyFips: "48021",
+        railKey: "cityLimits",
+        verdict: "pass",
+        unaccountedCount: 0,
+        evaluatedAt: "2026-09-02T18:00:00Z",
+        runId: "b-gate-sched-test-1",
+      },
+    ]);
+    const result = await loadParcelGateVerdict(store, "48021", "cityLimits");
+    expect(result).toEqual({
+      countyFips: "48021",
+      railKey: "cityLimits",
+      verdict: "pass",
+      unaccountedCount: 0,
+      evaluatedAt: "2026-09-02T18:00:00Z",
+      runId: "b-gate-sched-test-1",
+    });
+  });
+
+  it("does not cross-match a different county or a different rail", async () => {
+    const store = memoryParcelGateVerdicts([
+      {
+        countyFips: "48021",
+        railKey: "cityLimits",
+        verdict: "pass",
+        unaccountedCount: 0,
+        evaluatedAt: "2026-09-02T18:00:00Z",
+        runId: "b-gate-sched-test-1",
+      },
+    ]);
+    expect(await loadParcelGateVerdict(store, "48055", "cityLimits")).toBeNull();
+    expect(await loadParcelGateVerdict(store, "48021", "flood")).toBeNull();
+  });
+});
