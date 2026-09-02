@@ -88,6 +88,49 @@ const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const FIND_PARCEL_NEAR_CAP_MAX = 50;
 const FIND_PARCEL_STREET_CAP_MAX = 50;
 
+/**
+ * P-106. Mirrors CONSTRAINT_SEARCH_MAX_CAP in
+ * artifacts/api-server/src/lib/parcelConstraintSearch.ts (200, read
+ * 2026-09-02). Bounds the LOCAL `cap` so a caller mistake fails at the tool
+ * boundary rather than a round trip. The county list and the unmeasured
+ * ceiling are deliberately NOT mirrored here: the first would go stale the
+ * day a county is added, and the second is an operator ruling that lives with
+ * the measurement, not in a package that cannot verify it.
+ */
+const FIND_PARCELS_CAP_MAX = 200;
+
+/**
+ * The filter grammar, closed at the tool boundary. Every member is strict, so
+ * an extra key is a rejection rather than a silently ignored field, and an
+ * unrecognised op never reaches the SQL builder.
+ */
+const FIND_PARCELS_FILTER = z.union([
+  z
+    .object({
+      rail: z.string().min(1),
+      op: z.enum(["gte", "lte"]),
+      number: z.number(),
+    })
+    .strict(),
+  z
+    .object({ rail: z.string().min(1), op: z.literal("eq"), number: z.number() })
+    .strict(),
+  z
+    .object({ rail: z.string().min(1), op: z.literal("eq"), text: z.string().min(1) })
+    .strict(),
+  z
+    .object({
+      rail: z.string().min(1),
+      op: z.literal("in"),
+      texts: z.array(z.string().min(1)).min(1),
+    })
+    .strict(),
+  z.object({ rail: z.string().min(1), op: z.literal("absent") }).strict(),
+  z
+    .object({ rail: z.string().min(1), op: z.enum(["is_true", "is_false"]) })
+    .strict(),
+]);
+
 const ASK_THE_MAP_REFUSAL = "ask_the_map accepts parcelNodeId and message.";
 const ASK_THE_MAP_STRICT = z
   .object({
@@ -373,6 +416,24 @@ async function resolveNearCenterPoint(
 
 function inputSchemaFor(name: SmartsiteToolName) {
   switch (name) {
+    case "find_parcels":
+      // P-106. countyFips and filters are OPTIONAL at the schema and required
+      // in the handler, on purpose and for the same reason find_parcel's three
+      // modes are: a caller that omits the bound gets a DECLARED refusal naming
+      // the problem, not a raw zod validation error. "No geographic bound is
+      // refused" is an acceptance item, and a schema-level rejection would make
+      // constraint_bound_missing unreachable through this tool.
+      return z
+        .object({
+          countyFips: z
+            .string()
+            .regex(/^\d{5}$/)
+            .optional(),
+          filters: z.array(FIND_PARCELS_FILTER).optional(),
+          cap: z.number().int().min(1).max(FIND_PARCELS_CAP_MAX).optional(),
+          query: z.string().min(1).optional(),
+        })
+        .strict();
     case "find_parcel":
       // P-91 v3 Q1. query, near, and street are three alternate modes on
       // one tool; exactly one is required, enforced in the handler (not
@@ -533,6 +594,68 @@ export function registerTools(server: McpServer): void {
         }
 
         switch (tool.name) {
+          case "find_parcels": {
+            const { countyFips, filters, cap, query } = args as {
+              countyFips?: string;
+              filters?: unknown[];
+              cap?: number;
+              query?: string;
+            };
+            // Both bound checks are DECLARED refusals rather than schema
+            // rejections, so a caller that omits either gets a reason token
+            // and a sentence instead of a zod dump. Refusing here also keeps
+            // a bound-less call off the wire entirely.
+            if (!countyFips) {
+              return declaredRefusalResult(
+                "constraint_bound_missing",
+                "A county is required. Give countyFips; there is no statewide constraint search.",
+              );
+            }
+            if (!filters || filters.length === 0) {
+              return declaredRefusalResult(
+                "constraint_filters_missing",
+                "At least one filter is required. A county with no filter is not a search.",
+              );
+            }
+            return withCortex(async (config) => {
+              const qs = new URLSearchParams({
+                countyFips,
+                filters: JSON.stringify(filters),
+              });
+              if (cap !== undefined) qs.set("cap", String(cap));
+              if (query !== undefined) qs.set("q", query);
+              const res = await cortexFetch(
+                config,
+                `/api/brokerage/v1/place/constraint-search?${qs.toString()}`,
+                { userId: auth.userId },
+              );
+              const body = await res.text();
+              if (!res.ok) {
+                if (res.status === 422) {
+                  const refusal = declarePlaceSearchRefusal(body);
+                  if (refusal) {
+                    return {
+                      content: [
+                        { type: "text" as const, text: JSON.stringify(refusal) },
+                      ],
+                      isError: true,
+                    };
+                  }
+                }
+                return upstreamErrorResult(res.status, body);
+              }
+              // 200: matched, excluded, notEvaluated, countingRule,
+              // unmeasuredPctByRail and projection pass through VERBATIM. All
+              // three sets are fields cortex already put on the wire, and this
+              // tool must not strip, merge, or reorder any of them: a response
+              // carrying only `matched` is the defect this card exists to
+              // prevent.
+              return {
+                content: [{ type: "text" as const, text: body }],
+                isError: false,
+              };
+            });
+          }
           case "find_parcel": {
             const { query, near, street } = args as {
               query?: string;

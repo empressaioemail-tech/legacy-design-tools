@@ -56,15 +56,17 @@ function entryFor(token: string): VocabularyEntry {
 }
 
 describe("VOCABULARY (V1)", () => {
-  it("has between 15 and 25 entries", () => {
+  it("has between 15 and 35 entries", () => {
     // P-91 v3 Q1 added the five closed place-search refusal codes
     // (radius_invalid, radius_exceeds_max, radius_unbounded,
     // bare_street_unbounded, bare_street_not_a_street), 19 -> 24. The
-    // upper bound moved from 20 to 25 to admit that and leave one slot;
-    // it is not re-derived from VOCABULARY.length itself (that would make
+    // upper bound moved from 20 to 25 to admit that and leave one slot.
+    // P-106 added the nine find_parcels refusal codes, 24 -> 33, and the
+    // ceiling moved 25 -> 35 to admit those and leave two slots. It is
+    // still not re-derived from VOCABULARY.length itself (that would make
     // this check unable to fail on an unbounded table).
     expect(VOCABULARY.length).toBeGreaterThanOrEqual(15);
-    expect(VOCABULARY.length).toBeLessThanOrEqual(25);
+    expect(VOCABULARY.length).toBeLessThanOrEqual(35);
   });
 
   it("every token is unique", () => {
