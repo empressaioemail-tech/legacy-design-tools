@@ -388,6 +388,65 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Band 1 stamp-gap wires (2026-09-01). Layers already staged. Stamp is
+  // county-scoped PIP against one city layer: a Waco run writes waco-tx onto
+  // any McLennan centroid inside a Waco polygon. That bleed is the SHAPE of
+  // the stamp, not bad data. The meaning-shaped fix is requiring the PIP hit
+  // AND landing containment city to AGREE — not built here. These wires plus
+  // --prop-ids-file scoped to in-city parcels are the Band 1 stopgap.
+  // SETBACK TABLES OWED for all six; Smithville BDC is Bastrop-city, not
+  // Smithville, and applying it is fabricated authority.
+  // ---------------------------------------------------------------------------
+  "smithville-tx": {
+    cityKey: "smithville-tx",
+    cityName: "Smithville",
+    countyFips: "48021",
+    layerUrl:
+      "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Smithville_Zoning/FeatureServer/0",
+    codeField: "ZONING",
+  },
+  "luling-tx": {
+    cityKey: "luling-tx",
+    cityName: "Luling",
+    countyFips: "48055",
+    layerUrl:
+      "https://services.arcgis.com/rVxY74DxxIDrDbc0/arcgis/rest/services/Caldwell_CAD_Parcel_Map/FeatureServer/50",
+    codeField: "ZONING",
+  },
+  "martindale-tx": {
+    cityKey: "martindale-tx",
+    cityName: "Martindale",
+    countyFips: "48055",
+    layerUrl:
+      "https://services.arcgis.com/rVxY74DxxIDrDbc0/arcgis/rest/services/Caldwell_CAD_Parcel_Map/FeatureServer/51",
+    codeField: "Zoning",
+  },
+  "woodcreek-tx": {
+    cityKey: "woodcreek-tx",
+    cityName: "Woodcreek",
+    countyFips: "48209",
+    layerUrl:
+      "https://services3.arcgis.com/NYBb8GS1tDodacOa/arcgis/rest/services/Woodcreek_Zoning/FeatureServer/0",
+    codeField: "Zoning",
+  },
+  "lakeway-tx": {
+    cityKey: "lakeway-tx",
+    cityName: "Lakeway",
+    countyFips: "48453",
+    layerUrl:
+      "https://services8.arcgis.com/Ovzem8VyXkJhfTgz/arcgis/rest/services/Zoning_Districts/FeatureServer/0",
+    codeField: "Zoning",
+  },
+  "robinson-tx": {
+    cityKey: "robinson-tx",
+    cityName: "Robinson",
+    countyFips: "48309",
+    layerUrl:
+      "https://services7.arcgis.com/Ls5quuABi3I5K4Lg/arcgis/rest/services/Zoning_2024/FeatureServer/21",
+    codeField: "ZoneCode",
+  },
+
+  // ---------------------------------------------------------------------------
   // Post-breadth zero-county wires (2026-07-24) — Guadalupe / McLennan / Bell
   // were recorded at honest-0% zoning; re-probe after ArcGIS paging fix showed
   // published city layers (un-wired), not genuine unzoned counties. Temple TX
