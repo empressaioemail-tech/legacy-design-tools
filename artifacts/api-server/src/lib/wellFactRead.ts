@@ -144,7 +144,16 @@ export type WellFactRefusal = {
     | "atom-miss"
     | "bind-conflict"
     | "atoms-store-not-configured"
-    | "malformed-atom";
+    | "malformed-atom"
+    /**
+     * PARCEL-B-READER (F-01): the serve allowlist resolved 'record' for
+     * this (county, wells) pair but no parcel_record-to-WellFactRead
+     * adapter exists yet -- that adapter is PARCEL-B-SLATE1's scope. Named
+     * here so wellFactServeCutover.ts's currently-unreachable 'record'
+     * branch has a real, typed refusal to return instead of an invented
+     * one, rather than widening an existing code to a false meaning.
+     */
+    | "parcel-record-adapter-not-built";
   source: typeof WELL_FACT_SOURCE;
   tried: WellFactBindPrefixes | [];
   reason: string;
