@@ -124,7 +124,7 @@ import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
-import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
@@ -138,7 +138,7 @@ import {
   subscriptionTierGrantsStudio,
 } from "../lib/peEntitlement";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
-import { loadCityLimitsFact } from "../lib/cityLimitsFactRead";
+import { loadCityLimitsFactForServe } from "../lib/cityLimitsFactServeCutover";
 import { usableCityLimitsQueryPoint } from "@workspace/cad-ingest/city-limits";
 import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
 import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
@@ -629,7 +629,7 @@ brokerageNodeFacetsRouter.get(
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactAtom(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
-        loadSpecialDistrictFactAtom(parcelNodeId),
+        loadSpecialDistrictFactForServe(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
         loadWellFactForServe(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
@@ -654,7 +654,8 @@ brokerageNodeFacetsRouter.get(
     // City limits FIRST: the zoning verdict derives incorporation from this
     // containment fact and from nothing else (CTX card F). A null situsCity
     // is not evidence of anything.
-    const cityLimitsFact = await loadCityLimitsFact(
+    const cityLimitsFact = await loadCityLimitsFactForServe(
+      parcelNodeId,
       snapshot?.queryPoint ?? null,
     );
     const zoningVerdict = snapshot

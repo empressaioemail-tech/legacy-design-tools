@@ -61,9 +61,9 @@ import {
 import { loadParcelRecordFloodFact } from "../lib/parcelRecordFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
-import { loadWellFactAtom } from "../lib/wellFactRead";
+import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
-import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
@@ -162,9 +162,9 @@ async function assembleNodeBriefBody(
     loadFloodHazardFactAtom(parcelNodeId),
     loadBoundaryEdgeFactAtom(parcelNodeId),
     loadPipelineFactAtom(parcelNodeId),
-    loadWellFactAtom(parcelNodeId),
+    loadWellFactForServe(parcelNodeId),
     loadStructuralFactAtom(parcelNodeId),
-    loadSpecialDistrictFactAtom(parcelNodeId),
+    loadSpecialDistrictFactForServe(parcelNodeId),
     loadParcelRecordFloodFact(parcelNodeId),
   ]);
   if (!snapshot) return null;
