@@ -14,6 +14,7 @@ import {
   documentRequiresPurchase,
 } from "./documentPurchase.js";
 import type { IndexSearchHit } from "./indexHits.js";
+import { PORTAL_ACCESS_BLOCKED_CODE } from "../portalAccessBlocked.js";
 import type { RecordsRecipeBrowser, RecordsRecipeResult } from "./types.js";
 
 /** Product constant — runs pause and ask before buying above this (cents). */
@@ -57,6 +58,13 @@ export async function acquireIndexHits(
 
     const nav = await input.browser.goto(hit.detailUrl);
     if (!nav.ok) {
+      if (nav.errorCode === PORTAL_ACCESS_BLOCKED_CODE) {
+        return {
+          kind: "failed",
+          errorCode: nav.errorCode,
+          errorMessage: `Portal blocked during acquisition (${hit.detailUrl}): ${nav.errorMessage ?? "navigation failed"}`,
+        };
+      }
       summary.pendingHuman.push(hit);
       continue;
     }

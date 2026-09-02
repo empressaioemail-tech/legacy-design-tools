@@ -126,7 +126,7 @@ import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
-import { loadWellFactAtom } from "../lib/wellFactRead";
+import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -631,7 +631,7 @@ brokerageNodeFacetsRouter.get(
         loadLandUseFactAtom(parcelNodeId),
         loadSpecialDistrictFactAtom(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
-        loadWellFactAtom(parcelNodeId),
+        loadWellFactForServe(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
         loadBoundaryEdgeFactAtom(parcelNodeId),
         grantsOwnerFact

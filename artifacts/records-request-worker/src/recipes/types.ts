@@ -16,6 +16,7 @@ export interface PortalNavigationResult {
   ok: boolean;
   status?: number;
   finalUrl?: string;
+  errorCode?: string;
   errorMessage?: string;
 }
 
@@ -42,6 +43,8 @@ export interface ResultRowExtract {
 
 /** Minimal browser seam — real Playwright adapter in run.ts; mocks in unit tests. */
 export interface RecordsRecipeBrowser {
+  /** Rate limit seam between search queries (no-op when omitted in mocks). */
+  beforePortalAction?(): Promise<void>;
   goto(url: string): Promise<PortalNavigationResult>;
   captureFullPage(label: string): Promise<PageCaptureResult>;
   click(selector: string): Promise<BrowserActionResult>;

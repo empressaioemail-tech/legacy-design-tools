@@ -15,6 +15,11 @@ import type {
   FloodHazardFactPresent,
   FloodHazardFactRead,
 } from "./floodHazardFactRead";
+import type {
+  ParcelRecordFloodRead,
+  ParcelRecordFloodValue,
+  ParcelRecordFloodAbsentVerified,
+} from "./parcelRecordFactRead";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 
@@ -280,6 +285,93 @@ export function summarizeFloodZoneExposure(
   );
 }
 
+/**
+ * Exported for unit tests. Parcel-record's flood companion carries a real
+ * floodway boolean (unlike the atoms path, which only string-matches
+ * "FLOODWAY" out of a free-text zone label -- see parcelRecordFactRead.ts's
+ * own header comment) and no zoneSubtype field, so this is a distinct
+ * function from summarizeFloodZoneExposure, not a reuse: the input shapes
+ * genuinely differ, not just the source.
+ */
+export function summarizeParcelRecordFloodZoneExposure(
+  fact: ParcelRecordFloodValue,
+): string | null {
+  const zoneRaw = fact.floodZone?.trim() ?? "";
+  if (!zoneRaw) {
+    return (
+      "Parcel does not intersect a mapped FEMA flood zone (treat as Zone X by omission). " +
+      "That is a mapped negative, not a FEMA 'no risk' certificate."
+    );
+  }
+  const bfe =
+    typeof fact.baseFloodElevation === "number"
+      ? ` Base flood elevation ${fact.baseFloodElevation} ft.`
+      : "";
+  if (fact.floodway) {
+    return (
+      `Mapped FEMA flood zone ${zoneRaw} is within the regulatory floodway.${bfe} ` +
+      "The floodway carries the most restrictive federal and local development standards."
+    );
+  }
+  const zone = zoneRaw.toUpperCase();
+  const inSpecialFloodHazardArea = zone !== "X" && !zone.startsWith("X");
+  if (inSpecialFloodHazardArea) {
+    return (
+      `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
+      `(1% annual-chance floodplain).${bfe}`
+    );
+  }
+  return (
+    `Mapped Zone ${zoneRaw} outside the Special Flood Hazard Area. ` +
+    "Zone X is not automatically minimal risk."
+  );
+}
+
+/**
+ * Parcel-record is the preferred flood source when it has earned a
+ * determination (value or absent-verified) -- the reconciled point-on-surface
+ * rule the old atoms/bake path does not have (parcelRecordFactRead.ts).
+ * "unaccounted" (nothing has looked yet) and "refused" fall through to the
+ * existing atoms-based path in composeFloodBriefSection, never silently
+ * treated as an absence.
+ */
+function composeFloodBriefSectionFromParcelRecord(
+  fact: ParcelRecordFloodValue | ParcelRecordFloodAbsentVerified,
+): BriefSectionParts {
+  if (fact.state === "value") {
+    const posture = withCitationPosture({
+      data: fact,
+      // parcel_record's flood companion carries provenance (method, source
+      // vintage) rather than a clickable URL; urlsFrom only recognizes real
+      // http(s) URLs, so this is honestly empty, not a citation we chose to
+      // drop. F2's own rule (withhold the quotable prose until a citation
+      // exists behind it) is respected as written: the structured zone/
+      // floodway/BFE values still ship in `data` either way; only the
+      // narrative sentence is conditionally withheld.
+      citations: [],
+      asOf: fact.sourceVintage,
+      disposition: "present",
+    });
+    return {
+      ...posture,
+      zoneExposureSummary: posture.citationsDegraded
+        ? null
+        : summarizeParcelRecordFloodZoneExposure(fact),
+    };
+  }
+  // absent-verified: a real determination (the sweep looked, found nothing),
+  // never promoted past "absent" at section level -- same rule
+  // factReadDisposition already applies to floodHazardFactRead's own typed
+  // absence (WDLL item 5, this file's existing comment on factReadDisposition).
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+    zoneExposureSummary: null,
+  };
+}
+
 type BriefSectionParts = Pick<
   R1BriefSection,
   | "data"
@@ -306,7 +398,15 @@ function withCitationPosture(
 function composeFloodBriefSection(
   tier2: unknown,
   floodHazardFact?: FloodHazardFactRead,
+  parcelRecordFloodFact?: ParcelRecordFloodRead,
 ): BriefSectionParts {
+  if (
+    parcelRecordFloodFact &&
+    (parcelRecordFloodFact.state === "value" ||
+      parcelRecordFloodFact.state === "absent-verified")
+  ) {
+    return composeFloodBriefSectionFromParcelRecord(parcelRecordFloodFact);
+  }
   if (floodHazardFact) {
     if (floodHazardFact.state === "present") {
       const posture = withCitationPosture({
@@ -456,6 +556,7 @@ export function buildR1Brief(
   tier2: unknown,
   options?: {
     floodHazardFact?: FloodHazardFactRead;
+    parcelRecordFloodFact?: ParcelRecordFloodRead;
     envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
   },
 ): {
@@ -484,6 +585,7 @@ export function buildR1Brief(
   const floodSection = composeFloodBriefSection(
     tier2,
     options?.floodHazardFact,
+    options?.parcelRecordFloodFact,
   );
   const landUseSection = withCitationPosture({
     data: baseFacts.landUse ?? null,

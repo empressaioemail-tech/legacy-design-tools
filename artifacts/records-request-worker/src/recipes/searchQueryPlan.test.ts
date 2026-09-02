@@ -94,4 +94,33 @@ describe("parseSubdivisionLotBlockFromLegal", () => {
       subdivision: null,
     });
   });
+
+  it("extracts BLOCK (not only BLK) from Bastrop Building Block legals", () => {
+    expect(
+      parseSubdivisionLotBlockFromLegal(
+        "Building Block, BLOCK 13 E W ST, ACRES 0.485",
+      ),
+    ).toEqual({
+      lot: null,
+      block: "13",
+      subdivision: null,
+    });
+    expect(
+      parseSubdivisionLotBlockFromLegal("BUILDING BLOCK 49 E W ST, ACRES 1.280"),
+    ).toEqual({
+      lot: null,
+      block: "49",
+      subdivision: null,
+    });
+  });
+
+  it("does not treat letter-only blocks as digit blocks", () => {
+    expect(
+      parseSubdivisionLotBlockFromLegal("Riverside Grove BLOCK A LOT 27"),
+    ).toEqual({
+      lot: "27",
+      block: null,
+      subdivision: null,
+    });
+  });
 });

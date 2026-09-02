@@ -28,6 +28,7 @@ const BOUNDARY_BODY = {
 const STRUCTURAL_PRESENT: StructuralFactRead = {
   state: "present",
   source: "structural-fact",
+  entityType: "cad_property",
   countyFips: "48021",
   propId: "34137",
   taxYear: 2025,
@@ -261,5 +262,88 @@ describe("parcelDrawFromReads one-liners", () => {
   it("anchor is null when the query point is missing, never invented", () => {
     const draw = drawFrom({ queryPoint: null });
     expect(draw?.frame.anchor).toBeNull();
+  });
+
+  it("merges onRecord CAD values onto draw attrs with source and vintage", () => {
+    const draw = drawFrom({
+      facets: {
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          apn: "34137",
+          situsState: "TX",
+          cadRoll: {
+            marketValue: {
+              v: 100000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            assessedValue: null,
+            landValue: null,
+            improvementValue: null,
+            livingAreaSqft: null,
+          },
+        },
+      },
+    });
+    expect(draw?.attrs.marketValue).toMatchObject({
+      state: "present",
+      v: 100000,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(draw?.attrs.assessedValue).toMatchObject({ state: "absent" });
+    expect((draw?.attrs.assessedValue as { v?: unknown }).v).toBeUndefined();
+  });
+
+  it("vacant-lot draw: baked improvementValue 0 serves state zero, not absent", () => {
+    const draw = drawFrom({
+      facets: {
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          apn: "vacant",
+          situsState: "TX",
+          cadRoll: {
+            marketValue: {
+              v: 45000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            assessedValue: {
+              v: 45000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            landValue: {
+              v: 45000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            improvementValue: {
+              v: 0,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            livingAreaSqft: null,
+          },
+        },
+      },
+    });
+    expect(draw?.attrs.improvementValue).toMatchObject({
+      state: "zero",
+      v: 0,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(draw?.attrs.livingAreaSqft).toMatchObject({ state: "absent" });
+    expect((draw?.attrs.livingAreaSqft as { v?: unknown }).v).toBeUndefined();
   });
 });

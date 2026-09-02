@@ -262,6 +262,13 @@ describe("GET /entitlement property block (pinned contract)", () => {
  * changes.
  */
 describe("GET /entitlement without a parcel (P-98 account scope)", () => {
+  // P-104 appended `studioGranted` LAST to this base body. The pins below still
+  // assert an EXACT key list and an exact order, so the seven fields ahead of it
+  // and their order remain pinned; only the tail grew. The field is the answer to
+  // "does this account get Studio", computed on the server so no consumer writes a
+  // fourth copy of subscriptionTierGrantsStudio. Adding it here is a deliberate
+  // widening of the R1 contract, not a test loosened to go green: removing any of
+  // the first seven, or reordering them, still fails every assertion below.
   const MAIN_BASE_KEYS = [
     "authenticated",
     "tier",
@@ -270,6 +277,7 @@ describe("GET /entitlement without a parcel (P-98 account scope)", () => {
     "userId",
     "devRole",
     "entitlementSource",
+    "studioGranted",
   ];
 
   it("authenticated + no parcel returns the account block with no property key", async () => {
