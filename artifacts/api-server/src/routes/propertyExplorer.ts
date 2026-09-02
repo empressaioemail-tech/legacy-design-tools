@@ -34,6 +34,7 @@ import {
   resolvePeEntitlement,
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
+import { requirePeStudioScreens } from "../lib/peStudioGate";
 import { setPeDevRole } from "../lib/peIdentity";
 import { readAiConnections } from "../lib/peAiConnections";
 import { readActiveUnlocks } from "../lib/peUnlocksRead";
@@ -557,9 +558,15 @@ const McpStatusBodySchema = z.object({
   status: z.string(),
 });
 
+/* P-101 call 1: BUILDING a screen is Studio or Team. The gate sits second, so
+ * an anonymous caller still gets 401 from requirePeAuthenticated rather than a
+ * 402 that names a rung it has no account to hold. The two GET routes below
+ * are deliberately NOT gated - the panel must still mount for a free connector
+ * user, and a free account's screen list is empty by construction. */
 router.post(
   "/property-explorer/v1/screens",
   requirePeAuthenticated,
+  requirePeStudioScreens,
   async (req: Request, res: Response) => {
     const scope = ownerScope(req);
     if (!scope) {
@@ -585,6 +592,12 @@ router.post(
   },
 );
 
+/* NOT Studio-gated, deliberately (P-101 call 1). Reading a list you could
+ * never have created gives nothing away, and `list_screens` is one of the
+ * three APP_HOST_TOOLS that mount the connector panel: gating it would leave a
+ * free user with no panel entry point at all, which is a larger consequence
+ * than "screens move to Studio" conveys. Do not add requirePeStudioScreens
+ * here without reversing that call. */
 router.get(
   "/property-explorer/v1/screens",
   requirePeAuthenticated,
@@ -635,9 +648,11 @@ router.get(
   },
 );
 
+/* P-101 call 1: adding to a screen is the same job as building one. */
 router.post(
   "/property-explorer/v1/screens/:screenId/rows",
   requirePeAuthenticated,
+  requirePeStudioScreens,
   async (req: Request, res: Response) => {
     const scope = ownerScope(req);
     if (!scope) {

@@ -305,6 +305,14 @@ export const NOT_ON_FILE_PREFIX = "Not on file in";
 export const NO_BAKED_SNAPSHOT_PREFIX = "No baked snapshot yet for";
 export const NOT_RETURNED = "Not returned";
 export const UPGRADE_TO_OPEN = "Upgrade to open this parcel";
+/* P-101 item 10. UPGRADE_TO_OPEN is about a PARCEL and is not reused for a
+ * screen: a user told "Upgrade to open this parcel" after clicking Add to
+ * screen is told about the wrong thing. This is its sibling, keyed off the
+ * refusal reason the api-server screens gate emits (`studio_screens`), which
+ * travels intact because declareUpstreamNonOk carries the upstream body's own
+ * `reason`. The screens gate is the only producer of that string today. */
+export const UPGRADE_SCREENS_REASON = "studio_screens";
+export const UPGRADE_TO_SCREEN = "Upgrade to build a screen";
 export const OPEN_REFUSED = "Open refused";
 export const RESULT_NOT_READABLE = "Result not readable";
 export const RESULT_NOT_READABLE_BODY = "The tool result carried no JSON text part. Ask again in the chat.";
@@ -2266,7 +2274,15 @@ export function declaredLineHtml(d: DeclaredBody): string {
   const reason = d.reason ? d.reason : UNSTATED;
   const bits: string[] = [];
   let head = "";
-  if (d.status === "error" || d.status === "degraded") {
+  if (d.status === "error" && d.reason === UPGRADE_SCREENS_REASON) {
+    /* A screens refusal arrives as an upstream non-ok, so its top-level status
+     * is "error"; the capability is named by the reason, not inferred. Painted
+     * as an upgrade prompt rather than as a failure, because it is neither a
+     * fault nor a bare refusal: it is a rung the account does not hold. */
+    head = UPGRADE_TO_SCREEN;
+    if (typeof d.upstreamStatus === "number") bits.push(`<span class="mono" data-upstream-status="${d.upstreamStatus}">${UPSTREAM_KEY} ${d.upstreamStatus}</span>`);
+    if (d.tier) bits.push(reasonLineHtml("tier", d.tier));
+  } else if (d.status === "error" || d.status === "degraded") {
     head = `${NOT_RETURNED}: ${escapeHtml(reason)}`;
     if (typeof d.upstreamStatus === "number") bits.push(`<span class="mono" data-upstream-status="${d.upstreamStatus}">${UPSTREAM_KEY} ${d.upstreamStatus}</span>`);
     if (d.tool) bits.push(reasonLineHtml("tool", d.tool));
@@ -3391,7 +3407,10 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("function declaredLineHtml") ||
     !html.includes(JSON.stringify(REFUSED_PREFIX)) ||
     !html.includes(JSON.stringify(NOT_IMPLEMENTED_PREFIX)) ||
-    !html.includes(JSON.stringify(NOT_READY_INFIX))
+    !html.includes(JSON.stringify(NOT_READY_INFIX)) ||
+    /* P-101: the screens upgrade branch reads this reason inside the embedded
+     * declaredLineHtml; without the var the branch throws in the iframe. */
+    !html.includes(JSON.stringify(UPGRADE_SCREENS_REASON))
   ) {
     violations.push("declared_body_unbound");
   }
@@ -3402,6 +3421,11 @@ export function htmlContractViolations(html: string): string[] {
     NOT_ON_FILE_PREFIX,
     NO_BAKED_SNAPSHOT_PREFIX,
     UPGRADE_TO_OPEN,
+    /* P-101: declaredLineHtml is embedded BY SOURCE, so a constant it closes
+     * over that is not emitted as a `var` throws ReferenceError in the iframe
+     * and paints nothing. A unit test on declaredLineHtml alone cannot catch
+     * that; this can. */
+    UPGRADE_TO_SCREEN,
     RESULT_NOT_READABLE,
   ];
   if (boundCopy.some((copy) => !html.includes(copy))) {
@@ -3687,6 +3711,8 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var SECTION_FOR_OVERLAY=${JSON.stringify(SECTION_FOR_OVERLAY)};
   var NOT_RETURNED=${JSON.stringify(NOT_RETURNED)};
   var UPGRADE_TO_OPEN=${JSON.stringify(UPGRADE_TO_OPEN)};
+  var UPGRADE_TO_SCREEN=${JSON.stringify(UPGRADE_TO_SCREEN)};
+  var UPGRADE_SCREENS_REASON=${JSON.stringify(UPGRADE_SCREENS_REASON)};
   var USE_THIS_LABEL=${JSON.stringify(USE_THIS_LABEL)};
   var LOOK_UP_LABEL=${JSON.stringify(LOOK_UP_LABEL)};
   var AMBIGUOUS_CAPTION=${JSON.stringify(AMBIGUOUS_CAPTION)};
