@@ -1027,6 +1027,21 @@ CREATE TABLE @@SCHEMA@@.gtm_consent (
 );
 
 
+-- Name: gtm_event_refusals; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.gtm_event_refusals (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    install_id text NOT NULL,
+    event_type text NOT NULL,
+    source_surface text NOT NULL,
+    reason text NOT NULL,
+    refused_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT gtm_event_refusals_event_type_chk CHECK ((event_type <> ''::text)),
+    CONSTRAINT gtm_event_refusals_install_id_chk CHECK ((install_id <> ''::text)),
+    CONSTRAINT gtm_event_refusals_reason_chk CHECK ((reason <> ''::text))
+);
+
+
 -- Name: gtm_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.gtm_events (
@@ -1247,6 +1262,18 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: pe_account_activations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_account_activations (
+    owner_user_id text NOT NULL,
+    milestone text NOT NULL,
+    surface text,
+    first_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_account_activations_milestone_chk CHECK ((milestone = ANY (ARRAY['first_parcel_inspected'::text, 'first_property_saved'::text, 'first_report_opened'::text]))),
+    CONSTRAINT pe_account_activations_surface_chk CHECK (((surface IS NULL) OR (surface <> ''::text)))
+);
+
+
 -- Name: pe_activation_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_activation_events (
@@ -1342,6 +1369,17 @@ CREATE TABLE @@SCHEMA@@.pe_screens (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone
+);
+
+
+-- Name: pe_share_attributions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_share_attributions (
+    recipient_user_id text NOT NULL,
+    grant_id text NOT NULL,
+    surface text,
+    attributed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_share_attributions_surface_chk CHECK (((surface IS NULL) OR (surface <> ''::text)))
 );
 
 
@@ -2726,6 +2764,12 @@ ALTER TABLE ONLY @@SCHEMA@@.gtm_consent
     ADD CONSTRAINT gtm_consent_pkey PRIMARY KEY (install_id);
 
 
+-- Name: gtm_event_refusals gtm_event_refusals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.gtm_event_refusals
+    ADD CONSTRAINT gtm_event_refusals_pkey PRIMARY KEY (id);
+
+
 -- Name: gtm_events gtm_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.gtm_events
@@ -2804,6 +2848,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_account_activations pe_account_activations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
+    ADD CONSTRAINT pe_account_activations_pkey PRIMARY KEY (owner_user_id, milestone);
+
+
 -- Name: pe_activation_events pe_activation_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
@@ -2838,6 +2888,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_screens
     ADD CONSTRAINT pe_screens_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_share_attributions pe_share_attributions_recipient_user_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
+    ADD CONSTRAINT pe_share_attributions_recipient_user_id_pk PRIMARY KEY (recipient_user_id);
 
 
 -- Name: pe_share_grants pe_share_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3614,6 +3670,16 @@ CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (at
 CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
 
 
+-- Name: gtm_event_refusals_event_type_refused_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_event_refusals_event_type_refused_at_idx ON @@SCHEMA@@.gtm_event_refusals USING btree (event_type, refused_at);
+
+
+-- Name: gtm_event_refusals_refused_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_event_refusals_refused_at_idx ON @@SCHEMA@@.gtm_event_refusals USING btree (refused_at);
+
+
 -- Name: gtm_events_event_type_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (event_type, created_at);
@@ -3774,6 +3840,11 @@ CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USIN
 CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (action_id, created_at);
 
 
+-- Name: pe_account_activations_milestone_first_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_account_activations_milestone_first_at_idx ON @@SCHEMA@@.pe_account_activations USING btree (milestone, first_at);
+
+
 -- Name: pe_activation_events_owner_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_activation_events_owner_user_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (owner_user_id, created_at);
@@ -3812,6 +3883,16 @@ CREATE INDEX pe_screen_rows_screen_ordinal_idx ON @@SCHEMA@@.pe_screen_rows USIN
 -- Name: pe_screens_owner_updated_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_screens_owner_updated_idx ON @@SCHEMA@@.pe_screens USING btree (tenant_id, owner_user_id, updated_at);
+
+
+-- Name: pe_share_attributions_attributed_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_attributions_attributed_at_idx ON @@SCHEMA@@.pe_share_attributions USING btree (attributed_at);
+
+
+-- Name: pe_share_attributions_grant_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_attributions_grant_id_idx ON @@SCHEMA@@.pe_share_attributions USING btree (grant_id);
 
 
 -- Name: pe_share_grants_grantor_idx; Type: INDEX; Schema: public; Owner: -
@@ -4547,6 +4628,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
 
 
+-- Name: pe_account_activations pe_account_activations_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
+    ADD CONSTRAINT pe_account_activations_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
 -- Name: pe_activation_events pe_activation_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
@@ -4575,6 +4662,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
     ADD CONSTRAINT pe_screen_rows_screen_id_pe_screens_id_fk FOREIGN KEY (screen_id) REFERENCES @@SCHEMA@@.pe_screens(id) ON DELETE CASCADE;
+
+
+-- Name: pe_share_attributions pe_share_attributions_grant_id_pe_share_grants_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
+    ADD CONSTRAINT pe_share_attributions_grant_id_pe_share_grants_id_fk FOREIGN KEY (grant_id) REFERENCES @@SCHEMA@@.pe_share_grants(id) ON DELETE CASCADE;
+
+
+-- Name: pe_share_attributions pe_share_attributions_recipient_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
+    ADD CONSTRAINT pe_share_attributions_recipient_user_id_users_id_fk FOREIGN KEY (recipient_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_share_grants pe_share_grants_grantor_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
