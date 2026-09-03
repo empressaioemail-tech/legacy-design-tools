@@ -34,6 +34,44 @@ export type StructuralFactAbsent = LayerAbsenceWire & {
 
 export type StructuralFactRead = StructuralFactPresent | StructuralFactAbsent;
 
+/**
+ * PARCEL-B-SLATE2: propertyExplorer.ts's research/brief endpoint serves
+ * livingAreaSqft and yearBuilt bundled in one StructuralFactRead object (no
+ * baked-snapshot overlay slot the way brokerageNodeFacets.ts has). Cutting
+ * either field over independently means merging a parcel_record-sourced
+ * value into the legacy object's OTHER fields (taxYear, tier, sourceVintage,
+ * entityType), never a whole-object swap.
+ *
+ * Disclosed limitation: if the legacy read is itself `state: "absent"` (no
+ * cad_property row, or lookup failed) while a rail resolves to "record"
+ * with a real parcel_record value, this function does NOT synthesize a new
+ * "present" object -- doing so would require fabricating taxYear/tier
+ * fields parcel_record does not carry. It returns the legacy absence
+ * unchanged in that case. Named explicitly in this card's own close rather
+ * than silently accepted; the common case (a present legacy row with one
+ * field overlaid) is fully handled.
+ */
+export function structuralFactWithParcelRecordOverlay(
+  fact: StructuralFactRead,
+  overlay: {
+    livingAreaSqft: { status: "populated"; value: number } | { status: "absent-in-record" } | null;
+    yearBuilt: { v: number; source: string; vintage: string | null } | null;
+  },
+): StructuralFactRead {
+  if (!fact || typeof fact !== "object" || !("state" in fact) || fact.state !== "present") {
+    return fact;
+  }
+  const next: StructuralFactPresent = { ...fact };
+  if (overlay.livingAreaSqft) {
+    next.livingAreaSqft =
+      overlay.livingAreaSqft.status === "populated" ? overlay.livingAreaSqft.value : null;
+  }
+  if (overlay.yearBuilt) {
+    next.yearBuilt = overlay.yearBuilt.v;
+  }
+  return next;
+}
+
 function propIdFromParcelNodeId(parcelNodeId: string): string | null {
   const idx = parcelNodeId.indexOf(":");
   if (idx < 0) return null;

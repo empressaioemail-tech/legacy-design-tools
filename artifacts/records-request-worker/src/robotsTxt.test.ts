@@ -76,19 +76,23 @@ describe("runRecipeForJob robots wiring", () => {
     const { runRecipeForJob } = await import("./recipes/index.js");
     const browser = {
       goto: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
-      captureFullPage: vi.fn(),
-      click: vi.fn(),
-      fill: vi.fn(),
-      pressEnter: vi.fn(),
+      captureFullPage: vi.fn().mockResolvedValue({ ok: true, sha256: "abc123", byteLength: 1, label: "test" }),
+      click: vi.fn().mockResolvedValue({ ok: false }),
+      fill: vi.fn().mockResolvedValue({ ok: false }),
+      pressEnter: vi.fn().mockResolvedValue({ ok: false }),
       pageIncludes: vi.fn().mockResolvedValue(false),
       currentUrl: vi.fn().mockResolvedValue("https://example.com"),
       extractResultRows: vi.fn().mockResolvedValue([]),
-      inspectDocumentPurchase: vi.fn(),
+      inspectDocumentPurchase: vi.fn().mockResolvedValue({
+        visibleMainText: "",
+        visibleMainControls: [],
+        rowPriceText: null,
+      }),
     };
 
     const fetchRobotsTxtFn = vi.fn().mockResolvedValue({
       ok: true,
-      url: "https://www.co.caldwell.tx.us/robots.txt",
+      url: "https://tx.countygovernmentrecords.com/robots.txt",
       status: 200,
       bodySnippet: "User-agent: *\nDisallow: /private",
       fetchedAt: "2026-09-01T00:00:00.000Z",
@@ -108,13 +112,13 @@ describe("runRecipeForJob robots wiring", () => {
     );
 
     expect(fetchRobotsTxtFn).toHaveBeenCalledWith(
-      "https://www.co.caldwell.tx.us/page/County.Clerk",
+      "https://tx.countygovernmentrecords.com/texas/web/",
     );
     expect(fetchRobotsTxtFn.mock.invocationCallOrder[0]).toBeLessThan(
       (browser.goto as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
     );
     expect(result.scopeSearched?.robotsTxt).toEqual({
-      url: "https://www.co.caldwell.tx.us/robots.txt",
+      url: "https://tx.countygovernmentrecords.com/robots.txt",
       status: 200,
       bodySnippet: "User-agent: *\nDisallow: /private",
       fetchedAt: "2026-09-01T00:00:00.000Z",
