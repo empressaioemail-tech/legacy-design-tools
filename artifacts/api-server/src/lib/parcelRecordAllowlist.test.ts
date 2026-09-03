@@ -23,21 +23,23 @@ import {
   resolveAllowlistState,
 } from "./parcelRecordAllowlist";
 
-describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells cutover, five counties, nothing else", () => {
-  it("exactly the five non-Caldwell counties are slated for wells, and nothing else is slated", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(5);
+describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells + specialDistricts cutover, five counties each", () => {
+  it("exactly the five non-Caldwell counties are slated for wells and specialDistricts, and nothing else is slated", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(10);
     for (const county of ["48021", "48209", "48309", "48453", "48491"]) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:wells`)).toBe(true);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:specialDistricts`)).toBe(true);
     }
   });
 
-  it("Caldwell wells is deliberately absent -- its known geometry gap stays legacy per this card's own premise", () => {
+  it("Caldwell wells and specialDistricts are deliberately absent -- its known geometry gap stays legacy per this card's own premise", () => {
     expect(PARCEL_RECORD_SLATE.has("48055:wells")).toBe(false);
+    expect(PARCEL_RECORD_SLATE.has("48055:specialDistricts")).toBe(false);
   });
 
-  it("no other rail is in the slate yet -- cityLimits/specialDistricts/valueHistory/flood all stay legacy for every county", () => {
+  it("no other rail is in the slate yet -- cityLimits/valueHistory/flood all stay legacy for every county", () => {
     for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
-      for (const rail of ["cityLimits", "flood", "specialDistricts", "valueHistory"]) {
+      for (const rail of ["cityLimits", "flood", "valueHistory"]) {
         expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(false);
       }
     }
@@ -62,7 +64,7 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the five real wells entries", () => {
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the ten real wells+specialDistricts entries", () => {
     const rails = ["cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn", "assessedValue"];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -77,11 +79,11 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
     }
-    // Falsifier's own falsifier: this loop must actually skip the five real
+    // Falsifier's own falsifier: this loop must actually skip the ten real
     // slated pairs, not silently cover zero cases because the skip branch
     // is unreachable -- fails loudly if PARCEL_RECORD_SLATE ever goes back
     // to empty without this test being updated to match.
-    expect(uncheckedSlatedPairs).toBe(5);
+    expect(uncheckedSlatedPairs).toBe(10);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -90,6 +92,15 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       expect(resolveAllowlistState(county, "wells", { verdict: "refuse" })).toBe("refused");
       expect(resolveAllowlistState(county, "wells", { verdict: "excluded" })).toBe("refused");
       expect(resolveAllowlistState(county, "wells", null)).toBe("legacy");
+    }
+  });
+
+  it("FALSIFIER: the five slated specialDistricts pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
+    for (const county of ["48021", "48209", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "specialDistricts", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "specialDistricts", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "specialDistricts", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "specialDistricts", null)).toBe("legacy");
     }
   });
 });
