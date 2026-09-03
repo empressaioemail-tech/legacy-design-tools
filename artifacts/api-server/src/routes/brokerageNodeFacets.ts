@@ -122,9 +122,9 @@ import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { refusePayloadAtServe } from "../lib/serveGuards";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
-import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
+import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
-import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
@@ -138,13 +138,16 @@ import {
   subscriptionTierGrantsStudio,
 } from "../lib/peEntitlement";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
-import { loadCityLimitsFact } from "../lib/cityLimitsFactRead";
+import { loadCityLimitsFactForServe } from "../lib/cityLimitsFactServeCutover";
 import { usableCityLimitsQueryPoint } from "@workspace/cad-ingest/city-limits";
 import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
 import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
 import {
   attachVerdictLayersToFacets,
+  attachCadRollOverlaysToFacets,
 } from "../lib/structuralFactToFacetsWire";
+import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
+import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { enrichFacetsResponseWithRegistry } from "@workspace/instrument-registry";
 import {
   authenticatedBrokerageUserId,
@@ -613,7 +616,9 @@ brokerageNodeFacetsRouter.get(
     let boundaryEdgeFact;
     let ownerFactLoaded;
     let structuralFact;
+    let cadRollOverlay;
     try {
+      const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
         snapshot,
         floodHazardFact,
@@ -625,11 +630,12 @@ brokerageNodeFacetsRouter.get(
         boundaryEdgeFact,
         ownerFactLoaded,
         structuralFact,
+        cadRollOverlay,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
-        loadFloodHazardFactAtom(parcelNodeId),
+        loadFloodHazardFactForServe(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
-        loadSpecialDistrictFactAtom(parcelNodeId),
+        loadSpecialDistrictFactForServe(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
         loadWellFactForServe(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
@@ -638,6 +644,20 @@ brokerageNodeFacetsRouter.get(
           ? loadOwnerFactAtom(parcelNodeId)
           : Promise.resolve(null),
         loadStructuralFactAtom(parcelNodeId),
+        // PARCEL-B-SLATE2: a malformed parcelNodeId already 400'd above this
+        // handler's own reachable code, but parseParcelNodeId is defensive
+        // regardless -- a null parse resolves every rail to "keep legacy"
+        // rather than throwing mid-Promise.all.
+        parsedForOverlay
+          ? resolveCadRollOverlaysForServe(parsedForOverlay.countyFips, parsedForOverlay.propId)
+          : Promise.resolve({
+              marketValue: null,
+              assessedValue: null,
+              landValue: null,
+              improvementValue: null,
+              livingAreaSqft: null,
+              yearBuilt: null,
+            }),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -654,7 +674,8 @@ brokerageNodeFacetsRouter.get(
     // City limits FIRST: the zoning verdict derives incorporation from this
     // containment fact and from nothing else (CTX card F). A null situsCity
     // is not evidence of anything.
-    const cityLimitsFact = await loadCityLimitsFact(
+    const cityLimitsFact = await loadCityLimitsFactForServe(
+      parcelNodeId,
       snapshot?.queryPoint ?? null,
     );
     const zoningVerdict = snapshot
@@ -685,10 +706,14 @@ brokerageNodeFacetsRouter.get(
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: attachVerdictLayersToFacets(
-        snapshot.facets as Record<string, unknown>,
-        structuralFact,
-        zoningVerdict,
+      facets: attachCadRollOverlaysToFacets(
+        attachVerdictLayersToFacets(
+          snapshot.facets as Record<string, unknown>,
+          structuralFact,
+          zoningVerdict,
+          cadRollOverlay.livingAreaSqft,
+        ),
+        cadRollOverlay,
       ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying

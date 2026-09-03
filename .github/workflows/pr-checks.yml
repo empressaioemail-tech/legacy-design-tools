@@ -105,6 +105,22 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: Install postgis into the postgres service container
+        # TXGIO-GEOM-FIX: txgio_parcel.geom is a real PostGIS geometry(Geometry,4326)
+        # column in production (added by an uncodified manual process this card
+        # tracks properly for the first time), and upsertTxgioParcels now derives it
+        # on every write. pgvector/pgvector:pg14 has no postgis package baked in, but
+        # its PGDG apt repo is already configured, so it installs the same way it
+        # would on any Debian bookworm host. The server process runs INSIDE the
+        # service container, so the package has to land there too, not on the runner.
+        run: |
+          CONTAINER_ID=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
+          docker exec -u root "$CONTAINER_ID" bash -c "apt-get update && apt-get install -y postgresql-14-postgis-3"
+      - name: Enable postgis extension
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS postgis;"
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
       - name: Check schema fixture drift

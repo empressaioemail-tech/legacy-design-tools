@@ -8,12 +8,20 @@
  * parcel_record directly. This module is the flood rail's read path. There is no
  * "drainage" rail in parcel_record's rail set; the drainage section is untouched.
  *
- * A THIRD store: FACTORY_DATABASE_URL, never DATABASE_URL (deployment) or
+ * A THIRD store: FACTORY_DATABASE_URL_RO, never DATABASE_URL (deployment),
  * ATOMS_DATABASE_URL (flood-hazard-fact atoms, floodHazardFactRead.ts's own
- * store). SELECT-only: no login-capable read-only Postgres role exists on the
- * Factory Neon project (verified live before writing this file), so this module
- * is structurally read-only by construction -- it never builds anything but a
- * SELECT, regardless of what the underlying credential could technically do.
+ * store), or FACTORY_DATABASE_URL (the writer credential every Factory job
+ * uses). SELECT-only, TWO ways (PARCEL-RO-ROLE, 2026-09-02): this module
+ * only ever builds a SELECT, and the credential itself authenticates as
+ * `parcel_record_ro`, a Postgres role granted SELECT alone on
+ * parcel_record / parcel_record_cell / parcel_record_companion_row --
+ * verified by violation, an INSERT through this credential fails with
+ * "permission denied for table parcel_record_cell" at the database. This
+ * closes the asymmetry PARCEL-B-READER's close flagged: this module used to
+ * be code-convention-only where its sibling parcelRecordCellRead.ts also
+ * enforced `SET default_transaction_read_only = on`; both readers now share
+ * the same role-level guarantee, the strongest of the three per the ruling
+ * (role beats connection-level beats convention).
  *
  * Cell-state vocabulary mirrors parcel_record's own five states exactly (never
  * translated here): value / absent-verified / not-applicable / unaccounted /
@@ -120,13 +128,25 @@ export function resetParcelRecordQueryableForTests(): void {
 }
 
 function factoryQueryableFromEnv(): ParcelRecordQueryable | null {
-  const url = process.env.FACTORY_DATABASE_URL?.trim();
+  const url = process.env.FACTORY_DATABASE_URL_RO?.trim();
   if (!url) return null;
   if (!sharedPool) {
     sharedPool = new pg.Pool({
       connectionString: url,
       ssl: url.includes("sslmode=") ? undefined : { rejectUnauthorized: false },
       max: 2,
+    });
+    // Belt-and-suspenders, matching this module's sibling
+    // parcelRecordCellRead.ts: the role grant alone already refuses a write
+    // at the database, but a protocol-level session flag costs nothing and
+    // closes the guarantee-asymmetry PARCEL-B-READER's close flagged.
+    sharedPool.on("connect", (client) => {
+      client.query("SET default_transaction_read_only = on").catch(() => {
+        // If this SET itself fails, every subsequent query on this client
+        // fails too, surfacing as a query error -- already handled by this
+        // module's refusal path. Swallow only to avoid an unhandled
+        // rejection on the pool's own connect event.
+      });
     });
   }
   return sharedPool;
@@ -261,7 +281,7 @@ export async function loadParcelRecordFloodFact(
       source: PARCEL_RECORD_FLOOD_SOURCE,
       placeKey,
       reason:
-        "parcel_record lives in the Factory store (FACTORY_DATABASE_URL). That store is not configured. Refusing rather than emitting a silent null.",
+        "parcel_record lives in the Factory store, read via the SELECT-only FACTORY_DATABASE_URL_RO credential. That credential is not configured. Refusing rather than emitting a silent null.",
     };
   }
   const result = await factory.query<CellRow>(SELECT_FLOOD_CELL, [placeKey, FLOOD_RAIL_KEY]);

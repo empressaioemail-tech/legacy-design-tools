@@ -48,8 +48,10 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "export_instrument",
     title: "Export an instrument",
     description:
-      "Export a site plan, terrain model, dossier, or brief artifact the caller's tier allows. Proxies Hauska MCP when configured; returns degraded (not server-down) if Hauska is unreachable.",
-    readiness: "live" as const,
+      "Export a site plan, terrain model, dossier, or brief artifact. Not available on any tier: the proxy is coded against POST /tools/export_instrument on Hauska MCP, and that route exists in no server. Returns not_ready to every caller, including Studio.",
+    readiness: "blocked" as const,
+    blockedReason:
+      "P-109 item 3: the Hauska export proxy contract does not exist. hauska-mcp-server serves MCP JSON-RPC on POST /mcp, not POST /tools/export_instrument (404, measured 2026-09-02), and no server anywhere defines export_instrument. Upstream export capability DOES exist under different names (refresh_/download_parcel_{site_plan,terrain,dossier}_export, two-hop, per-format, no brief kind), so this is a rewire, not a missing feature. Supplying HAUSKA_MCP_BASE_URL alone would turn an honest refusal into a 404 body.",
   },
   {
     name: "ask_the_map",

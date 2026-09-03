@@ -75,4 +75,25 @@ describe("recipeCanarySelectors", () => {
       expect(result.reason).toContain("down");
     }
   });
+
+  it("P-113: registers McLennan under the shared Tyler self-service probe (scaffold retired)", () => {
+    const probe = canaryProbeForPortal("mclennan-online-records");
+    expect(probe?.probeId).toBe("tyler-self-service-v2");
+    expect(probe?.recipeVersion).toBe("p85-tyler-self-service-v2");
+  });
+
+  it("P-113: registers Caldwell under its own CountyGovernmentRecords probe (scaffold retired)", async () => {
+    const probe = canaryProbeForPortal("caldwell-clerk-web");
+    expect(probe?.probeId).toBe("caldwell-countygovernmentrecords-v1");
+    expect(probe?.recipeVersion).toBe("p85-caldwell-countygovernmentrecords-v1");
+
+    const browser = mockBrowser({
+      click: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false })
+        .mockResolvedValueOnce({ ok: true }),
+    });
+    const result = await checkRecipeCanarySelectors("caldwell-clerk-web", browser);
+    expect(result.ok).toBe(true);
+  });
 });
