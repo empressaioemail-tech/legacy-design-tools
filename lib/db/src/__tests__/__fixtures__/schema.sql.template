@@ -2891,10 +2891,10 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_screens
     ADD CONSTRAINT pe_screens_pkey PRIMARY KEY (id);
 
 
--- Name: pe_share_attributions pe_share_attributions_recipient_user_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: pe_share_attributions pe_share_attributions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
-    ADD CONSTRAINT pe_share_attributions_recipient_user_id_pk PRIMARY KEY (recipient_user_id);
+    ADD CONSTRAINT pe_share_attributions_pkey PRIMARY KEY (recipient_user_id);
 
 
 -- Name: pe_share_grants pe_share_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3836,14 +3836,14 @@ CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
--- Name: pe_activation_events_action_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (action_id, created_at);
-
-
 -- Name: pe_account_activations_milestone_first_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_account_activations_milestone_first_at_idx ON @@SCHEMA@@.pe_account_activations USING btree (milestone, first_at);
+
+
+-- Name: pe_activation_events_action_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (action_id, created_at);
 
 
 -- Name: pe_activation_events_owner_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
