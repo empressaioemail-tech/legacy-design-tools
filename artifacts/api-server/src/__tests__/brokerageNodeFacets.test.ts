@@ -416,20 +416,36 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(TIER2_ADAPTER_KEY).toBe("node-facets:tier2");
   });
 
-  it("the route source wires floodHazardFact from atoms and keeps flood: null", () => {
+  it("the route source wires floodHazardFact through the PARCEL-FLOOD-CUTOVER serve cutover and keeps flood: null", () => {
+    // F-01, PARCEL-FLOOD-CUTOVER (2026-09-03): the route now calls
+    // loadFloodHazardFactForServe (floodHazardFactServeCutover.ts),
+    // mirroring wells/specialDistricts/cityLimits' own PARCEL-B-SLATE1
+    // cutovers -- checks the rail allowlist and delegates to
+    // loadFloodHazardFactAtom unchanged when not slated+passing. The next
+    // test asserts THAT module's own wiring still lands on atoms.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
     expect(routeSrc).toMatch(
-      /from\s+["']\.\.\/lib\/floodHazardFactRead["']/,
+      /from\s+["']\.\.\/lib\/floodHazardFactServeCutover["']/,
     );
-    expect(routeSrc).toMatch(/loadFloodHazardFactAtom/);
+    expect(routeSrc).toMatch(/loadFloodHazardFactForServe/);
     expect(routeSrc).toMatch(/floodHazardFact/);
     // SS-W16 floor: the CI gate requires these two markers in this file.
     expect(routeSrc).toMatch(/flood:\s*null;/);
     expect(routeSrc).toMatch(/flood:\s*null,/);
     expect(routeSrc).not.toMatch(/flood:\s*p\.flood/);
+  });
+
+  it("floodHazardFactServeCutover (the PARCEL-FLOOD-CUTOVER wrapper) itself wires floodHazardFact from atoms", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "floodHazardFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/floodHazardFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadFloodHazardFactAtom/);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
   });
 
   it("the route source wires landUseFact from atoms and keeps baked landUse", () => {

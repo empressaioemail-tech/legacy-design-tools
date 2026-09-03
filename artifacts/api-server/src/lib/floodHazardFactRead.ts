@@ -77,7 +77,21 @@ export type FloodHazardFactRefusal = {
     | "atom-miss"
     | "bind-conflict"
     | "atoms-store-not-configured"
-    | "malformed-atom";
+    | "malformed-atom"
+    /**
+     * PARCEL-FLOOD-CUTOVER (F-01): floodHazardFactFromParcelRecord.ts's own
+     * refusal codes, distinct from the atom-store codes above -- a
+     * parcel_record cell miss/store-not-configured/malformed-cell/
+     * unaccounted/invalid-id is a different failure mode than an atom-store
+     * miss and must not be collapsed into "atom-miss" (that would
+     * misrepresent which store failed), matching the same discipline
+     * PARCEL-B-SLATE1's own wells/specialDistricts adapters used.
+     */
+    | "invalid-parcel-node-id"
+    | "parcel-record-cell-miss"
+    | "parcel-record-unaccounted"
+    | "parcel-record-store-not-configured"
+    | "parcel-record-malformed-cell";
   source: typeof FLOOD_HAZARD_FACT_SOURCE;
   tried: FloodHazardFactBindKeys | [];
   reason: string;
