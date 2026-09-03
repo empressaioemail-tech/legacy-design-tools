@@ -140,24 +140,66 @@ describe("runRecipeForJob — Aumentum index search", () => {
   });
 });
 
-describe("runRecipeForJob — Caldwell reachability scaffold", () => {
+describe("runRecipeForJob — Caldwell CountyGovernmentRecords index search (P-113)", () => {
   const caldwellCtx: RecordsRecipeContext = {
     jobId: "job-caldwell",
     countyFips: "48055",
     parcelKey: "apn:48055:10001",
     portalId: "caldwell-clerk-web",
-    requestPayload: {},
+    requestPayload: {
+      searchTerms: { ownerName: "SMITH JOHN" },
+    },
   };
 
-  it("completes reachability when entry navigation succeeds", async () => {
+  it("fails closed to needs-human/login-required on the real splash-to-login flow (verified live 2026-09-03: no anonymous search path exists on this vendor)", async () => {
     const browser = mockBrowser({
       goto: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+      click: vi.fn().mockResolvedValue({ ok: true }),
+      currentUrl: vi
+        .fn()
+        .mockResolvedValue(
+          "https://tx.countygovernmentrecords.com/texas/web/login.jsp?submit=Enter",
+        ),
+    });
+    const result = await runRecipeForJob(caldwellCtx, browser);
+    expect(result.status).toBe("needs-human");
+    expect(result.errorCode).toBe("login-required");
+    expect(result.scopeSearched?.recipeVersion).toBe(
+      "p85-caldwell-countygovernmentrecords-v1",
+    );
+    expect(result.scopeSearched?.mode).toBe("index-search");
+    expect(browser.goto).toHaveBeenCalledWith(
+      "https://tx.countygovernmentrecords.com/texas/web/",
+    );
+    // Evidentiary capture of the login wall, SHA-256 present.
+    expect(result.scopeSearched?.captures).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sha256: "abc123" })]),
+    );
+  });
+
+  it("fails closed when entry navigation fails", async () => {
+    const browser = mockBrowser({
+      goto: vi.fn().mockResolvedValue({ ok: false, status: 503 }),
+    });
+    const result = await runRecipeForJob(caldwellCtx, browser);
+    expect(result.status).toBe("failed");
+    expect(result.errorCode).toBe("portal-unreachable");
+  });
+
+  it("would run an owner-name search if the vendor ever exposed an anonymous surface (dead-code guard — not reachable on the real portal today)", async () => {
+    const browser = mockBrowser({
+      goto: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+      click: vi.fn().mockResolvedValue({ ok: true }),
+      fill: vi.fn().mockResolvedValue({ ok: true }),
+      currentUrl: vi
+        .fn()
+        .mockResolvedValue("https://tx.countygovernmentrecords.com/texas/web/search.jsp"),
+      pageIncludes: vi.fn().mockResolvedValue(false),
     });
     const result = await runRecipeForJob(caldwellCtx, browser);
     expect(result.status).toBe("complete");
-    expect(result.scopeSearched?.recipeVersion).toBe("p85-caldwell-clerk-scaffold-v1");
-    expect(browser.goto).toHaveBeenCalledWith(
-      "https://www.co.caldwell.tx.us/page/County.Clerk",
+    expect(result.scopeSearched?.queries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "owner-name" })]),
     );
   });
 });

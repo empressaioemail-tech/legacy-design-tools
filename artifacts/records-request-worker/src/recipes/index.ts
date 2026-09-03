@@ -11,6 +11,7 @@ import {
 import { runAumentumIndexSearch } from "./aumentumIndexSearch.js";
 import { runPublicsearchRecipe } from "./publicsearchSearch.js";
 import { runPortalReachabilityRecipe } from "./portalReachability.js";
+import { runCountyGovernmentRecordsSearch } from "./countyGovernmentRecordsSearch.js";
 import {
   runTylerSelfServiceSearch,
   tylerSurfaceFromPortal,
@@ -30,8 +31,19 @@ const AUMENTUM_SEARCH_PORTAL_IDS = new Set([
   "bastrop-aumentum",
   "travis-tccsearch",
 ]);
-const TYLER_SEARCH_PORTAL_IDS = new Set(["williamson-tylerhost", "hays-erss"]);
+const TYLER_SEARCH_PORTAL_IDS = new Set([
+  "williamson-tylerhost",
+  "hays-erss",
+  // P-113: McLennan is the same Tyler self-service DOCSEARCH product as
+  // Hays, verified live 2026-09-03 (reachable headless, unlike Williamson
+  // TylerHost's 403-to-bots).
+  "mclennan-online-records",
+]);
 const PUBLICSEARCH_PORTAL_IDS = new Set(["williamson-publicsearch"]);
+// P-113: Caldwell's real vendor (verified live 2026-09-03) requires login
+// before any search — its own recipe fails closed to needs-human rather than
+// falling through to the bare reachability scaffold.
+const COUNTY_GOV_RECORDS_PORTAL_IDS = new Set(["caldwell-clerk-web"]);
 
 function recipeForPortalConfig(
   portal: P85PortalConfig,
@@ -61,6 +73,9 @@ async function runRecipeForPortalConfig(
   }
   if (PUBLICSEARCH_PORTAL_IDS.has(portal.portalId)) {
     return runPublicsearchRecipe(ctx, portal, browser);
+  }
+  if (COUNTY_GOV_RECORDS_PORTAL_IDS.has(portal.portalId)) {
+    return runCountyGovernmentRecordsSearch(ctx, portal, browser);
   }
   return runPortalReachabilityRecipe(ctx, portal, browser);
 }
