@@ -23,23 +23,30 @@ import {
   resolveAllowlistState,
 } from "./parcelRecordAllowlist";
 
-describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells + specialDistricts cutover, five counties each", () => {
-  it("exactly the five non-Caldwell counties are slated for wells and specialDistricts, and nothing else is slated", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(10);
+describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells + specialDistricts (5 counties) + cityLimits (all 6, incl. Caldwell)", () => {
+  it("exactly the five non-Caldwell counties are slated for wells and specialDistricts", () => {
     for (const county of ["48021", "48209", "48309", "48453", "48491"]) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:wells`)).toBe(true);
       expect(PARCEL_RECORD_SLATE.has(`${county}:specialDistricts`)).toBe(true);
     }
   });
 
-  it("Caldwell wells and specialDistricts are deliberately absent -- its known geometry gap stays legacy per this card's own premise", () => {
-    expect(PARCEL_RECORD_SLATE.has("48055:wells")).toBe(false);
-    expect(PARCEL_RECORD_SLATE.has("48055:specialDistricts")).toBe(false);
+  it("all six counties, INCLUDING Caldwell, are slated for cityLimits -- it has no txgio-geometry dependency", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(16);
+    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      expect(PARCEL_RECORD_SLATE.has(`${county}:cityLimits`)).toBe(true);
+    }
   });
 
-  it("no other rail is in the slate yet -- cityLimits/valueHistory/flood all stay legacy for every county", () => {
+  it("Caldwell wells and specialDistricts are deliberately absent -- its known geometry gap stays legacy per this card's own premise; Caldwell cityLimits is present -- deliberately, not an oversight", () => {
+    expect(PARCEL_RECORD_SLATE.has("48055:wells")).toBe(false);
+    expect(PARCEL_RECORD_SLATE.has("48055:specialDistricts")).toBe(false);
+    expect(PARCEL_RECORD_SLATE.has("48055:cityLimits")).toBe(true);
+  });
+
+  it("no other rail is in the slate -- valueHistory/flood stay legacy for every county", () => {
     for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
-      for (const rail of ["cityLimits", "flood", "valueHistory"]) {
+      for (const rail of ["flood", "valueHistory"]) {
         expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(false);
       }
     }
@@ -55,16 +62,16 @@ describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells + specialDistricts cut
 
 describe("resolveAllowlistState — pure decision, every branch", () => {
   it("FALSIFIER: a pair NOT in the slate resolves to legacy even with a fabricated PASS verdict", () => {
-    const result = resolveAllowlistState("48021", "cityLimits", { verdict: "pass" });
+    const result = resolveAllowlistState("48021", "valueHistory", { verdict: "pass" });
     expect(result).toBe("legacy");
   });
 
   it("a pair not in the slate resolves to legacy with no verdict at all", () => {
-    const result = resolveAllowlistState("48021", "cityLimits", null);
+    const result = resolveAllowlistState("48021", "valueHistory", null);
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the ten real wells+specialDistricts entries", () => {
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the sixteen real slated entries", () => {
     const rails = ["cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn", "assessedValue"];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -79,11 +86,11 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
     }
-    // Falsifier's own falsifier: this loop must actually skip the ten real
-    // slated pairs, not silently cover zero cases because the skip branch
-    // is unreachable -- fails loudly if PARCEL_RECORD_SLATE ever goes back
-    // to empty without this test being updated to match.
-    expect(uncheckedSlatedPairs).toBe(10);
+    // Falsifier's own falsifier: this loop must actually skip the sixteen
+    // real slated pairs, not silently cover zero cases because the skip
+    // branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE ever
+    // goes back to empty without this test being updated to match.
+    expect(uncheckedSlatedPairs).toBe(16);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -101,6 +108,15 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       expect(resolveAllowlistState(county, "specialDistricts", { verdict: "refuse" })).toBe("refused");
       expect(resolveAllowlistState(county, "specialDistricts", { verdict: "excluded" })).toBe("refused");
       expect(resolveAllowlistState(county, "specialDistricts", null)).toBe("legacy");
+    }
+  });
+
+  it("FALSIFIER: all SIX slated cityLimits pairs (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
+    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "cityLimits", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "cityLimits", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "cityLimits", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "cityLimits", null)).toBe("legacy");
     }
   });
 });
@@ -150,18 +166,18 @@ describe("resolveAllowlistState — hypothetical slate membership (logic proof, 
 describe("resolveAllowlist — async, through the real verdict reader", () => {
   it("FALSIFIER: missing verdict row resolves to legacy, not a thrown error", async () => {
     const store = memoryParcelGateVerdicts([]);
-    const result = await resolveAllowlist(store, "48021", "cityLimits");
+    const result = await resolveAllowlist(store, "48021", "valueHistory");
     expect(result).toBe("legacy");
   });
 
   it("FALSIFIER: a verdict-store query failure (e.g. the table does not exist yet) resolves to legacy, not a thrown error", async () => {
     const store = memoryParcelGateVerdictsThatFails();
-    const result = await resolveAllowlist(store, "48021", "cityLimits");
+    const result = await resolveAllowlist(store, "48021", "valueHistory");
     expect(result).toBe("legacy");
   });
 
   it("FALSIFIER: a null store (not configured) resolves to legacy, not a thrown error", async () => {
-    const result = await resolveAllowlist(null, "48021", "cityLimits");
+    const result = await resolveAllowlist(null, "48021", "valueHistory");
     expect(result).toBe("legacy");
   });
 
@@ -173,12 +189,27 @@ describe("resolveAllowlist — async, through the real verdict reader", () => {
         throw new Error("should never be called for an unslated pair");
       },
     };
-    const result = await resolveAllowlist(spyStore as never, "48021", "cityLimits");
+    const result = await resolveAllowlist(spyStore as never, "48021", "valueHistory");
     expect(result).toBe("legacy");
     expect(queried).toBe(false);
   });
 
   it("a real, present PASS verdict on an UNSLATED pair still resolves to legacy (slate gates everything)", async () => {
+    const store = memoryParcelGateVerdicts([
+      {
+        countyFips: "48021",
+        railKey: "valueHistory",
+        verdict: "pass",
+        unaccountedCount: 0,
+        evaluatedAt: "2026-09-02T18:00:00Z",
+        runId: "b-gate-sched-test-1",
+      },
+    ]);
+    const result = await resolveAllowlist(store, "48021", "valueHistory");
+    expect(result).toBe("legacy");
+  });
+
+  it("a real, present PASS verdict on a SLATED cityLimits pair resolves to record -- the flip is genuinely live through the async path, not just the pure decision function", async () => {
     const store = memoryParcelGateVerdicts([
       {
         countyFips: "48021",
@@ -190,6 +221,6 @@ describe("resolveAllowlist — async, through the real verdict reader", () => {
       },
     ]);
     const result = await resolveAllowlist(store, "48021", "cityLimits");
-    expect(result).toBe("legacy");
+    expect(result).toBe("record");
   });
 });

@@ -56,6 +56,13 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  *
  * specialDistricts, same 5 counties, same reasoning (F-01, PARCEL-B-SLATE1,
  * 2026-09-03): Caldwell also verdict=excluded for specialDistricts.
+ * LIVE IN PRODUCTION 2026-09-03T05:53Z.
+ *
+ * cityLimits, ALL SIX counties including Caldwell (F-01, PARCEL-B-SLATE1,
+ * 2026-09-03): unlike wells/specialDistricts/flood, cityLimits has no
+ * txgio-geometry dependency (sourced from landing_parcel_jurisdiction) --
+ * Caldwell's gate verdict for cityLimits is 'pass', not 'excluded', live-
+ * verified in this card's own CP3 grid search.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -68,6 +75,12 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:specialDistricts",
   "48453:specialDistricts",
   "48491:specialDistricts",
+  "48021:cityLimits",
+  "48055:cityLimits",
+  "48209:cityLimits",
+  "48309:cityLimits",
+  "48453:cityLimits",
+  "48491:cityLimits",
 ]);
 
 export const DOLLAR_RAIL_KEYS: ReadonlySet<string> = new Set([
