@@ -7,14 +7,17 @@
  * 101.5s to materialize the SMALLEST county's cells; a Travis single-shot
  * would run 25+ minutes). This module never issues a county-scoped query.
  *
- * Structurally read-only: every pooled connection runs
- * `SET default_transaction_read_only = on` immediately on connect, so
- * Postgres itself refuses any write attempt at the protocol level
- * regardless of what the underlying credential is granted to do.
- * FACTORY_DATABASE_URL is the only Factory credential provisioned today
- * (verified via `gcloud secrets list`, 2026-09-02) -- a dedicated
- * SELECT-only DB role would be stronger defense-in-depth and is named as a
- * leave_behind, not built here.
+ * Structurally read-only, TWO layers deep (PARCEL-RO-ROLE, 2026-09-02):
+ * the connection authenticates as `parcel_record_ro`, a Postgres role
+ * granted SELECT only on parcel_record / parcel_record_cell /
+ * parcel_record_companion_row (verified by violation: an INSERT through
+ * this credential fails with "permission denied for table
+ * parcel_record_cell" at the database, before any application code runs).
+ * Every pooled connection ALSO runs `SET default_transaction_read_only =
+ * on` immediately on connect, so a write is refused twice over -- role
+ * grant first, protocol-level session flag second. Credential lives in
+ * Secret Manager as FACTORY_DATABASE_URL_RO, never FACTORY_DATABASE_URL
+ * (the writer credential every Factory job uses).
  *
  * `unaccounted` never reaches the wire as a word. It is a REFUSAL (code
  * "unaccounted"), matching this repo's own house convention in every
@@ -126,8 +129,16 @@ export function resetParcelRecordQueryableForTests(): void {
   injectedQueryable = undefined;
 }
 
-function parcelRecordQueryableFromEnv(): ParcelRecordQueryable | null {
-  const url = process.env.FACTORY_DATABASE_URL?.trim();
+/**
+ * Exported for reuse by parcelGateVerdictRead.ts: parcel_record_ro (this
+ * pool's credential) also carries SELECT on parcel_gate_verdict
+ * (PARCEL-B-SLATE1, migration 0010) -- same database, same credential, no
+ * reason for a second connection pool. This is the RAW env-resolved store
+ * only, with no test-injection seam of its own; callers apply their own
+ * injection override first.
+ */
+export function parcelRecordQueryableFromEnv(): ParcelRecordQueryable | null {
+  const url = process.env.FACTORY_DATABASE_URL_RO?.trim();
   if (!url) return null;
   if (!sharedPool) {
     sharedPool = new pg.Pool({
@@ -310,7 +321,7 @@ export async function loadParcelRecordCell(
       railKey,
       code: "store-not-configured",
       reason:
-        "parcel_record lives in the Factory store (FACTORY_DATABASE_URL). That credential is not configured. Refusing rather than reading a legacy store under this name.",
+        "parcel_record lives in the Factory store, read via the SELECT-only FACTORY_DATABASE_URL_RO credential. That credential is not configured. Refusing rather than reading a legacy store under this name.",
     };
   }
   const [cellResult, companionResult] = await Promise.all([

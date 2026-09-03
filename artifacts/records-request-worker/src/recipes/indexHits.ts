@@ -121,7 +121,14 @@ export function vendorFamilyFromPortalId(portalId: string): VendorFamily {
   if (portalId.includes("aumentum") || portalId.includes("tccsearch")) {
     return "aumentum";
   }
-  if (portalId.includes("tyler") || portalId.includes("erss")) {
+  if (
+    portalId.includes("tyler") ||
+    portalId.includes("erss") ||
+    // McLennan (P-113) is the same Tyler self-service DOCSEARCH grid product
+    // as Hays ERSS, verified live 2026-09-03, but its portalId carries
+    // neither "tyler" nor "erss".
+    portalId.includes("mclennan")
+  ) {
     return "tyler";
   }
   if (portalId.includes("publicsearch")) {

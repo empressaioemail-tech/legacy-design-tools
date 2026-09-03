@@ -30,11 +30,11 @@
  * (county, rail) pair unconditionally, which is what the staging probe
  * verifies byte-identical output against.
  *
- * Dollar rails (assessedValue, improvementValue, landValue, marketValue,
- * livingAreaSqft) MUST NOT be added to PARCEL_RECORD_SLATE until
- * PARCEL-S6-COLLISION closes — a hard requirement from the decision, named
- * here so a future edit to this file trips over the comment before
- * shipping a violation.
+ * Dollar rails (assessedValue, improvementValue, landValue, marketValue)
+ * plus the two structural rails (livingAreaSqft, yearBuilt) were held out of
+ * PARCEL_RECORD_SLATE until PARCEL-S6-COLLISION closed. It closed
+ * 2026-09-02 (_inbox/2026-09-02_parcel-s6-collision_close.json); PARCEL-B-
+ * SLATE2 is the sanctioned cutover card that added them below.
  */
 
 import { loadParcelGateVerdict } from "./parcelGateVerdictRead";
@@ -44,12 +44,119 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
 
 /**
  * Code-owned slate of (county, rail) pairs authorized to attempt a
- * parcel_record cutover. Empty on this card by design. Edited only by a
- * dedicated slate card (PARCEL-B-SLATE1 and successors), never by this
- * reader's own logic, never by a gate verdict alone.
+ * parcel_record cutover. Edited only by a dedicated slate card
+ * (PARCEL-B-SLATE1 and successors), never by this reader's own logic,
+ * never by a gate verdict alone.
+ *
+ * wells, 5 counties (F-01, PARCEL-B-SLATE1, 2026-09-03): every non-Caldwell
+ * program county passes the gate live (gate-rail-cli.mjs, verified
+ * unaccountedCount=0 for all five; Caldwell excluded, its known pre-
+ * existing txgio geometry gap, stays legacy per this card's own premise 4).
+ * LIVE IN PRODUCTION 2026-09-03T04:53Z.
+ *
+ * specialDistricts, same 5 counties, same reasoning (F-01, PARCEL-B-SLATE1,
+ * 2026-09-03): Caldwell also verdict=excluded for specialDistricts.
+ * LIVE IN PRODUCTION 2026-09-03T05:53Z.
+ *
+ * cityLimits, ALL SIX counties including Caldwell (F-01, PARCEL-B-SLATE1,
+ * 2026-09-03): unlike wells/specialDistricts/flood, cityLimits has no
+ * txgio-geometry dependency (sourced from landing_parcel_jurisdiction) --
+ * Caldwell's gate verdict for cityLimits is 'pass', not 'excluded', live-
+ * verified in this card's own CP3 grid search.
+ *
+ * flood, ALL SIX counties including Caldwell (F-01, PARCEL-FLOOD-CUTOVER,
+ * 2026-09-03): unlike cityLimits, Caldwell's own flood gate verdict IS
+ * 'excluded' (its known txgio geometry gap, live-verified twice --
+ * matching wells/specialDistricts' own pattern, not cityLimits'). Caldwell
+ * is slated here anyway, deliberately, per this card's own mission: an
+ * excluded verdict on a SLATED pair resolves the allowlist to 'refused'
+ * (attempted, visible, distinct from an unslated pair's silent 'legacy'
+ * default) -- the "owed observed-refusing evidence" this card's own
+ * premise names. Unlike wells/specialDistricts (where Caldwell was left
+ * OUT of the slate entirely, so it never reaches a visible 'refused'
+ * state), flood deliberately includes it to make that distinction real.
+ *
+ * marketValue, assessedValue, landValue, improvementValue, livingAreaSqft,
+ * yearBuilt, ALL SIX counties including Caldwell (F-01, PARCEL-B-SLATE2,
+ * 2026-09-03): every one of the 36 (county, rail) pairs passes the gate
+ * live (gate-rail-cli.mjs, unaccountedCount=0 for all 36 -- these six rails
+ * have no txgio-geometry dependency at all, sourced from cad_property via a
+ * CAD-attribute join, not spatial containment, so Caldwell's known geometry
+ * gap does not apply here the way it does for wells/specialDistricts/flood).
+ * No excluded/refused pair exists in this set. Unlike wells/specialDistricts/
+ * cityLimits/flood (each a whole-function legacy-loader swap), these six
+ * rails are served via a request-time OVERLAY onto the legacy value
+ * (cadRollServeCutover.ts) -- the legacy bake/live-read path is never
+ * modified, only overlaid where the allowlist resolves to 'record'.
  */
-export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([]);
+export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
+  "48021:wells",
+  "48209:wells",
+  "48309:wells",
+  "48453:wells",
+  "48491:wells",
+  "48021:specialDistricts",
+  "48209:specialDistricts",
+  "48309:specialDistricts",
+  "48453:specialDistricts",
+  "48491:specialDistricts",
+  "48021:cityLimits",
+  "48055:cityLimits",
+  "48209:cityLimits",
+  "48309:cityLimits",
+  "48453:cityLimits",
+  "48491:cityLimits",
+  "48021:flood",
+  "48055:flood",
+  "48209:flood",
+  "48309:flood",
+  "48453:flood",
+  "48491:flood",
+  "48021:marketValue",
+  "48055:marketValue",
+  "48209:marketValue",
+  "48309:marketValue",
+  "48453:marketValue",
+  "48491:marketValue",
+  "48021:assessedValue",
+  "48055:assessedValue",
+  "48209:assessedValue",
+  "48309:assessedValue",
+  "48453:assessedValue",
+  "48491:assessedValue",
+  "48021:landValue",
+  "48055:landValue",
+  "48209:landValue",
+  "48309:landValue",
+  "48453:landValue",
+  "48491:landValue",
+  "48021:improvementValue",
+  "48055:improvementValue",
+  "48209:improvementValue",
+  "48309:improvementValue",
+  "48453:improvementValue",
+  "48491:improvementValue",
+  "48021:livingAreaSqft",
+  "48055:livingAreaSqft",
+  "48209:livingAreaSqft",
+  "48309:livingAreaSqft",
+  "48453:livingAreaSqft",
+  "48491:livingAreaSqft",
+  "48021:yearBuilt",
+  "48055:yearBuilt",
+  "48209:yearBuilt",
+  "48309:yearBuilt",
+  "48453:yearBuilt",
+  "48491:yearBuilt",
+]);
 
+/**
+ * Historical: the five dollar-named rail keys this allowlist held out of
+ * the slate pending PARCEL-S6-COLLISION. That gate lifted (PARCEL-B-SLATE2,
+ * 2026-09-03) -- kept as a named list for any future code that needs to
+ * enumerate "the dollar rails" specifically (e.g. yearBuilt is a rail but
+ * not a dollar amount, so it is deliberately excluded from this set).
+ */
 export const DOLLAR_RAIL_KEYS: ReadonlySet<string> = new Set([
   "assessedValue",
   "improvementValue",

@@ -174,15 +174,20 @@ describe("smartsite-mcp tool honesty", () => {
     });
   });
 
-  it("export_instrument returns degraded (not server-down) when Hauska MCP is down", async () => {
+  // P-109. Was: "returns degraded when Hauska MCP is down". That path is
+  // unreachable now that the tool is readiness "blocked", and the degraded
+  // payload it asserted is covered directly in export-degraded.fixture.test.ts.
+  // What matters at this boundary instead is that SUPPLYING the config does
+  // not silently change the answer: the endpoint the proxy targets
+  // (POST /tools/export_instrument) exists in no server, so a configured
+  // HAUSKA_MCP_BASE_URL must not make the tool look available.
+  it("export_instrument stays not_ready even when HAUSKA_MCP_BASE_URL is set, and reaches no upstream", async () => {
     process.env.HAUSKA_MCP_BASE_URL = "https://hauska-mcp.test";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.includes("hauska-mcp.test/health")) {
-        throw new Error("ECONNREFUSED");
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      });
 
     await withTestClient(async (client) => {
       const result = await client.callTool({
@@ -195,11 +200,11 @@ describe("smartsite-mcp tool honesty", () => {
       expect(result.isError).toBe(true);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
       expect(parsed).toMatchObject({
-        status: "degraded",
+        status: "not_ready",
         tool: "export_instrument",
-        reason: "hauska_mcp_unavailable",
-        dependency: "hauska-mcp",
       });
+      expect(parsed.reason).toContain("P-109 item 3");
+      expect(fetchSpy).not.toHaveBeenCalled();
       expect(mockCortexFetch).not.toHaveBeenCalled();
     });
   });
@@ -545,7 +550,13 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
     });
   });
 
-  it("free session cannot run a Studio export (siteplan)", async () => {
+  // P-109. export_instrument is readiness "blocked", so the readiness
+  // short-circuit fires BEFORE the Studio gate and every tier gets the same
+  // answer. That ordering is deliberate: no tier can obtain the export, so
+  // quoting a free caller an upgrade price for it is a promise the product
+  // cannot keep. The Studio gate itself is untouched and still covers
+  // run_report above.
+  it("free session gets not_ready for a Studio export, not an upgrade price", async () => {
     mockAuth = {
       userId: "user-free",
       email: "free@example.com",
@@ -565,15 +576,16 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
       expect(result.isError).toBe(true);
       const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
       expect(parsed).toMatchObject({
-        status: "upgrade_required",
-        reason: "studio_report",
-        tier: "free",
+        status: "not_ready",
+        tool: "export_instrument",
       });
+      expect(parsed.reason).toContain("P-109 item 3");
+      expect(parsed.status).not.toBe("upgrade_required");
       expect(mockCortexFetch).not.toHaveBeenCalled();
     });
   });
 
-  it("studio session passes studio gate but export remains not_ready", async () => {
+  it("studio session gets the same not_ready: the export is unavailable on every tier", async () => {
     await withTestClient(async (client) => {
       const result = await client.callTool({
         name: "export_instrument",
@@ -1922,11 +1934,14 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
     const report = JSON.parse((await callRaw("run_report", { parcelNodeId: "48021:34137" })).text);
     expectDeclared(report);
     expect(report).toMatchObject({ status: "upgrade_required", reason: "deep_report" });
+    // P-109: export_instrument no longer reaches the Studio gate (readiness
+    // "blocked" short-circuits first), so it is a not_ready body here, not an
+    // upgrade_required one. run_report above still carries the gate reason.
     const studio = JSON.parse(
       (await callRaw("export_instrument", { parcelNodeId: "48021:34137", kind: "siteplan" })).text,
     );
     expectDeclared(studio);
-    expect(studio).toMatchObject({ status: "upgrade_required", reason: "studio_report" });
+    expect(studio).toMatchObject({ status: "not_ready", tool: "export_instrument" });
     expect(mockCortexFetch).not.toHaveBeenCalled();
   });
 
@@ -2052,26 +2067,25 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
     expect(JSON.parse(res.text)).toEqual({ id: "scr-1", rows: [] });
   });
 
-  it("export_instrument: a Hauska non-OK pass-through is declared; the HTTP status is unmeasured at this boundary", async () => {
+  // P-109. Was: "a Hauska non-OK pass-through is declared". The pass-through
+  // it exercised was a MOCK of POST /tools/export_instrument, a route that
+  // exists in no server; the fixture was the only thing keeping the contract
+  // looking real. The tool is readiness "blocked", so the declared body at
+  // this boundary is a not_ready one and no upstream is reached at all.
+  it("export_instrument: the declared body is not_ready, and no Hauska call is made", async () => {
     process.env.HAUSKA_MCP_BASE_URL = "https://hauska-mcp.test";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.includes("hauska-mcp.test/health")) return new Response("{}", { status: 200 });
-      if (url.includes("hauska-mcp.test/tools/export_instrument")) {
-        return new Response("<html>500</html>", { status: 500 });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      });
     const res = await callRaw("export_instrument", { parcelNodeId: "48021:34137", kind: "brief" });
     expect(res.isError).toBe(true);
     const parsed = JSON.parse(res.text);
     expectDeclared(parsed);
-    expect(parsed).toEqual({
-      status: "error",
-      reason: "upstream_non_json",
-      upstreamStatus: "unmeasured",
-      brief: "<html>500</html>",
-    });
+    expect(parsed).toMatchObject({ status: "not_ready", tool: "export_instrument" });
+    expect(parsed.reason).toContain("P-109 item 3");
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(mockCortexFetch).not.toHaveBeenCalled();
   });
 });

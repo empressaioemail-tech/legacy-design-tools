@@ -84,6 +84,22 @@ export function createPlaywrightBrowser(
       await throttle.beforeAction();
     },
 
+    async wait(ms: number): Promise<void> {
+      await page.waitForTimeout(ms);
+    },
+
+    async extractTotalResultsHint(): Promise<number | null> {
+      try {
+        const text = await page.evaluate(() => document.body?.innerText ?? "");
+        const match = text.match(/([\d,]+)\s+Total\s+Results/i);
+        if (!match) return null;
+        const n = Number(match[1].replace(/,/g, ""));
+        return Number.isFinite(n) ? n : null;
+      } catch {
+        return null;
+      }
+    },
+
     async goto(url: string): Promise<PortalNavigationResult> {
       await throttle.beforeAction();
       try {

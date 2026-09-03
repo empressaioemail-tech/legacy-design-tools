@@ -45,6 +45,24 @@ export interface ResultRowExtract {
 export interface RecordsRecipeBrowser {
   /** Rate limit seam between search queries (no-op when omitted in mocks). */
   beforePortalAction?(): Promise<void>;
+  /**
+   * Settle seam — bounded wait for an async post-click effect (e.g. a
+   * disclaimer-accept cookie write) to land before the next navigation.
+   * Optional so existing mocks are unaffected; no-op when omitted.
+   */
+  wait?(ms: number): Promise<void>;
+  /**
+   * Vendor "N Total Results" declaration on the results surface, when the
+   * page publishes one (e.g. Tyler self-service's "Showing page X of Y for
+   * N Total Results"). Optional; null when absent or unrecognized. Used to
+   * catch a silent-zero: the portal reports records exist but the row
+   * extractor's markup shape does not recognize this vendor's grid — refuse
+   * rather than report a fabricated-looking complete/zero (P-113 hardening,
+   * found live on McLennan: 1,706 real results, 0 rows extracted, because
+   * that vendor's results panel is a div/listview, not the RadGrid/table
+   * shape extractResultRowsSource targets).
+   */
+  extractTotalResultsHint?(): Promise<number | null>;
   goto(url: string): Promise<PortalNavigationResult>;
   captureFullPage(label: string): Promise<PageCaptureResult>;
   click(selector: string): Promise<BrowserActionResult>;

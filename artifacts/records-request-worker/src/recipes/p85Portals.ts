@@ -53,18 +53,35 @@ export const P85_PORTALS: readonly P85PortalConfig[] = [
     recipeVersion: "p85-hays-erss-v2",
   },
   {
+    // P-113: real vendor is Tyler Technologies "CountyGovernmentRecords.com"
+    // (landrecords product), NOT the informational co.caldwell.tx.us page and
+    // NOT the ERSS/web-self-service product used by Hays/McLennan — verified
+    // live 2026-09-03. The splash page's only action is "Enter", which routes
+    // straight to /texas/web/login.jsp: this vendor requires free registration
+    // + login before ANY index search, with no anonymous search surface at
+    // all. Do not guess from the county name or from "Tyler Technologies" —
+    // same company, materially different product than the other Tyler portals.
     portalId: "caldwell-clerk-web",
     countyFips: "48055",
-    portalUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
-    entryUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
-    recipeVersion: "p85-caldwell-clerk-scaffold-v1",
+    portalUrl: "https://tx.countygovernmentrecords.com/texas/web/",
+    entryUrl: "https://tx.countygovernmentrecords.com/texas/web/",
+    recipeVersion: "p85-caldwell-countygovernmentrecords-v1",
   },
   {
+    // P-113: real vendor is Tyler self-service (same product family as Hays
+    // ERSS), verified live 2026-09-03 — reachable headless (unlike Williamson
+    // TylerHost's 403-to-bots), disclaimer accept at /web/user/disclaimer,
+    // real search action DOCSEARCH402S1 ("Official Public Record Search and
+    // Copies"). Field ids differ from Hays: McLennan's combined name field is
+    // field_BothNamesID, not field_GrantorGrantee — see
+    // TYLER_MCLENNAN_SEARCH_INPUT_SELECTORS in tylerSelfServiceSearch.ts.
     portalId: "mclennan-online-records",
     countyFips: "48309",
-    portalUrl: "https://www.mclennan.gov/166/County-Clerk",
-    entryUrl: "https://www.mclennan.gov/166/County-Clerk",
-    recipeVersion: "p85-mclennan-clerk-scaffold-v0",
+    portalUrl: "https://mclennancountytx-web.tylerhost.net/web/",
+    entryUrl: "https://mclennancountytx-web.tylerhost.net/web/user/disclaimer",
+    searchEntryUrl:
+      "https://mclennancountytx-web.tylerhost.net/web/search/DOCSEARCH402S1",
+    recipeVersion: "p85-mclennan-tylerhost-v1",
   },
 ] as const;
 

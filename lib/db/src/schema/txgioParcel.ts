@@ -7,7 +7,25 @@ import {
   timestamp,
   primaryKey,
   index,
+  customType,
 } from "drizzle-orm/pg-core";
+
+/**
+ * PostGIS `geometry(Geometry,4326)` -- drizzle-orm/pg-core has no built-in
+ * geometry type. Untyped at the TS level (nothing in this codebase reads it
+ * through drizzle's typed select; every consumer of `geom` goes through raw
+ * SQL, per `lib/cad-ingest/src/txgio/ingest.ts`'s own geom-derivation UPDATE)
+ * -- this declaration exists so the column is TRACKED (visible to
+ * drizzle-kit schema diffing and to anyone reading this file to understand
+ * the table's real shape), per PARCEL-TXGIO-REACQ's own finding that `geom`
+ * previously existed live with zero tracked migration and zero schema
+ * declaration, populated entirely by an uncodified manual process.
+ */
+const geometryColumn = customType<{ data: string; default: false }>({
+  dataType() {
+    return "geometry(Geometry,4326)";
+  },
+});
 
 /**
  * Self-hosted parcel GEOMETRY store — TxGIO/StratMap statewide Land
@@ -87,6 +105,16 @@ export const txgioParcel = pgTable(
     zoningJurisdiction: text("zoning_jurisdiction"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
+    /**
+     * PostGIS-native mirror of `geometry`, derived by
+     * `upsertTxgioParcels`'s own geom-sync UPDATE (never written directly).
+     * Nullable at rest only during the brief window between a batch's
+     * insert and that same batch's geom-sync UPDATE within one flush call
+     * -- never nullable after a completed apply. Backs
+     * `txgio_parcel_geom_gist_idx` for spatial queries `geometry`'s jsonb
+     * shape cannot serve efficiently.
+     */
+    geom: geometryColumn("geom"),
     /** Feature bbox, WGS84. */
     westLng: doublePrecision("west_lng").notNull(),
     southLat: doublePrecision("south_lat").notNull(),

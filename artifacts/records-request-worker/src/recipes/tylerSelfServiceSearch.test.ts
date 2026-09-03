@@ -111,10 +111,91 @@ describe("runTylerSelfServiceSearch — Hays ERSS", () => {
   });
 });
 
-describe("p85Portals — Caldwell entry URL", () => {
-  it("uses County.Clerk path that returns HTTP 200 (not lowercase 403 path)", () => {
+const mclennanCtx: RecordsRecipeContext = {
+  jobId: "job-mclennan",
+  countyFips: "48309",
+  parcelKey: "apn:48309:12345",
+  portalId: "mclennan-online-records",
+  requestPayload: {
+    searchTerms: { ownerName: "BAYLOR UNIVERSITY" },
+  },
+};
+
+describe("runTylerSelfServiceSearch — McLennan (P-113)", () => {
+  it("fills the combined BothNames field, not the Grantor-only field (regression guard for the field-id divergence from Hays)", async () => {
+    const portal = tylerSurfaceFromPortal(portalConfigById("mclennan-online-records")!);
+    const fill = vi.fn(async (selector: string) =>
+      // Both the correct combined field AND the generic Grantor-only
+      // fallback would "succeed" if filled — proves priority order, not
+      // just reachability.
+      selector === "#field_BothNamesID" || selector === 'input[id*="Grantor" i]'
+        ? { ok: true }
+        : { ok: false },
+    );
+    const browser = mockBrowser({
+      fill,
+      click: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const result = await runTylerSelfServiceSearch(mclennanCtx, portal, browser);
+
+    expect(result.status).toBe("complete");
+    expect(fill.mock.calls[0]?.[0]).toBe("#field_BothNamesID");
+  });
+
+  it("completes with capture when owner search submits via #searchButton", async () => {
+    const portal = tylerSurfaceFromPortal(portalConfigById("mclennan-online-records")!);
+    const browser = mockBrowser({
+      fill: vi.fn(async (selector: string) =>
+        selector === "#field_BothNamesID" ? { ok: true } : { ok: false },
+      ),
+      click: vi.fn(async (selector: string) =>
+        selector === "#searchButton" ? { ok: true } : { ok: false },
+      ),
+    });
+
+    const result = await runTylerSelfServiceSearch(mclennanCtx, portal, browser);
+
+    expect(result.status).toBe("complete");
+    expect(result.scopeSearched?.captures).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sha256: "abc123" })]),
+    );
+  });
+
+  it("routes to needs-human when owner name is absent", async () => {
+    const portal = tylerSurfaceFromPortal(portalConfigById("mclennan-online-records")!);
+    const browser = mockBrowser();
+    const result = await runTylerSelfServiceSearch(
+      { ...mclennanCtx, requestPayload: {} },
+      portal,
+      browser,
+    );
+    expect(result.status).toBe("needs-human");
+    expect(result.errorCode).toBe("search-terms-missing");
+  });
+});
+
+describe("p85Portals — Caldwell entry URL (P-113, verified live 2026-09-03)", () => {
+  it("uses the real CountyGovernmentRecords.com splash, not the informational county page", () => {
     const portal = portalConfigById("caldwell-clerk-web");
-    expect(portal?.entryUrl).toBe("https://www.co.caldwell.tx.us/page/County.Clerk");
-    expect(portal?.recipeVersion).toBe("p85-caldwell-clerk-scaffold-v1");
+    expect(portal?.entryUrl).toBe("https://tx.countygovernmentrecords.com/texas/web/");
+    expect(portal?.recipeVersion).toBe("p85-caldwell-countygovernmentrecords-v1");
+  });
+});
+
+describe("p85Portals — McLennan entry URL and search entry (P-113, verified live 2026-09-03)", () => {
+  it("uses the real McLennan TylerHost disclaimer and DOCSEARCH402S1 search action, and the BothNames selector override", () => {
+    const portal = portalConfigById("mclennan-online-records");
+    expect(portal?.entryUrl).toBe(
+      "https://mclennancountytx-web.tylerhost.net/web/user/disclaimer",
+    );
+    expect(portal?.searchEntryUrl).toBe(
+      "https://mclennancountytx-web.tylerhost.net/web/search/DOCSEARCH402S1",
+    );
+    expect(portal?.recipeVersion).toBe("p85-mclennan-tylerhost-v1");
+    const surface = tylerSurfaceFromPortal(portal!);
+    expect(surface.searchEntryUrl).toBe(portal?.searchEntryUrl);
+    const selectors = tylerSearchInputSelectorsForPortal("mclennan-online-records");
+    expect(selectors[0]).toBe("#field_BothNamesID");
   });
 });

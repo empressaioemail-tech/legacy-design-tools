@@ -173,6 +173,25 @@ export interface TxgioUpsertSummary {
   batches: number;
 }
 
+/**
+ * PARCEL-TXGIO-REACQ found this live: `geom` (a PostGIS `geometry(Geometry,4326)`
+ * column with its own partial GiST index, `txgio_parcel_geom_gist_idx`) carries
+ * zero triggers and no generated-column expression -- it was populated ENTIRELY by
+ * a separate, uncodified manual backfill, never by this ingest code. Because
+ * `replaceCountyParcels` deletes-then-inserts a county atomically, every apply
+ * silently wiped `geom` back to NULL for every county it touched, not only the
+ * ones (Caldwell) that already started NULL -- this is the TXGIO-GEOM-FIX card.
+ *
+ * This is the exact formula the reacq close's own manual backfill already
+ * validated live across all six program counties (Caldwell: 32781/32781 valid;
+ * Travis: 894657/894657 valid). Kept as a raw UPDATE rather than a value expressed
+ * inline in the drizzle `.values()` insert: `geometry` is a jsonb column already
+ * proven to round-trip correctly through drizzle's typed insert, and this way the
+ * SAME derivation runs unconditionally after every batch regardless of whether
+ * that batch's rows were fresh inserts or ON CONFLICT updates -- "geom written at
+ * insert AND updated on conflict" is satisfied by construction, not by having to
+ * keep two code paths in sync.
+ */
 export async function upsertTxgioParcels(
   db: TxgioIngestDb,
   records: AsyncIterable<TxgioParcelRecord> | Iterable<TxgioParcelRecord>,
@@ -214,6 +233,25 @@ export async function upsertTxgioParcels(
           ingestedAt: sql`now()`,
         },
       });
+
+    // `sql.param(...)`, not plain `${...}` interpolation: drizzle's default
+    // array interpolation SPREADS a JS array into one placeholder per
+    // element ($1, $2, ...) for IN-clause convenience, which is not what
+    // `unnest` needs -- `sql.param` forces a single bound parameter and lets
+    // node-postgres's own array serialization produce a real `{...}` literal.
+    const countyFipsKeys = sql.param(batch.map((r) => r.countyFips));
+    const tileKeys = sql.param(batch.map((r) => r.tileKey));
+    const featureIndexKeys = sql.param(batch.map((r) => r.featureIndex));
+    await db.execute(sql`
+      UPDATE ${txgioParcel} AS t
+         SET geom = ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(t.geometry::text), 4326))
+        FROM unnest(${countyFipsKeys}::text[], ${tileKeys}::text[], ${featureIndexKeys}::int[])
+          AS v(county_fips, tile_key, feature_index)
+       WHERE t.county_fips = v.county_fips
+         AND t.tile_key = v.tile_key
+         AND t.feature_index = v.feature_index
+    `);
+
     rowsInserted += batch.length;
     batches += 1;
     batch = [];

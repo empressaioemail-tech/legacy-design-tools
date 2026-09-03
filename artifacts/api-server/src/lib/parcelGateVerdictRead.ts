@@ -33,7 +33,32 @@
  * decision, and it fails closed to legacy either way.
  */
 
-import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
+import { parcelRecordQueryableFromEnv, type ParcelRecordQueryable } from "./parcelRecordCellRead";
+
+/**
+ * PARCEL-B-SLATE1 (F-01): resolves the real verdict-store connection for a
+ * serve-cutover wrapper's own test-injection seam. Every wrapper
+ * (wellFactServeCutover.ts and siblings) previously called
+ * `resolveAllowlist(injectedVerdictStore ?? null, ...)` -- since
+ * `injectedVerdictStore` defaults to `undefined` outside tests,
+ * `undefined ?? null` is `null` in EVERY production request, meaning the
+ * verdict store was never actually connected: resolveAllowlist always
+ * fell back to 'legacy' regardless of PARCEL_RECORD_SLATE membership. This
+ * was invisible while the slate shipped empty (PARCEL-B-READER) because
+ * resolveAllowlist's own synchronous slate-membership check short-circuits
+ * before ever reaching the store for an unslated pair -- the gap only
+ * matters, and only became reachable, once a real slate entry existed.
+ * Callers pass their own `injectedVerdictStore` through unchanged for
+ * tests (`undefined` means "no override, use the real env-resolved pool";
+ * `null` explicitly means "store not configured", still a valid, testable
+ * fail-closed case).
+ */
+export function resolveVerdictStore(
+  injected: ParcelRecordQueryable | null | undefined,
+): ParcelRecordQueryable | null {
+  if (injected !== undefined) return injected;
+  return parcelRecordQueryableFromEnv();
+}
 
 export type ParcelGateVerdictKind = "pass" | "refuse" | "excluded";
 

@@ -13,11 +13,12 @@ describe("smartsite-mcp constants", () => {
     expect(SERVER_NAME).toBe("Smart Site");
   });
 
-  it("marks the records pair and ask_the_map blocked, each with a reason", () => {
+  it("marks the records pair, ask_the_map and export_instrument blocked, each with a reason", () => {
     const blocked = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked");
     expect(blocked.map((t) => t.name).sort()).toEqual([
       "ask_the_map",
       "check_request",
+      "export_instrument",
       "request_records",
     ]);
     for (const tool of blocked) {
@@ -30,6 +31,16 @@ describe("smartsite-mcp constants", () => {
     expect((askTheMap as { blockedReason?: string }).blockedReason).toContain(
       "P-91 item 34",
     );
+    // P-109: the Hauska proxy is coded against POST /tools/export_instrument,
+    // a route that exists in no server (404, measured 2026-09-02). Blocked
+    // rather than deleted because SmartsiteToolName is derived from this
+    // array and deleting the name forces edits to src/tools.ts.
+    const exportInstrument = SMARTSITE_MCP_TOOLS.find(
+      (t) => t.name === "export_instrument",
+    );
+    expect(
+      (exportInstrument as { blockedReason?: string }).blockedReason,
+    ).toContain("P-109 item 3");
   });
 
   it("descriptions do not promise a map, listings, web, or owner data", () => {
@@ -73,5 +84,28 @@ describe("llms.txt", () => {
     for (const tool of SMARTSITE_MCP_TOOLS) {
       expect(txt).toContain(tool.name);
     }
+  });
+
+  // P-109 item 3. The advertised catalog must not present a tool as available
+  // when the runtime refuses it. Every blocked tool carries the not-ready
+  // marker on its own line; every live tool does not.
+  it("marks every blocked tool not ready on its own line, and no live tool", () => {
+    const txt = renderLlmsTxt("https://mcp.smartsite.cloud");
+    const lineFor = (name: string) =>
+      txt.split("\n").find((l) => l.includes(`(\`${name}\`)`)) ?? "";
+    for (const tool of SMARTSITE_MCP_TOOLS) {
+      const line = lineFor(tool.name);
+      expect(line, `${tool.name} has a catalog line`).not.toBe("");
+      if (tool.readiness === "blocked") {
+        expect(line, `${tool.name} is advertised not ready`).toContain(
+          "not ready",
+        );
+      } else {
+        expect(line, `${tool.name} is advertised available`).not.toContain(
+          "not ready",
+        );
+      }
+    }
+    expect(lineFor("export_instrument")).toContain("not ready");
   });
 });
