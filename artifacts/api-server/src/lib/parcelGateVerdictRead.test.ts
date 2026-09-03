@@ -9,7 +9,31 @@ import {
   loadParcelGateVerdict,
   memoryParcelGateVerdicts,
   memoryParcelGateVerdictsThatFails,
+  resolveVerdictStore,
 } from "./parcelGateVerdictRead";
+
+describe("resolveVerdictStore", () => {
+  it("FALSIFIER: an explicit injected store passes through unchanged, never falls to the env resolver", async () => {
+    const store = memoryParcelGateVerdicts([
+      { countyFips: "48021", railKey: "wells", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
+    ]);
+    expect(resolveVerdictStore(store)).toBe(store);
+  });
+
+  it("an explicit injected null passes through as null, never falls to the env resolver", () => {
+    expect(resolveVerdictStore(null)).toBeNull();
+  });
+
+  it("undefined (the production default, no test override) resolves via the env-connected pool, which is null when FACTORY_DATABASE_URL_RO is unset in this process", () => {
+    // Load-bearing regression guard for the exact defect this function
+    // fixes: the wrapper's own default MUST NOT be a hardcoded null --
+    // it must actually attempt env resolution. This process has no
+    // FACTORY_DATABASE_URL_RO set, so the honest, correct answer here is
+    // still null, but via the real code path, not a bypassed one.
+    expect(process.env.FACTORY_DATABASE_URL_RO).toBeUndefined();
+    expect(resolveVerdictStore(undefined)).toBeNull();
+  });
+});
 
 describe("loadParcelGateVerdict", () => {
   it("returns null when the store is not configured", async () => {

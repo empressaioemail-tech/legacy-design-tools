@@ -2262,6 +2262,7 @@ CREATE TABLE @@SCHEMA@@.txgio_parcel (
     zoning_district text,
     zoning_jurisdiction text,
     geometry jsonb NOT NULL,
+    geom public.geometry(Geometry,4326),
     west_lng double precision NOT NULL,
     south_lat double precision NOT NULL,
     east_lng double precision NOT NULL,

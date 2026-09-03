@@ -146,14 +146,20 @@ export type WellFactRefusal = {
     | "atoms-store-not-configured"
     | "malformed-atom"
     /**
-     * PARCEL-B-READER (F-01): the serve allowlist resolved 'record' for
-     * this (county, wells) pair but no parcel_record-to-WellFactRead
-     * adapter exists yet -- that adapter is PARCEL-B-SLATE1's scope. Named
-     * here so wellFactServeCutover.ts's currently-unreachable 'record'
-     * branch has a real, typed refusal to return instead of an invented
-     * one, rather than widening an existing code to a false meaning.
+     * PARCEL-B-SLATE1 (F-01): wellFactFromParcelRecord.ts's own refusal
+     * codes, distinct from the atom-store codes above -- a parcel_record
+     * cell miss/store-not-configured/malformed-cell/unaccounted is a
+     * different failure mode than an atom-store miss and must not be
+     * collapsed into "atom-miss" (that would misrepresent which store
+     * failed). "invalid-parcel-node-id" matches the naming already used by
+     * the sibling flood adapter (parcelRecordFactRead.ts).
      */
-    | "parcel-record-adapter-not-built";
+    | "invalid-parcel-node-id"
+    | "parcel-record-cell-miss"
+    | "parcel-record-unaccounted"
+    | "parcel-record-engine-refused"
+    | "parcel-record-malformed-cell"
+    | "parcel-record-store-not-configured";
   source: typeof WELL_FACT_SOURCE;
   tried: WellFactBindPrefixes | [];
   reason: string;
