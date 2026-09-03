@@ -23,7 +23,7 @@ import {
   resolveAllowlistState,
 } from "./parcelRecordAllowlist";
 
-describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells + specialDistricts (5 counties) + cityLimits (all 6, incl. Caldwell)", () => {
+describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLimits + flood (all 6, incl. Caldwell)", () => {
   it("exactly the five non-Caldwell counties are slated for wells and specialDistricts", () => {
     for (const county of ["48021", "48209", "48309", "48453", "48491"]) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:wells`)).toBe(true);
@@ -31,24 +31,24 @@ describe("PARCEL_RECORD_SLATE — PARCEL-B-SLATE1's wells + specialDistricts (5 
     }
   });
 
-  it("all six counties, INCLUDING Caldwell, are slated for cityLimits -- it has no txgio-geometry dependency", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(16);
+  it("all six counties, INCLUDING Caldwell, are slated for cityLimits and flood", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(22);
     for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:cityLimits`)).toBe(true);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:flood`)).toBe(true);
     }
   });
 
-  it("Caldwell wells and specialDistricts are deliberately absent -- its known geometry gap stays legacy per this card's own premise; Caldwell cityLimits is present -- deliberately, not an oversight", () => {
+  it("Caldwell wells and specialDistricts are deliberately absent -- its known geometry gap stays legacy per those cards' own premise; Caldwell cityLimits and flood are present -- deliberately, not an oversight", () => {
     expect(PARCEL_RECORD_SLATE.has("48055:wells")).toBe(false);
     expect(PARCEL_RECORD_SLATE.has("48055:specialDistricts")).toBe(false);
     expect(PARCEL_RECORD_SLATE.has("48055:cityLimits")).toBe(true);
+    expect(PARCEL_RECORD_SLATE.has("48055:flood")).toBe(true);
   });
 
-  it("no other rail is in the slate -- valueHistory/flood stay legacy for every county", () => {
+  it("no other rail is in the slate -- valueHistory (and every dollar rail) stays legacy for every county", () => {
     for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
-      for (const rail of ["flood", "valueHistory"]) {
-        expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(false);
-      }
+      expect(PARCEL_RECORD_SLATE.has(`${county}:valueHistory`)).toBe(false);
     }
   });
 
@@ -86,11 +86,11 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
     }
-    // Falsifier's own falsifier: this loop must actually skip the sixteen
-    // real slated pairs, not silently cover zero cases because the skip
-    // branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE ever
-    // goes back to empty without this test being updated to match.
-    expect(uncheckedSlatedPairs).toBe(16);
+    // Falsifier's own falsifier: this loop must actually skip the
+    // twenty-two real slated pairs, not silently cover zero cases because
+    // the skip branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE
+    // ever goes back to empty without this test being updated to match.
+    expect(uncheckedSlatedPairs).toBe(22);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -118,6 +118,24 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       expect(resolveAllowlistState(county, "cityLimits", { verdict: "excluded" })).toBe("refused");
       expect(resolveAllowlistState(county, "cityLimits", null)).toBe("legacy");
     }
+  });
+
+  it("FALSIFIER: all SIX slated flood pairs (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
+    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "flood", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "flood", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "flood", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "flood", null)).toBe("legacy");
+    }
+  });
+
+  it("THE OWED EVIDENCE: Caldwell's own live gate verdict for flood is 'excluded' (its known geometry gap, live-verified) -- slated deliberately so this resolves to the allowlist's VISIBLE 'refused' state, not the silent 'legacy' default an unslated pair would show", () => {
+    // Mirrors the real, live-verified verdict shape (parcel_gate_verdict:
+    // 48055/flood/excluded) rather than a generic fixture -- this is the
+    // specific case this card's own premise names as still-owed evidence.
+    const caldwellExcluded = { verdict: "excluded" as const };
+    expect(PARCEL_RECORD_SLATE.has("48055:flood")).toBe(true);
+    expect(resolveAllowlistState("48055", "flood", caldwellExcluded)).toBe("refused");
   });
 });
 

@@ -63,6 +63,18 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * txgio-geometry dependency (sourced from landing_parcel_jurisdiction) --
  * Caldwell's gate verdict for cityLimits is 'pass', not 'excluded', live-
  * verified in this card's own CP3 grid search.
+ *
+ * flood, ALL SIX counties including Caldwell (F-01, PARCEL-FLOOD-CUTOVER,
+ * 2026-09-03): unlike cityLimits, Caldwell's own flood gate verdict IS
+ * 'excluded' (its known txgio geometry gap, live-verified twice --
+ * matching wells/specialDistricts' own pattern, not cityLimits'). Caldwell
+ * is slated here anyway, deliberately, per this card's own mission: an
+ * excluded verdict on a SLATED pair resolves the allowlist to 'refused'
+ * (attempted, visible, distinct from an unslated pair's silent 'legacy'
+ * default) -- the "owed observed-refusing evidence" this card's own
+ * premise names. Unlike wells/specialDistricts (where Caldwell was left
+ * OUT of the slate entirely, so it never reaches a visible 'refused'
+ * state), flood deliberately includes it to make that distinction real.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -81,6 +93,12 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:cityLimits",
   "48453:cityLimits",
   "48491:cityLimits",
+  "48021:flood",
+  "48055:flood",
+  "48209:flood",
+  "48309:flood",
+  "48453:flood",
+  "48491:flood",
 ]);
 
 export const DOLLAR_RAIL_KEYS: ReadonlySet<string> = new Set([

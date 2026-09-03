@@ -122,7 +122,7 @@ import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { refusePayloadAtServe } from "../lib/serveGuards";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
-import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
+import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
@@ -633,7 +633,7 @@ brokerageNodeFacetsRouter.get(
         cadRollOverlay,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
-        loadFloodHazardFactAtom(parcelNodeId),
+        loadFloodHazardFactForServe(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
         loadSpecialDistrictFactForServe(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
