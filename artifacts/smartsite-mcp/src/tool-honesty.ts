@@ -803,9 +803,28 @@ export type StreetSearchRefusalCode =
   | "bare_street_unbounded"
   | "bare_street_not_a_street";
 
+/**
+ * P-106 constraint-search refusals. Same posture as the five above: the
+ * producer looked at the request and answered honestly. `constraint_rail_
+ * unmeasured` is the one that carries a number, and that number is the whole
+ * point of the refusal, so `detail` is preserved on the way through rather
+ * than dropped into the message string.
+ */
+export type ConstraintSearchRefusalCode =
+  | "constraint_bound_missing"
+  | "constraint_county_out_of_scope"
+  | "constraint_single_address"
+  | "constraint_filters_missing"
+  | "constraint_rail_unknown"
+  | "constraint_op_unsupported"
+  | "constraint_cap_invalid"
+  | "constraint_rail_unmeasured"
+  | "constraint_projection_missing";
+
 export type PlaceSearchRefusalCode =
   | RadiusSearchRefusalCode
-  | StreetSearchRefusalCode;
+  | StreetSearchRefusalCode
+  | ConstraintSearchRefusalCode;
 
 const PLACE_SEARCH_REFUSAL_CODES: readonly PlaceSearchRefusalCode[] = [
   "radius_invalid",
@@ -813,6 +832,15 @@ const PLACE_SEARCH_REFUSAL_CODES: readonly PlaceSearchRefusalCode[] = [
   "radius_unbounded",
   "bare_street_unbounded",
   "bare_street_not_a_street",
+  "constraint_bound_missing",
+  "constraint_county_out_of_scope",
+  "constraint_single_address",
+  "constraint_filters_missing",
+  "constraint_rail_unknown",
+  "constraint_op_unsupported",
+  "constraint_cap_invalid",
+  "constraint_rail_unmeasured",
+  "constraint_projection_missing",
 ];
 
 function isPlaceSearchRefusalCode(
@@ -829,6 +857,13 @@ export type DeclaredPlaceSearchRefusal = {
   reason: PlaceSearchRefusalCode;
   message: string;
   reasonDisplayText: string;
+  /**
+   * The producer's own structured evidence for the refusal, passed through
+   * verbatim when present. `constraint_rail_unmeasured` carries the measured
+   * percentage here; a refusal that names a threshold and hides the number it
+   * was measured against is an assertion, not a determination.
+   */
+  detail?: Record<string, unknown>;
 };
 
 /**
@@ -891,10 +926,15 @@ export function declarePlaceSearchRefusal(
   if (typeof body.message !== "string" || body.message.length === 0) {
     return null;
   }
+  const detail =
+    body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)
+      ? (body.detail as Record<string, unknown>)
+      : undefined;
   return {
     status: "refused",
     reason: body.error,
     message: body.message,
     reasonDisplayText: placeSearchRefusalDisplayText(body.error, vocabulary),
+    ...(detail ? { detail } : {}),
   };
 }

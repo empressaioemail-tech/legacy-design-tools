@@ -1239,7 +1239,7 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
 });
 
 describe("mcp-app registration", () => {
-  it("tools/list stays 13 and only the three host tools carry the ui resource", async () => {
+  it("tools/list stays 14 and only the three host tools carry the ui resource", async () => {
     const server = new McpServer({ name: SERVER_NAME, version: "0.0.1" });
     registerTools(server);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -1247,7 +1247,7 @@ describe("mcp-app registration", () => {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(13);
+    expect(tools).toHaveLength(14);
     for (const tool of tools) {
       const meta = (tool as { _meta?: { ui?: { resourceUri?: string } } })._meta;
       if ((APP_HOST_TOOLS as readonly string[]).includes(tool.name)) {

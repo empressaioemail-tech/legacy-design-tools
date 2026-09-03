@@ -74,7 +74,7 @@ Endpoint: ${publicHost}/mcp
 Protocol: Streamable HTTP (MCP 2025-03-26)
 Authorization: OAuth 2.1 + PKCE against the Smart Site account (WorkOS AuthKit). Bearer-without-OAuth is refused.
 
-Tools (13):
+Tools (${SMARTSITE_MCP_TOOLS.length}):
 ${toolLines}
 
 Hauska MCP (mcp.hauska.dev) remains the developer catalog gate. This server is product-owned and lists only Smart Site tools.
