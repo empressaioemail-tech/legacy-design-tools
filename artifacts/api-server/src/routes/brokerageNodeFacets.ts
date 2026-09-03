@@ -144,7 +144,10 @@ import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
 import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
 import {
   attachVerdictLayersToFacets,
+  attachCadRollOverlaysToFacets,
 } from "../lib/structuralFactToFacetsWire";
+import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
+import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { enrichFacetsResponseWithRegistry } from "@workspace/instrument-registry";
 import {
   authenticatedBrokerageUserId,
@@ -613,7 +616,9 @@ brokerageNodeFacetsRouter.get(
     let boundaryEdgeFact;
     let ownerFactLoaded;
     let structuralFact;
+    let cadRollOverlay;
     try {
+      const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
         snapshot,
         floodHazardFact,
@@ -625,6 +630,7 @@ brokerageNodeFacetsRouter.get(
         boundaryEdgeFact,
         ownerFactLoaded,
         structuralFact,
+        cadRollOverlay,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -638,6 +644,20 @@ brokerageNodeFacetsRouter.get(
           ? loadOwnerFactAtom(parcelNodeId)
           : Promise.resolve(null),
         loadStructuralFactAtom(parcelNodeId),
+        // PARCEL-B-SLATE2: a malformed parcelNodeId already 400'd above this
+        // handler's own reachable code, but parseParcelNodeId is defensive
+        // regardless -- a null parse resolves every rail to "keep legacy"
+        // rather than throwing mid-Promise.all.
+        parsedForOverlay
+          ? resolveCadRollOverlaysForServe(parsedForOverlay.countyFips, parsedForOverlay.propId)
+          : Promise.resolve({
+              marketValue: null,
+              assessedValue: null,
+              landValue: null,
+              improvementValue: null,
+              livingAreaSqft: null,
+              yearBuilt: null,
+            }),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -686,10 +706,14 @@ brokerageNodeFacetsRouter.get(
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: attachVerdictLayersToFacets(
-        snapshot.facets as Record<string, unknown>,
-        structuralFact,
-        zoningVerdict,
+      facets: attachCadRollOverlaysToFacets(
+        attachVerdictLayersToFacets(
+          snapshot.facets as Record<string, unknown>,
+          structuralFact,
+          zoningVerdict,
+          cadRollOverlay.livingAreaSqft,
+        ),
+        cadRollOverlay,
       ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying

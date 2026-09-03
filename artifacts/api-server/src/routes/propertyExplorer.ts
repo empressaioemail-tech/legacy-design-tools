@@ -61,7 +61,10 @@ import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
+import { structuralFactWithParcelRecordOverlay } from "../lib/structuralFactResolve";
 import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
+import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
+import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
@@ -146,15 +149,17 @@ function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
 async function assembleNodeBriefBody(
   parcelNodeId: string,
 ): Promise<Record<string, unknown> | null> {
+  const parsedForOverlay = parseParcelNodeId(parcelNodeId);
   const [
     snapshot,
     floodHazardFact,
     boundaryFact,
     pipelineFact,
     wellFact,
-    structuralFact,
+    structuralFactLegacy,
     specialDistrictFact,
     parcelRecordFloodFact,
+    cadRollOverlay,
   ] = await Promise.all([
     loadBakedNodeFacetSnapshot(parcelNodeId),
     loadFloodHazardFactForServe(parcelNodeId),
@@ -164,7 +169,23 @@ async function assembleNodeBriefBody(
     loadStructuralFactAtom(parcelNodeId),
     loadSpecialDistrictFactForServe(parcelNodeId),
     loadParcelRecordFloodFact(parcelNodeId),
+    // PARCEL-B-SLATE2: livingAreaSqft + yearBuilt overlay, merged onto the
+    // legacy structural read below rather than a whole-object swap.
+    parsedForOverlay
+      ? resolveCadRollOverlaysForServe(parsedForOverlay.countyFips, parsedForOverlay.propId)
+      : Promise.resolve({
+          marketValue: null,
+          assessedValue: null,
+          landValue: null,
+          improvementValue: null,
+          livingAreaSqft: null,
+          yearBuilt: null,
+        }),
   ]);
+  const structuralFact = structuralFactWithParcelRecordOverlay(structuralFactLegacy, {
+    livingAreaSqft: cadRollOverlay.livingAreaSqft,
+    yearBuilt: cadRollOverlay.yearBuilt,
+  });
   if (!snapshot) return null;
   const root = asRecord(snapshot.facets);
   const bakedAt =

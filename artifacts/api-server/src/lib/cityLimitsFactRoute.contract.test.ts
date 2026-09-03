@@ -50,7 +50,11 @@ describe("cityLimitsFact inspect wire (file contract)", () => {
     expect(load).toBeGreaterThan(0);
     expect(verdict).toBeGreaterThan(load);
     expect(enrich).toBeGreaterThan(verdict);
-    expect(routeSrc).toMatch(/attachVerdictLayersToFacets\([\s\S]*?zoningVerdict,\s*\)/);
+    // PARCEL-B-SLATE2 added a 4th argument (the livingAreaSqft parcel_record
+    // overlay) after zoningVerdict -- the invariant this asserts is that
+    // zoningVerdict is passed in the correct (third) position, not that it
+    // is literally the call's last argument.
+    expect(routeSrc).toMatch(/attachVerdictLayersToFacets\([\s\S]*?zoningVerdict,\s*[\s\S]*?\)/);
     for (const rel of ["verdictLayerServe.ts", "landUseFactVerdict.ts", "structuralFactToFacetsWire.ts", "cityLimitsFactRead.ts", "cityLimitsFactServeCutover.ts", "cityLimitsFactFromParcelRecord.ts"]) {
       const src = readFileSync(join(here, rel), "utf8");
       // The only mentions of situsCity in the serve modules are the comments saying it is never an input.
