@@ -1247,7 +1247,7 @@ describe("mcp-app registration", () => {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(14);
+    expect(tools).toHaveLength(16);
     for (const tool of tools) {
       const meta = (tool as { _meta?: { ui?: { resourceUri?: string } } })._meta;
       if ((APP_HOST_TOOLS as readonly string[]).includes(tool.name)) {
