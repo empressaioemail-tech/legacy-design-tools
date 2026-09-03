@@ -77,6 +77,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // No FK chain touches it besides `users`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant.
   "pe_workbench_state",
+  // P-106 constraint search - the projection the constraint route READS.
+  // No route writes it (the build job does), but a test that seeds it must
+  // not leak rows into the next one, and the "if a test touches it, it is in
+  // this list" invariant is the same invariant either way.
+  "pe_parcel_constraint_index",
+  "pe_parcel_constraint_index_builds",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",

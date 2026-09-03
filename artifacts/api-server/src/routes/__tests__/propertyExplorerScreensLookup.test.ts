@@ -33,19 +33,52 @@ vi.mock("@workspace/db", () => ({
   peScreenRows: {},
 }));
 
-vi.mock("../../lib/peEntitlement", () => ({
-  PE_FREE_CHAT_MESSAGE_LIMIT: 3,
-  createPePropertyUnlock: vi.fn(),
-  getPeFreeChatMessagesUsed: vi.fn(),
-  hasPeDevPaidBypass: vi.fn(async () => false),
-  isPePropertyEntitled: vi.fn(async () => true),
-  requirePeAuthenticated: (_req: Request, _res: Response, next: NextFunction) =>
-    next(),
-  requirePePaidOrPropertyUnlocked:
-    () => (_req: Request, _res: Response, next: NextFunction) => next(),
-  resolvePeEntitlement: vi.fn(),
-  resolvePeOwnerUserId: () => "user-screens-lookup",
+/**
+ * INVERTED 2026-09-02 (P-101), not deleted.
+ *
+ * `resolvePeEntitlement` was `vi.fn()` returning undefined, which pinned the
+ * fact that NOTHING on the screens path read a tier: any in-handler tier read
+ * would have thrown on `undefined`. The operator ruling of 2026-08-31 makes a
+ * tier read mandatory on the two POST routes, so the stub is replaced by a
+ * real snapshot the tests move, and the file now asserts what the tier read
+ * DOES rather than that there is none.
+ *
+ * The mock spreads the REAL module. `peStudioGate` imports
+ * `subscriptionTierGrantsStudio` from here, and hand-writing that export in
+ * this factory would let one editor satisfy both sides of the predicate — the
+ * internal-consistency shape the 2026-08-31 amendment named when it found
+ * three copies of that function with no divergence test between them.
+ */
+const entitlementState = vi.hoisted(() => ({
+  snapshot: {
+    tier: "paid" as "free" | "paid",
+    subscriptionTier: "studio" as "solo" | "studio" | "team" | null,
+    tenantId: "default",
+    userId: "user-screens-lookup" as string | null,
+    authenticated: true,
+    devRole: false,
+    entitlementSource: "stripe_sub" as string | null,
+    seatsPurchased: null as number | null,
+    billingInterval: null as string | null,
+  },
 }));
+
+vi.mock("../../lib/peEntitlement", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../lib/peEntitlement")>();
+  return {
+    ...actual,
+    requirePeAuthenticated: (
+      _req: Request,
+      _res: Response,
+      next: NextFunction,
+    ) => next(),
+    requirePePaidOrPropertyUnlocked:
+      () => (_req: Request, _res: Response, next: NextFunction) => next(),
+    resolvePeEntitlement: vi.fn(async () => entitlementState.snapshot),
+    resolvePeOwnerUserId: () => "user-screens-lookup",
+  };
+});
 
 vi.mock("../../lib/peScreenSaveDb", async () => {
   const { MemoryScreenSaveStore } = await import("../../lib/peScreenSaveMemory");
@@ -284,5 +317,92 @@ describe("POST /property-explorer/v1/screens with two spellings of one parcel (B
     expect(store.rows[0]!.query).toBe(CV);
     expect(fakes.resolver).toHaveBeenCalledWith(CV);
     expect(fakes.resolver).toHaveBeenCalledWith(COVE);
+  });
+});
+
+/**
+ * P-101 — the tier read this file used to prove was absent.
+ *
+ * The old `resolvePeEntitlement: vi.fn()` stub existed so that any handler
+ * reading a tier would throw. It was a correct pin on a real fact and it is
+ * now a pin on the opposite fact: the row-add path reads the rung and refuses
+ * a non-Studio caller before the parcel lookup is consulted. Delete
+ * `requirePeStudioScreens` from the rows route and this block fails.
+ */
+describe("P-101: adding a row is Studio, and the refusal precedes the lookup", () => {
+  beforeEach(() => {
+    store.screens = [];
+    store.rows = [];
+    store.saves = [];
+    fakes.lookup.mockReset();
+    fakes.resolver.mockReset();
+    fakes.lookup.mockImplementation(async (id) =>
+      id === HIT ? { parcelNodeId: HIT, label: "910 PINE" } : null,
+    );
+    fakes.resolver.mockImplementation(async () => []);
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "paid",
+      subscriptionTier: "studio",
+    };
+  });
+
+  it("a free caller is refused 402 and the parcel lookup is never called", async () => {
+    const app = buildApp();
+    const screenId = await createEmptyScreen(app);
+    fakes.lookup.mockClear();
+
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "free",
+      subscriptionTier: null,
+      entitlementSource: null,
+    };
+
+    const res = await request(app)
+      .post(`/api/property-explorer/v1/screens/${screenId}/rows`)
+      .send({ parcelNodeId: HIT, source: "walk" });
+
+    expect(res.status).toBe(402);
+    expect(res.body).toMatchObject({
+      error: "upgrade_required",
+      reason: "studio_screens",
+      tier: "free",
+      subscriptionTier: null,
+    });
+    // Refused at the gate, so no upstream work happened and nothing was stored.
+    expect(fakes.lookup).not.toHaveBeenCalled();
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("a solo caller is refused; a studio caller is served on the same request", async () => {
+    const app = buildApp();
+    const screenId = await createEmptyScreen(app);
+
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "paid",
+      subscriptionTier: "solo",
+    };
+    const refused = await request(app)
+      .post(`/api/property-explorer/v1/screens/${screenId}/rows`)
+      .send({ parcelNodeId: HIT, source: "walk" });
+    expect(refused.status).toBe(402);
+    expect(refused.body.subscriptionTier).toBe("solo");
+    expect(store.rows).toHaveLength(0);
+
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      subscriptionTier: "studio",
+    };
+    const served = await request(app)
+      .post(`/api/property-explorer/v1/screens/${screenId}/rows`)
+      .send({ parcelNodeId: HIT, source: "walk" });
+    expect(served.status).toBe(200);
+    expect(served.body.row).toMatchObject({
+      parcelNodeId: HIT,
+      resolution: "resolved",
+    });
+    expect(store.rows).toHaveLength(1);
   });
 });

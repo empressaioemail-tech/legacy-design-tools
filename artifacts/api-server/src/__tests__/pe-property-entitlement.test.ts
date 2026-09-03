@@ -300,6 +300,12 @@ describe("GET /entitlement without a parcel (P-98 account scope)", () => {
       ...MAIN_BASE_KEYS,
       "seatsPurchased",
       "billingInterval",
+      // A-062 appends hasBillingAccount to the ACCOUNT body only, so the
+      // with-parcel contract the PE BFF pins does not move. Deliberate
+      // widening of the account shape, not a test loosened to go green:
+      // this still asserts an EXACT list in an EXACT order, so removing or
+      // reordering anything ahead of it still fails.
+      "hasBillingAccount",
     ]);
     expect(res.body.tier).toBe("paid");
     expect(res.body.seatsPurchased).toBe(5);

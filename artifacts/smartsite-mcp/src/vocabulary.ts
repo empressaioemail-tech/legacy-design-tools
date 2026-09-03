@@ -275,6 +275,69 @@ export const VOCABULARY: readonly VocabularyEntry[] = [
     meaning:
       "serve_refused reason (street): the query reads as a house-number-prefixed address, not a bare street name. Use find_parcel's plain query (or near) for one specific address instead of street.",
   },
+  /**
+   * P-106. find_parcels' declared refusals, same 422 serve_refused envelope as
+   * the five above. Every one of these is the producer answering honestly
+   * rather than failing. No numeric threshold appears in a meaning below: the
+   * county list and the unmeasured ceiling live in api-server, which this
+   * package has no dependency on and cannot verify was not changed since this
+   * was written. The one number that matters travels in the refusal's own
+   * `detail`, measured on the same snapshot as the answer would have been.
+   */
+  {
+    token: "constraint_bound_missing",
+    displayText: "A county is required",
+    meaning:
+      "serve_refused reason (find_parcels): no geographic bound was given. There is no statewide constraint search, because incorporation is dispositioned for a small share of Texas parcels and a statewide answer would imply coverage that does not exist. Give countyFips.",
+  },
+  {
+    token: "constraint_county_out_of_scope",
+    displayText: "No constraint index for that county",
+    meaning:
+      "serve_refused reason (find_parcels): the projection has never been built for that county. Refused rather than answered with an empty set, because an empty set reads as \"no parcels match\" and this is not that claim.",
+  },
+  {
+    token: "constraint_single_address",
+    displayText: "That is a lookup, not a search",
+    meaning:
+      "serve_refused reason (find_parcels): the query reads as one street address. Use find_parcel, singular, for a single address; find_parcels answers questions across parcels.",
+  },
+  {
+    token: "constraint_filters_missing",
+    displayText: "At least one filter is required",
+    meaning:
+      "serve_refused reason (find_parcels): a county with no filter is not a search. Give at least one {rail, op, value}.",
+  },
+  {
+    token: "constraint_rail_unknown",
+    displayText: "Unknown rail",
+    meaning:
+      "serve_refused reason (find_parcels): the named rail is not one this search carries. The refusal lists the rails that are.",
+  },
+  {
+    token: "constraint_op_unsupported",
+    displayText: "That operator does not apply to that rail",
+    meaning:
+      "serve_refused reason (find_parcels): an ordered comparison on a rail with no ordered value, a categorical match on a rail with no categorical value, or a flag test on a rail with no flag. A caller-input problem on this call, not a claim about the parcels.",
+  },
+  {
+    token: "constraint_cap_invalid",
+    displayText: "Invalid cap",
+    meaning:
+      "serve_refused reason (find_parcels): cap was outside the range this search allows.",
+  },
+  {
+    token: "constraint_rail_unmeasured",
+    displayText: "Too little of that rail is measured to search on it",
+    meaning:
+      "serve_refused reason (find_parcels): the filtered rail is unmeasured on more of the county than the configured ceiling allows, so a search over it would evaluate a small fraction of the county while presenting itself as a search. detail carries the measured percentage, the parcel counts it came from, and the ceiling. Not a claim that no parcels match.",
+  },
+  {
+    token: "constraint_projection_missing",
+    displayText: "The projection has no rows for that county",
+    meaning:
+      "serve_refused reason (find_parcels): the constraint index holds no parcels for that county, so there is nothing to filter. Refused rather than reported as zero matches, because zero matches and never built are different facts.",
+  },
 ] as const;
 
 export const VOCABULARY_RESOURCE_URI = "docs://smartsite/vocabulary-p91v3.json";

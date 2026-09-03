@@ -44,23 +44,62 @@ vi.mock("@workspace/db", () => ({
   peScreenRows: {},
 }));
 
-vi.mock("../../lib/peEntitlement", () => ({
-  PE_FREE_CHAT_MESSAGE_LIMIT: 3,
-  createPePropertyUnlock: vi.fn(),
-  getPeFreeChatMessagesUsed: vi.fn(),
-  hasPeDevPaidBypass: vi.fn(async () => false),
-  isPePropertyEntitled: vi.fn(async () => true),
-  requirePeAuthenticated: (_req: Request, _res: Response, next: NextFunction) =>
-    next(),
-  // The paid gate must never be consulted on the screens routes; a call here
-  // is a defect (the board is the intake surface).
-  requirePePaidOrPropertyUnlocked: () =>
-    (_req: Request, res: Response, _next: NextFunction) => {
-      res.status(402).json({ error: "paid_gate_reached_on_screens_route" });
-    },
-  resolvePeEntitlement: vi.fn(),
-  resolvePeOwnerUserId: () => "user-screens-stubs",
+/**
+ * INVERTED 2026-09-02 (P-101), not deleted.
+ *
+ * This mock previously declared that "the paid gate must never be consulted on
+ * the screens routes; a call here is a defect", and made a call fail loudly.
+ * The operator ruling of 2026-08-31 reverses that premise for the WRITE side:
+ * building a screen is the Studio job, and the two POST routes now carry
+ * `requirePeStudioScreens`. The old assertion is rewritten to assert the new
+ * behaviour rather than removed, so the file still says what the routes are
+ * required to do.
+ *
+ * The `requirePePaidOrPropertyUnlocked` trap stays exactly as it was. That gate
+ * is still wrong on these routes: screens are a Studio question, not a
+ * per-property unlock question, and a call to it here is still a defect.
+ *
+ * The mock spreads the REAL module rather than hand-writing its exports.
+ * `peStudioGate` imports `subscriptionTierGrantsStudio` from here, and a
+ * hand-written copy in this factory would be a test that satisfies both sides
+ * of its own predicate — the internal-consistency shape the 2026-08-31
+ * amendment named when it found three copies of that function. Only the three
+ * request-scoped seams are overridden.
+ */
+const entitlementState = vi.hoisted(() => ({
+  snapshot: {
+    tier: "paid" as "free" | "paid",
+    subscriptionTier: "studio" as "solo" | "studio" | "team" | null,
+    tenantId: "default",
+    userId: "user-screens-stubs" as string | null,
+    authenticated: true,
+    devRole: false,
+    entitlementSource: "stripe_sub" as string | null,
+    seatsPurchased: null as number | null,
+    billingInterval: null as string | null,
+  },
 }));
+
+vi.mock("../../lib/peEntitlement", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../lib/peEntitlement")>();
+  return {
+    ...actual,
+    requirePeAuthenticated: (
+      _req: Request,
+      _res: Response,
+      next: NextFunction,
+    ) => next(),
+    // Still a defect on these routes: a per-property unlock cannot answer a
+    // Studio question. Unchanged by P-101.
+    requirePePaidOrPropertyUnlocked: () =>
+      (_req: Request, res: Response, _next: NextFunction) => {
+        res.status(402).json({ error: "paid_gate_reached_on_screens_route" });
+      },
+    resolvePeEntitlement: vi.fn(async () => entitlementState.snapshot),
+    resolvePeOwnerUserId: () => "user-screens-stubs",
+  };
+});
 
 vi.mock("../../lib/peScreenSaveDb", async () => {
   const { MemoryScreenSaveStore } = await import("../../lib/peScreenSaveMemory");
@@ -379,5 +418,155 @@ describe("GET /property-explorer/v1/screens (bare list) is unchanged", () => {
       updatedAt: expect.any(String),
     });
     expect(fakes.snapshot).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * P-101 — the assertion this file used to make in reverse.
+ *
+ * Before 2026-08-31 this file declared that a paid gate on the screens routes
+ * was a defect. The operator ruling split the two halves: BUILDING a screen is
+ * the Studio job, READING one is not. These cases are what makes that gate
+ * falsifiable — remove `requirePeStudioScreens` from either POST and this
+ * block fails. The suite that surrounds it exercises the same routes with a
+ * Studio caller, so both directions are covered in one file.
+ */
+describe("P-101: building a screen is Studio, reading one is not", () => {
+  beforeEach(() => {
+    resetFakes();
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "paid",
+      subscriptionTier: "studio",
+    };
+  });
+
+  function goFree(): void {
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "free",
+      subscriptionTier: null,
+      entitlementSource: null,
+    };
+  }
+
+  it("a free caller is refused on POST /screens with a named reason, and nothing is stored", async () => {
+    goFree();
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "walk", queries: [OK], source: "pasted" });
+
+    expect(res.status).toBe(402);
+    expect(res.body).toMatchObject({
+      error: "upgrade_required",
+      reason: "studio_screens",
+      tier: "free",
+      subscriptionTier: null,
+    });
+    // The reason is a sentence that names the capability, not a bare code.
+    expect(res.body.message).toMatch(/screen/i);
+    // Refused BEFORE the handler: no resolver call, no row, no screen.
+    expect(fakes.resolver).not.toHaveBeenCalled();
+    expect(store.screens).toHaveLength(0);
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("a solo caller is refused too — Solo is a paid rung and still not Studio", async () => {
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "paid",
+      subscriptionTier: "solo",
+    };
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "walk", queries: [OK], source: "pasted" });
+
+    expect(res.status).toBe(402);
+    expect(res.body).toMatchObject({
+      error: "upgrade_required",
+      reason: "studio_screens",
+      tier: "paid",
+      subscriptionTier: "solo",
+    });
+    expect(store.screens).toHaveLength(0);
+  });
+
+  it("a free caller is refused on POST /screens/:id/rows", async () => {
+    const app = buildApp();
+    const created = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "walk", queries: [OK], source: "pasted" });
+    expect(created.status).toBe(200);
+    const screenId = created.body.screen.id as string;
+    const rowsBefore = store.rows.length;
+
+    goFree();
+    const res = await request(app)
+      .post(`/api/property-explorer/v1/screens/${screenId}/rows`)
+      .send({ parcelNodeId: OK2, source: "map" });
+
+    expect(res.status).toBe(402);
+    expect(res.body).toMatchObject({
+      error: "upgrade_required",
+      reason: "studio_screens",
+    });
+    expect(store.rows).toHaveLength(rowsBefore);
+  });
+
+  it("a free caller is SERVED on both GET routes: empty list, and the screen it cannot add to", async () => {
+    const app = buildApp();
+    const created = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "walk", queries: [OK], source: "pasted" });
+    expect(created.status).toBe(200);
+    const screenId = created.body.screen.id as string;
+
+    goFree();
+    const bare = await request(app).get("/api/property-explorer/v1/screens");
+    expect(bare.status).toBe(200);
+    expect(Array.isArray(bare.body.screens)).toBe(true);
+
+    const one = await request(app).get(
+      `/api/property-explorer/v1/screens/${screenId}`,
+    );
+    expect(one.status).toBe(200);
+    expect(one.body.screen.id).toBe(screenId);
+  });
+
+  it("a team caller builds screens like a studio caller", async () => {
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      tier: "paid",
+      subscriptionTier: "team",
+    };
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "walk", queries: [OK], source: "pasted" });
+    expect(res.status).toBe(200);
+    expect(res.body.screen.rows).toHaveLength(1);
+  });
+
+  it("the gate fails closed on an unauthenticated caller: 401, never a 402 naming a rung it has no account to hold", async () => {
+    goFree();
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      authenticated: false,
+      userId: null,
+    };
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/property-explorer/v1/screens")
+      .send({ name: "walk", queries: [OK], source: "pasted" });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "authentication_required" });
+    entitlementState.snapshot = {
+      ...entitlementState.snapshot,
+      authenticated: true,
+      userId: "user-screens-stubs",
+    };
   });
 });

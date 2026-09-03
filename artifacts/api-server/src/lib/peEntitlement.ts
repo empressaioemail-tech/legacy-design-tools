@@ -68,6 +68,21 @@ export type PeEntitlementSnapshot = {
    * as monthly would upsell annual subscribers.
    */
   billingInterval: PeBillingInterval | null;
+  /**
+   * Does this account have a Stripe customer at all (A-062)?
+   *
+   * A BOOLEAN, DELIBERATELY. The customer id itself never leaves the server:
+   * the portal route resolves it from the session and REFUSES a caller-supplied
+   * one, so putting the id on a wire the client can read would hand every
+   * caller the exact value the route is built to reject. The client needs one
+   * bit — is there a billing account to manage — and that is the bit.
+   *
+   * FALSE FOR ANONYMOUS, and false is correct there rather than unknown: an
+   * anonymous caller has no account, so there is nothing to manage. The
+   * account body is the only response that carries this field; the anonymous
+   * and with-parcel bodies are unchanged.
+   */
+  hasBillingAccount: boolean;
 };
 
 /**
@@ -114,6 +129,9 @@ export async function resolvePeEntitlement(
       // Absent, not zero and not "month".
       seatsPurchased: null,
       billingInterval: null,
+      // Not "unknown": there is no account, so there is definitively no
+      // billing account to manage. A positive determination, not a default.
+      hasBillingAccount: false,
     };
   }
   const row = await getPeEntitlementRow(userId);
@@ -145,6 +163,13 @@ export async function resolvePeEntitlement(
     // fact, and this column exists precisely to keep those out.
     seatsPurchased: row.seatsPurchased,
     billingInterval: row.billingInterval,
+    // A-062. Derived from the same row read the rest of this snapshot comes
+    // from, so Settings cannot be told "you have a billing account" by one
+    // query and refused a portal by another. A blank-string customer id is
+    // NOT a billing account: the same trim the portal route's lookup applies,
+    // so the two cannot disagree about what counts as present.
+    hasBillingAccount:
+      typeof row.stripeCustomerId === "string" && row.stripeCustomerId.trim() !== "",
   };
 }
 
@@ -231,11 +256,24 @@ export function peEntitlementAccountBody(snap: PeEntitlementSnapshot): ReturnTyp
 > & {
   seatsPurchased: number | null;
   billingInterval: PeBillingInterval | null;
+  hasBillingAccount: boolean;
 } {
   return {
     ...peEntitlementBaseBody(snap),
     seatsPurchased: snap.seatsPurchased,
     billingInterval: snap.billingInterval,
+    /**
+     * A-062. Settings > Plan renders a real "Manage billing / Cancel" control
+     * ONLY when this is true, and the honest "no billing history" row when it
+     * is false. Without it the panel would either show a button that always
+     * refuses, or probe the portal route to find out — and a probe would be a
+     * write-shaped request whose only purpose is to read.
+     *
+     * ADDED ONLY TO THE ACCOUNT BODY. `peEntitlementBaseBody` stays
+     * byte-identical, so the anonymous and with-parcel responses are unchanged
+     * and the per-property client is untouched.
+     */
+    hasBillingAccount: snap.hasBillingAccount,
   };
 }
 

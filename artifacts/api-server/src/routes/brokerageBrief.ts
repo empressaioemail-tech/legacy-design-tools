@@ -141,6 +141,7 @@ import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildable
 import { brokeragePlaceSitusSearchRouter } from "./brokeragePlaceSitusSearch";
 import { brokeragePlaceRadiusSearchRouter } from "./brokeragePlaceRadiusSearch";
 import { brokeragePlaceStreetSearchRouter } from "./brokeragePlaceStreetSearch";
+import { brokeragePlaceConstraintSearchRouter } from "./brokeragePlaceConstraintSearch";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
 import { propertyExplorerBillingRouter } from "./propertyExplorerBilling";
@@ -327,6 +328,11 @@ brokerageV1.use("/place", brokeragePlaceBuildableEnvelopeRouter);
 brokerageV1.use("/place", brokeragePlaceSitusSearchRouter);
 brokerageV1.use("/place", brokeragePlaceRadiusSearchRouter);
 brokerageV1.use("/place", brokeragePlaceStreetSearchRouter);
+/**
+ * P-106 constraint search: a question ACROSS parcels, answered as three sets.
+ * Peer of radius-search and street-search, behind the same service gate.
+ */
+brokerageV1.use("/place", brokeragePlaceConstraintSearchRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
