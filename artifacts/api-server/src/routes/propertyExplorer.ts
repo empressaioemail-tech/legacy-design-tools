@@ -55,9 +55,7 @@ import {
   isValidParcelNodeId,
   loadBakedNodeFacetSnapshot,
 } from "./brokerageNodeFacets";
-import {
-  loadFloodHazardFactAtom,
-} from "../lib/floodHazardFactRead";
+import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadParcelRecordFloodFact } from "../lib/parcelRecordFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
@@ -159,7 +157,7 @@ async function assembleNodeBriefBody(
     parcelRecordFloodFact,
   ] = await Promise.all([
     loadBakedNodeFacetSnapshot(parcelNodeId),
-    loadFloodHazardFactAtom(parcelNodeId),
+    loadFloodHazardFactForServe(parcelNodeId),
     loadBoundaryEdgeFactAtom(parcelNodeId),
     loadPipelineFactAtom(parcelNodeId),
     loadWellFactForServe(parcelNodeId),
@@ -209,7 +207,7 @@ async function assembleNodeBriefBody(
 async function assembleStubBody(parcelNodeId: string) {
   const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
   if (!snapshot) return null;
-  const floodHazardFact = await loadFloodHazardFactAtom(parcelNodeId);
+  const floodHazardFact = await loadFloodHazardFactForServe(parcelNodeId);
   return composeSmartSiteStub({
     parcelNodeId,
     facets: snapshot.facets,
