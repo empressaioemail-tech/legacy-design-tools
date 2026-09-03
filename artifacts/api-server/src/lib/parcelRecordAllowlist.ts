@@ -52,6 +52,10 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * program county passes the gate live (gate-rail-cli.mjs, verified
  * unaccountedCount=0 for all five; Caldwell excluded, its known pre-
  * existing txgio geometry gap, stays legacy per this card's own premise 4).
+ * LIVE IN PRODUCTION 2026-09-03T04:53Z.
+ *
+ * specialDistricts, same 5 counties, same reasoning (F-01, PARCEL-B-SLATE1,
+ * 2026-09-03): Caldwell also verdict=excluded for specialDistricts.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -59,6 +63,11 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:wells",
   "48453:wells",
   "48491:wells",
+  "48021:specialDistricts",
+  "48209:specialDistricts",
+  "48309:specialDistricts",
+  "48453:specialDistricts",
+  "48491:specialDistricts",
 ]);
 
 export const DOLLAR_RAIL_KEYS: ReadonlySet<string> = new Set([
