@@ -23,17 +23,20 @@ import {
   resolveAllowlistState,
 } from "./parcelRecordAllowlist";
 
-describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLimits + flood (all 6, incl. Caldwell)", () => {
+const ALL_SIX_COUNTIES = ["48021", "48055", "48209", "48309", "48453", "48491"];
+const NON_CALDWELL_COUNTIES = ["48021", "48209", "48309", "48453", "48491"];
+const SLATE2_RAIL_KEYS = ["marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt"];
+
+describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLimits + flood + six dollar/structural rails (all 6, incl. Caldwell)", () => {
   it("exactly the five non-Caldwell counties are slated for wells and specialDistricts", () => {
-    for (const county of ["48021", "48209", "48309", "48453", "48491"]) {
+    for (const county of NON_CALDWELL_COUNTIES) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:wells`)).toBe(true);
       expect(PARCEL_RECORD_SLATE.has(`${county}:specialDistricts`)).toBe(true);
     }
   });
 
   it("all six counties, INCLUDING Caldwell, are slated for cityLimits and flood", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(22);
-    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+    for (const county of ALL_SIX_COUNTIES) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:cityLimits`)).toBe(true);
       expect(PARCEL_RECORD_SLATE.has(`${county}:flood`)).toBe(true);
     }
@@ -46,16 +49,31 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     expect(PARCEL_RECORD_SLATE.has("48055:flood")).toBe(true);
   });
 
-  it("no other rail is in the slate -- valueHistory (and every dollar rail) stays legacy for every county", () => {
-    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+  it("PARCEL-B-SLATE2: all six counties, INCLUDING Caldwell, are slated for all six dollar/structural rails -- these rails have no txgio-geometry dependency, so Caldwell's known gap does not apply here", () => {
+    for (const county of ALL_SIX_COUNTIES) {
+      for (const rail of SLATE2_RAIL_KEYS) {
+        expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(true);
+      }
+    }
+  });
+
+  it("the slate has exactly 58 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails)", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(58);
+  });
+
+  it("no other rail is in the slate -- valueHistory stays legacy for every county", () => {
+    for (const county of ALL_SIX_COUNTIES) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:valueHistory`)).toBe(false);
     }
   });
 
-  it("no dollar rail is ever in the slate, even accidentally (hard requirement pending PARCEL-S6-COLLISION)", () => {
+  it("DOLLAR_RAIL_KEYS is a five-member historical list (yearBuilt is deliberately excluded -- a rail, not a dollar amount) and every member IS now in the slate", () => {
+    expect([...DOLLAR_RAIL_KEYS].sort()).toEqual(
+      ["assessedValue", "improvementValue", "landValue", "livingAreaSqft", "marketValue"].sort(),
+    );
     for (const rail of DOLLAR_RAIL_KEYS) {
-      expect(PARCEL_RECORD_SLATE.has(`48021:${rail}`)).toBe(false);
-      expect(PARCEL_RECORD_SLATE.has(`48491:${rail}`)).toBe(false);
+      expect(PARCEL_RECORD_SLATE.has(`48021:${rail}`)).toBe(true);
+      expect(PARCEL_RECORD_SLATE.has(`48491:${rail}`)).toBe(true);
     }
   });
 });
@@ -71,8 +89,11 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the sixteen real slated entries", () => {
-    const rails = ["cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn", "assessedValue"];
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the fifty-eight real slated entries", () => {
+    const rails = [
+      "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
+      "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
+    ];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
     for (const county of counties) {
@@ -87,10 +108,12 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       }
     }
     // Falsifier's own falsifier: this loop must actually skip the
-    // twenty-two real slated pairs, not silently cover zero cases because
-    // the skip branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE
-    // ever goes back to empty without this test being updated to match.
-    expect(uncheckedSlatedPairs).toBe(22);
+    // fifty-eight real slated pairs (every one PARCEL_RECORD_SLATE holds,
+    // since this rail list now covers all of them), not silently cover zero
+    // cases because the skip branch is unreachable -- fails loudly if
+    // PARCEL_RECORD_SLATE ever changes without this test being updated.
+    expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
+    expect(uncheckedSlatedPairs).toBe(58);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -126,6 +149,17 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       expect(resolveAllowlistState(county, "flood", { verdict: "refuse" })).toBe("refused");
       expect(resolveAllowlistState(county, "flood", { verdict: "excluded" })).toBe("refused");
       expect(resolveAllowlistState(county, "flood", null)).toBe("legacy");
+    }
+  });
+
+  it("FALSIFIER: all SIX slated pairs for each of the six PARCEL-B-SLATE2 dollar/structural rails (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
+    for (const rail of ["marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt"]) {
+      for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+        expect(resolveAllowlistState(county, rail, { verdict: "pass" })).toBe("record");
+        expect(resolveAllowlistState(county, rail, { verdict: "refuse" })).toBe("refused");
+        expect(resolveAllowlistState(county, rail, { verdict: "excluded" })).toBe("refused");
+        expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
+      }
     }
   });
 
