@@ -232,6 +232,50 @@ export async function createProCheckoutSession(input: {
   return createSubscriptionCheckoutSession({ ...input, tier: "pro" });
 }
 
+/**
+ * THE ONE Stripe Customer Portal call in this codebase (A-062).
+ *
+ * Every portal session — the install-scoped extension seam below and the PE
+ * user-scoped route in `pePaywallStripe.ts` — reaches Stripe through this
+ * function and nothing else. The two seams differ only in HOW THEY RESOLVE A
+ * CUSTOMER, which is the part that must not be shared: the install seam may
+ * create a customer for an install that has none, and the PE route must never
+ * create one (A-062 acceptance item 2). Sharing the HTTP call and splitting
+ * the resolution is the whole point; a second `/billing_portal/sessions`
+ * poster would be a second thing to keep correct.
+ *
+ * `customerId` is a RESOLVED value. This function never looks one up, never
+ * creates one, and never accepts an empty string — an unresolved customer is
+ * the caller's refusal to make, not this function's to paper over.
+ */
+export async function createStripePortalSessionForCustomer(input: {
+  customerId: string;
+  returnUrl: string;
+}): Promise<{ mode: "live"; portalUrl: string }> {
+  const customerId = input.customerId.trim();
+  if (!customerId) {
+    // Fail closed. A blank customer id posted to Stripe is an error at best
+    // and somebody else's portal at worst.
+    throw new Error("Stripe portal session requires a resolved customer id");
+  }
+  const session = await stripePostForm("/billing_portal/sessions", {
+    customer: customerId,
+    return_url: input.returnUrl,
+  });
+
+  // NOT `String(session.url)`. That was the shipped shape and it could not
+  // fail: `String(undefined)` is the seven-character string "undefined",
+  // which is truthy, so the guard below never fired and a Stripe response
+  // carrying no url redirected the customer to a page named "undefined".
+  // Read the field, require it to be a non-empty string, and refuse.
+  const rawUrl = session.url;
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+    throw new Error("Stripe portal session missing url");
+  }
+
+  return { mode: "live", portalUrl: rawUrl };
+}
+
 export async function createBillingPortalSession(input: {
   installId: string;
   returnUrl: string;
@@ -249,15 +293,10 @@ export async function createBillingPortalSession(input: {
   const customerId =
     row.stripeCustomerId ?? (await getOrCreateStripeCustomer(input.installId));
 
-  const session = await stripePostForm("/billing_portal/sessions", {
-    customer: customerId,
-    return_url: input.returnUrl,
+  return createStripePortalSessionForCustomer({
+    customerId,
+    returnUrl: input.returnUrl,
   });
-
-  const portalUrl = String(session.url);
-  if (!portalUrl) throw new Error("Stripe portal session missing url");
-
-  return { mode: "live", portalUrl };
 }
 
 /** Keyless demo path — activates Pro without Stripe keys (smoke / local). */
