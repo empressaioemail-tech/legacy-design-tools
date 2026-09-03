@@ -49,6 +49,18 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // this list" invariant so the activation-event suite starts empty and a
   // count assertion cannot pick up another test's rows.
   "pe_activation_events",
+  // P-100 item 4 -- once-per-account activation milestone. A different table
+  // from `pe_activation_events` and a different subject: that one is per
+  // ladder-rung impression, this one is one row per account per milestone.
+  "pe_account_activations",
+  // P-100 item 3 -- share attribution. Cascades off `users` AND off
+  // `pe_share_grants`, but listed explicitly per the "if a route writes to
+  // it, it's in this list" invariant so a first-touch assertion cannot pick
+  // up another test's row.
+  "pe_share_attributions",
+  // P-100 item 5 -- the refusal ledger. No FK at all (install ids are not
+  // accounts), so nothing else's CASCADE clears it.
+  "gtm_event_refusals",
   "pe_team_members",
   "pe_team_invitations",
   "pe_saved_properties",

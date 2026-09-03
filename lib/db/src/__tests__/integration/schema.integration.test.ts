@@ -190,6 +190,10 @@ describe("lib/db schema integration", () => {
         "findings",
         // GTM observation layer — Property Brief extension consent + events.
         "gtm_consent",
+        // P-100 item 5 — events this system declined to write for want of a
+        // consent row. Sorts before `gtm_events` (`_` < `s`) per
+        // `ORDER BY tablename`.
+        "gtm_event_refusals",
         "gtm_events",
         // OPS-9 S1 onboarding ledger, read-side mirror of hauska-engine's
         // frozen JurisdictionRegistryRow. Sorts before `knowledge_atoms`
@@ -223,6 +227,10 @@ describe("lib/db schema integration", () => {
         // PE USER rather than to `gtm_events`'s install_id. Sorts first in
         // the whole `pe_` block: `pe_ac` < `pe_ai` (`c` < `i`) per
         // `ORDER BY tablename`.
+        // P-100 item 4 — once-per-account activation milestone. A DIFFERENT
+        // subject from `pe_activation_events` (which is per ladder-rung
+        // impression). Sorts before it: `pe_acc` < `pe_act` (`c` < `t`).
+        "pe_account_activations",
         "pe_activation_events",
         // P-87 Claude Sync — MCP clients that have authenticated against
         // this account. Sorts after `pe_activation_events` and before
@@ -241,6 +249,9 @@ describe("lib/db schema integration", () => {
         "pe_screen_rows",
         "pe_screens",
         // P-86 — share grant registry. Resolvable URL is /s/{id}.
+        // P-100 item 3 — which sharer a recipient account belongs to, keyed
+        // on the grant row. Sorts before `pe_share_grants` (`_a` < `_g`).
+        "pe_share_attributions",
         "pe_share_grants",
         "pe_team_invitations",
         "pe_team_members",
