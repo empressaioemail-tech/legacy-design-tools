@@ -6,17 +6,17 @@
  * rather than dormant code nobody calls -- the exact defect the step-5
  * review named for the publish gate, not repeated here for the allowlist.
  *
- * With PARCEL_RECORD_SLATE empty (PARCEL-B-READER's shipped state), the
- * allowlist check below short-circuits to 'legacy' synchronously, in
- * memory, before any I/O -- loadWellFactAtom runs exactly as it did before
- * this file existed, byte-identical, which is what that card's staging
- * probe verified. PARCEL-B-SLATE1 slates (county, "wells") pairs one at a
- * time; the 'record' branch below only becomes reachable for a slated,
- * gate-passing pair.
+ * PARCEL_RECORD_SLATE now carries real (county, "wells") entries
+ * (PARCEL-B-SLATE1's wells cutover) -- the allowlist check below reaches
+ * the verdict store for those pairs and resolves 'record' when the gate
+ * passes. injectedVerdictStore's `undefined` default resolves to the real
+ * env-connected pool via resolveVerdictStore (parcelGateVerdictRead.ts),
+ * not to `null` -- see that function's own comment for why this mattered.
  */
 
 import { resolveAllowlist } from "./parcelRecordAllowlist";
 import { countyFipsFromParcelNodeId } from "./verdictLayerServe";
+import { resolveVerdictStore } from "./parcelGateVerdictRead";
 import { wellFactFromParcelRecord } from "./wellFactFromParcelRecord";
 import { loadWellFactAtom, type WellFactRead } from "./wellFactRead";
 import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
@@ -24,11 +24,9 @@ import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
 const WELLS_RAIL_KEY = "wells";
 
 /**
- * Test/deploy seam for the verdict store this wrapper consults. Not the
- * parcel_record store itself -- that only matters once the 'record' branch
- * is real. `undefined` (the default, and every production path today)
- * means: do not even attempt to configure a store, since the slate is
- * empty and resolveAllowlist never reaches the store for an unslated pair.
+ * Test/deploy seam for the verdict store this wrapper consults.
+ * `undefined` (the default) means: use the real env-resolved pool
+ * (resolveVerdictStore). Tests inject an explicit store or `null`.
  */
 let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
 
@@ -52,7 +50,7 @@ export async function loadWellFactForServe(
     return loadWellFactAtom(parcelNodeId);
   }
   const state = await resolveAllowlist(
-    injectedVerdictStore ?? null,
+    resolveVerdictStore(injectedVerdictStore),
     countyFips,
     WELLS_RAIL_KEY,
   );

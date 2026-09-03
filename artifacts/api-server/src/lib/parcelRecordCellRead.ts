@@ -129,7 +129,15 @@ export function resetParcelRecordQueryableForTests(): void {
   injectedQueryable = undefined;
 }
 
-function parcelRecordQueryableFromEnv(): ParcelRecordQueryable | null {
+/**
+ * Exported for reuse by parcelGateVerdictRead.ts: parcel_record_ro (this
+ * pool's credential) also carries SELECT on parcel_gate_verdict
+ * (PARCEL-B-SLATE1, migration 0010) -- same database, same credential, no
+ * reason for a second connection pool. This is the RAW env-resolved store
+ * only, with no test-injection seam of its own; callers apply their own
+ * injection override first.
+ */
+export function parcelRecordQueryableFromEnv(): ParcelRecordQueryable | null {
   const url = process.env.FACTORY_DATABASE_URL_RO?.trim();
   if (!url) return null;
   if (!sharedPool) {

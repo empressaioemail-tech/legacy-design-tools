@@ -44,11 +44,22 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
 
 /**
  * Code-owned slate of (county, rail) pairs authorized to attempt a
- * parcel_record cutover. Empty on this card by design. Edited only by a
- * dedicated slate card (PARCEL-B-SLATE1 and successors), never by this
- * reader's own logic, never by a gate verdict alone.
+ * parcel_record cutover. Edited only by a dedicated slate card
+ * (PARCEL-B-SLATE1 and successors), never by this reader's own logic,
+ * never by a gate verdict alone.
+ *
+ * wells, 5 counties (F-01, PARCEL-B-SLATE1, 2026-09-03): every non-Caldwell
+ * program county passes the gate live (gate-rail-cli.mjs, verified
+ * unaccountedCount=0 for all five; Caldwell excluded, its known pre-
+ * existing txgio geometry gap, stays legacy per this card's own premise 4).
  */
-export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([]);
+export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
+  "48021:wells",
+  "48209:wells",
+  "48309:wells",
+  "48453:wells",
+  "48491:wells",
+]);
 
 export const DOLLAR_RAIL_KEYS: ReadonlySet<string> = new Set([
   "assessedValue",

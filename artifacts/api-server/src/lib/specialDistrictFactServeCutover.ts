@@ -11,6 +11,7 @@
 
 import { resolveAllowlist } from "./parcelRecordAllowlist";
 import { countyFipsFromParcelNodeId } from "./verdictLayerServe";
+import { resolveVerdictStore } from "./parcelGateVerdictRead";
 import { specialDistrictFactFromParcelRecord } from "./specialDistrictFactFromParcelRecord";
 import {
   loadSpecialDistrictFactAtom,
@@ -20,7 +21,12 @@ import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
 
 const SPECIAL_DISTRICTS_RAIL_KEY = "specialDistricts";
 
-/** Test/deploy seam for the verdict store this wrapper consults. */
+/**
+ * Test/deploy seam for the verdict store this wrapper consults.
+ * `undefined` (the default) means: use the real env-resolved pool
+ * (resolveVerdictStore, parcelGateVerdictRead.ts). Tests inject an
+ * explicit store or `null`.
+ */
 let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
 
 export function setSpecialDistrictsVerdictStoreForTests(
@@ -43,7 +49,7 @@ export async function loadSpecialDistrictFactForServe(
     return loadSpecialDistrictFactAtom(parcelNodeId);
   }
   const state = await resolveAllowlist(
-    injectedVerdictStore ?? null,
+    resolveVerdictStore(injectedVerdictStore),
     countyFips,
     SPECIAL_DISTRICTS_RAIL_KEY,
   );
