@@ -30,6 +30,7 @@ import {
 import { requireAuthContext } from "./request-context.js";
 import { executeExportInstrument } from "./export-instrument.js";
 import { loadHauskaMcpConfig } from "./hauska-client.js";
+import { listPurchasedRecords, readPurchasedRecord } from "./recordsExtraction.js";
 import {
   buildRunReportEnvelope,
   declarePlaceSearchRefusal,
@@ -507,6 +508,15 @@ function inputSchemaFor(name: SmartsiteToolName) {
         .strict();
     case "check_request":
       return z.object({ jobId: z.string().min(1) });
+    case "list_purchased_records":
+      return z.object({ parcelNodeId: z.string().min(1) }).strict();
+    case "read_purchased_record":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          artifactId: z.string().min(1),
+        })
+        .strict();
     case "ask_the_map":
       return askTheMapInputSchema();
     case "export_instrument":
@@ -964,6 +974,22 @@ export function registerTools(server: McpServer): void {
                 ],
                 isError: false,
               };
+            });
+          }
+          case "list_purchased_records": {
+            const { parcelNodeId } = args as { parcelNodeId: string };
+            return listPurchasedRecords(entitlement, auth.userId, {
+              parcelNodeId,
+            });
+          }
+          case "read_purchased_record": {
+            const { parcelNodeId, artifactId } = args as {
+              parcelNodeId: string;
+              artifactId: string;
+            };
+            return readPurchasedRecord(entitlement, auth.userId, {
+              parcelNodeId,
+              artifactId,
             });
           }
           // export_instrument has no handler while readiness is "blocked"

@@ -1,4 +1,4 @@
-/** WDLL P-91 / P-92 — eight live tools plus five screen/save tools, plus P-106 find_parcels (14). */
+/** WDLL P-91 / P-92 — eight live tools plus five screen/save tools, plus P-106 find_parcels (14), plus P-113 list_purchased_records / read_purchased_record (16). */
 export const SMARTSITE_MCP_TOOLS = [
   {
     name: "find_parcel",
@@ -50,6 +50,20 @@ export const SMARTSITE_MCP_TOOLS = [
       "Poll an async report or records job for queued, running, complete, failed, or needs-human.",
     readiness: "blocked" as const,
     blockedReason: "P-85 item 4",
+  },
+  {
+    name: "list_purchased_records",
+    title: "List purchased records",
+    description:
+      "List purchased-courthouse-document jobs for one parcel (parcelNodeId), each with its documents' vision-read state (pending, complete, failed, skipped) and classification state (pending, written, refused, skipped). Never returns full document text — call read_purchased_record with the artifactId from a listed document for that. Requires Studio or above; otherwise returns refused with reason upgrade_required. An empty jobs array is a genuine result: no records purchase has been made for this parcel by this account, not an error.",
+    readiness: "live" as const,
+  },
+  {
+    name: "read_purchased_record",
+    title: "Read a purchased record",
+    description:
+      "Read one purchased document in full: extracted vision-read text (when the read completed) and classification detail, by parcelNodeId and artifactId (from list_purchased_records). Requires Studio or above; otherwise returns refused with reason upgrade_required. An artifactId that does not exist, or that belongs to a different parcel or a different account, comes back as the same refused/artifact_not_found response — existence is never confirmed or denied across an ownership mismatch.",
+    readiness: "live" as const,
   },
   {
     name: "export_instrument",

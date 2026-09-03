@@ -86,13 +86,15 @@ const READ_ONLY_BY_NAME: Record<string, boolean> = {
   list_screens: true,
   save_property: false,
   set_property_status: false,
+  list_purchased_records: true,
+  read_purchased_record: true,
 };
 
 describe("smartsite-mcp tools/list", () => {
-  it("registers exactly fourteen tools with Smart Site server name", async () => {
+  it("registers exactly sixteen tools with Smart Site server name", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(14);
+      expect(tools).toHaveLength(16);
       expect(tools.map((t) => t.name).sort()).toEqual(
         SMARTSITE_MCP_TOOLS.map((t) => t.name).sort(),
       );
@@ -111,7 +113,7 @@ describe("smartsite-mcp tool annotations (P-91 item 1)", () => {
     ]);
   });
 
-  it("accepts a complete fourteen-tool fixture", () => {
+  it("accepts a complete sixteen-tool fixture", () => {
     const fixture: ListedTool[] = SMARTSITE_MCP_TOOLS.map((tool) => ({
       name: tool.name,
       annotations: { readOnlyHint: READ_ONLY_BY_NAME[tool.name] },
@@ -122,7 +124,7 @@ describe("smartsite-mcp tool annotations (P-91 item 1)", () => {
   it("listTools exposes annotations.readOnlyHint on every registered tool", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(14);
+      expect(tools).toHaveLength(16);
       expect(namesMissingReadOnlyHint(tools)).toEqual([]);
       for (const tool of tools) {
         expect(tool.annotations?.readOnlyHint).toBe(READ_ONLY_BY_NAME[tool.name]);
@@ -495,10 +497,10 @@ describe("ask_the_map leak closed (P-91 item 10) and blocked (P-91 item 34)", ()
     });
   });
 
-  it("tools/list still returns fourteen names with ask_the_map listed", async () => {
+  it("tools/list still returns sixteen names with ask_the_map listed", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(14);
+      expect(tools).toHaveLength(16);
       expect(tools.map((t) => t.name)).toContain("ask_the_map");
     });
   });
@@ -880,10 +882,10 @@ describe("P-91 Wave B screen/save tools", () => {
     mockCortexFetch.mockReset();
   });
 
-  it("tools/list is 14 and omits get_screen, unsave_property, delete_screen", async () => {
+  it("tools/list is 16 and omits get_screen, unsave_property, delete_screen", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(14);
+      expect(tools).toHaveLength(16);
       const names = tools.map((t) => t.name);
       expect(names).toContain("create_screen");
       expect(names).toContain("add_to_screen");
