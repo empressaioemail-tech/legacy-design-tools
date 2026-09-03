@@ -19,6 +19,7 @@
 
 import { resolveAllowlist } from "./parcelRecordAllowlist";
 import { countyFipsFromParcelNodeId } from "./verdictLayerServe";
+import { resolveVerdictStore } from "./parcelGateVerdictRead";
 import { cityLimitsFactFromParcelRecord } from "./cityLimitsFactFromParcelRecord";
 import {
   loadCityLimitsFact,
@@ -29,7 +30,12 @@ import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
 
 const CITY_LIMITS_RAIL_KEY = "cityLimits";
 
-/** Test/deploy seam for the verdict store this wrapper consults. */
+/**
+ * Test/deploy seam for the verdict store this wrapper consults.
+ * `undefined` (the default) means: use the real env-resolved pool
+ * (resolveVerdictStore, parcelGateVerdictRead.ts). Tests inject an
+ * explicit store or `null`.
+ */
 let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
 
 export function setCityLimitsVerdictStoreForTests(
@@ -53,7 +59,7 @@ export async function loadCityLimitsFactForServe(
     return loadCityLimitsFact(point);
   }
   const state = await resolveAllowlist(
-    injectedVerdictStore ?? null,
+    resolveVerdictStore(injectedVerdictStore),
     countyFips,
     CITY_LIMITS_RAIL_KEY,
   );
