@@ -1283,6 +1283,88 @@ CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
 );
 
 
+-- Name: pe_parcel_constraint_index; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_parcel_constraint_index (
+    county_fips text NOT NULL,
+    prop_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    built_at timestamp with time zone NOT NULL,
+    bake_snapshot_at timestamp with time zone,
+    build_run_id uuid NOT NULL,
+    acreage_acres numeric(14,4),
+    acreage_state text NOT NULL,
+    land_use_code text,
+    land_use_state text NOT NULL,
+    city_limits text,
+    city_limits_state text NOT NULL,
+    etj text,
+    etj_state text NOT NULL,
+    zoning_district text,
+    zoning_state text NOT NULL,
+    flood_zone text,
+    flood_in_sfha boolean,
+    flood_state text NOT NULL,
+    special_district_id text,
+    special_district_state text NOT NULL,
+    market_value bigint,
+    market_value_state text NOT NULL,
+    land_value bigint,
+    land_value_state text NOT NULL,
+    improvement_value bigint,
+    improvement_value_state text NOT NULL,
+    year_built integer,
+    year_built_state text NOT NULL,
+    CONSTRAINT pe_pci_acreage_state_chk CHECK ((acreage_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_acreage_value_state_chk CHECK (((acreage_acres IS NOT NULL) = (acreage_state = 'present'::text))),
+    CONSTRAINT pe_pci_city_limits_grammar_chk CHECK (((city_limits IS NULL) OR (city_limits = ANY (ARRAY['in-city'::text, 'unincorporated'::text])))),
+    CONSTRAINT pe_pci_city_limits_state_chk CHECK ((city_limits_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_city_limits_value_state_chk CHECK (((city_limits IS NOT NULL) = (city_limits_state = 'present'::text))),
+    CONSTRAINT pe_pci_county_fips_chk CHECK ((county_fips ~ '^[0-9]{5}$'::text)),
+    CONSTRAINT pe_pci_etj_state_chk CHECK ((etj_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_etj_value_state_chk CHECK (((etj IS NOT NULL) = (etj_state = 'present'::text))),
+    CONSTRAINT pe_pci_flood_state_chk CHECK ((flood_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_flood_value_state_chk CHECK (((flood_in_sfha IS NOT NULL) = (flood_state = 'present'::text))),
+    CONSTRAINT pe_pci_flood_zone_needs_flag_chk CHECK (((flood_zone IS NULL) OR (flood_in_sfha IS NOT NULL))),
+    CONSTRAINT pe_pci_improvement_value_state_chk CHECK ((improvement_value_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_improvement_value_value_state_chk CHECK (((improvement_value IS NOT NULL) = (improvement_value_state = 'present'::text))),
+    CONSTRAINT pe_pci_land_use_state_chk CHECK ((land_use_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_land_use_value_state_chk CHECK (((land_use_code IS NOT NULL) = (land_use_state = 'present'::text))),
+    CONSTRAINT pe_pci_land_value_state_chk CHECK ((land_value_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_land_value_value_state_chk CHECK (((land_value IS NOT NULL) = (land_value_state = 'present'::text))),
+    CONSTRAINT pe_pci_market_value_state_chk CHECK ((market_value_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_market_value_value_state_chk CHECK (((market_value IS NOT NULL) = (market_value_state = 'present'::text))),
+    CONSTRAINT pe_pci_node_id_shape_chk CHECK ((parcel_node_id = ((county_fips || ':'::text) || prop_id))),
+    CONSTRAINT pe_pci_prop_id_chk CHECK (((btrim(prop_id) <> ''::text) AND (prop_id <> '0'::text))),
+    CONSTRAINT pe_pci_special_district_state_chk CHECK ((special_district_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_special_district_value_state_chk CHECK (((special_district_id IS NOT NULL) = (special_district_state = 'present'::text))),
+    CONSTRAINT pe_pci_year_built_state_chk CHECK ((year_built_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_year_built_value_state_chk CHECK (((year_built IS NOT NULL) = (year_built_state = 'present'::text))),
+    CONSTRAINT pe_pci_zoning_state_chk CHECK ((zoning_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_zoning_value_state_chk CHECK (((zoning_district IS NOT NULL) = (zoning_state = 'present'::text)))
+);
+
+
+-- Name: pe_parcel_constraint_index_builds; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_parcel_constraint_index_builds (
+    build_run_id uuid NOT NULL,
+    county_fips text NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    invocation text NOT NULL,
+    prop_id_lo text,
+    prop_id_hi text,
+    bake_rows_read bigint,
+    rows_written bigint,
+    bake_snapshot_max timestamp with time zone,
+    outcome text NOT NULL,
+    refusal_reason text,
+    CONSTRAINT pe_pci_builds_outcome_chk CHECK ((outcome = ANY (ARRAY['started'::text, 'succeeded'::text, 'failed'::text, 'refused'::text]))),
+    CONSTRAINT pe_pci_builds_refusal_chk CHECK (((outcome <> 'refused'::text) OR (btrim(COALESCE(refusal_reason, ''::text)) <> ''::text)))
+);
+
+
 -- Name: pe_property_unlocks; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_property_unlocks (
@@ -2817,6 +2899,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
     ADD CONSTRAINT pe_chat_message_counts_owner_user_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, parcel_node_id);
 
 
+-- Name: pe_parcel_constraint_index_builds pe_parcel_constraint_index_builds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_parcel_constraint_index_builds
+    ADD CONSTRAINT pe_parcel_constraint_index_builds_pkey PRIMARY KEY (build_run_id);
+
+
+-- Name: pe_parcel_constraint_index pe_parcel_constraint_index_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_parcel_constraint_index
+    ADD CONSTRAINT pe_parcel_constraint_index_pk PRIMARY KEY (county_fips, prop_id);
+
+
 -- Name: pe_property_unlocks pe_property_unlocks_owner_user_id_tenant_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
@@ -3788,6 +3882,26 @@ CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_conn
 -- Name: pe_ai_connections_owner_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_ai_connections_owner_idx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id);
+
+
+-- Name: pe_pci_builds_county_started_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_builds_county_started_idx ON @@SCHEMA@@.pe_parcel_constraint_index_builds USING btree (county_fips, started_at);
+
+
+-- Name: pe_pci_county_acreage_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_county_acreage_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips, acreage_state, acreage_acres);
+
+
+-- Name: pe_pci_county_flood_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_county_flood_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips, flood_state, flood_in_sfha);
+
+
+-- Name: pe_pci_county_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_county_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips);
 
 
 -- Name: pe_saved_properties_owner_idx; Type: INDEX; Schema: public; Owner: -

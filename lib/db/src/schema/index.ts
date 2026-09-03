@@ -91,6 +91,7 @@ export * from "./peAiConnections";
 export * from "./peActivationEvents";
 export * from "./peSavedProperties";
 export * from "./peScreens";
+export * from "./peParcelConstraintIndex";
 export * from "./pePropertyUnlocks";
 export * from "./peChatMessageCounts";
 export * from "./peWorkbenchState";
