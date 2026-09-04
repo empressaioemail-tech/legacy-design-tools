@@ -2149,7 +2149,17 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
       if (body.method === "notifications/initialized") {
         return new Response("", { status: 202 });
       }
+      // P-110 LIVE BUG (2026-09-04, real hauska-mcp-server): download_
+      // parcel_site_plan_export rejected a call with no `format` (MCP
+      // error -32602, "Required" at ["format"]) — refresh had succeeded
+      // WITHOUT it. Enforce the same required-field strictness here so
+      // this integration test — not just the unit-level one in
+      // export-degraded.fixture.test.ts — would fail if that regresses.
       if (body.method === "tools/call" && body.params?.name?.startsWith("refresh_")) {
+        expect(body.params.arguments).toEqual({
+          parcel_node_id: "48021:34137",
+          format: "glb",
+        });
         return new Response(
           JSON.stringify({
             jsonrpc: "2.0",
@@ -2160,6 +2170,24 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
         );
       }
       if (body.method === "tools/call" && body.params?.name?.startsWith("download_")) {
+        if (!body.params.arguments?.format) {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: body.id,
+              error: {
+                code: -32602,
+                message:
+                  'Input validation error: Invalid arguments for tool download_parcel_terrain_export: [{"expected":"format","received":"undefined","code":"invalid_type","path":["format"],"message":"Required"}]',
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        expect(body.params.arguments).toEqual({
+          parcel_node_id: "48021:34137",
+          format: "glb",
+        });
         return new Response(
           JSON.stringify({
             jsonrpc: "2.0",

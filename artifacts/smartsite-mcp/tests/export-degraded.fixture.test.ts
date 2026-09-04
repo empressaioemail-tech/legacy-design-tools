@@ -98,7 +98,13 @@ describe("export-degraded fixture (P-87 item 17)", () => {
       "refresh_parcel_dossier_export",
       "download_parcel_dossier_export",
     ]);
-    expect(calls[0]!.args).toEqual({ parcel_node_id: "48021:34137" });
+    // Dossier's format is fixed and required on refresh, but hauska-map's own
+    // dossier download call omits format entirely — only site plan and
+    // terrain need it on download (see the live-bug test below).
+    expect(calls[0]!.args).toEqual({
+      parcel_node_id: "48021:34137",
+      format: "pdf-dossier",
+    });
     expect(calls[1]!.args).toEqual({ parcel_node_id: "48021:34137" });
   });
 
@@ -118,6 +124,59 @@ describe("export-degraded fixture (P-87 item 17)", () => {
     expect(names).toEqual([
       "refresh_parcel_site_plan_export",
       "download_parcel_site_plan_export",
+    ]);
+  });
+
+  // P-110 LIVE BUG (found 2026-09-04 against the real hauska-mcp-server,
+  // parcel 48021:34137, kind siteplan): download_parcel_site_plan_export
+  // rejected the call with MCP error -32602, "Invalid arguments ... format:
+  // Required" — refresh had succeeded WITHOUT format, so the missing field
+  // only surfaced on the second hop. export_instrument takes no format
+  // argument from the calling agent (it has no way to discover the upstream
+  // format enum), so both hops must default it per kind — matching
+  // hauska-map's own proven defaults exactly (pe-site-plan-export.ts:
+  // `?? 'pdf-site-plan'`; pe-terrain-export.ts: `?? 'glb'`). This test would
+  // have caught the bug: the mocked callTool in the tests above never
+  // enforced upstream schema strictness the way the real server does.
+  it("executeExportInstrument sends the default format on BOTH hops for siteplan and terrain", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const callTool = async (
+      _config: unknown,
+      name: string,
+      args: Record<string, unknown>,
+    ) => {
+      calls.push({ name, args });
+      return { data: {}, isError: false };
+    };
+    const deps = {
+      loadConfig: () => ({ baseUrl: "https://hauska-mcp.test", serviceKey: "k" }),
+      probeHealth: async () => ({ state: "ok" as const, latency_ms: 4, detail: "HTTP 200" }),
+      callTool,
+    };
+
+    await executeExportInstrument({ parcelNodeId: "48021:34137", kind: "siteplan" }, deps);
+    expect(calls).toEqual([
+      {
+        name: "refresh_parcel_site_plan_export",
+        args: { parcel_node_id: "48021:34137", format: "pdf-site-plan" },
+      },
+      {
+        name: "download_parcel_site_plan_export",
+        args: { parcel_node_id: "48021:34137", format: "pdf-site-plan" },
+      },
+    ]);
+
+    calls.length = 0;
+    await executeExportInstrument({ parcelNodeId: "48021:34137", kind: "terrain" }, deps);
+    expect(calls).toEqual([
+      {
+        name: "refresh_parcel_terrain_export",
+        args: { parcel_node_id: "48021:34137", format: "glb" },
+      },
+      {
+        name: "download_parcel_terrain_export",
+        args: { parcel_node_id: "48021:34137", format: "glb" },
+      },
     ]);
   });
 

@@ -26,6 +26,35 @@ const UPSTREAM_EXPORT_KIND_SEGMENT: Record<UpstreamExportKind, string> = {
   dossier: "dossier",
 };
 
+/**
+ * Live-measured 2026-09-04 against the real server: `download_parcel_site_
+ * plan_export` rejects a call with no `format` (MCP error -32602, "Required"
+ * at path ["format"]) — refresh succeeded without it, only download failed.
+ * The connector's export_instrument tool takes no format argument at all
+ * (a calling agent has no way to discover the upstream format enum), so we
+ * default per kind exactly the way hauska-map's own proven BFF does
+ * (apps/property-explorer/api/pe-site-plan-export.ts:
+ * `parseSitePlanFormat(body?.format) ?? 'pdf-site-plan'`; pe-terrain-
+ * export.ts: `?? 'glb'`; dossier's refresh hardcodes 'pdf-dossier').
+ *
+ * `includeOnDownload` mirrors an upstream asymmetry, not a guess: site plan
+ * and terrain each have several possible artifact formats, so their
+ * download tools require `format` to disambiguate which one to fetch (the
+ * same value used at refresh). Dossier has exactly one shape, and
+ * hauska-map's own dossier download call
+ * (`callMcpTool('download_parcel_dossier_export', { parcel_node_id })`)
+ * omits `format` entirely — so we do too, rather than sending a field nothing
+ * downstream has verified is accepted there.
+ */
+const UPSTREAM_EXPORT_FORMAT: Record<
+  UpstreamExportKind,
+  { value: string; includeOnDownload: boolean }
+> = {
+  siteplan: { value: "pdf-site-plan", includeOnDownload: true },
+  terrain: { value: "glb", includeOnDownload: true },
+  dossier: { value: "pdf-dossier", includeOnDownload: false },
+};
+
 export type ExportInstrumentArgs = {
   parcelNodeId: string;
   kind: UpstreamExportKind;
@@ -153,14 +182,19 @@ export async function executeExportInstrument(
   }
 
   const upstreamKind = UPSTREAM_EXPORT_KIND_SEGMENT[args.kind];
-  const toolArgs: Record<string, unknown> = { parcel_node_id: args.parcelNodeId };
+  const format = UPSTREAM_EXPORT_FORMAT[args.kind];
+  const baseArgs: Record<string, unknown> = { parcel_node_id: args.parcelNodeId };
+  const refreshArgs: Record<string, unknown> = { ...baseArgs, format: format.value };
+  const downloadArgs: Record<string, unknown> = format.includeOnDownload
+    ? { ...baseArgs, format: format.value }
+    : baseArgs;
 
   let refreshed: HauskaMcpToolResult;
   try {
     refreshed = await callTool(
       config,
       `refresh_parcel_${upstreamKind}_export`,
-      toolArgs,
+      refreshArgs,
     );
   } catch (err) {
     return upstreamThrewResult(err);
@@ -177,7 +211,7 @@ export async function executeExportInstrument(
     downloaded = await callTool(
       config,
       `download_parcel_${upstreamKind}_export`,
-      toolArgs,
+      downloadArgs,
     );
   } catch (err) {
     return upstreamThrewResult(err);
