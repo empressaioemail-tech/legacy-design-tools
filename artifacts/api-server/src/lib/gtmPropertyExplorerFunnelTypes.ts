@@ -25,6 +25,15 @@
  * into `gtm_events` was added for them — they go through the one insert the
  * property-explorer events route already owns.
  */
+/**
+ * P-118. `pe_help_widget_opened` and `pe_help_widget_message_sent` are the
+ * ungated Help widget's own usage, fed through this SAME writer per the
+ * card's own instruction ("its own usage should feed the SAME funnel-event
+ * instrumentation P-100 already built") — no second writer, no parallel
+ * analytics mechanism. Fired client-side from HelpWidget.tsx via the
+ * existing recordPeGtmEvent, exactly the pattern share_created/share_viewed
+ * already established.
+ */
 export const PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES = [
   "pe_browse_started",
   "pe_cold_open_dismissed",
@@ -35,6 +44,8 @@ export const PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES = [
   "pe_upgrade_started",
   "share_created",
   "share_viewed",
+  "pe_help_widget_opened",
+  "pe_help_widget_message_sent",
 ] as const;
 
 export type PropertyExplorerFunnelEventType =
