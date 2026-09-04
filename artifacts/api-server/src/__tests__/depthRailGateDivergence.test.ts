@@ -29,19 +29,39 @@
  * is the only thing standing between a 0.00% row and a customer-facing
  * "satisfied". Its refusal is load-bearing safety, not over-strictness.
  *
- * Its defect is what it ERASES: it clears `isPartial` while demoting, so
- * "measured at 33.98% below a 95% bar" and "never scored at all" render
- * identically. All 18 partial cells in the entire ledger are zoning cells, so
- * the ledger summary's `satisfiedPresentPartialCells` — the field built to
- * surface exactly that class — reads 0 while the store holds 18. Changing it
- * moves a reported number and is an operator ruling, so lane SS-W13 filed it
- * rather than shipped it. The behaviour is PINNED below in both copies at
- * once, so the ruling cannot land in one of them.
+ * ITS DEFECT, AND THE RULING THAT FIXED IT. The gate used to demote to
+ * `not-yet` and clear `isPartial`, so "measured at 33.98% below a 95% bar" and
+ * "never scored at all" rendered identically. All 18 partial cells in the
+ * entire ledger are zoning cells, so the ledger summary's
+ * `satisfiedPresentPartialCells` — the field built to surface exactly that
+ * class — read 0 while the store held 18. Lane SS-W13 filed that rather than
+ * shipping it, because moving a reported number is an operator ruling.
+ *
+ * OPERATOR RULING 4 (2026-08-19, OPS-16 A-020) IS THAT RULING, and lane SS-W15
+ * executed it: the gate now demotes to `measured-below-bar`, and a cell with no
+ * ledger row at all renders `not-measured`. One is a coverage gap, the other an
+ * instrument gap, and they no longer look the same. The demotion target is
+ * `DEPTH_GATE_DEMOTION_STATE` in `lib/db/src/manifestDisplayState.ts` — a single
+ * constant both copies read, so the value can no longer be changed in one of
+ * them.
+ *
+ * `isPartial` IS NOT CLEARED ON DEMOTION (composed with R-09, PR #447,
+ * 2026-08-21, live in production). Ruling 4 originally cleared `isPartial`
+ * here too, reasoning the new displayState split made it redundant — that
+ * reasoning does not survive contact with R-09's own regression tests, which
+ * assert `isPartial` specifically survives demotion, live-verified against
+ * the deployment DB (18 real `isPartial:true` cells, was 0 before R-09). The
+ * two fields answer different questions: `displayState` says which KIND of
+ * gap this is (instrument vs coverage), `isPartial` says whether THIS cell's
+ * own measurement was incomplete. Both survive.
  */
 
 import { describe, it, expect } from "vitest";
 import { applyDepthRailDisplayGate as gateLedgerCompute } from "../countyLedgerCompute";
-import { readManifestGridFromPool } from "@workspace/db/manifest";
+import {
+  DEPTH_GATE_DEMOTION_STATE,
+  readManifestGridFromPool,
+} from "@workspace/db/manifest";
 
 interface GateCase {
   label: string;
@@ -59,7 +79,15 @@ const CASES: readonly GateCase[] = [
   { label: "Travis 48453 zoning at zero", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 0, thresholdPct: 95 },
   { label: "null coverage", railKey: "zoning", displayState: "satisfied-present", isPartial: false, honestCoveragePct: null, thresholdPct: 95 },
   { label: "null threshold falls back to the rail default", railKey: "zoning", displayState: "satisfied-present", isPartial: false, honestCoveragePct: 50, thresholdPct: null },
-  { label: "already not-yet", railKey: "zoning", displayState: "not-yet", isPartial: false, honestCoveragePct: 0, thresholdPct: 95 },
+  // Composed with ruling 4: `not-yet` is retained only as a STORED
+  // rail_state (the SQL CASE converts it to `measured-below-bar` before the
+  // gate ever runs), never as an already-terminal DISPLAY value the gate
+  // would see directly -- feeding raw "not-yet" straight to the gate (as
+  // this case did pre-composition) tested a shape that can no longer occur
+  // in production. `not-measured` is the real post-split terminal state for
+  // an already non-satisfied-present cell, and exercises the same no-op
+  // passthrough branch this case always intended to test.
+  { label: "already not-measured", railKey: "zoning", displayState: "not-measured", isPartial: false, honestCoveragePct: 0, thresholdPct: 95 },
   { label: "satisfied-absent is untouched", railKey: "zoning", displayState: "satisfied-absent", isPartial: false, honestCoveragePct: 0, thresholdPct: 95 },
   // statewide-uniform rails are NOT gated: per OPS-14 the gate is a depth rule.
   { label: "geometry below bar is not demoted", railKey: "geometry", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 80, thresholdPct: 95 },
@@ -142,7 +170,7 @@ describe("depth-rail display gate: two implementations, one rule", () => {
     const divergent = runLedgerComputeGate({
       label: "x", railKey: "geometry", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 0, thresholdPct: 95,
     });
-    expect(libDb[0]?.displayState).toBe("not-yet");
+    expect(libDb[0]?.displayState).toBe(DEPTH_GATE_DEMOTION_STATE);
     expect(divergent.displayState).toBe("satisfied-present");
     expect(divergent.displayState).not.toBe(libDb[0]?.displayState);
   });
@@ -151,14 +179,27 @@ describe("depth-rail display gate: two implementations, one rule", () => {
     const r = runLedgerComputeGate({
       label: "Travis at zero", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 0, thresholdPct: 95,
     });
-    expect(r.displayState).toBe("not-yet");
+    expect(r.displayState).toBe(DEPTH_GATE_DEMOTION_STATE);
+    // The refusal must still REFUSE. A rename that accidentally demoted to a
+    // satisfied-looking state would pass a `toBe(CONSTANT)` assertion while
+    // publishing a 0.00% cell as covered, so the state is also pinned by NAME.
+    expect(r.displayState).toBe("measured-below-bar");
+    expect(r.displayState).not.toBe("satisfied-present");
   });
 
-  it("R-09: preserves isPartial on demotion so the indicator can fire", async () => {
+  it("EXECUTES ruling 4 composed with R-09: measured-below-bar, AND isPartial survives", async () => {
+    // Ruling 4 (displayState split) and R-09 (isPartial preserved on
+    // demotion, live in production since 2026-08-21) answer different
+    // questions and both apply to the same demoted cell: displayState says
+    // this was a COVERAGE gap, not an instrument gap; isPartial says THIS
+    // cell's own measurement was incomplete. Empirically proven distinct by
+    // running R-09's own regression tests against ruling 4's code with only
+    // isPartial:false applied (displayState held constant) -- both failed on
+    // isPartial specifically, so the split does not subsume it.
     const r = runLedgerComputeGate({
       label: "Williamson below bar", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95,
     });
-    expect(r.displayState).toBe("not-yet");
+    expect(r.displayState).toBe("measured-below-bar");
     expect(r.isPartial).toBe(true);
     const libDb = await runLibDbGate([
       { label: "same", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95 },

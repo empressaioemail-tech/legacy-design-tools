@@ -2,13 +2,9 @@
  * Shared manifest cell display resolution after rail-field overlay.
  */
 import type { AtomFamilyState } from "./schema/countyRailDimension";
+import type { ManifestDisplayState } from "./manifestDisplayState";
 
-export type ManifestDisplayState =
-  | "no-atom"
-  | "no-writer"
-  | "not-yet"
-  | "satisfied-present"
-  | "satisfied-absent";
+export type { ManifestDisplayState };
 
 const ATOM_FAMILY_STRICTNESS: Record<string, number> = {
   missing: 0,
@@ -49,6 +45,19 @@ export function mergeEffectiveRailFields(
   return { atomFamilyState, hasWriter };
 }
 
+/**
+ * Mirrors `MANIFEST_DISPLAY_STATE_SQL` (`./manifestDisplayState.ts`)
+ * exactly, for the overlay path where a live-probed `effectiveByKey` value
+ * differs from what's stored and the display state has to be recomputed in
+ * TypeScript rather than re-queried. Composing ruling 4 (the
+ * not-measured/measured-below-bar split) surfaced that this function had
+ * never been taught it: it predates the split, still returned `not-yet` for
+ * a null railState, and silently clobbered the SQL CASE's own
+ * ruling-4-aware `not-measured` back down to `not-yet` for every cell this
+ * overlay path touches. `__tests__/manifestCellResolve.test.ts` pins the
+ * exact mapping so a future split cannot re-diverge the same way without
+ * failing loudly.
+ */
 export function resolveManifestDisplayState(
   atomFamilyState: AtomFamilyState | string,
   hasWriter: boolean,
@@ -56,14 +65,19 @@ export function resolveManifestDisplayState(
 ): ManifestDisplayState {
   if (atomFamilyState !== "present") return "no-atom";
   if (!hasWriter) return "no-writer";
-  if (railState === null) return "not-yet";
+  if (railState === null) return "not-measured";
+  if (railState === "not-yet") return "measured-below-bar";
   if (
     railState === "satisfied-present" ||
     railState === "satisfied-absent"
   ) {
     return railState;
   }
-  return "not-yet";
+  // Unreachable given rail_state's own CHECK constraint (NULL |
+  // satisfied-present | satisfied-absent | not-yet) — but mirrors the SQL
+  // CASE's own `ELSE c.rail_state` passthrough rather than guessing a
+  // different literal for a value that should never arrive.
+  return railState as ManifestDisplayState;
 }
 
 export function resolveManifestIsPartial(

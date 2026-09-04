@@ -250,7 +250,10 @@ describe("POST /api/county-ledger/recompute, the delta answers the question a ti
     const footprintBefore = first.body.summary.satisfiedCells;
 
     // The shape of the operator's complaint: a writer lands coverage AFTER
-    // the ledger was materialized, and the ledger keeps reporting not-yet.
+    // the ledger was materialized, and the ledger keeps reporting the cell as
+    // unmeasured. Operator ruling 4 (lane SS-W15): a cell with NO
+    // county_facet_coverage row is `not-measured` (an instrument gap), not
+    // `not-yet`, which now means measured-and-short.
     await db.insert(countyFacetCoverage).values({
       countyFips: "48021",
       facet: "footprint",
@@ -262,7 +265,7 @@ describe("POST /api/county-ledger/recompute, the delta answers the question a ti
     });
 
     const stale = await request(getApp()).get("/api/county-ledger");
-    expect(stale.body.manifestCells[0].displayState).toBe("not-yet");
+    expect(stale.body.manifestCells[0].displayState).toBe("not-measured");
 
     const second = await request(getApp()).post(RECOMPUTE_PATH).set(serviceAuth).send({});
     expect(second.status).toBe(200);

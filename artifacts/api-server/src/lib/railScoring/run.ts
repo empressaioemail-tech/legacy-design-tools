@@ -26,6 +26,7 @@ import {
   type RailLedgerValues,
 } from "./engine";
 import {
+  CountyNotMeasurableError,
   measureRailCell,
   readManifestCounties,
   RailNotMeasurableError,
@@ -112,6 +113,22 @@ export interface RailRunResult {
    * cell the run never reached.
    */
   absencesPreserved: Array<{ countyFips: string; basis: string | null }>;
+  /**
+   * Counties this rail could not measure, each with its refusal code and
+   * basis. NO ROW IS WRITTEN for a refused cell — an instrument that cannot
+   * see a county may not publish a number about it, and a zero from blindness
+   * is a claim about the world (DEV_PROCESS 4.3, and lane SS-W13's ruling
+   * inherited whole).
+   *
+   * This list is the reason the second half of lane SS-W15 exists. Only 23
+   * city zoning layers are wired across 10 counties against 1,222 incorporated
+   * Texas municipalities, so on the zoning rail this list is most of Texas —
+   * which the console must show as an INSTRUMENT gap, distinct from a county
+   * measured and found short.
+   */
+  countiesRefused: Array<{ countyFips: string; refusal: string; basis: string }>;
+  /** Refusal code -> count, so a 244-entry list has a readable summary. */
+  refusalCounts: Record<string, number>;
   /** Per-cell numbers when `includeCells` was set and the target set was small enough. */
   cells?: RailCellReport[];
   /** Why cells were omitted, when they were. An honest absence, not a silent one. */
@@ -139,6 +156,8 @@ export interface RailScoreRunReport {
     cellsCoverageMoved: number;
     cellsUnchanged: number;
     cellsWritten: number;
+    /** Cells the instrument refused to measure. Reported, never folded into a zero. */
+    cellsRefused: number;
   };
 }
 
@@ -311,6 +330,8 @@ export async function runRailScore(
       overcountCounties: [],
       absenceRefusals: [],
       absencesPreserved: [],
+      countiesRefused: [],
+      refusalCounts: {},
     };
     // Cells are readable evidence at small target sizes and an unreadable
     // wall at statewide sizes; the cap is stated rather than guessed at by
@@ -332,6 +353,23 @@ export async function runRailScore(
         const measurement = await measureRailCell(rule, ctx, countyFips);
         score = scoreRailCell(rule, threshold, measurement);
       } catch (err) {
+        if (err instanceof CountyNotMeasurableError) {
+          // ONE COUNTY, not the rail. Write nothing, name the reason, keep
+          // going. Skipping silently would be indistinguishable from a county
+          // the run never reached, and writing a zero would assert an absence
+          // this instrument never established.
+          result.countiesRefused.push({
+            countyFips,
+            refusal: err.refusal,
+            basis: err.basis,
+          });
+          result.refusalCounts[err.refusal] =
+            (result.refusalCounts[err.refusal] ?? 0) + 1;
+          options.onProgress?.(
+            `${rule.railKey} ${countyFips} NOT MEASURED (${err.refusal})`,
+          );
+          continue;
+        }
         if (err instanceof RailNotMeasurableError) {
           // A rail-level impossibility (no spec, no atoms store). Abandon the
           // whole rail and NAME it; never score its remaining counties as
@@ -438,6 +476,7 @@ export async function runRailScore(
       cellsCoverageMoved: rails.reduce((a, r) => a + r.cellsCoverageMoved, 0),
       cellsUnchanged: rails.reduce((a, r) => a + r.cellsUnchanged, 0),
       cellsWritten: rails.reduce((a, r) => a + r.cellsWritten, 0),
+      cellsRefused: rails.reduce((a, r) => a + r.countiesRefused.length, 0),
     },
   };
 }
