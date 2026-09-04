@@ -109,6 +109,29 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * gate evaluation for utilityService lands. Slating ahead of the verdict is
  * fail-closed by construction, per this file's own PARCEL-B-READER
  * precedent (shipped with an empty slate for the same reason).
+ *
+ * overlayDistricts, ALL SIX counties including Caldwell (F-01, serve/prod
+ * cutover, 2026-09-04): the writer (parcel-overlay-districts.mjs) itself
+ * scans all 6 program counties with no documented per-county exclusion --
+ * unlike wells/specialDistricts, there is no stated txgio-geometry reason to
+ * hold any county out, so all 6 are slated on the writer's own declared
+ * scope rather than on an inferred guess about which counties happen to
+ * contain the 12 confirmed cities. No legacy serve path exists for this
+ * rail either. OPEN QUESTION, not resolved by this cutover: the writer
+ * deliberately leaves a parcel's cell untouched (stays 'unaccounted') for
+ * every parcel outside all 12 confirmed cities -- the large majority of
+ * parcels in every county -- so a per-county unaccountedCount-based gate
+ * verdict may never read 'pass' for this rail unless gate-rail-cli.mjs (out
+ * of this repo's scope) can distinguish "outside this rail's own reach"
+ * from "never examined". No gate verdict exists for this rail as of this
+ * card; every entry resolves to 'legacy' until one does.
+ *
+ * agValuation, Williamson (48491) + Travis (48453) ONLY (F-01, serve/prod
+ * cutover, 2026-09-04): the writer (parcel-ag-valuation.mjs) refuses any
+ * other county outright (COUNTY_NOT_IN_SCOPE) -- the other four program
+ * counties are correctly never slated, not an oversight. No legacy serve
+ * path exists for this rail. No gate verdict exists for this rail as of
+ * this card; every entry resolves to 'legacy' until one does.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -175,6 +198,14 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:utilityService",
   "48453:utilityService",
   "48491:utilityService",
+  "48021:overlayDistricts",
+  "48055:overlayDistricts",
+  "48209:overlayDistricts",
+  "48309:overlayDistricts",
+  "48453:overlayDistricts",
+  "48491:overlayDistricts",
+  "48491:agValuation",
+  "48453:agValuation",
 ]);
 
 /**
