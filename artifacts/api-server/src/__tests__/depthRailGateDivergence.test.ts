@@ -43,9 +43,17 @@
  * instrument gap, and they no longer look the same. The demotion target is
  * `DEPTH_GATE_DEMOTION_STATE` in `lib/db/src/manifestDisplayState.ts` — a single
  * constant both copies read, so the value can no longer be changed in one of
- * them. `isPartial` is still cleared on demotion, and that is now correct
- * rather than lossy: the display state itself carries what `isPartial` used to
- * have to encode.
+ * them.
+ *
+ * `isPartial` IS NOT CLEARED ON DEMOTION (composed with R-09, PR #447,
+ * 2026-08-21, live in production). Ruling 4 originally cleared `isPartial`
+ * here too, reasoning the new displayState split made it redundant — that
+ * reasoning does not survive contact with R-09's own regression tests, which
+ * assert `isPartial` specifically survives demotion, live-verified against
+ * the deployment DB (18 real `isPartial:true` cells, was 0 before R-09). The
+ * two fields answer different questions: `displayState` says which KIND of
+ * gap this is (instrument vs coverage), `isPartial` says whether THIS cell's
+ * own measurement was incomplete. Both survive.
  */
 
 import { describe, it, expect } from "vitest";
@@ -171,16 +179,24 @@ describe("depth-rail display gate: two implementations, one rule", () => {
     expect(r.displayState).not.toBe("satisfied-present");
   });
 
-  it("EXECUTES ruling 4: a demoted cell is measured-below-bar, not not-yet", async () => {
+  it("EXECUTES ruling 4 composed with R-09: measured-below-bar, AND isPartial survives", async () => {
+    // Ruling 4 (displayState split) and R-09 (isPartial preserved on
+    // demotion, live in production since 2026-08-21) answer different
+    // questions and both apply to the same demoted cell: displayState says
+    // this was a COVERAGE gap, not an instrument gap; isPartial says THIS
+    // cell's own measurement was incomplete. Empirically proven distinct by
+    // running R-09's own regression tests against ruling 4's code with only
+    // isPartial:false applied (displayState held constant) -- both failed on
+    // isPartial specifically, so the split does not subsume it.
     const r = runLedgerComputeGate({
       label: "Williamson below bar", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95,
     });
     expect(r.displayState).toBe("measured-below-bar");
-    expect(r.isPartial).toBe(false);
+    expect(r.isPartial).toBe(true);
     const libDb = await runLibDbGate([
       { label: "same", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95 },
     ]);
-    expect(libDb[0]?.isPartial).toBe(false);
+    expect(libDb[0]?.isPartial).toBe(true);
   });
 
   it("holds its fire on a statewide-uniform rail, for the right reason", () => {

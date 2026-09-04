@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@hauska/atom-contract": "file:../../vendor/hauska-atom-contract-1.6.0.tgz",
+    "@empressaio/atom-contract": "^1.30.0",
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
     "zod": "catalog:"

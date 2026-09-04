@@ -19,7 +19,7 @@ import {
   terrainGenerationJobs,
   type TerrainGenerationJob,
 } from "@workspace/db";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import { getHistoryService } from "../atoms/registry";
 import { ingestSiteTopography } from "./siteTopographyIngest";
 import { logger as defaultLogger } from "./logger";

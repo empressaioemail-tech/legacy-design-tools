@@ -200,6 +200,268 @@ export function normalizeStreetLine(raw: string): string | null {
 }
 
 /**
+ * Prefix-search key for situs typeahead — same tokenization as equality
+ * match but allows a single house-number token ("6026") or a partial street
+ * ("6026 MARSH"). Returns null when there is no leading house number.
+ */
+export function normalizeSitusSearchPrefix(raw: string): string | null {
+  const tokens = tokenizeSegment(raw.split(",")[0] ?? raw);
+  if (tokens.length === 0) return null;
+  return tokens.join(" ");
+}
+
+/** Canonical street-type suffix tokens (USPS abbreviations). */
+const STREET_TYPE_SUFFIXES = new Set(Object.values(STREET_TYPE_ABBR));
+
+/**
+ * Prefix variants for locality-filtered situs search. When the typed query
+ * includes a street-type suffix ("908 Pine St") but the CAD situs omits it
+ * ("908 PINE , BASTROP, TX 78602"), exact street-key lookup misses; prefix
+ * ILIKE on the stripped form recovers the hit while locality still blocks
+ * homonyms in other counties.
+ */
+export function situsSearchPrefixVariants(raw: string): string[] {
+  const streetOnly = raw.split(",")[0] ?? raw;
+  const primary = normalizeSitusSearchPrefix(streetOnly);
+  if (!primary) return [];
+
+  const variants: string[] = [primary];
+  const tokens = primary.split(" ").filter(Boolean);
+  if (tokens.length >= 3) {
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) {
+      const stripped = tokens.slice(0, -1).join(" ");
+      if (stripped.length > 0 && !variants.includes(stripped)) {
+        variants.push(stripped);
+      }
+    }
+  }
+  return variants;
+}
+
+/**
+ * Exact street-key set for situs lookup. Unions the resolver candidates
+ * with the street-type-stripped prefix variants so a typed "908 Pine St"
+ * matches a CAD situs whose first-comma segment is "908 PINE".
+ */
+export function situsSearchStreetKeys(raw: string): string[] {
+  const keys: string[] = [];
+  for (const key of normalizeStreetLineCandidates(raw)) {
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  for (const key of situsSearchPrefixVariants(raw)) {
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Bare-street key for "everyone on Pine St". Returns null when the
+ * first-comma segment starts with a house number (that is prefix
+ * search, not this) or when the only token is a street-type suffix.
+ */
+export function normalizeBareStreetLine(raw: string): string | null {
+  const segment = raw.split(",")[0] ?? raw;
+  const cleaned = segment
+    .toUpperCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+
+  const tokens = cleaned.split(" ").filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (/^\d/.test(tokens[0]!)) return null;
+
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (UNIT_DESIGNATORS.has(t) || t.startsWith("#")) break;
+    out.push(DIRECTIONAL_ABBR[t] ?? STREET_TYPE_ABBR[t] ?? t);
+  }
+  if (out.length === 0) return null;
+  if (out.length === 1 && STREET_TYPE_SUFFIXES.has(out[0]!)) return null;
+  return out.join(" ");
+}
+
+/** Primary bare-street needle plus the street-type-stripped form. */
+export function situsSearchBareStreetVariants(raw: string): string[] {
+  const primary = normalizeBareStreetLine(raw);
+  if (!primary) return [];
+  const variants: string[] = [primary];
+  const tokens = primary.split(" ").filter(Boolean);
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) {
+      const stripped = tokens.slice(0, -1).join(" ");
+      if (stripped.length > 0 && !variants.includes(stripped)) {
+        variants.push(stripped);
+      }
+    }
+  }
+  return variants;
+}
+
+/** City / state / ZIP constraints parsed from a typeahead or MCP find query. */
+export type PlaceSearchLocality = {
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+};
+
+function normalizeLocalityToken(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const folded = value.trim().toUpperCase().replace(/\s+/g, " ");
+  return folded.length > 0 ? folded : null;
+}
+
+function parseLocalityTail(tail: string): PlaceSearchLocality {
+  const upper = tail.toUpperCase().replace(/[.]/g, "").replace(/\s+/g, " ").trim();
+  if (!upper) return { city: null, state: null, zip: null };
+
+  const zipMatch = /\b(\d{5})(?:-\d{4})?\b/.exec(upper);
+  const zip = zipMatch ? zipMatch[1]! : null;
+  let rest = zipMatch ? upper.replace(zipMatch[0], " ").replace(/\s+/g, " ").trim() : upper;
+
+  let state: string | null = null;
+  const stateTail = /\b([A-Z]{2})\b$/.exec(rest);
+  if (stateTail) {
+    state = stateTail[1]!;
+    rest = rest.slice(0, stateTail.index).trim();
+  } else {
+    const stateAny = /\b([A-Z]{2})\b/.exec(rest);
+    if (stateAny) {
+      state = stateAny[1]!;
+      rest = `${rest.slice(0, stateAny.index)} ${rest.slice(stateAny.index + 2)}`
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+
+  const city = normalizeLocalityToken(rest.replace(/,/g, " "));
+  return { city, state, zip };
+}
+
+/**
+ * Parse city/state/ZIP from a full typed address for prefix-search filtering.
+ * Supports "908 Pine St, Bastrop TX 78602" and comma-less "908 Pine St Bastrop TX 78602".
+ */
+export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
+  const trimmed = raw.trim();
+  if (!trimmed) return { city: null, state: null, zip: null };
+
+  const commaParts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
+  if (commaParts.length >= 2) {
+    return parseLocalityTail(commaParts.slice(1).join(", "));
+  }
+
+  const flat = trimmed.replace(/,/g, " ");
+  const tokens = flat
+    .toUpperCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (tokens.length < 4) return { city: null, state: null, zip: null };
+
+  const last = tokens[tokens.length - 1]!;
+  if (!ZIP_RE.test(last)) {
+    // Comma-less "<street> <city>" without state/zip — e.g. "908 Pine St Bastrop".
+    for (let i = tokens.length - 2; i >= 1; i--) {
+      const t = tokens[i]!;
+      const canonical = STREET_TYPE_ABBR[t] ?? t;
+      if (STREET_TYPE_SUFFIXES.has(canonical)) {
+        const cityTokens = tokens.slice(i + 1);
+        if (cityTokens.length >= 1 && cityTokens.length <= 3) {
+          return {
+            city: normalizeLocalityToken(cityTokens.join(" ")),
+            state: null,
+            zip: null,
+          };
+        }
+        break;
+      }
+    }
+    return { city: null, state: null, zip: null };
+  }
+  const zip = last;
+  const maybeState = tokens[tokens.length - 2]!;
+  if (!STATE_RE.test(maybeState)) {
+    return { city: null, state: null, zip };
+  }
+  const state = maybeState;
+
+  let end = tokens.length - 2; // strip state + zip
+  const withoutAnchor = tokens.slice(0, end);
+  const candidateKeys = new Set(normalizeStreetLineCandidates(trimmed));
+  let streetTokenCount: number | null = null;
+  for (let drop = 0; drop <= 3; drop++) {
+    const sliceLen = withoutAnchor.length - drop;
+    if (sliceLen < 2) break;
+    const key = withoutAnchor.slice(0, sliceLen).join(" ");
+    if (candidateKeys.has(key) && sliceLen < withoutAnchor.length) {
+      if (streetTokenCount == null || sliceLen > streetTokenCount) {
+        streetTokenCount = sliceLen;
+      }
+    }
+  }
+  if (streetTokenCount == null) {
+    return { city: null, state, zip };
+  }
+  const cityTokens = withoutAnchor.slice(streetTokenCount);
+  const city = normalizeLocalityToken(cityTokens.join(" "));
+  return { city, state, zip };
+}
+
+/** Extract locality from a stored situs or formatted address-point label. */
+export function localityFromStoredAddress(raw: string): PlaceSearchLocality {
+  const trimmed = raw.trim();
+  if (!trimmed) return { city: null, state: null, zip: null };
+
+  const parts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    const city = normalizeLocalityToken(parts[1]);
+    const tail = parseLocalityTail(parts.slice(2).join(" "));
+    return {
+      city,
+      state: tail.state,
+      zip: tail.zip,
+    };
+  }
+  if (parts.length === 2) {
+    return parseLocalityTail(parts[1]!);
+  }
+  return parseLocalityTail(trimmed);
+}
+
+export function placeSearchLocalityMatches(
+  stored: PlaceSearchLocality,
+  query: PlaceSearchLocality,
+): boolean {
+  const qZip = query.zip;
+  const qCity = query.city;
+  const qState = query.state;
+
+  if (!qZip && !qCity && !qState) return true;
+
+  if (qZip) {
+    if (!stored.zip || stored.zip !== qZip) return false;
+  }
+  if (qState) {
+    if (!stored.state || stored.state !== qState) return false;
+  }
+  if (qCity) {
+    if (!stored.city) return false;
+    if (stored.city !== qCity) return false;
+  }
+  return true;
+}
+
+export function hasPlaceSearchLocality(query: PlaceSearchLocality): boolean {
+  return Boolean(query.city || query.state || query.zip);
+}
+
+/**
  * QUERY-SIDE key derivation for the F4d/F4e situs + rooftop lookups. Given
  * a typed address, return the set of candidate normalized street-line keys
  * to match against the stored (comma-bearing) situs/full_addr — most
@@ -403,4 +665,24 @@ export function buildNormalizedStreetSql(col: string): string {
   // Final trim + whitespace collapse in case a replacement changed length
   // (it never introduces spaces, but keep the contract identical).
   return `trim(${expr})`;
+}
+
+/**
+ * Every Texas county FIPS (254 codes). The situs functional index is
+ * `(county_fips, <normalized street>)`. A search that omits the leading
+ * column seq-scans `txgio_parcel` (16M rows / 18 GB) and hits the 20 s
+ * budget. `allStoreCounties()` cannot supply this list: it still tags
+ * Bastrop as live-ArcGIS and would drop 48021 while 74k situs rows sit
+ * in the table.
+ *
+ * The odd-number 001..507 assignment is the Census county-code scheme
+ * for Texas, verified 254-of-254 against the statewide roster. This
+ * function is the index bound, not a name directory.
+ */
+export function texasCountyFipsList(): string[] {
+  const out: string[] = [];
+  for (let n = 1; n <= 507; n += 2) {
+    out.push(`48${String(n).padStart(3, "0")}`);
+  }
+  return out;
 }

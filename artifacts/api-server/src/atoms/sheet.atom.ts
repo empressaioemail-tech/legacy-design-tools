@@ -1,6 +1,6 @@
 /**
  * The `sheet` atom registration — first catalog atom against
- * `@hauska/atom-contract` (Spec 20 §4 + §6, A1 sprint).
+ * `@empressaio/atom-contract` (Spec 20 §4 + §6, A1 sprint).
  *
  * A Revit *sheet* (one drawing in a snapshot's sheet set) is a natural
  * first atom because:
@@ -24,7 +24,7 @@ import type {
   AtomRegistration,
   ContextSummary,
   EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 import {
   extractSheetCrossRefs,

@@ -34,9 +34,58 @@ import {
   sanitizeNodeFacetPayload,
   payloadHasOwnerKey,
   extractTier2Overlay,
+  disposeTier2Flood,
+  TIER2_FLOOD_PRODUCERS,
 } from "../routes/brokerageNodeFacets";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
+import {
+  memoryFloodHazardAtoms,
+  resetFloodHazardAtomQueryableForTests,
+  setFloodHazardAtomQueryableForTests,
+} from "../lib/floodHazardFactRead";
+import {
+  memoryLandUseFactAtoms,
+  resetLandUseFactAtomQueryableForTests,
+  setLandUseFactAtomQueryableForTests,
+} from "../lib/landUseFactRead";
+import {
+  memorySpecialDistrictFactAtoms,
+  resetSpecialDistrictFactAtomQueryableForTests,
+  setSpecialDistrictFactAtomQueryableForTests,
+} from "../lib/specialDistrictFactRead";
+import {
+  memoryPipelineFactAtoms,
+  resetPipelineFactAtomQueryableForTests,
+  setPipelineFactAtomQueryableForTests,
+} from "../lib/pipelineFactRead";
+import {
+  memoryWellFactAtoms,
+  resetWellFactAtomQueryableForTests,
+  setWellFactAtomQueryableForTests,
+} from "../lib/wellFactRead";
+import {
+  memoryBuildingFootprintFactAtoms,
+  resetBuildingFootprintFactAtomQueryableForTests,
+  setBuildingFootprintFactAtomQueryableForTests,
+} from "../lib/buildingFootprintFactRead";
+import {
+  memoryBoundaryEdgeFactAtoms,
+  resetBoundaryEdgeFactAtomQueryableForTests,
+  setBoundaryEdgeFactAtomQueryableForTests,
+} from "../lib/boundaryEdgeFactRead";
+import {
+  memoryOwnerFactAtoms,
+  resetOwnerFactAtomQueryableForTests,
+  setOwnerFactAtomQueryableForTests,
+} from "../lib/ownerFactRead";
+import { mintSessionToken } from "../lib/sessionToken";
+import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import {
+  resetCityLimitsIndexForTests,
+  setCityLimitsIndexForTests,
+} from "../lib/cityLimitsFactRead";
+import { buildCityBoundaryIndex } from "@workspace/cad-ingest/boundary";
 
 // Point the route module's `db` (and this test's seeding `db`) at the
 // per-file test schema, so writes land where `truncateAll` clears them
@@ -81,6 +130,9 @@ describe("brokerageNodeFacets helpers (pure)", () => {
       owner: "SHOULD NOT LEAK",
       ownerName: "SHOULD NOT LEAK",
       owner_name: "SHOULD NOT LEAK",
+      cadOwner: "SHOULD NOT LEAK",
+      gisOwner: "SHOULD NOT LEAK",
+      txgioOwner: "SHOULD NOT LEAK",
       baseFacts: {
         apn: "10068",
         owner: { name: "SHOULD NOT LEAK", mailing: "x" },
@@ -122,8 +174,32 @@ describe("brokerageNodeFacets helpers (pure)", () => {
   });
 });
 
-describe("extractTier2Overlay (the card's FEMA flood read, pure)", () => {
-  it("pulls flood + envelope + bakedAt from a real Tier-2 payload", () => {
+// -------------------------------------------------------------------------
+// SS-W16 (2026-08-19) — the Tier-2 flood facet is RETIRED at the read path.
+//
+// Every case below is seeded with a value the OLD code served, so each one is
+// a known violation the new guard has to refuse. The in-SFHA "AE" payload is
+// the exact shape that was live on the anonymous route; if any of these start
+// returning a determination again, these tests go red.
+// -------------------------------------------------------------------------
+
+/** The real shape the Tier-2 bake writes — a determination, with its producer. */
+const RETIRED_FLOOD_FACET = {
+  status: "in-sfha",
+  floodZone: "AE",
+  inSpecialFloodHazardArea: true,
+  zoneSubtype: "FLOODWAY",
+  baseFloodElevation: 512.4,
+  provenance: {
+    source: "fema-nfhl",
+    adapterKey: "fema:nfhl-flood-zone",
+    layer: "flood-hazard-zones",
+    vintage: "2026-07-21T00:00:00.000Z",
+  },
+};
+
+describe("extractTier2Overlay — flood is refused, never served (SS-W16)", () => {
+  it("refuses a REAL in-SFHA determination and puts no value on the wire", () => {
     const tier2Payload = {
       facetSchemaVersion: "node-facets-tier2-v1",
       tier: 2,
@@ -131,43 +207,149 @@ describe("extractTier2Overlay (the card's FEMA flood read, pure)", () => {
       countyFips: "48055",
       countyName: "Caldwell",
       envelope: { status: "declined", edgeSignal: "shape" },
-      flood: {
-        status: "in-sfha",
-        floodZone: "AE",
-        inSpecialFloodHazardArea: true,
-        provenance: { source: "fema-nfhl", vintage: "2026-07-21T00:00:00.000Z" },
-      },
+      flood: RETIRED_FLOOD_FACET,
       bakedAt: "2026-07-21T00:00:00.000Z",
     };
-    const overlay = extractTier2Overlay(tier2Payload, new Date("2026-07-21T00:00:00.000Z"));
+    const overlay = extractTier2Overlay(
+      tier2Payload,
+      new Date("2026-07-21T00:00:00.000Z"),
+    );
     expect(overlay).not.toBeNull();
-    expect((overlay!.flood as Record<string, unknown>).status).toBe("in-sfha");
-    expect((overlay!.flood as Record<string, unknown>).floodZone).toBe("AE");
-    // Anti-zombie: Tier-2 envelope is never product truth on the wire.
+    expect(overlay!.flood).toBeNull();
+
+    // The refusal names the retired instrument and its replacement.
+    expect(overlay!.floodDisposition.state).toBe("refused");
+    expect(overlay!.floodDisposition.code).toBe("retired-instrument");
+    expect(overlay!.floodDisposition.producer).toBe("fema:nfhl-flood-zone");
+
+    // NOTHING of the determination survives serialization — not the zone code,
+    // not the SFHA flag, not the FEMA vintage. This is the assertion that would
+    // catch a partial strip that left a value nested somewhere.
+    const wire = JSON.stringify(overlay);
+    expect(wire).not.toContain("in-sfha");
+    expect(wire).not.toContain('"AE"');
+    expect(wire).not.toContain("inSpecialFloodHazardArea");
+    expect(wire).not.toContain("FLOODWAY");
+    expect(wire).not.toContain("512.4");
+
+    // Anti-zombie: Tier-2 envelope is still never product truth on the wire.
     expect(overlay!.envelope).toBeNull();
     expect(overlay!.snapshotAt).toBe("2026-07-21T00:00:00.000Z");
   });
 
-  it("surfaces an honest-absence flood (unavailable) verbatim, never a fabricated zone", () => {
+  it("refuses the 'outside-sfha' answer too — the 1,995-parcel failure mode", () => {
+    // The adjudication found 1,995 parcels told they were OUTSIDE a Special
+    // Flood Hazard Area whose centroid is inside one. A false negative is the
+    // dangerous direction, so it must be refused exactly as loudly as a hit.
     const overlay = extractTier2Overlay(
       {
         flood: {
-          status: "unavailable",
+          status: "outside-sfha",
           floodZone: null,
-          provenance: { source: "fema-nfhl", unavailableReason: "FEMA NFHL fetch failed" },
+          inSpecialFloodHazardArea: false,
+          provenance: {
+            source: "fema-nfhl",
+            adapterKey: "fema:nfhl-flood-zone",
+            layer: "flood-hazard-zones",
+            vintage: "2026-07-21T00:00:00.000Z",
+          },
         },
       },
       null,
     );
-    expect(overlay).not.toBeNull();
-    expect((overlay!.flood as Record<string, unknown>).status).toBe("unavailable");
-    expect((overlay!.flood as Record<string, unknown>).floodZone).toBeNull();
+    expect(overlay!.flood).toBeNull();
+    expect(overlay!.floodDisposition.code).toBe("retired-instrument");
+    expect(JSON.stringify(overlay)).not.toContain("inSpecialFloodHazardArea");
   });
 
-  it("returns null for a payload with no flood facet (malformed/legacy row)", () => {
-    expect(extractTier2Overlay({ tier: 2, envelope: {} }, null)).toBeNull();
+  it("FAILS CLOSED on an unrecognised producer rather than passing it through", () => {
+    // A facet from an instrument nobody has ruled on must not be served on the
+    // grounds that it is merely not the retired one. Refusal is the default.
+    const overlay = extractTier2Overlay(
+      {
+        flood: {
+          status: "in-sfha",
+          floodZone: "VE",
+          provenance: { source: "somewhere", adapterKey: "some:new-adapter" },
+        },
+      },
+      null,
+    );
+    expect(overlay!.flood).toBeNull();
+    expect(overlay!.floodDisposition.code).toBe("unrecognised-producer");
+    expect(overlay!.floodDisposition.producer).toBe("some:new-adapter");
+    expect(JSON.stringify(overlay)).not.toContain('"VE"');
+  });
+
+  it("FAILS CLOSED when the facet declares no producer at all", () => {
+    const overlay = extractTier2Overlay(
+      { flood: { status: "in-sfha", floodZone: "AO" } },
+      null,
+    );
+    expect(overlay!.flood).toBeNull();
+    expect(overlay!.floodDisposition.code).toBe("unrecognised-producer");
+    expect(overlay!.floodDisposition.producer).toBeNull();
+    expect(JSON.stringify(overlay)).not.toContain('"AO"');
+  });
+
+  it("distinguishes 'row exists, flood refused' from 'no Tier-2 row at all'", () => {
+    // Three states, never collapsed into one. A row with no flood facet is a
+    // THIRD thing again: it reports no-flood-facet, not a retirement.
+    const noFacet = extractTier2Overlay({ tier: 2, envelope: {} }, null);
+    expect(noFacet).not.toBeNull();
+    expect(noFacet!.flood).toBeNull();
+    expect(noFacet!.floodDisposition.code).toBe("no-flood-facet");
+
+    // No row at all -> no overlay. This is the only null the route emits.
     expect(extractTier2Overlay(null, null)).toBeNull();
     expect(extractTier2Overlay("not-an-object", null)).toBeNull();
+  });
+
+  it("disposeTier2Flood is TOTAL — no SNAPSHOT input yields a value (SS-W16 stays)", () => {
+    const inputs: unknown[] = [
+      undefined,
+      null,
+      0,
+      "",
+      "AE",
+      [],
+      [RETIRED_FLOOD_FACET],
+      {},
+      { provenance: null },
+      { provenance: {} },
+      { provenance: { adapterKey: "" } },
+      { provenance: { adapterKey: "  fema:nfhl-flood-zone  " } },
+      { provenance: { adapterKey: "fema:nfhl-flood-zone-v2" } },
+      { provenance: { adapterKey: "prefix/fema:nfhl-flood-zone" } },
+      RETIRED_FLOOD_FACET,
+    ];
+    for (const input of inputs) {
+      const disposition = disposeTier2Flood(input);
+      expect(disposition.state).toBe("refused");
+    }
+    // Exact equality, not substring: a key that merely CONTAINS the retired one
+    // is unrecognised, and a padded exact key is still the retired one.
+    expect(
+      disposeTier2Flood({ provenance: { adapterKey: "fema:nfhl-flood-zone-v2" } })
+        .code,
+    ).toBe("unrecognised-producer");
+    expect(
+      disposeTier2Flood({
+        provenance: { adapterKey: "prefix/fema:nfhl-flood-zone" },
+      }).code,
+    ).toBe("unrecognised-producer");
+    expect(
+      disposeTier2Flood({
+        provenance: { adapterKey: "  fema:nfhl-flood-zone  " },
+      }).code,
+    ).toBe("retired-instrument");
+  });
+
+  it("the recognised-producer set is closed and holds exactly the retired one", () => {
+    // If this grows, disposeTier2Flood's switch must grow with it or the build
+    // fails at its `never` assignment. This assertion makes the intent explicit
+    // so a future reader does not widen the set casually.
+    expect([...TIER2_FLOOD_PRODUCERS]).toEqual(["fema:nfhl-flood-zone"]);
   });
 });
 
@@ -233,29 +415,268 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     // The Tier-2 bake writes rows under this exact key; the read composes them.
     expect(TIER2_ADAPTER_KEY).toBe("node-facets:tier2");
   });
+
+  it("the route source wires floodHazardFact through the PARCEL-FLOOD-CUTOVER serve cutover and keeps flood: null", () => {
+    // F-01, PARCEL-FLOOD-CUTOVER (2026-09-03): the route now calls
+    // loadFloodHazardFactForServe (floodHazardFactServeCutover.ts),
+    // mirroring wells/specialDistricts/cityLimits' own PARCEL-B-SLATE1
+    // cutovers -- checks the rail allowlist and delegates to
+    // loadFloodHazardFactAtom unchanged when not slated+passing. The next
+    // test asserts THAT module's own wiring still lands on atoms.
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/floodHazardFactServeCutover["']/,
+    );
+    expect(routeSrc).toMatch(/loadFloodHazardFactForServe/);
+    expect(routeSrc).toMatch(/floodHazardFact/);
+    // SS-W16 floor: the CI gate requires these two markers in this file.
+    expect(routeSrc).toMatch(/flood:\s*null;/);
+    expect(routeSrc).toMatch(/flood:\s*null,/);
+    expect(routeSrc).not.toMatch(/flood:\s*p\.flood/);
+  });
+
+  it("floodHazardFactServeCutover (the PARCEL-FLOOD-CUTOVER wrapper) itself wires floodHazardFact from atoms", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "floodHazardFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/floodHazardFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadFloodHazardFactAtom/);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
+  });
+
+  it("the route source wires landUseFact from atoms and keeps baked landUse", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/landUseFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadLandUseFactAtom/);
+    expect(routeSrc).toMatch(/landUseFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/\.from\(\s*cad_property/i);
+    expect(routeSrc).not.toMatch(/landUseFact\s*=\s*.*baseFacts\.landUse/);
+  });
+
+  it("the route source wires specialDistrictFact through the PARCEL-B-SLATE1 serve cutover and does not read bake/CAD/mud-pid directly", () => {
+    // F-01, PARCEL-B-SLATE1 (2026-09-02): the route now calls
+    // loadSpecialDistrictFactForServe (specialDistrictFactServeCutover.ts),
+    // mirroring wells' own PARCEL-B-READER cutover -- checks the rail
+    // allowlist (today: legacy for every unslated pair) and delegates to
+    // loadSpecialDistrictFactAtom unchanged. The next test asserts THAT
+    // module's own wiring still lands on atoms, so this file no longer
+    // naming specialDistrictFactRead directly does not weaken the "never
+    // bake/CAD/mud-pid" guarantee -- it moves one hop, verified below.
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/specialDistrictFactServeCutover["']/,
+    );
+    expect(routeSrc).toMatch(/loadSpecialDistrictFactForServe/);
+    expect(routeSrc).toMatch(/specialDistrictFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /specialDistrictFact\s*=\s*.*place_layer_snapshots/,
+    );
+  });
+
+  it("specialDistrictFactServeCutover (the PARCEL-B-SLATE1 wrapper) itself wires specialDistrictFact from atoms and does not read bake/CAD/mud-pid", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "specialDistrictFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/specialDistrictFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadSpecialDistrictFactAtom/);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
+  });
+
+  it("the route source wires pipelineFact from atoms and does not read bake/CAD/GIS", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/pipelineFactRead["']/);
+    expect(routeSrc).toMatch(/loadPipelineFactAtom/);
+    expect(routeSrc).toMatch(/pipelineFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_pipeline[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /pipelineFact\s*=\s*.*place_layer_snapshots/,
+    );
+    expect(routeSrc).not.toMatch(/pipelineFact\s*=\s*.*texas-rrc/);
+    expect(routeSrc).not.toMatch(/specialDistrictFactFromCortexRoot/);
+  });
+
+  it("the route source wires wellFact through the PARCEL-B-READER serve cutover and does not read bake/CAD/GIS/texas-rrc directly", () => {
+    // F-01, PARCEL-B-READER (2026-09-02): the route now calls
+    // loadWellFactForServe (wellFactServeCutover.ts), which checks the
+    // rail allowlist (today: always 'legacy', PARCEL_RECORD_SLATE is
+    // empty) and then delegates to loadWellFactAtom unchanged. The next
+    // test asserts THAT module's own wiring still lands on atoms, so this
+    // one file's source no longer needing to name wellFactRead directly
+    // does not weaken the "never bake/CAD/GIS/texas-rrc" guarantee -- it
+    // moves one hop, verified below.
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/wellFactServeCutover["']/);
+    expect(routeSrc).toMatch(/loadWellFactForServe/);
+    expect(routeSrc).toMatch(/wellFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_well[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*place_layer_snapshots/);
+    expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*texas-rrc/);
+    expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*tx_rrc_well/);
+  });
+
+  it("wellFactServeCutover (the PARCEL-B-READER wrapper) itself wires wellFact from atoms and does not read bake/CAD/GIS/texas-rrc", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "wellFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/wellFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadWellFactAtom/);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_well[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
+  });
+
+  it("the route source wires buildingFootprintFact from atoms and does not read bake/CAD/GIS", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/buildingFootprintFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadBuildingFootprintFactAtom/);
+    expect(routeSrc).toMatch(/buildingFootprintFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*tx_building_footprint[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /buildingFootprintFact\s*=\s*.*place_layer_snapshots/,
+    );
+    expect(routeSrc).not.toMatch(/buildingFootprintFact\s*=\s*.*tx_building_footprint/);
+    expect(routeSrc).not.toMatch(
+      /buildingFootprintFact\s*=\s*.*split_part/,
+    );
+  });
+
+  it("the route source wires boundaryEdgeFact from atoms and does not read bake/CAD/GIS/txgio_parcel", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/boundaryEdgeFactRead["']/,
+    );
+    expect(routeSrc).toMatch(/loadBoundaryEdgeFactAtom/);
+    expect(routeSrc).toMatch(/boundaryEdgeFact/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*txgio_parcel[^"']*["']/i);
+    expect(routeSrc).not.toMatch(
+      /boundaryEdgeFact\s*=\s*.*place_layer_snapshots/,
+    );
+    expect(routeSrc).not.toMatch(/boundaryEdgeFact\s*=\s*.*txgio_parcel/);
+    expect(routeSrc).not.toMatch(/boundaryEdgeFact\s*=\s*.*entity_id = ANY/);
+  });
+
+  it("the route source wires ownerFact from atoms and does not read bake/CAD/GIS", () => {
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/ownerFactRead["']/);
+    expect(routeSrc).toMatch(/loadOwnerFactAtom/);
+    expect(routeSrc).toMatch(/ownerFact/);
+    expect(routeSrc).toMatch(/authenticatedBrokerageUserId/);
+    expect(routeSrc).toMatch(/subscriptionTierGrantsStudio/);
+    expect(routeSrc).toMatch(/resolvePeEntitlement/);
+    expect(routeSrc).toMatch(/studio-gated|studioGatedOwnerFactRefusal/);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad-parcel-roll[^"']*["']/i);
+    expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*place_layer_snapshots/);
+    expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*cad-parcel-roll/);
+    expect(routeSrc).not.toMatch(/ownerFact\s*=\s*.*ParcelCardData/);
+    expect(routeSrc).not.toMatch(/Clerk/);
+    expect(routeSrc).not.toMatch(/stripe/i);
+  });
+
+  it("the route source wires cityLimitsFact through the PARCEL-B-SLATE1 serve cutover, not an atom or ETJ buffer", () => {
+    // F-01, PARCEL-B-SLATE1 (2026-09-02): the route now calls
+    // loadCityLimitsFactForServe (cityLimitsFactServeCutover.ts), mirroring
+    // wells' own PARCEL-B-READER cutover -- checks the rail allowlist
+    // (today: legacy for every unslated pair) and delegates to
+    // loadCityLimitsFact unchanged. The next test asserts THAT module's own
+    // wiring still lands on tx_city_boundary PIP, so this file no longer
+    // naming cityLimitsFactRead directly does not weaken the "not an atom
+    // or ETJ buffer" guarantee -- it moves one hop, verified below.
+    const routeSrc = readFileSync(
+      join(here, "..", "routes", "brokerageNodeFacets.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/cityLimitsFactServeCutover["']/,
+    );
+    expect(routeSrc).toMatch(/loadCityLimitsFactForServe/);
+    expect(routeSrc).toMatch(/cityLimitsFact/);
+    expect(routeSrc).not.toMatch(/cityLimitsFact\s*=\s*.*situsCity/);
+    expect(routeSrc).not.toMatch(/offset\s*2\s*miles/i);
+    expect(routeSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
+    expect(routeSrc).not.toMatch(/--apply/);
+  });
+
+  it("cityLimitsFactServeCutover (the PARCEL-B-SLATE1 wrapper) itself wires cityLimitsFact from tx_city_boundary PIP, not an atom or ETJ buffer", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "cityLimitsFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/cityLimitsFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadCityLimitsFact/);
+    expect(wrapperSrc).not.toMatch(/offset\s*2\s*miles/i);
+    expect(wrapperSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
+    expect(wrapperSrc).not.toMatch(/--apply/);
+  });
 });
 
 // -------------------------------------------------------------------------
 // 2. Integration tests — seed a baked row, hit the anonymous endpoint.
 // -------------------------------------------------------------------------
 
-const hasDb = Boolean(
-  process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL,
-);
+const hasDb =
+  Boolean(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL) &&
+  process.env.VITEST_DATABASE_STUB !== "1";
 
 // NB: do NOT destructure `db` here — the mocked `db` is a getter that throws
 // until ctx.schema is set (inside setupRouteTests' beforeAll). Destructuring at
 // module scope would invoke the getter too early. `placeLayerSnapshots` is a
 // plain export, safe to destructure; `db` is read lazily inside the hooks.
 const dbMod = await import("@workspace/db");
-const { placeLayerSnapshots } = dbMod;
+const { placeLayerSnapshots, peUserEntitlements, pePropertyUnlocks, users } =
+  dbMod;
 const { setupRouteTests } = await import("./setup");
 const { truncateAll } = await import("@workspace/db/testing");
 
 let getApp: () => Express;
-setupRouteTests((g) => {
-  getApp = g;
-});
+if (hasDb) {
+  setupRouteTests((g) => {
+    getApp = g;
+  });
+}
 
 /** A realistic Tier-1 payload with a real land-use + a deliberately-injected
  * owner key at depth (to PROVE the route strips it — the real bake never
@@ -365,6 +786,19 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   beforeEach(async () => {
+    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
+    setLandUseFactAtomQueryableForTests(memoryLandUseFactAtoms([]));
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([]),
+    );
+    setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([]),
+    );
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    setOwnerFactAtomQueryableForTests(memoryOwnerFactAtoms([]));
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
     await dbMod.db.insert(placeLayerSnapshots).values([
       {
         placeKey: placeKeyForNode(BAKED_NODE_ID),
@@ -395,6 +829,15 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   afterEach(async () => {
+    resetFloodHazardAtomQueryableForTests();
+    resetLandUseFactAtomQueryableForTests();
+    resetSpecialDistrictFactAtomQueryableForTests();
+    resetPipelineFactAtomQueryableForTests();
+    resetWellFactAtomQueryableForTests();
+    resetBuildingFootprintFactAtomQueryableForTests();
+    resetBoundaryEdgeFactAtomQueryableForTests();
+    resetOwnerFactAtomQueryableForTests();
+    resetCityLimitsIndexForTests();
     if (!ctx.schema) return;
     await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
   });
@@ -415,36 +858,1494 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.facets.baseFacts.acreage.value).toBeCloseTo(0.2388);
     expect(res.body.facets.facetCoverage.landUse).toBe(true);
 
-    // OWNER LEAK GUARD — no owner key anywhere, no owner value anywhere.
+    // OWNER LEAK GUARD — baked owner keys stay stripped. Anonymous
+    // ownerFact is a typed refusal with no ownerName / mailing. The
+    // field name itself is allowed; PII is not.
     expect(payloadHasOwnerKey(res.body.facets)).toBe(false);
-    expect(JSON.stringify(res.body)).not.toMatch(/owner/i);
+    expect(JSON.stringify(res.body.facets)).not.toMatch(/SHOULD NOT LEAK/);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
+
+    // Empty city-limits index is unmeasured, never unincorporated.
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    expect(res.body.cityLimitsFact.source).toBe("tx_city_boundary");
+    expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
-  it("composes the Tier-2 FEMA flood overlay onto the card's read (real per-node zone)", async () => {
+  it("serves incorporated cityLimitsFact when the bake point sits in a fixture city", async () => {
+    setCityLimitsIndexForTests({
+      tablePopulated: true,
+      entries: buildCityBoundaryIndex([
+        {
+          geoId: "4805820",
+          cityName: "Bastrop",
+          gnis: null,
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [-97.70, 30.02],
+                [-97.65, 30.02],
+                [-97.65, 30.06],
+                [-97.70, 30.06],
+                [-97.70, 30.02],
+              ],
+            ],
+          },
+        },
+      ]),
+    });
     const res = await request(getApp()).get(
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
     expect(res.status).toBe(200);
-    // The Tier-2 overlay the card + the map's "FEMA flood zone" layer consume.
-    expect(res.body.tier2).not.toBeNull();
-    expect(res.body.tier2.flood.status).toBe("in-sfha");
-    expect(res.body.tier2.flood.floodZone).toBe("AE");
-    expect(res.body.tier2.flood.inSpecialFloodHazardArea).toBe(true);
-    // Carries the FEMA vintage so the card can cite it (commitment #1).
-    expect(res.body.tier2.flood.provenance.source).toBe("fema-nfhl");
-    expect(res.body.tier2.flood.provenance.vintage).toBe(
-      "2026-07-21T00:00:00.000Z",
+    expect(res.body.cityLimitsFact.status).toBe("incorporated");
+    expect(res.body.cityLimitsFact.cityName).toBe("Bastrop");
+    expect(res.body.cityLimitsFact.geoId).toBe("4805820");
+    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    expect(res.body.cityLimitsFact.source).toBe("tx_city_boundary");
+  });
+
+  it("serves unincorporated + etj unresolved when the bake point misses every city", async () => {
+    setCityLimitsIndexForTests({
+      tablePopulated: true,
+      entries: buildCityBoundaryIndex([
+        {
+          geoId: "4805000",
+          cityName: "Austin",
+          gnis: "1389879",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [-97.78, 30.24],
+                [-97.72, 30.24],
+                [-97.72, 30.28],
+                [-97.78, 30.28],
+                [-97.78, 30.24],
+              ],
+            ],
+          },
+        },
+      ]),
+    });
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
-    // Tier-1 base still present alongside the overlay.
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
+    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    expect(res.body.cityLimitsFact.cityName).toBeUndefined();
+  });
+
+  // -----------------------------------------------------------------------
+  // CTX card F (2026-08-28): a parcel without a zoning stamp is served as
+  // unmeasured or as unincorporated by city-limits containment, never as
+  // unincorporated because situsCity was null. The seeded conformant row
+  // below is the production shape of the three unstamped golds (zoning null,
+  // facetCoverage.zoning false, baseFacts.situsCity null) with a real bake
+  // point. Before this card all three cases served `not-applicable` from the
+  // null situsCity; the first and third assertions failed on that code.
+  // -----------------------------------------------------------------------
+  const UNSTAMPED_TRAVIS_NODE_ID = "48453:493738";
+  const unstampedConformantPayload = {
+    shapeSource: "conformant-v1",
+    baked: true,
+    source: "conformant-v1-cad-parcel-roll",
+    access: { discoverability: "catalog-listed", entitlement: "anyone-free" },
+    facets: { base: { parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID, situsAddress: "4707 SHOALWOOD AVE", apn: "493738" } },
+    facetSchemaVersion: "node-facets-tier1-conformant-v1",
+    tier: 1,
+    parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID,
+    countyFips: "48453",
+    countyName: "Travis",
+    baseFacts: {
+      apn: "493738",
+      situsAddress: "4707 SHOALWOOD AVE",
+      situsCity: null,
+      situsState: null,
+      situsZip: null,
+      landUse: null,
+      acreage: null,
+    },
+    zoning: null,
+    envelope: null,
+    facetCoverage: { baseFacts: true, landUse: false, acreage: false, zoning: false, envelope: false, tier1: "populated" },
+    provenance: {
+      parcelSource: "conformant-v1-cad-parcel-roll",
+      parcelVintage: "2026",
+      landUseSource: null,
+      landUseAddressRecovered: false,
+      roadsPending: true,
+      tierNote: "Tier 1 (deterministic).",
+      landUseGateBlocked: false,
+      zoningSource: null,
+      parcelJoin: { table: "txgio_parcel", state: "no-row", basis: "no txgio_parcel row" },
+    },
+    bakedAt: "2026-08-28T18:26:50.293Z",
+  };
+  const AUSTIN_SQUARE = buildCityBoundaryIndex([
+    {
+      geoId: "4805000",
+      cityName: "Austin",
+      gnis: "1389879",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.78, 30.24],
+            [-97.72, 30.24],
+            [-97.72, 30.28],
+            [-97.78, 30.28],
+            [-97.78, 30.24],
+          ],
+        ],
+      },
+    },
+  ]);
+  const seedUnstampedTravis = async (lat: string, lng: string) => {
+    await dbMod.db.insert(placeLayerSnapshots).values([
+      {
+        placeKey: placeKeyForNode(UNSTAMPED_TRAVIS_NODE_ID),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: lat,
+        lngRounded: lng,
+        payloadJson: unstampedConformantPayload,
+        contentHash: "test-hash-unstamped-travis",
+      },
+    ]);
+  };
+  const getUnstampedTravis = () =>
+    request(getApp()).get(`/api/brokerage/v1/place/node/${encodeURIComponent(UNSTAMPED_TRAVIS_NODE_ID)}/facets`);
+
+  it("card F fixture 1: null situsCity with the bake point INSIDE a populated polygon serves stamp-missing for Austin, not not-applicable", async () => {
+    await seedUnstampedTravis("30.26000", "-97.75000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("incorporated");
+    expect(res.body.cityLimitsFact.queryPoint).toEqual({ longitude: -97.75, latitude: 30.26 });
+    expect(res.body.facets.zoning.status).toBe("absent");
+    expect(res.body.facets.zoning.verdict).toBe("stamp-missing");
+    expect(res.body.facets.zoning.authority).toBe("Austin");
+    expect(res.body.facets.zoning.derivation.place.geoId).toBe("4805000");
+    expect(res.body.facets.zoning.verdict).not.toBe("not-applicable");
+    expect(res.body.facets.facetCoverage.zoning).toBe(false);
+    // The land-use fact is NOT told zoning is not applicable.
+    expect(res.body.landUseFact.verdict).toBeUndefined();
+  });
+
+  it("card F fixture 2: the bake point OUTSIDE every polygon of a populated index serves not-applicable with the city-limits basis and source", async () => {
+    await seedUnstampedTravis("30.40000", "-97.90000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
+    expect(res.body.facets.zoning.verdict).toBe("not-applicable");
+    expect(res.body.facets.zoning.authority).toBe("none");
+    expect(res.body.facets.zoning.basis).toContain("tx_city_boundary");
+    expect(res.body.facets.zoning.basis).toContain("county 48453 unincorporated territory is unzoned");
+    expect(res.body.facets.zoning.derivation.source).toBe("tx_city_boundary");
+    expect(res.body.facets.zoning.basis).not.toContain("shape predicate");
+    // Land use (atom-miss here) receives the containment-derived not-applicable.
+    expect(res.body.landUseFact.verdict).toBe("not-applicable");
+  });
+
+  it("card F fixture 3: an EMPTY city-limits index serves unmeasured with the index's reason, never not-applicable", async () => {
+    await seedUnstampedTravis("30.26000", "-97.75000");
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.facets.zoning.verdict).toBe("unmeasured");
+    expect(res.body.facets.zoning.basis).toContain("unmeasured, not unincorporated");
+    expect(res.body.landUseFact.verdict).toBeUndefined();
+  });
+
+  it("card F: the 0,0 bake sentinel (the three unstamped golds as stored on 2026-08-28) serves unmeasured for lack of a query point", async () => {
+    await seedUnstampedTravis("0.00000", "0.00000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.cityLimitsFact.queryPoint).toBeNull();
+    expect(res.body.facets.zoning.verdict).toBe("unmeasured");
+    expect(res.body.facets.zoning.basis).toBe("no usable parcel query point; city limits are unmeasured");
+  });
+
+  it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {
+    // No atom fixture: the atoms path must name the miss, not copy the snapshot.
+    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
+    // The seeded Tier-2 row is a genuine in-SFHA "AE" determination — the exact
+    // shape that was live on this anonymous route before SS-W16. The endpoint
+    // must return 200 with every other facet intact and NO snapshot flood value.
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+
+    // The overlay still exists (the row exists) but carries no determination.
+    expect(res.body.tier2).not.toBeNull();
+    expect(res.body.tier2.flood).toBeNull();
+    expect(res.body.tier2.floodDisposition.state).toBe("refused");
+    expect(res.body.tier2.floodDisposition.code).toBe("retired-instrument");
+    expect(res.body.tier2.floodDisposition.producer).toBe(
+      "fema:nfhl-flood-zone",
+    );
+    expect(res.body.tier2.floodDisposition.supersededBy).toBe(
+      "flood-hazard-fact",
+    );
+
+    // SNAPSHOT tokens must not appear. These values exist only on the bake.
+    const wire = JSON.stringify(res.body);
+    expect(wire).not.toContain("in-sfha");
+    expect(wire).not.toContain('"AE"');
+    expect(wire).not.toContain("inSpecialFloodHazardArea");
+    expect(wire).not.toContain("FLOODWAY");
+    expect(wire).not.toContain("512.4");
+
+    // Atom miss is named, never a silent null.
+    expect(res.body.floodHazardFact).not.toBeNull();
+    expect(res.body.floodHazardFact.state).toBe("refused");
+    expect(res.body.floodHazardFact.code).toBe("atom-miss");
+    expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.floodHazardFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+
+    // Land-use-fact miss is named too. Cad-roll bake stays on retiredStore.
+    expect(res.body.landUseFact).not.toBeNull();
+    expect(res.body.landUseFact.state).toBe("refused");
+    expect(res.body.landUseFact.code).toBe("atom-miss");
+    expect(res.body.landUseFact.source).toBe("land-use-fact");
+    expect(res.body.landUseFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.landUseFact.landUseCode).toBeUndefined();
+    expect(res.body.landUseFact.code).not.toBe("A1");
+
+    // Special-district-fact miss is named. Snapshot / CAD must not fill it.
+    expect(res.body.specialDistrictFact).not.toBeNull();
+    expect(res.body.specialDistrictFact.state).toBe("refused");
+    expect(res.body.specialDistrictFact.code).toBe("atom-miss");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.specialDistrictFact.districtId).toBeUndefined();
+    expect(res.body.specialDistrictFact.districtType).toBeUndefined();
+
+    // rrc-pipeline-fact miss is named. Snapshot / CAD / GIS must not fill it.
+    expect(res.body.pipelineFact).not.toBeNull();
+    expect(res.body.pipelineFact.state).toBe("refused");
+    expect(res.body.pipelineFact.code).toBe("atom-miss");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+    expect(res.body.pipelineFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.pipelineFact.t4permit).toBeUndefined();
+    expect(res.body.pipelineFact.operatorName).toBeUndefined();
+    expect(res.body.pipelineFact.nearPipeline).toBeUndefined();
+
+    // well-fact miss is named. Snapshot / CAD / GIS / texas-rrc must not fill it.
+    expect(res.body.wellFact).not.toBeNull();
+    expect(res.body.wellFact.state).toBe("refused");
+    expect(res.body.wellFact.code).toBe("atom-miss");
+    expect(res.body.wellFact.source).toBe("well-fact");
+    expect(res.body.wellFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.wellFact.apiNumber14).toBeUndefined();
+    expect(res.body.wellFact.wellKey).toBeUndefined();
+    expect(res.body.wellFact.parcelRelation).toBeUndefined();
+
+    // building-footprint miss is named. Snapshot / CAD / GIS must not fill it.
+    expect(res.body.buildingFootprintFact).not.toBeNull();
+    expect(res.body.buildingFootprintFact.state).toBe("refused");
+    expect(res.body.buildingFootprintFact.code).toBe("atom-miss");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+    expect(res.body.buildingFootprintFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.buildingFootprintFact.structureRole).toBeUndefined();
+    expect(res.body.buildingFootprintFact.footprintId).toBeUndefined();
+
+    // property-boundary-edge miss is named. Snapshot / CAD / GIS / txgio_parcel must not fill it.
+    expect(res.body.boundaryEdgeFact).not.toBeNull();
+    expect(res.body.boundaryEdgeFact.state).toBe("refused");
+    expect(res.body.boundaryEdgeFact.code).toBe("atom-miss");
+    expect(res.body.boundaryEdgeFact.source).toBe("property-boundary-edge");
+    expect(res.body.boundaryEdgeFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.boundaryEdgeFact.edgeIndex).toBeUndefined();
+    expect(res.body.boundaryEdgeFact.interior).toBeUndefined();
+
+    // SCOPE ASSERTION — the cut is the snapshot flood facet, NOT the endpoint.
     expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
+    expect(res.body.facets.baseFacts.apn).toBe("10068");
+    expect(res.body.facets.baseFacts.acreage.value).toBeCloseTo(0.2388);
+    expect(res.body.adapterKey).toBe(TIER1_ADAPTER_KEY);
+    expect(res.body.source).toBe("baked-snapshot");
+
     // OWNER LEAK GUARD extends to the overlay — the injected Tier-2 owner is gone.
     expect(payloadHasOwnerKey(res.body.tier2)).toBe(false);
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
   });
 
-  it("returns tier2:null for a node with a Tier-1 row but no Tier-2 flood overlay yet", async () => {
-    // Comal has only a Tier-1 row — the card renders the base unchanged, no flood.
+  it("serves a fixture flood-hazard-fact while still refusing the snapshot bake", async () => {
+    // Divergence: snapshot is AE/FLOODWAY/512.4, atom is AO with no those tokens.
+    // If this test passed while serving the snapshot, AO would be missing and
+    // FLOODWAY would still be on the wire.
+    setFloodHazardAtomQueryableForTests(
+      memoryFloodHazardAtoms([
+        {
+          entityId: `${BAKED_NODE_ID}.00000000`,
+          body: {
+            entityType: "flood-hazard-fact",
+            atomDid: "fhfact_fedcba9876543210",
+            parcelNodeId: `${BAKED_NODE_ID}.00000000`,
+            sourceTier: "fema-nfhl",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AO",
+            zoneSubtype: null,
+            baseFloodElevation: null,
+            sourceAdapter: "fema-nfhl-bulk-v1",
+            sourceVintage: "NFHL_48_20260101",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+
+    expect(res.body.tier2.flood).toBeNull();
+    expect(res.body.tier2.floodDisposition.code).toBe("retired-instrument");
+
+    expect(res.body.floodHazardFact.state).toBe("present");
+    expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.floodHazardFact.floodZone).toBe("AO");
+    expect(res.body.floodHazardFact.inSpecialFloodHazardArea).toBe(true);
+    expect(res.body.floodHazardFact.boundAs).toBe(`${BAKED_NODE_ID}.00000000`);
+    expect(res.body.floodHazardFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+
+    const wire = JSON.stringify(res.body);
+    expect(wire).toContain('"AO"');
+    expect(wire).not.toContain("FLOODWAY");
+    expect(wire).not.toContain("512.4");
+    expect(wire).not.toContain("in-sfha");
+    expect(wire).not.toContain('"AE"');
+  });
+
+  it("gold parcel 48021:34137 dual-grammar bind yields the fixture atom", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold",
+    });
+    setFloodHazardAtomQueryableForTests(
+      memoryFloodHazardAtoms([
+        {
+          entityId: gold,
+          body: {
+            entityType: "flood-hazard-fact",
+            atomDid: "fhfact_4802134137aaaaaa",
+            parcelNodeId: gold,
+            sourceTier: "fema-nfhl",
+            inSpecialFloodHazardArea: false,
+            floodZone: "X",
+            sourceAdapter: "fema-nfhl-bulk-v1",
+            sourceVintage: "NFHL_48_20260101",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.floodHazardFact.state).toBe("present");
+    expect(res.body.floodHazardFact.floodZone).toBe("X");
+    expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.tier2).toBeNull();
+  });
+
+  it("serves a fixture land-use-fact while keeping baked cad-roll landUse as retiredStore", async () => {
+    // Divergence: bake is A1 / Single-family residential / cad-roll.
+    // Atom is C1 / Vacant commercial on ${parcel}:2025. If landUseFact copied
+    // the bake, landUseCode would be missing and code would be A1.
+    setLandUseFactAtomQueryableForTests(
+      memoryLandUseFactAtoms([
+        {
+          entityId: `${BAKED_NODE_ID}:2025`,
+          body: {
+            entityType: "land-use-fact",
+            atomDid: "lufact_fedcba9876543210",
+            parcelNodeId: BAKED_NODE_ID,
+            taxYear: 2025,
+            sourceTier: "cad-authoritative",
+            landUseCode: "C1",
+            landUseLabel: "Vacant commercial",
+            sourceAdapter: "cad-roll-v1",
+            sourceVintage: "2025-caldwell-cad-export",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+
+    expect(res.body.landUseFact.state).toBe("present");
+    expect(res.body.landUseFact.source).toBe("land-use-fact");
+    expect(res.body.landUseFact.landUseCode).toBe("C1");
+    expect(res.body.landUseFact.landUseLabel).toBe("Vacant commercial");
+    expect(res.body.landUseFact.taxYear).toBe(2025);
+    expect(res.body.landUseFact.boundAs).toBe(`${BAKED_NODE_ID}:2025`);
+    expect(res.body.landUseFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+    expect(res.body.landUseFact.code).toBeUndefined();
+    expect(res.body.landUseFact.description).toBeUndefined();
+
+    expect(res.body.facets.baseFacts.landUse.code).toBe("A1");
+    expect(res.body.facets.baseFacts.landUse.description).toBe(
+      "Single-family residential",
+    );
+    expect(res.body.facets.baseFacts.landUse.source).toBe("cad-roll");
+  });
+
+  it("gold parcel 48021:34137 dual-grammar prefix bind yields the :2025 fixture atom", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold-landuse",
+    });
+    setLandUseFactAtomQueryableForTests(
+      memoryLandUseFactAtoms([
+        {
+          entityId: `${gold}:2025`,
+          body: {
+            entityType: "land-use-fact",
+            atomDid: "lufact_4802134137aaaaaa",
+            parcelNodeId: gold,
+            taxYear: 2025,
+            sourceTier: "cad-authoritative",
+            landUseCode: "A1",
+            landUseLabel: "Single Family",
+            sourceAdapter: "cad-roll-v1",
+            sourceVintage: "2025-bastrop-cad-export",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.landUseFact.state).toBe("present");
+    expect(res.body.landUseFact.landUseCode).toBe("A1");
+    expect(res.body.landUseFact.source).toBe("land-use-fact");
+    expect(res.body.landUseFact.taxYear).toBe(2025);
+    expect(res.body.landUseFact.boundAs).toBe(`${gold}:2025`);
+    expect(res.body.landUseFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+  });
+
+  it("padded gold prefix 48021:34137.00000000:2025 dual-grammar bind yields landUseCode", async () => {
+    const gold = "48021:34137";
+    const goldPadded = "48021:34137.00000000";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold-landuse-padded",
+    });
+    setLandUseFactAtomQueryableForTests(
+      memoryLandUseFactAtoms([
+        {
+          entityId: `${goldPadded}:2025`,
+          body: {
+            entityType: "land-use-fact",
+            parcelNodeId: goldPadded,
+            taxYear: 2025,
+            sourceTier: "cad-authoritative",
+            landUseCode: "C1",
+            sourceAdapter: "cad-roll-v1",
+            evaluatedAt: "2026-08-11T23:13:43.774Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.landUseFact.state).toBe("present");
+    expect(res.body.landUseFact.landUseCode).toBe("C1");
+    expect(res.body.landUseFact.boundAs).toBe(`${goldPadded}:2025`);
+    expect(res.body.landUseFact.landUseLabel).toBeNull();
+  });
+
+  it("serves a fixture special-district-fact and does not copy snapshot district fields", async () => {
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${BAKED_NODE_ID}:sd:3504125`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: BAKED_NODE_ID,
+            sourceTier: "tceq-water-districts",
+            districtId: "3504125",
+            districtType: "MUD",
+            districtName: "The Colony MUD 1C",
+            sourceAdapter: "tceq-water-districts-v1",
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("present");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.districtId).toBe("3504125");
+    expect(res.body.specialDistrictFact.districtType).toBe("MUD");
+    expect(res.body.specialDistrictFact.districtName).toBe("The Colony MUD 1C");
+    expect(res.body.specialDistrictFact.boundAs).toBe(
+      `${BAKED_NODE_ID}:sd:3504125`,
+    );
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      BAKED_NODE_ID,
+      `${BAKED_NODE_ID}.00000000`,
+    ]);
+  });
+
+  it("gold parcel 48021:34137 :sd:outside is typed absence, not a fabricated MUD", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-gold-sd-outside",
+    });
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${gold}:sd:outside`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: gold,
+            sourceTier: "tceq-water-districts",
+            absence: {
+              kind: "outside-tceq-source-boundaries",
+              reason:
+                "Parcel geometry does not intersect any polygon in tx_special_district for county 48021.",
+            },
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("absent");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.entityId).toBe(`${gold}:sd:outside`);
+    expect(res.body.specialDistrictFact.absence.kind).toBe(
+      "outside-tceq-source-boundaries",
+    );
+    expect(res.body.specialDistrictFact.districtType).toBeUndefined();
+    expect(res.body.specialDistrictFact.districtName).toBeUndefined();
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+  });
+
+  it("Bastrop present substitute 48021:102817:sd:3504125 dual-grammar prefix bind yields MUD", async () => {
+    const parcel = "48021:102817";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-bastrop-sd",
+    });
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${parcel}:sd:3504125`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: parcel,
+            sourceTier: "tceq-water-districts",
+            districtId: "3504125",
+            districtType: "MUD",
+            districtName: "The Colony MUD 1C",
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("present");
+    expect(res.body.specialDistrictFact.districtId).toBe("3504125");
+    expect(res.body.specialDistrictFact.districtType).toBe("MUD");
+    expect(res.body.specialDistrictFact.source).toBe("special-district-fact");
+    expect(res.body.specialDistrictFact.boundAs).toBe(`${parcel}:sd:3504125`);
+    expect(res.body.specialDistrictFact.tried).toEqual([
+      parcel,
+      `${parcel}.00000000`,
+    ]);
+  });
+
+  it("padded gold prefix 48021:102817.00000000:sd:3504125 dual-grammar bind yields districtId", async () => {
+    const parcel = "48021:102817";
+    const parcelPadded = "48021:102817.00000000";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-bastrop-sd-padded",
+    });
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([
+        {
+          entityId: `${parcelPadded}:sd:3504125`,
+          body: {
+            entityType: "special-district-fact",
+            parcelNodeId: parcelPadded,
+            sourceTier: "tceq-water-districts",
+            districtId: "3504125",
+            districtType: "MUD",
+            districtName: "The Colony MUD 1C",
+            evaluatedAt: "2026-08-12T21:33:03.719Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.specialDistrictFact.state).toBe("present");
+    expect(res.body.specialDistrictFact.districtId).toBe("3504125");
+    expect(res.body.specialDistrictFact.boundAs).toBe(
+      `${parcelPadded}:sd:3504125`,
+    );
+    expect(res.body.specialDistrictFact.districtName).toBe("The Colony MUD 1C");
+  });
+
+  it("serves a fixture rrc-pipeline-fact nearby hit and does not copy GIS/bake fields", async () => {
+    const near = "48021:10048";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(near),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: near,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "10048",
+          P5_NUM: "GIS-MUST-NOT-LEAK",
+          OPER_NM: "GIS OPERATOR MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-pipeline-near",
+    });
+    setPipelineFactAtomQueryableForTests(
+      memoryPipelineFactAtoms([
+        {
+          entityId: near,
+          body: {
+            entityType: "rrc-pipeline-fact",
+            atomDid: "pipefact_4802110048aaaaaa",
+            parcelNodeId: near,
+            sourceTier: "rrc-public-gis",
+            nearPipeline: true,
+            bufferMeters: 152.4,
+            nearestPipelineDistanceMeters: 87.9,
+            t4permit: "05781",
+            p5Num: "252017",
+            operatorName: "ENERGY TRANSFER COMPANY",
+            systemName: "PRAIRIE LEA",
+            commodity: "NATURAL GAS",
+            sourceAdapter: "tx-rrc-pipeline-staged-v1",
+            evaluatedAt: "2026-08-12T14:20:00.000Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(near)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.pipelineFact.state).toBe("present");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+    expect(res.body.pipelineFact.nearPipeline).toBe(true);
+    expect(res.body.pipelineFact.t4permit).toBe("05781");
+    expect(res.body.pipelineFact.p5Num).toBe("252017");
+    expect(res.body.pipelineFact.operatorName).toBe("ENERGY TRANSFER COMPANY");
+    expect(res.body.pipelineFact.systemName).toBe("PRAIRIE LEA");
+    expect(res.body.pipelineFact.commodity).toBe("NATURAL GAS");
+    expect(res.body.pipelineFact.boundAs).toBe(near);
+    expect(res.body.pipelineFact.tried).toEqual([near, `${near}.00000000`]);
+    expect(res.body.pipelineFact.P5_NUM).toBeUndefined();
+    expect(res.body.pipelineFact.OPER_NM).toBeUndefined();
+    const wire = JSON.stringify(res.body.pipelineFact);
+    expect(wire).not.toContain("GIS-MUST-NOT-LEAK");
+    expect(wire).not.toContain("GIS OPERATOR MUST NOT LEAK");
+  });
+
+  it("gold 48021:34137 outside-buffer fixture is present, not a fabricated nearby pipeline", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-pipeline-gold",
+    });
+    setPipelineFactAtomQueryableForTests(
+      memoryPipelineFactAtoms([
+        {
+          entityId: gold,
+          body: {
+            entityType: "rrc-pipeline-fact",
+            atomDid: "pipefact_4802134137aaaaaa",
+            parcelNodeId: gold,
+            sourceTier: "rrc-public-gis",
+            nearPipeline: false,
+            bufferMeters: 152.4,
+            sourceAdapter: "tx-rrc-pipeline-staged-v1",
+            evaluatedAt: "2026-08-12T14:20:00.000Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.pipelineFact.state).toBe("present");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+    expect(res.body.pipelineFact.nearPipeline).toBe(false);
+    expect(res.body.pipelineFact.t4permit).toBeNull();
+    expect(res.body.pipelineFact.operatorName).toBeNull();
+    expect(res.body.pipelineFact.entityId).toBe(gold);
+    expect(res.body.pipelineFact.tried).toEqual([gold, `${gold}.00000000`]);
+  });
+
+  it("padded-only rrc-pipeline-fact fixture binds on inbound integer id", async () => {
+    const near = "48021:10048";
+    const nearPadded = `${near}.00000000`;
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(near),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: near,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-pipeline-padded",
+    });
+    setPipelineFactAtomQueryableForTests(
+      memoryPipelineFactAtoms([
+        {
+          entityId: nearPadded,
+          body: {
+            entityType: "rrc-pipeline-fact",
+            atomDid: "pipefact_4802110048padded",
+            parcelNodeId: nearPadded,
+            sourceTier: "rrc-public-gis",
+            nearPipeline: true,
+            bufferMeters: 152.4,
+            nearestPipelineDistanceMeters: 87.9,
+            t4permit: "05781",
+            operatorName: "ENERGY TRANSFER COMPANY",
+            sourceAdapter: "tx-rrc-pipeline-staged-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(near)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.pipelineFact.state).toBe("present");
+    expect(res.body.pipelineFact.boundAs).toBe(nearPadded);
+    expect(res.body.pipelineFact.t4permit).toBe("05781");
+    expect(res.body.pipelineFact.source).toBe("rrc-pipeline-fact");
+  });
+
+  it("Crane 48103:100 fixture is present wellFact from well-fact, not bake/GIS", async () => {
+    const crane = "48103:100";
+    const lead = "48103:100:42000001030000";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(crane),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.48000",
+      lngRounded: "-102.75900",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: crane,
+        countyFips: "48103",
+        countyName: "Crane",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "100",
+          API: "GIS-MUST-NOT-LEAK",
+          OPER_NM: "GIS OPERATOR MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-well-crane",
+    });
+    setWellFactAtomQueryableForTests(
+      memoryWellFactAtoms([
+        {
+          entityId: lead,
+          body: {
+            entityType: "well-fact",
+            atomDid: "wlfact_48103100aaaaaaaa",
+            parcelNodeId: crane,
+            wellKey: "42000001030000",
+            apiNumber14: "42000001030000",
+            wellStatus: "dry",
+            wellType: "unknown",
+            orphaned: false,
+            parcelRelation: "on-parcel",
+            proximityRadiusMeters: 152,
+            sourceAdapter: "tx-rrc-well-staged-v1",
+            evaluatedAt: "2026-08-16T09:57:36.576Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(crane)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.wellFact.state).toBe("present");
+    expect(res.body.wellFact.source).toBe("well-fact");
+    expect(res.body.wellFact.parcelRelation).toBe("on-parcel");
+    expect(res.body.wellFact.apiNumber14).toBe("42000001030000");
+    expect(res.body.wellFact.wellKey).toBe("42000001030000");
+    expect(res.body.wellFact.wellStatus).toBe("dry");
+    expect(res.body.wellFact.operatorName).toBeNull();
+    expect(res.body.wellFact.boundAs).toBe(lead);
+    expect(res.body.wellFact.tried).toEqual([crane, `${crane}.00000000`]);
+    expect(res.body.wellFact.API).toBeUndefined();
+    expect(res.body.wellFact.OPER_NM).toBeUndefined();
+    const wire = JSON.stringify(res.body.wellFact);
+    expect(wire).not.toContain("GIS-MUST-NOT-LEAK");
+    expect(wire).not.toContain("GIS OPERATOR MUST NOT LEAK");
+    expect(wire).not.toContain("t4permit");
+  });
+
+  it("gold 48021:34137 empty well-fact is atom-miss, not a fabricated :none", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          API: "GIS-MUST-NOT-LEAK",
+        },
+      },
+      contentHash: "test-hash-well-gold",
+    });
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.wellFact.state).toBe("refused");
+    expect(res.body.wellFact.code).toBe("atom-miss");
+    expect(res.body.wellFact.source).toBe("well-fact");
+    expect(res.body.wellFact.tried).toEqual([gold, `${gold}.00000000`]);
+    expect(res.body.wellFact.apiNumber14).toBeUndefined();
+    expect(res.body.wellFact.absence).toBeUndefined();
+    expect(JSON.stringify(res.body.wellFact)).not.toContain("GIS-MUST-NOT-LEAK");
+  });
+
+  it("padded-only well-fact fixture binds on inbound integer id", async () => {
+    const crane = "48103:100";
+    const cranePadded = `${crane}.00000000`;
+    const leadPadded = `${cranePadded}:42000001030000`;
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(crane),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.48000",
+      lngRounded: "-102.75900",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: crane,
+        countyFips: "48103",
+        countyName: "Crane",
+      },
+      contentHash: "test-hash-well-padded",
+    });
+    setWellFactAtomQueryableForTests(
+      memoryWellFactAtoms([
+        {
+          entityId: leadPadded,
+          body: {
+            entityType: "well-fact",
+            parcelNodeId: cranePadded,
+            wellKey: "42000001030000",
+            apiNumber14: "42000001030000",
+            wellStatus: "dry",
+            wellType: "unknown",
+            orphaned: false,
+            parcelRelation: "on-parcel",
+            proximityRadiusMeters: 152,
+            sourceAdapter: "tx-rrc-well-staged-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(crane)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.wellFact.state).toBe("present");
+    expect(res.body.wellFact.boundAs).toBe(leadPadded);
+    expect(res.body.wellFact.apiNumber14).toBe("42000001030000");
+    expect(res.body.wellFact.source).toBe("well-fact");
+  });
+
+  it("Anderson 48001:10136 fixture is present buildingFootprintFact from the atom body, not bake/GIS", async () => {
+    const parcel = "48001:10136";
+    const lead = "48001:10136.00000000:footprint:primary";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.75000",
+      lngRounded: "-95.63000",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48001",
+        countyName: "Anderson",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "10136",
+          structureRole: "GIS-MUST-NOT-LEAK",
+          FOOTPRINT: "GIS FOOTPRINT MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-fp-anderson",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([
+        {
+          entityId: lead,
+          body: {
+            entityType: "building-footprint",
+            atomDid: "bfoot_4800110136aaaaaaaa",
+            parcelNodeId: "48001:10136.00000000",
+            footprintId: "primary",
+            structureRole: "primary",
+            sourceTier: "ml-derived",
+            verificationStatus: "unsurveyed",
+            footprintGeometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-95.0, 31.0],
+                  [-95.0, 31.001],
+                  [-94.999, 31.001],
+                  [-94.999, 31.0],
+                  [-95.0, 31.0],
+                ],
+              ],
+            },
+            sourceAdapter: "ml-global-building-footprints-v1",
+            evaluatedAt: "2026-08-16T10:45:43.182Z",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("present");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+    expect(res.body.buildingFootprintFact.structureRole).toBe("primary");
+    expect(res.body.buildingFootprintFact.footprintId).toBe("primary");
+    expect(res.body.buildingFootprintFact.boundAs).toBe(lead);
+    expect(res.body.buildingFootprintFact.tried).toEqual([
+      parcel,
+      `${parcel}.00000000`,
+    ]);
+    expect(res.body.buildingFootprintFact.FOOTPRINT).toBeUndefined();
+    const wire = JSON.stringify(res.body.buildingFootprintFact);
+    expect(wire).not.toContain("GIS-MUST-NOT-LEAK");
+    expect(wire).not.toContain("GIS FOOTPRINT MUST NOT LEAK");
+  });
+
+  it("gold 48021:34137 empty building-footprint is atom-miss, not a fabricated absence", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          structureRole: "GIS-MUST-NOT-LEAK",
+        },
+      },
+      contentHash: "test-hash-fp-gold",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("refused");
+    expect(res.body.buildingFootprintFact.code).toBe("atom-miss");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+    expect(res.body.buildingFootprintFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+    expect(res.body.buildingFootprintFact.structureRole).toBeUndefined();
+    expect(res.body.buildingFootprintFact.absence).toBeUndefined();
+    expect(JSON.stringify(res.body.buildingFootprintFact)).not.toContain(
+      "GIS-MUST-NOT-LEAK",
+    );
+  });
+
+  it("padded-only building-footprint fixture binds on inbound integer id", async () => {
+    const parcel = "48001:10136";
+    const padded = `${parcel}.00000000`;
+    const leadPadded = `${padded}:footprint:primary`;
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.75000",
+      lngRounded: "-95.63000",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48001",
+        countyName: "Anderson",
+      },
+      contentHash: "test-hash-fp-padded",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([
+        {
+          entityId: leadPadded,
+          body: {
+            entityType: "building-footprint",
+            parcelNodeId: padded,
+            footprintId: "primary",
+            structureRole: "primary",
+            sourceTier: "ml-derived",
+            footprintGeometry: { type: "Polygon", coordinates: [] },
+            sourceAdapter: "ml-global-building-footprints-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("present");
+    expect(res.body.buildingFootprintFact.boundAs).toBe(leadPadded);
+    expect(res.body.buildingFootprintFact.structureRole).toBe("primary");
+    expect(res.body.buildingFootprintFact.source).toBe("building-footprint");
+  });
+
+  it("does not parse :primary as identity — body.structureRole=accessory is served", async () => {
+    const parcel = "48001:10136";
+    const lead = "48001:10136.00000000:footprint:primary";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcel),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "31.75000",
+      lngRounded: "-95.63000",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: parcel,
+        countyFips: "48001",
+        countyName: "Anderson",
+      },
+      contentHash: "test-hash-fp-role-body",
+    });
+    setBuildingFootprintFactAtomQueryableForTests(
+      memoryBuildingFootprintFactAtoms([
+        {
+          entityId: lead,
+          body: {
+            entityType: "building-footprint",
+            parcelNodeId: "48001:10136.00000000",
+            footprintId: "primary",
+            structureRole: "accessory",
+            sourceTier: "ml-derived",
+            footprintGeometry: { type: "Polygon", coordinates: [] },
+            sourceAdapter: "ml-global-building-footprints-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(parcel)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.buildingFootprintFact.state).toBe("present");
+    expect(res.body.buildingFootprintFact.structureRole).toBe("accessory");
+    expect(res.body.buildingFootprintFact.footprintId).toBe("primary");
+    expect(res.body.buildingFootprintFact.entityId).toBe(lead);
+  });
+
+  it("gold 48021:34137 fixture is present boundaryEdgeFact from the atom body, not GIS/txgio_parcel", async () => {
+    const gold = "48021:34137";
+    const localEnu: [[number, number], [number, number]] = [
+      [0, 0],
+      [30.18, 0],
+    ];
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          parcelRing: "GIS-OUTLINE-MUST-NOT-LEAK",
+          txgio_parcel: "TXGIO RING MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-edge-gold",
+    });
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:0",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 0,
+            role: "rear",
+            adjacencyKind: "alley",
+            interior: { edgeEndpoints: localEnu },
+            sourceAdapter: "descriptor-fixture",
+          },
+        },
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            frontBasis: "situs-street-match",
+            facingRoad: {
+              roadNodeId: "48021:road:15113284",
+              classification: "residential",
+            },
+            interior: { edgeEndpoints: localEnu },
+            sourceAdapter: "descriptor-fixture",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.boundaryEdgeFact.state).toBe("present");
+    expect(res.body.boundaryEdgeFact.source).toBe("property-boundary-edge");
+    expect(res.body.boundaryEdgeFact.entityId).toBe("48021:34137:boundary:2");
+    expect(res.body.boundaryEdgeFact.role).toBe("front");
+    expect(res.body.boundaryEdgeFact.edgeIndex).toBe(2);
+    expect(res.body.boundaryEdgeFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+    expect(res.body.boundaryEdgeFact.edges).toHaveLength(2);
+    expect(res.body.boundaryEdgeFact.txgio_parcel).toBeUndefined();
+    expect(res.body.boundaryEdgeFact.parcelRing).toBeUndefined();
+    const wire = JSON.stringify(res.body.boundaryEdgeFact);
+    expect(wire).not.toContain("GIS-OUTLINE-MUST-NOT-LEAK");
+    expect(wire).not.toContain("TXGIO RING MUST NOT LEAK");
+  });
+
+  it("gold 48021:34137 empty boundary-edge atoms is atom-miss, not a copied GIS outline", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          parcelRing: "GIS-OUTLINE-MUST-NOT-LEAK",
+          txgio_parcel: "TXGIO RING MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-edge-gold-miss",
+    });
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.boundaryEdgeFact.state).toBe("refused");
+    expect(res.body.boundaryEdgeFact.code).toBe("atom-miss");
+    expect(res.body.boundaryEdgeFact.source).toBe("property-boundary-edge");
+    expect(res.body.boundaryEdgeFact.tried).toEqual([
+      gold,
+      `${gold}.00000000`,
+    ]);
+    expect(res.body.boundaryEdgeFact.interior).toBeUndefined();
+    expect(res.body.boundaryEdgeFact.edges).toBeUndefined();
+    expect(JSON.stringify(res.body.boundaryEdgeFact)).not.toContain(
+      "GIS-OUTLINE-MUST-NOT-LEAK",
+    );
+    expect(JSON.stringify(res.body.boundaryEdgeFact)).not.toContain(
+      "TXGIO RING MUST NOT LEAK",
+    );
+  });
+
+  it("serves classified setback on the wire: road-class refused, dimensional value, placeholder unknown", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-edge-setback-disposition",
+    });
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 15,
+              provenance: "road-class-setback-table",
+              atomCitation: "bastrop_tx",
+            },
+          },
+        },
+      ]),
+    );
+    const refused = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(refused.status).toBe(200);
+    expect(refused.body.boundaryEdgeFact.setback.state).toBe("refused");
+    expect(refused.body.boundaryEdgeFact.setback.basis).toMatch(
+      /retired road-class derivation/,
+    );
+    expect(refused.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "road-class-setback-table",
+    );
+    expect(refused.body.boundaryEdgeFact.setback.feet).toBeUndefined();
+    expect(refused.body.boundaryEdgeFact.edges[0].setback.state).toBe("refused");
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 30,
+              provenance: "bastrop-per-parcel-record-layer-23",
+            },
+          },
+        },
+      ]),
+    );
+    const valued = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(valued.status).toBe(200);
+    expect(valued.body.boundaryEdgeFact.setback.state).toBe("value");
+    expect(valued.body.boundaryEdgeFact.setback.feet).toBe(30);
+    expect(valued.body.boundaryEdgeFact.setback.provenance).toBe(
+      "bastrop-per-parcel-record-layer-23",
+    );
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 0,
+              provenance: "storage-port-proof/phase-1a",
+            },
+          },
+        },
+      ]),
+    );
+    const unknown = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(unknown.status).toBe(200);
+    expect(unknown.body.boundaryEdgeFact.setback.state).toBe("unknown");
+    expect(unknown.body.boundaryEdgeFact.setback.basis).toMatch(
+      /phase-1a storage-port proof/,
+    );
+    expect(unknown.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "storage-port-proof/phase-1a",
+    );
+    expect(JSON.stringify(unknown.body.boundaryEdgeFact.setback)).not.toContain(
+      "absent-verified",
+    );
+  });
+
+  it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
+    // Comal has only a Tier-1 row. `tier2: null` now means exactly one thing —
+    // no Tier-2 row exists — and is distinct from the refusal above.
     const res = await request(getApp()).get(
       `/api/brokerage/v1/place/node/${encodeURIComponent(COMAL_NODE_ID)}/facets`,
     );
@@ -481,5 +2382,227 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       "/api/brokerage/v1/place/node/not-a-node/facets",
     );
     expect(res.status).toBe(400);
+  });
+
+  it("anonymous GET with a gold owner-fact fixture still has no ownerName or mailing", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          owner_name: "CAD ROLL MUST NOT LEAK",
+        },
+      },
+      contentHash: "test-hash-owner-anon",
+    });
+    setOwnerFactAtomQueryableForTests(
+      memoryOwnerFactAtoms([
+        {
+          entityId: "48021:34137:2025",
+          body: {
+            entityType: "owner-fact",
+            parcelNodeId: gold,
+            taxYear: 2025,
+            ownerName: "FIXTURE OWNER",
+            ownerMailingAddress: "1 FIXTURE RD, BASTROP, TX 78602",
+            sourceAdapter: "cad-property-owner-v1",
+          },
+        },
+      ]),
+    );
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(res.body.ownerFact.ownerMailingAddress).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("CAD ROLL MUST NOT LEAK");
+    expect(JSON.stringify(res.body.facets)).not.toContain("CAD ROLL MUST NOT LEAK");
+  });
+
+  async function seedOwnerGoldSnapshot(gold: string, contentHash: string) {
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          owner_name: "CAD ROLL MUST NOT LEAK",
+          cadOwner: "CAD ROLL MUST NOT LEAK",
+        },
+      },
+      contentHash,
+    });
+  }
+
+  function goldOwnerFixture(gold: string) {
+    setOwnerFactAtomQueryableForTests(
+      memoryOwnerFactAtoms([
+        {
+          entityId: "48021:34137:2025",
+          body: {
+            entityType: "owner-fact",
+            parcelNodeId: gold,
+            taxYear: 2025,
+            ownerName: "FIXTURE OWNER",
+            ownerMailingAddress: "1 FIXTURE RD, BASTROP, TX 78602",
+            sourceAdapter: "cad-property-owner-v1",
+          },
+        },
+      ]),
+    );
+  }
+
+  async function seedPeUser(
+    userId: string,
+    row: {
+      accessTier: "free" | "paid";
+      subscriptionTier?: "solo" | "studio" | "team" | null;
+    },
+  ) {
+    await dbMod.db.insert(users).values({ id: userId, displayName: userId });
+    await dbMod.db.insert(peUserEntitlements).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: row.accessTier,
+      subscriptionTier: row.subscriptionTier ?? null,
+    });
+  }
+
+  it("identified-only GET with an owner atom MUST refuse — identified is not Studio", async () => {
+    const gold = "48021:34137";
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-ident-only");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: "user_owner_fact_identified_only" },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
+    expect(JSON.stringify(res.body)).not.toContain("CAD ROLL MUST NOT LEAK");
+  });
+
+  it("signed-in Solo GET with an owner atom MUST refuse ownerName", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_solo";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "solo" });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-solo");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
+  });
+
+  it("unlock-only GET with an owner atom MUST refuse ownerName", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_unlock";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("Studio GET serves gold 48021:34137:2025 from owner-fact, not CAD-roll", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_studio";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-studio");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("present");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.entityId).toBe("48021:34137:2025");
+    expect(res.body.ownerFact.taxYear).toBe(2025);
+    expect(res.body.ownerFact.ownerName).toBe("FIXTURE OWNER");
+    expect(res.body.ownerFact.tried).toEqual([gold, `${gold}.00000000`]);
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain(
+      "CAD ROLL MUST NOT LEAK",
+    );
+  });
+
+  it("Studio GET with empty owner-fact atoms is atom-miss, not a copied CAD-roll owner", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_studio_miss";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-studio-miss");
+    setOwnerFactAtomQueryableForTests(memoryOwnerFactAtoms([]));
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("atom-miss");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+    expect(JSON.stringify(res.body.ownerFact)).not.toContain(
+      "CAD ROLL MUST NOT LEAK",
+    );
   });
 });

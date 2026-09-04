@@ -1,4 +1,4 @@
-import type { ReadContract as AtomReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract as AtomReadContract } from "@empressaio/atom-contract/read-contract";
 import type { ReadContract as WireReadContract } from "@workspace/api-client-react";
 import { ReadContractChrome } from "./ReadContractChrome";
 import { legacyHonestyToReadContract } from "@workspace/engine-core";

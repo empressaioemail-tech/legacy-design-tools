@@ -30,19 +30,28 @@
  *      source that cannot see a county cannot report that county empty.
  *   5. AN UNSPECIFIED RAIL IS REFUSED, never scored as zero.
  *
- * CLASSIFIER. `classifyFacet` is imported from `countyCoverageScoreCli.ts`
- * rather than duplicated — it is the existing single definition and the
- * geometry and flood CLIs already import it, so copying it would create the
- * future contradiction DEV_PROCESS 6.2 warns about. That file is owned by
- * lane SS-W13 this week, so `engine.test.ts` PINS the classifier behaviours
- * this engine depends on: if SS-W13 changes them, those tests fail loudly
- * instead of this engine drifting silently.
+ * CLASSIFIER. `classifyFacet` is imported from the pure leaf module
+ * `lib/countyCoverageClassification.ts` rather than duplicated — it is the
+ * single definition and the geometry and flood CLIs import the same one, so
+ * copying it would create the future contradiction DEV_PROCESS 6.2 warns
+ * about. `engine.test.ts` PINS the classifier behaviours this engine depends
+ * on, so a change to them fails loudly instead of this engine drifting.
+ *
+ * IT USED TO BE IMPORTED FROM `countyCoverageScoreCli.ts`, AND THAT BROKE
+ * PRODUCTION. `routes/countyRailScore.ts` imports this engine through the
+ * `./index.ts` barrel, so the CLI was in the server's boot graph. esbuild
+ * bundles everything into one file, which defeats the CLI's `isDirectRun()`
+ * guard (`import.meta.url` and `argv[1]` are both the bundle), so the CLI's
+ * `main()` ran at boot and `process.exit(1)`'d before Express listened — the
+ * canary deploy of `5688aa31` on 2026-08-19. Never import a `*Cli` module
+ * from anything on this path; `scripts/checkBootGraphNoCliImports.mjs`
+ * enforces it.
  */
 
 import {
   classifyFacet,
   type Classification,
-} from "../../countyCoverageScoreCli";
+} from "../countyCoverageClassification";
 import {
   absenceProbeCoversCounty,
   isScoreableRule,
@@ -82,6 +91,16 @@ export interface RailCellMeasurement {
   detail?: string | null;
   /** Set only when a declared probe POSITIVELY established absence. */
   absence?: AbsenceDetermination | null;
+  /**
+   * County-level absence already read from the atoms store (e.g. mud
+   * `{fips}:_county_coverage` marker). Does not require an absence probe.
+   */
+  establishedAbsence?: AbsenceDetermination | null;
+  /**
+   * Layer applicability from serve-layer verdict vocabulary. When
+   * `not-applicable`, the rail must not score as a coverage gap.
+   */
+  applicabilityVerdict?: "not-applicable" | null;
 }
 
 /** Exactly the values that define a ledger row. Timestamps are NOT here — see `railCellChanged`. */
@@ -162,9 +181,22 @@ export function scoreRailCell(
   measurement: RailCellMeasurement,
 ): RailCellScore {
   if (!isScoreableRule(rule)) {
+    if (rule.denominator.kind === "retired-unknown-denominator") {
+      throw new Error(
+        `rail '${rule.railKey}' has a retired denominator and cannot be scored ` +
+          `until a new scorer lands. Substituting a reconstructible denominator ` +
+          `would rewrite live rows against a different counting rule.`,
+      );
+    }
+    if (rule.kind === "unspecified") {
+      throw new Error(
+        `rail '${rule.railKey}' has no measurement spec (kind 'unspecified'); ` +
+          `it cannot be scored. Owner: ${rule.specOwner}.`,
+      );
+    }
     throw new Error(
-      `rail '${rule.railKey}' has no measurement spec (kind 'unspecified'); ` +
-        `it cannot be scored. Owner: ${rule.specOwner}.`,
+      `rail '${rule.railKey}' cannot be scored (kind '${rule.kind}', ` +
+        `denominator '${rule.denominator.kind}')`,
     );
   }
 
@@ -192,6 +224,59 @@ export function scoreRailCell(
     verificationMethod: rule.verificationMethod,
     verifiedByInstrument: rule.instrument,
   };
+
+  // --- county-level marker absence (mud L7 _county_coverage) -----------------
+  const established = measurement.establishedAbsence;
+  if (established?.basis?.trim()) {
+    const facet = classifyFacet({
+      facet: rule.railKey,
+      rawCoveragePct: 0,
+      sourcePresent: false,
+      verdict: null,
+      ownerMatchRate: null,
+      source: established.source ?? "county-coverage-marker",
+      sourceVintage: measurement.sourceVintage ?? null,
+      sampled: 0,
+    });
+    return {
+      ...base,
+      honestCoveragePct: 0,
+      classification: facet.classification,
+      integrityVerdict: facet.integrityVerdict,
+      source: facet.source,
+      railState: "satisfied-absent",
+      absenceBasis: established.basis.trim(),
+      artifactPath: provenanceFor(numerator, denominator),
+      overcount: false,
+      absenceRefusedReason: null,
+    };
+  }
+
+  // --- layer not applicable (verdict input, not a boolean gap) ---------------
+  if (measurement.applicabilityVerdict === "not-applicable") {
+    const facet = classifyFacet({
+      facet: rule.railKey,
+      rawCoveragePct: 0,
+      sourcePresent: true,
+      verdict: null,
+      ownerMatchRate: null,
+      source: "layer-not-applicable",
+      sourceVintage: measurement.sourceVintage ?? null,
+      sampled: 0,
+    });
+    return {
+      ...base,
+      honestCoveragePct: 0,
+      classification: facet.classification,
+      integrityVerdict: facet.integrityVerdict,
+      source: facet.source,
+      railState: "satisfied-absent",
+      absenceBasis: "layer-not-applicable",
+      artifactPath: provenanceFor(numerator, denominator),
+      overcount: false,
+      absenceRefusedReason: null,
+    };
+  }
 
   // --- established absence -------------------------------------------------
   if (absence.allowed) {

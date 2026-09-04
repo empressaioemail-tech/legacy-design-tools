@@ -71,6 +71,8 @@ export {
   WEB_CODE_ALLOWLIST_HOSTS,
   MIAMI_WHOLE_REVIEW_WEB_TARGETS,
   reviewWebTargetsForJurisdiction,
+  isAllowlistedWebHost,
+  fetchAllowlistedUrl,
   type WebCodeFetchInput,
   type WebCodeFetchResult,
   type WebCodeReviewTarget,

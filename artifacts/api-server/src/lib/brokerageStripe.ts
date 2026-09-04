@@ -11,12 +11,33 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, brokerageWallets } from "@workspace/db";
+import {
+  db,
+  brokerageWallets,
+  type PeBillingInterval,
+  type PeSubscriptionTier,
+} from "@workspace/db";
 import { logger } from "./logger";
 import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
 import { setPeAccessTierFromStripe } from "./peIdentity";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
+import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
+import {
+  configuredExtraSeatPriceId,
+  configuredTeamPriceIds,
+  extractStripePriceItems,
+  parseMetadataSeats,
+  resolveTeamSeatsPurchased,
+  type StripePriceItem,
+} from "./peTeamSeatsFromStripe";
+
+/** 30-day unlock bound (LOCKED 2026-08-10 ladder: "$15, 30 days — not forever"). */
+const PE_UNLOCK_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isPeSubscriptionTierValue(v: unknown): v is PeSubscriptionTier {
+  return v === "solo" || v === "studio" || v === "team";
+}
 
 export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
@@ -53,11 +74,25 @@ export function stripeWebhookPath(): string {
 }
 
 export type StripeCheckoutResult = {
-  checkoutUrl: string;
+  /**
+   * Hosted Checkout redirect. Required on the hosted path. Omitted on
+   * Elements / Embedded Checkout (`ui_mode: elements|embedded_page`) —
+   * those return `clientSecret` instead and must not carry a hosted URL.
+   */
+  checkoutUrl?: string;
+  /**
+   * Checkout Session client secret for Custom / Embedded Checkout.
+   * Absent on the hosted path.
+   */
+  clientSecret?: string;
   sessionId: string;
   mode: "live" | "simulated";
   publishableKey: string | null;
   tier?: SubscriptionCheckoutTier;
+  /** Smart Site ladder tier for PE user-scoped checkouts (LOCKED 2026-08-10). */
+  peTier?: PeSubscriptionTier;
+  /** Billing interval for PE user-scoped subscription checkouts (2026-08-24 annual ruling). */
+  peInterval?: "month" | "year";
   note?: string;
 };
 
@@ -105,6 +140,27 @@ export async function stripePostForm(
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body,
+  });
+  const json = (await res.json()) as Record<string, unknown> & {
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(
+      (json.error as { message?: string } | undefined)?.message ??
+        `Stripe ${path} failed (${res.status})`,
+    );
+  }
+  return json;
+}
+
+/** Exported so `pePaywallStripe.ts` can reuse the same signed HTTP call. */
+export async function stripeGet(
+  path: string,
+): Promise<Record<string, unknown>> {
+  const secret = process.env.STRIPE_SECRET_KEY!.trim();
+  const res = await fetch(`https://api.stripe.com/v1${path}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${secret}` },
   });
   const json = (await res.json()) as Record<string, unknown> & {
     error?: { message?: string };
@@ -197,6 +253,50 @@ export async function createProCheckoutSession(input: {
   return createSubscriptionCheckoutSession({ ...input, tier: "pro" });
 }
 
+/**
+ * THE ONE Stripe Customer Portal call in this codebase (A-062).
+ *
+ * Every portal session — the install-scoped extension seam below and the PE
+ * user-scoped route in `pePaywallStripe.ts` — reaches Stripe through this
+ * function and nothing else. The two seams differ only in HOW THEY RESOLVE A
+ * CUSTOMER, which is the part that must not be shared: the install seam may
+ * create a customer for an install that has none, and the PE route must never
+ * create one (A-062 acceptance item 2). Sharing the HTTP call and splitting
+ * the resolution is the whole point; a second `/billing_portal/sessions`
+ * poster would be a second thing to keep correct.
+ *
+ * `customerId` is a RESOLVED value. This function never looks one up, never
+ * creates one, and never accepts an empty string — an unresolved customer is
+ * the caller's refusal to make, not this function's to paper over.
+ */
+export async function createStripePortalSessionForCustomer(input: {
+  customerId: string;
+  returnUrl: string;
+}): Promise<{ mode: "live"; portalUrl: string }> {
+  const customerId = input.customerId.trim();
+  if (!customerId) {
+    // Fail closed. A blank customer id posted to Stripe is an error at best
+    // and somebody else's portal at worst.
+    throw new Error("Stripe portal session requires a resolved customer id");
+  }
+  const session = await stripePostForm("/billing_portal/sessions", {
+    customer: customerId,
+    return_url: input.returnUrl,
+  });
+
+  // NOT `String(session.url)`. That was the shipped shape and it could not
+  // fail: `String(undefined)` is the seven-character string "undefined",
+  // which is truthy, so the guard below never fired and a Stripe response
+  // carrying no url redirected the customer to a page named "undefined".
+  // Read the field, require it to be a non-empty string, and refuse.
+  const rawUrl = session.url;
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+    throw new Error("Stripe portal session missing url");
+  }
+
+  return { mode: "live", portalUrl: rawUrl };
+}
+
 export async function createBillingPortalSession(input: {
   installId: string;
   returnUrl: string;
@@ -214,15 +314,10 @@ export async function createBillingPortalSession(input: {
   const customerId =
     row.stripeCustomerId ?? (await getOrCreateStripeCustomer(input.installId));
 
-  const session = await stripePostForm("/billing_portal/sessions", {
-    customer: customerId,
-    return_url: input.returnUrl,
+  return createStripePortalSessionForCustomer({
+    customerId,
+    returnUrl: input.returnUrl,
   });
-
-  const portalUrl = String(session.url);
-  if (!portalUrl) throw new Error("Stripe portal session missing url");
-
-  return { mode: "live", portalUrl };
 }
 
 /** Keyless demo path — activates Pro without Stripe keys (smoke / local). */
@@ -254,15 +349,23 @@ export type StripeWebhookHandleResult =
   | { handled: true; eventType: string; installId?: string; peUserId?: string }
   | { handled: false; reason: string };
 
-/** `metadata.pe_user_id` / `metadata.checkout_kind` set by `pePaywallStripe.ts`. */
+/** `metadata.pe_user_id` / `metadata.checkout_kind` / `metadata.subscription_tier` set by `pePaywallStripe.ts`. */
 function peMetadataFromObject(obj: Record<string, unknown>): {
   peUserId: string | null;
   checkoutKind: string | null;
   parcelNodeId: string | null;
+  subscriptionTierRaw: string | null;
+  seatsPurchased: number | null;
 } {
   const meta = obj.metadata;
   if (!meta || typeof meta !== "object") {
-    return { peUserId: null, checkoutKind: null, parcelNodeId: null };
+    return {
+      peUserId: null,
+      checkoutKind: null,
+      parcelNodeId: null,
+      subscriptionTierRaw: null,
+      seatsPurchased: null,
+    };
   }
   const record = meta as Record<string, unknown>;
   return {
@@ -271,7 +374,42 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       typeof record.checkout_kind === "string" ? record.checkout_kind : null,
     parcelNodeId:
       typeof record.parcel_node_id === "string" ? record.parcel_node_id : null,
+    subscriptionTierRaw:
+      typeof record.subscription_tier === "string"
+        ? record.subscription_tier
+        : null,
+    seatsPurchased: parseMetadataSeats(record.seats_purchased),
   };
+}
+
+/**
+ * Resolve the ladder tier a completed PE subscription checkout grants.
+ *
+ *  - `metadata.subscription_tier` valid            -> that tier
+ *  - absent + legacy `checkout_kind: "pro_sub"`    -> "solo" (pre-ladder
+ *    sessions carried no tier and charged the Solo-named price; never
+ *    mapped to studio/team)
+ *  - present but UNKNOWN value                     -> null: FAIL CLOSED,
+ *    grant nothing, return unhandled so Stripe retries and the miss is
+ *    visible in the webhook dashboard rather than silently granting a tier
+ */
+function resolvePeGrantTier(meta: {
+  checkoutKind: string | null;
+  subscriptionTierRaw: string | null;
+}): PeSubscriptionTier | null {
+  if (meta.subscriptionTierRaw !== null) {
+    return isPeSubscriptionTierValue(meta.subscriptionTierRaw)
+      ? meta.subscriptionTierRaw
+      : null;
+  }
+  if (meta.checkoutKind === "pro_sub") {
+    logger.warn(
+      {},
+      "stripe: legacy pro_sub checkout without subscription_tier — granting solo",
+    );
+    return "solo";
+  }
+  return null;
 }
 
 /**
@@ -329,13 +467,15 @@ export async function handleStripeWebhook(
 
     // PE property-unlock (WDLL 2026-08-05 item 4): one-time $15 checkout
     // opened by `pePaywallStripe.ts`. Writes through the SAME unlock writer
-    // the operator dev-unlock route uses, with `source: "stripe"`.
+    // the operator dev-unlock route uses, with `source: "stripe"` and the
+    // 30-day bound from the LOCKED 2026-08-10 ladder.
     if (peMeta.peUserId && peMeta.checkoutKind === "property_unlock") {
       if (peMeta.parcelNodeId) {
         await createPePropertyUnlock({
           ownerUserId: peMeta.peUserId,
           parcelNodeId: peMeta.parcelNodeId,
           source: "stripe",
+          expiresAt: new Date(Date.now() + PE_UNLOCK_DURATION_MS),
         });
       } else {
         logger.warn(
@@ -354,20 +494,49 @@ export async function handleStripeWebhook(
       };
     }
 
-    // PE Pro subscription (WDLL 2026-08-05 items 2, 5): sets the PE
-    // user-scoped entitlement (`pe_user_entitlements.access_tier`), NOT the
+    // PE subscription (WDLL 2026-08-05 items 2, 5; tier-aware per the
+    // LOCKED 2026-08-10 ladder): sets the PE user-scoped entitlement
+    // (`pe_user_entitlements.access_tier` + `subscription_tier`), NOT the
     // install-scoped `brokerage_wallets` row the branch below writes. Promo
     // vs full-price is recorded in `entitlement_source` for the pinned
     // `/entitlement` contract's `source` field.
     if (peMeta.peUserId) {
+      const grantTier = resolvePeGrantTier(peMeta);
+      if (!grantTier) {
+        // FAIL CLOSED: an unknown subscription_tier grants nothing. The
+        // non-2xx response makes Stripe retry and surfaces the miss.
+        logger.error(
+          {
+            peUserId: peMeta.peUserId,
+            subscriptionTier: peMeta.subscriptionTierRaw,
+            checkoutKind: peMeta.checkoutKind,
+          },
+          "stripe: PE checkout completed with unknown subscription_tier — refusing to grant",
+        );
+        return {
+          handled: false,
+          reason: `unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        };
+      }
       const source = checkoutSessionHadDiscount(obj)
         ? "stripe_promo"
         : "stripe_sub";
+      // P-98: the interval rides with the tier write that was already here.
+      // No new write path, and both facts come from one read of the items.
+      const billing = await peGrantBillingFacts({
+        grantTier,
+        obj,
+        metadataSeats: peMeta.seatsPurchased,
+        subscriptionId,
+      });
       await setPeAccessTierFromStripe({
         userId: peMeta.peUserId,
         tier: "paid",
+        subscriptionTier: grantTier,
         source,
         stripeCustomerId: customerId,
+        seatsPurchased: billing.seatsPurchased,
+        billingInterval: billing.billingInterval,
       });
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
@@ -399,6 +568,55 @@ export async function handleStripeWebhook(
   }
 
   if (type === "customer.subscription.updated") {
+    // PE user-scoped subscription lifecycle (subscription_data metadata set
+    // by pePaywallStripe.ts): keep `pe_user_entitlements` in step so a
+    // cancelled or past-due subscription actually downgrades — before the
+    // 2026-08 ladder work a PE user stayed "paid" forever after one payment.
+    const peMeta = peMetadataFromObject(obj);
+    if (peMeta.peUserId) {
+      const status = typeof obj.status === "string" ? obj.status : "";
+      const active = status === "active" || status === "trialing";
+      const grantTier = resolvePeGrantTier(peMeta);
+      if (active && !grantTier) {
+        logger.error(
+          { peUserId: peMeta.peUserId, subscriptionTier: peMeta.subscriptionTierRaw },
+          "stripe: PE subscription active with unknown subscription_tier — refusing to grant",
+        );
+        return {
+          handled: false,
+          reason: `unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        };
+      }
+      // P-98: re-derived on EVERY update, including back to null. A plan
+      // change from monthly to annual is exactly this event, so carrying a
+      // previous value forward when this payload does not prove it would
+      // leave a stale "month" on an annual subscriber — and the rail would
+      // then upsell annual billing to someone who already bought it. Same
+      // rule the seat count follows: never omit the column on update.
+      const billing = active
+        ? await peGrantBillingFacts({
+            grantTier,
+            obj,
+            metadataSeats: peMeta.seatsPurchased,
+            subscriptionId: typeof obj.id === "string" ? obj.id : null,
+          })
+        : { seatsPurchased: null, billingInterval: null };
+      await setPeAccessTierFromStripe({
+        userId: peMeta.peUserId,
+        tier: active ? "paid" : "free",
+        subscriptionTier: active ? grantTier : null,
+        source: "stripe_sub",
+        stripeCustomerId: typeof obj.customer === "string" ? obj.customer : null,
+        seatsPurchased: billing.seatsPurchased,
+        billingInterval: billing.billingInterval,
+      });
+      return {
+        handled: true,
+        eventType: active ? "pe_subscription_active" : "pe_churned",
+        peUserId: peMeta.peUserId,
+      };
+    }
+
     const installId = await installIdFromStripeSubscription(obj);
     const status = typeof obj.status === "string" ? obj.status : "";
     const active = status === "active" || status === "trialing";
@@ -427,6 +645,17 @@ export async function handleStripeWebhook(
   }
 
   if (type === "customer.subscription.deleted") {
+    const peMeta = peMetadataFromObject(obj);
+    if (peMeta.peUserId) {
+      await setPeAccessTierFromStripe({
+        userId: peMeta.peUserId,
+        tier: "free",
+        subscriptionTier: null,
+        source: "stripe_sub",
+      });
+      return { handled: true, eventType: "pe_churned", peUserId: peMeta.peUserId };
+    }
+
     const installId = await installIdFromStripeSubscription(obj);
     if (installId) {
       await setSubscriptionEntitlement({
@@ -460,6 +689,73 @@ function periodEndFromStripe(obj: Record<string, unknown>): Date | null {
   const end = obj.current_period_end;
   if (typeof end === "number") return new Date(end * 1000);
   return null;
+}
+
+/**
+ * The billed price items behind a PE grant, read ONCE.
+ *
+ * A `checkout.session.completed` payload does not carry `line_items` —
+ * Stripe never expands them on a webhook — so for a brand-new subscription
+ * the items have to be fetched. That fetch already existed here for Team
+ * seats; P-98 widens its condition from "team only" to "any PE subscription
+ * grant whose payload carries no items", because the billing interval is
+ * derived from the same items and, without the widening, every new Solo and
+ * Studio subscriber would store a null interval — starving the exact rung
+ * (`annual_upgrade`) the column was added to feed.
+ *
+ * Widening cannot change the seat count: {@link resolveTeamSeatsPurchased}
+ * returns null on its first line for any non-team grant, with or without
+ * items. It costs at most one extra Stripe call per new subscription.
+ *
+ * A failed fetch returns no items, and every caller reads that as unknown.
+ */
+async function peBilledPriceItems(input: {
+  obj: Record<string, unknown>;
+  subscriptionId: string | null;
+}): Promise<StripePriceItem[]> {
+  const inline = extractStripePriceItems(input.obj);
+  if (inline.length > 0) return inline;
+  if (!input.subscriptionId || !isStripeConfigured()) return [];
+  try {
+    const sub = await fetchStripeSubscription(input.subscriptionId);
+    return extractStripePriceItems(sub);
+  } catch (err) {
+    logger.warn(
+      { err, subscriptionId: input.subscriptionId },
+      "stripe: PE subscription items fetch failed",
+    );
+    return [];
+  }
+}
+
+/**
+ * Seat count and billing interval for a PE grant, both derived from the SAME
+ * reading of the billed items so the two facts can never disagree about what
+ * was on the subscription. Either may be null, and null means unknown.
+ */
+async function peGrantBillingFacts(input: {
+  grantTier: PeSubscriptionTier | null;
+  obj: Record<string, unknown>;
+  metadataSeats: number | null;
+  subscriptionId: string | null;
+}): Promise<{
+  seatsPurchased: number | null;
+  billingInterval: PeBillingInterval | null;
+}> {
+  const items = await peBilledPriceItems({
+    obj: input.obj,
+    subscriptionId: input.subscriptionId,
+  });
+  return {
+    seatsPurchased: resolveTeamSeatsPurchased({
+      grantTier: input.grantTier,
+      metadataSeats: input.metadataSeats,
+      items,
+      teamPriceIds: configuredTeamPriceIds(),
+      extraSeatPriceId: configuredExtraSeatPriceId(),
+    }),
+    billingInterval: peBillingIntervalFromPriceItems(items),
+  };
 }
 
 async function fetchStripeSubscription(

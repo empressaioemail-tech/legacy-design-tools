@@ -22,8 +22,9 @@ import {
  *
  * Keyed `geo_id` (CPA 7-char place identifier, e.g. `4805000` for Austin).
  * Unincorporated territory is NOT represented here — a point outside every
- * polygon is the honest `unincorporated` answer from the containment helper,
- * not a missing row.
+ * polygon of a *populated* index is the honest `unincorporated` answer from
+ * the containment helper, not a missing row. A zero-row table is
+ * `unmeasured`, never unincorporated. ETJ is not stored here.
  *
  * Geometry is GeoJSON Polygon/MultiPolygon in WGS84. Per-feature bbox
  * columns back viewport pre-filter without decoding jsonb.

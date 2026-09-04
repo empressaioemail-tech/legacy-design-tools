@@ -5,7 +5,7 @@
  * quantities (posterior, agreement, calibrated point) are never persisted.
  */
 
-import type { ModelAttributionStamp } from "@hauska/atom-contract/read-contract";
+import type { ModelAttributionStamp } from "@empressaio/atom-contract/read-contract";
 
 /** Canonical source-event-type for ledger deposits. */
 export type LedgerSourceEventType =

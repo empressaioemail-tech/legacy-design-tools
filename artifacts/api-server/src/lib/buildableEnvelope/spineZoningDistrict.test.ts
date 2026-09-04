@@ -12,6 +12,14 @@ import {
 
 const loadBaked = vi.mocked(loadBakedNodeFacetSnapshot);
 
+const testEnvelopeBriefRefusal = {
+  state: "refused" as const,
+  code: "not-in-bake" as const,
+  producer: "baked-envelope-facet" as const,
+  supersededBy: "buildable-envelope" as const,
+  reason: "test fixture",
+};
+
 describe("resolveSpineZoningWhenGisAbsent", () => {
   beforeEach(() => {
     loadBaked.mockReset();
@@ -33,6 +41,7 @@ describe("resolveSpineZoningWhenGisAbsent", () => {
       },
       snapshotAt: "2026-07-20T12:00:00.000Z",
       tier2: null,
+      envelopeBriefRefusal: testEnvelopeBriefRefusal,
     });
     const result = await resolveSpineZoningWhenGisAbsent("48021:33512", null);
     expect(result).toEqual({
@@ -48,6 +57,7 @@ describe("resolveSpineZoningWhenGisAbsent", () => {
       facets: { zoning: null },
       snapshotAt: null,
       tier2: null,
+      envelopeBriefRefusal: testEnvelopeBriefRefusal,
     });
     const result = await resolveSpineZoningWhenGisAbsent("48021:99999", "");
     expect(result).toBeNull();

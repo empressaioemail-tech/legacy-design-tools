@@ -9,7 +9,9 @@ import {
   peUserIdentities,
   peUserEntitlements,
   users,
+  type PeBillingInterval,
   type PeOidcProvider,
+  type PeSubscriptionTier,
 } from "@workspace/db";
 import { ensureUserProfile } from "./userProfiles";
 import { newUserId } from "./sessionToken";
@@ -88,11 +90,30 @@ export async function upsertPeOidcIdentity(
     input.displayName?.trim() ||
     (email ? email.split("@")[0]! : `User ${randomBytes(3).toString("hex")}`);
 
+  // Pre-existing defect, found and fixed while building P-112 (email magic
+  // link): `ensureUserProfile` below inserts a bare `users` row (no email)
+  // as a profile-hydration side effect. The insert that FOLLOWS it — meant
+  // to be the authoritative write of this brand-new identity's email — used
+  // `onConflictDoNothing()`, so it silently no-op'd against the row
+  // `ensureUserProfile` had just created one line above, and `users.email`
+  // was left null for EVERY newly created PE user regardless of provider.
+  // `pe_user_identities.email` (written a few lines down) was never
+  // affected, and callers that read `identity.email` off this function's
+  // own return value (session-exchange, the GHL hook, this file's own
+  // in-memory `email` variable) were never affected either — only anything
+  // reading `users.email` back from the DB was. That is very likely the
+  // root cause behind hauska-map's "blank Stripe checkout email" bug
+  // (worked around downstream today rather than traced to source).
+  // `onConflictDoUpdate` makes this insert authoritative for a brand-new
+  // identity's displayName/email regardless of insert order.
   await ensureUserProfile(userId, displayName);
   await db
     .insert(users)
     .values({ id: userId, displayName, email })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: users.id,
+      set: { displayName, email },
+    });
 
   await db.insert(peUserIdentities).values({
     id: identityRowId(input.provider, input.subject),
@@ -131,9 +152,23 @@ export async function getPeAccessTier(
 
 export type PeEntitlementRow = {
   accessTier: "free" | "paid";
+  /** Ladder rung for paid subscribers (LOCKED 2026-08-10); null = free / unlock-only / legacy pre-ladder. */
+  subscriptionTier: PeSubscriptionTier | null;
   devRole: boolean;
   entitlementSource: "stripe_sub" | "stripe_promo" | "stripe_unlock" | "dev" | null;
   stripeCustomerId: string | null;
+  /**
+   * Checkout seat count on a Team subscription; null = unknown or not Team.
+   * Read here (P-98) so the account-scoped `/entitlement` answer does not
+   * need a second query for it.
+   */
+  seatsPurchased: number | null;
+  /**
+   * Billing interval of the subscription (P-98, migration 0092). Null means
+   * UNKNOWN, which is what every row written before 0092 carries, because
+   * nothing backfills it. A reader must not treat null as monthly.
+   */
+  billingInterval: PeBillingInterval | null;
 };
 
 /** Full entitlement row read (WDLL 2026-08-05 item 1/4) — dev role + provenance. */
@@ -143,18 +178,26 @@ export async function getPeEntitlementRow(
   const [row] = await db
     .select({
       accessTier: peUserEntitlements.accessTier,
+      subscriptionTier: peUserEntitlements.subscriptionTier,
       devRole: peUserEntitlements.devRole,
       entitlementSource: peUserEntitlements.entitlementSource,
       stripeCustomerId: peUserEntitlements.stripeCustomerId,
+      seatsPurchased: peUserEntitlements.seatsPurchased,
+      billingInterval: peUserEntitlements.billingInterval,
     })
     .from(peUserEntitlements)
     .where(eq(peUserEntitlements.ownerUserId, userId))
     .limit(1);
   return {
     accessTier: row?.accessTier === "paid" ? "paid" : "free",
+    subscriptionTier: row?.subscriptionTier ?? null,
     devRole: row?.devRole === true,
     entitlementSource: row?.entitlementSource ?? null,
     stripeCustomerId: row?.stripeCustomerId ?? null,
+    // No row at all, a NULL column, and a stored value are collapsed to the
+    // same two states on purpose: present, or unknown. Neither is defaulted.
+    seatsPurchased: row?.seatsPurchased ?? null,
+    billingInterval: row?.billingInterval ?? null,
   };
 }
 
@@ -168,6 +211,23 @@ export async function setPeDevRole(
     .update(peUserEntitlements)
     .set({ devRole, updatedAt: new Date() })
     .where(eq(peUserEntitlements.ownerUserId, userId));
+}
+
+/**
+ * Look up a PE user's email for Stripe checkout. Stripe Custom/Elements
+ * Checkout requires an email on the session before `confirm()` will
+ * succeed — `getOrCreatePeStripeCustomer` already accepts one, but no
+ * checkout route was populating it, so a fresh Stripe customer had no
+ * email and every confirm attempt failed with "An email address is
+ * required to confirm this Checkout Session."
+ */
+export async function getPeUserEmail(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return row?.email ?? null;
 }
 
 /** Link a Stripe customer id to a PE user's entitlement row. */
@@ -206,15 +266,47 @@ export async function findPeUserIdByStripeCustomerId(
 export async function setPeAccessTierFromStripe(input: {
   userId: string;
   tier: "free" | "paid";
+  /**
+   * Ladder rung (LOCKED 2026-08-10) for `tier: "paid"`. Required on paid
+   * writes so a Solo payment can never silently read as Studio; cleared on
+   * `tier: "free"` (churn).
+   */
+  subscriptionTier: PeSubscriptionTier | null;
   source: "stripe_sub" | "stripe_promo";
   stripeCustomerId?: string | null;
+  /**
+   * Team seat count from billed Stripe items. Null on solo/studio, churn,
+   * or a Team grant whose items were not readable. Never omit the column
+   * on update — a leftover number after downgrade is a silent seat grant.
+   */
+  seatsPurchased?: number | null;
+  /**
+   * Billing interval derived from the billed price ids (P-98). Null means
+   * UNKNOWN — an unmatched price id, an unreadable subscription, or a
+   * pre-0092 row. Never omit the column on update, for the same reason the
+   * seat count is never omitted: a leftover "month" after a switch to
+   * annual is a silent false claim about the customer's billing, and it is
+   * the one input that would make the `annual_upgrade` rung upsell an
+   * annual subscriber.
+   */
+  billingInterval?: PeBillingInterval | null;
 }): Promise<void> {
   await ensurePeEntitlement(input.userId);
+  const seatsPurchased =
+    input.tier === "paid" && input.subscriptionTier === "team"
+      ? (input.seatsPurchased ?? null)
+      : null;
   await db
     .update(peUserEntitlements)
     .set({
       accessTier: input.tier,
+      subscriptionTier: input.tier === "paid" ? input.subscriptionTier : null,
       entitlementSource: input.tier === "paid" ? input.source : null,
+      seatsPurchased,
+      // Cleared on churn: a free row has no subscription, so it has no
+      // interval. Only a paid grant can carry one.
+      billingInterval:
+        input.tier === "paid" ? (input.billingInterval ?? null) : null,
       ...(input.stripeCustomerId
         ? { stripeCustomerId: input.stripeCustomerId }
         : {}),

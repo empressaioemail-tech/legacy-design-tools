@@ -16,11 +16,19 @@
  *                  bakeable parcels), GATED by the owner-match integrity gate:
  *                  a BLOCKED join records honest_coverage 0 (never the
  *                  fabricated stamp rate) and verdict 'block'.
- *   - zoning     — stamped % (parcels with a non-null zoning_district /
- *                  parcels). No owner oracle -> verdict 'n/a'.
- *   - envelope   — derivable % proxy: parcels that carry BOTH a zoning
- *                  district AND geometry (the deterministic Tier-1 envelope's
- *                  precondition). No owner oracle -> verdict 'n/a'.
+ *
+ * ZONING AND ENVELOPE RETIRED FROM THIS INSTRUMENT (R1 ruling, 2026-09-04,
+ * OPS-19b; see `scoreCounty`'s own comment at the retired call site).
+ * `countyRailScoreCli.ts` (lane SS-W15) is now the sole writer of both,
+ * scored over a corrected incorporated-city-parcels denominator this CLI
+ * never had. The two instruments upserted the same (county_fips, facet)
+ * primary key with different denominators — county-wide here, incorporated-
+ * only there — so the ledger cell read whichever number ran last: Bastrop
+ * alternated between 15.22% and 79.60% depending on which CLI fired most
+ * recently. The measurability-refusal machinery (lane SS-W13, 2026-08-19)
+ * that used to live here for the zoning stamp moved with it; see
+ * `countyRailScoreCli.ts` / `lib/railScoring/countyMeasurability.ts` for the
+ * current version of that logic.
  *
  * Classification (see `classifyFacet`):
  *   fabricated-blocked  the join was proven fabricated (owner-match block).
@@ -30,40 +38,10 @@
  *                       (e.g. Comal ships no CAD roll) — an honest absence.
  *   real-at-ceiling     the facet is real and at THIS INSTRUMENT'S achievable
  *                       coverage. Read the row's `source`, which names the
- *                       denominator and the instrument's wiring: on the zoning
- *                       facet the ceiling is bounded by the wired city layers,
- *                       not by what the county has. There is no enum value for
- *                       "measured, below the instrument's own reach", so the
- *                       counting rule carries it. See LEDGER PROVENANCE below.
- *
- * MEASURABILITY REFUSAL (lane SS-W13, 2026-08-19). A stamp facet is written
- * ONLY when this instrument can actually see it. Three refusals, each counted
- * and printed, never silent:
- *
- *   no-zoning-column   the resolved parcel table cannot carry
- *                      `zoning_district` at all. `txgio_parcel_staging` has no
- *                      such column, and `locateCounty` falls back to it when
- *                      `txgio_parcel` holds nothing for a county.
- *   no-wired-layer     no city zoning layer is registered for the county in
- *                      `ZONING_LAYERS`. 23 layers across 10 counties are
- *                      wired; Texas has 1,222 incorporated cities. For the
- *                      other 244 counties a 0% stamp rate measures this
- *                      instrument's wiring, not the county.
- *   stamp-not-rolled   layers are wired but no parcel carries a stamp, so the
- *                      zoning-stamp CLI has not been run for this county.
- *
- * WHY REFUSE RATHER THAN WRITE A ZERO. Before this change, a county with no
- * zoning COLUMN recorded `true-source-gap` — which the list above defines as
- * "the SOURCE has none", a POSITIVE ABSENCE CLAIM — and an unwired county
- * recorded `real-at-ceiling` at 0.00%, which asserts the achievable ceiling is
- * zero. Both are false, and both were produced from the instrument's own
- * blindness. Measured 2026-08-19: Travis 48453 held such a cell at 0.00% since
- * 2026-07-21 while Smart Site served `48453:149405` zoning district SF-2 off
- * the very column the scorer reads. Only a positive determination writes an
- * absence (AGENT_CONTRACT section 5, DEV_PROCESS 4.3). A refused facet leaves
- * no row, and the manifest grid already renders a missing row as `not-yet`, so
- * the displayed state is unchanged — what changes is that the ledger stops
- * asserting a source gap it never established.
+ *                       denominator and the instrument's wiring. There is no
+ *                       enum value for "measured, below the instrument's own
+ *                       reach", so the counting rule carries it. See LEDGER
+ *                       PROVENANCE below.
  *
  * FACET KEYS ARE VALIDATED, FAIL-CLOSED. Every key this CLI writes is checked
  * against `lib/db/src/schema/facetKeyRegistry.ts` before any row is upserted.
@@ -117,10 +95,7 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import pg from "pg";
 
-import {
-  tryResolveDeclaredCadVintage,
-  wiredZoningCityKeys,
-} from "@workspace/cad-ingest";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import {
   assertWritableFacetKeys,
   COUNTY_RAIL_DECLARATION,
@@ -129,10 +104,30 @@ import {
   sampleJoinPairs,
   sampleAddressJoinPairs,
   evaluateJoinIntegrity,
-  type JoinIntegrityReport,
   type QueryablePool,
 } from "./lib/joinIntegrityGate";
 import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./lib/joinNormalize";
+/**
+ * The classifier moved OUT of this file on 2026-08-19 (lane SS-W18, P-47).
+ *
+ * `lib/railScoring/engine.ts` imported `classifyFacet` from here, and the
+ * `/api/county-ledger` route imports that engine, so THIS CLI was in the
+ * server's boot graph. esbuild bundles everything into one `dist/index.mjs`,
+ * which makes the `isDirectRun()` guard at the bottom of this file read TRUE
+ * at server boot (`import.meta.url` is the bundle, and so is `argv[1]`), so
+ * `main()` ran with an empty argv and `process.exit(1)`'d before Express
+ * listened. A canary deploy of `5688aa31` failed exactly this way.
+ *
+ * The pure decisions now live in a leaf module that imports nothing at
+ * runtime, and this CLI is a CONSUMER of it like every other scorer. Do not
+ * re-export them from here: a re-export would put this file back on the
+ * import path that broke production. Enforced by
+ * `scripts/checkBootGraphNoCliImports.mjs`.
+ */
+import {
+  classifyFacet,
+  type FacetScore,
+} from "./lib/countyCoverageClassification";
 
 const { Pool } = pg;
 
@@ -184,7 +179,10 @@ function fail(msg: string): never {
 }
 
 // ---------------------------------------------------------------------------
-// Classification — PURE, unit-testable without a DB.
+// Facet keys, rail thresholds and provenance strings — PURE, unit-testable
+// without a DB. The CLASSIFIER itself now lives in
+// `lib/countyCoverageClassification.ts`; these stay here because they read
+// COUNTY_RAIL_DECLARATION and nothing in the server boot graph wants them.
 // ---------------------------------------------------------------------------
 
 /**
@@ -204,35 +202,6 @@ export const LANDUSE_JOIN_FACET_KEY = "landuse-cad-join";
 
 /** This file, as recorded in `county_facet_coverage.verified_by_instrument`. */
 const INSTRUMENT_REF = "countyCoverageScoreCli.ts";
-
-/**
- * The counting rule, written INTO the row (DEV_PROCESS 1.2: every ratio
- * carries its counting rule at the point of use, not in an appendix). A
- * reader of the zoning cell must be able to see that the denominator is every
- * parcel in the county while the numerator can only come from the wired city
- * layers — which is why a metro county reads well under the 95% depth bar
- * even when every parcel inside a wired city is stamped.
- */
-function zoningStampSourceBasis(county: {
-  table: string;
-  wiredZoningLayers: number;
-}): string {
-  return (
-    `zoning-stamp;denom=distinct-feature_index-in-county;table=${county.table};` +
-    `wired-city-layers=${county.wiredZoningLayers}`
-  );
-}
-
-function envelopeSourceBasis(county: {
-  table: string;
-  wiredZoningLayers: number;
-}): string {
-  return (
-    `deterministic;rule=zoning_district AND geometry both non-null;` +
-    `denom=distinct-feature_index-in-county;table=${county.table};` +
-    `wired-city-layers=${county.wiredZoningLayers}`
-  );
-}
 
 /** Declared threshold for a rail key, or null when the facet is not a rail. */
 export function railThresholdPct(facetKey: string): number | null {
@@ -262,114 +231,6 @@ function landUseArtifactPath(fips: string, table: string): string {
 
 function stampArtifactPath(fips: string, table: string): string {
   return `${table}.zoning_district;county_fips=${fips};denom=distinct-feature_index`;
-}
-
-export type Classification =
-  | "real-at-ceiling"
-  | "needs-crosswalk"
-  | "true-source-gap"
-  | "fabricated-blocked";
-
-export interface FacetScore {
-  facet: string;
-  /** HONEST coverage 0..100 (a blocked land-use facet records 0). */
-  honestCoveragePct: number;
-  /** The integrity verdict; 'n/a' for facets with no owner oracle. */
-  integrityVerdict: JoinIntegrityReport["verdict"] | "n/a";
-  /** 0..1 owner-match rate, or null for n/a facets. */
-  ownerMatchRate: number | null;
-  source: string | null;
-  sourceVintage: string | null;
-  sampled: number;
-  classification: Classification;
-}
-
-export interface ClassifyInput {
-  facet: string;
-  /**
-   * RAW coverage the join produced BEFORE gating, 0..100 — for land-use this
-   * is the fabricated-or-real stamp rate; the classifier zeroes it when
-   * blocked.
-   */
-  rawCoveragePct: number;
-  /** Whether the SOURCE exists at all (e.g. a CAD roll is loaded). */
-  sourcePresent: boolean;
-  /** The gate verdict for facets with an owner oracle; null for n/a facets. */
-  verdict: JoinIntegrityReport["verdict"] | null;
-  ownerMatchRate: number | null;
-  source: string | null;
-  sourceVintage: string | null;
-  sampled: number;
-}
-
-/**
- * Zoning/envelope source presence is the SOURCE COLUMN, not a positive stamp
- * rate. `stampedPct > 0` manufacturing is SF-24.
- */
-export function sourcePresentForStampFacet(
-  hasSourceColumn: boolean,
-  _stampedPct: number,
-): boolean {
-  return hasSourceColumn;
-}
-
-/**
- * Classify a facet from its raw coverage + gate verdict + source presence.
- * PURE. This is the load-bearing decision the ledger records, so it is
- * separated from all I/O and unit-tested directly.
- *
- * Rules (in priority order):
- *  1. verdict 'block'                -> fabricated-blocked, honest coverage 0.
- *     (A proven fabrication is stored as honest-absence, never the stamp rate.)
- *  2. no source at all               -> true-source-gap, coverage 0.
- *     (Comal ships no CAD roll; the gap is the source's, honestly reported.)
- *  3. verdict 'insufficient-sample'
- *     AND some raw coverage          -> needs-crosswalk.
- *     (A source exists but the join key is too thin to prove — an external
- *     CAD-account⟷prop_id crosswalk is the unblock.)
- *  4. otherwise                      -> real-at-ceiling, honest = raw.
- */
-export function classifyFacet(input: ClassifyInput): FacetScore {
-  const {
-    facet,
-    rawCoveragePct,
-    sourcePresent,
-    verdict,
-    ownerMatchRate,
-    source,
-    sourceVintage,
-    sampled,
-  } = input;
-
-  let classification: Classification;
-  let honestCoveragePct: number;
-
-  if (verdict === "block") {
-    classification = "fabricated-blocked";
-    honestCoveragePct = 0;
-  } else if (!sourcePresent) {
-    classification = "true-source-gap";
-    honestCoveragePct = 0;
-  } else if (verdict === "insufficient-sample" && rawCoveragePct > 0) {
-    classification = "needs-crosswalk";
-    // The raw coverage is not proven real, so it is not asserted as honest
-    // coverage; the crosswalk lifts it later. Record 0 honest until proven.
-    honestCoveragePct = 0;
-  } else {
-    classification = "real-at-ceiling";
-    honestCoveragePct = rawCoveragePct;
-  }
-
-  return {
-    facet,
-    honestCoveragePct,
-    integrityVerdict: verdict ?? "n/a",
-    ownerMatchRate,
-    source,
-    sourceVintage,
-    sampled,
-    classification,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -420,108 +281,12 @@ async function tableExists(pool: pg.Pool, table: string): Promise<boolean> {
   return r.rows[0]?.r != null;
 }
 
-/**
- * Does the table resolved by `to_regclass` carry this column?
- *
- * The `table_schema = ANY(current_schemas(false))` predicate is not
- * decoration. `tableExists` above resolves through `to_regclass`, which is
- * search_path-aware, while `information_schema.columns` matches on bare NAME
- * across every schema in the database. Two lookups, one question, different
- * resolution rules — so a same-named table in another schema could report a
- * column the table actually being read does not have. That is the paired-
- * control divergence DEV_PROCESS 2.4 names, and the two halves are aligned
- * here rather than left to agree by luck. (It is NOT the cause of the zoning
- * zeros: this asymmetry can only produce false POSITIVES.)
- */
-async function columnExists(
-  pool: pg.Pool,
-  table: string,
-  column: string,
-): Promise<boolean> {
-  const r = await pool.query<{ n: string }>(
-    `SELECT count(*) AS n
-       FROM information_schema.columns
-      WHERE table_name = $1
-        AND column_name = $2
-        AND table_schema = ANY(current_schemas(false))`,
-    [table, column],
-  );
-  return Number(r.rows[0]?.n ?? 0) > 0;
-}
-
 interface CountyPresence {
   fips: string;
   name: string;
   /** The parcel table this county actually resolved to. */
   table: string;
-  /** Whether THAT table carries `zoning_district` at all. */
-  hasZoning: boolean;
-  /** Wired city zoning layers registered for this county in ZONING_LAYERS. */
-  wiredZoningLayers: number;
   parcels: number;
-}
-
-/**
- * Why a stamp facet could not be measured, or null when it can be.
- *
- * The three refusals are the file header's `no-zoning-column`,
- * `no-wired-layer` and `stamp-not-rolled`. Each carries the basis a reader
- * needs to act on it, because a refusal a reader cannot act on becomes a
- * shrug.
- */
-export interface StampFacetMeasurability {
-  measurable: boolean;
-  /** Stable machine code, one of the three refusals. Null when measurable. */
-  refusal: "no-zoning-column" | "no-wired-layer" | "stamp-not-rolled" | null;
-  /** Human basis, printed and carried into the close artifact. */
-  basis: string | null;
-}
-
-/**
- * Decide whether the zoning/envelope stamp facets are measurable for a county.
- *
- * PURE, so the rule is unit-testable without a database and the negative case
- * is provable (DEV_PROCESS 2.2: a gate is tested for its ability to FIRE).
- */
-export function resolveStampFacetMeasurability(input: {
-  table: string;
-  hasZoningColumn: boolean;
-  wiredZoningLayers: number;
-  stampedPct: number;
-}): StampFacetMeasurability {
-  if (!input.hasZoningColumn) {
-    return {
-      measurable: false,
-      refusal: "no-zoning-column",
-      basis:
-        `resolved parcel table '${input.table}' has no zoning_district column, ` +
-        "so this instrument cannot see zoning for this county. Recording a " +
-        "source gap from a missing column would assert an absence never " +
-        "determined.",
-    };
-  }
-  if (input.wiredZoningLayers === 0) {
-    return {
-      measurable: false,
-      refusal: "no-wired-layer",
-      basis:
-        "no city zoning layer is registered for this county in ZONING_LAYERS, " +
-        "so a 0% stamp rate would measure this instrument's wiring rather " +
-        "than the county. Wire a city layer, or establish the county's " +
-        "unincorporated status positively, before an absence is written.",
-    };
-  }
-  if (input.stampedPct <= 0) {
-    return {
-      measurable: false,
-      refusal: "stamp-not-rolled",
-      basis:
-        `${input.wiredZoningLayers} city zoning layer(s) are wired for this ` +
-        "county but no parcel carries a stamp, so the zoning-stamp CLI has " +
-        "not been run here. That is an unrun step, not a source gap.",
-    };
-  }
-  return { measurable: true, refusal: null, basis: null };
 }
 
 /** Which table serves this county (prod winning over staging), plus counts. */
@@ -540,13 +305,10 @@ async function locateCounty(
     );
     const parcels = Number(r.rows[0]?.parcels ?? 0);
     if (parcels > 0) {
-      const hasZoning = await columnExists(pool, table, "zoning_district");
       return {
         fips,
         name: countyNames[fips] ?? LEGACY_COUNTY_NAMES_FALLBACK[fips] ?? fips,
         table,
-        hasZoning,
-        wiredZoningLayers: wiredZoningCityKeys(fips).size,
         parcels,
       };
     }
@@ -568,8 +330,6 @@ interface RawCoverage {
    * dead-prop_id-join 0.
    */
   landUseAddressRecoveredPct: number | null;
-  zoningStampedPct: number;
-  envelopeDerivablePct: number;
 }
 
 /**
@@ -585,7 +345,7 @@ async function measureCoverage(
   county: CountyPresence,
   measureAddressRecovery: boolean,
 ): Promise<RawCoverage> {
-  const { fips, table, hasZoning, parcels } = county;
+  const { fips, table, parcels } = county;
 
   const cadPresent = await tableExists(pool, "cad_property");
   let cadCountyRows = 0;
@@ -727,61 +487,12 @@ async function measureCoverage(
     landUseAddressRecoveredPct = total > 0 ? (accepted / total) * 100 : 0;
   }
 
-  // --- zoning stamped % ---
-  let zoningStampedPct = 0;
-  if (hasZoning) {
-    const r = await pool.query<{ stamped: string; total: string }>(
-      `WITH d AS (
-         SELECT DISTINCT ON (feature_index) feature_index, zoning_district
-           FROM ${table}
-          WHERE county_fips = $1
-          ORDER BY feature_index
-       )
-       SELECT
-         count(*) FILTER (WHERE zoning_district IS NOT NULL) AS stamped,
-         count(*) AS total
-       FROM d`,
-      [fips],
-    );
-    const stamped = Number(r.rows[0]?.stamped ?? 0);
-    const total = Number(r.rows[0]?.total ?? 0);
-    zoningStampedPct = total > 0 ? (stamped / total) * 100 : 0;
-  }
-
-  // --- envelope derivable % (zoning present AND geometry present) ---
-  let envelopeDerivablePct = 0;
-  {
-    const zoningExpr = hasZoning
-      ? "zoning_district IS NOT NULL"
-      : "false"; // no zoning column -> no deterministic envelope precondition
-    const r = await pool.query<{ derivable: string; total: string }>(
-      `WITH d AS (
-         SELECT DISTINCT ON (feature_index) feature_index,
-                ${hasZoning ? "zoning_district" : "NULL::text AS zoning_district"},
-                geometry
-           FROM ${table}
-          WHERE county_fips = $1
-          ORDER BY feature_index
-       )
-       SELECT
-         count(*) FILTER (WHERE ${zoningExpr} AND geometry IS NOT NULL) AS derivable,
-         count(*) AS total
-       FROM d`,
-      [fips],
-    );
-    const derivable = Number(r.rows[0]?.derivable ?? 0);
-    const total = Number(r.rows[0]?.total ?? 0);
-    envelopeDerivablePct = total > 0 ? (derivable / total) * 100 : 0;
-  }
-
   return {
     parcels,
     landUseRawPct,
     landUseSourcePresent,
     landUseVintage,
     landUseAddressRecoveredPct,
-    zoningStampedPct,
-    envelopeDerivablePct,
   };
 }
 
@@ -875,61 +586,23 @@ async function scoreCounty(
     });
   }
 
-  // --- ZONING + ENVELOPE: measured, or refused with a stated basis ---
-  // Both facets rest on the same `zoning_district` stamp, so one
-  // measurability decision governs both. A refusal writes NO ROW: the
-  // manifest grid already renders a missing row as `not-yet`, which is the
-  // honest reading of "this instrument did not look".
-  const stamp = resolveStampFacetMeasurability({
-    table: county.table,
-    hasZoningColumn: county.hasZoning,
-    wiredZoningLayers: county.wiredZoningLayers,
-    stampedPct: cov.zoningStampedPct,
-  });
-
+  // ZONING + ENVELOPE RETIRED FROM THIS INSTRUMENT (R1 ruling, 2026-09-04,
+  // OPS-19b). `countyRailScoreCli.ts` (lane SS-W15) is now the sole writer of
+  // both facets over the corrected incorporated-city-parcels denominator.
+  // This CLI and that one both upserted the same (county_fips, facet) primary
+  // key with DIFFERENT denominators (this one over every county parcel,
+  // that one over incorporated parcels only) -- last-run-wins, so Bastrop's
+  // zoning cell alternated between 15.22% and 79.60% depending on which ran
+  // most recently. SS-W15's own PR named the fix and correctly declined to
+  // execute a retirement in a different lane's file without a ruling; this is
+  // that ruling, executed. `refused` stays declared on `CountyScore` (kept
+  // for whichever facet this instrument still measures and might refuse) but
+  // is always empty for zoning/envelope now: this instrument no longer
+  // attempts them at all, which is a different fact from attempting and being
+  // refused. See `countyCoverageScoreCli.zoningEnvelopeRetirement.test.ts`
+  // for the regression guard.
   const facets: FacetScore[] = [landUse];
   const refused: RefusedFacet[] = [];
-
-  if (stamp.measurable) {
-    facets.push(
-      classifyFacet({
-        facet: "zoning",
-        rawCoveragePct: cov.zoningStampedPct,
-        sourcePresent: sourcePresentForStampFacet(
-          county.hasZoning,
-          cov.zoningStampedPct,
-        ),
-        verdict: null, // no owner oracle for zoning
-        ownerMatchRate: null,
-        source: zoningStampSourceBasis(county),
-        sourceVintage: null,
-        sampled: 0,
-      }),
-    );
-    facets.push(
-      classifyFacet({
-        facet: "envelope",
-        rawCoveragePct: cov.envelopeDerivablePct,
-        sourcePresent: sourcePresentForStampFacet(
-          county.hasZoning,
-          cov.envelopeDerivablePct,
-        ),
-        verdict: null, // deterministic; no owner oracle
-        ownerMatchRate: null,
-        source: envelopeSourceBasis(county),
-        sourceVintage: null,
-        sampled: 0,
-      }),
-    );
-  } else {
-    for (const facet of ["zoning", "envelope"] as const) {
-      refused.push({
-        facet,
-        refusal: stamp.refusal as string,
-        basis: stamp.basis as string,
-      });
-    }
-  }
 
   return {
     fips: county.fips,

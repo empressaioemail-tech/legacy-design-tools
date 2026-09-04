@@ -49,11 +49,18 @@ import productSpecReferencesRouter from "./productSpecReferences";
 import deliverableLetterRendersRouter from "./deliverableLetterRenders";
 import siteTopographyRouter from "./siteTopography";
 import siteDrainageRouter from "./siteDrainage";
+import recordsRequestRouter from "./recordsRequest";
 import encumbrancesRouter from "./encumbrances";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import { countyLedgerRouter } from "./countyLedger";
 import { servingSweepRouter } from "./servingSweep";
+import { db } from "@workspace/db";
+import {
+  countWhoServesStaging,
+  loadWhoServesCandidatesAtPoint,
+} from "../lib/whoServesRead";
+import { createWhoServesRouter } from "./whoServes";
 import { onboardingLedgerIngestRouter } from "./onboardingLedgerIngest";
 import { onboardingLedgerEventsRouter } from "./onboardingLedgerEvents";
 import { countyRailScoreRouter } from "./countyRailScore";
@@ -61,15 +68,22 @@ import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
 import peAuthRouter from "./peAuth";
+import peMagicLinkRouter from "./peMagicLink";
 import propertyExplorerRouter from "./propertyExplorer";
 import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
+import peHelpRouter from "./peHelp";
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use(peAuthRouter);
+router.use(peMagicLinkRouter);
 router.use(propertyExplorerRouter);
+// P-118 — ungated Help widget chat. Deliberately its OWN router, mounted at
+// the top level (never under brokerageV1), so it can never inherit that
+// surface's session/entitlement/install-id gating by accident.
+router.use(peHelpRouter);
 // G-60: plan-review BFF lives on plan-review Cloud Run. This mount is a
 // proxy, not a second implementation and not a 404 (unlike Smart Files).
 router.use("/plan-review", planReviewProxyRouter);
@@ -94,6 +108,7 @@ router.use(generateLayersRouter);
 // pattern as parcelBriefingsRouter above).
 router.use(siteTopographyRouter);
 router.use(siteDrainageRouter);
+router.use(recordsRequestRouter);
 router.use(encumbrancesRouter);
 // briefingSourcesRouter exposes top-level `/briefing-sources/:id/glb`
 // for the DA-MV-1 viewer; ordering relative to engagementsRouter is
@@ -118,6 +133,16 @@ router.use("/county-ledger", countyLedgerRouter);
 // catch-all and answer HTML 200, which is what made the missing route look
 // like missing data.
 router.use("/serving-sweep", servingSweepRouter);
+// P-75 who-serves read over L22 staging. Mount required: unmatched /api/*
+// falls through to the SPA catch-all and answers HTML 200.
+router.use(
+  "/who-serves",
+  createWhoServesRouter(
+    (longitude, latitude) =>
+      loadWhoServesCandidatesAtPoint(longitude, latitude, db),
+    () => countWhoServesStaging(db),
+  ),
+);
 // Onboarding ledger ingest, OPS-9 S1 write path for hauska-engine's report
 // wrappers. Reachable at POST /api/onboarding-ledger/ingest (pinned contract).
 router.use("/onboarding-ledger", onboardingLedgerIngestRouter);

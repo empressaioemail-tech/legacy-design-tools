@@ -20,7 +20,7 @@ import {
   materializableElements,
 } from "@workspace/db";
 import { BIM_MODEL_IFC_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
 import { parseIfc, type ParseIfcResult } from "./ifcParser";

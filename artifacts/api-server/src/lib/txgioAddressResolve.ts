@@ -56,24 +56,46 @@
  * county) and consistent with what we store.
  */
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db as defaultDb, txgioParcel, txgioAddress } from "@workspace/db";
 import {
   pointInGeometry,
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
-import { parcelNodeId } from "./parcelNodeId";
+import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
+import { isPunctuationOnlySitus } from "./situsCompose";
 import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
+  normalizeSitusSearchPrefix,
   buildNormalizedStreetSql,
+  parsePlaceSearchLocality,
+  localityFromStoredAddress,
+  placeSearchLocalityMatches,
+  hasPlaceSearchLocality,
+  situsSearchPrefixVariants,
+  situsSearchStreetKeys,
+  texasCountyFipsList,
+  type PlaceSearchLocality,
 } from "./txgioAddressNormalize";
+import { allStoreCounties } from "./brokerageTxParcels";
 
 /** Re-exported so existing import sites keep working; defined in the
  *  dependency-free `./txgioAddressNormalize` so its pure logic can be
  *  unit-tested without pulling in `@workspace/db`. */
-export { normalizeStreetLine };
+export {
+  normalizeStreetLine,
+  normalizeSitusSearchPrefix,
+  parsePlaceSearchLocality,
+  localityFromStoredAddress,
+  placeSearchLocalityMatches,
+  hasPlaceSearchLocality,
+  situsSearchPrefixVariants,
+  situsSearchStreetKeys,
+  texasCountyFipsList,
+};
+export type { PlaceSearchLocality };
 
 /** Narrow db surface — injectable for tests (mirrors TxgioStoreDb). */
 export type TxgioAddressResolveDb = Pick<
@@ -158,6 +180,34 @@ interface SitusCandidate {
  */
 function normalizedColumnExpr(columnName: string) {
   return sql.raw(buildNormalizedStreetSql(columnName));
+}
+
+/**
+ * Push city/ZIP into SQL before LIMIT. JS locality filter after an
+ * unfiltered window is how a real row (Bastrop 48021:34137) can exist
+ * in the table and still return []. Registry `allStoreCounties()` is
+ * not used here: Bastrop is still live-ArcGIS in that list while
+ * 74k rows sit in `txgio_parcel`; node-id lookup already ignores the
+ * tag. The table is the second derivation.
+ */
+function storedSitusLocalitySql(locality: PlaceSearchLocality) {
+  const filters: ReturnType<typeof sql>[] = [];
+  if (locality.zip) {
+    filters.push(sql`${txgioParcel.situsAddress} ~ ${`\\m${locality.zip}\\M`}`);
+  }
+  if (locality.city) {
+    filters.push(
+      sql`strpos(upper(${txgioParcel.situsAddress}), ${locality.city}) > 0`,
+    );
+  }
+  return filters;
+}
+
+/** Leading column of `txgio_parcel_situs_norm_idx` / address twin. */
+function storeCountyFipsBound(
+  column: typeof txgioParcel.countyFips | typeof txgioAddress.countyFips,
+) {
+  return inArray(column, texasCountyFipsList());
 }
 
 /**
@@ -428,5 +478,776 @@ export async function resolveRooftopByAddress(input: {
   };
 }
 
+export interface SitusSearchHit {
+  parcelNodeId: string;
+  situsAddress: string;
+  countyFips: string;
+}
+
+/**
+ * Resolve situs label for a typed parcel node id (`48021:34137`). Returns a
+ * prefix-search hit shape when the store row carries a non-empty situs;
+ * null when the parcel is absent or situs is honestly empty (never a
+ * fabricated address).
+ */
+export async function lookupSitusByParcelNodeId(input: {
+  parcelNodeId: string;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit | null> {
+  const parsed = parseParcelNodeId(input.parcelNodeId);
+  if (!parsed) return null;
+
+  const database = input.database ?? defaultDb;
+  const rows = (await database
+    .select({
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, parsed.countyFips),
+        eq(txgioParcel.propId, parsed.propId),
+      ),
+    )
+    .limit(8)) as {
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  for (const r of rows) {
+    const rawPropId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!rawPropId || !situs) continue;
+    const nodeId = parcelNodeId(parsed.countyFips, rawPropId);
+    if (nodeId !== input.parcelNodeId.trim()) continue;
+    return {
+      parcelNodeId: nodeId,
+      situsAddress: situs,
+      countyFips: parsed.countyFips,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Screen resolve existence check. A typed node id is a hit only when a
+ * parcel row matches. Empty situs (null, blank, or the store's
+ * punctuation-only ", ," sentinel) is still a hit; the label is the node
+ * id. Absent row is null. A store error propagates so the caller refuses;
+ * it is never read as an absence. Never fabricates a situs string.
+ *
+ * `prop_id` is stored RAW (leading zeros intact, cad-ingest txgio parse)
+ * while the node-id suffix is the normalized form (`parcelNodeId.ts` strips
+ * leading zeros from an all-digit id). The predicate therefore matches the
+ * raw id or its zero-stripped form, and the post-filter requires the
+ * canonical node id rebuilt from the raw row to equal the wanted id. The
+ * ltrim arm is not served by `txgio_parcel_prop_idx` (county_fips, prop_id)
+ * and reads the county's index entries. leave_behind: an expression index
+ * on (county_fips, ltrim(prop_id, '0')) or a normalized column (migration).
+ */
+export async function lookupParcelNodeForScreen(input: {
+  parcelNodeId: string;
+  database?: TxgioAddressResolveDb;
+}): Promise<{ parcelNodeId: string; label: string } | null> {
+  const parsed = parseParcelNodeId(input.parcelNodeId);
+  if (!parsed) return null;
+
+  const database = input.database ?? defaultDb;
+  const rows = (await database
+    .select({
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, parsed.countyFips),
+        or(
+          eq(txgioParcel.propId, parsed.propId),
+          sql`ltrim(${txgioParcel.propId}, '0') = ${parsed.propId}`,
+        ),
+      ),
+    )
+    .limit(8)) as {
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const wanted = input.parcelNodeId.trim();
+  for (const r of rows) {
+    const rawPropId = r.propId?.trim();
+    if (!rawPropId) continue;
+    const nodeId = parcelNodeId(parsed.countyFips, rawPropId);
+    if (nodeId !== wanted) continue;
+    const situs = r.situsAddress?.trim();
+    const label = situs && !isPunctuationOnlySitus(situs) ? situs : nodeId;
+    return { parcelNodeId: nodeId, label };
+  }
+  return null;
+}
+
+const SITUS_SEARCH_MAX_LIMIT = 10;
+
+/**
+ * Wall-clock budget for one `searchPlaceByPrefix` call. Under the 25 s
+ * HTTP contract and the 30 s MCP `cortexFetch` abort. A miss that
+ * exhausts ILIKE across the store (Rainmaker Cv/Cove on warm cortex)
+ * must return `hits: []` inside this window rather than hang.
+ */
+export const SITUS_SEARCH_BUDGET_MS = 20_000;
+
+/** Named refuse when a situs-search query is canceled for budget. */
+export const SITUS_SEARCH_BUDGET_ERROR = "situs-search-budget-exceeded";
+
+export class SitusSearchBudgetExceededError extends Error {
+  readonly code = SITUS_SEARCH_BUDGET_ERROR;
+  constructor() {
+    super(SITUS_SEARCH_BUDGET_ERROR);
+    this.name = "SitusSearchBudgetExceededError";
+  }
+}
+
+function isBudgetAbort(err: unknown): boolean {
+  if (err instanceof SitusSearchBudgetExceededError) return true;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "57014") return true;
+  const message = e.message ?? "";
+  return /statement timeout|canceling statement/i.test(message);
+}
+
+type TxgioTxHandle = TxgioAddressResolveDb & {
+  execute?: (query: unknown) => Promise<unknown>;
+};
+
+type TxgioDbWithTransaction = TxgioAddressResolveDb & {
+  transaction: (fn: (tx: TxgioTxHandle) => Promise<unknown>) => Promise<unknown>;
+};
+
+function hasTransaction(db: TxgioAddressResolveDb): db is TxgioDbWithTransaction {
+  return typeof (db as { transaction?: unknown }).transaction === "function";
+}
+
+/**
+ * Race `work` against `budgetMs`. Timeout fail-closes to `onTimeout`
+ * (empty hits). Does not cancel a mock; production pairs this with
+ * `SET LOCAL statement_timeout` so the SQL dies too.
+ */
+export async function withSitusSearchBudget<T>(
+  work: () => Promise<T>,
+  opts: { budgetMs: number; onTimeout: T; onBudget?: () => void },
+): Promise<T> {
+  const budgetMs = opts.budgetMs;
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+    opts.onBudget?.();
+    return opts.onTimeout;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const markBudget = () => {
+    timedOut = true;
+    opts.onBudget?.();
+  };
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      markBudget();
+      resolve(opts.onTimeout);
+    }, budgetMs);
+  });
+
+  try {
+    return await Promise.race([
+      work().catch((err: unknown) => {
+        if (timedOut || isBudgetAbort(err)) {
+          markBudget();
+          return opts.onTimeout;
+        }
+        throw err;
+      }),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function startSitusQuery<T>(
+  db: TxgioAddressResolveDb,
+  timeoutMs: number,
+  query: (db: TxgioAddressResolveDb) => Promise<T>,
+): Promise<T> {
+  if (!hasTransaction(db)) {
+    return query(db);
+  }
+  return db.transaction(async (tx) => {
+    if (typeof tx.execute === "function") {
+      await tx.execute(
+        sql.raw(
+          "SET LOCAL statement_timeout = " +
+            String(Math.max(1, Math.floor(timeoutMs))),
+        ),
+      );
+    }
+    return query(tx);
+  }) as Promise<T>;
+}
+
+async function runBoundedSitusQuery<T>(
+  remainingMs: number,
+  database: TxgioAddressResolveDb | undefined,
+  query: (db: TxgioAddressResolveDb) => Promise<T>,
+  onTimeout: T,
+  onBudget?: () => void,
+): Promise<T> {
+  if (remainingMs <= 0) {
+    onBudget?.();
+    return onTimeout;
+  }
+  const db = database ?? defaultDb;
+  try {
+    return await withSitusSearchBudget(
+      () => startSitusQuery(db, remainingMs, query),
+      { budgetMs: remainingMs, onTimeout, onBudget },
+    );
+  } catch (err) {
+    if (isBudgetAbort(err)) {
+      onBudget?.();
+      return onTimeout;
+    }
+    throw err;
+  }
+}
+
+/** Escape `%` and `_` for a literal ILIKE prefix pattern. */
+function escapeIlikeLiteral(prefix: string): string {
+  return prefix.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
+ * Exact street-key situs lookup across store counties, optionally filtered by
+ * parsed city/state/ZIP. Used when the MCP/FE sends a full address so prefix
+ * ILIKE does not return the wrong county's homonym street.
+ */
+export async function searchSitusByStreetKeys(input: {
+  keys: string[];
+  limit?: number;
+  locality?: PlaceSearchLocality;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit[]> {
+  const keys = [...new Set(input.keys.map((k) => k.trim()).filter(Boolean))];
+  if (keys.length === 0) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+
+  const database = input.database ?? defaultDb;
+  const locality = input.locality ?? { city: null, state: null, zip: null };
+
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        storeCountyFipsBound(txgioParcel.countyFips),
+        inArray(normalizedColumnExpr("situs_address"), keys),
+        ...storedSitusLocalitySql(locality),
+      ),
+    )
+    .limit(limit * 16)) as {
+    countyFips: string | null;
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const byParcel = new Map<string, SitusSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!fips || !propId || !situs) continue;
+    if (
+      hasPlaceSearchLocality(locality) &&
+      !placeSearchLocalityMatches(localityFromStoredAddress(situs), locality)
+    ) {
+      continue;
+    }
+    const nodeId = parcelNodeId(fips, propId);
+    if (!nodeId) continue;
+    if (!byParcel.has(nodeId)) {
+      byParcel.set(nodeId, {
+        parcelNodeId: nodeId,
+        situsAddress: situs,
+        countyFips: fips,
+      });
+    }
+    if (byParcel.size >= limit) break;
+  }
+
+  return [...byParcel.values()];
+}
+
+/**
+ * Prefix search over store-backed situs addresses for PE typeahead.
+ * Matches the normalized first-comma segment of `situs_address` across
+ * every `txgio-store` county. Dedupes tile-cell duplicates per parcel.
+ */
+export async function searchSitusByPrefix(input: {
+  query: string;
+  limit?: number;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit[]> {
+  const prefix = normalizeSitusSearchPrefix(input.query);
+  if (!prefix) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+
+  const database = input.database ?? defaultDb;
+  const pattern = `${escapeIlikeLiteral(prefix)}%`;
+
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        storeCountyFipsBound(txgioParcel.countyFips),
+        sql`${normalizedColumnExpr("situs_address")} ILIKE ${pattern}`,
+      ),
+    )
+    .limit(limit * 8)) as {
+    countyFips: string | null;
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const byParcel = new Map<string, SitusSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!fips || !propId || !situs) continue;
+    const nodeId = parcelNodeId(fips, propId);
+    if (!nodeId) continue;
+    if (!byParcel.has(nodeId)) {
+      byParcel.set(nodeId, {
+        parcelNodeId: nodeId,
+        situsAddress: situs,
+        countyFips: fips,
+      });
+    }
+    if (byParcel.size >= limit) break;
+  }
+
+  return [...byParcel.values()];
+}
+
+/**
+ * Prefix situs search with city/state/ZIP filter — used when exact street-key
+ * lookup misses (CAD situs often omits the street-type suffix the user typed).
+ * Still fail-closed: never falls back to an unfiltered cross-county prefix.
+ */
+async function searchSitusByPrefixWithLocality(input: {
+  query: string;
+  limit?: number;
+  locality: PlaceSearchLocality;
+  database?: TxgioAddressResolveDb;
+}): Promise<SitusSearchHit[]> {
+  const prefixes = situsSearchPrefixVariants(input.query);
+  if (prefixes.length === 0) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+
+  const database = input.database ?? defaultDb;
+  const patterns = prefixes.map(
+    (p) => sql`${normalizedColumnExpr("situs_address")} ILIKE ${`${escapeIlikeLiteral(p)}%`}`,
+  );
+
+  const rows = (await database
+    .select({
+      countyFips: txgioParcel.countyFips,
+      propId: txgioParcel.propId,
+      situsAddress: txgioParcel.situsAddress,
+    })
+    .from(txgioParcel)
+    .where(
+      and(
+        storeCountyFipsBound(txgioParcel.countyFips),
+        patterns.length === 1 ? patterns[0]! : or(...patterns),
+        ...storedSitusLocalitySql(input.locality),
+      ),
+    )
+    .limit(limit * 8)) as {
+    countyFips: string | null;
+    propId: string | null;
+    situsAddress: string | null;
+  }[];
+
+  const byParcel = new Map<string, SitusSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propId = r.propId?.trim();
+    const situs = r.situsAddress?.trim();
+    if (!fips || !propId || !situs) continue;
+    if (
+      !placeSearchLocalityMatches(
+        localityFromStoredAddress(situs),
+        input.locality,
+      )
+    ) {
+      continue;
+    }
+    const nodeId = parcelNodeId(fips, propId);
+    if (!nodeId) continue;
+    if (!byParcel.has(nodeId)) {
+      byParcel.set(nodeId, {
+        parcelNodeId: nodeId,
+        situsAddress: situs,
+        countyFips: fips,
+      });
+    }
+    if (byParcel.size >= limit) break;
+  }
+
+  return [...byParcel.values()];
+}
+
+export interface AddressPointSearchHit {
+  parcelNodeId: null;
+  situsAddress: string;
+  countyFips: string;
+  latitude: number;
+  longitude: number;
+  source: "address-point";
+}
+
+export type PlaceSearchHit =
+  | (SitusSearchHit & { source: "parcel-situs" })
+  | AddressPointSearchHit;
+
+/** Empty hits carry a class so a budget refuse is not a "not a place". */
+export type SitusSearchMissClass = "no-hit" | typeof SITUS_SEARCH_BUDGET_ERROR;
+
+export type PlaceSearchResult = {
+  hits: PlaceSearchHit[];
+  missClass?: SitusSearchMissClass;
+};
+
+function formatAddressPointLabel(row: {
+  fullAddr: string | null;
+  postComm: string | null;
+  state: string | null;
+  postCode: string | null;
+}): string {
+  const street = row.fullAddr?.trim() ?? "";
+  if (!street) return "";
+  const locality = [row.postComm, row.state ?? "TX", row.postCode]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+  return locality ? `${street}, ${locality}` : street;
+}
+
+/**
+ * Prefix search over authoritative TxGIO/StratMap address points (`txgio_address`).
+ * Travis and other counties carry rooftop coords here when `txgio_parcel.situs`
+ * is empty or city-less.
+ */
+export async function searchAddressPointsByPrefix(input: {
+  query: string;
+  limit?: number;
+  locality?: PlaceSearchLocality;
+  database?: TxgioAddressResolveDb;
+}): Promise<AddressPointSearchHit[]> {
+  const prefix = normalizeSitusSearchPrefix(input.query);
+  if (!prefix) return [];
+
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+
+  const database = input.database ?? defaultDb;
+  const pattern = `${escapeIlikeLiteral(prefix)}%`;
+  const locality = input.locality ?? { city: null, state: null, zip: null };
+
+  const localityFilters: ReturnType<typeof sql>[] = [];
+  if (locality.zip) {
+    localityFilters.push(
+      sql`trim(${txgioAddress.postCode}) = ${locality.zip}`,
+    );
+  }
+  if (locality.city) {
+    localityFilters.push(
+      sql`upper(trim(${txgioAddress.postComm})) = ${locality.city}`,
+    );
+  }
+  if (locality.state) {
+    localityFilters.push(
+      sql`upper(trim(${txgioAddress.state})) = ${locality.state}`,
+    );
+  }
+
+  const rows = (await database
+    .select({
+      countyFips: txgioAddress.countyFips,
+      fullAddr: txgioAddress.fullAddr,
+      postComm: txgioAddress.postComm,
+      state: txgioAddress.state,
+      postCode: txgioAddress.postCode,
+      latitude: txgioAddress.latitude,
+      longitude: txgioAddress.longitude,
+    })
+    .from(txgioAddress)
+    .where(
+      and(
+        storeCountyFipsBound(txgioAddress.countyFips),
+        sql`${normalizedColumnExpr("full_addr")} ILIKE ${pattern}`,
+        ...localityFilters,
+      ),
+    )
+    .limit(limit * 8)) as {
+    countyFips: string | null;
+    fullAddr: string | null;
+    postComm: string | null;
+    state: string | null;
+    postCode: string | null;
+    latitude: number;
+    longitude: number;
+  }[];
+
+  const byLabel = new Map<string, AddressPointSearchHit>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const label = formatAddressPointLabel(r);
+    if (!fips || !label) continue;
+    if (
+      !Number.isFinite(r.latitude) ||
+      !Number.isFinite(r.longitude)
+    ) {
+      continue;
+    }
+    const key = `${fips}|${label.toLowerCase()}`;
+    if (!byLabel.has(key)) {
+      byLabel.set(key, {
+        parcelNodeId: null,
+        situsAddress: label,
+        countyFips: fips,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        source: "address-point",
+      });
+    }
+    if (byLabel.size >= limit) break;
+  }
+
+  return [...byLabel.values()];
+}
+
+/**
+ * Merge parcel-situs prefix hits with authoritative address-point hits for PE
+ * typeahead. Parcel situs wins ordering; address points fill gaps (Travis Simsbrook).
+ *
+ * Each store query is raced against the remaining {@link SITUS_SEARCH_BUDGET_MS}
+ * (20 s, under the 25 s HTTP / 30 s MCP abort). A miss fail-closes to `[]`
+ * rather than hanging on ILIKE. Hits already found are kept if a later query
+ * times out (Pine must still resolve). Production also `SET LOCAL
+ * statement_timeout` so the SQL dies; `allStoreCounties()` is not used as a
+ * county bound because it still tags Bastrop as ArcGIS and would drop 48021.
+ */
+export async function searchPlaceByPrefix(input: {
+  query: string;
+  limit?: number;
+  database?: TxgioAddressResolveDb;
+  /** Test override. Production uses {@link SITUS_SEARCH_BUDGET_MS}. */
+  budgetMs?: number;
+}): Promise<PlaceSearchResult> {
+  const limit = Math.min(
+    Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
+    SITUS_SEARCH_MAX_LIMIT,
+  );
+  const budgetMs = input.budgetMs ?? SITUS_SEARCH_BUDGET_MS;
+  const started = Date.now();
+  const remainingMs = () => Math.max(0, budgetMs - (Date.now() - started));
+  let budgetExhausted = false;
+  const onBudget = () => {
+    budgetExhausted = true;
+  };
+
+  const finish = (hits: PlaceSearchHit[]): PlaceSearchResult => {
+    if (hits.length > 0) return { hits };
+    if (budgetExhausted) {
+      return { hits: [], missClass: SITUS_SEARCH_BUDGET_ERROR };
+    }
+    return { hits: [], missClass: "no-hit" };
+  };
+
+  const locality = parsePlaceSearchLocality(input.query);
+  const keys = situsSearchStreetKeys(input.query);
+  const situsHitsRaw =
+    keys.length > 0
+      ? await runBoundedSitusQuery(
+          remainingMs(),
+          input.database,
+          (database) =>
+            searchSitusByStreetKeys({
+              keys,
+              limit,
+              locality: hasPlaceSearchLocality(locality) ? locality : undefined,
+              database,
+            }),
+          [],
+          onBudget,
+        )
+      : [];
+  const needPrefixFallback =
+    situsHitsRaw.length === 0 && !budgetExhausted;
+  const prefixHits =
+    needPrefixFallback && hasPlaceSearchLocality(locality)
+      ? await runBoundedSitusQuery(
+          remainingMs(),
+          input.database,
+          (database) =>
+            searchSitusByPrefixWithLocality({
+              query: input.query,
+              limit,
+              locality,
+              database,
+            }),
+          [],
+          onBudget,
+        )
+      : needPrefixFallback
+        ? await runBoundedSitusQuery(
+            remainingMs(),
+            input.database,
+            (database) => searchSitusByPrefix({ ...input, limit, database }),
+            [],
+            onBudget,
+          )
+        : [];
+  const situsHits = (situsHitsRaw.length > 0 ? situsHitsRaw : prefixHits).map(
+    (h) => ({
+      ...h,
+      source: "parcel-situs" as const,
+    }),
+  );
+
+  const seenLookup = new Set(
+    situsHits.map((h) => h.situsAddress.trim().toLowerCase()),
+  );
+  const remaining = Math.max(limit - situsHits.length, 0);
+  const addressHits =
+    remaining > 0 && !budgetExhausted
+      ? await runBoundedSitusQuery(
+          remainingMs(),
+          input.database,
+          (database) =>
+            searchAddressPointsByPrefix({
+              ...input,
+              limit: remaining,
+              locality: hasPlaceSearchLocality(locality) ? locality : undefined,
+              database,
+            }),
+          [],
+          onBudget,
+        )
+      : [];
+
+  const merged: PlaceSearchHit[] = [...situsHits];
+  for (const hit of addressHits) {
+    const key = hit.situsAddress.trim().toLowerCase();
+    if (seenLookup.has(key)) continue;
+    seenLookup.add(key);
+    merged.push(hit);
+    if (merged.length >= limit) break;
+  }
+  return finish(merged);
+}
+
+/**
+ * Resolve an address to an authoritative rooftop across every store county.
+ * Used when county routing from a fuzzy geocode would miss the correct table.
+ */
+export async function resolveRooftopAcrossCounties(input: {
+  address: string;
+  database?: TxgioAddressResolveDb;
+}): Promise<(RooftopHit & { countyFips: string }) | null> {
+  const keys = normalizeStreetLineCandidates(input.address);
+  if (keys.length === 0) return null;
+  const database = input.database ?? defaultDb;
+  const fipsList = allStoreCounties().map((c) => c.fips);
+  if (fipsList.length === 0) return null;
+
+  const rows = (await database
+    .select({
+      countyFips: txgioAddress.countyFips,
+      latitude: txgioAddress.latitude,
+      longitude: txgioAddress.longitude,
+    })
+    .from(txgioAddress)
+    .where(
+      and(
+        inArray(txgioAddress.countyFips, fipsList),
+        inArray(normalizedColumnExpr("full_addr"), keys),
+      ),
+    )) as {
+    countyFips: string | null;
+    latitude: number;
+    longitude: number;
+  }[];
+
+  if (rows.length === 0) return null;
+
+  const distinct = new Map<
+    string,
+    { countyFips: string; latitude: number; longitude: number }
+  >();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    if (!fips || !Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) {
+      continue;
+    }
+    const k = `${r.latitude.toFixed(6)},${r.longitude.toFixed(6)}`;
+    if (!distinct.has(k)) {
+      distinct.set(k, {
+        countyFips: fips,
+        latitude: r.latitude,
+        longitude: r.longitude,
+      });
+    }
+  }
+  if (distinct.size !== 1) return null;
+  const point = [...distinct.values()][0]!;
+  return {
+    countyFips: point.countyFips,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    matchSource: "txgio-address",
+  };
+}
+
 /** Exposed for unit tests. */
-export const __internal = { normalizedColumnExpr };
+export const __internal = {
+  normalizedColumnExpr,
+  escapeIlikeLiteral,
+  withSitusSearchBudget,
+  isBudgetAbort,
+  runBoundedSitusQuery,
+};

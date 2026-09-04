@@ -61,8 +61,52 @@ export type DenominatorKind =
    * cost in `./cityBoundaryDenominator.ts`.
    */
   | "incorporated-city-parcels"
-  /** No denominator: the rail could not be measured for this county. */
-  | "none";
+  /**
+   * No measurement spec yet. The rail has never been measured; there is no
+   * counting rule to recover. This is the unspecified-never-measured state
+   * (roads, footprint, easement, …). It is NOT the state for live ledger
+   * rows whose denominator was lost — that is `retired-unknown-denominator`.
+   */
+  | "none"
+  /**
+   * Live ledger rows exist, but the denominator they were computed against
+   * is not reconstructible from checked-in source. Distinct from `none`:
+   * retired-rows-with-unknown-denominator is not unspecified-never-measured.
+   * A new scorer (a different card) must land before this rail is scored.
+   */
+  | "retired-unknown-denominator";
+
+/**
+ * Can a measurer actually execute this denominator today?
+ *
+ * EXHAUSTIVE OVER THE UNION, DELIBERATELY. A hardcoded allowlist (the prior
+ * shape here was a `Set` of "live" kinds) fails OPEN by omission: a new
+ * `DenominatorKind` added anywhere else in this file compiles fine and
+ * silently reads as "not live" here, which is exactly how a rail can vanish
+ * from `scoreableRailKeys()` — and therefore from a default
+ * `railScoring/run.ts` run — with no error and no test failure. The `never`
+ * assignment in the default case makes that omission a TYPE ERROR instead:
+ * adding a kind without deciding whether it is executable is not allowed to
+ * compile. This is not hypothetical: composing S-22's geometry retirement
+ * with SS-W15's zoning denominator (both landed independently) is exactly
+ * the scenario this exhaustiveness check exists for — without it,
+ * `"incorporated-city-parcels"` would have silently read "not live" here,
+ * and zoning would have vanished from `scoreableRailKeys()` with no error.
+ */
+export function isLiveCountingDenominatorKind(kind: DenominatorKind): boolean {
+  switch (kind) {
+    case "txgio-parcel-distinct-feature-index":
+    case "incorporated-city-parcels":
+      return true;
+    case "none":
+    case "retired-unknown-denominator":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled denominator kind: ${String(exhaustive)}`);
+    }
+  }
+}
 
 export interface DenominatorSpec {
   kind: DenominatorKind;
@@ -157,6 +201,18 @@ export interface AtomCountRule extends RailScoringRuleBase {
   kind: "atom-count-over-parcel-features";
   /** `atoms.entity_type` in the ATOMS store, counted per county by entity_id prefix. */
   entityType: string;
+  /**
+   * How the numerator is counted. Default `atom-count` is raw atom rows (may
+   * exceed parcel-feature denominator for multi-atom-per-parcel families).
+   * `distinct-parcel-keys` counts DISTINCT parcel keys parsed from entity_id
+   * (family suffix stripped), so coverage cannot exceed 100%.
+   */
+  numeratorMode?: "atom-count" | "distinct-parcel-keys";
+  /**
+   * Provenance label when coverage is present. Default `${entityType}-atom-count`.
+   * Mud uses `special-district-fact-determination-over-txgio-feature-index`.
+   */
+  presentSourceLabel?: string;
 }
 
 export interface ParcelColumnStampRule extends RailScoringRuleBase {
@@ -218,9 +274,13 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     entityType: "parcel-node",
     instrument: "countyRailScoreCli.ts:geometry",
     verificationMethod: "sweep",
-    denominator: PARCEL_FEATURE_DENOMINATOR,
+    denominator: {
+      kind: "retired-unknown-denominator",
+      basis:
+        "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an 'accounted features' denominator by B2_cp2_geometry_scorer_apply.mjs, which is not in this repo. The reconstructible parcel-feature count is a different rule and is not claimed here. Re-scoring waits on a new scorer (S-21); until then this rail is unscored.",
+    },
     notes:
-      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here.",
+      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here. RETIRED 2026-08-20 (S-22): the machine-readable denominator is no longer PARCEL_FEATURE_DENOMINATOR. Live geometry rows are 254 over 254 distinct county FIPS, not 253 (253 was a different rail's figure; source _inbox/2026-08-20_db_probe_five_answers.md Q2). Until a new scorer lands (S-21), this rail is unscored rather than re-derived against a different denominator.",
   },
   {
     railKey: "cad",
@@ -242,13 +302,13 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   },
   {
     railKey: "roads",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "road-node",
     instrument: "countyRailScoreCli.ts:roads",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. county_rail declares an atom family and a writer, but no instrument has ever emitted a roads coverage number. The measurement spec must settle at minimum: numerator (road-node atoms? OSM way count? county roadway layer features?), denominator (parcels with frontage? county road-mile ceiling?), and whether a county with no acquired roads layer is not-yet or an established absence.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Numerator is road-node atom rows per county (entity_id FIPS prefix). Ratio may exceed 100% when multiple road segments attach to one parcel feature; overcount fails closed to not-yet per SF-25.",
   },
   {
     railKey: "flood",
@@ -278,27 +338,28 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     verificationMethod: "sweep",
     denominator: PARCEL_FEATURE_DENOMINATOR,
     notes:
-      "The 254 live landuse rows are land-use-fact atom counts from score_cad_rails_fast.mjs, which is what this reproduces. SEPARATE from countyCoverageScoreCli.ts's owner-gated CAD-roll join, which writes facet 'land-use' (orphaned: no such rail key) and is owned by lane SS-W13. Both are named here so a successor does not mistake one for the other.",
+      "The 254 live landuse rows are land-use-fact atom counts from score_cad_rails_fast.mjs, which is what this reproduces. SEPARATE from countyCoverageScoreCli.ts's owner-gated CAD-roll join, which now upserts diagnostic facet 'landuse-cad-join' (the historical 'land-use' key is RETIRED; 19 orphan rows remain until operator-authorised retirement SQL). Both are named here so a successor does not mistake one for the other.",
   },
   {
     railKey: "footprint",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "building-footprint",
+    numeratorMode: "distinct-parcel-keys",
     instrument: "countyRailScoreCli.ts:footprint",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage, and the WRITTEN-to-SCORED leg is the whole gap: county_rail declares writer write-building-footprint-county.mjs and footprints were landed in 174 counties, but no instrument ever scored them, so a ledger recompute moves zero cells no matter how fresh it is. Spec must settle the denominator: footprints are not per-parcel (a parcel may carry zero or many), so parcel-feature count is the wrong denominator and an unclamped ratio would exceed 100 routinely.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Numerator is DISTINCT parcel keys with at least one building-footprint atom (entity_id prefix before the family suffix). Denominator is parcel-feature count. Raw atom count is the wrong numerator because a parcel may carry zero or many footprints.",
   },
   {
     railKey: "easement",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "utility-easement",
     instrument: "countyRailScoreCli.ts:easement",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. The declared source is a county honest-absence DEFAULT with a CAD exception where published, which means this rail is mostly an absence rail — so its spec is mostly an absence-probe spec, and it must name what positively establishes 'no recorded easement layer for this county' rather than defaulting absence from an empty query.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Numerator is utility-easement atom rows. Honest-absence counties emit ONE county-coverage atom (not per-parcel), so present-data counties drive the ratio; absent counties stay not-yet until a positive county-coverage absence atom exists or an absence probe lands.",
   },
   {
     railKey: "owner",
@@ -312,43 +373,59 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   },
   {
     railKey: "rrc-wells",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "well-fact",
     instrument: "countyRailScoreCli.ts:rrc-wells",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage, and the acquisition source is HARRIS-ONLY: 12,796 features whose extent is one county, with a Dallas bbox returning zero. A spec that scores this statewide writes mass false absences. When the spec lands it MUST carry an absenceProbe with reach 'enumerated-counties', not 'statewide' — the engine will refuse a statewide absence claim it cannot back.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    absenceProbe: {
+      kind: "source-table-zero-rows",
+      table: "rrc_wells",
+      fipsColumn: "county_fips",
+      basis: "texas-rrc-wells-v1-source-zero-rows-for-fips",
+      reach: { kind: "enumerated-counties", counties: ["48201"] },
+    },
+    notes:
+      "Acquisition source is Harris-only (12,796 features). Absence may be established ONLY inside reach; all other counties refuse absence and stay not-yet rather than false 0% gaps.",
   },
   {
     railKey: "rrc-pipelines",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "rrc-pipeline-fact",
     instrument: "countyRailScoreCli.ts:rrc-pipelines",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. Line geometry from a different endpoint than the wells layer, so it needs its own denominator; a per-parcel ratio is the wrong shape for a linear feature and the spec must say what it is instead.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Statewide line geometry from Texas RRC public GIS. Per-parcel ratio is an approximation (linear features); overcount fails closed to not-yet.",
   },
   {
     railKey: "rail-corridor",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "rail-corridor-fact",
     instrument: "countyRailScoreCli.ts:rail-corridor",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. Railroad TRACKS, not the Railroad Commission — the name collision with the rrc-* rails above is why this note exists. Single national source, so a statewide absence probe is plausible here where it is not for rrc-wells; the spec must establish that rather than assume it.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Railroad TRACKS (national source), not Railroad Commission. Per-parcel atom ratio is an approximation for linear adjacency; overcount fails closed to not-yet.",
   },
   {
     railKey: "mud",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "special-district-fact",
+    numeratorMode: "distinct-parcel-keys",
+    presentSourceLabel: "special-district-fact-determination-over-txgio-feature-index",
     instrument: "countyRailScoreCli.ts:mud",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "254 live rows exist (134 satisfied-present, 75 satisfied-absent) and the rule that produced them exists NOWHERE in checked-in source: l16-score-mud.mjs is not in this repo and is not on the machine. What the stored rows reveal is only an outline — source 'special-district-fact-determination-over-txgio-feature-index' for present cells, and absence basis 'tceq-tx_special_district-statewide-zero-districts-for-fips' for absent ones. Reconstructing a rule from the shape of its own output would be a guess presented as a spec, which is exactly the failure this lane was dispatched against, so it is declared unspecified. This rail is the single clearest statement of why scoring had to become a capability.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    absenceProbe: {
+      kind: "source-table-zero-rows",
+      table: "tx_special_district",
+      fipsColumn: "county_fips",
+      basis: "tceq-tx_special_district-statewide-zero-districts-for-fips",
+      reach: { kind: "statewide" },
+    },
+    notes:
+      "Numerator is DISTINCT parcel keys with at least one special-district-fact determination (entity_id FIPS prefix before the :sd: family suffix). The county marker {fips}:_county_coverage is excluded from the ratio and establishes satisfied-absent instead. tx_special_district zero rows for the FIPS establishes satisfied-absent; features=0 with districts>0 (Donley 48129) fails closed to not-yet.",
   },
 ] as const;
 
@@ -412,10 +489,29 @@ export function thresholdPctForRail(railKey: string): number {
   return t;
 }
 
-export function isScoreableRule(
-  rule: RailScoringRule,
-): rule is Exclude<RailScoringRule, UnspecifiedRule> {
-  return rule.kind !== "unspecified";
+/**
+ * Plain `boolean`, NOT a type predicate. It used to narrow to
+ * `Exclude<RailScoringRule, UnspecifiedRule>`, which was accurate when
+ * "not scoreable" meant exactly `kind === "unspecified"`. It no longer does:
+ * a rule can keep a specified `kind` (geometry is still
+ * `atom-count-over-parcel-features`) and still be unscoreable because its
+ * denominator is retired. A stale predicate here does not just mislabel —
+ * `scoreRailCell`'s `if (!isScoreableRule(rule))` branch would have TypeScript
+ * narrow `rule` to `UnspecifiedRule`, prove its own `kind === "unspecified"`
+ * check always true, and therefore prove its own trailing fallback `throw`
+ * unreachable (`rule: never`) — a real compile error, not a rebase artifact.
+ *
+ * A measurement kind without an executable denominator is not scoreable.
+ * Geometry keeps kind `atom-count-over-parcel-features` (the numerator shape
+ * is still parcel-node atom count) but its denominator is retired, so
+ * substituting the reconstructible parcel-feature count would rescore live
+ * rows against a different rule. Unspecified rails use kind `none`.
+ */
+export function isScoreableRule(rule: RailScoringRule): boolean {
+  return (
+    rule.kind !== "unspecified" &&
+    isLiveCountingDenominatorKind(rule.denominator.kind)
+  );
 }
 
 /** Rails this capability can measure today. */
@@ -435,6 +531,25 @@ export function unspecifiedRails(): Array<{
     railKey,
     unspecifiedReason,
     specOwner,
+  }));
+}
+
+/**
+ * Rails whose live ledger rows were computed against a denominator that is
+ * not reconstructible from checked-in source. Distinct from `unspecifiedRails`
+ * (never measured) and from `scoreableRailKeys` (executable denominator).
+ */
+export function retiredDenominatorRails(): Array<{
+  railKey: string;
+  denominatorKind: DenominatorKind;
+  basis: string;
+}> {
+  return RAIL_SCORING_DECLARATION.filter(
+    (r) => r.denominator.kind === "retired-unknown-denominator",
+  ).map((r) => ({
+    railKey: r.railKey,
+    denominatorKind: r.denominator.kind,
+    basis: r.denominator.basis,
   }));
 }
 

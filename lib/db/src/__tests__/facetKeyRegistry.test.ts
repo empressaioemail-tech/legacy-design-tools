@@ -23,6 +23,7 @@ import {
   facetKeyCollisionForm,
   checkFacetKey,
   assertWritableFacetKeys,
+  assertRailLedgerRowFixture,
 } from "../schema/facetKeyRegistry";
 import { COUNTY_RAIL_DECLARATION } from "../schema/countyRailDimension";
 
@@ -124,5 +125,27 @@ describe("facet key registry", () => {
     }
     expect(message).toContain("land-use");
     expect(message).toContain("wetlands");
+  });
+
+  // --- row-shaped fixtures used as RAIL cells ---
+
+  it("accepts a ledger-row fixture whose facet is a rail key", () => {
+    const railRow = {
+      county_fips: "48021",
+      facet: "landuse",
+      honest_coverage_pct: "98.26",
+    };
+    expect(() => assertRailLedgerRowFixture(railRow)).not.toThrow();
+  });
+
+  it("REJECTS a ledger-row fixture that uses retired land-use as a rail key", () => {
+    const orphanAsRail = {
+      county_fips: "48021",
+      facet: "land-use",
+      honest_coverage_pct: "98.01",
+    };
+    expect(() => assertRailLedgerRowFixture(orphanAsRail)).toThrow(/RETIRED/);
+    expect(RAIL_FACET_KEYS.has(orphanAsRail.facet)).toBe(false);
+    expect(RETIRED_FACET_KEYS.has(orphanAsRail.facet)).toBe(true);
   });
 });

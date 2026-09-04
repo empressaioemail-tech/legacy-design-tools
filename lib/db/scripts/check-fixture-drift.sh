@@ -41,7 +41,7 @@ pg_dump \
   --no-comments \
   --schema=public \
   | grep -vE '^(SET |SELECT pg_catalog\.set_config|CREATE SCHEMA |\\restrict |\\unrestrict |--$|-- (PostgreSQL|Dumped))' \
-  | sed -E 's/\bpublic\./@@SCHEMA@@./g; s/@@SCHEMA@@\.vector\(/public.vector(/g' \
+  | sed -E 's/\bpublic\./@@SCHEMA@@./g; s/@@SCHEMA@@\.vector\(/public.vector(/g; s/@@SCHEMA@@\.geometry\(/public.geometry(/g' \
   > "$LIVE"
 
 if ! diff -u "$COMMITTED" "$LIVE"; then

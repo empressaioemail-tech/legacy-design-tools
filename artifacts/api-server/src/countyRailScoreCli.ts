@@ -52,19 +52,30 @@ const { Pool } = pg;
 /**
  * The capability is loaded DYNAMICALLY, after connection strings resolve.
  *
- * `lib/railScoring/engine.ts` imports `classifyFacet` from
- * `countyCoverageScoreCli.ts`, which imports `@workspace/cad-ingest`, which
- * imports `@workspace/db`, whose module body THROWS unless `DATABASE_URL` is
- * set. This CLI opens its own pools and never touches that singleton, so a
- * static import would make it die on a variable it does not use — and on the
- * one variable name that means the ATOMS store in the sibling scorer CLIs and
- * the DEPLOYMENT store in api-server.
- *
+ * ORIGINAL REASON, NOW REMOVED. `lib/railScoring/engine.ts` used to import
+ * `classifyFacet` from `countyCoverageScoreCli.ts`, which imports
+ * `@workspace/cad-ingest`, which imports `@workspace/db`, whose module body
+ * THROWS unless `DATABASE_URL` is set. This CLI opens its own pools and never
+ * touches that singleton, so a static import would have made it die on a
+ * variable it does not use — and on the one variable name that means the ATOMS
+ * store in the sibling scorer CLIs and the DEPLOYMENT store in api-server.
  * Static imports are hoisted above the module body, so defaulting the variable
- * in `main()` would be too late. A dynamic import after `resolveConnections()`
- * is the fix. The alternative — moving `classifyFacet` into a leaf module — is
- * the better fix and is deliberately NOT taken here: that file is owned by an
- * in-flight lane this week. It is recorded in the close as a follow-on.
+ * in `main()` would have been too late.
+ *
+ * That header named the better fix — moving `classifyFacet` into a leaf module
+ * — and deferred it because the file was owned by an in-flight lane. Lane
+ * SS-W18 took it on 2026-08-19 (`lib/countyCoverageClassification.ts`), for a
+ * more expensive reason: the same import chain also put a CLI in the SERVER
+ * boot graph, and the canary deploy of `5688aa31` exited before Express
+ * listened. Verified after that change: the whole `lib/railScoring` barrel now
+ * reaches only `@workspace/db/schema`, which is a pure subpath export and does
+ * not read `DATABASE_URL`.
+ *
+ * The dynamic import is RETAINED rather than converted, because converting it
+ * is a behaviour change to a CLI this lane was not scoped to touch and it buys
+ * nothing today. It is recorded as a leave-behind, not as a live constraint.
+ * What must not happen is this comment continuing to assert a reason that no
+ * longer exists.
  */
 type RailScoringModule = typeof import("./lib/railScoring");
 let railScoring: RailScoringModule | null = null;
@@ -135,14 +146,19 @@ function makePool(connectionString: string, max: number): pg.Pool {
 /**
  * `--list` reads a checked-in declaration and touches no database, so it must
  * not need a connection string. It imports `./lib/railScoring/registry`
- * DIRECTLY rather than the barrel: the barrel re-exports the engine, which
- * imports classifyFacet from countyCoverageScoreCli.ts, which reaches
- * @workspace/db and throws without DATABASE_URL. Caught by running the
- * cheapest command in the tool, which had become the one command that could
- * not run.
+ * DIRECTLY rather than the barrel. The original reason was that the barrel
+ * re-exported the engine, which imported classifyFacet from
+ * countyCoverageScoreCli.ts, which reached @workspace/db and threw without
+ * DATABASE_URL. Caught by running the cheapest command in the tool, which had
+ * become the one command that could not run.
+ *
+ * Lane SS-W18 removed that chain on 2026-08-19, so the direct import is now
+ * narrowness rather than necessity. It is kept because importing the one
+ * module you need is correct regardless, and because the barrel is exactly the
+ * hop that carried the boot-graph defect into production.
  */
 async function printRegistry(): Promise<void> {
-  const { RAIL_SCORING_DECLARATION, scoreableRailKeys, unspecifiedRails } =
+  const { RAIL_SCORING_DECLARATION, scoreableRailKeys, unspecifiedRails, retiredDenominatorRails } =
     await import("./lib/railScoring/registry");
   log("--- rail scoring registry ---");
   for (const rule of RAIL_SCORING_DECLARATION) {
@@ -151,6 +167,11 @@ async function printRegistry(): Promise<void> {
         `  ${rule.railKey.padEnd(14)} NOT SCOREABLE  owner=${rule.specOwner}`,
       );
       log(`    ${rule.unspecifiedReason}`);
+    } else if (rule.denominator.kind === "retired-unknown-denominator") {
+      log(
+        `  ${rule.railKey.padEnd(14)} NOT SCOREABLE  denominator retired (live rows unmeasured until a new scorer)`,
+      );
+      log(`    ${rule.denominator.basis}`);
     } else {
       log(
         `  ${rule.railKey.padEnd(14)} ${rule.kind.padEnd(34)} den=${rule.denominator.kind}`,
@@ -159,7 +180,8 @@ async function printRegistry(): Promise<void> {
   }
   log(
     `scoreable: ${scoreableRailKeys().length} of ${RAIL_SCORING_DECLARATION.length}; ` +
-      `awaiting a measurement spec: ${unspecifiedRails().map((r) => r.railKey).join(", ")}`,
+      `awaiting a measurement spec: ${unspecifiedRails().map((r) => r.railKey).join(", ")}; ` +
+      `retired denominator: ${retiredDenominatorRails().map((r) => r.railKey).join(", ") || "none"}`,
   );
 }
 

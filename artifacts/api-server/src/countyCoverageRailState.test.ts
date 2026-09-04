@@ -21,6 +21,13 @@ import {
   railThresholdPct,
   LANDUSE_JOIN_FACET_KEY,
 } from "./countyCoverageScoreCli";
+import {
+  assertWritableFacetKeys,
+  DIAGNOSTIC_FACET_KEYS,
+  RAIL_FACET_KEYS,
+  RETIRED_FACET_KEYS,
+} from "@workspace/db/schema";
+import { LANDUSE_JOIN_LEDGER_BLOCK_FACETS } from "./lib/joinIntegrityGate";
 
 describe("railThresholdPct", () => {
   it("reads the rail declaration rather than a local constant", () => {
@@ -71,5 +78,32 @@ describe("deriveRailState", () => {
     // hold its fire, on adjacent inputs rather than distant ones.
     expect(deriveRailState("envelope", 89.99)).toBe("not-yet");
     expect(deriveRailState("envelope", 90)).toBe("satisfied-present");
+  });
+});
+
+/**
+ * The UPSERT binds `f.facet`. scoreCounty sets that field from
+ * `LANDUSE_JOIN_FACET_KEY`, not from the gate label `facet: "land-use"`
+ * passed to evaluateJoinIntegrity. This block pins the write key.
+ *
+ * Input type of the constant is the string literal `"landuse-cad-join"`.
+ * `expect(key).not.toBe("land-use")` would be satisfied by `"landuse"`
+ * (the rail) or by `""`. Those cheapest satisfiers are the overlay and
+ * the empty-key defects, so the predicate is equality to the declared
+ * diagnostic plus the registry membership checks. assertWritableFacetKeys
+ * is the same guard upsertLedger calls before INSERT.
+ */
+describe("LANDUSE_JOIN_FACET_KEY is the ledger write key, not land-use", () => {
+  it("upserts landuse-cad-join, never land-use, never the landuse rail", () => {
+    expect(LANDUSE_JOIN_FACET_KEY).toBe("landuse-cad-join");
+    expect(LANDUSE_JOIN_FACET_KEY).not.toBe("land-use");
+    expect(DIAGNOSTIC_FACET_KEYS.has(LANDUSE_JOIN_FACET_KEY)).toBe(true);
+    expect(RAIL_FACET_KEYS.has(LANDUSE_JOIN_FACET_KEY)).toBe(false);
+    expect(RETIRED_FACET_KEYS.has(LANDUSE_JOIN_FACET_KEY)).toBe(false);
+    expect(() => assertWritableFacetKeys([LANDUSE_JOIN_FACET_KEY])).not.toThrow();
+  });
+
+  it("the bake's ledger-block reader includes the write key", () => {
+    expect(LANDUSE_JOIN_LEDGER_BLOCK_FACETS).toContain(LANDUSE_JOIN_FACET_KEY);
   });
 });

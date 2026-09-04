@@ -2,7 +2,7 @@
  * WDLL item 14 — deep-route tier gate (free vs paid vs anonymous).
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
@@ -16,6 +16,31 @@ import {
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
+import {
+  memoryFloodHazardAtoms,
+  resetFloodHazardAtomQueryableForTests,
+  setFloodHazardAtomQueryableForTests,
+} from "../lib/floodHazardFactRead";
+import {
+  memoryBoundaryEdgeFactAtoms,
+  resetBoundaryEdgeFactAtomQueryableForTests,
+  setBoundaryEdgeFactAtomQueryableForTests,
+} from "../lib/boundaryEdgeFactRead";
+import {
+  memoryPipelineFactAtoms,
+  resetPipelineFactAtomQueryableForTests,
+  setPipelineFactAtomQueryableForTests,
+} from "../lib/pipelineFactRead";
+import {
+  memoryWellFactAtoms,
+  resetWellFactAtomQueryableForTests,
+  setWellFactAtomQueryableForTests,
+} from "../lib/wellFactRead";
+import {
+  memorySpecialDistrictFactAtoms,
+  resetSpecialDistrictFactAtomQueryableForTests,
+  setSpecialDistrictFactAtomQueryableForTests,
+} from "../lib/specialDistrictFactRead";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -56,6 +81,13 @@ function exchangeAuth(req: Test): Test {
 
 describe("PE entitlement gate", () => {
   beforeEach(async () => {
+    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([]),
+    );
     await db.insert(users).values([
       { id: USER_FREE, displayName: "Free User" },
       { id: USER_PAID, displayName: "Paid User" },
@@ -72,6 +104,14 @@ describe("PE entitlement gate", () => {
         accessTier: "paid",
       },
     ]);
+  });
+
+  afterEach(() => {
+    resetFloodHazardAtomQueryableForTests();
+    resetBoundaryEdgeFactAtomQueryableForTests();
+    resetPipelineFactAtomQueryableForTests();
+    resetWellFactAtomQueryableForTests();
+    resetSpecialDistrictFactAtomQueryableForTests();
   });
 
   it("anonymous GET entitlement shows unauthenticated free tier", async () => {
@@ -123,10 +163,13 @@ describe("PE entitlement gate", () => {
         .send({ parcelNodeId: BAKED_NODE_ID }),
       USER_FREE,
     );
-    // The dev-role bypass clears the 402 gate. The honest 404 is expected
-    // because this test has not seeded a snapshot in this case.
+    // The dev-role bypass clears the 402 gate. State constructed here: no
+    // txgio_parcel row for BAKED_NODE_ID and no snapshot, so the P-91 miss
+    // split answers the honest 404 for an ABSENT parcel (parcel_not_found),
+    // not the unbaked one.
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.error).toBe("parcel_not_found");
+    expect(res.body.parcelNodeId).toBe(BAKED_NODE_ID);
   });
 
   it("authed paid user receives a cited baked R1 brief and manifest", async () => {
@@ -185,16 +228,58 @@ describe("PE entitlement gate", () => {
     expect(res.body.mode).toBe("baked-facet-intel-v1");
     expect(res.body.source).toBe("baked-snapshot");
     // Anti-zombie: baked envelope is stripped from the facets wire, so setbacks
-    // citation is no longer composed from Tier-1 envelope. Land-use + flood remain.
+    // citation is no longer composed from Tier-1 envelope. Land-use remains.
     expect(res.body.citations).toEqual(
-      expect.arrayContaining([
-        "https://example.test/land-use",
-        "https://example.test/flood",
-      ]),
+      expect.arrayContaining(["https://example.test/land-use"]),
     );
     expect(res.body.citations).not.toContain("https://example.test/setbacks");
+
+    // SS-W16 (2026-08-19): this assertion USED to require the flood citation
+    // "https://example.test/flood", composed from the baked Tier-2 flood facet.
+    // That facet is retired — it asked FEMA at a 0.005-degree tile centre, a
+    // measured median 227 m from the parcel, and was correct in 0 of 5,714
+    // adjudicated cases. A test asserting a citation the system should never
+    // have emitted converts the defect into a specification and makes the fix
+    // read as a regression, so it is inverted here rather than deleted: the
+    // brief must NOT cite the retired instrument.
+    expect(res.body.citations).not.toContain("https://example.test/flood");
+
+    // The paid brief must not go silently blank either. The flood section keeps
+    // its place and carries the refusal, so "withdrawn and why" is legible and
+    // is not collapsed into "never measured".
+    const floodSection = res.body.brief.sections.find(
+      (section: { id: string }) => section.id === "flood",
+    );
+    expect(floodSection).toBeDefined();
+    expect(floodSection.data).toBeNull();
+    expect(floodSection.refusal.state).toBe("refused");
+    expect(floodSection.refusal.code).toBe("unrecognised-producer");
+
+    const envelopeSection = res.body.brief.sections.find(
+      (section: { id: string }) => section.id === "setbacks-envelope",
+    );
+    expect(envelopeSection.data).toBeNull();
+    expect(envelopeSection.refusal.code).toBe("baked-envelope-not-served");
+
     // Disclosure may be empty when envelope is stripped; brief still 200 cited.
     expect(Array.isArray(res.body.brief.disclosure)).toBe(true);
+
+    // P-87 WDLL 22/26: draw is on the brief; empty edge prefix does not invent a ring.
+    expect(res.body.draw).toMatchObject({
+      node: BAKED_NODE_ID,
+      kind: "parcel",
+      confidence: "seed",
+      url: `https://smartsite.cloud/p/${BAKED_NODE_ID}`,
+    });
+    expect(res.body.draw.ring).toBeUndefined();
+    expect(res.body.draw.attrs).not.toHaveProperty("setbacks");
+    expect(
+      res.body.draw.overlays.find((overlay: { id: string }) => overlay.id === "boundary"),
+    ).toMatchObject({
+      state: "unknown",
+      draw: "hatch-interior",
+      label: "Parcel boundary unmeasured",
+    });
 
     const manifest = await asUser(
       request(getApp()).get(
@@ -204,11 +289,16 @@ describe("PE entitlement gate", () => {
     );
     expect(manifest.status).toBe(200);
     expect(manifest.body.contract).toBe("layer-manifest-v1");
-    // Flood remains; buildable-envelope layer may be absent when baked envelope
-    // is stripped (atom path owns envelope product truth).
-    expect(manifest.body.layers.map((layer: { id: string }) => layer.id)).toEqual(
-      expect.arrayContaining(["flood"]),
+    // SS-W16: the manifest used to emit a "flood" layer off the baked Tier-2
+    // facet. No flood layer is composed from a baked snapshot any more, and the
+    // buildable-envelope layer is absent because the baked envelope is stripped
+    // (atom path owns envelope product truth). The manifest therefore degrades
+    // HONESTLY, naming the refusal, rather than shipping a wrong hazard layer.
+    expect(manifest.body.layers.map((layer: { id: string }) => layer.id)).not.toContain(
+      "flood",
     );
+    expect(manifest.body.degraded).toBe(true);
+    expect(manifest.body.reason).toContain("refused");
   });
 
   it("session-exchange mints token for verified BFF identity", async () => {

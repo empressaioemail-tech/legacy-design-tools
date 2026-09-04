@@ -407,8 +407,11 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     await db.insert(countyFacetCoverage).values({ countyFips: "50903", facet: "zoning", honestCoveragePct: "33.98", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
     const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50903" && c.railKey === "zoning");
+    // Ruling 4's displayState split composed with R-09's isPartial
+    // preservation — see depthRailGateDivergence.test.ts for the full
+    // reasoning and the empirical proof the two fields are independent.
     expect(cell.displayState).toBe("measured-below-bar");
-    expect(cell.isPartial).toBe(false);
+    expect(cell.isPartial).toBe(true);
   });
 
   it("precedence: statewide-uniform below threshold stays PARTIAL satisfied-present", async () => {

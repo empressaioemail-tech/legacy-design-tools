@@ -56,7 +56,7 @@ import {
   type ContextSummary,
   type EventAnchoringService,
   type KeyMetric,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 import { db, parcelBriefings, type ParcelBriefing } from "@workspace/db";
 import { eq } from "drizzle-orm";
 

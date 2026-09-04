@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   runAtomContractTests,
   createInMemoryEventService,
-} from "@hauska/atom-contract/testing";
+} from "@empressaio/atom-contract/testing";
 import * as dbModule from "@workspace/db";
 import {
   makeSiteDrainageAtom,

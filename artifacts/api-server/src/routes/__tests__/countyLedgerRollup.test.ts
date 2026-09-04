@@ -199,9 +199,12 @@ describe("applyDepthRailDisplayGate", () => {
     const result = applyDepthRailDisplayGate(baseCell());
     // Operator ruling 4 (2026-08-19, lane SS-W15): a demoted cell WAS measured
     // and fell short, which is a different state from never having been
-    // measured. Both were `not-yet` and rendered identically.
+    // measured. Both were `not-yet` and rendered identically. Composed with
+    // R-09 (PR #447, live since 2026-08-21): isPartial is preserved from the
+    // input, not cleared — see depthRailGateDivergence.test.ts for the full
+    // reasoning and the empirical proof the two fields are independent.
     expect(result.displayState).toBe("measured-below-bar");
-    expect(result.isPartial).toBe(false);
+    expect(result.isPartial).toBe(true);
   });
 
   it("leaves jurisdiction-depth satisfied-present at/above threshold unchanged", () => {

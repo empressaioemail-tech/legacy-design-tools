@@ -19,9 +19,13 @@ import {
 } from "@workspace/db/schema";
 import {
   buildEffectiveCountyRailDeclaration,
+  effectiveRailFieldsByKey,
   isRailDerivationIndeterminate,
   manifestReadProbeOptions,
   probeRailCapabilities,
+  resolveManifestDisplayState,
+  resolveManifestIsPartial,
+  mergeEffectiveRailFields,
 } from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -160,6 +164,8 @@ export interface CountyLedgerPayload {
   railCapabilities: unknown;
   railCapabilitiesProbeReason?: string;
   summary: CountyLedgerSummary;
+  /** Set when a county publish run stamps freshness; absent on pre-publish snapshots. */
+  published_at?: string | null;
 }
 
 /** Drizzle handle from the route singleton or the CLI's own pool. */
@@ -179,7 +185,19 @@ export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
   const threshold = cell.thresholdPct;
   const coverage = cell.honestCoveragePct;
   if (coverage === null || threshold === null || coverage < threshold) {
-    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE, isPartial: false };
+    // Ruling 4's displayState split (measured-below-bar vs not-measured)
+    // composed with R-09's own fix (2026-08-21, PR #447, live in production):
+    // isPartial is NOT cleared here. Ruling 4 originally cleared it, reasoning
+    // the new displayState split made it redundant -- empirically false,
+    // proven by running R-09's own regression tests
+    // (depthRailGateDivergence.test.ts "R-09: preserves isPartial on
+    // demotion", manifestReadIndicatorOverlay.test.ts "isPartial survives
+    // depth-rail display downgrade") against Ruling 4's code in isolation:
+    // both fail on `isPartial`, independent of the displayState string used.
+    // The two fixes answer different questions -- displayState says WHICH
+    // KIND of gap this is (instrument vs coverage), isPartial says whether
+    // THIS cell's own measurement is incomplete -- and both survive.
+    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE };
   }
   return cell;
 }
@@ -231,17 +249,41 @@ ${sql.raw(MANIFEST_IS_PARTIAL_SQL)}
     ORDER BY m.county_fips, r.ordinal
   `)) as { rows: ManifestGridQueryRow[] };
   const indeterminateRails = indeterminateRailKeysFromEffectiveDeclaration();
+  const effectiveByKey = effectiveRailFieldsByKey(manifestReadProbeOptions());
   return applyDerivationIndeterminateOverlay(
-    rows.map((row) =>
-      applyDepthRailDisplayGate({
+    rows.map((row) => {
+      const effective = effectiveByKey.get(row.rail_key);
+      const merged = mergeEffectiveRailFields(
+        row.atom_family_state,
+        Boolean(row.has_writer),
+        effective?.atomFamilyState,
+        effective?.hasWriter,
+      );
+      const atomFamilyState = merged.atomFamilyState;
+      const hasWriter = merged.hasWriter;
+      const honestCoveragePct = num(row.honest_coverage_pct);
+      const thresholdPct = num(row.cell_threshold ?? row.rail_default_threshold);
+      const displayState = resolveManifestDisplayState(
+        atomFamilyState,
+        hasWriter,
+        row.rail_state,
+      );
+      const isPartial = resolveManifestIsPartial(
+        atomFamilyState,
+        hasWriter,
+        row.rail_state,
+        honestCoveragePct,
+        thresholdPct,
+      );
+      return applyDepthRailDisplayGate({
         countyFips: row.county_fips,
         railKey: row.rail_key,
-        displayState: row.display_state,
-        isPartial: Boolean(row.is_partial),
-        honestCoveragePct: num(row.honest_coverage_pct),
-        thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
-        atomFamilyState: row.atom_family_state,
-        hasWriter: Boolean(row.has_writer),
+        displayState,
+        isPartial,
+        honestCoveragePct,
+        thresholdPct,
+        atomFamilyState,
+        hasWriter,
         absenceBasis: row.absence_basis ?? null,
         source: row.source ?? null,
         sourceVintage: row.source_vintage ?? null,
@@ -249,8 +291,8 @@ ${sql.raw(MANIFEST_IS_PARTIAL_SQL)}
         verifiedByInstrument: row.verified_by_instrument ?? null,
         verificationMethod: row.verification_method ?? null,
         artifactPath: row.artifact_path ?? null,
-      }),
-    ),
+      });
+    }),
     indeterminateRails,
   );
 }

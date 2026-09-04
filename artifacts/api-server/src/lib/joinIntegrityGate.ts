@@ -191,6 +191,220 @@ export interface AddressLandUseEntry {
 }
 
 /**
+ * CAD roll keyed by normalized situs address at the DECLARED vintage — the
+ * lookup `resolveAddressLandUse` consumes. DISTINCT ON collapses address
+ * collisions within that year only (deterministic prop_id tie-break). The
+ * owner is used ONLY for the per-match gate and never enters a payload.
+ * READ-ONLY.
+ */
+export async function fetchCountyLandUseByAddress(
+  pool: QueryablePool,
+  fips: string,
+): Promise<Map<string, AddressLandUseEntry>> {
+  const out = new Map<string, AddressLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
+  if (!(await tableExists(pool, "cad_property"))) return out;
+  const r = await pool.query<{
+    naddr: string;
+    property_use_code: string;
+    source_vintage: string;
+    owner_name: string | null;
+  }>(
+    `SELECT DISTINCT ON (upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')))
+            upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) AS naddr,
+            property_use_code, source_vintage, owner_name
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL
+        AND situs_address IS NOT NULL
+        AND situs_address <> ''
+      ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
+               prop_id`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    if (!row.naddr) continue;
+    out.set(row.naddr, {
+      code: row.property_use_code,
+      vintage: row.source_vintage,
+      owner: row.owner_name,
+    });
+  }
+  return out;
+}
+
+/**
+ * A CAD roll land-use entry on the normalized prop_id join key. The field
+ * names are the ones the old txgio-keyed bake built its map with, so both
+ * bakes read one shape.
+ */
+export interface PropIdLandUseEntry {
+  landUseCode: string;
+  landUseVintage: string;
+}
+
+/**
+ * The county CAD roll on the prop_id key, PLUS what the read actually did.
+ *
+ * `consulted` is false when the county declares no CAD vintage or
+ * `cad_property` is not present in this database. Absent, zero and unmeasured
+ * are three different states: an empty map is NOT evidence that a parcel has
+ * no land use, and a caller that collapses the two would turn "we could not
+ * look" into "we looked and it is not there". `declaredTaxYear` is the
+ * vintage the read was pinned to, never a max(tax_year) fallback.
+ */
+export interface CountyLandUseRoll {
+  byPropId: Map<string, PropIdLandUseEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
+/**
+ * CAD roll keyed by prop_id at the DECLARED vintage. The SAME query the old
+ * Tier-1 bake ran for its land-use join, lifted here so the conformant bake
+ * reads the identical upstream through one function. READ-ONLY.
+ *
+ * This is a CAD-to-CAD join (cad_property.prop_id to the CAD parcel id).
+ * Seed does NOT apply. Seed risk was TxGIO-to-CAD (cross-namespace). One
+ * namespace, both sides CAD. 48209 and 48491 are clear on this join. Do not
+ * re-impose LANDUSE_JOIN_DISABLED_FIPS_SEED here. The join key is prop_id,
+ * never seed.
+ *
+ * Undeclared counties and a missing `cad_property` return `consulted: false`
+ * with an empty map (honest), never a max-year fallback.
+ */
+export async function fetchCountyLandUseRoll(
+  pool: QueryablePool,
+  fips: string,
+): Promise<CountyLandUseRoll> {
+  const byPropId = new Map<string, PropIdLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byPropId, declaredTaxYear: null, consulted: false };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byPropId, declaredTaxYear: declared.taxYear, consulted: false };
+  }
+  const r = await pool.query<{
+    prop_id: string;
+    property_use_code: string;
+    source_vintage: string;
+  }>(
+    `SELECT prop_id, property_use_code, source_vintage
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    byPropId.set(row.prop_id, {
+      landUseCode: row.property_use_code,
+      landUseVintage: row.source_vintage,
+    });
+  }
+  return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
+}
+
+/**
+ * Full `cad_property` row at the DECLARED vintage, keyed by CAD prop_id.
+ * CAD-to-CAD. Seed does NOT apply. Used for dollar / living / year / legal
+ * / exemption fields. NEVER a cad-parcel-roll atom. ALL parcels at the
+ * declared year (not only those with a property_use_code).
+ *
+ * Undeclared counties and a missing `cad_property` return `consulted: false`.
+ */
+export interface PropIdCadPropertyEntry {
+  propId: string;
+  taxYear: number;
+  sourceVintage: string;
+  marketValue: number | null;
+  assessedValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  livingAreaSqft: number | null;
+  yearBuilt: number | null;
+  legalDescription: string | null;
+  exemptionCodes: string[] | null;
+}
+
+export interface CountyCadPropertyRoll {
+  byPropId: Map<string, PropIdCadPropertyEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
+function numericOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof v === "bigint") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+export async function fetchCountyCadPropertyRoll(
+  pool: QueryablePool,
+  fips: string,
+): Promise<CountyCadPropertyRoll> {
+  const byPropId = new Map<string, PropIdCadPropertyEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byPropId, declaredTaxYear: null, consulted: false };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byPropId, declaredTaxYear: declared.taxYear, consulted: false };
+  }
+  const r = await pool.query<{
+    prop_id: string;
+    tax_year: number;
+    source_vintage: string;
+    market_value: unknown;
+    assessed_value: unknown;
+    land_value: unknown;
+    improvement_value: unknown;
+    living_area_sqft: unknown;
+    year_built: unknown;
+    legal_description: string | null;
+    exemption_codes: string[] | null;
+  }>(
+    `SELECT prop_id, tax_year, source_vintage,
+            market_value, assessed_value, land_value, improvement_value,
+            living_area_sqft, year_built, legal_description, exemption_codes
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    byPropId.set(row.prop_id, {
+      propId: row.prop_id,
+      taxYear: row.tax_year,
+      sourceVintage: row.source_vintage,
+      marketValue: numericOrNull(row.market_value),
+      assessedValue: numericOrNull(row.assessed_value),
+      landValue: numericOrNull(row.land_value),
+      improvementValue: numericOrNull(row.improvement_value),
+      livingAreaSqft: numericOrNull(row.living_area_sqft),
+      yearBuilt: numericOrNull(row.year_built),
+      legalDescription:
+        typeof row.legal_description === "string" && row.legal_description.trim()
+          ? row.legal_description.trim()
+          : null,
+      exemptionCodes: Array.isArray(row.exemption_codes)
+        ? row.exemption_codes.filter(
+            (c): c is string => typeof c === "string" && c.trim() !== "",
+          )
+        : null,
+    });
+  }
+  return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
+}
+
+/**
  * Resolve a situs-address-matched land-use through the per-match owner gate.
  *
  * Returns the CAD entry ONLY when an address match exists AND the TxGIO owner
@@ -646,6 +860,25 @@ export async function gateCountyLandUseJoin(
 }
 
 /**
+ * Ledger facet keys whose `integrity_verdict='block'` gates the land-use bake.
+ *
+ * The coverage scorer upserts the CAD-join measurement under
+ * `landuse-cad-join` (`LANDUSE_JOIN_FACET_KEY`). The retired key `land-use`
+ * still has 19 production rows until operator-authorised retirement SQL
+ * is applied. Reading BOTH is the transition that lets a deploy and the
+ * SQL apply land in either order without starving the bake of ledger
+ * blocks. Drop `land-use` from this list only after that SQL has been
+ * applied and verified n=0.
+ *
+ * `evaluateJoinIntegrity({ facet: "land-use" })` is a GATE LABEL on the
+ * integrity report, not a ledger write key. Do not collapse the two.
+ */
+export const LANDUSE_JOIN_LEDGER_BLOCK_FACETS: readonly string[] = [
+  "landuse-cad-join",
+  "land-use",
+];
+
+/**
  * Load the set of county FIPS the LEDGER records as land-use `block` — the
  * gate's computed fabrication verdicts, the authoritative (not hand-edited)
  * block set the bakes gate on.
@@ -661,15 +894,17 @@ export async function gateCountyLandUseJoin(
  */
 export async function loadLedgerBlockedFips(
   pool: QueryablePool,
-  facet = "land-use",
+  facetOrFacets: string | readonly string[] = LANDUSE_JOIN_LEDGER_BLOCK_FACETS,
 ): Promise<Set<string>> {
+  const facets =
+    typeof facetOrFacets === "string" ? [facetOrFacets] : [...facetOrFacets];
   const out = new Set<string>();
   if (!(await tableExists(pool, "county_facet_coverage"))) return out;
   const r = await pool.query<{ county_fips: string }>(
     `SELECT county_fips
        FROM county_facet_coverage
-      WHERE facet = $1 AND integrity_verdict = 'block'`,
-    [facet],
+      WHERE facet = ANY($1::text[]) AND integrity_verdict = 'block'`,
+    [facets],
   );
   for (const row of r.rows) out.add(row.county_fips);
   return out;

@@ -106,7 +106,7 @@ vi.mock("@workspace/db", () => ({
 
 // NOTE: `drizzle-orm` is intentionally NOT mocked. Its operators (eq/and/…) are
 // pure token builders whose output the fake `db` above ignores, and mocking the
-// whole module would break transitive consumers (e.g. `@hauska/atom-contract`
+// whole module would break transitive consumers (e.g. `@empressaio/atom-contract`
 // imports `sql` from it). Keeping the real module is both correct and simpler.
 
 // Mock the heavy ingest — its behavior is injected per-test.

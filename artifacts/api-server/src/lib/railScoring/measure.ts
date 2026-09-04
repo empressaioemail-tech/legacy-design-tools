@@ -133,7 +133,15 @@ async function tableExists(
  * Returns null when NEITHER parcel table holds the county — a null
  * denominator, not a zero. The distinction is load-bearing: a zero would
  * divide, a null fails closed to `not-yet`.
+ *
+ * The machine name of what this function computes. Any rail measured through
+ * this function must declare `denominator.kind` equal to this string, or the
+ * declaration has drifted from the query (S-22). Keep this identifier next
+ * to the SQL; do not relocate it to the registry.
  */
+export const EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND =
+  "txgio-parcel-distinct-feature-index" as const;
+
 export async function readParcelFeatureCount(
   ctx: MeasureContext,
   countyFips: string,
@@ -185,6 +193,170 @@ export async function readAtomCountForCounty(
 }
 
 /**
+ * Distinct parcel keys with at least one atom of the given type in the county.
+ * Strips the family suffix after the first `:`-delimited parcel key segment
+ * (e.g. `48021:34137:footprint:…` → `48021:34137`).
+ */
+export async function readDistinctParcelKeysWithAtoms(
+  atoms: RailScoreQueryable,
+  entityType: string,
+  countyFips: string,
+  excludeEntityId?: string,
+): Promise<number> {
+  const params: unknown[] = [entityType, countyFips, `${countyFips}￿`];
+  let excludeClause = "";
+  if (excludeEntityId != null) {
+    excludeClause = " AND entity_id <> $4";
+    params.push(excludeEntityId);
+  }
+  const r = await atoms.query<{ n: string }>(
+    `SELECT count(DISTINCT split_part(entity_id, ':', 1) || ':' || split_part(entity_id, ':', 2))::text AS n
+       FROM atoms
+      WHERE entity_type = $1
+        AND entity_id >= $2
+        AND entity_id < $3${excludeClause}`,
+    params,
+  );
+  return Number(r.rows[0]?.n ?? 0);
+}
+
+async function readSpecialDistrictCountForCounty(
+  deployment: RailScoreQueryable,
+  countyFips: string,
+): Promise<number | null> {
+  const table = "tx_special_district";
+  if (!(await tableExists(deployment, table))) return null;
+  const r = await deployment.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM ${table} WHERE county_fips = $1`,
+    [countyFips],
+  );
+  return Number(r.rows[0]?.n ?? 0);
+}
+
+function countyCoverageMarkerEntityId(countyFips: string): string {
+  return `${countyFips}:_county_coverage`;
+}
+
+function basisFromCountyCoverageMarkerBody(body: unknown): string {
+  if (body != null && typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    if (typeof record.absenceBasis === "string" && record.absenceBasis.trim()) {
+      return record.absenceBasis.trim();
+    }
+    const verified = record.verifiedAbsence;
+    if (verified != null && typeof verified === "object") {
+      const scope = (verified as { provenanceScope?: unknown }).provenanceScope;
+      if (Array.isArray(scope) && scope.length > 0) {
+        return scope.filter((s): s is string => typeof s === "string").join(";");
+      }
+    }
+  }
+  return "special-district-county-coverage-marker;not-a-parcel";
+}
+
+async function readCountyCoverageMarkerAbsence(
+  atoms: RailScoreQueryable,
+  entityType: string,
+  countyFips: string,
+): Promise<RailCellMeasurement["establishedAbsence"]> {
+  const entityId = countyCoverageMarkerEntityId(countyFips);
+  const r = await atoms.query<{ body: unknown }>(
+    `SELECT body
+       FROM atoms
+      WHERE entity_type = $1
+        AND entity_id = $2
+      LIMIT 1`,
+    [entityType, entityId],
+  );
+  if (r.rows.length === 0) return null;
+  return {
+    basis: basisFromCountyCoverageMarkerBody(r.rows[0]?.body),
+    source: "special-district-fact:_county_coverage",
+    evidence: null,
+  };
+}
+
+const MUD_PRESENT_SOURCE = "special-district-fact-determination-over-txgio-feature-index";
+
+async function measureMud(
+  rule: AtomCountRule,
+  ctx: MeasureContext,
+  countyFips: string,
+): Promise<RailCellMeasurement> {
+  if (!ctx.atoms) {
+    throw new RailNotMeasurableError(
+      rule.railKey,
+      "atoms_store_not_configured",
+      `rail '${rule.railKey}' is measured from the ATOMS store, which is not configured ` +
+        `(set ATOMS_DATABASE_URL). Refusing to score it rather than reporting zero coverage.`,
+    );
+  }
+
+  const markerEntityId = countyCoverageMarkerEntityId(countyFips);
+  const establishedAbsence = await readCountyCoverageMarkerAbsence(
+    ctx.atoms,
+    rule.entityType,
+    countyFips,
+  );
+  if (establishedAbsence != null) {
+    return {
+      countyFips,
+      numerator: 0,
+      denominator: null,
+      sourcePresent: false,
+      source: "special-district-fact:_county_coverage",
+      detail: "countyCoverageMarker=true",
+      absence: null,
+      establishedAbsence,
+    };
+  }
+
+  const den = await readParcelFeatureCount(ctx, countyFips);
+  const num = await readDistinctParcelKeysWithAtoms(
+    ctx.atoms,
+    rule.entityType,
+    countyFips,
+    markerEntityId,
+  );
+  const presentSource = rule.presentSourceLabel ?? MUD_PRESENT_SOURCE;
+
+  if (den == null) {
+    const districtCount = await readSpecialDistrictCountForCounty(ctx.deployment, countyFips);
+    if (districtCount != null && districtCount > 0) {
+      return {
+        countyFips,
+        numerator: num,
+        denominator: null,
+        sourcePresent: num > 0,
+        source: num > 0 ? presentSource : null,
+        detail: "donleyGuard=features-zero-districts-positive",
+        absence: null,
+      };
+    }
+    const absence = await runAbsenceProbe(rule, ctx.deployment, countyFips);
+    return {
+      countyFips,
+      numerator: num,
+      denominator: null,
+      sourcePresent: num > 0,
+      source: num > 0 ? presentSource : null,
+      detail: `atoms:entity_type=${rule.entityType},numeratorMode=distinct-parcel-keys,table=none`,
+      absence,
+    };
+  }
+
+  return {
+    countyFips,
+    numerator: num,
+    denominator: den.features,
+    sourcePresent: num > 0,
+    source: presentSource,
+    detail: `atoms:entity_type=${rule.entityType},numeratorMode=distinct-parcel-keys,table=${den.table}`,
+    absence: null,
+  };
+}
+
+/**
  * Run a declared absence probe. Returns a determination ONLY on a positive
  * finding (the source table is reachable for this county AND holds zero rows
  * for it). Everything else returns null, and null means "not established",
@@ -229,7 +401,11 @@ async function measureAtomCount(
     );
   }
   const den = await readParcelFeatureCount(ctx, countyFips);
-  const num = await readAtomCountForCounty(ctx.atoms, rule.entityType, countyFips);
+  const numeratorMode = rule.numeratorMode ?? "atom-count";
+  const num =
+    numeratorMode === "distinct-parcel-keys"
+      ? await readDistinctParcelKeysWithAtoms(ctx.atoms, rule.entityType, countyFips)
+      : await readAtomCountForCounty(ctx.atoms, rule.entityType, countyFips);
   const absence = den == null ? await runAbsenceProbe(rule, ctx.deployment, countyFips) : null;
   return {
     countyFips,
@@ -237,7 +413,7 @@ async function measureAtomCount(
     denominator: den?.features ?? null,
     sourcePresent: num > 0,
     source: `${rule.entityType}-atom-count`,
-    detail: `atoms:entity_type=${rule.entityType},table=${den?.table ?? "none"}`,
+    detail: `atoms:entity_type=${rule.entityType},numeratorMode=${numeratorMode},table=${den?.table ?? "none"}`,
     absence,
   };
 }
@@ -461,8 +637,26 @@ export async function measureRailCell(
   ctx: MeasureContext,
   countyFips: string,
 ): Promise<RailCellMeasurement> {
+  // FAIL CLOSED. A retired denominator means live rows were computed against
+  // a lost counting rule. Executing readParcelFeatureCount would substitute
+  // a reconstructible denominator and silently rewrite those rows. The guard
+  // sits BEFORE the kind switch so a still-typed atom-count rule cannot
+  // reach the measurer.
+  if (rule.denominator.kind === "retired-unknown-denominator") {
+    throw new RailNotMeasurableError(
+      rule.railKey,
+      "denominator_retired",
+      `rail '${rule.railKey}' declares a retired denominator; live ledger rows were ` +
+        `computed against a counting rule that is not reconstructible from checked-in ` +
+        `source. Refusing to score rather than substituting ` +
+        `${EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND}. Re-scoring is a different card (S-21).`,
+    );
+  }
   switch (rule.kind) {
     case "atom-count-over-parcel-features":
+      if (rule.railKey === "mud") {
+        return await measureMud(rule, ctx, countyFips);
+      }
       return await measureAtomCount(rule, ctx, countyFips);
     case "parcel-column-stamp-rate":
       return await measureColumnStamp(rule, ctx, countyFips);

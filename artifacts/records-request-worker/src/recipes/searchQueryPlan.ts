@@ -1,0 +1,98 @@
+/**
+ * P-85 item 5 — planned clerk index queries from CAD-enriched search terms.
+ */
+
+import type { RecordsSearchTerms } from "./searchTerms.js";
+
+export type SearchQueryKind =
+  | "owner-name"
+  | "legal-description"
+  | "subdivision-lot-block";
+
+/** Clerk "begins with" searches often miss when CAD owner includes a leading THE. */
+export function normalizeOwnerNameForClerkSearch(ownerName: string): string {
+  let name = ownerName.trim().replace(/\s+/g, " ");
+  if (/^the\s+/i.test(name)) {
+    name = name.replace(/^the\s+/i, "").trim();
+  }
+  return name;
+}
+
+export interface PlannedSearchQuery {
+  kind: SearchQueryKind;
+  query: string;
+  /** Short label for capture artifacts. */
+  captureLabel: string;
+}
+
+/** Parse subdivision / block / lot from a Texas-style legal when CAD has no columns. */
+export function parseSubdivisionLotBlockFromLegal(
+  legal: string | null,
+): Pick<RecordsSearchTerms, "subdivision" | "block" | "lot"> {
+  if (!legal?.trim()) {
+    return { subdivision: null, block: null, lot: null };
+  }
+  const text = legal.trim();
+  const lotMatch = text.match(/\bLOT\s+(\d+[A-Z]?)\b/i);
+  /**
+   * Matches BLK, BLOCK, and BLKOCK spellings with either a digit block id
+   * (P-85 audit CURRENT_BLOCK_PATTERN) or a letter-only block id (P-113
+   * widening — 2026-08-31_p85_block_job_audit exclusion_letterBlockNoDigit:
+   * letter-only is a real Texas plat designation, e.g. "BLOCK A" / "BLK D",
+   * not a declined clerk-term class; the old capture group required a
+   * leading digit and refused it).
+   */
+  const blockMatch = text.match(/\bBL(?:OC)?K\.?\s+(\d+[A-Z]?|[A-Z]\d*)\b/i);
+  const subMatch = text.match(
+    /\b(?:SUBDIVISION|SUBD?\.?|PHASE)\s+([A-Z0-9][A-Z0-9\s.'-]{2,60})/i,
+  );
+  return {
+    lot: lotMatch?.[1]?.trim() ?? null,
+    block: blockMatch?.[1]?.trim() ?? null,
+    subdivision: subMatch?.[1]?.trim() ?? null,
+  };
+}
+
+export function buildSearchQueryPlan(
+  terms: RecordsSearchTerms,
+): PlannedSearchQuery[] {
+  const plan: PlannedSearchQuery[] = [];
+  const parsed = parseSubdivisionLotBlockFromLegal(terms.legalDescription);
+  const subdivision = terms.subdivision ?? parsed.subdivision;
+  const block = terms.block ?? parsed.block;
+  const lot = terms.lot ?? parsed.lot;
+
+  if (terms.ownerName?.trim()) {
+    const ownerQuery = normalizeOwnerNameForClerkSearch(terms.ownerName);
+    if (ownerQuery) {
+      plan.push({
+        kind: "owner-name",
+        query: ownerQuery,
+        captureLabel: "owner-name-results",
+      });
+    }
+  }
+
+  if (subdivision || (block && lot)) {
+    const parts = [
+      lot ? `LOT ${lot}` : null,
+      block ? `BLK ${block}` : null,
+      subdivision ? subdivision : null,
+    ].filter(Boolean);
+    plan.push({
+      kind: "subdivision-lot-block",
+      query: parts.join(" "),
+      captureLabel: "subdivision-lot-block-results",
+    });
+  }
+
+  if (terms.legalDescription?.trim()) {
+    plan.push({
+      kind: "legal-description",
+      query: terms.legalDescription.trim(),
+      captureLabel: "legal-description-results",
+    });
+  }
+
+  return plan;
+}

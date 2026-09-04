@@ -13,7 +13,7 @@
  */
 
 import { createHmac } from "node:crypto";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq, and } from "drizzle-orm";
@@ -141,6 +141,287 @@ describe("PE checkout routes (WDLL item 3) — simulated mode (no Stripe keys)",
     expect(ok.status).toBe(200);
     expect(ok.body.mode).toBe("simulated");
     expect(ok.body.parcelNodeId).toBe("48055:10068");
+  });
+});
+
+function mockStripeCheckoutSession(payload: Record<string, unknown>): {
+  checkoutBodies: URLSearchParams[];
+} {
+  const checkoutBodies: URLSearchParams[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const path = String(url);
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    if (path.includes("/customers")) {
+      return new Response(JSON.stringify({ id: "cus_test_unlock_3b" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (path.includes("/checkout/sessions")) {
+      checkoutBodies.push(body);
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({ error: { message: `unexpected stripe path ${path}` } }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  return { checkoutBodies };
+}
+
+describe("unlock custom / hosted checkout chrome (WDLL 3b item 2)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("entitlement/checkout custom: secret + sessionId, no checkoutUrl; body still parcelNodeId + returnUrl", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({
+      parcelNodeId: "48055:10068",
+      uiMode: "custom",
+      returnUrl: "https://smartsite.cloud/?checkout=success",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe("simulated");
+    expect(res.body.parcelNodeId).toBe("48055:10068");
+    expect(res.body.sessionId).toMatch(/^cs_test_/);
+    expect(res.body.clientSecret).toMatch(/^cs_test_.*_secret_sim$/);
+    expect(res.body).toHaveProperty("publishableKey");
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
+  it("property-unlock alias custom is the same contract", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    const res = await asUser(
+      request(getApp()).post(
+        "/api/property-explorer/v1/billing/property-unlock/checkout",
+      ),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toMatch(/_secret_sim$/);
+    expect(res.body.checkoutUrl).toBeUndefined();
+  });
+
+  it("unlock hosted path still returns checkoutUrl (absent and hosted)", async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    const absent = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068" });
+    expect(absent.status).toBe(200);
+    expect(absent.body.checkoutUrl).toContain("unlock=1");
+    expect(absent.body.clientSecret).toBeUndefined();
+
+    const hosted = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", uiMode: "hosted" });
+    expect(hosted.status).toBe(200);
+    expect(hosted.body.checkoutUrl).toContain("unlock=1");
+  });
+
+  it("VIOLATION: live unlock custom without client_secret is refused", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { createPePropertyUnlockCheckoutSession } = await import(
+      "../lib/pePaywallStripe"
+    );
+    mockStripeCheckoutSession({
+      id: "cs_test_unlock_nosecret",
+      url: "https://checkout.stripe.com/c/pay/cs_test_unlock_nosecret",
+    });
+    await expect(
+      createPePropertyUnlockCheckoutSession({
+        userId: USER_A,
+        parcelNodeId: "48055:10068",
+        uiMode: "custom",
+        successUrl: "https://x.example/?ok",
+        cancelUrl: "https://x.example/?no",
+      }),
+    ).rejects.toThrow(/client_secret/);
+  });
+
+  it("live unlock custom keeps property_unlock + parcel_node_id metadata; no hosted URL", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_unlock";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_unlock_ok",
+      client_secret: "cs_test_unlock_ok_secret_live",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(res.body.clientSecret).toBe("cs_test_unlock_ok_secret_live");
+    expect(res.body.checkoutUrl).toBeUndefined();
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get("ui_mode")).toBe("elements");
+    expect(form.get("return_url")).toContain("{CHECKOUT_SESSION_ID}");
+    expect(form.get("success_url")).toBeNull();
+    expect(form.get("cancel_url")).toBeNull();
+    expect(form.get("metadata[checkout_kind]")).toBe("property_unlock");
+    expect(form.get("metadata[parcel_node_id]")).toBe("48055:10068");
+  });
+});
+
+describe("Stripe customer email — Custom Checkout confirm() requires one (2026-09-04 fix)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("passes the account's email when creating a new Stripe customer", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "operator@example.com" })
+      .where(eq(users.id, USER_A));
+
+    const customerBodies: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      if (path.includes("/customers")) {
+        customerBodies.push(body);
+        return new Response(JSON.stringify({ id: "cus_test_email_new" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_email", client_secret: "cs_test_email_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerBodies).toHaveLength(1);
+    expect(customerBodies[0]!.get("email")).toBe("operator@example.com");
+  });
+
+  it("backfills email onto an existing Stripe customer that was created without one", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "backfilled@example.com" })
+      .where(eq(users.id, USER_A));
+    await db
+      .update(peUserEntitlements)
+      .set({ stripeCustomerId: "cus_test_needs_email" })
+      .where(eq(peUserEntitlements.ownerUserId, USER_A));
+
+    const customerGets: string[] = [];
+    const customerUpdates: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+      if (path.includes("/customers/cus_test_needs_email") && method === "GET") {
+        customerGets.push(path);
+        return new Response(JSON.stringify({ id: "cus_test_needs_email", email: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/customers/cus_test_needs_email") && method === "POST") {
+        customerUpdates.push(new URLSearchParams(String(init?.body ?? "")));
+        return new Response(JSON.stringify({ id: "cus_test_needs_email", email: "backfilled@example.com" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_backfill", client_secret: "cs_test_backfill_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerGets).toHaveLength(1);
+    expect(customerUpdates).toHaveLength(1);
+    expect(customerUpdates[0]!.get("email")).toBe("backfilled@example.com");
+  });
+
+  it("does not re-issue a backfill when the existing customer already has an email", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "already-set@example.com" })
+      .where(eq(users.id, USER_A));
+    await db
+      .update(peUserEntitlements)
+      .set({ stripeCustomerId: "cus_test_already_has_email" })
+      .where(eq(peUserEntitlements.ownerUserId, USER_A));
+
+    const customerUpdates: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+      if (path.includes("/customers/cus_test_already_has_email") && method === "GET") {
+        return new Response(
+          JSON.stringify({ id: "cus_test_already_has_email", email: "already-set@example.com" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (path.includes("/customers/cus_test_already_has_email") && method === "POST") {
+        customerUpdates.push(new URLSearchParams(String(init?.body ?? "")));
+        return new Response(JSON.stringify({ id: "cus_test_already_has_email" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_noop", client_secret: "cs_test_noop_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerUpdates).toHaveLength(0);
   });
 });
 

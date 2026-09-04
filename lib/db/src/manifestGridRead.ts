@@ -9,6 +9,16 @@ import {
   MANIFEST_IS_PARTIAL_SQL,
 } from "./manifestDisplayState";
 import type { ReconciliationManifestCell } from "./manifestReconciliationGate";
+import {
+  effectiveRailFieldsByKey,
+  manifestReadProbeOptions,
+} from "./railManifestDerivation";
+import {
+  resolveManifestDisplayState,
+  resolveManifestIsPartial,
+  mergeEffectiveRailFields,
+  mergeHasWriter,
+} from "./manifestCellResolve";
 
 interface ManifestGridQueryRow extends Record<string, unknown> {
   county_fips: string;
@@ -27,7 +37,8 @@ interface ManifestGridQueryRow extends Record<string, unknown> {
 const num = (v: unknown): number | null =>
   v === null || v === undefined ? null : Number(v);
 
-function applyDepthRailDisplayGate(
+/** Exported for countyLedger route parity and unit tests. */
+export function applyDepthRailDisplayGate(
   cell: ReconciliationManifestCell,
 ): ReconciliationManifestCell {
   if (COVERAGE_CLASS_BY_RAIL_KEY[cell.railKey] !== "jurisdiction-depth") {
@@ -37,14 +48,57 @@ function applyDepthRailDisplayGate(
   const threshold = cell.thresholdPct;
   const coverage = cell.honestCoveragePct;
   if (coverage === null || threshold === null || coverage < threshold) {
-    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE, isPartial: false };
+    // Downgrade display only — isPartial stays true when SQL computed partial
+    // (R-09: erasing isPartial made the indicator constant on live ledger).
+    // Ruling 4's displayState split composed on top: see
+    // countyLedgerCompute.ts's sibling function for the full reasoning and
+    // the empirical proof that isPartial and displayState answer different
+    // questions and both must survive.
+    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE };
   }
   return cell;
+}
+
+function overlayEffectiveRailFields(
+  row: ManifestGridQueryRow,
+  effectiveByKey: ReturnType<typeof effectiveRailFieldsByKey>,
+): {
+  atomFamilyState: string;
+  hasWriter: boolean;
+  displayState: string;
+  isPartial: boolean;
+} {
+  const effective = effectiveByKey.get(row.rail_key);
+  const merged = mergeEffectiveRailFields(
+    row.atom_family_state,
+    Boolean(row.has_writer),
+    effective?.atomFamilyState,
+    effective?.hasWriter,
+  );
+  const atomFamilyState = merged.atomFamilyState;
+  const hasWriter = merged.hasWriter;
+  const honestCoveragePct = num(row.honest_coverage_pct);
+  const thresholdPct = num(row.cell_threshold ?? row.rail_default_threshold);
+  const displayState = resolveManifestDisplayState(
+    atomFamilyState,
+    hasWriter,
+    row.rail_state,
+  );
+  const isPartial = resolveManifestIsPartial(
+    atomFamilyState,
+    hasWriter,
+    row.rail_state,
+    honestCoveragePct,
+    thresholdPct,
+  );
+  return { atomFamilyState, hasWriter, displayState, isPartial };
 }
 
 export async function readManifestGridFromPool(
   pool: pg.Pool,
 ): Promise<ReconciliationManifestCell[]> {
+  const effectiveByKey = effectiveRailFieldsByKey(manifestReadProbeOptions());
+
   const { rows } = await pool.query<ManifestGridQueryRow>(`
     SELECT
       m.county_fips,
@@ -66,18 +120,19 @@ ${MANIFEST_IS_PARTIAL_SQL}
     ORDER BY m.county_fips, r.ordinal
   `);
 
-  return rows.map((row) =>
-    applyDepthRailDisplayGate({
+  return rows.map((row) => {
+    const overlaid = overlayEffectiveRailFields(row, effectiveByKey);
+    return applyDepthRailDisplayGate({
       countyFips: row.county_fips,
       railKey: row.rail_key,
-      displayState: row.display_state,
-      isPartial: Boolean(row.is_partial),
+      displayState: overlaid.displayState,
+      isPartial: overlaid.isPartial,
       honestCoveragePct: num(row.honest_coverage_pct),
       thresholdPct: num(row.cell_threshold ?? row.rail_default_threshold),
-      hasWriter: Boolean(row.has_writer),
+      hasWriter: overlaid.hasWriter,
       verifiedByInstrument: row.verified_by_instrument ?? null,
-    }),
-  );
+    });
+  });
 }
 
 export async function readCountyManifestRowCount(pool: pg.Pool): Promise<number> {
@@ -90,8 +145,14 @@ export async function readCountyManifestRowCount(pool: pg.Pool): Promise<number>
 export async function readCountyRailHasWriterMap(
   pool: pg.Pool,
 ): Promise<Map<string, boolean>> {
+  const effectiveByKey = effectiveRailFieldsByKey(manifestReadProbeOptions());
   const { rows } = await pool.query<{ rail_key: string; has_writer: boolean }>(
     "SELECT rail_key, has_writer FROM county_rail",
   );
-  return new Map(rows.map((r) => [r.rail_key, r.has_writer]));
+  return new Map(
+    rows.map((r) => [
+      r.rail_key,
+      mergeHasWriter(r.has_writer, effectiveByKey.get(r.rail_key)?.hasWriter ?? true),
+    ]),
+  );
 }

@@ -15,7 +15,7 @@ import {
   type RailCellMeasurement,
   type RailLedgerValues,
 } from "./engine";
-import { classifyFacet } from "../../countyCoverageScoreCli";
+import { classifyFacet } from "../countyCoverageClassification";
 import type {
   AtomCountRule,
   RailScoringRule,
@@ -37,6 +37,9 @@ const atomRule: AtomCountRule = {
 const absenceCapableRule: AtomCountRule = {
   ...atomRule,
   railKey: "mud",
+  entityType: "special-district-fact",
+  numeratorMode: "distinct-parcel-keys",
+  presentSourceLabel: "special-district-fact-determination-over-txgio-feature-index",
   absenceProbe: {
     kind: "source-table-zero-rows",
     table: "tx_special_district",
@@ -195,6 +198,132 @@ describe("an unspecified rail is refused, never scored as zero", () => {
   });
 });
 
+describe("a rail with a retired denominator is refused, not rescored", () => {
+  it("throws rather than substituting a reconstructible denominator", () => {
+    const retiredGeometry: AtomCountRule = {
+      ...atomRule,
+      railKey: "geometry",
+      entityType: "parcel-node",
+      denominator: {
+        kind: "retired-unknown-denominator",
+        basis:
+          "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an accounted-features denominator that is not in this repo.",
+      },
+    };
+    expect(() => scoreRailCell(retiredGeometry, 95, measurement())).toThrow(
+      /retired denominator/,
+    );
+  });
+});
+
+describe("layer applicability verdict (P-59)", () => {
+  it("not-applicable writes satisfied-absent, not a below-threshold not-yet gap", () => {
+    const score = scoreRailCell(
+      atomRule,
+      95,
+      measurement({
+        numerator: 0,
+        denominator: 1000,
+        sourcePresent: false,
+        applicabilityVerdict: "not-applicable",
+      }),
+    );
+    expect(score.railState).toBe("satisfied-absent");
+    expect(score.absenceBasis).toBe("layer-not-applicable");
+    expect(score.classification).not.toBe("true-source-gap");
+  });
+
+  it("zero coverage without applicability verdict stays not-yet (the gap shape)", () => {
+    const score = scoreRailCell(
+      atomRule,
+      95,
+      measurement({ numerator: 0, denominator: 1000, sourcePresent: false }),
+    );
+    expect(score.railState).toBe("not-yet");
+    expect(score.absenceBasis).toBeNull();
+  });
+});
+
+describe("mud scorer falsifiers (P-59)", () => {
+  it("a _county_coverage marker writes satisfied-absent, never a parcel ratio", () => {
+    const score = scoreRailCell(
+      absenceCapableRule,
+      90,
+      measurement({
+        countyFips: "48395",
+        numerator: 0,
+        denominator: 16935,
+        sourcePresent: false,
+        source: "special-district-fact:_county_coverage",
+        establishedAbsence: {
+          basis: "special-district-county-coverage-marker;not-a-parcel;CROSSWALK_HOLD",
+          source: "special-district-fact:_county_coverage",
+        },
+      }),
+    );
+    expect(score.railState).toBe("satisfied-absent");
+    expect(score.honestCoveragePct).toBe(0);
+    expect(score.absenceBasis).toMatch(/county-coverage-marker/);
+    expect(score.source).toBe("special-district-fact:_county_coverage");
+  });
+
+  it("Donley guard: features=0 with districts>0 is not-yet, not satisfied-absent", () => {
+    const score = scoreRailCell(
+      absenceCapableRule,
+      90,
+      measurement({
+        countyFips: "48129",
+        numerator: 0,
+        denominator: null,
+        sourcePresent: false,
+        detail: "donleyGuard=features-zero-districts-positive",
+      }),
+    );
+    expect(score.railState).toBe("not-yet");
+    expect(score.absenceBasis).toBeNull();
+  });
+
+  it("zero numerator without marker or probe stays not-yet, not satisfied-present at 0%", () => {
+    const score = scoreRailCell(
+      absenceCapableRule,
+      90,
+      measurement({ numerator: 0, denominator: 1000, sourcePresent: false }),
+    );
+    expect(score.railState).toBe("not-yet");
+    expect(score.honestCoveragePct).toBe(0);
+  });
+
+  it("below 90% with data stays not-yet with honest pct", () => {
+    const score = scoreRailCell(
+      absenceCapableRule,
+      90,
+      measurement({
+        numerator: 460,
+        denominator: 1000,
+        sourcePresent: true,
+        source: "special-district-fact-determination-over-txgio-feature-index",
+      }),
+    );
+    expect(score.railState).toBe("not-yet");
+    expect(score.honestCoveragePct).toBeCloseTo(46, 5);
+  });
+
+  it("at or above 90% with distinct parcel keys satisfies present", () => {
+    const score = scoreRailCell(
+      absenceCapableRule,
+      90,
+      measurement({
+        numerator: 983,
+        denominator: 1000,
+        sourcePresent: true,
+        source: "special-district-fact-determination-over-txgio-feature-index",
+      }),
+    );
+    expect(score.railState).toBe("satisfied-present");
+    expect(score.honestCoveragePct).toBeCloseTo(98.3, 5);
+  });
+});
+
 describe("facet equals rail key by construction", () => {
   it("takes the facet from the rule, so a hand-typed key cannot orphan a row", () => {
     // countyCoverageScoreCli.ts writes facet 'land-use' while the rail is
@@ -249,10 +378,14 @@ describe("idempotency is a VALUE diff, not a row count", () => {
 });
 
 describe("PINNED classifier behaviour (cross-lane drift detector)", () => {
-  // classifyFacet lives in countyCoverageScoreCli.ts, which lane SS-W13 owns
-  // this week. This engine imports it rather than duplicating it
-  // (DEV_PROCESS 6.2), so these assertions exist to make a change over there
-  // fail HERE, loudly, instead of silently altering what this engine writes.
+  // classifyFacet lives in lib/countyCoverageClassification.ts, a pure leaf
+  // module shared with the three scorer CLIs. This engine imports it rather
+  // than duplicating it (DEV_PROCESS 6.2), so these assertions exist to make a
+  // change over there fail HERE, loudly, instead of silently altering what
+  // this engine writes. It used to live in countyCoverageScoreCli.ts; lane
+  // SS-W18 moved it on 2026-08-19 because importing a CLI put the CLI in the
+  // server boot graph and a canary deploy of 5688aa31 exited before Express
+  // listened.
   it("sourcePresent=false yields true-source-gap at coverage 0", () => {
     const r = classifyFacet({
       facet: "flood",

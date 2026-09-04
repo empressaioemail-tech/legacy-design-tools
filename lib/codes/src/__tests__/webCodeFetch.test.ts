@@ -7,6 +7,7 @@ import {
 import {
   corpusCoversTarget,
   fetchCodeSection,
+  isAllowlistedWebHost,
   reviewWebTargetsForJurisdiction,
   websearchAtomId,
 } from "../webCodeFetch/index";
@@ -255,6 +256,15 @@ describe("reviewWebTargetsForJurisdiction", () => {
     );
     expect(reviewWebTargetsForJurisdiction("bastrop_tx")).toEqual([]);
     expect(reviewWebTargetsForJurisdiction("austin_tx")).toEqual([]);
+  });
+
+  it("civic official hosts are allowlisted; blogs are not; ICC hold targets stay empty for bastrop", () => {
+    expect(isAllowlistedWebHost("tea.texas.gov")).toBe(true);
+    expect(isAllowlistedWebHost("www.bastropisd.org")).toBe(true);
+    expect(isAllowlistedWebHost("cityofbastrop.org")).toBe(true);
+    expect(isAllowlistedWebHost("codes.iccsafe.org")).toBe(true);
+    expect(isAllowlistedWebHost("random-blog.example")).toBe(false);
+    expect(reviewWebTargetsForJurisdiction("bastrop_tx")).toEqual([]);
   });
 });
 
