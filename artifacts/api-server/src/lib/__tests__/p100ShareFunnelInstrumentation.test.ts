@@ -60,9 +60,35 @@ describe("P-100 item 2: the Smart Site share plane emits", () => {
   });
 
   it("adds no second writer: the allowlist is the only thing that grew", () => {
-    // Before this card the list held seven types. Two were added and nothing
-    // else. If a future change grows it silently this fails and asks why.
-    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(9);
+    // Before this card the list held seven types; P-100 added two
+    // (share_created, share_viewed) for a baseline of nine. P-118 later
+    // added two more (see the describe block below) — this assertion tracks
+    // the CURRENT total rather than freezing at nine forever, because the
+    // point of this guard is "still exactly one writer", not "never grows
+    // again". Bump this number, deliberately, whenever a future card adds
+    // to the allowlist.
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(11);
+  });
+});
+
+describe("P-118: the Help widget emits through the SAME writer, not a second one", () => {
+  it("accepts pe_help_widget_opened and pe_help_widget_message_sent as property-explorer funnel types", () => {
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toContain("pe_help_widget_opened");
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toContain("pe_help_widget_message_sent");
+  });
+
+  it("still refuses a type that is not in the allowlist (the check is not vacuous)", () => {
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).not.toContain(
+      "pe_help_widget_definitely_not_a_real_event",
+    );
+  });
+
+  it("adds no second writer: the allowlist grew by exactly these two", () => {
+    // Before P-118 the list held nine types (P-100's seven plus share_created
+    // / share_viewed). Two were added for the Help widget and nothing else —
+    // same single insert(gtmEvents) site the property-explorer events route
+    // already owns.
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(11);
   });
 });
 
