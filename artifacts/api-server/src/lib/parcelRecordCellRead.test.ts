@@ -39,7 +39,24 @@ describe("interpretParcelRecordCell — pure, fixture-driven", () => {
       disposition: null,
       rowCount: null,
       companionRows: [],
+      raw: { kind: "value", value: "34137", source: "cad_property", vintage: "2025" },
     });
+  });
+
+  it("a value cell with rail-specific sibling fields beyond the generic shape (e.g. schoolDistrict's districtCode/geoid) preserves them on `raw`, not just the bare value", () => {
+    const result = interpretParcelRecordCell("48309:135397", "schoolDistrict", {
+      kind: "value",
+      value: "McGregor ISD",
+      districtCode: "161-909",
+      geoid: "4829820",
+      source: "tx_school_district",
+      vintage: "2026-09-03T16:50:31.471Z",
+    }, []);
+    expect(result.state).toBe("present");
+    if (result.state !== "present") throw new Error("unreachable");
+    expect(result.value).toBe("McGregor ISD");
+    expect(result.raw.districtCode).toBe("161-909");
+    expect(result.raw.geoid).toBe("4829820");
   });
 
   it("a companion value cell carries disposition, rowCount, and its companion rows", () => {

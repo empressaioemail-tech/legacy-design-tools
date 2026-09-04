@@ -132,6 +132,16 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * counties are correctly never slated, not an oversight. No legacy serve
  * path exists for this rail. No gate verdict exists for this rail as of
  * this card; every entry resolves to 'legacy' until one does.
+ *
+ * schoolDistrict, ALL SIX counties including Caldwell (F-01, serve/prod
+ * cutover, 2026-09-04): statewide source (tx_school_district), scanned
+ * per-county by the writer with no per-county exclusion -- every one of the
+ * 6 program counties is slated. No legacy serve path exists for this rail.
+ * KNOWN ANOMALY CLASS: 13 parcels program-wide are zero-hit/multi-hit
+ * centroids the writer deliberately never wrote a cell for (see
+ * schoolDistrictFactRead.ts's module doc) -- these serve as an ordinary
+ * `unaccounted` refusal, not a defect. No gate verdict exists for this
+ * rail as of this card; every entry resolves to 'legacy' until one does.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -206,6 +216,12 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48491:overlayDistricts",
   "48491:agValuation",
   "48453:agValuation",
+  "48021:schoolDistrict",
+  "48055:schoolDistrict",
+  "48209:schoolDistrict",
+  "48309:schoolDistrict",
+  "48453:schoolDistrict",
+  "48491:schoolDistrict",
 ]);
 
 /**
