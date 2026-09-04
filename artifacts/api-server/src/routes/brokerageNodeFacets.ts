@@ -190,6 +190,7 @@ import { loadOverlayDistrictsFactForServe } from "../lib/overlayDistrictsFactSer
 import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover";
 import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
+import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -685,6 +686,7 @@ brokerageNodeFacetsRouter.get(
     let agValuationFact;
     let schoolDistrictFact;
     let maxImperviousCoverPctFact;
+    let valueHistoryFact;
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
@@ -704,6 +706,7 @@ brokerageNodeFacetsRouter.get(
         agValuationFact,
         schoolDistrictFact,
         maxImperviousCoverPctFact,
+        valueHistoryFact,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -736,6 +739,7 @@ brokerageNodeFacetsRouter.get(
         loadAgValuationFactForServe(parcelNodeId),
         loadSchoolDistrictFactForServe(parcelNodeId),
         loadMaxImperviousCoverPctFactForServe(parcelNodeId),
+        loadValueHistoryFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -862,6 +866,11 @@ brokerageNodeFacetsRouter.get(
       // only. Resolves to a typed not-cut-over refusal until a gate
       // evaluation for this rail lands.
       maxImperviousCoverPctFact,
+      // parcel_record-only, no legacy path (see module doc). All six
+      // counties; entries is plural, one per distinct tax_year, never a
+      // picked lead. Resolves to a typed not-cut-over refusal until a gate
+      // evaluation for this rail lands.
+      valueHistoryFact,
       }),
     );
   },
