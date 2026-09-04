@@ -37,6 +37,7 @@ import { logger } from "./logger";
 import {
   createStripePortalSessionForCustomer,
   isStripeConfigured,
+  stripeGet,
   stripePostForm,
   stripePublishableKey,
   type StripeCheckoutResult,
@@ -337,7 +338,21 @@ async function getOrCreatePeStripeCustomer(input: {
     .from(peUserEntitlements)
     .where(eq(peUserEntitlements.ownerUserId, input.userId))
     .limit(1);
-  if (row?.stripeCustomerId) return row.stripeCustomerId;
+  if (row?.stripeCustomerId) {
+    // A customer created before this account's email was known (or before
+    // this fix shipped) has no email on file, and Custom Checkout refuses
+    // to confirm without one. Backfill it rather than leaving every prior
+    // customer permanently broken.
+    if (input.email) {
+      const existing = await stripeGet(`/customers/${row.stripeCustomerId}`);
+      if (!existing.email) {
+        await stripePostForm(`/customers/${row.stripeCustomerId}`, {
+          email: input.email,
+        });
+      }
+    }
+    return row.stripeCustomerId;
+  }
 
   const customer = await stripePostForm("/customers", {
     "metadata[pe_user_id]": input.userId,

@@ -35,7 +35,7 @@ import {
   resolvePeOwnerUserId,
 } from "../lib/peEntitlement";
 import { requirePeStudioScreens } from "../lib/peStudioGate";
-import { setPeDevRole } from "../lib/peIdentity";
+import { getPeUserEmail, setPeDevRole } from "../lib/peIdentity";
 import { readAiConnections } from "../lib/peAiConnections";
 import { readActiveUnlocks } from "../lib/peUnlocksRead";
 import {
@@ -1298,8 +1298,10 @@ router.post(
       return;
     }
     try {
+      const email = await getPeUserEmail(userId);
       const session = await createPeSubscriptionCheckoutSession({
         userId,
+        email,
         tier: parsed.data.tier ?? "solo",
         interval: parsed.data.interval ?? "month",
         seats: parsed.data.seats,
@@ -1573,8 +1575,10 @@ router.post(
       return;
     }
     try {
+      const email = await getPeUserEmail(userId);
       const session = await createPePropertyUnlockCheckoutSession({
         userId,
+        email,
         parcelNodeId,
         installId: installIdFromRequest(req),
         successUrl: parsed.data.successUrl ?? defaultPeCheckoutSuccessUrl(),

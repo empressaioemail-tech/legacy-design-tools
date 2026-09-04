@@ -153,6 +153,27 @@ export async function stripePostForm(
   return json;
 }
 
+/** Exported so `pePaywallStripe.ts` can reuse the same signed HTTP call. */
+export async function stripeGet(
+  path: string,
+): Promise<Record<string, unknown>> {
+  const secret = process.env.STRIPE_SECRET_KEY!.trim();
+  const res = await fetch(`https://api.stripe.com/v1${path}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  const json = (await res.json()) as Record<string, unknown> & {
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(
+      (json.error as { message?: string } | undefined)?.message ??
+        `Stripe ${path} failed (${res.status})`,
+    );
+  }
+  return json;
+}
+
 async function getOrCreateStripeCustomer(installId: string): Promise<string> {
   const row = await ensureWalletRow(installId);
   if (row.stripeCustomerId) return row.stripeCustomerId;
