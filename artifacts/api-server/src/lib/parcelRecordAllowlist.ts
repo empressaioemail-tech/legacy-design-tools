@@ -125,6 +125,13 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * of this repo's scope) can distinguish "outside this rail's own reach"
  * from "never examined". No gate verdict exists for this rail as of this
  * card; every entry resolves to 'legacy' until one does.
+ *
+ * agValuation, Williamson (48491) + Travis (48453) ONLY (F-01, serve/prod
+ * cutover, 2026-09-04): the writer (parcel-ag-valuation.mjs) refuses any
+ * other county outright (COUNTY_NOT_IN_SCOPE) -- the other four program
+ * counties are correctly never slated, not an oversight. No legacy serve
+ * path exists for this rail. No gate verdict exists for this rail as of
+ * this card; every entry resolves to 'legacy' until one does.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -197,6 +204,8 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:overlayDistricts",
   "48453:overlayDistricts",
   "48491:overlayDistricts",
+  "48491:agValuation",
+  "48453:agValuation",
 ]);
 
 /**
