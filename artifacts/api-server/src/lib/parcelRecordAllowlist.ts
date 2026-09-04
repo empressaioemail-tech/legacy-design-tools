@@ -177,6 +177,51 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * refusal, since there is no legacy reader) until a gate evaluation for
  * valueHistory lands. Slating ahead of the verdict is fail-closed by
  * construction, per this file's own PARCEL-B-READER precedent.
+ *
+ * zoningDistrict + setbackFrontFt, ALL SIX counties including Caldwell
+ * (F-01, PARCEL-B-SLATE3, OPS-16 A-096/A-097/A-098, 2026-09-04): the
+ * specific defect this card fixes. Unlike every rail above, zoning
+ * (zoningDistrict/zoningJurisdictionKey/zoningProvenance) and setbacks
+ * (setbackFrontFt/setbackSideFt/setbackRearFt/setbackCornerFt) DO have a
+ * live legacy serve path (r1BriefCompose.ts's zoningDisposition and
+ * nodeFacetBakeTier1.ts's computeTier1Envelope, both reading only the
+ * Tier-1 bake payload) -- but that path has no code path to ever emit
+ * not-applicable, so 346,165 unincorporated parcels across these six
+ * counties (independently reproduced,
+ * _inbox/2026-09-02_p106_rail_census_zoningdiv.json) read UNKNOWN for these
+ * seven rail keys when they should read NOT_APPLICABLE, matching what
+ * hauska-factory's parcel-record-engine already writes at row-creation time
+ * (rail-keys.js's UNINCORPORATED_NOT_APPLICABLE_RAIL_KEYS, instantiate.js).
+ * Operator ruling (OPS-16 A-096): "it should be not applicable." Each
+ * three/four-key group is gated on ONE representative rail key
+ * (zoningDistrict for the zoning group, setbackFrontFt for the setbacks
+ * group) rather than seven independent slate entries -- the sibling keys
+ * in each group are metadata about / siblings of the SAME determination,
+ * written together by instantiate.js, not independent facts the way the
+ * six dollar/structural rails are (see zoningFactFromParcelRecord.ts's and
+ * setbacksFactFromParcelRecord.ts's own module docs). All six counties are
+ * slated with no per-county exclusion -- rail-keys.js/instantiate.js apply
+ * this logic statewide with no documented geographic restriction, matching
+ * overlayDistricts'/schoolDistrict's own "all six, no exclusion documented"
+ * reasoning, not wells'/specialDistricts' Caldwell exclusion. No gate
+ * verdict exists for either representative rail key as of this card
+ * (gate-rail-cli.mjs evaluation is a separate, out-of-repo process per
+ * OPS-16 A-098); every entry resolves to 'legacy' until one does -- the
+ * same accepted, zero-regression-risk initial state utilityService,
+ * overlayDistricts, agValuation, schoolDistrict, and maxImperviousCoverPct
+ * all shipped with. Verified directly against the adapter (bypassing the
+ * gate, which is exactly what this initial state means) with a fixture
+ * matching a real sample parcel from the census
+ * (_inbox/2026-09-02_p106_projection_recon.json, 48021:10001, unincorporated,
+ * zoningDistrict labeled "absent-verified"/"unincorporated-no-municipal-
+ * zoning" there): the adapter treats both of parcel_record's own absence
+ * kinds (absent-verified AND not-applicable -- instantiate.js's own writer
+ * code is cited using "not-applicable" per OPS-16 A-097's direct read of
+ * rail-keys.js; the census projection's own vocabulary differs, honestly
+ * unreconciled here since either kind resolves the same way downstream) as
+ * a verified absence, never a fabricated unknown-collapsed-to-absent or an
+ * unconditional not-applicable regardless of which the live writer turns
+ * out to use.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -264,6 +309,18 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:valueHistory",
   "48453:valueHistory",
   "48491:valueHistory",
+  "48021:zoningDistrict",
+  "48055:zoningDistrict",
+  "48209:zoningDistrict",
+  "48309:zoningDistrict",
+  "48453:zoningDistrict",
+  "48491:zoningDistrict",
+  "48021:setbackFrontFt",
+  "48055:setbackFrontFt",
+  "48209:setbackFrontFt",
+  "48309:setbackFrontFt",
+  "48453:setbackFrontFt",
+  "48491:setbackFrontFt",
 ]);
 
 /**

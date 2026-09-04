@@ -58,6 +58,8 @@ import {
 } from "./brokerageNodeFacets";
 import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadParcelRecordFloodFact } from "../lib/parcelRecordFactRead";
+import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
+import { loadSetbacksFactForServe } from "../lib/setbacksFactServeCutover";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
@@ -164,6 +166,8 @@ async function assembleNodeBriefBody(
     specialDistrictFact,
     parcelRecordFloodFact,
     cadRollOverlay,
+    parcelRecordZoningFact,
+    parcelRecordSetbacksFact,
   ] = await Promise.all([
     loadBakedNodeFacetSnapshot(parcelNodeId),
     loadFloodHazardFactForServe(parcelNodeId),
@@ -185,6 +189,9 @@ async function assembleNodeBriefBody(
           livingAreaSqft: null,
           yearBuilt: null,
         }),
+    // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
+    loadZoningFactForServe(parcelNodeId),
+    loadSetbacksFactForServe(parcelNodeId),
   ]);
   const structuralFact = structuralFactWithParcelRecordOverlay(structuralFactLegacy, {
     livingAreaSqft: cadRollOverlay.livingAreaSqft,
@@ -198,6 +205,8 @@ async function assembleNodeBriefBody(
     floodHazardFact,
     parcelRecordFloodFact,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    parcelRecordZoningFact,
+    parcelRecordSetbacksFact,
   });
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
@@ -232,13 +241,20 @@ async function assembleNodeBriefBody(
 async function assembleStubBody(parcelNodeId: string) {
   const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
   if (!snapshot) return null;
-  const floodHazardFact = await loadFloodHazardFactForServe(parcelNodeId);
+  const [floodHazardFact, parcelRecordZoningFact, parcelRecordSetbacksFact] = await Promise.all([
+    loadFloodHazardFactForServe(parcelNodeId),
+    // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
+    loadZoningFactForServe(parcelNodeId),
+    loadSetbacksFactForServe(parcelNodeId),
+  ]);
   return composeSmartSiteStub({
     parcelNodeId,
     facets: snapshot.facets,
     flood: floodReadToRail(floodHazardFact),
     drainage: { attempted: false },
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    parcelRecordZoningFact,
+    parcelRecordSetbacksFact,
   });
 }
 

@@ -28,8 +28,10 @@ import {
   type BatchAnchorOutcome,
 } from "./parcel-anchor.js";
 import { requireAuthContext } from "./request-context.js";
-import { executeExportInstrument } from "./export-instrument.js";
-import { loadHauskaMcpConfig } from "./hauska-client.js";
+import {
+  executeExportInstrument,
+  exportKindNotAvailableResult,
+} from "./export-instrument.js";
 import { listPurchasedRecords, readPurchasedRecord } from "./recordsExtraction.js";
 import {
   buildRunReportEnvelope,
@@ -992,30 +994,31 @@ export function registerTools(server: McpServer): void {
               artifactId,
             });
           }
-          // export_instrument has no handler while readiness is "blocked"
-          // (P-109 item 3), the same shape as ask_the_map below and the
-          // records pair: the blocked branch above answers not_ready before
-          // this switch, and TypeScript narrows the name union accordingly,
-          // so a case here would not compile. The handler was NOT deleted
-          // because the tool is unwanted. It was deleted because it proxied
-          // POST /tools/export_instrument on Hauska MCP, a route that exists
-          // in no server (404 measured 2026-09-02) and appeared only here and
-          // in a test that mocked it. Re-arming it means a case here that
-          // re-applies the Studio gate and calls a REWRITTEN
-          // executeExportInstrument that speaks MCP
-          // JSON-RPC to the real upstream tools: refresh_parcel_site_plan_export,
-          // refresh_parcel_terrain_export, refresh_parcel_dossier_export and
-          // their download_ siblings. That rewrite needs three rulings first:
-          // there is no upstream "brief" export kind; the upstream shape is
-          // two-hop refresh-then-download, per format; and the upstream tools
-          // are public-paid and SDK-metered per refresh while these callers
-          // already pay Stripe.
-          // Left deliberately in place rather than swept, because two open PRs
-          // hold this file and P-109 is scoped to the minimum: the imports
-          // isStudioExportKind, canRunStudioReport, refuseStudioReport,
-          // executeExportInstrument and loadHauskaMcpConfig, and the local
-          // ensureDeclaredError, now have no caller in this file. They are
-          // declared in the P-109 close as leave_behind, not orphaned silently.
+          // P-110: re-armed. The three rulings P-109 left open are closed
+          // (A-096): there is no upstream "brief" export kind, so it is
+          // refused before any config load or network call, never proxied;
+          // the upstream shape is two-hop refresh-then-download, per format,
+          // now spoken as real MCP JSON-RPC (POST /mcp) instead of the
+          // never-existent POST /tools/export_instrument REST route; and the
+          // upstream tools' SDK metering is absorbed on Legacy Group ATX's
+          // side via this server's own HAUSKA_MCP_SERVICE_KEY (operator
+          // ruling, not a new billing mechanism — see export-instrument.ts).
+          // The Studio gate is unchanged from the pre-P-109 shape.
+          case "export_instrument": {
+            const { parcelNodeId, kind } = args as {
+              parcelNodeId: string;
+              kind: "brief" | "siteplan" | "terrain" | "dossier";
+            };
+            if (kind === "brief") {
+              return exportKindNotAvailableResult();
+            }
+            if (isStudioExportKind(kind) && !canRunStudioReport(entitlement)) {
+              return upgradeRequiredResult(refuseStudioReport(entitlement));
+            }
+            return ensureDeclaredError(
+              await executeExportInstrument({ parcelNodeId, kind }),
+            );
+          }
           case "create_screen": {
             const body = args as {
               name?: string;

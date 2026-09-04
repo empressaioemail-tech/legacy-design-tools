@@ -158,7 +158,7 @@ function makePool(connectionString: string, max: number): pg.Pool {
  * hop that carried the boot-graph defect into production.
  */
 async function printRegistry(): Promise<void> {
-  const { RAIL_SCORING_DECLARATION, scoreableRailKeys, unspecifiedRails } =
+  const { RAIL_SCORING_DECLARATION, scoreableRailKeys, unspecifiedRails, retiredDenominatorRails } =
     await import("./lib/railScoring/registry");
   log("--- rail scoring registry ---");
   for (const rule of RAIL_SCORING_DECLARATION) {
@@ -167,6 +167,11 @@ async function printRegistry(): Promise<void> {
         `  ${rule.railKey.padEnd(14)} NOT SCOREABLE  owner=${rule.specOwner}`,
       );
       log(`    ${rule.unspecifiedReason}`);
+    } else if (rule.denominator.kind === "retired-unknown-denominator") {
+      log(
+        `  ${rule.railKey.padEnd(14)} NOT SCOREABLE  denominator retired (live rows unmeasured until a new scorer)`,
+      );
+      log(`    ${rule.denominator.basis}`);
     } else {
       log(
         `  ${rule.railKey.padEnd(14)} ${rule.kind.padEnd(34)} den=${rule.denominator.kind}`,
@@ -175,7 +180,8 @@ async function printRegistry(): Promise<void> {
   }
   log(
     `scoreable: ${scoreableRailKeys().length} of ${RAIL_SCORING_DECLARATION.length}; ` +
-      `awaiting a measurement spec: ${unspecifiedRails().map((r) => r.railKey).join(", ")}`,
+      `awaiting a measurement spec: ${unspecifiedRails().map((r) => r.railKey).join(", ")}; ` +
+      `retired denominator: ${retiredDenominatorRails().map((r) => r.railKey).join(", ") || "none"}`,
   );
 }
 

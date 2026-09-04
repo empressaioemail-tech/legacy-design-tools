@@ -9,6 +9,8 @@ import {
   type RailReadInput,
   type SmartSiteRailState,
 } from "./smartSiteStub";
+import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
+import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 
 const ATOM_MISS = {
   attempted: true,
@@ -380,5 +382,138 @@ describe("D2 stub is a projection of node", () => {
     const { projected, stubRails } = composeBoth(c);
     expect(stubRails).toEqual(c.expect);
     expect(projected).toEqual(c.expect);
+  });
+});
+
+/**
+ * OPS-16 A-096/A-097/A-098: the specific fix this card ships. Before this
+ * card, an unincorporated parcel's zoning/setbacks read UNKNOWN at both
+ * depths (smartSiteStub.ts:85-96 unconditionally mapped `absent` to
+ * `unknown`, no code path ever emitted a verified absence). These tests
+ * prove the flip works, and that it ONLY changes the specific
+ * unincorporated case -- present real values and record-side refusals are
+ * unaffected, matching the "never regress a parcel with a real answer"
+ * invariant.
+ */
+describe("OPS-16 A-096/A-097/A-098: zoning + setbacks not-applicable fix", () => {
+  const PARCEL = "48021:10001"; // real unincorporated sample, projection_recon.json
+  const legacyUnknownFacets = {
+    bakedAt: "2026-09-01T22:34:53.142Z",
+    zoning: null, // legacy bake never determined a district -- this is the UNKNOWN the census measured
+    envelope: null,
+  };
+  const zoningNotApplicable: ZoningFactRead = {
+    state: "absent",
+    source: "zoning-fact-parcel-record",
+    entityId: PARCEL,
+    absence: { kind: "not-applicable", reason: "unincorporated parcel -- no municipal zoning authority applies" },
+    verifiedAbsence: null,
+    sourceTier: null,
+    sourceAdapter: "parcel_record",
+    sourceVintage: null,
+  };
+  const setbacksNotApplicable: SetbacksFactRead = {
+    state: "absent",
+    source: "setbacks-fact-parcel-record",
+    entityId: PARCEL,
+    absence: { kind: "not-applicable", reason: "unincorporated parcel -- no municipal setback authority applies" },
+    verifiedAbsence: null,
+    sourceTier: null,
+    sourceAdapter: "parcel_record",
+    sourceVintage: null,
+  };
+  const zoningPresent: ZoningFactRead = {
+    state: "present",
+    source: "zoning-fact-parcel-record",
+    entityId: "48021:103387",
+    district: "SF-1",
+    jurisdictionKey: "bastrop_city_tx",
+    provenance: "https://gis.example.test/zoning/bastrop",
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-04T00:00:00.000Z",
+    evaluatedAt: "2026-09-04T00:00:00.000Z",
+  };
+  const zoningRefused: ZoningFactRead = {
+    state: "refused",
+    code: "parcel-record-malformed-cell",
+    source: "zoning-fact-parcel-record",
+    entityId: "48021:1",
+    reason: "parcel_record_cell 48021:1/zoningDistrict is kind=value but its value is not a readable district.",
+  };
+
+  it("THE FIX: an unincorporated parcel flips from unknown to absent-verified for zoning when the record says not-applicable", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: PARCEL,
+      facets: legacyUnknownFacets,
+      parcelRecordZoningFact: zoningNotApplicable,
+    });
+    expect(stub.zoning).toBe("absent-verified");
+    // Falsifier: without the record fact, this exact fixture stays unknown -- proves the fix is the record fact, not a fixture quirk.
+    const withoutRecordFact = composeSmartSiteStub({ parcelNodeId: PARCEL, facets: legacyUnknownFacets });
+    expect(withoutRecordFact.zoning).toBe("unknown");
+  });
+
+  it("THE FIX: an unincorporated parcel flips from unknown to absent-verified for envelope/setbacks when the record says not-applicable", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: PARCEL,
+      facets: legacyUnknownFacets,
+      parcelRecordSetbacksFact: setbacksNotApplicable,
+    });
+    expect(stub.envelope).toBe("absent-verified");
+    const withoutRecordFact = composeSmartSiteStub({ parcelNodeId: PARCEL, facets: legacyUnknownFacets });
+    expect(withoutRecordFact.envelope).toBe("unknown");
+  });
+
+  it("REGRESSION GUARD: a present record determination reports present, never regressing a real answer", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48021:103387",
+      facets: { zoning: null },
+      parcelRecordZoningFact: zoningPresent,
+    });
+    expect(stub.zoning).toBe("present");
+  });
+
+  it("REGRESSION GUARD: a refused record fact falls through to the legacy bake computation, never regressing a parcel that already has a real bake-derived zoning value", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48021:1",
+      facets: { zoning: { district: "C-1" } },
+      parcelRecordZoningFact: zoningRefused,
+    });
+    expect(stub.zoning).toBe("present");
+  });
+
+  it("REGRESSION GUARD: every existing call shape (no parcelRecordZoningFact/parcelRecordSetbacksFact at all) is byte-identical to before this card -- the new params are additive and optional", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: PARCEL,
+      facets: { zoning: { district: "SF-1" }, envelope: { status: "ok", geojson: {} } },
+      flood: { attempted: false },
+    });
+    expect(stub.zoning).toBe("present");
+    expect(stub.envelope).toBe("present");
+  });
+
+  it("D2 cross-check: the brief section stays disposition 'absent' (WDLL item 5 -- the coarse enum never grows a fifth state) while its own data honestly carries verdict not-applicable, and the stub independently reaches absent-verified -- two depths, two vocabularies, never contradicting", () => {
+    const brief = buildR1Brief(legacyUnknownFacets, null, {
+      parcelRecordZoningFact: zoningNotApplicable,
+      parcelRecordSetbacksFact: setbacksNotApplicable,
+    });
+    const zoningSection = brief.sections.find((s) => s.id === "zoning");
+    const envelopeSection = brief.sections.find((s) => s.id === "setbacks-envelope");
+    expect(zoningSection?.disposition).toBe("absent");
+    expect((zoningSection?.data as { absence?: { kind?: string } } | null)?.absence?.kind).toBe(
+      "not-applicable",
+    );
+    expect(envelopeSection?.disposition).toBe("absent");
+    expect((envelopeSection?.data as { absence?: { kind?: string } } | null)?.absence?.kind).toBe(
+      "not-applicable",
+    );
+    const stub = composeSmartSiteStub({
+      parcelNodeId: PARCEL,
+      facets: legacyUnknownFacets,
+      parcelRecordZoningFact: zoningNotApplicable,
+      parcelRecordSetbacksFact: setbacksNotApplicable,
+    });
+    expect(stub.zoning).toBe("absent-verified");
+    expect(stub.envelope).toBe("absent-verified");
   });
 });

@@ -72,6 +72,7 @@ import peMagicLinkRouter from "./peMagicLink";
 import propertyExplorerRouter from "./propertyExplorer";
 import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
+import peHelpRouter from "./peHelp";
 const router: IRouter = Router();
 
 router.use(healthRouter);
@@ -79,6 +80,10 @@ router.use(authRouter);
 router.use(peAuthRouter);
 router.use(peMagicLinkRouter);
 router.use(propertyExplorerRouter);
+// P-118 — ungated Help widget chat. Deliberately its OWN router, mounted at
+// the top level (never under brokerageV1), so it can never inherit that
+// surface's session/entitlement/install-id gating by accident.
+router.use(peHelpRouter);
 // G-60: plan-review BFF lives on plan-review Cloud Run. This mount is a
 // proxy, not a second implementation and not a 404 (unlike Smart Files).
 router.use("/plan-review", planReviewProxyRouter);

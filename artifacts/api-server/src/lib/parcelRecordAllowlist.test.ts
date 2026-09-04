@@ -57,8 +57,25 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     }
   });
 
-  it("the slate has exactly 85 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(85);
+  it("the slate has exactly 97 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(97);
+  });
+
+  it("OPS-16 A-096/A-097/A-098: all six counties, INCLUDING Caldwell, are slated for zoningDistrict and setbackFrontFt -- the representative keys for the zoning and setbacks not-applicable fix, no per-county exclusion documented in rail-keys.js/instantiate.js", () => {
+    for (const county of ALL_SIX_COUNTIES) {
+      expect(PARCEL_RECORD_SLATE.has(`${county}:zoningDistrict`)).toBe(true);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:setbackFrontFt`)).toBe(true);
+    }
+  });
+
+  it("the sibling zoning/setback rail keys (zoningJurisdictionKey, zoningProvenance, setbackSideFt, setbackRearFt, setbackCornerFt) are deliberately NOT independent slate entries -- gated on their group's representative key instead", () => {
+    for (const county of ALL_SIX_COUNTIES) {
+      expect(PARCEL_RECORD_SLATE.has(`${county}:zoningJurisdictionKey`)).toBe(false);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:zoningProvenance`)).toBe(false);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:setbackSideFt`)).toBe(false);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:setbackRearFt`)).toBe(false);
+      expect(PARCEL_RECORD_SLATE.has(`${county}:setbackCornerFt`)).toBe(false);
+    }
   });
 
   it("only Travis is slated for maxImperviousCoverPct -- the writer refuses every other county outright, not an oversight", () => {
@@ -128,12 +145,12 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the eighty-five real slated entries", () => {
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the ninety-seven real slated entries", () => {
     const rails = [
       "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
       "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
       "utilityService", "overlayDistricts", "agValuation", "schoolDistrict",
-      "maxImperviousCoverPct",
+      "maxImperviousCoverPct", "zoningDistrict", "setbackFrontFt",
     ];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -149,12 +166,12 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       }
     }
     // Falsifier's own falsifier: this loop must actually skip the
-    // eighty-five real slated pairs (every one PARCEL_RECORD_SLATE holds,
+    // ninety-seven real slated pairs (every one PARCEL_RECORD_SLATE holds,
     // since this rail list now covers all of them), not silently cover zero
     // cases because the skip branch is unreachable -- fails loudly if
     // PARCEL_RECORD_SLATE ever changes without this test being updated.
     expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
-    expect(uncheckedSlatedPairs).toBe(85);
+    expect(uncheckedSlatedPairs).toBe(97);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -253,6 +270,24 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       expect(resolveAllowlistState(county, "valueHistory", { verdict: "refuse" })).toBe("refused");
       expect(resolveAllowlistState(county, "valueHistory", { verdict: "excluded" })).toBe("refused");
       expect(resolveAllowlistState(county, "valueHistory", null)).toBe("legacy");
+    }
+  });
+
+  it("FALSIFIER: all SIX slated zoningDistrict pairs (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict -- no gate verdict for this rail exists yet, so every live call resolves to legacy today (OPS-16 A-096/A-097/A-098)", () => {
+    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "zoningDistrict", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "zoningDistrict", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "zoningDistrict", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "zoningDistrict", null)).toBe("legacy");
+    }
+  });
+
+  it("FALSIFIER: all SIX slated setbackFrontFt pairs (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict -- no gate verdict for this rail exists yet, so every live call resolves to legacy today (OPS-16 A-096/A-097/A-098)", () => {
+    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "setbackFrontFt", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "setbackFrontFt", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "setbackFrontFt", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "setbackFrontFt", null)).toBe("legacy");
     }
   });
 

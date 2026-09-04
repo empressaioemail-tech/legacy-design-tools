@@ -153,10 +153,13 @@ describe("P-109 item 4: the catalog and the runtime agree", () => {
       ).toEqual([]);
     });
 
+    // P-110: export_instrument is live again and legitimately has a handler
+    // case now, so it no longer serves as the "still blocked, no handler"
+    // example here — check_request still is (P-85 item 4, unchanged).
     it("the case-label parser sees a blocked tool that kept its handler", () => {
-      const withStrayCase = `${source}\n          case "export_instrument": {\n`;
-      expect(handlerCaseLabels(withStrayCase)).toContain("export_instrument");
-      expect(handlerCaseLabels(source)).not.toContain("export_instrument");
+      const withStrayCase = `${source}\n          case "check_request": {\n`;
+      expect(handlerCaseLabels(withStrayCase)).toContain("check_request");
+      expect(handlerCaseLabels(source)).not.toContain("check_request");
     });
 
     it("the case-label parser ignores inputSchemaFor's cases above registerTools", () => {

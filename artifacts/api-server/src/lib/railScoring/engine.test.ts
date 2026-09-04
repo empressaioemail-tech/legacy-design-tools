@@ -198,6 +198,24 @@ describe("an unspecified rail is refused, never scored as zero", () => {
   });
 });
 
+describe("a rail with a retired denominator is refused, not rescored", () => {
+  it("throws rather than substituting a reconstructible denominator", () => {
+    const retiredGeometry: AtomCountRule = {
+      ...atomRule,
+      railKey: "geometry",
+      entityType: "parcel-node",
+      denominator: {
+        kind: "retired-unknown-denominator",
+        basis:
+          "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an accounted-features denominator that is not in this repo.",
+      },
+    };
+    expect(() => scoreRailCell(retiredGeometry, 95, measurement())).toThrow(
+      /retired denominator/,
+    );
+  });
+});
+
 describe("layer applicability verdict (P-59)", () => {
   it("not-applicable writes satisfied-absent, not a below-threshold not-yet gap", () => {
     const score = scoreRailCell(
