@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./txgio-geo": "./src/txgio/geo.ts",
-    "./zoning-layers": "./src/txgio/zoning-layers.ts"
+    "./zoning-layers": "./src/txgio/zoning-layers.ts",
+    "./boundary": "./src/boundary/containment.ts",
+    "./city-limits": "./src/boundary/cityLimitsFact.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

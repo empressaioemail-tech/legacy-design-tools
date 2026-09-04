@@ -130,7 +130,11 @@ router.get("/", async (req: Request, res: Response) => {
       return;
     }
 
-    res.json(stampServedPayload(snap.payload, snap.computedAt, new Date()));
+    const stamped = stampServedPayload(snap.payload, snap.computedAt, new Date());
+    res.json({
+      ...stamped,
+      published_at: snap.payload.published_at ?? null,
+    });
   } catch (err) {
     res.status(500).json({
       error: "county_ledger_read_failed",

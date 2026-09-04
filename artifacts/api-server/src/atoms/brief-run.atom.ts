@@ -7,7 +7,7 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 
 export const BRIEF_RUN_SUPPORTED_MODES = [
   "inline",

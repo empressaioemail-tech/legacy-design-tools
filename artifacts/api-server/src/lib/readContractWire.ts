@@ -2,8 +2,8 @@
  * F4 — read-contract wire helpers for cortex-api responses.
  */
 
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
-import { READ_CONTRACT_SCHEMA } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
+import { READ_CONTRACT_SCHEMA } from "@empressaio/atom-contract/read-contract";
 import type { EngineHonesty } from "@workspace/engine-core";
 import {
   legacyHonestyToReadContract,

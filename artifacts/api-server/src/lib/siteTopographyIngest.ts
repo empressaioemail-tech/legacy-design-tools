@@ -66,11 +66,11 @@ import {
 } from "@workspace/site-context/server";
 import { EngineSpineError } from "./engineSpineClient";
 import { routeFetchUsgs3depDem } from "./engineSpineHydrology";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import {
   createWidthedConfidence,
   type WidthedConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import { SITE_TOPOGRAPHY_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { ObjectStorageService } from "./objectStorage";
 import { logger as defaultLogger } from "./logger";
@@ -130,6 +130,7 @@ const MAX_CONTOUR_GEOJSON_BYTES = 1_048_576;
 
 /** Layer kinds the parcel resolver inspects, in priority order. */
 const PARCEL_LAYER_KINDS_BY_PRIORITY: ReadonlyArray<string> = [
+  "pe-records-parcel", // P-85 PE Records Request bridge (peRecordsEngagement.ts)
   "grand-county-ut-parcels", // County-GIS for partner cities (Bastrop is partner-only on the parcels side; Grand County gated off baseline)
   "ugrc-parcels", // State-tier UGRC fallback for Utah
 ];

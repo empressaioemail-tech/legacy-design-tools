@@ -405,7 +405,7 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50903" && c.railKey === "zoning");
     expect(cell.displayState).toBe("not-yet");
-    expect(cell.isPartial).toBe(false);
+    expect(cell.isPartial).toBe(true);
   });
 
   it("precedence: statewide-uniform below threshold stays PARTIAL satisfied-present", async () => {

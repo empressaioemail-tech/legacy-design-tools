@@ -472,6 +472,30 @@ CREATE TABLE @@SCHEMA@@.canva_push_jobs (
 );
 
 
+-- Name: clerk_portal_terms; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.clerk_portal_terms (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    county_fips text NOT NULL,
+    portal_id text NOT NULL,
+    portal_url text NOT NULL,
+    terms_url text,
+    terms_text text NOT NULL,
+    terms_fetched_at timestamp with time zone NOT NULL,
+    automated_search text DEFAULT 'unknown'::text NOT NULL,
+    login_required boolean DEFAULT false NOT NULL,
+    image_purchase jsonb DEFAULT '{}'::jsonb NOT NULL,
+    operator_ruled_at timestamp with time zone,
+    operator_ruling_notes text,
+    canary_status text,
+    canary_checked_at timestamp with time zone,
+    canary_failure_reason text,
+    canary_recipe_version text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
@@ -1003,6 +1027,21 @@ CREATE TABLE @@SCHEMA@@.gtm_consent (
 );
 
 
+-- Name: gtm_event_refusals; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.gtm_event_refusals (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    install_id text NOT NULL,
+    event_type text NOT NULL,
+    source_surface text NOT NULL,
+    reason text NOT NULL,
+    refused_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT gtm_event_refusals_event_type_chk CHECK ((event_type <> ''::text)),
+    CONSTRAINT gtm_event_refusals_install_id_chk CHECK ((install_id <> ''::text)),
+    CONSTRAINT gtm_event_refusals_reason_chk CHECK ((reason <> ''::text))
+);
+
+
 -- Name: gtm_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.gtm_events (
@@ -1223,6 +1262,44 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: pe_account_activations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_account_activations (
+    owner_user_id text NOT NULL,
+    milestone text NOT NULL,
+    surface text,
+    first_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_account_activations_milestone_chk CHECK ((milestone = ANY (ARRAY['first_parcel_inspected'::text, 'first_property_saved'::text, 'first_report_opened'::text]))),
+    CONSTRAINT pe_account_activations_surface_chk CHECK (((surface IS NULL) OR (surface <> ''::text)))
+);
+
+
+-- Name: pe_activation_events; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_activation_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_user_id text NOT NULL,
+    event_type text NOT NULL,
+    action_id text NOT NULL,
+    surface text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_activation_events_action_id_chk CHECK ((action_id <> ''::text)),
+    CONSTRAINT pe_activation_events_event_type_chk CHECK ((event_type = ANY (ARRAY['shown'::text, 'acted'::text]))),
+    CONSTRAINT pe_activation_events_surface_chk CHECK (((surface IS NULL) OR (surface <> ''::text)))
+);
+
+
+-- Name: pe_ai_connections; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_ai_connections (
+    owner_user_id text NOT NULL,
+    client_name text NOT NULL,
+    client_version text,
+    first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: pe_chat_message_counts; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
@@ -1233,6 +1310,100 @@ CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
 );
 
 
+-- Name: pe_magic_link_tokens; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_magic_link_tokens (
+    id text NOT NULL,
+    email text NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: pe_parcel_constraint_index; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_parcel_constraint_index (
+    county_fips text NOT NULL,
+    prop_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    built_at timestamp with time zone NOT NULL,
+    bake_snapshot_at timestamp with time zone,
+    build_run_id uuid NOT NULL,
+    acreage_acres numeric(14,4),
+    acreage_state text NOT NULL,
+    land_use_code text,
+    land_use_state text NOT NULL,
+    city_limits text,
+    city_limits_state text NOT NULL,
+    etj text,
+    etj_state text NOT NULL,
+    zoning_district text,
+    zoning_state text NOT NULL,
+    flood_zone text,
+    flood_in_sfha boolean,
+    flood_state text NOT NULL,
+    special_district_id text,
+    special_district_state text NOT NULL,
+    market_value bigint,
+    market_value_state text NOT NULL,
+    land_value bigint,
+    land_value_state text NOT NULL,
+    improvement_value bigint,
+    improvement_value_state text NOT NULL,
+    year_built integer,
+    year_built_state text NOT NULL,
+    CONSTRAINT pe_pci_acreage_state_chk CHECK ((acreage_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_acreage_value_state_chk CHECK (((acreage_acres IS NOT NULL) = (acreage_state = 'present'::text))),
+    CONSTRAINT pe_pci_city_limits_grammar_chk CHECK (((city_limits IS NULL) OR (city_limits = ANY (ARRAY['in-city'::text, 'unincorporated'::text])))),
+    CONSTRAINT pe_pci_city_limits_state_chk CHECK ((city_limits_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_city_limits_value_state_chk CHECK (((city_limits IS NOT NULL) = (city_limits_state = 'present'::text))),
+    CONSTRAINT pe_pci_county_fips_chk CHECK ((county_fips ~ '^[0-9]{5}$'::text)),
+    CONSTRAINT pe_pci_etj_state_chk CHECK ((etj_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_etj_value_state_chk CHECK (((etj IS NOT NULL) = (etj_state = 'present'::text))),
+    CONSTRAINT pe_pci_flood_state_chk CHECK ((flood_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_flood_value_state_chk CHECK (((flood_in_sfha IS NOT NULL) = (flood_state = 'present'::text))),
+    CONSTRAINT pe_pci_flood_zone_needs_flag_chk CHECK (((flood_zone IS NULL) OR (flood_in_sfha IS NOT NULL))),
+    CONSTRAINT pe_pci_improvement_value_state_chk CHECK ((improvement_value_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_improvement_value_value_state_chk CHECK (((improvement_value IS NOT NULL) = (improvement_value_state = 'present'::text))),
+    CONSTRAINT pe_pci_land_use_state_chk CHECK ((land_use_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_land_use_value_state_chk CHECK (((land_use_code IS NOT NULL) = (land_use_state = 'present'::text))),
+    CONSTRAINT pe_pci_land_value_state_chk CHECK ((land_value_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_land_value_value_state_chk CHECK (((land_value IS NOT NULL) = (land_value_state = 'present'::text))),
+    CONSTRAINT pe_pci_market_value_state_chk CHECK ((market_value_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_market_value_value_state_chk CHECK (((market_value IS NOT NULL) = (market_value_state = 'present'::text))),
+    CONSTRAINT pe_pci_node_id_shape_chk CHECK ((parcel_node_id = ((county_fips || ':'::text) || prop_id))),
+    CONSTRAINT pe_pci_prop_id_chk CHECK (((btrim(prop_id) <> ''::text) AND (prop_id <> '0'::text))),
+    CONSTRAINT pe_pci_special_district_state_chk CHECK ((special_district_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_special_district_value_state_chk CHECK (((special_district_id IS NOT NULL) = (special_district_state = 'present'::text))),
+    CONSTRAINT pe_pci_year_built_state_chk CHECK ((year_built_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_year_built_value_state_chk CHECK (((year_built IS NOT NULL) = (year_built_state = 'present'::text))),
+    CONSTRAINT pe_pci_zoning_state_chk CHECK ((zoning_state = ANY (ARRAY['present'::text, 'absent-verified'::text, 'unknown'::text, 'refused'::text, 'unread'::text]))),
+    CONSTRAINT pe_pci_zoning_value_state_chk CHECK (((zoning_district IS NOT NULL) = (zoning_state = 'present'::text)))
+);
+
+
+-- Name: pe_parcel_constraint_index_builds; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_parcel_constraint_index_builds (
+    build_run_id uuid NOT NULL,
+    county_fips text NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    invocation text NOT NULL,
+    prop_id_lo text,
+    prop_id_hi text,
+    bake_rows_read bigint,
+    rows_written bigint,
+    bake_snapshot_max timestamp with time zone,
+    outcome text NOT NULL,
+    refusal_reason text,
+    CONSTRAINT pe_pci_builds_outcome_chk CHECK ((outcome = ANY (ARRAY['started'::text, 'succeeded'::text, 'failed'::text, 'refused'::text]))),
+    CONSTRAINT pe_pci_builds_refusal_chk CHECK (((outcome <> 'refused'::text) OR (btrim(COALESCE(refusal_reason, ''::text)) <> ''::text)))
+);
+
+
 -- Name: pe_property_unlocks; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_property_unlocks (
@@ -1240,7 +1411,8 @@ CREATE TABLE @@SCHEMA@@.pe_property_unlocks (
     tenant_id text DEFAULT 'default'::text NOT NULL,
     parcel_node_id text NOT NULL,
     unlocked_at timestamp with time zone DEFAULT now() NOT NULL,
-    source text DEFAULT 'stub'::text NOT NULL
+    source text DEFAULT 'stub'::text NOT NULL,
+    expires_at timestamp with time zone
 );
 
 
@@ -1253,8 +1425,92 @@ CREATE TABLE @@SCHEMA@@.pe_saved_properties (
     parcel_node_id text NOT NULL,
     label text,
     snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    crm_status text,
+    note text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_saved_properties_crm_status_chk CHECK (((crm_status IS NULL) OR (crm_status = ANY (ARRAY['New'::text, 'Watching'::text, 'Chasing'::text, 'Passed'::text]))))
+);
+
+
+-- Name: pe_screen_rows; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_screen_rows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    screen_id uuid NOT NULL,
+    ordinal integer NOT NULL,
+    query text NOT NULL,
+    parcel_node_id text,
+    resolution text NOT NULL,
+    source text NOT NULL,
+    candidates jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_screen_rows_ambiguous_candidates_chk CHECK (((resolution = 'ambiguous'::text) = ((candidates IS NOT NULL) AND (jsonb_typeof(candidates) = 'array'::text) AND (jsonb_array_length(candidates) > 0)))),
+    CONSTRAINT pe_screen_rows_query_present_chk CHECK ((char_length(btrim(query)) > 0)),
+    CONSTRAINT pe_screen_rows_resolution_chk CHECK ((resolution = ANY (ARRAY['resolved'::text, 'ambiguous'::text, 'unresolved'::text]))),
+    CONSTRAINT pe_screen_rows_resolved_node_chk CHECK (((resolution = 'resolved'::text) = (parcel_node_id IS NOT NULL))),
+    CONSTRAINT pe_screen_rows_source_chk CHECK ((source = ANY (ARRAY['pasted'::text, 'chrome'::text, 'gmail'::text, 'file'::text, 'walk'::text, 'saved'::text])))
+);
+
+
+-- Name: pe_screens; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_screens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    owner_user_id text NOT NULL,
+    name text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    deleted_at timestamp with time zone
+);
+
+
+-- Name: pe_share_attributions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_share_attributions (
+    recipient_user_id text NOT NULL,
+    grant_id text NOT NULL,
+    surface text,
+    attributed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_share_attributions_surface_chk CHECK (((surface IS NULL) OR (surface <> ''::text)))
+);
+
+
+-- Name: pe_share_grants; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_share_grants (
+    id text NOT NULL,
+    grantor_user_id text NOT NULL,
+    grantor_tenant_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone
+);
+
+
+-- Name: pe_team_invitations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_team_invitations (
+    id text NOT NULL,
+    account_owner_user_id text NOT NULL,
+    email text NOT NULL,
+    role text NOT NULL,
+    sent_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_team_invitations_role_chk CHECK ((role = ANY (ARRAY['owner'::text, 'member'::text])))
+);
+
+
+-- Name: pe_team_members; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_team_members (
+    account_owner_user_id text NOT NULL,
+    member_user_id text NOT NULL,
+    email text NOT NULL,
+    role text NOT NULL,
+    joined_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pe_team_members_role_chk CHECK ((role = ANY (ARRAY['owner'::text, 'member'::text])))
 );
 
 
@@ -1267,7 +1523,11 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
     dev_role boolean DEFAULT false NOT NULL,
     entitlement_source text,
     stripe_customer_id text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    subscription_tier text,
+    seats_purchased integer,
+    billing_interval text,
+    CONSTRAINT pe_user_entitlements_billing_interval_chk CHECK (((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))
 );
 
 
@@ -1526,6 +1786,51 @@ CREATE TABLE @@SCHEMA@@.recorded_instruments (
     upload_byte_size integer,
     extract_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: records_request_artifacts; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.records_request_artifacts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    job_id uuid NOT NULL,
+    portal_id text NOT NULL,
+    recording_ref text,
+    document_type text,
+    recording_date text,
+    parties text,
+    acquisition_method text NOT NULL,
+    content_sha256 text NOT NULL,
+    byte_size integer,
+    purchase_cost_cents integer,
+    detail_url text,
+    storage_path text,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: records_request_jobs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.records_request_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    place_key text,
+    user_id text NOT NULL,
+    user_email text,
+    parcel_key text NOT NULL,
+    county_fips text NOT NULL,
+    status text NOT NULL,
+    request_payload jsonb,
+    scope_searched jsonb,
+    live_instant_gis jsonb,
+    run_cost jsonb,
+    recipe_version text,
+    error_code text,
+    error_message text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone
 );
 
 
@@ -2020,6 +2325,35 @@ CREATE TABLE @@SCHEMA@@.tx_parcel_tile_cache (
 );
 
 
+-- Name: tx_utility_territory_staging; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_utility_territory_staging (
+    staging_row_id text NOT NULL,
+    source_key text NOT NULL,
+    service_kind text NOT NULL,
+    territory_id text NOT NULL,
+    territory_name text,
+    county_name text,
+    county_fips text,
+    geometry jsonb NOT NULL,
+    geometry_crs text NOT NULL,
+    source_url text NOT NULL,
+    source_layer_id text NOT NULL,
+    fetched_at timestamp with time zone NOT NULL,
+    source_tiers jsonb NOT NULL,
+    source_tier_satisfied jsonb NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    passthrough_attributes jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    object_id text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: txgio_address; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.txgio_address (
@@ -2060,6 +2394,7 @@ CREATE TABLE @@SCHEMA@@.txgio_parcel (
     zoning_district text,
     zoning_jurisdiction text,
     geometry jsonb NOT NULL,
+    geom public.geometry(Geometry,4326),
     west_lng double precision NOT NULL,
     south_lat double precision NOT NULL,
     east_lng double precision NOT NULL,
@@ -2326,6 +2661,12 @@ ALTER TABLE ONLY @@SCHEMA@@.canva_push_jobs
     ADD CONSTRAINT canva_push_jobs_pkey PRIMARY KEY (id);
 
 
+-- Name: clerk_portal_terms clerk_portal_terms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.clerk_portal_terms
+    ADD CONSTRAINT clerk_portal_terms_pkey PRIMARY KEY (id);
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -2518,6 +2859,12 @@ ALTER TABLE ONLY @@SCHEMA@@.gtm_consent
     ADD CONSTRAINT gtm_consent_pkey PRIMARY KEY (install_id);
 
 
+-- Name: gtm_event_refusals gtm_event_refusals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.gtm_event_refusals
+    ADD CONSTRAINT gtm_event_refusals_pkey PRIMARY KEY (id);
+
+
 -- Name: gtm_events gtm_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.gtm_events
@@ -2596,10 +2943,40 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_account_activations pe_account_activations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
+    ADD CONSTRAINT pe_account_activations_pkey PRIMARY KEY (owner_user_id, milestone);
+
+
+-- Name: pe_activation_events pe_activation_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
+    ADD CONSTRAINT pe_activation_events_pkey PRIMARY KEY (id);
+
+
 -- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
     ADD CONSTRAINT pe_chat_message_counts_owner_user_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, parcel_node_id);
+
+
+-- Name: pe_magic_link_tokens pe_magic_link_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_magic_link_tokens
+    ADD CONSTRAINT pe_magic_link_tokens_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_parcel_constraint_index_builds pe_parcel_constraint_index_builds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_parcel_constraint_index_builds
+    ADD CONSTRAINT pe_parcel_constraint_index_builds_pkey PRIMARY KEY (build_run_id);
+
+
+-- Name: pe_parcel_constraint_index pe_parcel_constraint_index_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_parcel_constraint_index
+    ADD CONSTRAINT pe_parcel_constraint_index_pk PRIMARY KEY (county_fips, prop_id);
 
 
 -- Name: pe_property_unlocks pe_property_unlocks_owner_user_id_tenant_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2612,6 +2989,42 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
     ADD CONSTRAINT pe_saved_properties_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_screen_rows pe_screen_rows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
+    ADD CONSTRAINT pe_screen_rows_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_screens pe_screens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screens
+    ADD CONSTRAINT pe_screens_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_share_attributions pe_share_attributions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
+    ADD CONSTRAINT pe_share_attributions_pkey PRIMARY KEY (recipient_user_id);
+
+
+-- Name: pe_share_grants pe_share_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
+    ADD CONSTRAINT pe_share_grants_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_team_invitations pe_team_invitations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
+    ADD CONSTRAINT pe_team_invitations_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_team_members pe_team_members_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
+    ADD CONSTRAINT pe_team_members_pkey PRIMARY KEY (account_owner_user_id, member_user_id);
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2708,6 +3121,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reasoning_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_pkey PRIMARY KEY (id);
+
+
+-- Name: records_request_artifacts records_request_artifacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_artifacts
+    ADD CONSTRAINT records_request_artifacts_pkey PRIMARY KEY (id);
+
+
+-- Name: records_request_jobs records_request_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
+    ADD CONSTRAINT records_request_jobs_pkey PRIMARY KEY (id);
 
 
 -- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2888,6 +3313,12 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_fema_nfhl_flood_zone
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_parcel_tile_cache
     ADD CONSTRAINT tx_parcel_tile_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: tx_utility_territory_staging tx_utility_territory_staging_staging_row_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_utility_territory_staging
+    ADD CONSTRAINT tx_utility_territory_staging_staging_row_id_pk PRIMARY KEY (staging_row_id);
 
 
 -- Name: txgio_address txgio_address_county_fips_full_addr_unit_pk; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3122,6 +3553,21 @@ CREATE INDEX canva_oauth_states_created_idx ON @@SCHEMA@@.canva_oauth_states USI
 CREATE INDEX canva_push_jobs_engagement_created_idx ON @@SCHEMA@@.canva_push_jobs USING btree (engagement_id, created_at);
 
 
+-- Name: clerk_portal_terms_county_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX clerk_portal_terms_county_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (county_fips);
+
+
+-- Name: clerk_portal_terms_county_portal_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX clerk_portal_terms_county_portal_uniq ON @@SCHEMA@@.clerk_portal_terms USING btree (county_fips, portal_id);
+
+
+-- Name: clerk_portal_terms_portal_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX clerk_portal_terms_portal_idx ON @@SCHEMA@@.clerk_portal_terms USING btree (portal_id);
+
+
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX code_atom_fetch_queue_jurisdiction_idx ON @@SCHEMA@@.code_atom_fetch_queue USING btree (jurisdiction_key);
@@ -3337,6 +3783,16 @@ CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (at
 CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
 
 
+-- Name: gtm_event_refusals_event_type_refused_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_event_refusals_event_type_refused_at_idx ON @@SCHEMA@@.gtm_event_refusals USING btree (event_type, refused_at);
+
+
+-- Name: gtm_event_refusals_refused_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_event_refusals_refused_at_idx ON @@SCHEMA@@.gtm_event_refusals USING btree (refused_at);
+
+
 -- Name: gtm_events_event_type_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (event_type, created_at);
@@ -3492,6 +3948,61 @@ CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: pe_account_activations_milestone_first_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_account_activations_milestone_first_at_idx ON @@SCHEMA@@.pe_account_activations USING btree (milestone, first_at);
+
+
+-- Name: pe_activation_events_action_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (action_id, created_at);
+
+
+-- Name: pe_activation_events_owner_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_activation_events_owner_user_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (owner_user_id, created_at);
+
+
+-- Name: pe_ai_connections_owner_client_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id, client_name);
+
+
+-- Name: pe_ai_connections_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_ai_connections_owner_idx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id);
+
+
+-- Name: pe_magic_link_tokens_email_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_magic_link_tokens_email_created_idx ON @@SCHEMA@@.pe_magic_link_tokens USING btree (email, created_at);
+
+
+-- Name: pe_magic_link_tokens_token_hash_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_magic_link_tokens_token_hash_uidx ON @@SCHEMA@@.pe_magic_link_tokens USING btree (token_hash);
+
+
+-- Name: pe_pci_builds_county_started_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_builds_county_started_idx ON @@SCHEMA@@.pe_parcel_constraint_index_builds USING btree (county_fips, started_at);
+
+
+-- Name: pe_pci_county_acreage_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_county_acreage_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips, acreage_state, acreage_acres);
+
+
+-- Name: pe_pci_county_flood_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_county_flood_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips, flood_state, flood_in_sfha);
+
+
+-- Name: pe_pci_county_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_pci_county_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips);
+
+
 -- Name: pe_saved_properties_owner_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, updated_at);
@@ -3500,6 +4011,71 @@ CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USI
 -- Name: pe_saved_properties_owner_parcel_uidx; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX pe_saved_properties_owner_parcel_uidx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, parcel_node_id);
+
+
+-- Name: pe_screen_rows_screen_node_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_screen_rows_screen_node_uidx ON @@SCHEMA@@.pe_screen_rows USING btree (screen_id, parcel_node_id) WHERE (parcel_node_id IS NOT NULL);
+
+
+-- Name: pe_screen_rows_screen_ordinal_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_screen_rows_screen_ordinal_idx ON @@SCHEMA@@.pe_screen_rows USING btree (screen_id, ordinal);
+
+
+-- Name: pe_screens_owner_updated_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_screens_owner_updated_idx ON @@SCHEMA@@.pe_screens USING btree (tenant_id, owner_user_id, updated_at);
+
+
+-- Name: pe_share_attributions_attributed_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_attributions_attributed_at_idx ON @@SCHEMA@@.pe_share_attributions USING btree (attributed_at);
+
+
+-- Name: pe_share_attributions_grant_id_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_attributions_grant_id_idx ON @@SCHEMA@@.pe_share_attributions USING btree (grant_id);
+
+
+-- Name: pe_share_grants_grantor_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_grants_grantor_idx ON @@SCHEMA@@.pe_share_grants USING btree (grantor_user_id, created_at);
+
+
+-- Name: pe_share_grants_parcel_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_share_grants_parcel_idx ON @@SCHEMA@@.pe_share_grants USING btree (parcel_node_id);
+
+
+-- Name: pe_team_invitations_account_email_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_invitations_account_email_uidx ON @@SCHEMA@@.pe_team_invitations USING btree (account_owner_user_id, email);
+
+
+-- Name: pe_team_invitations_account_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_team_invitations_account_idx ON @@SCHEMA@@.pe_team_invitations USING btree (account_owner_user_id);
+
+
+-- Name: pe_team_members_account_email_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_members_account_email_uidx ON @@SCHEMA@@.pe_team_members USING btree (account_owner_user_id, email);
+
+
+-- Name: pe_team_members_account_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_team_members_account_idx ON @@SCHEMA@@.pe_team_members USING btree (account_owner_user_id);
+
+
+-- Name: pe_team_members_account_member_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_members_account_member_uidx ON @@SCHEMA@@.pe_team_members USING btree (account_owner_user_id, member_user_id);
+
+
+-- Name: pe_team_members_member_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_team_members_member_uidx ON @@SCHEMA@@.pe_team_members USING btree (member_user_id);
 
 
 -- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
@@ -3600,6 +4176,36 @@ CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instrume
 -- Name: recorded_instruments_listing_install_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX recorded_instruments_listing_install_idx ON @@SCHEMA@@.recorded_instruments USING btree (install_id, listing_key);
+
+
+-- Name: records_request_artifacts_job_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_artifacts_job_idx ON @@SCHEMA@@.records_request_artifacts USING btree (job_id, created_at);
+
+
+-- Name: records_request_artifacts_sha256_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_artifacts_sha256_idx ON @@SCHEMA@@.records_request_artifacts USING btree (content_sha256);
+
+
+-- Name: records_request_jobs_active_per_engagement_user_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX records_request_jobs_active_per_engagement_user_uniq ON @@SCHEMA@@.records_request_jobs USING btree (engagement_id, user_id) WHERE (status = ANY (ARRAY['queued'::text, 'running'::text, 'awaiting-purchase-approval'::text]));
+
+
+-- Name: records_request_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_jobs_engagement_created_idx ON @@SCHEMA@@.records_request_jobs USING btree (engagement_id, created_at);
+
+
+-- Name: records_request_jobs_place_key_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_jobs_place_key_idx ON @@SCHEMA@@.records_request_jobs USING btree (place_key);
+
+
+-- Name: records_request_jobs_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX records_request_jobs_status_idx ON @@SCHEMA@@.records_request_jobs USING btree (status);
 
 
 -- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -
@@ -3840,6 +4446,21 @@ CREATE INDEX tx_parcel_tile_cache_expires_idx ON @@SCHEMA@@.tx_parcel_tile_cache
 -- Name: tx_parcel_tile_cache_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX tx_parcel_tile_cache_uniq ON @@SCHEMA@@.tx_parcel_tile_cache USING btree (tile_key, county_fips);
+
+
+-- Name: tx_utility_territory_staging_bbox_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_utility_territory_staging_bbox_idx ON @@SCHEMA@@.tx_utility_territory_staging USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_utility_territory_staging_county_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_utility_territory_staging_county_idx ON @@SCHEMA@@.tx_utility_territory_staging USING btree (county_fips);
+
+
+-- Name: tx_utility_territory_staging_source_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_utility_territory_staging_source_idx ON @@SCHEMA@@.tx_utility_territory_staging USING btree (source_key);
 
 
 -- Name: txgio_address_tile_idx; Type: INDEX; Schema: public; Owner: -
@@ -4150,6 +4771,24 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
 
 
+-- Name: pe_account_activations pe_account_activations_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
+    ADD CONSTRAINT pe_account_activations_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_activation_events pe_activation_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
+    ADD CONSTRAINT pe_activation_events_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_ai_connections pe_ai_connections_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_ai_connections
+    ADD CONSTRAINT pe_ai_connections_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
 -- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
@@ -4160,6 +4799,48 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
     ADD CONSTRAINT pe_property_unlocks_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_screen_rows pe_screen_rows_screen_id_pe_screens_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
+    ADD CONSTRAINT pe_screen_rows_screen_id_pe_screens_id_fk FOREIGN KEY (screen_id) REFERENCES @@SCHEMA@@.pe_screens(id) ON DELETE CASCADE;
+
+
+-- Name: pe_share_attributions pe_share_attributions_grant_id_pe_share_grants_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
+    ADD CONSTRAINT pe_share_attributions_grant_id_pe_share_grants_id_fk FOREIGN KEY (grant_id) REFERENCES @@SCHEMA@@.pe_share_grants(id) ON DELETE CASCADE;
+
+
+-- Name: pe_share_attributions pe_share_attributions_recipient_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_attributions
+    ADD CONSTRAINT pe_share_attributions_recipient_user_id_users_id_fk FOREIGN KEY (recipient_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_share_grants pe_share_grants_grantor_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
+    ADD CONSTRAINT pe_share_grants_grantor_user_id_users_id_fk FOREIGN KEY (grantor_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_team_invitations pe_team_invitations_account_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
+    ADD CONSTRAINT pe_team_invitations_account_owner_user_id_users_id_fk FOREIGN KEY (account_owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_team_members pe_team_members_account_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
+    ADD CONSTRAINT pe_team_members_account_owner_user_id_users_id_fk FOREIGN KEY (account_owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_team_members pe_team_members_member_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
+    ADD CONSTRAINT pe_team_members_member_user_id_users_id_fk FOREIGN KEY (member_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -4196,6 +4877,18 @@ ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
 
 ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
     ADD CONSTRAINT recorded_instruments_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: records_request_artifacts records_request_artifacts_job_id_records_request_jobs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_artifacts
+    ADD CONSTRAINT records_request_artifacts_job_id_records_request_jobs_id_fk FOREIGN KEY (job_id) REFERENCES @@SCHEMA@@.records_request_jobs(id) ON DELETE CASCADE;
+
+
+-- Name: records_request_jobs records_request_jobs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.records_request_jobs
+    ADD CONSTRAINT records_request_jobs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

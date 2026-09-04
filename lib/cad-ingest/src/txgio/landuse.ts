@@ -39,6 +39,7 @@
 
 import type { CadPropertyRecord, ParseCounters } from "../types";
 import { recordSkip } from "../types";
+import { landAcresFromGis, parseYearBuilt } from "../p78Merge";
 
 /** Raw DBF attribute bag for one StratMap land-parcel feature. */
 export type StratMapProperties = Record<string, unknown>;
@@ -143,9 +144,13 @@ export function normalizeStratMapLandUse(
     improvementValue: dollars(properties.IMP_VALUE),
     marketValue: dollars(properties.MKT_VALUE),
     assessedValue: null,
-    yearBuilt: null,
+    yearBuilt: parseYearBuilt(properties.YEAR_BUILT),
     livingAreaSqft: null,
-    landAcres: null,
+    landAcres: (() => {
+      const gate = landAcresFromGis(properties.GIS_AREA, properties.GIS_AREA_U);
+      if ("refuse" in gate) return null;
+      return gate.landAcres;
+    })(),
     propertyUseCode: normalizeStatLandUse(properties.STAT_LAND_),
   };
 }

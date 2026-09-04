@@ -13,16 +13,16 @@ import {
   type AtomTier,
   type VerifyChainResult,
   ACCESS_POLICY_VALUES,
-} from "@hauska/atom-contract/conformance";
-import type { AtomEvent } from "@hauska/atom-contract";
+} from "@empressaio/atom-contract/conformance";
+import type { AtomEvent } from "@empressaio/atom-contract";
 
 type AccessPolicy = (typeof ACCESS_POLICY_VALUES)[number];
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
 import {
   createReadContract,
   createThreeAxisConfidence,
   createWidthedConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import { intervalWidthFromSignalCount, routineConsequenceAxis } from "./readContractDerive.js";
 
 /** ADR-017 five-value union — target accessPolicy per mutable family. */

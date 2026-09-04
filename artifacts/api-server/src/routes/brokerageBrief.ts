@@ -138,6 +138,10 @@ import {
 } from "../lib/brokerageResearchAreaContext";
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildableEnvelope";
+import { brokeragePlaceSitusSearchRouter } from "./brokeragePlaceSitusSearch";
+import { brokeragePlaceRadiusSearchRouter } from "./brokeragePlaceRadiusSearch";
+import { brokeragePlaceStreetSearchRouter } from "./brokeragePlaceStreetSearch";
+import { brokeragePlaceConstraintSearchRouter } from "./brokeragePlaceConstraintSearch";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
 import { propertyExplorerBillingRouter } from "./propertyExplorerBilling";
@@ -159,6 +163,7 @@ import {
   BRIEF_WEB_SCRAPED_DISCLOSURE,
   resolveBriefLocalCodeLayer,
 } from "../lib/brokerageBriefLocalCode";
+import { resolveResearchChatWebSearchBackup } from "../lib/brokerageResearchChatWebSearch";
 import {
   isBrokerageBriefViaGateEnabled,
 } from "../lib/brokerageSpineGate";
@@ -174,7 +179,7 @@ export const BROKERAGE_ADU_RESEARCH_QUERIES = [
 ] as const;
 
 const ADU_TOPIC_RE =
-  /\b(adu|accessory dwelling|guest house|backyard cottage|secondary unit|granny flat)\b/i;
+  /\b(adu|accessory dwelling|guest house|backyard cottage|secondary unit|additional unit|granny flat|subdivision)\b/i;
 
 const presentationModeSchema = z.enum(["consumer", "pro"]).default("consumer");
 
@@ -320,6 +325,14 @@ brokerageV1.use("/profile", brokerageProfileRouter);
 brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceBuildableEnvelopeRouter);
+brokerageV1.use("/place", brokeragePlaceSitusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceRadiusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceStreetSearchRouter);
+/**
+ * P-106 constraint search: a question ACROSS parcels, answered as three sets.
+ * Peer of radius-search and street-search, behind the same service gate.
+ */
+brokerageV1.use("/place", brokeragePlaceConstraintSearchRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
@@ -1397,6 +1410,18 @@ brokerageV1.post(
           "brokerage: research chat retrieval degraded",
         );
       }
+    }
+
+    const webBackup = await resolveResearchChatWebSearchBackup({
+      jurisdictionKey,
+      message,
+      existingAtoms: [...atomMap.values()],
+    });
+    for (const a of webBackup.atoms) {
+      if (!atomMap.has(a.atomDid)) atomMap.set(a.atomDid, a);
+    }
+    for (const reason of webBackup.degradedReasons) {
+      if (!degradedReasons.includes(reason)) degradedReasons.push(reason);
     }
 
     const atoms = [...atomMap.values()];

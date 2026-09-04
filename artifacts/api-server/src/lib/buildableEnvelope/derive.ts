@@ -13,7 +13,12 @@
  */
 
 import type { SetbackDistrict, SetbackTable } from "@workspace/adapters";
-import { insetPerEdge, ringAreaSqFt, type Ring } from "./geometry";
+import {
+  insetPerEdge,
+  ringAreaSqFt,
+  type InsetEmptyKind,
+  type Ring,
+} from "./geometry";
 import {
   insetFeetForLabeling,
   type EdgeLabelingResult,
@@ -65,6 +70,13 @@ export interface BuildableEnvelopeProps {
   citationUrl: string;
   /** Empty-envelope reason, when there is no buildable area. */
   emptyReason?: string;
+  /**
+   * Machine-readable class of the empty result (P60b reason split):
+   * "consumed" is the only class meaning the setbacks genuinely exceed the
+   * lot; "validation-failed" means the geometry gates declined the derived
+   * ring and must never be presented as a consume-lot measurement.
+   */
+  emptyKind?: InsetEmptyKind;
 }
 
 export interface BuildableEnvelopeResult {
@@ -85,8 +97,10 @@ export interface BuildableEnvelopeResult {
   confidence: null;
   /** True when the envelope should render as approximate (geometry signal). */
   approximate: boolean;
-  /** True when setbacks consume the lot (no buildable area). */
+  /** True when there is no buildable area (see emptyKind for which class). */
   empty: boolean;
+  /** Set when empty: distinguishes consume-lot from a validation decline. */
+  emptyKind?: InsetEmptyKind;
   citationUrl: string;
   district: string;
 }
@@ -130,8 +144,10 @@ function composeDisclosure(
   notSpecifiedNote?: string,
 ): string {
   if (empty) {
+    // Never default to consume-lot wording: an unexplained empty is a
+    // validation gap, not a measurement.
     return (
-      `No buildable area: ${emptyReason ?? "setbacks exceed the lot"}. ` +
+      `No buildable area: ${emptyReason ?? "reason unavailable"}. ` +
       `Approximate — verify with a survey and the city.`
     );
   }
@@ -227,6 +243,14 @@ export function deriveBuildableEnvelope(
     inset.empty && allSilentPrimary
       ? "Envelope geometry failed; code states no scalar setbacks (build-to-line governs) — not a consume-lot finding"
       : inset.emptyReason;
+  // Fail closed on the class: an empty result of unknown class, or one built
+  // from all-silent (fabricated-zero) setbacks, is a validation failure and
+  // must never be presented as a consume-lot measurement.
+  const emptyKind: InsetEmptyKind | undefined = inset.empty
+    ? allSilentPrimary
+      ? "validation-failed"
+      : (inset.emptyKind ?? "validation-failed")
+    : undefined;
 
   const silentNote = hasSilent
     ? "One or more scalar setbacks are not specified in the code (build-to-line governs); silent axes are not treated as 0 ft entitlements"
@@ -264,7 +288,7 @@ export function deriveBuildableEnvelope(
     maxHeightFt,
     maxFootprintSqFt,
     citationUrl: d.citation_url,
-    ...(inset.empty ? { emptyReason } : {}),
+    ...(inset.empty ? { emptyReason, emptyKind } : {}),
   };
 
   const features: BuildableEnvelopeResult["geojson"]["features"] = [];
@@ -287,6 +311,7 @@ export function deriveBuildableEnvelope(
     confidence: null,
     approximate,
     empty: inset.empty,
+    ...(emptyKind ? { emptyKind } : {}),
     citationUrl: d.citation_url,
     district: d.district_name,
   };

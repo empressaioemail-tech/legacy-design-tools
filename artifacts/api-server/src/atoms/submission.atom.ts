@@ -44,7 +44,7 @@ import type {
   ContextSummary,
   EventAnchoringService,
   KeyMetric,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 import { hydrateActors as defaultHydrateActors } from "../lib/userLookup";
 

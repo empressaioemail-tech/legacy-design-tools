@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SAMPLE_READ_CONTRACT } from "@hauska/atom-contract/read-contract";
+import { SAMPLE_READ_CONTRACT } from "@empressaio/atom-contract/read-contract";
 import type { ReadContract as WireReadContract } from "@workspace/api-client-react";
 import { ReadContractChrome } from "../ReadContractChrome";
 

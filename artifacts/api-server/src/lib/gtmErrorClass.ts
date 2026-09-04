@@ -9,6 +9,7 @@ export const GTM_ERROR_CLASSES = [
   "upstream_timeout",
   "geocode_miss",
   "validation_error",
+  "serve_refused",
   "unknown",
 ] as const;
 

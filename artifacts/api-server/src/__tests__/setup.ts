@@ -42,7 +42,31 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "saved_workspace_spaces",
   "pe_user_identities",
   "pe_user_entitlements",
+  // P-87 Claude Sync -- written by the MCP server, read by the PE card.
+  "pe_ai_connections",
+  // P-98 next-action rail -- shown/acted per ladder rung. Cascades off
+  // `users`, but listed explicitly per the "if a route writes to it, it's in
+  // this list" invariant so the activation-event suite starts empty and a
+  // count assertion cannot pick up another test's rows.
+  "pe_activation_events",
+  // P-100 item 4 -- once-per-account activation milestone. A different table
+  // from `pe_activation_events` and a different subject: that one is per
+  // ladder-rung impression, this one is one row per account per milestone.
+  "pe_account_activations",
+  // P-100 item 3 -- share attribution. Cascades off `users` AND off
+  // `pe_share_grants`, but listed explicitly per the "if a route writes to
+  // it, it's in this list" invariant so a first-touch assertion cannot pick
+  // up another test's row.
+  "pe_share_attributions",
+  // P-100 item 5 -- the refusal ledger. No FK at all (install ids are not
+  // accounts), so nothing else's CASCADE clears it.
+  "gtm_event_refusals",
+  "pe_team_members",
+  "pe_team_invitations",
   "pe_saved_properties",
+  // P-91 / P-92 Wave B — screens are a different table from saves.
+  "pe_screens",
+  "pe_screen_rows",
   // R1 paywall (LOCK 2026-07-29) — per-property unlock record + signed-in
   // free chat counter. Both cascade off `users`, but listed explicitly per
   // the "if a route writes to it, it's in this list" invariant so the
@@ -53,6 +77,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // No FK chain touches it besides `users`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant.
   "pe_workbench_state",
+  // P-106 constraint search - the projection the constraint route READS.
+  // No route writes it (the build job does), but a test that seeds it must
+  // not leak rows into the next one, and the "if a test touches it, it is in
+  // this list" invariant is the same invariant either way.
+  "pe_parcel_constraint_index",
+  "pe_parcel_constraint_index_builds",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",
@@ -287,6 +317,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // known-empty state (its 503/404 cases assert an EMPTY store, which a
   // row leaked from an earlier test would silently turn green).
   "serving_sweep_county",
+  // P-112 email leg — magic-link tokens. No FK to `users` (a token can be
+  // requested before any account exists — the verify path is also how a
+  // brand-new signup is created), so nothing else's CASCADE clears it.
+  "pe_magic_link_tokens",
 ];
 
 /**

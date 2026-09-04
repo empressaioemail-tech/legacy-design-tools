@@ -60,7 +60,7 @@ const dbModule = await import("@workspace/db");
 const { engagements, snapshots, snapshotIfcFiles, bimModels } = dbModule;
 const { eq } = await import("drizzle-orm");
 const { PostgresEventAnchoringService } = await import(
-  "@hauska/atom-contract"
+  "@empressaio/atom-contract"
 );
 const { ensureBimModelAndEmitIfcIngestEvent, distinctIfcTypes } = await import(
   "../lib/ifcIngest"

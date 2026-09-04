@@ -94,11 +94,12 @@ describe("GET /score/registry", () => {
     const payload = body() as {
       scoreable: string[];
       unspecified: Array<{ railKey: string; unspecifiedReason: string; specOwner: string }>;
+      retiredDenominator: Array<{ railKey: string; denominatorKind: string; basis: string }>;
     };
 
-    // The six rails with zero rows in county_facet_coverage, verified against
-    // the deployment store 2026-08-19.
+    // P-59 mud scorer (2026-08-23): all 14 rails scoreable; none unspecified.
     const unspecifiedKeys = payload.unspecified.map((u) => u.railKey);
+    expect(unspecifiedKeys).toEqual([]);
     for (const railKey of [
       "roads",
       "footprint",
@@ -106,8 +107,9 @@ describe("GET /score/registry", () => {
       "rrc-wells",
       "rrc-pipelines",
       "rail-corridor",
+      "mud",
     ]) {
-      expect(unspecifiedKeys, railKey).toContain(railKey);
+      expect(payload.scoreable, railKey).toContain(railKey);
     }
     for (const u of payload.unspecified) {
       expect(u.specOwner.length, u.railKey).toBeGreaterThan(0);
@@ -117,5 +119,10 @@ describe("GET /score/registry", () => {
     for (const key of payload.scoreable) {
       expect(unspecifiedKeys).not.toContain(key);
     }
+    // Geometry's live rows are retired (S-22): not scoreable, not unspecified.
+    const retiredKeys = (payload.retiredDenominator ?? []).map((r) => r.railKey);
+    expect(retiredKeys).toContain("geometry");
+    expect(payload.scoreable).not.toContain("geometry");
+    expect(unspecifiedKeys).not.toContain("geometry");
   });
 });

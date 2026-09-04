@@ -5,12 +5,12 @@
  * Wire surfaces receive this derived read-contract object.
  */
 
-import type { ModelAttributionStamp, ReadContract } from "@hauska/atom-contract/read-contract";
+import type { ModelAttributionStamp, ReadContract } from "@empressaio/atom-contract/read-contract";
 import {
   createReadContract,
   createThreeAxisConfidence,
   createWidthedConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import { canonicalOverlayAtomKey } from "@workspace/codes";
 import { collectCalibrationSignals } from "./signals.js";
 import { computePartitionCalibration } from "./compute.js";

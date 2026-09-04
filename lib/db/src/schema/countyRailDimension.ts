@@ -21,7 +21,7 @@
  * 2026-08-08: this repo (`legacy-design-tools`) has NO live dependency edge
  * to that constant.
  *
- *   - `lib/engine-core/package.json` depends on `@hauska/atom-contract` via
+ *   - `lib/engine-core/package.json` depends on `@empressaio/atom-contract` via
  *     a VENDORED TARBALL pinned at 1.6.0 (`file:../../vendor/hauska-atom-
  *     contract-1.6.0.tgz`) — seven minor/major versions behind the current
  *     1.13.0, and under the OLD package name (`@hauska/*`, not

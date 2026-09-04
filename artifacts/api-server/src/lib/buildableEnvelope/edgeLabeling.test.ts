@@ -11,6 +11,8 @@ import {
   insetFeetForLabeling,
   normalizeStreetName,
   streetNameFromSitus,
+  expandGroupLabelsToEdges,
+  type EdgeLabel,
   type RoadCandidate,
 } from "./edgeLabeling";
 import { BASTROP_P5_ROAD_CLASS_SETBACKS } from "./roadClassSetbacks";
@@ -414,6 +416,369 @@ describe("labelEdges — corner lot (2 named street frontages)", () => {
     expect(result.edges.some((e) => e.label === "side_corner")).toBe(false);
     // Either single-front (same edge) or cornerUnresolved — never invent.
     expect(result.cornerLot).not.toBe(true);
+  });
+});
+
+// === Segmented street frontage + corner adjacency (WDLL P-60b items 3 + 5) ===
+
+/**
+ * Real parcel 48453:280239 (17005 Simsbrook Drive, Pflugerville TX), captured
+ * live 2026-08-23 from the Travis County parcel service into
+ * P:/tmp/simsbrook_forensics/parcel_by_propid.json. The Simsbrook Drive
+ * frontage is a gentle curve digitized as SEVEN chords (one 2.4 ft + six
+ * 9.0 ft, each joint turning ~0.6°); real corners on the ring turn 89.8–92.7°;
+ * the two rear edges are exactly collinear (0.00° joint).
+ */
+const SIMSBROOK_RING: Ring = [
+  [-97.6352430942568, 30.4591069676234],
+  [-97.6352520051467, 30.4590002733325],
+  [-97.6352575934357, 30.4589333628894],
+  [-97.6356142369004, 30.4589605231052],
+  [-97.6356118197417, 30.4589850542453],
+  [-97.6356096977318, 30.4590096036204],
+  [-97.6356078728062, 30.4590341729904],
+  [-97.635606341191, 30.4590587553998],
+  [-97.635605108788, 30.4590833526916],
+  [-97.6356041698402, 30.4591079578689],
+  [-97.6356039948115, 30.459114634288],
+  [-97.6352430942568, 30.4591069676234],
+];
+
+/**
+ * Real Overpass response for the same parcel (roads_overpass.json in the
+ * forensics dir), in production order (namedRoadsFromOverpass sorts longest
+ * first): two unnamed sidewalks, then Simsbrook Drive (nearest frontage edge
+ * at 7.5 m) and Dashwood Creek Drive (nearest edge 9 at 43.3 m — ACROSS the
+ * block, 142 ft from the parcel; it does not adjoin).
+ */
+const SIMSBROOK_ROADS: RoadCandidate[] = [
+  {
+    name: null,
+    highway: "footway",
+    classification: "unclassified",
+    polyline: [
+      [-97.6357348, 30.4602548],
+      [-97.6357321, 30.4602086],
+      [-97.6356672, 30.4597176],
+      [-97.6356229, 30.4593211],
+      [-97.6356194, 30.4591188],
+      [-97.6356299, 30.4589799],
+      [-97.6356649, 30.4587716],
+      [-97.6357104, 30.4585975],
+      [-97.6357536, 30.4584797],
+      [-97.6358354, 30.4583016],
+      [-97.6359451, 30.4581044],
+      [-97.6365258, 30.4572005],
+      [-97.6365289, 30.4571812],
+      [-97.6365166, 30.4571673],
+      [-97.6363733, 30.4570989],
+      [-97.6361084, 30.4569482],
+      [-97.6360896, 30.4569121],
+      [-97.635999, 30.4568155],
+      [-97.6359823, 30.4568092],
+      [-97.6359722, 30.4568086],
+      [-97.6359454, 30.4568109],
+      [-97.6358938, 30.4568566],
+      [-97.6357677, 30.4570363],
+      [-97.6357208, 30.4571242],
+      [-97.635702, 30.4571363],
+      [-97.6355638, 30.4573687],
+      [-97.6355478, 30.4573727],
+      [-97.6354901, 30.4574797],
+    ],
+  },
+  {
+    name: null,
+    highway: "footway",
+    classification: "unclassified",
+    polyline: [
+      [-97.6348485, 30.4602976],
+      [-97.63474, 30.4594236],
+      [-97.6347329, 30.45923],
+      [-97.6347329, 30.459103],
+      [-97.6347481, 30.4588682],
+      [-97.6347725, 30.4587148],
+      [-97.6348172, 30.4585291],
+      [-97.6348498, 30.4583986],
+      [-97.634925, 30.4582014],
+      [-97.6350175, 30.4579833],
+      [-97.6351191, 30.4577905],
+      [-97.6353996, 30.4573735],
+      [-97.6358241, 30.4567134],
+      [-97.6358441, 30.4566855],
+    ],
+  },
+  {
+    name: "Simsbrook Drive",
+    highway: "residential",
+    classification: "residential",
+    polyline: [
+      [-97.6366447, 30.4571234],
+      [-97.6359149, 30.4582554],
+      [-97.6358039, 30.4584991],
+      [-97.6357307, 30.4587386],
+      [-97.6356851, 30.4590384],
+      [-97.6356856, 30.4593321],
+      [-97.6358071, 30.4603513],
+    ],
+  },
+  {
+    name: "Dashwood Creek Drive",
+    highway: "residential",
+    classification: "residential",
+    polyline: [
+      [-97.6354228, 30.4574519],
+      [-97.6351246, 30.457897],
+      [-97.6350277, 30.4581045],
+      [-97.6349429, 30.458333],
+      [-97.6348737, 30.4585693],
+      [-97.6348191, 30.4587858],
+      [-97.634797, 30.4590206],
+      [-97.6347952, 30.4592555],
+      [-97.6349232, 30.4604399],
+    ],
+  },
+];
+
+const SIMSBROOK_SITUS = "17005 SIMSBROOK DR, PFLUGERVILLE, TX 78660";
+
+describe("labelEdges — Simsbrook 48453:280239 segmented frontage (WDLL P-60b 3+5)", () => {
+  it("labels all seven frontage-curve edges front and merges the collinear rear pair", () => {
+    const result = labelEdges({
+      ring: SIMSBROOK_RING,
+      roads: SIMSBROOK_ROADS,
+      situsAddress: SIMSBROOK_SITUS,
+    })!;
+    expect(result.signal).toBe("road");
+    expect(result.edges).toHaveLength(11);
+    const labels = result.edges.map((e) => e.label);
+    // Edges 0–6: the digitized frontage curve — the WHOLE curve is one street
+    // frontage (front setback applies along the entire frontage, not to one
+    // arbitrary 9 ft chord of it).
+    expect(labels.slice(0, 7)).toEqual(Array<EdgeLabel>(7).fill("front"));
+    // Edges 8+9 are exactly collinear (0.00° joint) — one logical rear edge.
+    expect(labels[8]).toBe("rear");
+    expect(labels[9]).toBe("rear");
+    // Edges 7 and 10 are the two ~113 ft sides.
+    expect(labels[7]).toBe("side");
+    expect(labels[10]).toBe("side");
+    expect(result.note).toMatch(/entire frontage/i);
+  });
+
+  it("does not fabricate a corner from non-adjoining Dashwood Creek (43.3 m)", () => {
+    const result = labelEdges({
+      ring: SIMSBROOK_RING,
+      roads: SIMSBROOK_ROADS,
+      situsAddress: SIMSBROOK_SITUS,
+    })!;
+    // Dashwood Creek passes the 45 m PRIMARY trust gate but sits 142 ft from
+    // the parcel — it does not adjoin, so this is NOT a corner lot, the note
+    // must not claim one, and it must not even read "possible corner".
+    expect(result.cornerLot).not.toBe(true);
+    expect(result.cornerUnresolved).not.toBe(true);
+    expect(result.edges.some((e) => e.label === "side_corner")).toBe(false);
+    expect(result.note).not.toMatch(/corner/i);
+  });
+
+  it("produces the SF-S feet array aligned 1:1 with the original 11 ring edges", () => {
+    const result = labelEdges({
+      ring: SIMSBROOK_RING,
+      roads: SIMSBROOK_ROADS,
+      situsAddress: SIMSBROOK_SITUS,
+    })!;
+    const feet = insetFeetForLabeling(result, {
+      front_ft: 25,
+      side_ft: 7.5,
+      rear_ft: 20,
+      side_corner_ft: 15,
+    });
+    expect(feet).toHaveLength(11);
+    expect(feet).toEqual([25, 25, 25, 25, 25, 25, 25, 7.5, 20, 20, 7.5]);
+  });
+});
+
+describe("expandGroupLabelsToEdges — 1:1 alignment contract (violation tests)", () => {
+  it("expands group labels back to per-edge labels in original ring order", () => {
+    // Groups start mid-ring (the circular walk starts after the first corner).
+    const groups = [[2, 3], [4], [0], [1]];
+    const labels: EdgeLabel[] = ["front", "side", "rear", "side"];
+    expect(expandGroupLabelsToEdges(groups, labels, 5)).toEqual([
+      "rear",
+      "side",
+      "front",
+      "front",
+      "side",
+    ]);
+  });
+
+  it("throws when a group omits an edge (misaligned expansion is caught)", () => {
+    expect(() =>
+      expandGroupLabelsToEdges([[0, 1], [2]], ["front", "side"], 4),
+    ).toThrow(/3 edges labeled, expected 4/);
+  });
+
+  it("throws when two groups claim the same edge", () => {
+    expect(() =>
+      expandGroupLabelsToEdges(
+        [
+          [0, 1],
+          [1, 2],
+        ],
+        ["front", "side"],
+        3,
+      ),
+    ).toThrow(/assigned by two groups/);
+  });
+
+  it("throws on a group/label count mismatch", () => {
+    expect(() =>
+      expandGroupLabelsToEdges([[0], [1]], ["front"], 2),
+    ).toThrow(/2 groups but 1 labels/);
+  });
+
+  it("throws on an out-of-range member index", () => {
+    expect(() =>
+      expandGroupLabelsToEdges([[0], [7]], ["front", "side"], 2),
+    ).toThrow(/outside \[0\.\.2\)/);
+  });
+});
+
+describe("labelEdges — segmented-curve synthetic (grouping)", () => {
+  const mPerDegLat = (Math.PI / 180) * 6_378_137;
+  const mPerDegLng = mPerDegLat * Math.cos((LAT0 * Math.PI) / 180);
+
+  /**
+   * 100 ft x 200 ft rectangle whose SOUTH edge is digitized as 8 sub-segments
+   * along a very shallow arc (each joint turns well under 1°) — the synthetic
+   * twin of the Simsbrook frontage curve.
+   */
+  function rectWithSegmentedSouthEdge(): Ring {
+    const halfWM = feetToMeters(50);
+    const halfHM = feetToMeters(100);
+    const bowM = 0.25; // max arc depth — keeps every joint turn < 1°
+    const ring: Ring = [];
+    // South edge, west -> east, as 8 chords of a shallow arc (9 vertices).
+    for (let k = 0; k <= 8; k++) {
+      const x = -halfWM + (k / 8) * 2 * halfWM;
+      const y = -halfHM + bowM * Math.sin((Math.PI * k) / 8);
+      ring.push([LNG0 + x / mPerDegLng, LAT0 + y / mPerDegLat]);
+    }
+    // NE and NW corners, then close (CCW).
+    ring.push([LNG0 + halfWM / mPerDegLng, LAT0 + halfHM / mPerDegLat]);
+    ring.push([LNG0 - halfWM / mPerDegLng, LAT0 + halfHM / mPerDegLat]);
+    ring.push([ring[0]![0], ring[0]![1]]);
+    return ring;
+  }
+
+  it("labels all 8 sub-segments front when the road faces that side", () => {
+    const ring = rectWithSegmentedSouthEdge();
+    const roadLat = LAT0 - (feetToMeters(100) + 5) / mPerDegLat; // 5 m south
+    const result = labelEdges({
+      ring,
+      road: [
+        [LNG0 - 0.002, roadLat],
+        [LNG0 + 0.002, roadLat],
+      ],
+    })!;
+    expect(result.signal).toBe("road");
+    // 8 south sub-segments + east + north + west = 11 edges.
+    expect(result.edges).toHaveLength(11);
+    expect(result.edges.filter((e) => e.label === "front")).toHaveLength(8);
+    expect(result.edges.filter((e) => e.label === "rear")).toHaveLength(1);
+    expect(result.edges.filter((e) => e.label === "side")).toHaveLength(2);
+    // The front sub-segments are contiguous and all on the south side.
+    const proj = projectRing(ring)!;
+    for (const e of result.edges) {
+      const a = proj.points[e.index]!;
+      const b = proj.points[(e.index + 1) % proj.points.length]!;
+      const midY = (a.y + b.y) / 2;
+      if (e.label === "front") expect(midY).toBeLessThan(0);
+      if (e.label === "rear") expect(midY).toBeGreaterThan(0);
+    }
+    // Feet array stays 1:1 with the original edges.
+    const feet = insetFeetForLabeling(result, {
+      front_ft: 25,
+      side_ft: 7.5,
+      rear_ft: 20,
+    });
+    expect(feet).toHaveLength(11);
+    result.edges.forEach((e, i) => {
+      if (e.label === "front") expect(feet[i]).toBe(25);
+    });
+  });
+
+  it("does not merge real 90° corners (plain rectangle keeps 4 logical edges)", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLatL = (Math.PI / 180) * 6_378_137;
+    const roadLat = LAT0 - feetToMeters(120) / mPerDegLatL;
+    const result = labelEdges({
+      ring,
+      road: [
+        [LNG0 - 0.002, roadLat],
+        [LNG0 + 0.002, roadLat],
+      ],
+    })!;
+    expect(result.edges.filter((e) => e.label === "front")).toHaveLength(1);
+    expect(result.edges.filter((e) => e.label === "rear")).toHaveLength(1);
+    expect(result.edges.filter((e) => e.label === "side")).toHaveLength(2);
+  });
+});
+
+describe("labelEdges — corner adjacency trust (WDLL P-60b item 5)", () => {
+  const mPerDegLat = (Math.PI / 180) * 6_378_137;
+  const mPerDegLng = mPerDegLat * Math.cos((LAT0 * Math.PI) / 180);
+  const southEdgeLat = LAT0 - feetToMeters(100) / mPerDegLat;
+  const southRoadLat = southEdgeLat - feetToMeters(15) / mPerDegLat;
+
+  function cornerRoads(westRoadDistM: number): RoadCandidate[] {
+    // West road at westRoadDistM beyond the west frontage (west edge is 50 ft
+    // from center on the 100 ft wide fixture lot).
+    const westLng = LNG0 - (feetToMeters(50) + westRoadDistM) / mPerDegLng;
+    return [
+      {
+        name: "Pecan Street",
+        polyline: [
+          [LNG0 - 0.002, southRoadLat],
+          [LNG0 + 0.002, southRoadLat],
+        ],
+      },
+      {
+        name: "Main Avenue",
+        polyline: [
+          [westLng, LAT0 - 0.002],
+          [westLng, LAT0 + 0.002],
+        ],
+      },
+    ];
+  }
+
+  it("still resolves a genuine corner lot (second road 12 m off the west frontage)", () => {
+    const ring = rectRing(LNG0, LAT0);
+    const result = labelEdges({
+      ring,
+      roads: cornerRoads(12),
+      situsAddress: "703 PECAN ST",
+    })!;
+    expect(result.cornerLot).toBe(true);
+    expect(result.edges.some((e) => e.label === "side_corner")).toBe(true);
+    expect(result.note).toMatch(/corner lot/i);
+  });
+
+  it("rejects a second road inside the 45 m trust gate but beyond adjacency (35 m)", () => {
+    const ring = rectRing(LNG0, LAT0);
+    // 35 m passed the OLD blanket gate (< 45 m) and fabricated a corner; a
+    // road across the block is not a frontage. It must neither resolve a
+    // corner nor leave "possible corner" wording behind.
+    const result = labelEdges({
+      ring,
+      roads: cornerRoads(35),
+      situsAddress: "703 PECAN ST",
+    })!;
+    expect(result.signal).toBe("road");
+    expect(result.cornerLot).not.toBe(true);
+    expect(result.cornerUnresolved).not.toBe(true);
+    expect(result.edges.some((e) => e.label === "side_corner")).toBe(false);
+    expect(result.note).not.toMatch(/corner/i);
   });
 });
 

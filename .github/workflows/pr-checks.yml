@@ -30,8 +30,12 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
+      - name: Install ripgrep (retirement gate + import-boundary tests)
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: check-no-hauska-atom-contract
+        run: node scripts/check-no-hauska-atom-contract.mjs
       - name: Typecheck
         run: pnpm run typecheck
   test:
@@ -101,6 +105,22 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: Install postgis into the postgres service container
+        # TXGIO-GEOM-FIX: txgio_parcel.geom is a real PostGIS geometry(Geometry,4326)
+        # column in production (added by an uncodified manual process this card
+        # tracks properly for the first time), and upsertTxgioParcels now derives it
+        # on every write. pgvector/pgvector:pg14 has no postgis package baked in, but
+        # its PGDG apt repo is already configured, so it installs the same way it
+        # would on any Debian bookworm host. The server process runs INSIDE the
+        # service container, so the package has to land there too, not on the runner.
+        run: |
+          CONTAINER_ID=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
+          docker exec -u root "$CONTAINER_ID" bash -c "apt-get update && apt-get install -y postgresql-14-postgis-3"
+      - name: Enable postgis extension
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS postgis;"
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
       - name: Check schema fixture drift
@@ -545,3 +565,50 @@ jobs:
             exit 1
           fi
           echo "ci-vintage-predicate: clean (${#hits[@]} candidate file(s) checked)"
+
+  ci-pr-base-is-main:
+    # LOAD-BEARING NAME. "PR base is main" is a REQUIRED status check on main
+    # (branch protection). Protection matches the check-run name, so renaming
+    # this silently removes the requirement with no error and a green PR.
+    # Change it only together with the protection setting.
+    #
+    # PR #601 (2026-09-04, overlayDistricts serve cutover) merged into an
+    # abandoned stacked-PR branch instead of main; nothing caught the wrong
+    # base at merge time, and its content only reached main because #602
+    # happened to retarget and carry it along. This is a metadata check on
+    # the PR itself, not a content grep: every PR into this repo targets
+    # main, full stop. Stacked-PR branches may still merge into each other
+    # locally if a lane wants that shape, but the repo's own PRs never do.
+    name: PR base is main
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: ci-pr-base-is-main
+        run: |
+          if [ "${{ github.event.pull_request.base.ref }}" != "main" ]; then
+            echo "FAIL ci-pr-base-is-main: PR #${{ github.event.pull_request.number }} targets '${{ github.event.pull_request.base.ref }}', not main. Retarget the PR base to main."
+            exit 1
+          fi
+          echo "ci-pr-base-is-main: clean (base is main)"
+
+  cortex-daily-limit-bake:
+    name: cortex daily limit bake
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-cortex-daily-limit-50000
+        run: |
+          # --set-env-vars is authoritative-replace. 10000 locked the operator
+          # out twice on 2026-08-28. The bake must stay 50000.
+          if rg -n 'CORTEX_USER_DAILY_API_LIMIT=10000' .github/workflows/cloud-run-deploy.yml; then
+            echo "FAIL ci-cortex-daily-limit-50000: bake is 10000; a deploy will lock the operator out"
+            exit 1
+          fi
+          if ! rg -q -- '--set-env-vars=.*CORTEX_USER_DAILY_API_LIMIT=50000' .github/workflows/cloud-run-deploy.yml; then
+            echo "FAIL ci-cortex-daily-limit-50000: --set-env-vars bake is missing CORTEX_USER_DAILY_API_LIMIT=50000"
+            exit 1
+          fi
+          echo "ci-cortex-daily-limit-50000: clean"
