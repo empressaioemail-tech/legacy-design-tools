@@ -34,6 +34,23 @@
  * and are simply empty for a scalar rail. No rail-metadata duplication of
  * hauska-engine's PARCEL_RECORD_RAIL_META, which is not published for
  * cross-repo consumption.
+ *
+ * `raw` ON A "value" CELL (added F-01, serve/prod cutover for ACQUIRE-GIS
+ * wave 1 + PARCEL wave 2, 2026-09-04): a "value" cell_state can carry rail-
+ * specific sibling fields beyond the generic {value, source, vintage,
+ * disposition, rowCount} shape this reader already lifts out -- e.g.
+ * schoolDistrict's own cell_state carries `districtCode` and `geoid`
+ * alongside `value` (parcel-school-district.mjs's schoolDistrictCellState),
+ * and maxImperviousCoverPct's carries `watershedType`, `inRechargeZone`,
+ * and `crosswalkCitation` (parcel-max-impervious-cover.mjs's
+ * maxImperviousCoverCellState). Every rail adapter up to this card only
+ * ever needed companion rows for "more than the bare scalar" data, so this
+ * gap was invisible until a rail's own extra data lived on the CELL itself
+ * rather than in a companion row. `raw` carries the full decoded cell_state
+ * object so a per-rail adapter (e.g. schoolDistrictFactFromParcelRecord.ts)
+ * can read its own extra fields without this shared reader needing to know
+ * every rail's private shape. Purely additive: every existing field is
+ * unchanged, and no existing adapter reads `raw`.
  */
 
 import pg from "pg";
@@ -65,6 +82,8 @@ export type ParcelRecordCellPresent = {
   disposition: "rows" | "empty-set" | null;
   rowCount: number | null;
   companionRows: ParcelRecordCompanionRow[];
+  /** The full decoded cell_state object, for a rail whose own extra fields live on the cell itself. See module doc. */
+  raw: Record<string, unknown>;
 };
 
 export type ParcelRecordCellAbsent = {
@@ -241,6 +260,7 @@ export function interpretParcelRecordCell(
         disposition,
         rowCount: asNullableNumber(rec.rowCount),
         companionRows: interpretCompanionRows(companionRows),
+        raw: rec,
       };
     }
     case "absent-verified": {

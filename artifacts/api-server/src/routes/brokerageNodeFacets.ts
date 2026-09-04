@@ -131,6 +131,25 @@
  * records). No gate verdict has yet been computed for this rail. Never
  * SELECT bake / place_layer_snapshots / CAD / GIS for this field.
  *
+ * SCHOOL DISTRICT IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `schoolDistrictFact` is read from parcel_record via
+ * loadSchoolDistrictFactForServe. No atom, no legacy path. `districtCode`
+ * is the hyphenated CCC-DDD form. A 13-parcel, program-wide zero-hit/multi-
+ * hit anomaly class (see schoolDistrictFactRead.ts's module doc) serves as
+ * an ordinary unaccounted refusal, not a defect. No gate verdict has yet
+ * been computed for this rail. Never SELECT bake / place_layer_snapshots /
+ * CAD / GIS for this field.
+ *
+ * MAX IMPERVIOUS COVER PCT IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01,
+ * serve/prod cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `maxImperviousCoverPctFact` is read from parcel_record via
+ * loadMaxImperviousCoverPctFactForServe. Travis (48453) / Austin ONLY. No
+ * atom, no legacy path. Most Travis parcels sit outside Austin's
+ * watershed-regulation area entirely and are deliberately untouched (not
+ * an anomaly). No gate verdict has yet been computed for this rail. Never
+ * SELECT bake / place_layer_snapshots / CAD / GIS for this field.
+ *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
  * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
  * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
@@ -164,6 +183,8 @@ import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadUtilityServiceFactForServe } from "../lib/utilityServiceFactServeCutover";
 import { loadOverlayDistrictsFactForServe } from "../lib/overlayDistrictsFactServeCutover";
 import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover";
+import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
+import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -657,6 +678,8 @@ brokerageNodeFacetsRouter.get(
     let utilityServiceFact;
     let overlayDistrictsFact;
     let agValuationFact;
+    let schoolDistrictFact;
+    let maxImperviousCoverPctFact;
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
@@ -674,6 +697,8 @@ brokerageNodeFacetsRouter.get(
         utilityServiceFact,
         overlayDistrictsFact,
         agValuationFact,
+        schoolDistrictFact,
+        maxImperviousCoverPctFact,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -704,6 +729,8 @@ brokerageNodeFacetsRouter.get(
         loadUtilityServiceFactForServe(parcelNodeId),
         loadOverlayDistrictsFactForServe(parcelNodeId),
         loadAgValuationFactForServe(parcelNodeId),
+        loadSchoolDistrictFactForServe(parcelNodeId),
+        loadMaxImperviousCoverPctFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -821,6 +848,15 @@ brokerageNodeFacetsRouter.get(
       // typed not-cut-over refusal until a gate evaluation for this rail
       // lands.
       agValuationFact,
+      // parcel_record-only, no legacy path (see module doc). A known
+      // 13-parcel anomaly class serves as an ordinary unaccounted refusal.
+      // Resolves to a typed not-cut-over refusal until a gate evaluation
+      // for this rail lands.
+      schoolDistrictFact,
+      // parcel_record-only, no legacy path (see module doc). Travis/Austin
+      // only. Resolves to a typed not-cut-over refusal until a gate
+      // evaluation for this rail lands.
+      maxImperviousCoverPctFact,
       }),
     );
   },
