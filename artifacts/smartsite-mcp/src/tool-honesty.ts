@@ -938,3 +938,60 @@ export function declarePlaceSearchRefusal(
     ...(detail ? { detail } : {}),
   };
 }
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's missClass display text, read from the
+ * same shared VOCABULARY table placeSearchRefusalDisplayText reads from
+ * above, so the machine token and the human word can never drift apart.
+ * Throws rather than falling back to the raw token (same convention as
+ * placeSearchRefusalDisplayText and vocabulary.ts's own requireString): a
+ * closed missClass with no display row is a defect in this package, not a
+ * value to paper over. Only `out_of_coverage` is looked up through this
+ * path today — `no-hit` and `located-unbound` ship unenriched, as they
+ * always have, and this function is never called for them.
+ */
+export function missClassDisplayText(
+  missClass: string,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): string {
+  const entry = vocabulary.find((e) => e.token === missClass);
+  if (!entry) {
+    throw new Error(`vocabulary: no entry for missClass "${missClass}"`);
+  }
+  return entry.displayText;
+}
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's out-of-coverage agentGuidance: names
+ * what Smart Site covers today rather than leaving the caller with only a
+ * negative ("out_of_coverage" alone reads no better than "no-hit" did — the
+ * defect the card exists to fix names the SAME collapse for the guidance
+ * text, not just the machine token).
+ *
+ * Mirrors COVERED_STATE_CODE in artifacts/api-server/src/lib/
+ * txgioAddressNormalize.ts (read 2026-09-04): the situs / rooftop store is
+ * Texas-only today. Not imported — this package has no workspace
+ * dependency on api-server (HTTP boundary only, same convention documented
+ * on PlaceSearchRefusalCode above). If api-server's covered-state set ever
+ * grows past one state, this sentence goes stale until updated by hand.
+ *
+ * Deliberately does not enumerate counties (masters 06/08's coverage
+ * posture: state coverage broadens continuously, and a per-county claim
+ * goes stale on the next county landed); state-level is also the actual
+ * granularity this detection operates at.
+ */
+export function outOfCoverageAgentGuidance(outOfCoverageState?: string): string {
+  const parsedAs =
+    typeof outOfCoverageState === "string" && outOfCoverageState.length > 0
+      ? ` This query parsed as state "${outOfCoverageState}".`
+      : "";
+  return (
+    "Smart Site's parcel data covers Texas today; coverage is expanding over " +
+    "time and this is not a permanent boundary." +
+    parsedAs +
+    " This is not a claim that the address does not exist or that the " +
+    "parcel is unverified — only that Smart Site has not reached this " +
+    "place yet. Do not report it to the user as a miss or a bad address; " +
+    "say plainly that this place is outside Smart Site's coverage today."
+  );
+}

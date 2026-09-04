@@ -77,6 +77,7 @@ import {
   situsSearchPrefixVariants,
   situsSearchStreetKeys,
   texasCountyFipsList,
+  isOutOfCoverageStateCode,
   type PlaceSearchLocality,
 } from "./txgioAddressNormalize";
 import { allStoreCounties } from "./brokerageTxParcels";
@@ -941,12 +942,27 @@ export type PlaceSearchHit =
   | (SitusSearchHit & { source: "parcel-situs" })
   | AddressPointSearchHit;
 
-/** Empty hits carry a class so a budget refuse is not a "not a place". */
-export type SitusSearchMissClass = "no-hit" | typeof SITUS_SEARCH_BUDGET_ERROR;
+/**
+ * Empty hits carry a class so a budget refuse is not a "not a place", and
+ * — P-107 / OPS-16 A-072 — so a query outside every place Smart Site
+ * covers is not a "not a place" either. `out_of_coverage` and `no-hit` are
+ * honest opposites: the first means Smart Site never had any business
+ * looking, the second means it looked, in coverage, and found nothing.
+ */
+export type SitusSearchMissClass =
+  | "no-hit"
+  | "out_of_coverage"
+  | typeof SITUS_SEARCH_BUDGET_ERROR;
 
 export type PlaceSearchResult = {
   hits: PlaceSearchHit[];
   missClass?: SitusSearchMissClass;
+  /**
+   * Present only when `missClass` is `"out_of_coverage"`: the recognised
+   * out-of-coverage state/territory code the query parsed to (e.g. "AZ").
+   * P-107 / OPS-16 A-072.
+   */
+  outOfCoverageState?: string;
 };
 
 function formatAddressPointLabel(row: {
@@ -1099,6 +1115,27 @@ export async function searchPlaceByPrefix(input: {
   };
 
   const locality = parsePlaceSearchLocality(input.query);
+
+  /**
+   * P-107 / OPS-16 A-072. An explicit, recognised out-of-state token means
+   * this query cannot resolve in a Texas-only store no matter what the DB
+   * holds — fire the honest out-of-coverage miss BEFORE running a single
+   * query, rather than letting it fall through the ordinary situs / prefix
+   * / address-point ladder to an indistinguishable `no-hit`. This is the
+   * exact collapse the card measured: `no-hit` reads as "this address does
+   * not exist" whether the store looked, in coverage, and found nothing,
+   * or never had any business looking in the first place. A query with no
+   * parsed state, or an unrecognised two-letter token, is left alone and
+   * still runs the ordinary search below (see isOutOfCoverageStateCode).
+   */
+  if (isOutOfCoverageStateCode(locality.state)) {
+    return {
+      hits: [],
+      missClass: "out_of_coverage",
+      outOfCoverageState: locality.state!,
+    };
+  }
+
   const keys = situsSearchStreetKeys(input.query);
   const situsHitsRaw =
     keys.length > 0

@@ -338,6 +338,25 @@ export const VOCABULARY: readonly VocabularyEntry[] = [
     meaning:
       "serve_refused reason (find_parcels): the constraint index holds no parcels for that county, so there is nothing to filter. Refused rather than reported as zero matches, because zero matches and never built are different facts.",
   },
+  /**
+   * P-107 (OPS-16 A-072). find_parcel's missing miss class. Mirrors
+   * SitusSearchMissClass in artifacts/api-server/src/lib/
+   * txgioAddressResolve.ts (read 2026-09-04): a query whose parsed state is
+   * a real, recognised state/territory other than the one the store covers
+   * today returns this missClass on a normal 200, before the ordinary
+   * search ever runs. Not a serve_refused refusal (find_parcel's query
+   * mode has no 422 refusal path) so it is not a PlaceSearchRefusalCode
+   * member; the wire carries it as `missClass`, same slot as `no-hit`, and
+   * tool-honesty.ts's splitFindParcelHits reads this row's displayText
+   * (never re-typed) plus its own hand-mirrored agentGuidance onto the
+   * response when this token fires.
+   */
+  {
+    token: "out_of_coverage",
+    displayText: "Outside Smart Site coverage",
+    meaning:
+      "find_parcel missClass: the query resolved to a state Smart Site's parcel store has not reached yet. The honest opposite of 'no-hit': this is not a claim that the address is unverified or missing, only that coverage has not extended there. agentGuidance names what is covered today.",
+  },
 ] as const;
 
 export const VOCABULARY_RESOURCE_URI = "docs://smartsite/vocabulary-p91v3.json";

@@ -686,3 +686,59 @@ export function texasCountyFipsList(): string[] {
   }
   return out;
 }
+
+/**
+ * Real, verified two-letter USPS state and territory codes. Deliberately
+ * NARROWER than {@link STATE_RE} above: that regex is kept broad on purpose
+ * (any two-letter token sitting directly before a trailing zip is treated
+ * as *a* state, for normalization/stripping purposes only), but
+ * out-of-coverage detection needs the opposite bias — a false positive
+ * reads to a caller as "Smart Site does not serve this place" when the
+ * real defect might just be a garbled query, so this set only recognises
+ * tokens that are genuinely a real state or territory abbreviation.
+ */
+export const US_STATE_AND_TERRITORY_CODES: ReadonlySet<string> = new Set([
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "DC", "PR", "VI", "GU", "AS", "MP",
+]);
+
+/**
+ * The one state the situs / rooftop store covers today — every FIPS
+ * {@link texasCountyFipsList} emits is a Texas county. Read by
+ * {@link isOutOfCoverageStateCode} and exported so a caller can name it in
+ * a user-facing message without hardcoding the string a second time.
+ *
+ * P-107 / OPS-16 A-072. This is the one place this claim lives on the
+ * api-server side; smartsite-mcp's tool-honesty.ts mirrors it by hand
+ * (documented there, same convention as PlaceSearchRefusalCode above)
+ * because that package has no workspace dependency on this one.
+ */
+export const COVERED_STATE_CODE = "TX";
+
+/**
+ * True when `code` is a real, recognised US state/territory abbreviation
+ * OTHER than the one the store covers today ({@link COVERED_STATE_CODE}).
+ *
+ * Used by {@link searchPlaceByPrefix} (P-107 / OPS-16 A-072) to distinguish
+ * "this query resolves outside every place Smart Site covers" from an
+ * honest in-coverage no-match, so the two stop collapsing into the same
+ * bare `no-hit` — the defect the card measured: an out-of-coverage address
+ * (`1600 E Camelback Rd, Phoenix, AZ`) and a genuine in-coverage miss
+ * (`147 Kahana Ln, Bastrop` with no matching parcel) came back
+ * indistinguishable, which reads to a user as "this address does not
+ * exist" either way.
+ *
+ * Scoped deliberately narrow: fires only on an EXPLICIT, recognised state
+ * token (e.g. "...Phoenix, AZ"). A query with no parsed state (most typed
+ * Texas addresses omit the state) or an unrecognised two-letter token is
+ * NOT treated as out-of-coverage and still runs the ordinary search —
+ * false "out of coverage" is the worse failure mode here, not a missed one.
+ */
+export function isOutOfCoverageStateCode(code: string | null): boolean {
+  if (!code) return false;
+  return code !== COVERED_STATE_CODE && US_STATE_AND_TERRITORY_CODES.has(code);
+}

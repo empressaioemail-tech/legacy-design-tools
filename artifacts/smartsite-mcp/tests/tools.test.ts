@@ -1403,6 +1403,65 @@ describe("find_parcel hits carry parcel records only (P-91 QA 2026-08-30 D1)", (
     expect(JSON.parse(splitFindParcelHits(budget))).toEqual({ hits: [], missClass: "situs-search-budget" });
     expect(splitFindParcelHits("<html>500</html>")).toBe("<html>500</html>");
   });
+
+  /**
+   * P-107 (OPS-16 A-072). find_parcel used to collapse "outside Smart
+   * Site's coverage" (e.g. Phoenix, AZ) and "in coverage, nothing on file"
+   * into the same bare no-hit. searchPlaceByPrefix fires missClass
+   * out_of_coverage BEFORE the store is ever searched, so there is never a
+   * located row alongside it (the address-point ladder never ran); here we
+   * only need to prove splitFindParcelHits enriches it with
+   * missClassDisplayText and agentGuidance, and leaves no-hit /
+   * located-unbound exactly as they were.
+   */
+  it("enriches out_of_coverage with missClassDisplayText and agentGuidance naming what is covered", () => {
+    const outOfCoverage = JSON.stringify({
+      hits: [],
+      missClass: "out_of_coverage",
+      outOfCoverageState: "AZ",
+    });
+    const out = JSON.parse(splitFindParcelHits(outOfCoverage)) as {
+      hits: unknown[];
+      missClass: string;
+      outOfCoverageState: string;
+      missClassDisplayText: string;
+      agentGuidance: string;
+      located?: unknown;
+    };
+    expect(out.hits).toEqual([]);
+    expect(out.missClass).toBe("out_of_coverage");
+    expect(out.outOfCoverageState).toBe("AZ");
+    expect(out.located).toBeUndefined();
+    expect(out.missClassDisplayText.length).toBeGreaterThan(0);
+    expect(out.missClassDisplayText).not.toBe("out_of_coverage");
+    expect(out.agentGuidance.toLowerCase()).toContain("texas");
+    expect(out.agentGuidance).toContain("AZ");
+  });
+
+  it("does not attach missClassDisplayText or agentGuidance to no-hit or located-unbound (unenriched, as always)", () => {
+    const noHit = JSON.parse(
+      splitFindParcelHits(JSON.stringify({ hits: [], missClass: "no-hit" })),
+    ) as Record<string, unknown>;
+    expect(noHit.missClassDisplayText).toBeUndefined();
+    expect(noHit.agentGuidance).toBeUndefined();
+
+    const locatedUnbound = JSON.parse(
+      splitFindParcelHits(
+        JSON.stringify({
+          hits: [
+            {
+              parcelNodeId: null,
+              label: "9999 Nowhere Ln, Bastrop, TX",
+              source: "address-point",
+            },
+          ],
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(locatedUnbound.missClass).toBe("located-unbound");
+    expect(locatedUnbound.missClassDisplayText).toBeUndefined();
+    expect(locatedUnbound.agentGuidance).toBeUndefined();
+  });
 });
 
 /**
