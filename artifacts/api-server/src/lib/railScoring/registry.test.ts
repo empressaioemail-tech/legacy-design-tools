@@ -16,6 +16,7 @@ import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 import {
   RAIL_SCORING_DECLARATION,
   absenceProbeCoversCounty,
+  denominatorNeedsCityBoundary,
   isLiveCountingDenominatorKind,
   isScoreableRule,
   railScoringRuleFor,
@@ -32,6 +33,28 @@ import {
   measureRailCell,
   RailNotMeasurableError,
 } from "./measure";
+
+/**
+ * SS-W15's incorporated-city-parcels path (composed with S-22, 2026-09-04).
+ * A SECOND executable denominator now exists alongside the parcel-feature
+ * count: `measureColumnStamp` routes zoning to `measureIncorporatedStampCounts`
+ * (`cityBoundaryDenominator.ts`) instead. `ST_PointOnSurface` is the marker
+ * the real executed query and zoning's own declared basis both carry,
+ * mirroring `EXECUTED_SQL`'s role for the parcel-feature path. Module-scoped
+ * because both divergence-check describe blocks below need it.
+ */
+const EXECUTED_INCORPORATED_SQL = "ST_PointOnSurface";
+/**
+ * Which rail(s) are INDEPENDENTLY known to execute the incorporated path,
+ * as a fact checked AGAINST the registry -- never derived from a rule's own
+ * declared `denominator.kind`. Deriving it from the declaration would be
+ * circular: a rail that regressed to (wrongly) declaring the ordinary
+ * parcel-feature kind would then be checked as an ordinary parcel-feature
+ * rail and could pass despite being wrong, which is the exact class of bug
+ * this whole file exists to catch (S-21: geometry's own declared kind was
+ * trusted instead of verified against what the code actually executes).
+ */
+const INCORPORATED_PATH_RAIL_KEYS: ReadonlySet<string> = new Set(["zoning"]);
 
 describe("registry / rail-dimension divergence", () => {
   it("declares a scoring rule for EVERY rail in COUNTY_RAIL_DECLARATION", () => {
@@ -122,7 +145,30 @@ describe("registry completeness", () => {
         }
         continue;
       }
-      // Live reconstructible rails (flood, cad, landuse, owner, zoning, envelope).
+      // SS-W15 (composed with S-22): zoning is INDEPENDENTLY known (via
+      // INCORPORATED_PATH_RAIL_KEYS, a hardcoded fact about the rail, never
+      // derived from its own declaration -- see the S-22 divergence
+      // describe block below for why deriving it from `kind` is circular
+      // and empirically fails to catch a regression) to execute the
+      // incorporated-city-parcels path, not the parcel-feature path every
+      // other live reconstructible rail uses.
+      if (INCORPORATED_PATH_RAIL_KEYS.has(rule.railKey)) {
+        if (kind !== "incorporated-city-parcels") {
+          errors.push(
+            `${rule.railKey} declares denominator.kind '${kind}' but measure.ts executes 'incorporated-city-parcels' for this rail`,
+          );
+        }
+        if (!basis.includes(EXECUTED_INCORPORATED_SQL)) {
+          errors.push(
+            `${rule.railKey} basis does not contain the SQL measure.ts executes for the incorporated-city-parcels path (${EXECUTED_INCORPORATED_SQL})`,
+          );
+        }
+        if (basis.trim().length <= 10) {
+          errors.push(`${rule.railKey} basis is too short to name a counting rule`);
+        }
+        continue;
+      }
+      // Live reconstructible rails (flood, cad, landuse, owner, envelope).
       if (kind !== executedKind) {
         errors.push(
           `${rule.railKey} declares denominator.kind '${kind}' but measure.ts executes '${executedKind}'`,
@@ -349,16 +395,24 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
     resolve(dirname(fileURLToPath(import.meta.url)), "./measure.ts"),
     "utf8",
   );
+  // The incorporated-city-parcels path's own measurement query lives in a
+  // separate module (SS-W15), not measure.ts -- measure.ts only dispatches
+  // to it. Read separately rather than assume functionSlice(measureSrc, ...)
+  // would ever find it there.
+  const cityBoundarySrc = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "./cityBoundaryDenominator.ts"),
+    "utf8",
+  );
   const EXECUTED_SQL = "count(DISTINCT feature_index)";
 
-  function functionSlice(src: string, name: string): string {
+  function functionSlice(src: string, name: string, sourceLabel = "measure.ts"): string {
     const markers = [`export async function ${name}`, `async function ${name}`];
     let start = -1;
     for (const marker of markers) {
       start = src.indexOf(marker);
       if (start >= 0) break;
     }
-    expect(start, `measure.ts must contain ${name}`).toBeGreaterThanOrEqual(0);
+    expect(start, `${sourceLabel} must contain ${name}`).toBeGreaterThanOrEqual(0);
     const rest = src.slice(start + 1);
     const next = rest.search(/\n(?:export )?async function /);
     return next < 0 ? src.slice(start) : src.slice(start, start + 1 + next);
@@ -366,6 +420,10 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
 
   it("can read measure.ts (a missing file must FAIL, not skip)", () => {
     expect(measureSrc).toContain("readParcelFeatureCount");
+  });
+
+  it("can read cityBoundaryDenominator.ts (a missing file must FAIL, not skip)", () => {
+    expect(cityBoundarySrc).toContain("measureIncorporatedStampCounts");
   });
 
   it("readParcelFeatureCount is the function that executes the parcel-feature count", () => {
@@ -387,6 +445,28 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
     }
   });
 
+  // EXECUTED_INCORPORATED_SQL and INCORPORATED_PATH_RAIL_KEYS are
+  // module-scoped (top of file) -- this describe block's own divergence
+  // check below shares them with "registry completeness"'s
+  // denominatorHonestyErrors, which has the identical composition gap.
+
+  it("measureIncorporatedStampCounts is the function that executes the incorporated-city-parcels count", () => {
+    const body = functionSlice(
+      cityBoundarySrc,
+      "measureIncorporatedStampCounts",
+      "cityBoundaryDenominator.ts",
+    );
+    expect(body).toContain(EXECUTED_INCORPORATED_SQL);
+  });
+
+  it("measureColumnStamp dispatches to the incorporated path BEFORE the parcel-feature path, gated on denominatorNeedsCityBoundary", () => {
+    const body = functionSlice(measureSrc, "measureColumnStamp");
+    const dispatchAt = body.indexOf("denominatorNeedsCityBoundary");
+    const fallbackAt = body.indexOf("readParcelFeatureCount");
+    expect(dispatchAt).toBeGreaterThanOrEqual(0);
+    expect(fallbackAt).toBeGreaterThan(dispatchAt);
+  });
+
   it("measureRailCell refuses a retired denominator BEFORE dispatching to a measurer", () => {
     const body = functionSlice(measureSrc, "measureRailCell");
     const retiredAt = body.indexOf("retired-unknown-denominator");
@@ -396,10 +476,15 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
   });
 
   it("scoreable rails declare the denominator measure.ts actually executes", () => {
+    // Two executable paths now (SS-W15 composed with S-22): most scoreable
+    // rails still execute the county-wide parcel-feature count, but zoning
+    // deliberately does not -- denominatorNeedsCityBoundary routes it to the
+    // incorporated-city-parcels count instead, which IS its declared kind,
+    // not a divergence from it.
     const atomCountKeys = ["flood", "cad", "landuse", "owner"];
-    const stampKeys = ["zoning"];
+    const incorporatedPathStampKeys = ["zoning"];
     const conjunctionKeys = ["envelope"];
-    for (const railKey of [...atomCountKeys, ...stampKeys, ...conjunctionKeys]) {
+    for (const railKey of [...atomCountKeys, ...conjunctionKeys]) {
       const rule = railScoringRuleFor(railKey);
       expect(rule, railKey).toBeDefined();
       expect(isScoreableRule(rule!), railKey).toBe(true);
@@ -407,6 +492,14 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
         EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND,
       );
       expect(rule!.denominator.basis, railKey).toContain(EXECUTED_SQL);
+    }
+    for (const railKey of incorporatedPathStampKeys) {
+      const rule = railScoringRuleFor(railKey);
+      expect(rule, railKey).toBeDefined();
+      expect(isScoreableRule(rule!), railKey).toBe(true);
+      expect(denominatorNeedsCityBoundary(rule!.denominator.kind), railKey).toBe(true);
+      expect(rule!.denominator.kind, railKey).toBe("incorporated-city-parcels");
+      expect(rule!.denominator.basis, railKey).toContain(EXECUTED_INCORPORATED_SQL);
     }
   });
 
@@ -427,6 +520,35 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
         continue;
       }
       if (rule.kind === "unspecified") continue;
+      // SS-W15 (composed with S-22): zoning takes the incorporated-city-
+      // parcels path, not the parcel-feature path everyone else takes --
+      // check it against THAT path's own executed kind/SQL.
+      //
+      // Routed on INCORPORATED_PATH_RAIL_KEYS (an independent fact about
+      // the rail), NOT on denominatorNeedsCityBoundary(rule.denominator.kind)
+      // -- an earlier version of this check tried that and it is circular:
+      // a rule that regressed to (wrongly) declaring the ordinary
+      // parcel-feature kind would make denominatorNeedsCityBoundary itself
+      // return false, routing it to the ordinary-path check below, which it
+      // would then PASS if its basis happened to be internally consistent
+      // with that wrong kind. Proven empirically, not just reasoned: a test
+      // mutating zoning to declare the parcel-feature kind with a
+      // parcel-feature basis produced zero errors under the circular
+      // version. Exactly the S-21 failure class this file exists to catch
+      // (a rule's own declaration deciding how it gets checked).
+      if (INCORPORATED_PATH_RAIL_KEYS.has(rule.railKey)) {
+        if (rule.denominator.kind !== "incorporated-city-parcels") {
+          errors.push(
+            `${rule.railKey} declares '${rule.denominator.kind}' but measure.ts executes 'incorporated-city-parcels' for this rail`,
+          );
+        }
+        if (!rule.denominator.basis.includes(EXECUTED_INCORPORATED_SQL)) {
+          errors.push(
+            `${rule.railKey} basis does not contain the SQL measure.ts executes for the incorporated-city-parcels path`,
+          );
+        }
+        continue;
+      }
       if (rule.denominator.kind !== executedKind) {
         errors.push(
           `${rule.railKey} declares '${rule.denominator.kind}' but measure.ts executes '${executedKind}'`,
@@ -486,6 +608,50 @@ describe("declared denominator vs executed measurement (S-22 divergence)", () =>
       EXECUTED_SQL,
     );
     expect(errors.some((e) => e.includes("flood") && e.includes("none"))).toBe(true);
+  });
+
+  it("FAILS if the incorporated-path rail (zoning) declares the wrong kind for its own dispatch", () => {
+    const dishonest = RAIL_SCORING_DECLARATION.map((r) =>
+      r.railKey === "zoning"
+        ? {
+            ...r,
+            denominator: {
+              kind: EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND,
+              basis: `${EXECUTED_SQL} in txgio_parcel for the county`,
+            },
+          }
+        : r,
+    );
+    const errors = declarationVsExecutionErrors(
+      dishonest,
+      EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND,
+      EXECUTED_SQL,
+    );
+    // INCORPORATED_PATH_RAIL_KEYS routes on railKey, independent of the
+    // (now-dishonest) declared kind, so zoning still lands in the
+    // incorporated-path branch here and is caught directly: it declares the
+    // parcel-feature kind but measure.ts executes the incorporated-city-
+    // parcels query for this rail regardless of what it claims. This is
+    // the regression this test exists to catch -- an earlier, circular
+    // version of the routing (keyed on the declared kind itself) let this
+    // exact mutation through with zero errors.
+    expect(errors.some((e) => e.includes("zoning"))).toBe(true);
+  });
+
+  it("FAILS if a live incorporated-path rail's basis drops the SQL marker measure.ts actually executes", () => {
+    const dishonest = RAIL_SCORING_DECLARATION.map((r) =>
+      r.railKey === "zoning"
+        ? { ...r, denominator: { kind: r.denominator.kind, basis: "trust me" } }
+        : r,
+    );
+    const errors = declarationVsExecutionErrors(
+      dishonest,
+      EXECUTED_PARCEL_FEATURE_DENOMINATOR_KIND,
+      EXECUTED_SQL,
+    );
+    expect(
+      errors.some((e) => e.includes("zoning") && e.includes("incorporated-city-parcels path")),
+    ).toBe(true);
   });
 
   it("measureRailCell throws denominator_retired for geometry without querying either store", async () => {
