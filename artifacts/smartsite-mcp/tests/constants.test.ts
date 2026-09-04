@@ -13,12 +13,11 @@ describe("smartsite-mcp constants", () => {
     expect(SERVER_NAME).toBe("Smart Site");
   });
 
-  it("marks the records pair, ask_the_map and export_instrument blocked, each with a reason", () => {
+  it("marks the records pair and ask_the_map blocked, each with a reason", () => {
     const blocked = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked");
     expect(blocked.map((t) => t.name).sort()).toEqual([
       "ask_the_map",
       "check_request",
-      "export_instrument",
       "request_records",
     ]);
     for (const tool of blocked) {
@@ -31,16 +30,19 @@ describe("smartsite-mcp constants", () => {
     expect((askTheMap as { blockedReason?: string }).blockedReason).toContain(
       "P-91 item 34",
     );
-    // P-109: the Hauska proxy is coded against POST /tools/export_instrument,
-    // a route that exists in no server (404, measured 2026-09-02). Blocked
-    // rather than deleted because SmartsiteToolName is derived from this
-    // array and deleting the name forces edits to src/tools.ts.
+  });
+
+  // P-110: export_instrument is live again, rewired to the real two-hop
+  // Hauska contract. "brief" has no upstream counterpart and is refused in
+  // the handler, not at the catalog level (see tools.test.ts).
+  it("export_instrument is live and names the real upstream shape, not brief", () => {
     const exportInstrument = SMARTSITE_MCP_TOOLS.find(
       (t) => t.name === "export_instrument",
     );
-    expect(
-      (exportInstrument as { blockedReason?: string }).blockedReason,
-    ).toContain("P-109 item 3");
+    expect(exportInstrument?.readiness).toBe("live");
+    expect((exportInstrument as { blockedReason?: string }).blockedReason).toBeUndefined();
+    expect(exportInstrument?.description).toContain("kind_not_available");
+    expect(exportInstrument?.description).not.toMatch(/\/tools\/export_instrument/);
   });
 
   it("descriptions do not promise a map, listings, web, or owner data", () => {
@@ -106,6 +108,6 @@ describe("llms.txt", () => {
         );
       }
     }
-    expect(lineFor("export_instrument")).toContain("not ready");
+    expect(lineFor("export_instrument")).not.toContain("not ready");
   });
 });

@@ -20,6 +20,8 @@ import {
   type R1BriefSectionDisposition,
 } from "./r1BriefCompose";
 import { composeSitusLabel } from "./situsCompose";
+import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
+import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 
 export const SMART_SITE_RAIL_STATES = [
   "present",
@@ -116,12 +118,52 @@ export function railStateFromRead(read: RailReadInput): SmartSiteRailState {
   );
 }
 
+/**
+ * OPS-16 A-096/A-097/A-098: parcel_record's own zoning determination, when
+ * genuinely reachable (non-null only when (county, zoningDistrict) is
+ * slated and gate-passing -- see zoningFactServeCutover.ts), takes priority
+ * over the bake-derived zoningDisposition -- present maps to "present",
+ * absent-verified/not-applicable (the only two absence kinds
+ * ParcelRecordCellAbsent carries) both map to "absent-verified" (this app's
+ * one vocabulary token for a verified/positive absence -- the fix this
+ * whole card exists to ship). A "refused" record fact falls through to the
+ * legacy bake-derived computation, exactly like r1BriefCompose's own
+ * composeZoningBriefSectionFromParcelRecord -- the same "never regress a
+ * parcel with a real answer" caution, kept consistent across both depths
+ * (D2: the stub is a projection of the node).
+ */
+function railStateFromZoningFact(
+  fact: ZoningFactRead,
+  legacyZoning: unknown,
+): SmartSiteRailState {
+  if (fact.state === "present") return "present";
+  if (fact.state === "absent") return "absent-verified";
+  return railStateFromSectionDisposition(zoningDisposition(legacyZoning));
+}
+
+/** Setbacks' own mirror of railStateFromZoningFact -- see that function's doc for the shared reasoning. */
+function railStateFromSetbacksFact(
+  fact: SetbacksFactRead,
+  legacyEnvelope: unknown,
+  envelopeBriefRefusal: { state?: string } | null | undefined,
+): SmartSiteRailState {
+  if (fact.state === "present") return "present";
+  if (fact.state === "absent") return "absent-verified";
+  return railStateFromSectionDisposition(
+    envelopeDisposition(legacyEnvelope, envelopeBriefRefusal),
+  );
+}
+
 export function composeSmartSiteStub(input: {
   parcelNodeId: string;
   facets: unknown;
   flood?: RailReadInput;
   drainage?: RailReadInput;
   envelopeBriefRefusal?: { state?: string } | null;
+  /** OPS-16 A-096/A-097/A-098. Non-null only when (county, zoningDistrict) is slated and gate-passing. */
+  parcelRecordZoningFact?: ZoningFactRead | null;
+  /** OPS-16 A-096/A-097/A-098. Non-null only when (county, setbackFrontFt) is slated and gate-passing. */
+  parcelRecordSetbacksFact?: SetbacksFactRead | null;
 }): SmartSiteStub {
   const root = asRecord(input.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
@@ -148,14 +190,22 @@ export function composeSmartSiteStub(input: {
     label: situs.label,
     url: `${SMARTSITE_PARCEL_URL_PREFIX}${input.parcelNodeId}`,
     situs: situs.situs,
-    zoning: railStateFromSectionDisposition(zoningDisposition(root.zoning)),
+    zoning: input.parcelRecordZoningFact
+      ? railStateFromZoningFact(input.parcelRecordZoningFact, root.zoning)
+      : railStateFromSectionDisposition(zoningDisposition(root.zoning)),
     landUse: railStateFromSectionDisposition(
       landUseDisposition(baseFacts.landUse),
     ),
     flood,
     drainage,
-    envelope: railStateFromSectionDisposition(
-      envelopeDisposition(root.envelope, input.envelopeBriefRefusal),
-    ),
+    envelope: input.parcelRecordSetbacksFact
+      ? railStateFromSetbacksFact(
+          input.parcelRecordSetbacksFact,
+          root.envelope,
+          input.envelopeBriefRefusal,
+        )
+      : railStateFromSectionDisposition(
+          envelopeDisposition(root.envelope, input.envelopeBriefRefusal),
+        ),
   };
 }

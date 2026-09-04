@@ -22,6 +22,8 @@ import type {
 } from "./parcelRecordFactRead";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
+import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
+import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -464,11 +466,101 @@ function composeFloodBriefSection(
   };
 }
 
+/**
+ * Exported for unit tests. OPS-16 A-096/A-097/A-098: parcel_record's zoning
+ * determination takes priority over the Tier-1 bake's own zoningDisposition
+ * whenever it has genuinely earned one (present, or a verified absence --
+ * absent-verified/not-applicable), the same rule
+ * composeFloodBriefSectionFromParcelRecord already applies for flood. The
+ * coarse section disposition stays "present"/"absent" either way (WDLL item
+ * 5: the four-value R1BriefSectionDisposition enum is not where a
+ * not-applicable distinction lives -- that distinction is visible in `data`
+ * itself, matching flood's own choice not to promote absent-verified past
+ * "absent" at section level). UNLIKE flood's ungated Consumer-C read, this
+ * fact only ever arrives non-null when the (county, zoningDistrict) pair is
+ * slated and gate-passing (zoningFactServeCutover.ts) -- so a "refused"
+ * record fact here means the record was reachable but its OWN read failed
+ * (e.g. a malformed cell), not "not cut over." Falling through to the
+ * legacy bake-derived section in that case (rather than surfacing "refused"
+ * to a customer, unlike wells'/cityLimits' own no-fallback convention)
+ * protects this section's "never regress a parcel that currently has a real
+ * answer" invariant -- the more prominent, narrative-driving role this
+ * section plays for a customer justifies the extra caution.
+ *
+ * Takes only the present/absent-verified/not-applicable variants, matching
+ * composeFloodBriefSectionFromParcelRecord's own narrowed parameter type --
+ * a refused fact is never valid input here BY TYPE, not by a runtime
+ * branch; the caller (buildR1Brief) is the one place that decides whether a
+ * given fact reaches this function at all.
+ */
+export function composeZoningBriefSectionFromParcelRecord(
+  fact: Exclude<ZoningFactRead, { state: "refused" }>,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (fact.state === "present") {
+    const data = {
+      district: fact.district,
+      jurisdictionKey: fact.jurisdictionKey,
+      provenance: fact.provenance,
+    };
+    return withCitationPosture({
+      data,
+      citations: urlsFrom(data),
+      asOf: fact.evaluatedAt ?? bakedAt,
+      disposition: "present",
+    });
+  }
+  // absent (absent-verified / not-applicable)
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+  };
+}
+
+/**
+ * Exported for unit tests. Setbacks' own mirror of
+ * composeZoningBriefSectionFromParcelRecord -- see that function's module
+ * doc for the shared reasoning and its own narrowed-by-type refused
+ * exclusion.
+ */
+export function composeSetbacksBriefSectionFromParcelRecord(
+  fact: Exclude<SetbacksFactRead, { state: "refused" }>,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (fact.state === "present") {
+    const data = {
+      frontFt: fact.frontFt,
+      sideFt: fact.sideFt,
+      rearFt: fact.rearFt,
+      cornerFt: fact.cornerFt,
+    };
+    return withCitationPosture({
+      data,
+      citations: [],
+      asOf: fact.evaluatedAt ?? bakedAt,
+      disposition: "present",
+    });
+  }
+  // absent (absent-verified / not-applicable)
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+  };
+}
+
 function composeSetbacksEnvelopeBriefSection(
   envelope: unknown,
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null,
   bakedAt?: string | null,
+  parcelRecordSetbacksFact?: SetbacksFactRead | null,
 ): BriefSectionParts {
+  if (parcelRecordSetbacksFact && parcelRecordSetbacksFact.state !== "refused") {
+    return composeSetbacksBriefSectionFromParcelRecord(parcelRecordSetbacksFact, bakedAt ?? null);
+  }
   const disposition = envelopeDisposition(envelope, envelopeBriefRefusal);
   if (disposition === "present") {
     return withCitationPosture({
@@ -558,6 +650,10 @@ export function buildR1Brief(
     floodHazardFact?: FloodHazardFactRead;
     parcelRecordFloodFact?: ParcelRecordFloodRead;
     envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
+    /** OPS-16 A-096/A-097/A-098. Non-null only when (county, zoningDistrict) is slated and gate-passing -- see zoningFactServeCutover.ts. */
+    parcelRecordZoningFact?: ZoningFactRead | null;
+    /** OPS-16 A-096/A-097/A-098. Non-null only when (county, setbackFrontFt) is slated and gate-passing -- see setbacksFactServeCutover.ts. */
+    parcelRecordSetbacksFact?: SetbacksFactRead | null;
   },
 ): {
   sections: R1BriefSection[];
@@ -571,16 +667,21 @@ export function buildR1Brief(
     typeof root.bakedAt === "string" && root.bakedAt.trim()
       ? root.bakedAt
       : null;
-  const zoningSection = withCitationPosture({
-    data: root.zoning ?? null,
-    citations: urlsFrom(root.zoning),
-    asOf: asOfFrom(root.zoning) ?? bakedAt,
-    disposition: zoningDisposition(root.zoning),
-  });
+  const parcelRecordZoningFact = options?.parcelRecordZoningFact;
+  const zoningSection =
+    parcelRecordZoningFact && parcelRecordZoningFact.state !== "refused"
+      ? composeZoningBriefSectionFromParcelRecord(parcelRecordZoningFact, bakedAt)
+      : withCitationPosture({
+          data: root.zoning ?? null,
+          citations: urlsFrom(root.zoning),
+          asOf: asOfFrom(root.zoning) ?? bakedAt,
+          disposition: zoningDisposition(root.zoning),
+        });
   const envelopeSection = composeSetbacksEnvelopeBriefSection(
     envelope,
     options?.envelopeBriefRefusal,
     bakedAt,
+    options?.parcelRecordSetbacksFact,
   );
   const floodSection = composeFloodBriefSection(
     tier2,
