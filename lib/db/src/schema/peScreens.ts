@@ -10,6 +10,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { users } from "./users";
 
 export const SCREEN_RESOLUTIONS = [
   "resolved",
@@ -28,12 +29,24 @@ export const SCREEN_SOURCES = [
 ] as const;
 export type ScreenSource = (typeof SCREEN_SOURCES)[number];
 
+/**
+ * OPS-16 P-111 (A-075/A-076) — `ownerUserId` FK added 2026-09-04. This table
+ * previously had NO foreign key at all, so deleting a `users` row orphaned
+ * every screen (and, transitively via `peScreenRows`' own cascade off
+ * `peScreens.id`, every screen row) permanently. Cascade matches the other
+ * thirteen `users.id` references in this schema: `onDelete: "cascade"`. Per
+ * the operator's same-day ruling, this is beta data and does not need a
+ * careful backfill — see migration 0097, which deletes existing orphans
+ * before adding the constraint.
+ */
 export const peScreens = pgTable(
   "pe_screens",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     tenantId: text("tenant_id").notNull().default("default"),
-    ownerUserId: text("owner_user_id").notNull(),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
