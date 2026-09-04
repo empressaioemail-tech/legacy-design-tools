@@ -15,6 +15,7 @@ import { mintSessionToken } from "../lib/sessionToken";
 import { upsertPeOidcIdentity, getPeAccessTier } from "../lib/peIdentity";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
+import { notifyGhlOfNewPeSignup } from "../lib/peGhlContact";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -89,6 +90,26 @@ router.post("/auth/session-exchange", async (req: Request, res: Response) => {
     const token = mintSessionToken(applicantSession(identity.userId));
     const tier = await getPeAccessTier(identity.userId);
     setSessionCookie(res, token);
+
+    // Real signup only (WDLL/decision-doc signal: isNewUser === a brand-new
+    // `users` row was just created by upsertPeOidcIdentity above, not a
+    // returning sign-in). Best-effort, fail-open — see peGhlContact.ts.
+    if (identity.isNewUser && identity.email) {
+      try {
+        await notifyGhlOfNewPeSignup({
+          email: identity.email,
+          displayName: identity.displayName,
+        });
+      } catch (err) {
+        // notifyGhlOfNewPeSignup already swallows its own failures; this is
+        // a last-resort backstop so a truly unexpected throw here can never
+        // turn a successful sign-up into a 500.
+        logger.error(
+          { err },
+          "pe session-exchange: GHL contact hook threw unexpectedly (swallowed, fail-open)",
+        );
+      }
+    }
 
     // Anonymous claim (WDLL 2026-08-05 item 6): the header wins over a body
     // field so the BFF's own install-id plumbing (X-Hauska-Install-Id) is
