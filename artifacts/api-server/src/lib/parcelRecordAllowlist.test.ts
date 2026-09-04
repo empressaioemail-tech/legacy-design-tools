@@ -57,8 +57,15 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     }
   });
 
-  it("the slate has exactly 78 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(78);
+  it("the slate has exactly 79 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(79);
+  });
+
+  it("only Travis is slated for maxImperviousCoverPct -- the writer refuses every other county outright, not an oversight", () => {
+    expect(PARCEL_RECORD_SLATE.has("48453:maxImperviousCoverPct")).toBe(true);
+    for (const county of ["48021", "48055", "48209", "48309", "48491"]) {
+      expect(PARCEL_RECORD_SLATE.has(`${county}:maxImperviousCoverPct`)).toBe(false);
+    }
   });
 
   it("all six counties, INCLUDING Caldwell, are slated for schoolDistrict -- statewide source, no per-county exclusion", () => {
@@ -120,6 +127,7 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
       "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
       "utilityService", "overlayDistricts", "agValuation", "schoolDistrict",
+      "maxImperviousCoverPct",
     ];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -135,12 +143,12 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       }
     }
     // Falsifier's own falsifier: this loop must actually skip the
-    // seventy-eight real slated pairs (every one PARCEL_RECORD_SLATE holds,
+    // seventy-nine real slated pairs (every one PARCEL_RECORD_SLATE holds,
     // since this rail list now covers all of them), not silently cover zero
     // cases because the skip branch is unreachable -- fails loudly if
     // PARCEL_RECORD_SLATE ever changes without this test being updated.
     expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
-    expect(uncheckedSlatedPairs).toBe(78);
+    expect(uncheckedSlatedPairs).toBe(79);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -224,6 +232,13 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       expect(resolveAllowlistState(county, "schoolDistrict", { verdict: "excluded" })).toBe("refused");
       expect(resolveAllowlistState(county, "schoolDistrict", null)).toBe("legacy");
     }
+  });
+
+  it("FALSIFIER: the single slated maxImperviousCoverPct pair (Travis) resolves to record on a real pass verdict, refused on refuse, legacy on no verdict -- no gate verdict for this rail exists yet, so every live call resolves to legacy today", () => {
+    expect(resolveAllowlistState("48453", "maxImperviousCoverPct", { verdict: "pass" })).toBe("record");
+    expect(resolveAllowlistState("48453", "maxImperviousCoverPct", { verdict: "refuse" })).toBe("refused");
+    expect(resolveAllowlistState("48453", "maxImperviousCoverPct", { verdict: "excluded" })).toBe("refused");
+    expect(resolveAllowlistState("48453", "maxImperviousCoverPct", null)).toBe("legacy");
   });
 
   it("THE OWED EVIDENCE: Caldwell's own live gate verdict for flood is 'excluded' (its known geometry gap, live-verified) -- slated deliberately so this resolves to the allowlist's VISIBLE 'refused' state, not the silent 'legacy' default an unslated pair would show", () => {
