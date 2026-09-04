@@ -860,6 +860,25 @@ export async function gateCountyLandUseJoin(
 }
 
 /**
+ * Ledger facet keys whose `integrity_verdict='block'` gates the land-use bake.
+ *
+ * The coverage scorer upserts the CAD-join measurement under
+ * `landuse-cad-join` (`LANDUSE_JOIN_FACET_KEY`). The retired key `land-use`
+ * still has 19 production rows until operator-authorised retirement SQL
+ * is applied. Reading BOTH is the transition that lets a deploy and the
+ * SQL apply land in either order without starving the bake of ledger
+ * blocks. Drop `land-use` from this list only after that SQL has been
+ * applied and verified n=0.
+ *
+ * `evaluateJoinIntegrity({ facet: "land-use" })` is a GATE LABEL on the
+ * integrity report, not a ledger write key. Do not collapse the two.
+ */
+export const LANDUSE_JOIN_LEDGER_BLOCK_FACETS: readonly string[] = [
+  "landuse-cad-join",
+  "land-use",
+];
+
+/**
  * Load the set of county FIPS the LEDGER records as land-use `block` — the
  * gate's computed fabrication verdicts, the authoritative (not hand-edited)
  * block set the bakes gate on.
@@ -875,15 +894,17 @@ export async function gateCountyLandUseJoin(
  */
 export async function loadLedgerBlockedFips(
   pool: QueryablePool,
-  facet = "land-use",
+  facetOrFacets: string | readonly string[] = LANDUSE_JOIN_LEDGER_BLOCK_FACETS,
 ): Promise<Set<string>> {
+  const facets =
+    typeof facetOrFacets === "string" ? [facetOrFacets] : [...facetOrFacets];
   const out = new Set<string>();
   if (!(await tableExists(pool, "county_facet_coverage"))) return out;
   const r = await pool.query<{ county_fips: string }>(
     `SELECT county_fips
        FROM county_facet_coverage
-      WHERE facet = $1 AND integrity_verdict = 'block'`,
-    [facet],
+      WHERE facet = ANY($1::text[]) AND integrity_verdict = 'block'`,
+    [facets],
   );
   for (const row of r.rows) out.add(row.county_fips);
   return out;

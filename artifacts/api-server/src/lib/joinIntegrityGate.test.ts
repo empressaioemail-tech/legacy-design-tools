@@ -19,11 +19,14 @@ import {
   ownerMatchRate,
   evaluateJoinIntegrity,
   resolveAddressLandUse,
+  loadLedgerBlockedFips,
+  LANDUSE_JOIN_LEDGER_BLOCK_FACETS,
   DEFAULT_MIN_OWNER_MATCH_RATE,
   MIN_INFORMATIVE_SAMPLE,
   normalizeForJoin,
   type OwnerPair,
   type AddressLandUseEntry,
+  type QueryablePool,
 } from "./joinIntegrityGate";
 
 // ---------------------------------------------------------------------------
@@ -350,5 +353,52 @@ describe("resolveAddressLandUse (per-match owner gate for the address join)", ()
   it("returns null for a null/empty address key (no key -> no join)", () => {
     expect(resolveAddressLandUse(null, "PURVIS MICHAEL", lookup)).toBeNull();
     expect(resolveAddressLandUse("", "PURVIS MICHAEL", lookup)).toBeNull();
+  });
+});
+
+describe("loadLedgerBlockedFips reads successor then retired", () => {
+  it("default facet list includes landuse-cad-join and still land-use", () => {
+    expect(LANDUSE_JOIN_LEDGER_BLOCK_FACETS).toContain("landuse-cad-join");
+    expect(LANDUSE_JOIN_LEDGER_BLOCK_FACETS).toContain("land-use");
+  });
+
+  it("queries ANY(landuse-cad-join, land-use) and collects block FIPS", async () => {
+    const captured: Array<{ text: string; params: unknown[] | undefined }> = [];
+    const pool: QueryablePool = {
+      // Method shorthand, not an arrow function assigned to the property:
+      // QueryablePool.query is a GENERIC method, and a concrete-typed arrow
+      // function is not structurally assignable to it. Matches
+      // memoryParcelRecordStore's own mock pattern elsewhere in this repo.
+      async query<R extends Record<string, any> = Record<string, any>>(
+        text: string,
+        params?: any[],
+      ): Promise<{ rows: R[] }> {
+        captured.push({ text, params });
+        if (text.includes("to_regclass")) {
+          return { rows: [{ r: "county_facet_coverage" }] as unknown as R[] };
+        }
+        return { rows: [{ county_fips: "48209" }] as unknown as R[] };
+      },
+    };
+    const blocked = await loadLedgerBlockedFips(pool);
+    expect(blocked.has("48209")).toBe(true);
+    const select = captured.find((c) => c.text.includes("integrity_verdict"));
+    expect(select).toBeDefined();
+    expect(select?.text).toContain("ANY($1::text[])");
+    const facets = select?.params?.[0] as string[];
+    expect(facets).toEqual(expect.arrayContaining(["landuse-cad-join", "land-use"]));
+  });
+
+  it("returns empty when the ledger table is absent, never a fabricated zero-block claim from a missing table", async () => {
+    const pool: QueryablePool = {
+      async query<R extends Record<string, any> = Record<string, any>>(
+        text: string,
+      ): Promise<{ rows: R[] }> {
+        if (text.includes("to_regclass")) return { rows: [{ r: null }] as unknown as R[] };
+        throw new Error("SELECT must not run when the table is absent");
+      },
+    };
+    const blocked = await loadLedgerBlockedFips(pool);
+    expect(blocked.size).toBe(0);
   });
 });
