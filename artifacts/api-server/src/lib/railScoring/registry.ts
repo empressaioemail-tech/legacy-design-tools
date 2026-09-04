@@ -47,8 +47,48 @@ import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 export type DenominatorKind =
   /** DISTINCT feature_index in txgio_parcel for the county — the real-world parcel count. */
   | "txgio-parcel-distinct-feature-index"
-  /** No denominator: the rail could not be measured for this county. */
-  | "none";
+  /**
+   * No measurement spec yet. The rail has never been measured; there is no
+   * counting rule to recover. This is the unspecified-never-measured state
+   * (roads, footprint, easement, …). It is NOT the state for live ledger
+   * rows whose denominator was lost — that is `retired-unknown-denominator`.
+   */
+  | "none"
+  /**
+   * Live ledger rows exist, but the denominator they were computed against
+   * is not reconstructible from checked-in source. Distinct from `none`:
+   * retired-rows-with-unknown-denominator is not unspecified-never-measured.
+   * A new scorer (a different card) must land before this rail is scored.
+   */
+  | "retired-unknown-denominator";
+
+/**
+ * Can a measurer actually execute this denominator today?
+ *
+ * EXHAUSTIVE OVER THE UNION, DELIBERATELY. A hardcoded allowlist (the prior
+ * shape here was a `Set` of "live" kinds) fails OPEN by omission: a new
+ * `DenominatorKind` added anywhere else in this file compiles fine and
+ * silently reads as "not live" here, which is exactly how a rail can vanish
+ * from `scoreableRailKeys()` — and therefore from a default
+ * `railScoring/run.ts` run — with no error and no test failure. The `never`
+ * assignment in the default case makes that omission a TYPE ERROR instead:
+ * adding a kind without deciding whether it is executable is not allowed to
+ * compile. (SS-W15's zoning-denominator card uses the identical pattern for
+ * `denominatorNeedsCityBoundary` — same failure class, same fix shape.)
+ */
+export function isLiveCountingDenominatorKind(kind: DenominatorKind): boolean {
+  switch (kind) {
+    case "txgio-parcel-distinct-feature-index":
+      return true;
+    case "none":
+    case "retired-unknown-denominator":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled denominator kind: ${String(exhaustive)}`);
+    }
+  }
+}
 
 export interface DenominatorSpec {
   kind: DenominatorKind;
@@ -204,9 +244,13 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     entityType: "parcel-node",
     instrument: "countyRailScoreCli.ts:geometry",
     verificationMethod: "sweep",
-    denominator: PARCEL_FEATURE_DENOMINATOR,
+    denominator: {
+      kind: "retired-unknown-denominator",
+      basis:
+        "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an 'accounted features' denominator by B2_cp2_geometry_scorer_apply.mjs, which is not in this repo. The reconstructible parcel-feature count is a different rule and is not claimed here. Re-scoring waits on a new scorer (S-21); until then this rail is unscored.",
+    },
     notes:
-      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here.",
+      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here. RETIRED 2026-08-20 (S-22): the machine-readable denominator is no longer PARCEL_FEATURE_DENOMINATOR. Live geometry rows are 254 over 254 distinct county FIPS, not 253 (253 was a different rail's figure; source _inbox/2026-08-20_db_probe_five_answers.md Q2). Until a new scorer lands (S-21), this rail is unscored rather than re-derived against a different denominator.",
   },
   {
     railKey: "cad",
@@ -387,10 +431,29 @@ export function thresholdPctForRail(railKey: string): number {
   return t;
 }
 
-export function isScoreableRule(
-  rule: RailScoringRule,
-): rule is Exclude<RailScoringRule, UnspecifiedRule> {
-  return rule.kind !== "unspecified";
+/**
+ * Plain `boolean`, NOT a type predicate. It used to narrow to
+ * `Exclude<RailScoringRule, UnspecifiedRule>`, which was accurate when
+ * "not scoreable" meant exactly `kind === "unspecified"`. It no longer does:
+ * a rule can keep a specified `kind` (geometry is still
+ * `atom-count-over-parcel-features`) and still be unscoreable because its
+ * denominator is retired. A stale predicate here does not just mislabel —
+ * `scoreRailCell`'s `if (!isScoreableRule(rule))` branch would have TypeScript
+ * narrow `rule` to `UnspecifiedRule`, prove its own `kind === "unspecified"`
+ * check always true, and therefore prove its own trailing fallback `throw`
+ * unreachable (`rule: never`) — a real compile error, not a rebase artifact.
+ *
+ * A measurement kind without an executable denominator is not scoreable.
+ * Geometry keeps kind `atom-count-over-parcel-features` (the numerator shape
+ * is still parcel-node atom count) but its denominator is retired, so
+ * substituting the reconstructible parcel-feature count would rescore live
+ * rows against a different rule. Unspecified rails use kind `none`.
+ */
+export function isScoreableRule(rule: RailScoringRule): boolean {
+  return (
+    rule.kind !== "unspecified" &&
+    isLiveCountingDenominatorKind(rule.denominator.kind)
+  );
 }
 
 /** Rails this capability can measure today. */
@@ -410,6 +473,25 @@ export function unspecifiedRails(): Array<{
     railKey,
     unspecifiedReason,
     specOwner,
+  }));
+}
+
+/**
+ * Rails whose live ledger rows were computed against a denominator that is
+ * not reconstructible from checked-in source. Distinct from `unspecifiedRails`
+ * (never measured) and from `scoreableRailKeys` (executable denominator).
+ */
+export function retiredDenominatorRails(): Array<{
+  railKey: string;
+  denominatorKind: DenominatorKind;
+  basis: string;
+}> {
+  return RAIL_SCORING_DECLARATION.filter(
+    (r) => r.denominator.kind === "retired-unknown-denominator",
+  ).map((r) => ({
+    railKey: r.railKey,
+    denominatorKind: r.denominator.kind,
+    basis: r.denominator.basis,
   }));
 }
 

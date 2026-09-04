@@ -205,6 +205,15 @@ describe("fail closed and NAMED", () => {
     expect(report.rails[0]?.byRailState["not-yet"]).toBe(1);
   });
 
+  it("geometry is UNAVAILABLE with denominator_retired, never scored against parcel features", async () => {
+    const { ctx, totalWrites } = makeFakeStores(BASE);
+    const report = await runRailScore(ctx, { railKeys: ["geometry"], dryRun: false });
+    expect(report.rails).toEqual([]);
+    expect(report.railsUnavailable[0]?.reason).toBe("denominator_retired");
+    expect(report.railsUnavailable[0]?.message).toMatch(/retired denominator/);
+    expect(totalWrites()).toBe(0);
+  });
+
   it("an unknown rail key is UNAVAILABLE rather than silently dropped", async () => {
     const { ctx } = makeFakeStores(BASE);
     const report = await runRailScore(ctx, { railKeys: ["not-a-rail"], dryRun: true });
