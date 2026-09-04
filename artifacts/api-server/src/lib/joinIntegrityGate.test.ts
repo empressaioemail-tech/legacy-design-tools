@@ -365,12 +365,19 @@ describe("loadLedgerBlockedFips reads successor then retired", () => {
   it("queries ANY(landuse-cad-join, land-use) and collects block FIPS", async () => {
     const captured: Array<{ text: string; params: unknown[] | undefined }> = [];
     const pool: QueryablePool = {
-      query: async (text, params) => {
+      // Method shorthand, not an arrow function assigned to the property:
+      // QueryablePool.query is a GENERIC method, and a concrete-typed arrow
+      // function is not structurally assignable to it. Matches
+      // memoryParcelRecordStore's own mock pattern elsewhere in this repo.
+      async query<R extends Record<string, any> = Record<string, any>>(
+        text: string,
+        params?: any[],
+      ): Promise<{ rows: R[] }> {
         captured.push({ text, params });
         if (text.includes("to_regclass")) {
-          return { rows: [{ r: "county_facet_coverage" }] };
+          return { rows: [{ r: "county_facet_coverage" }] as unknown as R[] };
         }
-        return { rows: [{ county_fips: "48209" }] };
+        return { rows: [{ county_fips: "48209" }] as unknown as R[] };
       },
     };
     const blocked = await loadLedgerBlockedFips(pool);
@@ -384,8 +391,10 @@ describe("loadLedgerBlockedFips reads successor then retired", () => {
 
   it("returns empty when the ledger table is absent, never a fabricated zero-block claim from a missing table", async () => {
     const pool: QueryablePool = {
-      query: async (text) => {
-        if (text.includes("to_regclass")) return { rows: [{ r: null }] };
+      async query<R extends Record<string, any> = Record<string, any>>(
+        text: string,
+      ): Promise<{ rows: R[] }> {
+        if (text.includes("to_regclass")) return { rows: [{ r: null }] as unknown as R[] };
         throw new Error("SELECT must not run when the table is absent");
       },
     };
