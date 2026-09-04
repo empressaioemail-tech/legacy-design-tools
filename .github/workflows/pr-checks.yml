@@ -566,6 +566,31 @@ jobs:
           fi
           echo "ci-vintage-predicate: clean (${#hits[@]} candidate file(s) checked)"
 
+  ci-pr-base-is-main:
+    # LOAD-BEARING NAME. "PR base is main" is a REQUIRED status check on main
+    # (branch protection). Protection matches the check-run name, so renaming
+    # this silently removes the requirement with no error and a green PR.
+    # Change it only together with the protection setting.
+    #
+    # PR #601 (2026-09-04, overlayDistricts serve cutover) merged into an
+    # abandoned stacked-PR branch instead of main; nothing caught the wrong
+    # base at merge time, and its content only reached main because #602
+    # happened to retarget and carry it along. This is a metadata check on
+    # the PR itself, not a content grep: every PR into this repo targets
+    # main, full stop. Stacked-PR branches may still merge into each other
+    # locally if a lane wants that shape, but the repo's own PRs never do.
+    name: PR base is main
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: ci-pr-base-is-main
+        run: |
+          if [ "${{ github.event.pull_request.base.ref }}" != "main" ]; then
+            echo "FAIL ci-pr-base-is-main: PR #${{ github.event.pull_request.number }} targets '${{ github.event.pull_request.base.ref }}', not main. Retarget the PR base to main."
+            exit 1
+          fi
+          echo "ci-pr-base-is-main: clean (base is main)"
+
   cortex-daily-limit-bake:
     name: cortex daily limit bake
     runs-on: ubuntu-latest
