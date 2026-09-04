@@ -62,13 +62,32 @@ export type DenominatorKind =
    */
   | "retired-unknown-denominator";
 
-/** Machine names of denominators a measurer can actually execute today. */
-const LIVE_COUNTING_DENOMINATOR_KINDS: ReadonlySet<DenominatorKind> = new Set([
-  "txgio-parcel-distinct-feature-index",
-]);
-
+/**
+ * Can a measurer actually execute this denominator today?
+ *
+ * EXHAUSTIVE OVER THE UNION, DELIBERATELY. A hardcoded allowlist (the prior
+ * shape here was a `Set` of "live" kinds) fails OPEN by omission: a new
+ * `DenominatorKind` added anywhere else in this file compiles fine and
+ * silently reads as "not live" here, which is exactly how a rail can vanish
+ * from `scoreableRailKeys()` — and therefore from a default
+ * `railScoring/run.ts` run — with no error and no test failure. The `never`
+ * assignment in the default case makes that omission a TYPE ERROR instead:
+ * adding a kind without deciding whether it is executable is not allowed to
+ * compile. (SS-W15's zoning-denominator card uses the identical pattern for
+ * `denominatorNeedsCityBoundary` — same failure class, same fix shape.)
+ */
 export function isLiveCountingDenominatorKind(kind: DenominatorKind): boolean {
-  return LIVE_COUNTING_DENOMINATOR_KINDS.has(kind);
+  switch (kind) {
+    case "txgio-parcel-distinct-feature-index":
+      return true;
+    case "none":
+    case "retired-unknown-denominator":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled denominator kind: ${String(exhaustive)}`);
+    }
+  }
 }
 
 export interface DenominatorSpec {
@@ -412,14 +431,25 @@ export function thresholdPctForRail(railKey: string): number {
   return t;
 }
 
-export function isScoreableRule(
-  rule: RailScoringRule,
-): rule is Exclude<RailScoringRule, UnspecifiedRule> {
-  // A measurement kind without an executable denominator is not scoreable.
-  // Geometry keeps kind `atom-count-over-parcel-features` (the numerator
-  // shape is still parcel-node atom count) but its denominator is retired,
-  // so substituting the reconstructible parcel-feature count would rescore
-  // live rows against a different rule. Unspecified rails use kind `none`.
+/**
+ * Plain `boolean`, NOT a type predicate. It used to narrow to
+ * `Exclude<RailScoringRule, UnspecifiedRule>`, which was accurate when
+ * "not scoreable" meant exactly `kind === "unspecified"`. It no longer does:
+ * a rule can keep a specified `kind` (geometry is still
+ * `atom-count-over-parcel-features`) and still be unscoreable because its
+ * denominator is retired. A stale predicate here does not just mislabel —
+ * `scoreRailCell`'s `if (!isScoreableRule(rule))` branch would have TypeScript
+ * narrow `rule` to `UnspecifiedRule`, prove its own `kind === "unspecified"`
+ * check always true, and therefore prove its own trailing fallback `throw`
+ * unreachable (`rule: never`) — a real compile error, not a rebase artifact.
+ *
+ * A measurement kind without an executable denominator is not scoreable.
+ * Geometry keeps kind `atom-count-over-parcel-features` (the numerator shape
+ * is still parcel-node atom count) but its denominator is retired, so
+ * substituting the reconstructible parcel-feature count would rescore live
+ * rows against a different rule. Unspecified rails use kind `none`.
+ */
+export function isScoreableRule(rule: RailScoringRule): boolean {
   return (
     rule.kind !== "unspecified" &&
     isLiveCountingDenominatorKind(rule.denominator.kind)

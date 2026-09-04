@@ -214,9 +214,16 @@ describe("registry completeness", () => {
     }
   });
 
-  it("all fourteen rails are scoreable; none remain unspecified", () => {
+  it("thirteen of fourteen rails are scoreable; none remain unspecified, geometry is retired (S-22)", () => {
+    // Pre-S-22 this asserted all fourteen scoreable. S-22 retired geometry's
+    // denominator (live rows were computed against a counting rule that is
+    // not reconstructible from checked-in source) rather than substituting a
+    // different one and silently rescoring them -- geometry is neither
+    // unspecified (it has a measurement kind) nor scoreable (no live
+    // denominator), a third state `retiredDenominatorRails()` names.
     expect(unspecifiedRails()).toEqual([]);
-    expect(scoreableRailKeys().length).toBe(RAIL_SCORING_DECLARATION.length);
+    expect(scoreableRailKeys().length).toBe(RAIL_SCORING_DECLARATION.length - 1);
+    expect(retiredDenominatorRails().map((r) => r.railKey)).toEqual(["geometry"]);
     expect(railScoringRuleFor("mud")?.kind).toBe("atom-count-over-parcel-features");
   });
 
