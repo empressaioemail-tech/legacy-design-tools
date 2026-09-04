@@ -90,11 +90,30 @@ export async function upsertPeOidcIdentity(
     input.displayName?.trim() ||
     (email ? email.split("@")[0]! : `User ${randomBytes(3).toString("hex")}`);
 
+  // Pre-existing defect, found and fixed while building P-112 (email magic
+  // link): `ensureUserProfile` below inserts a bare `users` row (no email)
+  // as a profile-hydration side effect. The insert that FOLLOWS it — meant
+  // to be the authoritative write of this brand-new identity's email — used
+  // `onConflictDoNothing()`, so it silently no-op'd against the row
+  // `ensureUserProfile` had just created one line above, and `users.email`
+  // was left null for EVERY newly created PE user regardless of provider.
+  // `pe_user_identities.email` (written a few lines down) was never
+  // affected, and callers that read `identity.email` off this function's
+  // own return value (session-exchange, the GHL hook, this file's own
+  // in-memory `email` variable) were never affected either — only anything
+  // reading `users.email` back from the DB was. That is very likely the
+  // root cause behind hauska-map's "blank Stripe checkout email" bug
+  // (worked around downstream today rather than traced to source).
+  // `onConflictDoUpdate` makes this insert authoritative for a brand-new
+  // identity's displayName/email regardless of insert order.
   await ensureUserProfile(userId, displayName);
   await db
     .insert(users)
     .values({ id: userId, displayName, email })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: users.id,
+      set: { displayName, email },
+    });
 
   await db.insert(peUserIdentities).values({
     id: identityRowId(input.provider, input.subject),

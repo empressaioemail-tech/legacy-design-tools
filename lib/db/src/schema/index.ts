@@ -78,6 +78,7 @@ export * from "./countyFacetCoverage";
 export * from "./txgioParcel";
 export * from "./txgioAddress";
 export * from "./txCityBoundary";
+export * from "./peMagicLinkTokens";
 export * from "./txCountyBoundary";
 export * from "./txFemaNfhlFloodZone";
 export * from "./txUtilityTerritoryStaging";
