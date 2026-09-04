@@ -68,6 +68,7 @@ import intakeRouter from "./intake";
 import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
 import peAuthRouter from "./peAuth";
+import peMagicLinkRouter from "./peMagicLink";
 import propertyExplorerRouter from "./propertyExplorer";
 import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
@@ -76,6 +77,7 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(authRouter);
 router.use(peAuthRouter);
+router.use(peMagicLinkRouter);
 router.use(propertyExplorerRouter);
 // G-60: plan-review BFF lives on plan-review Cloud Run. This mount is a
 // proxy, not a second implementation and not a 404 (unlike Smart Files).

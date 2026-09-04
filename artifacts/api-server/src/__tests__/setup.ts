@@ -317,6 +317,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // known-empty state (its 503/404 cases assert an EMPTY store, which a
   // row leaked from an earlier test would silently turn green).
   "serving_sweep_county",
+  // P-112 email leg — magic-link tokens. No FK to `users` (a token can be
+  // requested before any account exists — the verify path is also how a
+  // brand-new signup is created), so nothing else's CASCADE clears it.
+  "pe_magic_link_tokens",
 ];
 
 /**

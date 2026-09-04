@@ -1310,6 +1310,18 @@ CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
 );
 
 
+-- Name: pe_magic_link_tokens; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_magic_link_tokens (
+    id text NOT NULL,
+    email text NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: pe_parcel_constraint_index; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_parcel_constraint_index (
@@ -2949,6 +2961,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
     ADD CONSTRAINT pe_chat_message_counts_owner_user_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, parcel_node_id);
 
 
+-- Name: pe_magic_link_tokens pe_magic_link_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_magic_link_tokens
+    ADD CONSTRAINT pe_magic_link_tokens_pkey PRIMARY KEY (id);
+
+
 -- Name: pe_parcel_constraint_index_builds pe_parcel_constraint_index_builds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_parcel_constraint_index_builds
@@ -3953,6 +3971,16 @@ CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_conn
 -- Name: pe_ai_connections_owner_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_ai_connections_owner_idx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id);
+
+
+-- Name: pe_magic_link_tokens_email_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_magic_link_tokens_email_created_idx ON @@SCHEMA@@.pe_magic_link_tokens USING btree (email, created_at);
+
+
+-- Name: pe_magic_link_tokens_token_hash_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_magic_link_tokens_token_hash_uidx ON @@SCHEMA@@.pe_magic_link_tokens USING btree (token_hash);
 
 
 -- Name: pe_pci_builds_county_started_idx; Type: INDEX; Schema: public; Owner: -
