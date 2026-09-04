@@ -274,6 +274,157 @@ describe("unlock custom / hosted checkout chrome (WDLL 3b item 2)", () => {
   });
 });
 
+describe("Stripe customer email — Custom Checkout confirm() requires one (2026-09-04 fix)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("passes the account's email when creating a new Stripe customer", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "operator@example.com" })
+      .where(eq(users.id, USER_A));
+
+    const customerBodies: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      if (path.includes("/customers")) {
+        customerBodies.push(body);
+        return new Response(JSON.stringify({ id: "cus_test_email_new" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_email", client_secret: "cs_test_email_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerBodies).toHaveLength(1);
+    expect(customerBodies[0]!.get("email")).toBe("operator@example.com");
+  });
+
+  it("backfills email onto an existing Stripe customer that was created without one", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "backfilled@example.com" })
+      .where(eq(users.id, USER_A));
+    await db
+      .update(peUserEntitlements)
+      .set({ stripeCustomerId: "cus_test_needs_email" })
+      .where(eq(peUserEntitlements.ownerUserId, USER_A));
+
+    const customerGets: string[] = [];
+    const customerUpdates: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+      if (path.includes("/customers/cus_test_needs_email") && method === "GET") {
+        customerGets.push(path);
+        return new Response(JSON.stringify({ id: "cus_test_needs_email", email: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/customers/cus_test_needs_email") && method === "POST") {
+        customerUpdates.push(new URLSearchParams(String(init?.body ?? "")));
+        return new Response(JSON.stringify({ id: "cus_test_needs_email", email: "backfilled@example.com" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_backfill", client_secret: "cs_test_backfill_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerGets).toHaveLength(1);
+    expect(customerUpdates).toHaveLength(1);
+    expect(customerUpdates[0]!.get("email")).toBe("backfilled@example.com");
+  });
+
+  it("does not re-issue a backfill when the existing customer already has an email", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "already-set@example.com" })
+      .where(eq(users.id, USER_A));
+    await db
+      .update(peUserEntitlements)
+      .set({ stripeCustomerId: "cus_test_already_has_email" })
+      .where(eq(peUserEntitlements.ownerUserId, USER_A));
+
+    const customerUpdates: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+      if (path.includes("/customers/cus_test_already_has_email") && method === "GET") {
+        return new Response(
+          JSON.stringify({ id: "cus_test_already_has_email", email: "already-set@example.com" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (path.includes("/customers/cus_test_already_has_email") && method === "POST") {
+        customerUpdates.push(new URLSearchParams(String(init?.body ?? "")));
+        return new Response(JSON.stringify({ id: "cus_test_already_has_email" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_noop", client_secret: "cs_test_noop_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerUpdates).toHaveLength(0);
+  });
+});
+
 describe("Stripe webhook PE routing (WDLL item 5)", () => {
   beforeEach(() => {
     process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;

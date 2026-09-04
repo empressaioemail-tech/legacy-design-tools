@@ -194,6 +194,23 @@ export async function setPeDevRole(
     .where(eq(peUserEntitlements.ownerUserId, userId));
 }
 
+/**
+ * Look up a PE user's email for Stripe checkout. Stripe Custom/Elements
+ * Checkout requires an email on the session before `confirm()` will
+ * succeed — `getOrCreatePeStripeCustomer` already accepts one, but no
+ * checkout route was populating it, so a fresh Stripe customer had no
+ * email and every confirm attempt failed with "An email address is
+ * required to confirm this Checkout Session."
+ */
+export async function getPeUserEmail(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return row?.email ?? null;
+}
+
 /** Link a Stripe customer id to a PE user's entitlement row. */
 export async function setPeStripeCustomerId(
   userId: string,
