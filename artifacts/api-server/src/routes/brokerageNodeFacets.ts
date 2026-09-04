@@ -112,6 +112,16 @@
  * that evaluation lands. Never SELECT bake / place_layer_snapshots / CAD /
  * GIS for this field.
  *
+ * OVERLAY DISTRICTS IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `overlayDistrictsFact` is read from parcel_record via
+ * loadOverlayDistrictsFactForServe. No atom, no legacy path -- nothing to
+ * swap, nothing to retire. `districts` is a plural array (a parcel can
+ * carry more than one overlay at once; there is no single "lead" the way
+ * wells/specialDistricts pick one). No gate verdict has yet been computed
+ * for this rail. Never SELECT bake / place_layer_snapshots / CAD / GIS for
+ * this field.
+ *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
  * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
  * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
@@ -143,6 +153,7 @@ import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServe
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadUtilityServiceFactForServe } from "../lib/utilityServiceFactServeCutover";
+import { loadOverlayDistrictsFactForServe } from "../lib/overlayDistrictsFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -634,6 +645,7 @@ brokerageNodeFacetsRouter.get(
     let structuralFact;
     let cadRollOverlay;
     let utilityServiceFact;
+    let overlayDistrictsFact;
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
@@ -649,6 +661,7 @@ brokerageNodeFacetsRouter.get(
         structuralFact,
         cadRollOverlay,
         utilityServiceFact,
+        overlayDistrictsFact,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -677,6 +690,7 @@ brokerageNodeFacetsRouter.get(
               yearBuilt: null,
             }),
         loadUtilityServiceFactForServe(parcelNodeId),
+        loadOverlayDistrictsFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -785,6 +799,10 @@ brokerageNodeFacetsRouter.get(
       // are independent slots. Resolves to a typed not-cut-over refusal
       // until a gate evaluation for this rail lands.
       utilityServiceFact,
+      // parcel_record-only, no legacy path (see module doc). districts is
+      // plural, never a picked lead. Resolves to a typed not-cut-over
+      // refusal until a gate evaluation for this rail lands.
+      overlayDistrictsFact,
       }),
     );
   },
