@@ -142,6 +142,17 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * schoolDistrictFactRead.ts's module doc) -- these serve as an ordinary
  * `unaccounted` refusal, not a defect. No gate verdict exists for this
  * rail as of this card; every entry resolves to 'legacy' until one does.
+ *
+ * maxImperviousCoverPct, Travis (48453) ONLY / Austin scope (F-01,
+ * serve/prod cutover, 2026-09-04): the writer refuses every other county
+ * outright, matching agValuation's own COUNTY_NOT_IN_SCOPE pattern. Even
+ * within Travis, most parcels sit outside Austin's watershed-regulation
+ * area entirely and are deliberately left untouched (not an anomaly, per
+ * that job's own module doc) -- the same large-scale "unaccounted by
+ * design" shape as overlayDistricts, so the same open question about
+ * gate-evaluability applies here too. No legacy serve path exists for this
+ * rail. No gate verdict exists for this rail as of this card; every entry
+ * resolves to 'legacy' until one does.
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -222,6 +233,7 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:schoolDistrict",
   "48453:schoolDistrict",
   "48491:schoolDistrict",
+  "48453:maxImperviousCoverPct",
 ]);
 
 /**
