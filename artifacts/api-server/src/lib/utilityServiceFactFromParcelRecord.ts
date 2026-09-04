@@ -3,10 +3,11 @@
  * `_decisions/2026-09-02_step7_consumer_c_then_b.md`).
  *
  * Companion rows are FIXED SLOTS (parcel-utility-service.mjs's own
- * WATER_ROW_INDEX=0 / SEWER_ROW_INDEX=1), not sequential-by-discovery like
- * wells/specialDistricts -- a sewer-only parcel's row still lives at
- * rowIndex 1, never compacted to 0. This adapter reads by rowIndex
- * explicitly rather than by array position for that reason.
+ * WATER_ROW_INDEX=0 / SEWER_ROW_INDEX=1 / ELECTRIC_ROW_INDEX=2), not
+ * sequential-by-discovery like wells/specialDistricts -- a sewer-only
+ * parcel's row still lives at rowIndex 1, never compacted to 0. This
+ * adapter reads by rowIndex explicitly rather than by array position for
+ * that reason.
  *
  * Reads via loadParcelRecordCell (parcelRecordCellRead.ts), the SELECT-only
  * parcel_record_ro-credentialed reader. `unaccounted` is never rendered as
@@ -26,6 +27,7 @@ import {
 
 const WATER_ROW_INDEX = 0;
 const SEWER_ROW_INDEX = 1;
+const ELECTRIC_ROW_INDEX = 2;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -119,14 +121,15 @@ export async function utilityServiceFactFromParcelRecord(
   const byIndex = new Map(cell.companionRows.map((r) => [r.rowIndex, r] as const));
   const water = entryFromCompanionRow(byIndex.get(WATER_ROW_INDEX));
   const sewer = entryFromCompanionRow(byIndex.get(SEWER_ROW_INDEX));
+  const electric = entryFromCompanionRow(byIndex.get(ELECTRIC_ROW_INDEX));
 
-  if (water === null && sewer === null) {
+  if (water === null && sewer === null && electric === null) {
     return {
       state: "refused",
       code: "parcel-record-malformed-cell",
       source: UTILITY_SERVICE_FACT_SOURCE,
       entityId: placeKey,
-      reason: `parcel_record_cell ${placeKey}/${UTILITY_SERVICE_RAIL_KEY} is kind=value but neither its water (rowIndex 0) nor sewer (rowIndex 1) companion row was readable. Refusing rather than inventing service.`,
+      reason: `parcel_record_cell ${placeKey}/${UTILITY_SERVICE_RAIL_KEY} is kind=value but none of its water (rowIndex 0), sewer (rowIndex 1), or electric (rowIndex 2) companion rows were readable. Refusing rather than inventing service.`,
     };
   }
 
@@ -136,6 +139,7 @@ export async function utilityServiceFactFromParcelRecord(
     entityId: placeKey,
     water,
     sewer,
+    electric,
     sourceAdapter: "parcel_record",
     sourceVintage: cell.vintage || null,
     evaluatedAt: cell.vintage || null,

@@ -103,14 +103,19 @@
  * loadUtilityServiceFactForServe. UNLIKE every other root-sibling fact
  * above, this one has no atom and no legacy path at all -- there was never
  * a `utilityService` facet served anywhere before this card, so there is
- * nothing to swap and nothing to retire. `water` and `sewer` are
- * independent slots, not a picked lead: a parcel served by both shows both.
- * No gate verdict has yet been computed for this rail (the scheduled
- * evaluation has no automatic trigger and has never been run against
- * utilityService as of this card -- see PARCEL-B-GATE-SCHED's own close),
- * so every request today resolves to the typed `not-cut-over` refusal until
- * that evaluation lands. Never SELECT bake / place_layer_snapshots / CAD /
- * GIS for this field.
+ * nothing to swap and nothing to retire. `water`, `sewer`, and `electric`
+ * are independent slots, not a picked lead: a parcel served by more than
+ * one shows all of them. BUGFIX 2026-09-04: the original cutover only read
+ * water/sewer (rowIndex 0/1), missing the electric slot (rowIndex 2) PARCEL
+ * wave 2 added to the same writer -- caught live via this card's own
+ * post-deploy witness-parcel check, not a unit test. See
+ * utilityServiceFactRead.ts's module doc for detail. No gate verdict has
+ * yet been computed for this rail (the scheduled evaluation has no
+ * automatic trigger and has never been run against utilityService as of
+ * this card -- see PARCEL-B-GATE-SCHED's own close), so every request
+ * today resolves to the typed `not-cut-over` refusal until that evaluation
+ * lands. Never SELECT bake / place_layer_snapshots / CAD / GIS for this
+ * field.
  *
  * OVERLAY DISTRICTS IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
  * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
