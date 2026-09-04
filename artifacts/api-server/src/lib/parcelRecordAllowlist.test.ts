@@ -57,8 +57,14 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     }
   });
 
-  it("the slate has exactly 58 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails)", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(58);
+  it("the slate has exactly 64 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(64);
+  });
+
+  it("all six counties, INCLUDING Caldwell, are slated for utilityService -- no txgio-geometry dependency holds Caldwell out, unlike wells/specialDistricts", () => {
+    for (const county of ALL_SIX_COUNTIES) {
+      expect(PARCEL_RECORD_SLATE.has(`${county}:utilityService`)).toBe(true);
+    }
   });
 
   it("no other rail is in the slate -- valueHistory stays legacy for every county", () => {
@@ -93,6 +99,7 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     const rails = [
       "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
       "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
+      "utilityService",
     ];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -108,12 +115,12 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
       }
     }
     // Falsifier's own falsifier: this loop must actually skip the
-    // fifty-eight real slated pairs (every one PARCEL_RECORD_SLATE holds,
+    // sixty-four real slated pairs (every one PARCEL_RECORD_SLATE holds,
     // since this rail list now covers all of them), not silently cover zero
     // cases because the skip branch is unreachable -- fails loudly if
     // PARCEL_RECORD_SLATE ever changes without this test being updated.
     expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
-    expect(uncheckedSlatedPairs).toBe(58);
+    expect(uncheckedSlatedPairs).toBe(64);
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -160,6 +167,15 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, { verdict: "excluded" })).toBe("refused");
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
+    }
+  });
+
+  it("FALSIFIER: all SIX slated utilityService pairs (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict -- no gate verdict for this rail exists yet, so every live call resolves to legacy today, but the mechanism is proven the same way as every other rail", () => {
+    for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "utilityService", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "utilityService", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "utilityService", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "utilityService", null)).toBe("legacy");
     }
   });
 

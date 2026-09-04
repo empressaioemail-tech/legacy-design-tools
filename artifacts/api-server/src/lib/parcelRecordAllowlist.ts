@@ -88,6 +88,27 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * rails are served via a request-time OVERLAY onto the legacy value
  * (cadRollServeCutover.ts) -- the legacy bake/live-read path is never
  * modified, only overlaid where the allowlist resolves to 'record'.
+ *
+ * utilityService, ALL SIX counties including Caldwell (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04): sourced from
+ * tx_puct_ccn via a statewide centroid-in-polygon sweep with no per-county
+ * restriction in the writer (parcel-utility-service.mjs) and no
+ * txgio-geometry dependency of the kind that holds Caldwell out of
+ * wells/specialDistricts -- so Caldwell is slated on the same footing as
+ * every other program county, matching cityLimits' and flood's own
+ * reasoning, not wells/specialDistricts'. UNLIKE every rail above,
+ * utilityService has NO legacy serve path at all (verified: no reference to
+ * `utilityService`, `sewer`, or CCN-adjacent fields exists anywhere in
+ * `artifacts/api-server/src` before this card) -- there is nothing to swap
+ * and nothing to retire. No gate verdict has been computed for this rail as
+ * of this card (the scheduled evaluation covers the four PARCEL-B-SLATE1
+ * rails and PARCEL-B-SLATE2's six only; see PARCEL-B-GATE-SCHED's own close,
+ * which documents no automatic trigger exists) -- every one of these six
+ * entries therefore resolves to 'legacy' (utilityServiceFactServeCutover.ts's
+ * own typed not-cut-over refusal, since there is no legacy reader) until a
+ * gate evaluation for utilityService lands. Slating ahead of the verdict is
+ * fail-closed by construction, per this file's own PARCEL-B-READER
+ * precedent (shipped with an empty slate for the same reason).
  */
 export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48021:wells",
@@ -148,6 +169,12 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:yearBuilt",
   "48453:yearBuilt",
   "48491:yearBuilt",
+  "48021:utilityService",
+  "48055:utilityService",
+  "48209:utilityService",
+  "48309:utilityService",
+  "48453:utilityService",
+  "48491:utilityService",
 ]);
 
 /**
