@@ -19,12 +19,27 @@
  * prefix-matching attempt this rail never makes -- there is only one
  * source, parcel_record, keyed by the plain place_key.
  *
- * Water and sewer are independent sub-types (parcel-utility-service.mjs's
- * own fixed companion-row slots: rowIndex 0 = water, rowIndex 1 = sewer),
- * not competing candidates the way wells/specialDistricts pick a single
- * "lead" -- a parcel served by both utilities is not an ambiguity to
- * resolve, so `present` carries both slots independently, either or both
- * `null`.
+ * Water, sewer, and electric are independent sub-types (parcel-utility-
+ * service.mjs's own fixed companion-row slots: rowIndex 0 = water, rowIndex
+ * 1 = sewer, rowIndex 2 = electric -- electric added in PARCEL wave 2,
+ * source tiles the entire state so it is present for effectively every
+ * parcel), not competing candidates the way wells/specialDistricts pick a
+ * single "lead" -- a parcel served by more than one utility is not an
+ * ambiguity to resolve, so `present` carries all three slots independently,
+ * any or all `null`.
+ *
+ * BUGFIX 2026-09-04 (post-deploy live-witness check): the original cutover
+ * only read rowIndex 0/1 (water/sewer), reflecting only the wave-1 writer
+ * this adapter was built against. Wave 2 added the electric slot to the
+ * SAME job (parcel-utility-service.mjs), which this card's own Phase 0
+ * research read from the wave-1 clone and never re-checked against wave
+ * 2's version of that specific file. Consequence: any parcel whose only
+ * populated slot was electric (a large share of the population, since
+ * electric's HIFLD source tiles the whole state while sewer covers ~51%)
+ * was served a fabricated `parcel-record-malformed-cell` refusal instead of
+ * its real electric utility record -- caught live in production via the
+ * witness-parcel check this card's own dispatch mandated, not by a unit
+ * test (none had a fixture with only rowIndex 2 populated).
  */
 
 export const UTILITY_SERVICE_FACT_SOURCE = "utility-service-fact" as const;
@@ -41,9 +56,10 @@ export type UtilityServiceFactPresent = {
   state: "present";
   source: typeof UTILITY_SERVICE_FACT_SOURCE;
   entityId: string;
-  /** Independent slots -- see module doc. Both null never reaches this variant (that is `absent`). */
+  /** Independent slots -- see module doc. All three null never reaches this variant (that is `absent`). */
   water: UtilityServiceEntry | null;
   sewer: UtilityServiceEntry | null;
+  electric: UtilityServiceEntry | null;
   sourceAdapter: "parcel_record";
   sourceVintage: string | null;
   evaluatedAt: string | null;
