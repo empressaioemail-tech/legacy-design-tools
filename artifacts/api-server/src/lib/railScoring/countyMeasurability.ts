@@ -29,7 +29,11 @@
  * `lib/db/src/manifestDisplayState.ts`.
  */
 
-import { resolveStampFacetMeasurability } from "../../countyCoverageScoreCli";
+// The classifier moved out of countyCoverageScoreCli.ts on 2026-08-19 (lane
+// SS-W18, P-47) -- that CLI's own module doc forbids re-exporting it (would
+// put the file back on the import path that broke a canary deploy). Import
+// from its current home directly; this branch predated that extraction.
+import { resolveStampFacetMeasurability } from "../countyCoverageClassification";
 
 /**
  * Refusal codes. The first three are SS-W13's, re-exported by value rather

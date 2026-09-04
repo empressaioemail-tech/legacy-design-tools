@@ -49,7 +49,6 @@ export {
   mergeAtomFamilyState,
   mergeHasWriter,
   mergeEffectiveRailFields,
-  type ManifestDisplayState,
 } from "./manifestCellResolve";
 export {
   applyDepthRailDisplayGate,

@@ -465,6 +465,12 @@ export function denominatorNeedsCityBoundary(kind: DenominatorKind): boolean {
       return true;
     case "txgio-parcel-distinct-feature-index":
     case "none":
+    // A retired denominator (S-22, geometry) means the rail cannot be
+    // measured at all -- measureRailCell refuses it before this function is
+    // ever consulted (see measure.ts's own guard). false either way: this
+    // exhaustiveness check exists to force the decision, not to imply the
+    // question is live for a retired rail.
+    case "retired-unknown-denominator":
       return false;
     default: {
       const exhaustive: never = kind;

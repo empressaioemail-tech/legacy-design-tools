@@ -96,7 +96,10 @@ describe("manifest display state: the split ruling 4 asked for", () => {
     ]);
     expect(cells[0]?.displayState).toBe("measured-below-bar");
     expect(cells[0]?.displayState).toBe(DEPTH_GATE_DEMOTION_STATE);
-    expect(cells[0]?.isPartial).toBe(false);
+    // Composed with R-09 (PR #447, live since 2026-08-21): isPartial
+    // survives demotion rather than being cleared. See
+    // depthRailGateDivergence.test.ts for the full reasoning.
+    expect(cells[0]?.isPartial).toBe(true);
   });
 
   it("leaves no-atom and no-writer precedence untouched", async () => {

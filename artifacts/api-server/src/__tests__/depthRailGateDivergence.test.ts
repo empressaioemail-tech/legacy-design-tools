@@ -79,7 +79,15 @@ const CASES: readonly GateCase[] = [
   { label: "Travis 48453 zoning at zero", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 0, thresholdPct: 95 },
   { label: "null coverage", railKey: "zoning", displayState: "satisfied-present", isPartial: false, honestCoveragePct: null, thresholdPct: 95 },
   { label: "null threshold falls back to the rail default", railKey: "zoning", displayState: "satisfied-present", isPartial: false, honestCoveragePct: 50, thresholdPct: null },
-  { label: "already not-yet", railKey: "zoning", displayState: "not-yet", isPartial: false, honestCoveragePct: 0, thresholdPct: 95 },
+  // Composed with ruling 4: `not-yet` is retained only as a STORED
+  // rail_state (the SQL CASE converts it to `measured-below-bar` before the
+  // gate ever runs), never as an already-terminal DISPLAY value the gate
+  // would see directly -- feeding raw "not-yet" straight to the gate (as
+  // this case did pre-composition) tested a shape that can no longer occur
+  // in production. `not-measured` is the real post-split terminal state for
+  // an already non-satisfied-present cell, and exercises the same no-op
+  // passthrough branch this case always intended to test.
+  { label: "already not-measured", railKey: "zoning", displayState: "not-measured", isPartial: false, honestCoveragePct: 0, thresholdPct: 95 },
   { label: "satisfied-absent is untouched", railKey: "zoning", displayState: "satisfied-absent", isPartial: false, honestCoveragePct: 0, thresholdPct: 95 },
   // statewide-uniform rails are NOT gated: per OPS-14 the gate is a depth rule.
   { label: "geometry below bar is not demoted", railKey: "geometry", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 80, thresholdPct: 95 },
