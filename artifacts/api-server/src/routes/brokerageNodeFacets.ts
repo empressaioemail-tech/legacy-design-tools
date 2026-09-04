@@ -97,6 +97,21 @@
  * central Austin as `not-applicable: unincorporated`. The land-use
  * fact receives the same verdict only when it is `not-applicable`.
  *
+ * UTILITY SERVICE IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `utilityServiceFact` is read from parcel_record via
+ * loadUtilityServiceFactForServe. UNLIKE every other root-sibling fact
+ * above, this one has no atom and no legacy path at all -- there was never
+ * a `utilityService` facet served anywhere before this card, so there is
+ * nothing to swap and nothing to retire. `water` and `sewer` are
+ * independent slots, not a picked lead: a parcel served by both shows both.
+ * No gate verdict has yet been computed for this rail (the scheduled
+ * evaluation has no automatic trigger and has never been run against
+ * utilityService as of this card -- see PARCEL-B-GATE-SCHED's own close),
+ * so every request today resolves to the typed `not-cut-over` refusal until
+ * that evaluation lands. Never SELECT bake / place_layer_snapshots / CAD /
+ * GIS for this field.
+ *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
  * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
  * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
@@ -127,6 +142,7 @@ import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
+import { loadUtilityServiceFactForServe } from "../lib/utilityServiceFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -617,6 +633,7 @@ brokerageNodeFacetsRouter.get(
     let ownerFactLoaded;
     let structuralFact;
     let cadRollOverlay;
+    let utilityServiceFact;
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
@@ -631,6 +648,7 @@ brokerageNodeFacetsRouter.get(
         ownerFactLoaded,
         structuralFact,
         cadRollOverlay,
+        utilityServiceFact,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -658,6 +676,7 @@ brokerageNodeFacetsRouter.get(
               livingAreaSqft: null,
               yearBuilt: null,
             }),
+        loadUtilityServiceFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -762,6 +781,10 @@ brokerageNodeFacetsRouter.get(
       // index is unmeasured. ETJ is unresolved, never a buffer. Carries
       // the query point the containment (and the zoning verdict) rests on.
       cityLimitsFact,
+      // parcel_record-only, no legacy path (see module doc). water/sewer
+      // are independent slots. Resolves to a typed not-cut-over refusal
+      // until a gate evaluation for this rail lands.
+      utilityServiceFact,
       }),
     );
   },
