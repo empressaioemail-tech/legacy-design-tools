@@ -7,10 +7,19 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
-export type PeOidcProvider = "google" | "microsoft";
+export type PeOidcProvider = "google" | "microsoft" | "email";
 
 /**
- * OIDC provider subject links for Property Explorer users.
+ * Provider subject links for Property Explorer users — OIDC providers
+ * (google/microsoft) plus, since P-112, "email" for magic-link sign-in.
+ * "email" has no external identity provider or subject of its own: the
+ * verified address IS the durable identifier, so `subject` is set to the
+ * same normalized email as the `email` column. This lets magic-link sign-in
+ * reuse `upsertPeOidcIdentity` unchanged (provider: "email", subject:
+ * <normalized email>) so a magic-link account is created and found through
+ * the exact same path as an OAuth account — same `users` row shape, same
+ * entitlement bootstrap, same GHL-new-signup hook.
+ *
  * One row per (provider, subject); upserted on session-exchange.
  */
 export const peUserIdentities = pgTable(

@@ -237,6 +237,10 @@ describe("lib/db schema integration", () => {
         // `pe_chat_message_counts` (`_ai` < `_ch`) per `ORDER BY tablename`.
         "pe_ai_connections",
         "pe_chat_message_counts",
+        // P-112 email leg — magic-link sign-in tokens. Sorts after
+        // `pe_chat_message_counts` and before `pe_parcel_constraint_index`
+        // (`pe_ch` < `pe_ma` < `pe_pa`) per `ORDER BY tablename`.
+        "pe_magic_link_tokens",
         // P-106 constraint search - the filterable projection of already-baked
         // facets, plus its build ledger. Sorts after `pe_chat_message_counts`
         // and before `pe_property_unlocks` (`pe_pa` < `pe_pr`) per
