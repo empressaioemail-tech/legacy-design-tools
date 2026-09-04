@@ -28,6 +28,7 @@ function makeFakeStores(options: {
   counties: string[];
   features: Record<string, number>;
   atoms: Record<string, number>;
+  districts?: Record<string, number>;
   seed?: Record<string, Record<string, unknown>>;
 }): {
   ctx: MeasureContext;
@@ -44,7 +45,9 @@ function makeFakeStores(options: {
     async query(text: string, params?: unknown[]): Promise<any> {
       const sql = text.replace(/\s+/g, " ").trim();
       if (sql.startsWith("SELECT to_regclass")) {
-        return { rows: [{ r: params?.[0] === "txgio_parcel" ? "txgio_parcel" : null }] };
+        const table = String(params?.[0]);
+        const known = table === "txgio_parcel" || table === "tx_special_district";
+        return { rows: [{ r: known ? table : null }] };
       }
       if (sql.includes("FROM county_manifest")) {
         return {
@@ -54,6 +57,10 @@ function makeFakeStores(options: {
       if (sql.includes("count(DISTINCT feature_index)")) {
         const fips = String(params?.[0]);
         return { rows: [{ features: String(options.features[fips] ?? 0) }] };
+      }
+      if (sql.includes("FROM tx_special_district")) {
+        const fips = String(params?.[0]);
+        return { rows: [{ n: String(options.districts?.[fips] ?? 1) }] };
       }
       if (sql.startsWith("SELECT county_fips, facet")) {
         const key = `${params?.[0]}|${params?.[1]}`;
@@ -92,7 +99,11 @@ function makeFakeStores(options: {
 
   const atoms: RailScoreQueryable = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async query(_text: string, params?: unknown[]): Promise<any> {
+    async query(text: string, params?: unknown[]): Promise<any> {
+      const sql = text.replace(/\s+/g, " ").trim();
+      if (sql.includes("entity_id = $2") && sql.includes("SELECT body")) {
+        return { rows: [] };
+      }
       const fips = String(params?.[1]);
       return { rows: [{ n: String(options.atoms[fips] ?? 0) }] };
     },
@@ -181,12 +192,17 @@ describe("fail closed and NAMED", () => {
     expect(totalWrites()).toBe(0);
   });
 
-  it("a rail with no measurement spec is UNAVAILABLE with its owner named", async () => {
-    const { ctx } = makeFakeStores(BASE);
-    const report = await runRailScore(ctx, { railKeys: ["footprint"], dryRun: true });
-    expect(report.rails).toEqual([]);
-    expect(report.railsUnavailable[0]?.reason).toBe("no_measurement_spec");
-    expect(report.railsUnavailable[0]?.message).toMatch(/SS-W14/);
+  it("mud is scoreable and runs when stores are configured", async () => {
+    const { ctx } = makeFakeStores({
+      ...BASE,
+      atoms: { "48021": 983, "48029": 100 },
+    });
+    const report = await runRailScore(ctx, { railKeys: ["mud"], dryRun: true });
+    expect(report.railsUnavailable).toEqual([]);
+    expect(report.rails).toHaveLength(1);
+    expect(report.rails[0]?.railKey).toBe("mud");
+    expect(report.rails[0]?.byRailState["satisfied-present"]).toBe(1);
+    expect(report.rails[0]?.byRailState["not-yet"]).toBe(1);
   });
 
   it("geometry is UNAVAILABLE with denominator_retired, never scored against parcel features", async () => {

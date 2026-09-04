@@ -2,7 +2,7 @@
  * F5 — append raw-conflict events to the evidence ledger.
  */
 
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import type { CodeSectionInput } from "@workspace/finding-engine";
 import { precedenceReconciliationsFromCodeSections } from "@workspace/finding-engine";
 import {

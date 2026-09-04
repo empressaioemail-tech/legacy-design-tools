@@ -54,7 +54,7 @@ import {
   UpdateReviewerAnnotationBody,
   UpdateReviewerAnnotationParams,
 } from "@workspace/api-zod";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import {
   REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,

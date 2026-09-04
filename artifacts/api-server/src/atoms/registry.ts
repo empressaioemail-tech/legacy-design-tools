@@ -18,7 +18,7 @@ import {
   type AtomRegistry,
   PostgresEventAnchoringService,
   type EventAnchoringService,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 import { db } from "@workspace/db";
 import { makeSheetAtom } from "./sheet.atom";
 import { makeEngagementAtom } from "./engagement.atom";

@@ -49,6 +49,46 @@ describe("formatResearchAreaContextForLlm — subject parcel constraints", () =>
     expect(out).not.toContain("null");
   });
 
+  it("renders parcel facts (acreage, living area, flood, land use) in the subject block", () => {
+    const out = formatSubjectConstraintsForLlm({
+      parcelFacts: {
+        acreageAc: 0.21,
+        acreageSqft: 9144,
+        livingAreaSqft: 1850,
+        floodZoneLabel: "Zone X",
+        landUseCode: "A1",
+        landUseDescription: "Single-family residential",
+        zoningDistrict: "P-5",
+      },
+    });
+
+    expect(out).toContain("Lot size: 0.21 ac (9,144 sqft)");
+    expect(out).toContain("Living area: 1,850 sqft");
+    expect(out).toContain("Flood zone: Zone X");
+    expect(out).toContain("Land use: A1 — Single-family residential");
+    expect(out).toContain("Zoning district: P-5");
+    expect(out).not.toContain("null");
+  });
+
+  it("renders parcelFacts-only subject when setbacks/envelope are absent", () => {
+    const out = formatSubjectConstraintsForLlm({
+      parcelFacts: {
+        acreageAc: 1.5,
+        livingAreaSqft: 2200,
+        floodZoneLabel: "Zone AE",
+        landUseCode: "R1",
+        landUseDescription: "Residential",
+        zoningDistrict: "R-1",
+      },
+    });
+
+    expect(out).toContain("SUBJECT PARCEL CONSTRAINTS");
+    expect(out).toContain("Lot size: 1.5 ac");
+    expect(out).toContain("Living area: 2,200 sqft");
+    expect(out).not.toContain("Setbacks:");
+    expect(out).not.toContain("Envelope:");
+  });
+
   it("skips null / absent fields without printing 'null ft'", () => {
     const out = formatSubjectConstraintsForLlm({
       setbacks: { front_ft: 25, side_ft: null, rear_ft: undefined, district: null },

@@ -12,6 +12,14 @@ export const WEB_CODE_ALLOWLIST_HOSTS = [
   "nfpa.org",
   "up.codes",
   "www.up.codes",
+  // Civic PE-chat backup (2026-08-24). Official ISD / TEA / city / county.
+  // Not blogs, aggregators, or licensed code viewers. ICC hold list unchanged.
+  "tea.texas.gov",
+  "cityofbastrop.org",
+  "bastropisd.org",
+  "co.bastrop.tx.us",
+  "georgetown.org",
+  "georgetownisd.org",
 ] as const;
 
 export type WebCodeAllowlistHost = (typeof WEB_CODE_ALLOWLIST_HOSTS)[number];

@@ -21,7 +21,7 @@ import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
 import { summarizeCadPayload } from "@workspace/adapters/local/cad";
 import { summarizePermitsPayload } from "@workspace/adapters/local/permits";
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
 import type { EngineHonesty } from "@workspace/engine-core";
 import {
   legacyHonestyToReadContract,

@@ -164,6 +164,18 @@ export interface AtomCountRule extends RailScoringRuleBase {
   kind: "atom-count-over-parcel-features";
   /** `atoms.entity_type` in the ATOMS store, counted per county by entity_id prefix. */
   entityType: string;
+  /**
+   * How the numerator is counted. Default `atom-count` is raw atom rows (may
+   * exceed parcel-feature denominator for multi-atom-per-parcel families).
+   * `distinct-parcel-keys` counts DISTINCT parcel keys parsed from entity_id
+   * (family suffix stripped), so coverage cannot exceed 100%.
+   */
+  numeratorMode?: "atom-count" | "distinct-parcel-keys";
+  /**
+   * Provenance label when coverage is present. Default `${entityType}-atom-count`.
+   * Mud uses `special-district-fact-determination-over-txgio-feature-index`.
+   */
+  presentSourceLabel?: string;
 }
 
 export interface ParcelColumnStampRule extends RailScoringRuleBase {
@@ -241,13 +253,13 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   },
   {
     railKey: "roads",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "road-node",
     instrument: "countyRailScoreCli.ts:roads",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. county_rail declares an atom family and a writer, but no instrument has ever emitted a roads coverage number. The measurement spec must settle at minimum: numerator (road-node atoms? OSM way count? county roadway layer features?), denominator (parcels with frontage? county road-mile ceiling?), and whether a county with no acquired roads layer is not-yet or an established absence.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Numerator is road-node atom rows per county (entity_id FIPS prefix). Ratio may exceed 100% when multiple road segments attach to one parcel feature; overcount fails closed to not-yet per SF-25.",
   },
   {
     railKey: "flood",
@@ -281,23 +293,24 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   },
   {
     railKey: "footprint",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "building-footprint",
+    numeratorMode: "distinct-parcel-keys",
     instrument: "countyRailScoreCli.ts:footprint",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage, and the WRITTEN-to-SCORED leg is the whole gap: county_rail declares writer write-building-footprint-county.mjs and footprints were landed in 174 counties, but no instrument ever scored them, so a ledger recompute moves zero cells no matter how fresh it is. Spec must settle the denominator: footprints are not per-parcel (a parcel may carry zero or many), so parcel-feature count is the wrong denominator and an unclamped ratio would exceed 100 routinely.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Numerator is DISTINCT parcel keys with at least one building-footprint atom (entity_id prefix before the family suffix). Denominator is parcel-feature count. Raw atom count is the wrong numerator because a parcel may carry zero or many footprints.",
   },
   {
     railKey: "easement",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "utility-easement",
     instrument: "countyRailScoreCli.ts:easement",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. The declared source is a county honest-absence DEFAULT with a CAD exception where published, which means this rail is mostly an absence rail — so its spec is mostly an absence-probe spec, and it must name what positively establishes 'no recorded easement layer for this county' rather than defaulting absence from an empty query.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Numerator is utility-easement atom rows. Honest-absence counties emit ONE county-coverage atom (not per-parcel), so present-data counties drive the ratio; absent counties stay not-yet until a positive county-coverage absence atom exists or an absence probe lands.",
   },
   {
     railKey: "owner",
@@ -311,43 +324,59 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   },
   {
     railKey: "rrc-wells",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "well-fact",
     instrument: "countyRailScoreCli.ts:rrc-wells",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage, and the acquisition source is HARRIS-ONLY: 12,796 features whose extent is one county, with a Dallas bbox returning zero. A spec that scores this statewide writes mass false absences. When the spec lands it MUST carry an absenceProbe with reach 'enumerated-counties', not 'statewide' — the engine will refuse a statewide absence claim it cannot back.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    absenceProbe: {
+      kind: "source-table-zero-rows",
+      table: "rrc_wells",
+      fipsColumn: "county_fips",
+      basis: "texas-rrc-wells-v1-source-zero-rows-for-fips",
+      reach: { kind: "enumerated-counties", counties: ["48201"] },
+    },
+    notes:
+      "Acquisition source is Harris-only (12,796 features). Absence may be established ONLY inside reach; all other counties refuse absence and stay not-yet rather than false 0% gaps.",
   },
   {
     railKey: "rrc-pipelines",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "rrc-pipeline-fact",
     instrument: "countyRailScoreCli.ts:rrc-pipelines",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. Line geometry from a different endpoint than the wells layer, so it needs its own denominator; a per-parcel ratio is the wrong shape for a linear feature and the spec must say what it is instead.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Statewide line geometry from Texas RRC public GIS. Per-parcel ratio is an approximation (linear features); overcount fails closed to not-yet.",
   },
   {
     railKey: "rail-corridor",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "rail-corridor-fact",
     instrument: "countyRailScoreCli.ts:rail-corridor",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "Zero rows in county_facet_coverage. Railroad TRACKS, not the Railroad Commission — the name collision with the rrc-* rails above is why this note exists. Single national source, so a statewide absence probe is plausible here where it is not for rrc-wells; the spec must establish that rather than assume it.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    notes:
+      "Railroad TRACKS (national source), not Railroad Commission. Per-parcel atom ratio is an approximation for linear adjacency; overcount fails closed to not-yet.",
   },
   {
     railKey: "mud",
-    kind: "unspecified",
+    kind: "atom-count-over-parcel-features",
+    entityType: "special-district-fact",
+    numeratorMode: "distinct-parcel-keys",
+    presentSourceLabel: "special-district-fact-determination-over-txgio-feature-index",
     instrument: "countyRailScoreCli.ts:mud",
     verificationMethod: "sweep",
-    denominator: { kind: "none", basis: "no measurement spec yet" },
-    unspecifiedReason:
-      "254 live rows exist (134 satisfied-present, 75 satisfied-absent) and the rule that produced them exists NOWHERE in checked-in source: l16-score-mud.mjs is not in this repo and is not on the machine. What the stored rows reveal is only an outline — source 'special-district-fact-determination-over-txgio-feature-index' for present cells, and absence basis 'tceq-tx_special_district-statewide-zero-districts-for-fips' for absent ones. Reconstructing a rule from the shape of its own output would be a guess presented as a spec, which is exactly the failure this lane was dispatched against, so it is declared unspecified. This rail is the single clearest statement of why scoring had to become a capability.",
-    specOwner: "SS-W14",
+    denominator: PARCEL_FEATURE_DENOMINATOR,
+    absenceProbe: {
+      kind: "source-table-zero-rows",
+      table: "tx_special_district",
+      fipsColumn: "county_fips",
+      basis: "tceq-tx_special_district-statewide-zero-districts-for-fips",
+      reach: { kind: "statewide" },
+    },
+    notes:
+      "Numerator is DISTINCT parcel keys with at least one special-district-fact determination (entity_id FIPS prefix before the :sd: family suffix). The county marker {fips}:_county_coverage is excluded from the ratio and establishes satisfied-absent instead. tx_special_district zero rows for the FIPS establishes satisfied-absent; features=0 with districts>0 (Donley 48129) fails closed to not-yet.",
   },
 ] as const;
 

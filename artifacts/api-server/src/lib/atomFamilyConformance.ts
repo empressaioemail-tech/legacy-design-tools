@@ -3,7 +3,7 @@
  * readContract + accessPolicy on every atom emission; no derived numbers persisted.
  */
 
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
 import {
   accessPolicyForFamily,
   buildAssertedFallbackReadContract,

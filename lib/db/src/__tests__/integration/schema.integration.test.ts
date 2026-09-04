@@ -124,6 +124,8 @@ describe("lib/db schema integration", () => {
         "canva_design_pushes",
         "canva_oauth_states",
         "canva_push_jobs",
+        // P-85 WDLL item 1 — clerk portal terms and operator ruling per portal.
+        "clerk_portal_terms",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
@@ -188,6 +190,10 @@ describe("lib/db schema integration", () => {
         "findings",
         // GTM observation layer — Property Brief extension consent + events.
         "gtm_consent",
+        // P-100 item 5 — events this system declined to write for want of a
+        // consent row. Sorts before `gtm_events` (`_` < `s`) per
+        // `ORDER BY tablename`.
+        "gtm_event_refusals",
         "gtm_events",
         // OPS-9 S1 onboarding ledger, read-side mirror of hauska-engine's
         // frozen JurisdictionRegistryRow. Sorts before `knowledge_atoms`
@@ -217,9 +223,42 @@ describe("lib/db schema integration", () => {
         // R1 paywall (LOCK 2026-07-29) — signed-in-free chat counter +
         // per-property unlock record. Listed alphabetically to match
         // `ORDER BY tablename`.
+        // P-98 next-action rail — shown/acted per ladder rung, scoped to the
+        // PE USER rather than to `gtm_events`'s install_id. Sorts first in
+        // the whole `pe_` block: `pe_ac` < `pe_ai` (`c` < `i`) per
+        // `ORDER BY tablename`.
+        // P-100 item 4 — once-per-account activation milestone. A DIFFERENT
+        // subject from `pe_activation_events` (which is per ladder-rung
+        // impression). Sorts before it: `pe_acc` < `pe_act` (`c` < `t`).
+        "pe_account_activations",
+        "pe_activation_events",
+        // P-87 Claude Sync — MCP clients that have authenticated against
+        // this account. Sorts after `pe_activation_events` and before
+        // `pe_chat_message_counts` (`_ai` < `_ch`) per `ORDER BY tablename`.
+        "pe_ai_connections",
         "pe_chat_message_counts",
+        // P-112 email leg — magic-link sign-in tokens. Sorts after
+        // `pe_chat_message_counts` and before `pe_parcel_constraint_index`
+        // (`pe_ch` < `pe_ma` < `pe_pa`) per `ORDER BY tablename`.
+        "pe_magic_link_tokens",
+        // P-106 constraint search - the filterable projection of already-baked
+        // facets, plus its build ledger. Sorts after `pe_chat_message_counts`
+        // and before `pe_property_unlocks` (`pe_pa` < `pe_pr`) per
+        // `ORDER BY tablename`.
+        "pe_parcel_constraint_index",
+        "pe_parcel_constraint_index_builds",
         "pe_property_unlocks",
         "pe_saved_properties",
+        // P-91 / P-92 Wave B — screens are a different table from saves.
+        "pe_screen_rows",
+        "pe_screens",
+        // P-86 — share grant registry. Resolvable URL is /s/{id}.
+        // P-100 item 3 — which sharer a recipient account belongs to, keyed
+        // on the grant row. Sorts before `pe_share_grants` (`_a` < `_g`).
+        "pe_share_attributions",
+        "pe_share_grants",
+        "pe_team_invitations",
+        "pe_team_members",
         "pe_user_entitlements",
         "pe_user_identities",
         "pe_workbench_state",
@@ -253,6 +292,9 @@ describe("lib/db schema integration", () => {
         "reasoning_atoms",
         // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
         "recorded_instruments",
+        // P-85 WDLL item 4/6 — Records Request async jobs + acquired artifacts.
+        "records_request_artifacts",
+        "records_request_jobs",
         "render_outputs",
         // feat/durable-report-run-state — cross-instance plan-review
         // report-run STATE (replaces three instance-local Maps in
@@ -349,6 +391,10 @@ describe("lib/db schema integration", () => {
         // tile cache keyed (tile_key, county_fips); neutral of (and
         // parallel to) the dormant Cotality spatial-tile cache tables.
         "tx_parcel_tile_cache",
+        // 0076 / P-75 — L22 utility who-serves staging. Sorts after
+        // `tx_parcel_tile_cache` and before `txgio_address` (`_utility` <
+        // `txgio`) per `ORDER BY tablename`.
+        "tx_utility_territory_staging",
         // feat/txgio-address-points (0056) — self-hosted TxGIO/StratMap
         // address-POINT store (open paginated ArcGIS REST); point sibling
         // of txgio_parcel, keyed (county_fips, full_addr, unit).

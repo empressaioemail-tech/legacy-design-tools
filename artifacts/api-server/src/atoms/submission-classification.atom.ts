@@ -43,7 +43,7 @@ import type {
   ContextSummary,
   EventAnchoringService,
   KeyMetric,
-} from "@hauska/atom-contract";
+} from "@empressaio/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 // Atom-grammar helpers + the event-vocabulary tuple live in
 // `@workspace/submission-classifier` so the historical-inbox backfill

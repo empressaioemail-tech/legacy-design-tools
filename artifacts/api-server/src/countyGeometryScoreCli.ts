@@ -27,7 +27,7 @@
  * bridging mechanism is invented here, this generalizes the existing one to
  * two simultaneous connections instead of an either/or fallback.
  *
- * DENOMINATOR CHOICE. Coverage is (counties `parcel-node` atom count) /
+ * DENOMINATOR CHOICE. Coverage is (county `parcel-node` atom count) /
  * (DISTINCT `feature_index` in `txgio_parcel` for that county) — the
  * SOURCE-FEATURE count, not the raw row count. `txgio_parcel` carries
  * multiple rows per feature (history/versioning — Kenedy is 2,400 rows for
@@ -38,6 +38,14 @@
  * geometry coverage roughly 4x on a rural county like Kenedy (529/2400 =
  * 22% vs the true 529/538 = 98.3%) — the feature is the real-world parcel;
  * the extra rows are not extra parcels.
+ *
+ * NUMERATOR (P-56). Retired parcel-nodes do not count. A prefix-range
+ * `count(*)` on 48135 included 3791 retired `prop_id` rows from P-02 and
+ * printed 104.95 not-yet by overcount. The 48135 numerator is active
+ * geo_id-keyed rows only (`body.status=active` and `body.keyKind` in
+ * `geo_id` / `geo_id_crosswalk`). Other counties exclude retired only;
+ * they still key on `prop_id`. A gap between the active count and the
+ * DISTINCT feature_index denom is a finding, never a clamp to 100.
  *
  * Facet scored: `geometry` — honest coverage = parcel-node atoms for the
  * county / DISTINCT feature_index in txgio_parcel for the county. No owner
@@ -116,6 +124,58 @@ const { Pool } = pg;
 
 const GEOMETRY_THRESHOLD_PCT = 95;
 const GEOMETRY_INSTRUMENT = "countyGeometryScoreCli.ts";
+
+/** Ector. P-02 re-keyed onto geo_id and retired the prop_id collapse. */
+export const ECTOR_GEOMETRY_FIPS = "48135";
+export const GEO_ID_KEY_KINDS = ["geo_id", "geo_id_crosswalk"] as const;
+
+export type GeometryNumeratorAtom = {
+  entity_id: string;
+  status?: string | null;
+  keyKind?: string | null;
+};
+
+/**
+ * Geometry numerator predicate. Retired rows never qualify.
+ * 48135 additionally requires a geo_id keyKind so the 3791 retired
+ * prop_id rows cannot re-enter through a missing status filter.
+ */
+export function geometryNumeratorQualifies(
+  row: GeometryNumeratorAtom,
+  fips: string,
+): boolean {
+  const status = (row.status ?? "active").trim();
+  if (status !== "active") return false;
+  if (fips === ECTOR_GEOMETRY_FIPS) {
+    const kind = (row.keyKind ?? "").trim();
+    return (GEO_ID_KEY_KINDS as readonly string[]).includes(kind);
+  }
+  return true;
+}
+
+export function countGeometryNumerator(
+  rows: readonly GeometryNumeratorAtom[],
+  fips: string,
+): number {
+  return rows.filter((r) => geometryNumeratorQualifies(r, fips)).length;
+}
+
+/**
+ * Meaning-shaped check: the counted set must not contain retired ids.
+ * A fixture that includes retired prop_id rows must throw.
+ */
+export function assertGeometryNumeratorExcludesRetired(
+  counted: readonly GeometryNumeratorAtom[],
+): void {
+  const retired = counted.filter(
+    (r) => (r.status ?? "active").trim() === "retired",
+  );
+  if (retired.length > 0) {
+    throw new Error(
+      `geometry numerator includes ${retired.length} retired row(s); refuse`,
+    );
+  }
+}
 
 function log(msg: string): void {
   console.log(`[geometry-score] ${msg}`);
@@ -225,18 +285,39 @@ export function countyFipsFromAtomRow(row: {
  *
  * When `onlyFips` is set, count that county alone (prefix range on
  * entity_id) — avoids a full 11M-row GROUP BY on single-county applies.
+ *
+ * Retired rows are excluded everywhere. 48135 additionally requires
+ * geo_id keyKind so the P-02 retired prop_id collapse cannot count.
  */
+export const GEOMETRY_ATOM_COUNT_SQL_ONE_COUNTY = `SELECT count(*)::text AS n
+         FROM atoms
+        WHERE entity_type = 'parcel-node'
+          AND entity_id >= $1
+          AND entity_id < $2
+          AND COALESCE(body->>'status', 'active') = 'active'
+          AND (
+            $1 <> '48135'
+            OR COALESCE(body->>'keyKind', '') IN ('geo_id', 'geo_id_crosswalk')
+          )`;
+
+export const GEOMETRY_ATOM_COUNT_SQL_ALL = `SELECT left(entity_id, 5) AS fips, count(*) AS n
+       FROM atoms
+      WHERE entity_type = 'parcel-node'
+        AND entity_id ~ '^[0-9]{5}'
+        AND COALESCE(body->>'status', 'active') = 'active'
+        AND (
+          left(entity_id, 5) <> '48135'
+          OR COALESCE(body->>'keyKind', '') IN ('geo_id', 'geo_id_crosswalk')
+        )
+      GROUP BY 1`;
+
 async function readAtomCountsByCounty(
   atomsPool: pg.Pool,
   onlyFips?: string,
 ): Promise<Map<string, number>> {
   if (onlyFips) {
     const { rows } = await atomsPool.query<{ n: string }>(
-      `SELECT count(*)::text AS n
-         FROM atoms
-        WHERE entity_type = 'parcel-node'
-          AND entity_id >= $1
-          AND entity_id < $2`,
+      GEOMETRY_ATOM_COUNT_SQL_ONE_COUNTY,
       [onlyFips, `${onlyFips}\uffff`],
     );
     const out = new Map<string, number>();
@@ -244,11 +325,7 @@ async function readAtomCountsByCounty(
     return out;
   }
   const { rows } = await atomsPool.query<{ fips: string | null; n: string }>(
-    `SELECT left(entity_id, 5) AS fips, count(*) AS n
-       FROM atoms
-      WHERE entity_type = 'parcel-node'
-        AND entity_id ~ '^[0-9]{5}'
-      GROUP BY 1`,
+    GEOMETRY_ATOM_COUNT_SQL_ALL,
   );
   const out = new Map<string, number>();
   for (const r of rows) {
@@ -429,7 +506,10 @@ export function scoreGeometry(input: {
     railState,
     absenceBasis: null,
     verifiedByInstrument: GEOMETRY_INSTRUMENT,
-    artifactPath: `atoms:entity_type=parcel-node,countyFips=${fips}`,
+    artifactPath:
+      fips === ECTOR_GEOMETRY_FIPS
+        ? `atoms:entity_type=parcel-node,countyFips=${fips};numerator=active-geo_id`
+        : `atoms:entity_type=parcel-node,countyFips=${fips}`,
   };
 }
 

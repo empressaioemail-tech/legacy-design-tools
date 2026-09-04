@@ -44,6 +44,7 @@ const GATE_FRONTED_ROUTE_PATTERNS = [
   /^(?:\/api)?\/engagements\/[^/]+\/encumbrances(?:\/|$)/,
   /^(?:\/api)?\/engagements\/[^/]+\/site-drainage(?:\/|$)/,
   /^(?:\/api)?\/engagements\/[^/]+\/site-topography(?:\/|$)/,
+  /^(?:\/api)?\/engagements\/[^/]+\/records-request(?:\/|$)/,
   /^(?:\/api)?\/findings\/[^/]+\/(accept|reject|override|outcome)(?:\/|$)/,
   /^(?:\/api)?\/findings\/outcome-observations(?:\/|$)/,
   /^(?:\/api)?\/submissions\/[^/]+\/findings(?:\/|$)/,

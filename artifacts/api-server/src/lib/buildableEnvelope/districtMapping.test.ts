@@ -81,22 +81,17 @@ describe("mapDistrict — guarded prefix match", () => {
     expect(r.confidence).toBe(0.7);
   });
 
-  it("routes Bastrop B3 P-5 to its populated city place-type row", () => {
-    const table = getSetbackTableForZoning("bastrop_tx", "P-5");
-    expect(table?.jurisdictionKey).toBe("bastrop-city-tx");
-    expect(table?.districts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          district_name: "P-5 Core",
-          front_ft: 15,
-        }),
-      ]),
-    );
-    expect(table?.note).toMatch(/B3 Code/i);
-    const result = mapDistrict(table!, "P-5");
+  it("routes Bastrop BDC SF-1 to bastrop-development-code row", () => {
+    const table = getSetbackTableForZoning("bastrop_tx", "SF-1");
+    expect(table?.jurisdictionKey).toBe("bastrop-development-code");
+    const result = mapDistrict(table!, "SF-1");
     expect(result?.kind).toBe("matched");
-    expect(result?.district.district_name).toBe("P-5 Core");
-    expect(result?.district.district_name).not.toMatch(/^P Public\/Institutional$/);
+    expect(result?.district.district_name).toMatch(/^SF-1/);
+    expect(result?.district.front_ft).toBe(30);
+  });
+
+  it("honest-declines repealed Bastrop B3 P-5 (no current-law table)", () => {
+    expect(getSetbackTableForZoning("bastrop_tx", "P-5")).toBeNull();
   });
   it("does not invent Kyle R-1 envelopes for R-1-T townhouse stamps", () => {
     const table = getSetbackTable("kyle-tx");

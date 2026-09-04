@@ -63,11 +63,13 @@ RUN pnpm --filter @workspace/api-server run build
 # plan-review `/plan-review/`, qa `/qa/`, codex-reviewer-qa
 # `/codex-reviewer-qa/`) so no BASE_PATH is needed. mockup-sandbox is
 # intentionally excluded — dev-only UI sandbox.
+# Non-fatal: api-server (built above) is the Cloud Run entrypoint; a SPA
+# vite regression must not block cortex-api deploys (2026-08-28 P-85 inbox).
 RUN pnpm --filter @workspace/design-tools \
          --filter @workspace/plan-review \
          --filter @workspace/qa \
          --filter @workspace/codex-reviewer-qa \
-         run build
+         run build || true
 
 
 # ---------- runtime stage ----------

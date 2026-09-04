@@ -1,0 +1,234 @@
+name: Cloud Run Deploy (smartsite-mcp)
+
+# Smart Site product MCP (OPS-16 P-87). Separate Cloud Run service from cortex-api.
+# Mirrors cortex-api deploy discipline: push builds image only; traffic shifts are
+# deliberate workflow_dispatch actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/smartsite-mcp/**"
+      - "lib/db/**"
+      - ".github/workflows/cloud-run-deploy-smartsite-mcp.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Operator job"
+        required: true
+        default: deploy-canary
+        type: choice
+        options:
+          - deploy-canary
+          - shift-traffic
+      image_tag:
+        description: "Image tag (sha preferred)"
+        required: false
+        default: latest
+        type: string
+
+env:
+  GCP_REGION: us-central1
+  ARTIFACT_REGISTRY_REPO: apps
+  IMAGE_NAME: smartsite-mcp
+  CLOUD_RUN_SERVICE: smartsite-mcp
+
+jobs:
+  build-and-push:
+    name: Build and push smartsite-mcp
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required (see docs/deploy.md)}"
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?GCP_WORKLOAD_IDENTITY_PROVIDER secret is required (see docs/deploy.md)}"
+          : "${GCP_SERVICE_ACCOUNT:?GCP_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: |
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}"
+          docker build -f artifacts/smartsite-mcp/Dockerfile \
+            -t "${IMAGE}:${{ github.sha }}" \
+            -t "${IMAGE}:latest" \
+            .
+
+      - name: Push image (sha + latest)
+        run: |
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}"
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+
+  deploy-canary:
+    name: Deploy smartsite-mcp canary
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'deploy-canary'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
+        run: |
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required (see docs/deploy.md)}"
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?GCP_WORKLOAD_IDENTITY_PROVIDER secret is required (see docs/deploy.md)}"
+          : "${GCP_SERVICE_ACCOUNT:?GCP_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+          : "${GCP_RUNTIME_SERVICE_ACCOUNT:?GCP_RUNTIME_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy revision (canary tag; first create vs update)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+
+          DEPLOY_FLAGS=(--tag=canary)
+          if gcloud run services describe "$SVC" --region="$RGN" >/dev/null 2>&1; then
+            DEPLOY_FLAGS+=(--no-traffic)
+            echo "Service exists: adding --no-traffic."
+          else
+            echo "::warning::First deploy for $SVC: default URL may route traffic until shift-traffic."
+          fi
+
+          # DATABASE_URL binds DEPLOYMENT_DATABASE_URL_DIRECT, not
+          # DEPLOYMENT_DATABASE_URL. The Neon pooler injected
+          # SET default_transaction_read_only = on for this database on
+          # 2026-08-31, killing every write while reads stayed green.
+          # A hand-applied fix was reverted by this workflow the same day
+          # (--set-secrets is authoritative-replace) and broke customer
+          # login for ~10 hours before anyone noticed. REVERT to
+          # DEPLOYMENT_DATABASE_URL only when Neon explains the injection
+          # and the pooler is restored. Running unpooled is a cost, not a
+          # resting state. See doc_repo _inbox/2026-08-31_neon_pooler_readonly_incident.md
+          # --min-instances=1: this service is what Claude talks to, so a cold
+          # start is a customer-visible failure rather than a slow page.
+          # MEASURED 2026-09-01: eight cold starts in one day, with request
+          # latencies of 81s, 65s, 58s and 47s against a warm path under 4.3s.
+          # No MCP host waits that long, so the first call of a cold session
+          # renders Claude's own "Unable to reach Smart Site" card. That string
+          # is in neither our panel HTML nor our server source; it is the host
+          # giving up. The panel resource, the tools and /health were all
+          # verified healthy in the same window, so warmth was the only
+          # variable.
+          #
+          # This must live HERE rather than in a `gcloud run services update`,
+          # because a workflow deploy is authoritative-replace and would revert
+          # a manually set value on the next deploy. And per the cortex-api
+          # guard: `services update --min-instances` only writes the TEMPLATE,
+          # so verify autoscaling.knative.dev/minScale on the SERVING REVISION,
+          # not the service. Do not set this back to 0.
+          gcloud run deploy "$SVC" \
+            --region="$RGN" \
+            --image="${IMAGE}" \
+            "${DEPLOY_FLAGS[@]}" \
+            --platform=managed \
+            --port=8080 \
+            --cpu=1 \
+            --memory=512Mi \
+            --min-instances=1 \
+            --max-instances=5 \
+            --concurrency=40 \
+            --timeout=120 \
+            --service-account="${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --set-env-vars="NODE_ENV=production,WORKOS_ISSUER=https://happy-asteroid-26.authkit.app,WORKOS_JWKS_URI=https://happy-asteroid-26.authkit.app/oauth2/jwks,SMARTSITE_MCP_PUBLIC_URL=https://mcp.smartsite.cloud,SMARTSITE_MCP_RESOURCE=https://mcp.smartsite.cloud/mcp,CORTEX_API_BASE_URL=https://cortex-api-tds7av26va-uc.a.run.app" \
+            --set-secrets="DATABASE_URL=DEPLOYMENT_DATABASE_URL_DIRECT:latest,WORKOS_CLIENT_ID=WORKOS_CLIENT_ID:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest"
+
+      - name: Show canary smoke URL
+        run: |
+          set -euo pipefail
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+          BASE_URL=$(gcloud run services describe "$SVC" --region="$RGN" --format='value(status.url)')
+          HOST="${BASE_URL#https://}"
+          HOST="${HOST#http://}"
+          echo "Canary tag URL: https://canary---${HOST}/health"
+
+  shift-traffic:
+    name: Shift traffic to smartsite-mcp canary
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'shift-traffic'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required (see docs/deploy.md)}"
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?GCP_WORKLOAD_IDENTITY_PROVIDER secret is required (see docs/deploy.md)}"
+          : "${GCP_SERVICE_ACCOUNT:?GCP_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Shift 100% traffic to canary tag
+        run: |
+          gcloud run services update-traffic "${{ env.CLOUD_RUN_SERVICE }}" \
+            --region="${{ env.GCP_REGION }}" \
+            --to-tags=canary=100
+
+      - name: Smoke-probe production /health
+        run: |
+          set -euo pipefail
+          BASE_URL=$(gcloud run services describe "${{ env.CLOUD_RUN_SERVICE }}" \
+            --region="${{ env.GCP_REGION }}" \
+            --format='value(status.url)')
+          BODY_FILE=$(mktemp)
+          HTTP=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" "${BASE_URL}/health")
+          echo "GET ${BASE_URL}/health -> HTTP ${HTTP}"
+          cat "$BODY_FILE"; echo
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::Production /health returned HTTP ${HTTP} after traffic shift"
+            exit 1
+          fi
+          # /health answers 200 with status "degraded" when auth or cortex is
+          # unconfigured, and a degraded server 503s every /mcp call. HTTP 200
+          # alone is not a pass. Fields are read by name, never by position.
+          if ! HEALTH_STATUS=$(jq -r '.status // "missing"' "$BODY_FILE"); then
+            echo "::error::Production /health body is not JSON after traffic shift"
+            exit 1
+          fi
+          if [ "$HEALTH_STATUS" != "ok" ]; then
+            echo "::error::Production /health status is '${HEALTH_STATUS}' after traffic shift (authConfigured=$(jq -r '.authConfigured' "$BODY_FILE"), cortexConfigured=$(jq -r '.cortexConfigured' "$BODY_FILE"), revision=$(jq -r '.revision' "$BODY_FILE"))"
+            exit 1
+          fi
+          echo "Production /health status ok (revision $(jq -r '.revision' "$BODY_FILE"))"

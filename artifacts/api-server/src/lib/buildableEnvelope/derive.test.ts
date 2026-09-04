@@ -3,12 +3,20 @@
  * product confidence is null (never labeling×district multiply).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { SetbackTable } from "@workspace/adapters";
-import { feetToMeters, type Ring } from "./geometry";
+import { feetToMeters, insetPerEdge, type Ring } from "./geometry";
 import { labelEdges } from "./edgeLabeling";
 import { mapDistrict } from "./districtMapping";
 import { deriveBuildableEnvelope } from "./derive";
+
+// Partial mock so the P60b reason-split test can force a gate rejection
+// (unreachable with honest inputs now that the gates only fire on genuine
+// violations); every other test runs the real insetPerEdge.
+vi.mock("./geometry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./geometry")>();
+  return { ...actual, insetPerEdge: vi.fn(actual.insetPerEdge) };
+});
 
 const LNG0 = -97.31;
 const LAT0 = 30.11;
@@ -94,16 +102,44 @@ describe("deriveBuildableEnvelope — geometry helper (no product confidence)", 
     expect(res.geojson.features[0]!.properties.edgeSignal).toBe("shape");
   });
 
-  it("setbacks exceed a tiny lot -> null geometry + honest reason", () => {
+  it("setbacks exceed a tiny lot -> null geometry + honest consume-lot reason", () => {
     const ring = rectRing(40, 40);
     const labeling = labelEdges({ ring, road: roadSouthOf() })!;
     const district = mapDistrict(TABLE, "R-LD")!;
     const res = deriveBuildableEnvelope({ ring, table: TABLE, district, labeling });
 
     expect(res.empty).toBe(true);
+    expect(res.emptyKind).toBe("consumed");
     expect(res.confidence).toBeNull();
-    expect(res.geojson.features[0]!.geometry).toBeNull();
-    expect(res.geojson.features[0]!.properties.disclosure).toMatch(/no buildable area/i);
+    const props = res.geojson.features[0]!;
+    expect(props.geometry).toBeNull();
+    expect(props.properties.emptyKind).toBe("consumed");
+    expect(props.properties.disclosure).toMatch(/no buildable area/i);
+    expect(props.properties.emptyReason).toMatch(/exceed the lot/i);
+  });
+
+  it("P60b reason split: gate rejection surfaces as validation decline, never consume-lot", () => {
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const district = mapDistrict(TABLE, "R-MD")!;
+    vi.mocked(insetPerEdge).mockReturnValueOnce({
+      ring: null,
+      areaSqFt: 0,
+      parcelAreaSqFt: 20_000,
+      empty: true,
+      emptyReason:
+        "geometry validation failed (inset overlaps forbidden setback strips by 12.00 m² (ε 0.50))",
+      emptyKind: "validation-failed",
+    });
+    const res = deriveBuildableEnvelope({ ring, table: TABLE, district, labeling });
+
+    expect(res.empty).toBe(true);
+    expect(res.emptyKind).toBe("validation-failed");
+    const props = res.geojson.features[0]!.properties;
+    expect(props.emptyKind).toBe("validation-failed");
+    expect(props.emptyReason).toMatch(/geometry validation failed/i);
+    expect(props.disclosure).toMatch(/geometry validation failed/i);
+    expect(props.disclosure).not.toMatch(/exceed the lot/i);
   });
 
   it("not_specified side/rear (P-3 shape) does not consume the lot", () => {

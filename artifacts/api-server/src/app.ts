@@ -1,4 +1,9 @@
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -83,6 +88,60 @@ app.use(sessionMiddleware);
 app.use(userRateLimitMiddleware);
 
 app.use("/api", router);
+
+/**
+ * A 4xx the framework itself raised for the client (body-parser's
+ * entity.parse.failed / entity.too.large carry `status` and `expose: true`).
+ * Anything else, including app errors that happen to carry a status, is an
+ * internal error. Narrow on purpose: a boundary that rewrites every error
+ * into a client fault is the over-broad control.
+ */
+function exposedClientErrorStatus(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const e = err as { status?: unknown; statusCode?: unknown; expose?: unknown };
+  const status =
+    typeof e.status === "number"
+      ? e.status
+      : typeof e.statusCode === "number"
+        ? e.statusCode
+        : null;
+  if (status === null || e.expose !== true) return null;
+  return status >= 400 && status <= 499 ? status : null;
+}
+
+// JSON error boundary for every /api route. Without it Express renders the
+// finalhandler HTML page: an MCP caller passes that page through verbatim
+// with isError: true, and outside production a DrizzleQueryError embeds SQL
+// and params in it. Express 5 forwards a rejected async handler here on its
+// own (no wrapper). Mounted at /api so the SPA static path is untouched.
+app.use(
+  "/api",
+  (err: unknown, req: Request, res: Response, next: NextFunction) => {
+    const path = req.originalUrl?.split("?")[0] ?? req.url;
+    const clientStatus = exposedClientErrorStatus(err);
+    if (clientStatus === null) {
+      logger.error({ err, path, method: req.method }, "api_internal_error");
+    } else {
+      logger.warn(
+        { err, path, method: req.method, status: clientStatus },
+        "api_client_error",
+      );
+    }
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    if (clientStatus !== null) {
+      const type = (err as { type?: unknown }).type;
+      res.status(clientStatus).json({
+        error: "bad_request",
+        type: typeof type === "string" ? type : "client_error",
+      });
+      return;
+    }
+    res.status(500).json({ error: "internal_error" });
+  },
+);
 
 // Production single-service static-serve: when SPA_STATIC_ROOT is set
 // (the Cloud Run image), api-server also serves the built Vite SPAs.

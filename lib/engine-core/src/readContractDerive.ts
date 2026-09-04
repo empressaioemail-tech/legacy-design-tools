@@ -13,7 +13,7 @@ import {
   type ModelAttributionStamp,
   type ReadContract,
   type LegacyEngineEnvelopeConfidence,
-} from "@hauska/atom-contract/read-contract";
+} from "@empressaio/atom-contract/read-contract";
 import type { EngineHonesty } from "./envelope.js";
 import { MIN_DENSE_SIGNAL } from "./constants.js";
 

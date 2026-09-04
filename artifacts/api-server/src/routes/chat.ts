@@ -15,8 +15,8 @@ import {
   type PromptAttachedSheet,
   type PromptFrameworkAtom,
 } from "@workspace/codes";
-import type { ContextSummary, Scope } from "@hauska/atom-contract";
-import { INLINE_ATOM_REGEX } from "@hauska/atom-contract";
+import type { ContextSummary, Scope } from "@empressaio/atom-contract";
+import { INLINE_ATOM_REGEX } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
 import { getAtomRegistry } from "../atoms/registry";
 import type { EngagementTypedPayload } from "../atoms/engagement.atom";

@@ -72,7 +72,7 @@ import {
   ObjectNotFoundError,
   ObjectStorageAccessDeniedError,
 } from "../lib/objectStorage";
-import type { EventAnchoringService } from "@hauska/atom-contract";
+import type { EventAnchoringService } from "@empressaio/atom-contract";
 import {
   BIM_MODEL_PUSH_ACTOR_ID,
   BIM_MODEL_REFRESH_ACTOR_ID,

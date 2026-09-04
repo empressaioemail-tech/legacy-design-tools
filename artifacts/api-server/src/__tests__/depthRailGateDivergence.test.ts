@@ -154,16 +154,16 @@ describe("depth-rail display gate: two implementations, one rule", () => {
     expect(r.displayState).toBe("not-yet");
   });
 
-  it("PINS the erasure this lane declined to change: isPartial is cleared on demotion", async () => {
+  it("R-09: preserves isPartial on demotion so the indicator can fire", async () => {
     const r = runLedgerComputeGate({
       label: "Williamson below bar", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95,
     });
     expect(r.displayState).toBe("not-yet");
-    expect(r.isPartial).toBe(false);
+    expect(r.isPartial).toBe(true);
     const libDb = await runLibDbGate([
       { label: "same", railKey: "zoning", displayState: "satisfied-present", isPartial: true, honestCoveragePct: 33.98, thresholdPct: 95 },
     ]);
-    expect(libDb[0]?.isPartial).toBe(false);
+    expect(libDb[0]?.isPartial).toBe(true);
   });
 
   it("holds its fire on a statewide-uniform rail, for the right reason", () => {

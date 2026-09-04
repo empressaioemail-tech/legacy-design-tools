@@ -141,8 +141,8 @@ import {
   buildRichLedgerPayload,
   adjudicatorFromActor,
 } from "@workspace/engine-core";
-import type { ReadContract } from "@hauska/atom-contract/read-contract";
-import { createModelAttributionStamp } from "@hauska/atom-contract/read-contract";
+import type { ReadContract } from "@empressaio/atom-contract/read-contract";
+import { createModelAttributionStamp } from "@empressaio/atom-contract/read-contract";
 import {
   readContractFromEngineHonesty,
 } from "../lib/readContractWire";

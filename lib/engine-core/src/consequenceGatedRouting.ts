@@ -5,8 +5,8 @@
  * Earned weights replace asserted routing after S3 lands.
  */
 
-import type { ConsequenceAxis } from "@hauska/atom-contract/read-contract";
-import { createConsequenceAxis } from "@hauska/atom-contract/read-contract";
+import type { ConsequenceAxis } from "@empressaio/atom-contract/read-contract";
+import { createConsequenceAxis } from "@empressaio/atom-contract/read-contract";
 
 /** F2 typed consequence fields on code-section atoms (cc-agent-E). */
 export interface CodeSectionConsequenceMetadata {
