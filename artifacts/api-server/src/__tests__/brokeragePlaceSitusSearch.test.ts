@@ -142,4 +142,33 @@ describe("GET /api/brokerage/v1/place/situs-search", () => {
     });
     expect(res.body.missClass).not.toBe("no-hit");
   });
+
+  it("out-of-coverage empty carries missClass out_of_coverage plus outOfCoverageState (P-107 / OPS-16 A-072)", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "out_of_coverage",
+      outOfCoverageState: "AZ",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "1600 E Camelback Rd, Phoenix, AZ" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "out_of_coverage",
+      outOfCoverageState: "AZ",
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("does not attach outOfCoverageState to a plain no-hit (no cross-contamination)", async () => {
+    searchMock.mockResolvedValueOnce({ hits: [], missClass: "no-hit" });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "zzzz-not-a-situs-99999" });
+
+    expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
+    expect(res.body).not.toHaveProperty("outOfCoverageState");
+  });
 });

@@ -58,7 +58,14 @@ brokeragePlaceSitusSearchRouter.get(
     });
     res.json(
       result.missClass
-        ? { hits: result.hits, missClass: result.missClass }
+        ? {
+            hits: result.hits,
+            missClass: result.missClass,
+            // P-107 / OPS-16 A-072: carried only on out_of_coverage.
+            ...(result.outOfCoverageState
+              ? { outOfCoverageState: result.outOfCoverageState }
+              : {}),
+          }
         : { hits: result.hits },
     );
   },

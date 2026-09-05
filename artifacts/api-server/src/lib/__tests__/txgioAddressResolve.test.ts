@@ -18,6 +18,9 @@ import {
   hasPlaceSearchLocality,
   situsSearchPrefixVariants,
   situsSearchStreetKeys,
+  isOutOfCoverageStateCode,
+  COVERED_STATE_CODE,
+  US_STATE_AND_TERRITORY_CODES,
 } from "../txgioAddressNormalize";
 
 describe("normalizeStreetLine", () => {
@@ -285,6 +288,47 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
       zip: "78602",
     });
     expect(placeSearchLocalityMatches(stored, query)).toBe(true);
+  });
+});
+
+describe("isOutOfCoverageStateCode (P-107 / OPS-16 A-072)", () => {
+  it("recognises a real out-of-state code parsed from a full address", () => {
+    const { state } = parsePlaceSearchLocality(
+      "1600 E Camelback Rd, Phoenix, AZ",
+    );
+    expect(state).toBe("AZ");
+    expect(isOutOfCoverageStateCode(state)).toBe(true);
+  });
+
+  it("does not treat the covered state (TX) as out of coverage", () => {
+    expect(COVERED_STATE_CODE).toBe("TX");
+    expect(isOutOfCoverageStateCode("TX")).toBe(false);
+    const { state } = parsePlaceSearchLocality(
+      "147 Kahana Ln, Bastrop, TX",
+    );
+    expect(state).toBe("TX");
+    expect(isOutOfCoverageStateCode(state)).toBe(false);
+  });
+
+  it("does not fire on a query with no parsed state (most typed TX addresses)", () => {
+    const { state } = parsePlaceSearchLocality("147 Kahana Ln, Bastrop");
+    expect(state).toBeNull();
+    expect(isOutOfCoverageStateCode(state)).toBe(false);
+    expect(isOutOfCoverageStateCode(null)).toBe(false);
+  });
+
+  it("does not fire on an unrecognised two-letter token (false-positive guard)", () => {
+    // STATE_RE (the normalizer's own broad match) would accept this; the
+    // out-of-coverage check is deliberately narrower so a garbled query
+    // never reads to a caller as "Smart Site does not cover this place".
+    expect(US_STATE_AND_TERRITORY_CODES.has("ZZ")).toBe(false);
+    expect(isOutOfCoverageStateCode("ZZ")).toBe(false);
+  });
+
+  it("recognises every real state/territory code except the covered one", () => {
+    for (const code of US_STATE_AND_TERRITORY_CODES) {
+      expect(isOutOfCoverageStateCode(code)).toBe(code !== COVERED_STATE_CODE);
+    }
   });
 });
 

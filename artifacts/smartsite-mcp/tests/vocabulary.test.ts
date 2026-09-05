@@ -47,6 +47,7 @@ const REQUIRED_TOKENS = [
   "radius_unbounded",
   "bare_street_unbounded",
   "bare_street_not_a_street",
+  "out_of_coverage",
 ] as const;
 
 function entryFor(token: string): VocabularyEntry {

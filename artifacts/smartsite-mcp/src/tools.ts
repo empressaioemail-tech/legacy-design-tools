@@ -39,7 +39,9 @@ import {
   declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
   mapScreensGateNonOk,
+  missClassDisplayText,
   normalizeGetSmartSiteResponseText,
+  outOfCoverageAgentGuidance,
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
@@ -178,6 +180,16 @@ function askTheMapInputSchema(): typeof ASK_THE_MAP_STRICT {
  * `hits` carries parcel hits only; when there is no parcel hit, the address
  * points move to `located` (typed, never a hit) so a caller can say "address
  * exists, parcel not bound" instead of "no match". Non-JSON bodies pass through.
+ *
+ * P-107 (OPS-16 A-072). Cortex may also carry `missClass: "out_of_coverage"`
+ * (plus `outOfCoverageState`) straight through from searchPlaceByPrefix —
+ * the query resolved to a state Smart Site's store has not reached, fired
+ * BEFORE the store was ever searched, so there is no `located` row to move
+ * here either. That token is enriched with `missClassDisplayText` and
+ * `agentGuidance` (read from the shared VOCABULARY / mirrored coverage
+ * constant in tool-honesty.ts) so a caller reads a served answer — what IS
+ * covered today — rather than a bare, unexplained machine token. `no-hit`
+ * and `located-unbound` are left exactly as they were: unenriched.
  */
 export function splitFindParcelHits(bodyText: string): string {
   let parsed: unknown;
@@ -205,6 +217,14 @@ export function splitFindParcelHits(bodyText: string): string {
   if (parcelHits.length === 0 && located.length > 0) {
     out.located = located;
     if (out.missClass === undefined) out.missClass = "located-unbound";
+  }
+  if (out.missClass === "out_of_coverage") {
+    out.missClassDisplayText = missClassDisplayText("out_of_coverage");
+    out.agentGuidance = outOfCoverageAgentGuidance(
+      typeof record.outOfCoverageState === "string"
+        ? record.outOfCoverageState
+        : undefined,
+    );
   }
   return JSON.stringify(out);
 }
