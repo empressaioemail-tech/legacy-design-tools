@@ -1,3 +1,4 @@
+import type { EntitlementGateRefusal } from "./entitlement.js";
 import { envelopeHuman } from "./mcp-app.js";
 import {
   DERIVED_FIGURES_POLICY,
@@ -659,6 +660,54 @@ export function mapGetSmartSiteNonOk(
   }
 
   return null;
+}
+
+/**
+ * OPS-16 A-101. `create_screen` / `add_to_screen` have no local Studio
+ * predicate — the api-server screens gate (`peStudioGate.ts`,
+ * `requirePeStudioScreens`) is the SOLE gate, so the MCP never grows a
+ * second, driftable copy of `subscriptionTierGrantsStudio` (three already
+ * exist; a fourth in this file would be exactly the mistake A-087 named).
+ * This does not re-decide the tier: it reshapes the route's OWN declared 402
+ * body into the same purpose-built `upgrade_required` envelope
+ * `export_instrument`'s local Studio gate already returns
+ * (entitlement.ts's `EntitlementGateRefusal`), so a caller sees one
+ * consistent shape for "you need to upgrade" no matter which gate refused.
+ *
+ * Strict on purpose (every field checked, not just `reason`): if the 402
+ * body is not shaped exactly as `requirePeStudioScreens` always sends it,
+ * this returns null and the caller falls back to the generic
+ * `declareUpstreamNonOk` envelope rather than fabricating a message, tier,
+ * or subscriptionTier this function did not actually read off the wire.
+ */
+export function mapScreensGateNonOk(
+  httpStatus: number,
+  bodyText: string,
+): EntitlementGateRefusal | null {
+  if (httpStatus !== 402) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body.error !== "upgrade_required" || body.reason !== "studio_screens") {
+    return null;
+  }
+  const message = nonEmptyString(body.message) ? (body.message as string) : null;
+  const tier = body.tier === "free" || body.tier === "paid" ? body.tier : null;
+  if (!message || !tier) return null;
+  const subscriptionTier =
+    body.subscriptionTier === "solo" ||
+    body.subscriptionTier === "studio" ||
+    body.subscriptionTier === "team"
+      ? body.subscriptionTier
+      : null;
+  return { status: "upgrade_required", reason: "studio_screens", tier, subscriptionTier, message };
 }
 
 /** Batch node rows keep per-parcel brief honesty; stubs pass through. */

@@ -195,9 +195,15 @@ describe("applyDepthRailDisplayGate", () => {
     };
   }
 
-  it("downgrades jurisdiction-depth satisfied-present below threshold to not-yet", () => {
+  it("downgrades jurisdiction-depth satisfied-present below threshold to measured-below-bar", () => {
     const result = applyDepthRailDisplayGate(baseCell());
-    expect(result.displayState).toBe("not-yet");
+    // Operator ruling 4 (2026-08-19, lane SS-W15): a demoted cell WAS measured
+    // and fell short, which is a different state from never having been
+    // measured. Both were `not-yet` and rendered identically. Composed with
+    // R-09 (PR #447, live since 2026-08-21): isPartial is preserved from the
+    // input, not cleared — see depthRailGateDivergence.test.ts for the full
+    // reasoning and the empirical proof the two fields are independent.
+    expect(result.displayState).toBe("measured-below-bar");
     expect(result.isPartial).toBe(true);
   });
 
@@ -206,8 +212,8 @@ describe("applyDepthRailDisplayGate", () => {
     expect(result.displayState).toBe("satisfied-present");
   });
 
-  it("downgrades jurisdiction-depth satisfied-present with NULL coverage to not-yet", () => {
-    expect(applyDepthRailDisplayGate(baseCell({ honestCoveragePct: null, isPartial: false })).displayState).toBe("not-yet");
+  it("downgrades jurisdiction-depth satisfied-present with NULL coverage to measured-below-bar", () => {
+    expect(applyDepthRailDisplayGate(baseCell({ honestCoveragePct: null, isPartial: false })).displayState).toBe("measured-below-bar");
   });
 
   it("does not override satisfied-absent on jurisdiction-depth rails", () => {

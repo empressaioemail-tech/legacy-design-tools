@@ -10,7 +10,7 @@
  *
  * Also covers County Manifest Sprint 1 (feat/county-manifest-sprint1): the
  * additive `manifestCells` field (254 x N-rail grid, always, N =
- * COUNTY_RAIL_COUNT), the no-atom/no-writer/not-yet/stored-rail_state
+ * COUNTY_RAIL_COUNT), the no-atom/no-writer/not-measured/measured-below-bar/stored-rail_state
  * precedence resolution, and that `manifestCells` is fully independent of
  * the pre-existing `counties` array — a route with zero
  * county_facet_coverage rows still returns the full manifest grid once
@@ -337,10 +337,13 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
       (c: { countyFips: string }) => c.countyFips === "50900",
     );
     expect(cellsForCounty).toHaveLength(RAIL_COUNT);
-    // Every cell resolves to a derived state (no-atom / no-writer / not-yet),
+    // Every cell resolves to a derived state. Operator ruling 4 (lane SS-W15)
+    // split the old `not-yet` into `not-measured` (no ledger row: an instrument
+    // gap) and `measured-below-bar` (a row, below its bar: a coverage gap). A
+    // county with ZERO coverage rows is entirely the former.
     // never a stored value, since no county_facet_coverage row exists.
     for (const c of cellsForCounty) {
-      expect(["no-atom", "no-writer", "not-yet"]).toContain(c.displayState);
+      expect(["no-atom", "no-writer", "not-measured"]).toContain(c.displayState);
     }
   });
 
@@ -398,13 +401,16 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(roadsCell.displayState).toBe("no-writer");
   });
 
-  it("precedence: jurisdiction-depth below threshold renders not-yet (P1.1)", async () => {
+  it("precedence: jurisdiction-depth below threshold renders measured-below-bar (P1.1)", async () => {
     await seedAllRails();
     await db.insert(countyManifest).values({ countyFips: "50903", countyName: "Partial County", parcelCountEst: 1000, rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
     await db.insert(countyFacetCoverage).values({ countyFips: "50903", facet: "zoning", honestCoveragePct: "33.98", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
     const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50903" && c.railKey === "zoning");
-    expect(cell.displayState).toBe("not-yet");
+    // Ruling 4's displayState split composed with R-09's isPartial
+    // preservation — see depthRailGateDivergence.test.ts for the full
+    // reasoning and the empirical proof the two fields are independent.
+    expect(cell.displayState).toBe("measured-below-bar");
     expect(cell.isPartial).toBe(true);
   });
 
@@ -418,13 +424,13 @@ describe("GET /api/county-ledger, County Manifest Sprint 1 manifestCells grid", 
     expect(cell.isPartial).toBe(true);
   });
 
-  it("precedence: jurisdiction-depth zero coverage renders not-yet", async () => {
+  it("precedence: jurisdiction-depth zero coverage renders measured-below-bar", async () => {
     await seedAllRails();
     await db.insert(countyManifest).values({ countyFips: "50906", countyName: "Zero Coverage", rosterSchemaVersion: "test-v1", rosterGeneratedAt: new Date("2026-08-05T00:00:00.000Z") });
     await db.insert(countyFacetCoverage).values({ countyFips: "50906", facet: "zoning", honestCoveragePct: "0", integrityVerdict: "n/a", classification: "real-at-ceiling", railState: "satisfied-present", thresholdPct: "95" });
     const res = await request(getApp()).get(LIVE_LEDGER_PATH);
     const cell = res.body.manifestCells.find((c: { countyFips: string; railKey: string }) => c.countyFips === "50906" && c.railKey === "zoning");
-    expect(cell.displayState).toBe("not-yet");
+    expect(cell.displayState).toBe("measured-below-bar");
   });
 
   it("precedence: jurisdiction-depth satisfied-absent unchanged by gate", async () => {

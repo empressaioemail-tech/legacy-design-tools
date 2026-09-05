@@ -154,6 +154,30 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * rail. No gate verdict exists for this rail as of this card; every entry
  * resolves to 'legacy' until one does.
  *
+ * valueHistory, ALL SIX counties including Caldwell (F-01, PARCEL-B-SLATE1
+ * template, serve/prod cutover, 2026-09-04): the ingest job
+ * (parcel-value-history.mjs, PARCEL-VALUE-HISTORY, closed 2026-09-02) ran
+ * --apply on all six program counties, every county's companion-row count
+ * exactly matching its landing denominator, zero orphans. A Williamson-only
+ * crosswalk collision between two situs-sharing R-accounts was found and
+ * fixed (PARCEL-VH-COLLISION, closed 2026-09-03, doc_repo
+ * `_inbox/2026-09-03_parcel-vh-collision_close.json`); the other five
+ * counties never touch the crosswalk path and were never exposed. No
+ * per-county writer exclusion exists for this rail (contrast agValuation /
+ * maxImperviousCoverPct), so all six are slated on the writer's own
+ * demonstrated scope, matching cityLimits/flood/dollar-rails/utilityService/
+ * schoolDistrict's own reasoning. No legacy serve path exists for this
+ * rail (confirmed by a repo-wide search before this card). No gate verdict
+ * exists for this rail as of this card (checked doc_repo for a
+ * `parcel_gate_verdict` evaluation record before assuming none exists --
+ * PARCEL-B-GATE-SCHED's own close documents its scheduled evaluation
+ * covering only the four PARCEL-B-SLATE1 rails and PARCEL-B-SLATE2's six;
+ * valueHistory, added afterward, is not among them); every entry resolves
+ * to 'legacy' (valueHistoryFactServeCutover.ts's own typed not-cut-over
+ * refusal, since there is no legacy reader) until a gate evaluation for
+ * valueHistory lands. Slating ahead of the verdict is fail-closed by
+ * construction, per this file's own PARCEL-B-READER precedent.
+ *
  * zoningDistrict + setbackFrontFt, ALL SIX counties including Caldwell
  * (F-01, PARCEL-B-SLATE3, OPS-16 A-096/A-097/A-098, 2026-09-04): the
  * specific defect this card fixes. Unlike every rail above, zoning
@@ -279,6 +303,12 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48453:schoolDistrict",
   "48491:schoolDistrict",
   "48453:maxImperviousCoverPct",
+  "48021:valueHistory",
+  "48055:valueHistory",
+  "48209:valueHistory",
+  "48309:valueHistory",
+  "48453:valueHistory",
+  "48491:valueHistory",
   "48021:zoningDistrict",
   "48055:zoningDistrict",
   "48209:zoningDistrict",

@@ -16,6 +16,16 @@
  *
  * Own file rather than an append to mcp-app.test.ts, which open PR #580
  * (P-106) edits.
+ *
+ * OPS-16 A-101 (2026-09-04). The wire shape create_screen/add_to_screen emit
+ * on a screens-gate 402 changed: `mapScreensGateNonOk` (tool-honesty.ts) now
+ * reshapes it into the same declared `upgrade_required` envelope
+ * `export_instrument`'s local Studio gate returns, rather than the generic
+ * `declareUpstreamNonOk` passthrough (`status: "error"`, `upstreamStatus`).
+ * `declaredLineHtml` still paints `UPGRADE_TO_SCREEN` for either shape — see
+ * its own comment in mcp-app.ts — but the FIXTURE below is updated to the
+ * shape the connector actually emits today, and the `upstreamStatus`
+ * assertion is gone because that field is no longer part of it.
  */
 
 import { describe, expect, it } from "vitest";
@@ -34,19 +44,21 @@ import {
 
 /**
  * The body `create_screen` hands the panel when the api-server screens gate
- * refuses. Shape produced by `declareUpstreamNonOk` (tool-honesty.ts) from the
- * 402 `requirePeStudioScreens` returns: top-level status is "error", the
- * capability travels in `reason`, and the upstream code in `upstreamStatus`.
+ * refuses. Shape produced by `mapScreensGateNonOk` (tool-honesty.ts)
+ * reshaping the 402 `requirePeStudioScreens` returns: top-level status is
+ * the declared "upgrade_required" kind (same envelope export_instrument's
+ * local Studio gate returns), the capability travels in `reason`, and there
+ * is no `upstreamStatus` — that field belongs to the generic
+ * `declareUpstreamNonOk` passthrough this envelope replaces for a
+ * recognised screens-gate refusal.
  */
 const SCREENS_REFUSAL = JSON.stringify({
-  error: "upgrade_required",
-  message:
-    "Studio or Team is required to build a screen. Solo answers one parcel; Studio works a list of them.",
+  status: "upgrade_required",
+  reason: "studio_screens",
   tier: "free",
   subscriptionTier: null,
-  status: "error",
-  reason: "studio_screens",
-  upstreamStatus: 402,
+  message:
+    "Studio or Team is required to build a screen. Solo answers one parcel; Studio works a list of them.",
 });
 
 function declaredFor(text: string): DeclaredBody {
@@ -58,9 +70,9 @@ function declaredFor(text: string): DeclaredBody {
 describe("P-101 item 10: a screens refusal paints an upgrade prompt, not a failure", () => {
   it("the wire body is read as a declared body carrying the capability name", () => {
     const d = declaredFor(SCREENS_REFUSAL);
-    expect(d.status).toBe("error");
+    expect(d.status).toBe("upgrade_required");
     expect(d.reason).toBe(UPGRADE_SCREENS_REASON);
-    expect(d.upstreamStatus).toBe(402);
+    expect(d.upstreamStatus).toBeUndefined();
     expect(d.tier).toBe("free");
     expect(d.message).toMatch(/screen/i);
   });
@@ -71,12 +83,32 @@ describe("P-101 item 10: a screens refusal paints an upgrade prompt, not a failu
     // The two strings this line must not borrow.
     expect(html).not.toContain(UPGRADE_TO_OPEN);
     expect(html).not.toContain(NOT_RETURNED);
-    // The reason the user was refused is stated, not implied.
-    expect(html).toContain('data-upstream-status="402"');
+    // No upstream-status badge: this envelope never carries one (unlike the
+    // generic upstream-error passthrough it replaces for this refusal).
+    expect(html).not.toContain("data-upstream-status");
     expect(html).toContain('<span class="key">tier</span>');
     expect(html).toContain("Studio or Team is required to build a screen");
-    expect(html).toContain('data-declared="error"');
+    expect(html).toContain('data-declared="upgrade_required"');
     expect(html).toContain(`data-reason="${UPGRADE_SCREENS_REASON}"`);
+  });
+
+  it("the OLD generic upstream-error shape (status error, upstreamStatus 402) still paints the same SCREEN head", () => {
+    // Defensive fallback path: mapScreensGateNonOk declines on an
+    // unrecognised 402 body and tools.ts falls back to declareUpstreamNonOk,
+    // which still carries reason "studio_screens" through untouched. The
+    // panel must still recognise it, or that fallback silently degrades to
+    // the generic failure line.
+    const legacyShape = JSON.stringify({
+      status: "error",
+      reason: "studio_screens",
+      upstreamStatus: 402,
+      tier: "free",
+      message: "Studio or Team is required to build a screen.",
+    });
+    const html = declaredLineHtml(declaredFor(legacyShape));
+    expect(html).toContain(`<b>${UPGRADE_TO_SCREEN}</b>`);
+    expect(html).toContain('data-upstream-status="402"');
+    expect(html).toContain('data-declared="error"');
   });
 
   it("the two strings are different sentences about different things", () => {

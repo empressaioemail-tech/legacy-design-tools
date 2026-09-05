@@ -2274,11 +2274,21 @@ export function declaredLineHtml(d: DeclaredBody): string {
   const reason = d.reason ? d.reason : UNSTATED;
   const bits: string[] = [];
   let head = "";
-  if (d.status === "error" && d.reason === UPGRADE_SCREENS_REASON) {
-    /* A screens refusal arrives as an upstream non-ok, so its top-level status
-     * is "error"; the capability is named by the reason, not inferred. Painted
-     * as an upgrade prompt rather than as a failure, because it is neither a
-     * fault nor a bare refusal: it is a rung the account does not hold. */
+  if (
+    (d.status === "upgrade_required" || d.status === "error") &&
+    d.reason === UPGRADE_SCREENS_REASON
+  ) {
+    /* OPS-16 A-101: create_screen/add_to_screen now reshape a recognised
+     * screens-gate 402 into the same declared upgrade_required envelope
+     * export_instrument's local gate returns (status "upgrade_required", no
+     * upstreamStatus — see mapScreensGateNonOk). status "error" stays here
+     * too as the fallback path: if that reshape ever declines (a 402 body
+     * missing a field it always sends today), the refusal still arrives via
+     * the generic upstream-error envelope, with reason carried through
+     * unchanged by declareUpstreamNonOk, and still paints as an upgrade
+     * prompt rather than a bare failure. Painted as an upgrade prompt either
+     * way, because it is neither a fault nor a bare refusal: it is a rung
+     * the account does not hold. */
     head = UPGRADE_TO_SCREEN;
     if (typeof d.upstreamStatus === "number") bits.push(`<span class="mono" data-upstream-status="${d.upstreamStatus}">${UPSTREAM_KEY} ${d.upstreamStatus}</span>`);
     if (d.tier) bits.push(reasonLineHtml("tier", d.tier));

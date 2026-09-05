@@ -25,6 +25,8 @@ function emptyPayload(): CountyLedgerPayload {
       satisfiedPresentCells: 0,
       satisfiedPresentPartialCells: 0,
       satisfiedAbsentCells: 0,
+      notMeasuredCells: 0,
+      measuredBelowBarCells: 0,
       texasCompletenessPct: 0,
     },
   };

@@ -28,6 +28,12 @@ import {
   mergeEffectiveRailFields,
 } from "@workspace/db/manifest";
 import { eq, sql } from "drizzle-orm";
+import {
+  DEPTH_GATE_DEMOTION_STATE,
+  MANIFEST_DISPLAY_STATE_SQL,
+  MANIFEST_IS_PARTIAL_SQL,
+  type ManifestDisplayState,
+} from "@workspace/db/manifest";
 
 /**
  * One cell of the 254 x N manifest grid. `displayState` resolves per the
@@ -39,13 +45,7 @@ import { eq, sql } from "drizzle-orm";
 export interface ManifestCell {
   countyFips: string;
   railKey: string;
-  displayState:
-    | "derivation-indeterminate"
-    | "no-atom"
-    | "no-writer"
-    | "not-yet"
-    | "satisfied-present"
-    | "satisfied-absent";
+  displayState: ManifestDisplayState;
   isPartial: boolean;
   honestCoveragePct: number | null;
   thresholdPct: number | null;
@@ -140,6 +140,18 @@ export interface CountyLedgerSummary {
   satisfiedPresentCells: number;
   satisfiedPresentPartialCells: number;
   satisfiedAbsentCells: number;
+  /**
+   * Cells with NO ledger row: never measured. An INSTRUMENT gap, and the
+   * answer is wiring a source, not acquiring more data (operator ruling 4,
+   * 2026-08-19).
+   */
+  notMeasuredCells: number;
+  /**
+   * Cells that WERE measured and sit below their bar. A COVERAGE gap, and the
+   * answer is acquisition. Until this split both of these read `not-yet` and
+   * the console could not say which kind of gap any cell was.
+   */
+  measuredBelowBarCells: number;
   texasCompletenessPct: number;
   computedAt?: string;
   servedAt?: string;
@@ -173,7 +185,19 @@ export function applyDepthRailDisplayGate(cell: ManifestCell): ManifestCell {
   const threshold = cell.thresholdPct;
   const coverage = cell.honestCoveragePct;
   if (coverage === null || threshold === null || coverage < threshold) {
-    return { ...cell, displayState: "not-yet" };
+    // Ruling 4's displayState split (measured-below-bar vs not-measured)
+    // composed with R-09's own fix (2026-08-21, PR #447, live in production):
+    // isPartial is NOT cleared here. Ruling 4 originally cleared it, reasoning
+    // the new displayState split made it redundant -- empirically false,
+    // proven by running R-09's own regression tests
+    // (depthRailGateDivergence.test.ts "R-09: preserves isPartial on
+    // demotion", manifestReadIndicatorOverlay.test.ts "isPartial survives
+    // depth-rail display downgrade") against Ruling 4's code in isolation:
+    // both fail on `isPartial`, independent of the displayState string used.
+    // The two fixes answer different questions -- displayState says WHICH
+    // KIND of gap this is (instrument vs coverage), isPartial says whether
+    // THIS cell's own measurement is incomplete -- and both survive.
+    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE };
   }
   return cell;
 }
@@ -215,20 +239,8 @@ async function readManifestGrid(db: SelectDb): Promise<ManifestCell[]> {
       c.verified_by_instrument,
       c.verification_method,
       c.artifact_path,
-      CASE
-        WHEN r.atom_family_state <> 'present' THEN 'no-atom'
-        WHEN r.has_writer = false THEN 'no-writer'
-        WHEN c.rail_state IS NULL THEN 'not-yet'
-        ELSE c.rail_state
-      END AS display_state,
-      CASE
-        WHEN r.atom_family_state = 'present'
-         AND r.has_writer = true
-         AND c.rail_state = 'satisfied-present'
-         AND c.honest_coverage_pct < COALESCE(c.threshold_pct, r.threshold_pct)
-        THEN true
-        ELSE false
-      END AS is_partial
+${sql.raw(MANIFEST_DISPLAY_STATE_SQL)},
+${sql.raw(MANIFEST_IS_PARTIAL_SQL)}
     FROM county_manifest m
     CROSS JOIN county_rail r
     LEFT JOIN county_facet_coverage c
@@ -287,6 +299,13 @@ async function readManifestGrid(db: SelectDb): Promise<ManifestCell[]> {
 
 const DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP = new Set(["zoning-regime-doctrine"]);
 
+/**
+ * THE LAUNCH-GATE PREDICATE. Re-exported at the bottom of this file, and lane
+ * SS-W15's `manifestDisplayState.test.ts` drives it directly to PROVE the
+ * display split is arithmetic-neutral rather than asserting it. A display
+ * change that moved this silently would be the most expensive possible defect
+ * of that lane.
+ */
 function isSatisfiedCell(cell: ManifestCell): boolean {
   if (cell.displayState === "derivation-indeterminate") return false;
   if (cell.source && DOCTRINE_SOURCES_EXCLUDED_FROM_ROLLUP.has(cell.source)) {
@@ -516,6 +535,13 @@ export async function computeCountyLedgerPayload(
   const satisfiedAbsentCells = manifestCells.filter(
     (c) => c.displayState === "satisfied-absent",
   ).length;
+  // Measured, never derived by subtraction from a total (DEV_PROCESS 1.3).
+  const notMeasuredCells = manifestCells.filter(
+    (c) => c.displayState === "not-measured",
+  ).length;
+  const measuredBelowBarCells = manifestCells.filter(
+    (c) => c.displayState === "measured-below-bar",
+  ).length;
   const parcelCountByFips = new Map<string, number | null>(
     manifestRows.map((m: { countyFips: string; parcelCountEst: unknown }) => [
       m.countyFips,
@@ -539,6 +565,8 @@ export async function computeCountyLedgerPayload(
       satisfiedPresentCells,
       satisfiedPresentPartialCells,
       satisfiedAbsentCells,
+      notMeasuredCells,
+      measuredBelowBarCells,
       texasCompletenessPct: rollup.texasPct,
     },
   };
