@@ -68,7 +68,16 @@ export function canRunStudioReport(
 
 export type EntitlementGateRefusal = {
   status: "upgrade_required";
-  reason: "deep_report" | "studio_report";
+  /**
+   * `studio_screens` is not built by a `refuse*` function here: it is the
+   * api-server screens gate's own reason (`peStudioGate.ts`,
+   * STUDIO_SCREENS_REFUSAL_REASON), reshaped from its 402 body by
+   * `mapScreensGateNonOk` (tool-honesty.ts) into this same envelope. Listed
+   * in this union so that reshaped value still type-checks as an
+   * EntitlementGateRefusal — one shape for "you need to upgrade" regardless
+   * of which gate (local predicate, or upstream route) produced it.
+   */
+  reason: "deep_report" | "studio_report" | "studio_screens";
   tier: "free" | "paid";
   subscriptionTier: PeSubscriptionTier | null;
   message: string;

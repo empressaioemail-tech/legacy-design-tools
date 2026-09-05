@@ -32,6 +32,15 @@
  *
  * Lives in its own file rather than appended to tools.test.ts because open PR
  * #580 (P-106) edits that file and changes the registered-tool count.
+ *
+ * OPS-16 A-101 (2026-09-04). The refusal SHAPE changed, item 2 did not: a
+ * 402 shaped exactly as `requirePeStudioScreens` sends it now reshapes (via
+ * `mapScreensGateNonOk`, tool-honesty.ts) into the same declared
+ * `upgrade_required` envelope `export_instrument`'s local Studio gate
+ * already returns, instead of the generic `declareUpstreamNonOk` passthrough
+ * this file originally pinned. Still exactly one cortex call, still the
+ * route's own reason/tier/subscriptionTier/message carried through intact —
+ * reshaped, not re-decided; still zero local tier predicate in tools.ts.
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -122,7 +131,7 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
     mockLoadCortexConfig.mockReturnValue(CORTEX_TEST_CONFIG);
   });
 
-  it("free create_screen: reaches cortex ONCE and surfaces the route refusal with its reason and status", async () => {
+  it("free create_screen: reaches cortex ONCE and surfaces the route refusal as a declared upgrade_required", async () => {
     mockAuth = { ...FREE_AUTH };
     mockCortexFetch.mockResolvedValue(refused402());
 
@@ -136,12 +145,17 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
       // tier is known. Exactly one call, so it did not retry past the refusal.
       expect(mockCortexFetch).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(textOf(result));
-      expect(parsed).toMatchObject({
-        status: "error",
+      // OPS-16 A-101: the same declared envelope export_instrument's local
+      // Studio gate returns, reshaped from the route's own 402 body — not
+      // the generic upstream-error passthrough (no `error` or
+      // `upstreamStatus` key; top-level `status` is the declared kind).
+      expect(parsed).toEqual({
+        status: "upgrade_required",
         reason: "studio_screens",
-        error: "upgrade_required",
-        upstreamStatus: 402,
         tier: "free",
+        subscriptionTier: null,
+        message:
+          "Studio or Team is required to build a screen. Solo answers one parcel; Studio works a list of them.",
       });
       // The sentence survives the hop; the connector does not have to invent one.
       expect(parsed.message).toMatch(/screen/i);
@@ -165,11 +179,39 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
       expect(mockCortexFetch).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(textOf(result));
       expect(parsed).toMatchObject({
-        status: "error",
+        status: "upgrade_required",
         reason: "studio_screens",
-        upstreamStatus: 402,
       });
       expect(parsed).not.toHaveProperty("screenId");
+      expect(parsed).not.toHaveProperty("upstreamStatus");
+    });
+  });
+
+  it("a 402 NOT shaped like the screens gate falls back to the generic declared envelope, never fabricated", async () => {
+    mockAuth = { ...FREE_AUTH };
+    // Same status, different (and incomplete) body: no `message`, and a
+    // `reason` this gate never emits. mapScreensGateNonOk must decline
+    // rather than guess a tier/subscriptionTier/message it never read.
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ error: "upgrade_required", reason: "some_other_gate" }), {
+        status: 402,
+      }),
+    );
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "create_screen",
+        arguments: { name: "walk", queries: ["48021:34137"], source: "pasted" },
+      });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(textOf(result));
+      // The generic upstream-error shape, not the screens upgrade_required
+      // envelope: falling back is honest about what it actually read.
+      expect(parsed).toMatchObject({
+        status: "error",
+        reason: "some_other_gate",
+        upstreamStatus: 402,
+      });
     });
   });
 

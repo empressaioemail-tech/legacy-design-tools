@@ -38,6 +38,7 @@ import {
   declarePlaceSearchRefusal,
   declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
+  mapScreensGateNonOk,
   normalizeGetSmartSiteResponseText,
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
@@ -1036,7 +1037,16 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const text = await res.text();
-              if (!res.ok) return upstreamErrorResult(res.status, text);
+              if (!res.ok) {
+                // OPS-16 A-101: screens have no local Studio predicate (the
+                // route is the sole gate — see mapScreensGateNonOk). A 402
+                // shaped as its own refusal reshapes into the same declared
+                // upgrade_required envelope export_instrument's local gate
+                // returns; anything else stays the generic upstream error.
+                const upgrade = mapScreensGateNonOk(res.status, text);
+                if (upgrade) return upgradeRequiredResult(upgrade);
+                return upstreamErrorResult(res.status, text);
+              }
               return {
                 content: [{ type: "text" as const, text }],
                 isError: false,
@@ -1060,7 +1070,12 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const text = await res.text();
-              if (!res.ok) return upstreamErrorResult(res.status, text);
+              if (!res.ok) {
+                // Same reshape as create_screen; see the comment there.
+                const upgrade = mapScreensGateNonOk(res.status, text);
+                if (upgrade) return upgradeRequiredResult(upgrade);
+                return upstreamErrorResult(res.status, text);
+              }
               return {
                 content: [{ type: "text" as const, text }],
                 isError: false,
