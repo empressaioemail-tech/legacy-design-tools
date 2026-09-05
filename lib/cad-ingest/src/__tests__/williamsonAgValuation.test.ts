@@ -168,43 +168,25 @@ describe("buildReconciliationRecords (join + honest summary counts)", () => {
 });
 
 describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)", () => {
-  async function createAgValuationFixtureTable(db: {
-    execute: (q: ReturnType<typeof sql>) => Promise<unknown>;
-  }) {
-    // Minimal schema-matching subset of the real tx_wcad_ag_valuation
-    // columns (per live information_schema.columns dump) -- this repo
-    // does not own that table's migration, so the fixture creates its
-    // own copy for the test schema only.
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS "tx_wcad_ag_valuation" (
-        "id" bigint PRIMARY KEY,
-        "prop_id" text NOT NULL,
-        "land_type" text,
-        "description" text,
-        "acres" numeric,
-        "value" numeric,
-        "curr_value" numeric,
-        "ag_flag" boolean NOT NULL DEFAULT false,
-        "source" text NOT NULL DEFAULT 'test-fixture',
-        "source_vintage" text NOT NULL DEFAULT 'test-fixture',
-        "source_citation" text NOT NULL DEFAULT 'test-fixture',
-        "ingested_at" timestamptz NOT NULL DEFAULT now(),
-        "county_fips" text
-      );
-    `);
-  }
+  // tx_wcad_ag_valuation is created by this repo's own migration
+  // (lib/db/drizzle/0098_tx_wcad_ag_valuation.sql) even though the repo
+  // does not own the table's real production lifecycle -- see that
+  // migration's own header. withTestSchema applies it like any other
+  // migration, so no ad-hoc fixture table is needed here; every NOT NULL
+  // column (ag_flag, source, source_vintage, source_citation) must be
+  // supplied explicitly since the real schema carries no defaults.
+  const REQ = "false, 'test-fixture', 'test-fixture', 'test-fixture'"; // ag_flag, source, source_vintage, source_citation
 
   it("aggregates multiple additive land segments for the same prop_id (real shape: up to ~29 rows per property)", async () => {
     await withTestSchema(async ({ db }) => {
-      await createAgValuationFixtureTable(db);
-      await db.execute(sql`
-        INSERT INTO tx_wcad_ag_valuation (id, prop_id, land_type, acres, value, curr_value, county_fips)
+      await db.execute(sql.raw(`
+        INSERT INTO tx_wcad_ag_valuation (id, prop_id, land_type, acres, value, curr_value, county_fips, ag_flag, source, source_vintage, source_citation)
         VALUES
-          (1, 'R349307', 'L', 1.021, 306, 250, '48491'),
-          (2, 'R349307', 'D1', 5.5, 1200, 900, '48491'),
-          (3, 'R500001', 'R', NULL, 48500, 48500, '48491'),
-          (4, 'R999999', 'L', 2.0, 500, 500, '48209');
-      `);
+          (1, 'R349307', 'L', 1.021, 306, 250, '48491', ${REQ}),
+          (2, 'R349307', 'D1', 5.5, 1200, 900, '48491', ${REQ}),
+          (3, 'R500001', 'R', NULL, 48500, 48500, '48491', ${REQ}),
+          (4, 'R999999', 'L', 2.0, 500, 500, '48209', ${REQ});
+      `));
 
       const aggregated = await aggregateAgValuationByPropId(db, WILLIAMSON_COUNTY_FIPS);
       expect(aggregated.get("R349307")).toEqual({ totalValue: "1506", totalAcres: "6.521" });
@@ -216,7 +198,6 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
 
   it("full reconcile: targets missing land_value/land_acres get filled via COALESCE, existing correct rows are untouched", async () => {
     await withTestSchema(async ({ db }) => {
-      await createAgValuationFixtureTable(db);
       // Williamson's DECLARED vintage (DECLARED_CAD_VINTAGES["48491"] in
       // vintage.ts) is tax_year 2026 -- this reconciliation must only
       // ever touch that year's rows, never a stale prior-vintage one.
@@ -255,10 +236,10 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
           sourceVintage: "2025-legacy",
         },
       ]);
-      await db.execute(sql`
-        INSERT INTO tx_wcad_ag_valuation (id, prop_id, land_type, acres, value, county_fips)
-        VALUES (1, 'R349307', 'L', 1.021, 306, '48491');
-      `);
+      await db.execute(sql.raw(`
+        INSERT INTO tx_wcad_ag_valuation (id, prop_id, land_type, acres, value, county_fips, ag_flag, source, source_vintage, source_citation)
+        VALUES (1, 'R349307', 'L', 1.021, 306, '48491', ${REQ});
+      `));
 
       const summary = await reconcileWilliamsonAgValuation(db, "2026-09-05-test");
       // Only the declared-vintage (2026) R349307 row is a target -- the
