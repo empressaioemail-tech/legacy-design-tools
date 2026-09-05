@@ -33,6 +33,7 @@ import {
   peEntitlementBaseBody,
   resolvePeEntitlement,
   resolvePeOwnerUserId,
+  subscriptionTierGrantsStudio,
 } from "../lib/peEntitlement";
 import { requirePeStudioScreens } from "../lib/peStudioGate";
 import { getPeUserEmail, setPeDevRole } from "../lib/peIdentity";
@@ -67,6 +68,7 @@ import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { structuralFactWithParcelRecordOverlay } from "../lib/structuralFactResolve";
 import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
+import { attachCadRollOverlaysToFacets } from "../lib/structuralFactToFacetsWire";
 import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
@@ -152,8 +154,19 @@ function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
   };
 }
 
+/**
+ * `grantsCadRollValuation` gates the four CAD tax-assessed dollar rails
+ * (marketValue/assessedValue/landValue/improvementValue) — OPS-16 A-103
+ * item 5 / A-104, same predicate as owner-info display
+ * (`callerGrantsOwnerFact` / `subscriptionTierGrantsStudio`), Studio|Team
+ * only. This route already runs behind `requirePeAuthenticated`, so the
+ * caller is guaranteed identified before this function is ever reached;
+ * the tier check alone is the gate here (never a fourth independent tier
+ * check — reuse `subscriptionTierGrantsStudio` directly, OPS-16 A-087).
+ */
 async function assembleNodeBriefBody(
   parcelNodeId: string,
+  grantsCadRollValuation: boolean,
 ): Promise<Record<string, unknown> | null> {
   const parsedForOverlay = parseParcelNodeId(parcelNodeId);
   const [
@@ -208,9 +221,25 @@ async function assembleNodeBriefBody(
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
   });
+  // PARCEL-B-SLATE2 dollar rails: merge the live overlay onto the offline-
+  // baked baseFacts.cadRoll (item 3, A-104) — previously discarded here
+  // entirely, unlike livingAreaSqft/yearBuilt above. yearBuilt is
+  // deliberately NOT re-merged through this call: it already flows through
+  // `structuralFactWithParcelRecordOverlay` above, and this call exists only
+  // to carry the four dollar fields through to `draw` / `onRecord`.
+  const facetsWithCadRollOverlay = attachCadRollOverlaysToFacets(
+    (asRecord(snapshot.facets) as Record<string, unknown> | null) ?? {},
+    {
+      marketValue: cadRollOverlay.marketValue,
+      assessedValue: cadRollOverlay.assessedValue,
+      landValue: cadRollOverlay.landValue,
+      improvementValue: cadRollOverlay.improvementValue,
+      yearBuilt: null,
+    },
+  );
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
-    facets: snapshot.facets,
+    facets: facetsWithCadRollOverlay,
     bakedAt,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
     queryPoint: snapshot.queryPoint ?? null,
@@ -220,13 +249,18 @@ async function assembleNodeBriefBody(
     well: wellFact,
     specialDistrict: specialDistrictFact,
     structural: structuralFact,
+    grantsCadRollValuation,
   });
   return {
     runId: buildR1RunId(parcelNodeId, bakedAt),
     reportFamily: "R1",
     mode: "baked-facet-intel-v1",
     parcelNodeId,
-    onRecord: serializeTwinOnRecord(snapshot.facets, parcelNodeId),
+    onRecord: serializeTwinOnRecord(
+      facetsWithCadRollOverlay,
+      parcelNodeId,
+      grantsCadRollValuation,
+    ),
     brief: {
       sections: brief.sections,
       disclosure: brief.disclosure,
@@ -1058,6 +1092,22 @@ router.post(
       return;
     }
 
+    // CAD tax-assessed dollar rails co-gate with owner info (OPS-16 A-103
+    // item 5 / A-104): Studio|Team only, same predicate as
+    // `callerGrantsOwnerFact` elsewhere. `requirePeAuthenticated` already
+    // guarantees an identified caller ahead of this handler, so the tier
+    // check alone is the gate. Resolved once per request (only for "node"
+    // depth -- "stub" depth never reads cadRoll, see assembleStubBody), so
+    // it does not vary per parcel id below. Fails closed: any entitlement
+    // read that does not resolve to a snapshot reads as ungranted, never
+    // granted-by-default.
+    const grantsCadRollValuation =
+      parsed.depth === "node"
+        ? subscriptionTierGrantsStudio(
+            (await resolvePeEntitlement(req))?.subscriptionTier ?? null,
+          )
+        : false;
+
     if (parsed.mode === "single") {
       const parcelNodeId = parsed.ids[0]!;
       if (!isValidParcelNodeId(parcelNodeId)) {
@@ -1073,7 +1123,10 @@ router.post(
         res.json(stub);
         return;
       }
-      const body = await assembleNodeBriefBody(parcelNodeId);
+      const body = await assembleNodeBriefBody(
+        parcelNodeId,
+        grantsCadRollValuation,
+      );
       if (!body) {
         await sendBriefMiss(res, parcelNodeId);
         return;
@@ -1095,7 +1148,7 @@ router.post(
         }
         const row =
           parsed.depth === "node"
-            ? await assembleNodeBriefBody(id)
+            ? await assembleNodeBriefBody(id, grantsCadRollValuation)
             : await assembleStubBody(id);
         return { id, row };
       }),

@@ -170,6 +170,25 @@
  * cad-parcel-roll / bake / cad_property / GIS ParcelCardData.owner for
  * this field. Do not run sanitizeNodeFacetPayload on a granted
  * ownerFact (it would strip ownerName).
+ *
+ * CAD TAX-ASSESSED DOLLAR VALUES CO-GATE WITH OWNER (OPS-16 A-103 item 5 /
+ * A-104, 2026-09-05). `facets.baseFacts.cadRoll.{marketValue,assessedValue,
+ * landValue,improvementValue}` are county tax-assessment figures — the
+ * operator's own distinction is that this is a sourced, factual figure from
+ * the CAD roll, NOT a market-valuation opinion, so Masters 06's "not a
+ * valuation tool" stance does not apply to it. It is cleared to display, but
+ * ruled to unlock at the exact same tier as owner info: gated by
+ * `grantsOwnerFact` (Studio|Team only), which means it is Studio+ ONLY,
+ * notably excluding Property Unlock even though Property Unlock otherwise
+ * carries X-ray/Flood/Feasibility/CAD-exports (P-119) — the same asymmetry
+ * A-104 flagged against owner info itself. Before this gate these four
+ * fields were written into the response by `attachCadRollOverlaysToFacets`
+ * with NO GATE AT ALL, a live (if inert — nothing rendered it) exposure.
+ * `gateCadRollValuationOnFacets` runs AFTER the overlay merge so it catches
+ * dollar values regardless of whether they came from the live overlay or
+ * straight off the offline-baked snapshot; refused callers get a typed
+ * `studio-gated` refusal per field, never a silent omission. `livingAreaSqft`
+ * is not a dollar field and is not part of this ruling.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -209,6 +228,7 @@ import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
 import {
   attachVerdictLayersToFacets,
   attachCadRollOverlaysToFacets,
+  gateCadRollValuationOnFacets,
 } from "../lib/structuralFactToFacetsWire";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
 import { parseParcelNodeId } from "../lib/parcelNodeId";
@@ -788,14 +808,21 @@ brokerageNodeFacetsRouter.get(
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: attachCadRollOverlaysToFacets(
-        attachVerdictLayersToFacets(
-          snapshot.facets as Record<string, unknown>,
-          structuralFact,
-          zoningVerdict,
-          cadRollOverlay.livingAreaSqft,
+      // CAD tax-assessed dollar rails (marketValue/assessedValue/landValue/
+      // improvementValue) are gated Studio|Team, same predicate as ownerFact
+      // just below (OPS-16 A-103 item 5 / A-104). livingAreaSqft is not a
+      // dollar field and is never touched by this gate.
+      facets: gateCadRollValuationOnFacets(
+        attachCadRollOverlaysToFacets(
+          attachVerdictLayersToFacets(
+            snapshot.facets as Record<string, unknown>,
+            structuralFact,
+            zoningVerdict,
+            cadRollOverlay.livingAreaSqft,
+          ),
+          cadRollOverlay,
         ),
-        cadRollOverlay,
+        grantsOwnerFact,
       ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying

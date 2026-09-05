@@ -44,6 +44,12 @@ vi.mock("../../lib/peEntitlement", () => ({
     () => (_req: Request, _res: Response, next: NextFunction) => next(),
   resolvePeEntitlement: vi.fn(),
   resolvePeOwnerUserId: () => "user-brief-absent",
+  // OPS-16 A-103 item 5 / A-104: propertyExplorer.ts now reuses this real
+  // predicate to gate the CAD tax-assessed dollar fields. This suite is
+  // about the brief miss-split, not entitlement, so mirror the real
+  // (pure) implementation rather than a stub.
+  subscriptionTierGrantsStudio: (tier: string | null) =>
+    tier === "studio" || tier === "team",
 }));
 
 vi.mock("../../lib/peScreenSaveDb", () => ({
