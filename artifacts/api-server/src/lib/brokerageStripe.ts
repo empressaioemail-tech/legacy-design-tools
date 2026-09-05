@@ -57,16 +57,47 @@ export function stripeMaxPriceId(): string | null {
 
 export type SubscriptionCheckoutTier = "pro" | "max";
 
+/**
+ * Raised when the legacy install-scoped (retired browser-extension) checkout
+ * cannot proceed because its Stripe price id is unconfigured. Mirrors
+ * `PeCheckoutConfigError` in `pePaywallStripe.ts` (routes map both to 503
+ * `checkout_unavailable`) — kept as a separate class rather than imported
+ * from there to avoid a circular import (`pePaywallStripe.ts` already
+ * imports from this file).
+ */
+export class BrokerageCheckoutConfigError extends Error {
+  readonly missing: string;
+  constructor(missing: string) {
+    super(`checkout unavailable: ${missing} is not configured`);
+    this.name = "BrokerageCheckoutConfigError";
+    this.missing = missing;
+  }
+}
+
 function stripePriceIdForTier(tier: SubscriptionCheckoutTier): string | null {
   return tier === "max" ? stripeMaxPriceId() : stripeProPriceId();
 }
 
+/**
+ * FAIL CLOSED. This seam served the retired browser extension's Pro/Max
+ * tiers only (operator ruling 2026-09: the extension has been retired for
+ * months and is not coming back — see OPS-16 A-061). A price id must match
+ * ONE of the two configured tier prices EXACTLY to resolve; anything else —
+ * including a Max subscriber whose price id no longer matches a stale or
+ * unset STRIPE_MAX_PRICE_ID — returns null rather than silently downgrading
+ * to "pro". The prior behaviour ("if it isn't Max, it's Pro") never checked
+ * the price id against STRIPE_PRO_PRICE_ID at all, so ANY unrecognized price
+ * id — a Max mismatch, a foreign product, a typo — resolved to Pro
+ * entitlement. Callers MUST treat null as a refusal, never a default.
+ */
 export function subscriptionTierFromPriceId(
   priceId: string | null | undefined,
-): SubscriptionCheckoutTier {
+): SubscriptionCheckoutTier | null {
   const maxId = stripeMaxPriceId();
+  const proId = stripeProPriceId();
   if (maxId && priceId === maxId) return "max";
-  return "pro";
+  if (proId && priceId === proId) return "pro";
+  return null;
 }
 
 export function stripeWebhookPath(): string {
@@ -199,11 +230,13 @@ export async function createSubscriptionCheckoutSession(input: {
   const priceId = stripePriceIdForTier(input.tier);
   const publishableKey = stripePublishableKey();
 
-  if (!isStripeConfigured() || !priceId) {
+  if (!isStripeConfigured()) {
+    // Keyless dev/smoke path ONLY — no STRIPE_SECRET_KEY at all. A deployment
+    // holding a real key (test or live) never lands here.
     const sessionId = `sim_cs_${input.installId.slice(0, 8)}_${Date.now()}`;
     logger.info(
       { installId: input.installId.slice(0, 8), tier: input.tier },
-      "stripe: simulated checkout (no STRIPE_SECRET_KEY or price id)",
+      "stripe: simulated checkout (no STRIPE_SECRET_KEY)",
     );
     const sep = input.successUrl.includes("?") ? "&" : "?";
     return {
@@ -213,6 +246,23 @@ export async function createSubscriptionCheckoutSession(input: {
       publishableKey: null,
       note: `Stripe credentials not configured — simulated ${input.tier} checkout session`,
     };
+  }
+
+  if (!priceId) {
+    // FAIL CLOSED. A real Stripe key IS configured but this tier's price id
+    // is not — the prior behaviour returned a fake "simulated" session here,
+    // indistinguishable to the caller from a genuine one, under a key that
+    // could be live. This seam served only the retired browser extension's
+    // Pro/Max tiers (extension retired, not coming back — OPS-16 A-061), so
+    // there is no live product this refusal could ever wrongly block; refuse
+    // loudly rather than hand back a checkout session that does nothing.
+    logger.error(
+      { installId: input.installId.slice(0, 8), tier: input.tier },
+      "stripe: checkout requested for a tier with no configured price id — refusing",
+    );
+    throw new BrokerageCheckoutConfigError(
+      input.tier === "max" ? "STRIPE_MAX_PRICE_ID" : "STRIPE_PRO_PRICE_ID",
+    );
   }
 
   const customerId = await getOrCreateStripeCustomer(input.installId);
@@ -554,6 +604,16 @@ export async function handleStripeWebhook(
         subscriptionId,
         obj,
       );
+      if (!tier) {
+        // FAIL CLOSED: an unrecognized price id must never grant "pro" by
+        // default. The non-2xx response makes Stripe retry and surfaces the
+        // miss, matching the PE grant-tier refusal above.
+        logger.error(
+          { installId, subscriptionId },
+          "stripe: legacy install-scoped checkout completed with unrecognized price id — refusing to grant",
+        );
+        return { handled: false, reason: "unknown_subscription_tier" };
+      }
 
       await setSubscriptionEntitlement({
         installId,
@@ -622,15 +682,25 @@ export async function handleStripeWebhook(
     const active = status === "active" || status === "trialing";
     if (installId) {
       const subId = typeof obj.id === "string" ? obj.id : null;
-      const { tier } = active
-        ? await resolveSubscriptionTierFromStripe(subId, obj)
-        : { tier: "pro" as const };
+      let tier: SubscriptionCheckoutTier | null = null;
+      if (active) {
+        tier = (await resolveSubscriptionTierFromStripe(subId, obj)).tier;
+        if (!tier) {
+          // FAIL CLOSED: same rule as checkout.session.completed above —
+          // never default an unrecognized price id to "pro".
+          logger.error(
+            { installId, subscriptionId: subId },
+            "stripe: legacy install-scoped subscription active with unrecognized price id — refusing to grant",
+          );
+          return { handled: false, reason: "unknown_subscription_tier" };
+        }
+      }
       await setSubscriptionEntitlement({
         installId,
         stripeCustomerId:
           typeof obj.customer === "string" ? obj.customer : null,
         stripeSubscriptionId: subId,
-        subscriptionTier: active ? tier : "free",
+        subscriptionTier: active ? tier! : "free",
         subscriptionStatus: active
           ? (status as "active" | "trialing")
           : "churned",
@@ -777,9 +847,10 @@ async function fetchStripeSubscription(
   return json;
 }
 
+/** FAIL CLOSED: returns null (never a default tier) on anything unrecognized. */
 function tierFromStripeObject(
   obj: Record<string, unknown>,
-): SubscriptionCheckoutTier {
+): SubscriptionCheckoutTier | null {
   const metaTier = (obj.metadata as Record<string, unknown> | undefined)
     ?.subscription_tier;
   if (metaTier === "max" || metaTier === "pro") return metaTier;
@@ -800,10 +871,11 @@ function tierFromStripeObject(
   return subscriptionTierFromPriceId(priceId);
 }
 
+/** FAIL CLOSED: `tier: null` means unresolved — the caller must refuse, never default. */
 async function resolveSubscriptionTierFromStripe(
   subscriptionId: string | null,
   obj?: Record<string, unknown>,
-): Promise<{ tier: SubscriptionCheckoutTier; periodEnd: Date | null }> {
+): Promise<{ tier: SubscriptionCheckoutTier | null; periodEnd: Date | null }> {
   let source = obj;
   if (subscriptionId) {
     try {
@@ -812,7 +884,7 @@ async function resolveSubscriptionTierFromStripe(
       logger.warn({ err, subscriptionId }, "stripe: subscription fetch failed");
     }
   }
-  const tier = source ? tierFromStripeObject(source) : "pro";
+  const tier = source ? tierFromStripeObject(source) : null;
   const periodEnd = source ? periodEndFromStripe(source) : null;
   return { tier, periodEnd };
 }
