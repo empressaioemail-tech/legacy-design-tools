@@ -66,6 +66,20 @@ vi.mock("../src/cortex-client.js", () => ({
   cortexFetch: (...args: unknown[]) => mockCortexFetch(...args),
 }));
 
+/**
+ * P-119 / OPS-16 A-103: Property Unlock is explicitly excluded from
+ * multi-property research tools (screens/boards) — Studio/Team only, per
+ * the operator's authoritative package table. Mocked (never really queried)
+ * so the "does an unlock change anything here" test below can assert it is
+ * never even consulted, proving the exclusion structurally rather than by
+ * absence of a call site.
+ */
+const mockHasPropertyUnlock = vi.fn<() => Promise<boolean>>(() => Promise.resolve(false));
+vi.mock("../src/property-unlock.js", () => ({
+  hasPropertyUnlock: (...args: unknown[]) =>
+    mockHasPropertyUnlock(...(args as [string, string])),
+}));
+
 const STUDIO_AUTH: SmartsiteAuthContext = {
   userId: "user-studio-1",
   email: "studio@example.com",
@@ -255,6 +269,37 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
       });
       expect(result.isError).toBe(false);
       expect(JSON.parse(textOf(result))).toMatchObject({ screenId: "s-1" });
+    });
+  });
+
+  // P-119 / OPS-16 A-103: the authoritative package table lists site plan
+  // CAD, terrain export, and Feasibility Studies under Property Unlock, but
+  // deliberately NOT screens/boards — "that capability is Studio/Team
+  // exclusive, confirmed absent from this row by its own omission." Proven
+  // here at the code level: a free-tier caller who HOLDS an active property
+  // unlock still gets the exact same studio_screens refusal a bare free
+  // caller gets, and the unlock lookup is never even consulted — because
+  // create_screen/add_to_screen have no local gate at all (the route is the
+  // sole gate, unchanged by this fix) and the route knows nothing about
+  // property unlocks for this capability.
+  it("a property-unlock caller still gets studio_screens: unlocks do not clear the screens gate", async () => {
+    mockAuth = { ...FREE_AUTH };
+    mockHasPropertyUnlock.mockResolvedValue(true);
+    mockCortexFetch.mockResolvedValue(refused402());
+
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "create_screen",
+        arguments: { name: "walk", queries: ["48021:34137"], source: "pasted" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(textOf(result))).toMatchObject({
+        status: "upgrade_required",
+        reason: "studio_screens",
+      });
+      // Structural proof, not just a passing assertion: this capability
+      // never even asks whether the parcel is unlocked.
+      expect(mockHasPropertyUnlock).not.toHaveBeenCalled();
     });
   });
 });

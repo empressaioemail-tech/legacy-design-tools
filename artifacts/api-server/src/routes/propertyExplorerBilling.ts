@@ -10,6 +10,7 @@ import { brokerageCors } from "../middlewares/brokerageCors";
 import { requireBrokerageAuthOrServiceToken } from "../middlewares/brokerageServiceAuth";
 import { requireInstallId } from "../lib/brokerageInstallId";
 import {
+  BrokerageCheckoutConfigError,
   createSubscriptionCheckoutSession,
   isStripeConfigured,
   type SubscriptionCheckoutTier,
@@ -81,6 +82,17 @@ propertyExplorerBillingRouter.post("/checkout", async (req: Request, res: Respon
         : "Stripe credentials not configured on cortex — simulated checkout only",
     });
   } catch (err) {
+    if (err instanceof BrokerageCheckoutConfigError) {
+      // FAIL CLOSED, declared: this tier's price is not configured. Refuse
+      // rather than hand back a fake session under a real key.
+      res.status(503).json({
+        error: "checkout_unavailable",
+        message: err.message,
+        missing: err.missing,
+        stripeConfigured: isStripeConfigured(),
+      });
+      return;
+    }
     res.status(502).json({
       error: "checkout_failed",
       message: String((err as Error).message || err),

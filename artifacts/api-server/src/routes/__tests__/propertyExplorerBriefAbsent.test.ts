@@ -96,6 +96,13 @@ vi.mock("../../lib/structuralFactRead", () => ({
 vi.mock("../../lib/specialDistrictFactRead", () => ({
   loadSpecialDistrictFactAtom: vi.fn(async () => null),
 }));
+// OPS-16 A-103 item 6 / A-104: assembleNodeBriefBody now also reads building
+// footprint (a direct atom read, no serve-cutover wrapper -- same category as
+// pipeline/boundary above, so it needs the same explicit mock rather than
+// relying on the allowlist short-circuit the cutover-wrapped facts below get).
+vi.mock("../../lib/buildingFootprintFactRead", () => ({
+  loadBuildingFootprintFactAtom: vi.fn(async () => null),
+}));
 
 vi.mock("../../lib/peRecordsEngagement", () => ({
   ensurePeRecordsEngagement: vi.fn(),
