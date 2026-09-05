@@ -59,6 +59,44 @@ export function landAcresFromGis(
   return { refuse: true, reason: REFUSE_GIS_AREA_REASON };
 }
 
+/**
+ * McLennan leftover-farm fallback (F-01, OPS-19b Wave 1 item 4 follow-up,
+ * `_inbox/2026-09-05_engine-williamson-mclennan-geomgap-nulls_close.json`).
+ *
+ * McLennan's StratMap drop carries no usable GIS_AREA_U for any of its
+ * 114,255 rows, so `landAcresFromGis` refuses every one of them even
+ * though `land_value`/`market_value` land fine from the same rows (99%
+ * populated) -- the acreage is not missing from the source, it is
+ * embedded as free text on `LEGAL_DESC` and was never extracted. Two
+ * real phrasings measured live against the county's own rows:
+ *   - "Acres 0.414" (the dominant form, ~96.6% of rows)
+ *   - "... 0.116 Ac Aband ROW (A) Total 0.414 Ac" (the remainder) --
+ *     note the decoy: a bare "<number> Ac" match here would wrongly
+ *     grab the 0.116 sub-tract figure instead of the parcel's real
+ *     0.414 total, so "Total ... Ac" is matched FIRST and specifically,
+ *     never a generic "<number> Ac" anywhere in the string.
+ * Returns null (never an invented figure) when neither phrasing is
+ * found -- this is a strict fallback that can only turn an existing
+ * null into a real value or leave it null; it never overwrites a value
+ * `landAcresFromGis` already resolved (see call site in txgio/landuse.ts).
+ */
+export function landAcresFromLegalDescription(
+  legalDescription: unknown,
+): string | null {
+  if (typeof legalDescription !== "string") return null;
+  const text = legalDescription.trim();
+  if (!text) return null;
+
+  const totalMatch = text.match(/\bTotal\s+(\d+(?:\.\d+)?)\s*Ac\b/i);
+  const acresMatch = totalMatch ? null : text.match(/\bAcres\s+(\d+(?:\.\d+)?)\b/i);
+  const raw = totalMatch?.[1] ?? acresMatch?.[1];
+  if (raw == null) return null;
+
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return formatAcres(n);
+}
+
 function isCamaVintage(vintage: string | null | undefined): boolean {
   return typeof vintage === "string" && vintage.startsWith("tier:cad-export;");
 }
