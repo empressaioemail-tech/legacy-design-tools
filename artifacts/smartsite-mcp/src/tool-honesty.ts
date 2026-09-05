@@ -1,3 +1,4 @@
+import type { EntitlementGateRefusal } from "./entitlement.js";
 import { envelopeHuman } from "./mcp-app.js";
 import {
   DERIVED_FIGURES_POLICY,
@@ -661,6 +662,54 @@ export function mapGetSmartSiteNonOk(
   return null;
 }
 
+/**
+ * OPS-16 A-101. `create_screen` / `add_to_screen` have no local Studio
+ * predicate — the api-server screens gate (`peStudioGate.ts`,
+ * `requirePeStudioScreens`) is the SOLE gate, so the MCP never grows a
+ * second, driftable copy of `subscriptionTierGrantsStudio` (three already
+ * exist; a fourth in this file would be exactly the mistake A-087 named).
+ * This does not re-decide the tier: it reshapes the route's OWN declared 402
+ * body into the same purpose-built `upgrade_required` envelope
+ * `export_instrument`'s local Studio gate already returns
+ * (entitlement.ts's `EntitlementGateRefusal`), so a caller sees one
+ * consistent shape for "you need to upgrade" no matter which gate refused.
+ *
+ * Strict on purpose (every field checked, not just `reason`): if the 402
+ * body is not shaped exactly as `requirePeStudioScreens` always sends it,
+ * this returns null and the caller falls back to the generic
+ * `declareUpstreamNonOk` envelope rather than fabricating a message, tier,
+ * or subscriptionTier this function did not actually read off the wire.
+ */
+export function mapScreensGateNonOk(
+  httpStatus: number,
+  bodyText: string,
+): EntitlementGateRefusal | null {
+  if (httpStatus !== 402) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body.error !== "upgrade_required" || body.reason !== "studio_screens") {
+    return null;
+  }
+  const message = nonEmptyString(body.message) ? (body.message as string) : null;
+  const tier = body.tier === "free" || body.tier === "paid" ? body.tier : null;
+  if (!message || !tier) return null;
+  const subscriptionTier =
+    body.subscriptionTier === "solo" ||
+    body.subscriptionTier === "studio" ||
+    body.subscriptionTier === "team"
+      ? body.subscriptionTier
+      : null;
+  return { status: "upgrade_required", reason: "studio_screens", tier, subscriptionTier, message };
+}
+
 /** Batch node rows keep per-parcel brief honesty; stubs pass through. */
 export function normalizeGetSmartSiteResponseText(
   cortexBodyText: string,
@@ -937,4 +986,61 @@ export function declarePlaceSearchRefusal(
     reasonDisplayText: placeSearchRefusalDisplayText(body.error, vocabulary),
     ...(detail ? { detail } : {}),
   };
+}
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's missClass display text, read from the
+ * same shared VOCABULARY table placeSearchRefusalDisplayText reads from
+ * above, so the machine token and the human word can never drift apart.
+ * Throws rather than falling back to the raw token (same convention as
+ * placeSearchRefusalDisplayText and vocabulary.ts's own requireString): a
+ * closed missClass with no display row is a defect in this package, not a
+ * value to paper over. Only `out_of_coverage` is looked up through this
+ * path today — `no-hit` and `located-unbound` ship unenriched, as they
+ * always have, and this function is never called for them.
+ */
+export function missClassDisplayText(
+  missClass: string,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): string {
+  const entry = vocabulary.find((e) => e.token === missClass);
+  if (!entry) {
+    throw new Error(`vocabulary: no entry for missClass "${missClass}"`);
+  }
+  return entry.displayText;
+}
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's out-of-coverage agentGuidance: names
+ * what Smart Site covers today rather than leaving the caller with only a
+ * negative ("out_of_coverage" alone reads no better than "no-hit" did — the
+ * defect the card exists to fix names the SAME collapse for the guidance
+ * text, not just the machine token).
+ *
+ * Mirrors COVERED_STATE_CODE in artifacts/api-server/src/lib/
+ * txgioAddressNormalize.ts (read 2026-09-04): the situs / rooftop store is
+ * Texas-only today. Not imported — this package has no workspace
+ * dependency on api-server (HTTP boundary only, same convention documented
+ * on PlaceSearchRefusalCode above). If api-server's covered-state set ever
+ * grows past one state, this sentence goes stale until updated by hand.
+ *
+ * Deliberately does not enumerate counties (masters 06/08's coverage
+ * posture: state coverage broadens continuously, and a per-county claim
+ * goes stale on the next county landed); state-level is also the actual
+ * granularity this detection operates at.
+ */
+export function outOfCoverageAgentGuidance(outOfCoverageState?: string): string {
+  const parsedAs =
+    typeof outOfCoverageState === "string" && outOfCoverageState.length > 0
+      ? ` This query parsed as state "${outOfCoverageState}".`
+      : "";
+  return (
+    "Smart Site's parcel data covers Texas today; coverage is expanding over " +
+    "time and this is not a permanent boundary." +
+    parsedAs +
+    " This is not a claim that the address does not exist or that the " +
+    "parcel is unverified — only that Smart Site has not reached this " +
+    "place yet. Do not report it to the user as a miss or a bad address; " +
+    "say plainly that this place is outside Smart Site's coverage today."
+  );
 }

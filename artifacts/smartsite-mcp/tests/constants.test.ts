@@ -60,6 +60,13 @@ describe("smartsite-mcp constants", () => {
     const findParcel = SMARTSITE_MCP_TOOLS.find((t) => t.name === "find_parcel");
     expect(findParcel?.description).toContain("missClass");
     expect(findParcel?.description).toMatch(/not that the parcel does not exist/);
+    // P-107 (OPS-16 A-072). find_parcel's own coverage claim was stale
+    // ("Central Texas") relative to the store it actually queries, and the
+    // description never told a caller the two miss classes mean opposite
+    // things. Locked in here so a future edit cannot silently regress
+    // either half of the fix.
+    expect(findParcel?.description).toContain("out_of_coverage");
+    expect(findParcel?.description).not.toMatch(/Central Texas/);
     const listScreens = SMARTSITE_MCP_TOOLS.find((t) => t.name === "list_screens");
     expect(listScreens?.description).toMatch(/does not open a board/);
     for (const name of ["save_property", "set_property_status"] as const) {

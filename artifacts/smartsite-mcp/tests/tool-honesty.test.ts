@@ -7,8 +7,10 @@ import {
   declarePlaceSearchRefusal,
   declareUpstreamNonOk,
   mapGetSmartSiteNonOk,
+  missClassDisplayText,
   normalizeGetSmartSiteResponseText,
   normalizeR1BodyForExternal,
+  outOfCoverageAgentGuidance,
   placeSearchRefusalDisplayText,
   sanitizeAskTheMapErrorBody,
   STUB_RAIL_FOR_NODE_DISPOSITION,
@@ -17,7 +19,7 @@ import {
   type ExternalBriefSectionDisposition,
   type PlaceSearchRefusalCode,
 } from "../src/tool-honesty.js";
-import { VOCABULARY } from "../src/vocabulary.js";
+import { VOCABULARY, type VocabularyEntry } from "../src/vocabulary.js";
 
 const GOLD_DRAW_A3 = {
   node: "48021:34137",
@@ -1128,5 +1130,56 @@ describe("declarePlaceSearchRefusal / placeSearchRefusalDisplayText (P-91 v3 Q1)
     ).toThrow(/no entry for place-search refusal code "radius_unbounded"/);
     // Restored (the real export, untouched by the filter above): green again.
     expect(() => placeSearchRefusalDisplayText("radius_unbounded")).not.toThrow();
+  });
+});
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's missing miss class: an out-of-coverage
+ * query (e.g. Phoenix, AZ) and a genuine in-coverage no-match both used to
+ * come back as the same bare `no-hit`. missClassDisplayText and
+ * outOfCoverageAgentGuidance are the two pieces splitFindParcelHits attaches
+ * when cortex reports `missClass: "out_of_coverage"`.
+ */
+describe("missClassDisplayText / outOfCoverageAgentGuidance (P-107 / OPS-16 A-072)", () => {
+  it("reads out_of_coverage's display text from the real, shared VOCABULARY without throwing", () => {
+    expect(() => missClassDisplayText("out_of_coverage")).not.toThrow();
+    expect(missClassDisplayText("out_of_coverage").length).toBeGreaterThan(0);
+    expect(missClassDisplayText("out_of_coverage")).not.toBe("out_of_coverage");
+  });
+
+  it("throws rather than falling back to the raw token for an unknown missClass (drift guard)", () => {
+    expect(() => missClassDisplayText("some_future_miss_class")).toThrow(
+      /no entry for missClass "some_future_miss_class"/,
+    );
+  });
+
+  it("verify by violation: a vocabulary table missing the out_of_coverage row makes the display path fail rather than print the raw token", () => {
+    const withoutOutOfCoverage: VocabularyEntry[] = VOCABULARY.filter(
+      (e) => e.token !== "out_of_coverage",
+    );
+    expect(withoutOutOfCoverage.length).toBe(VOCABULARY.length - 1);
+    expect(() =>
+      missClassDisplayText("out_of_coverage", withoutOutOfCoverage),
+    ).toThrow(/no entry for missClass "out_of_coverage"/);
+  });
+
+  it("names what IS covered today, not just that this place is not — the card's own bar", () => {
+    // "we do not cover Arizona yet" is a served user; a bare no-hit / bare
+    // token is a failed one (OPS-16 A-072's own framing). The guidance must
+    // name the covered place, not just negate the query.
+    expect(outOfCoverageAgentGuidance("AZ").toLowerCase()).toContain("texas");
+    expect(outOfCoverageAgentGuidance("AZ")).toContain("AZ");
+  });
+
+  it("still names coverage when no state was carried on the wire (defensive default)", () => {
+    const guidance = outOfCoverageAgentGuidance();
+    expect(guidance.toLowerCase()).toContain("texas");
+    expect(guidance.length).toBeGreaterThan(0);
+  });
+
+  it("explicitly disclaims 'the address does not exist' rather than leaving it ambiguous, and names coverage as non-permanent", () => {
+    const guidance = outOfCoverageAgentGuidance("AZ").toLowerCase();
+    expect(guidance).toMatch(/not a claim that the address does not exist/);
+    expect(guidance).toMatch(/expanding|not a permanent boundary/);
   });
 });
