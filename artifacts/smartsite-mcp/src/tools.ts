@@ -10,8 +10,10 @@ import {
 import {
   canRunDeepReport,
   canRunStudioReport,
+  isPropertyExportKind,
   isStudioExportKind,
   refuseDeepReport,
+  refusePropertyExport,
   refuseStudioReport,
   snapshotFromAuth,
 } from "./entitlement.js";
@@ -32,6 +34,8 @@ import {
   executeExportInstrument,
   exportKindNotAvailableResult,
 } from "./export-instrument.js";
+import { executeFeasibilityExport } from "./feasibility-export.js";
+import { hasPropertyUnlock } from "./property-unlock.js";
 import { listPurchasedRecords, readPurchasedRecord } from "./recordsExtraction.js";
 import {
   buildRunReportEnvelope,
@@ -545,7 +549,7 @@ function inputSchemaFor(name: SmartsiteToolName) {
     case "export_instrument":
       return z.object({
         parcelNodeId: z.string().min(1),
-        kind: z.enum(["brief", "siteplan", "terrain", "dossier"]),
+        kind: z.enum(["brief", "siteplan", "terrain", "dossier", "feasibility"]),
       });
     case "get_smart_site":
       return z.object({
@@ -1024,17 +1028,59 @@ export function registerTools(server: McpServer): void {
           // upstream tools' SDK metering is absorbed on Legacy Group ATX's
           // side via this server's own HAUSKA_MCP_SERVICE_KEY (operator
           // ruling, not a new billing mechanism — see export-instrument.ts).
-          // The Studio gate is unchanged from the pre-P-109 shape.
+          //
+          // GATES CORRECTED, P-119 / OPS-16 A-103. The operator's final
+          // package table settled two things this connector had wrong:
+          // dossier (X-ray) was gated Studio/Team here while the web app
+          // has only ever required Solo+ (or a property unlock) — backwards,
+          // corrected below to match the web app (A-068/A-074/A-099 named
+          // this divergence; never resolved until now). Site plan and
+          // terrain keep their Studio/Team ceiling but now ALSO clear on a
+          // property unlock, per the table's Property Unlock row — a
+          // per-parcel lookup, checked only when the account-wide Studio
+          // check fails, never a broadened account-level predicate (that
+          // shape — `tier !== 'paid'` — is exactly the over-grant class
+          // A-068 found live once already).
           case "export_instrument": {
             const { parcelNodeId, kind } = args as {
               parcelNodeId: string;
-              kind: "brief" | "siteplan" | "terrain" | "dossier";
+              kind: "brief" | "siteplan" | "terrain" | "dossier" | "feasibility";
             };
             if (kind === "brief") {
               return exportKindNotAvailableResult();
             }
-            if (isStudioExportKind(kind) && !canRunStudioReport(entitlement)) {
-              return upgradeRequiredResult(refuseStudioReport(entitlement));
+            if (kind === "feasibility") {
+              // Studio/Team OR a property unlock (P-119) — same shape as
+              // site plan/terrain below, but there is no hauska-mcp-server
+              // tool to proxy: this calls hauska-engine-api directly (see
+              // feasibility-export.ts).
+              if (!canRunStudioReport(entitlement)) {
+                const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
+                if (!unlocked) {
+                  return upgradeRequiredResult(refuseStudioReport(entitlement));
+                }
+              }
+              return ensureDeclaredError(
+                await executeFeasibilityExport({ parcelNodeId }),
+              );
+            }
+            if (isPropertyExportKind(kind)) {
+              // dossier (X-ray): Solo+ OR a property unlock — matches the
+              // web app's resolveDossierExportAuth exactly (P-119 row 1).
+              if (!canRunDeepReport(entitlement)) {
+                const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
+                if (!unlocked) {
+                  return upgradeRequiredResult(refusePropertyExport(entitlement));
+                }
+              }
+            } else if (isStudioExportKind(kind)) {
+              // siteplan, terrain: Studio/Team OR a property unlock.
+              if (!canRunStudioReport(entitlement)) {
+                const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
+                if (!unlocked) {
+                  return upgradeRequiredResult(refuseStudioReport(entitlement));
+                }
+              }
             }
             return ensureDeclaredError(
               await executeExportInstrument({ parcelNodeId, kind }),

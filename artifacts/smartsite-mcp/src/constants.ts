@@ -69,7 +69,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "export_instrument",
     title: "Export an instrument",
     description:
-      "Export a site plan, terrain model, or dossier artifact via Hauska's real two-hop export contract (refresh, then download; P-110). Requires Studio or Team for site plan and terrain; dossier requires Studio or Team here on the connector (Solo+ on the web app — a recorded, deliberate divergence, P-104, not resolved by this tool). `brief` is accepted as a kind for discoverability but always returns status kind_not_available: Hauska's export contract has no brief kind and never has.",
+      "Export a site plan, terrain model, feasibility study, or property dossier (X-ray) artifact, each a two-hop refresh-then-download call (P-110; feasibility calls hauska-engine-api directly, the other three go through Hauska's MCP export contract). Site plan, terrain, and feasibility study require Studio or Team, or a 30-day unlock on the parcel. The property dossier (X-ray) requires only Solo or above, or a 30-day unlock on the parcel — matching the web app (P-119; a prior Studio-only gate here on the connector was corrected, OPS-16 A-103). `brief` is accepted as a kind for discoverability but always returns status kind_not_available: Hauska's export contract has no brief kind and never has.",
     readiness: "live" as const,
   },
   {

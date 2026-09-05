@@ -20,6 +20,24 @@ vi.mock("../src/cortex-client.js", () => ({
   cortexFetch: (...args: unknown[]) => mockCortexFetch(...args),
 }));
 
+/**
+ * Property Unlock (P-119, A-103) is a real DB lookup in production
+ * (property-unlock.ts, mirroring api-server's hasPePropertyUnlock). Mocked
+ * here the same way cortex-client is mocked above, so export_instrument's
+ * gate tests never touch a real database — default false (no unlock)
+ * unless a test explicitly grants one via mockResolvedValueOnce(true).
+ */
+const mockHasPropertyUnlock = vi.fn<() => Promise<boolean>>(() => Promise.resolve(false));
+vi.mock("../src/property-unlock.js", () => ({
+  hasPropertyUnlock: (...args: unknown[]) =>
+    mockHasPropertyUnlock(...(args as [string, string])),
+}));
+
+afterEach(() => {
+  mockHasPropertyUnlock.mockReset();
+  mockHasPropertyUnlock.mockResolvedValue(false);
+});
+
 const defaultAuth: SmartsiteAuthContext = {
   userId: "user-test-1",
   email: "test@example.com",
@@ -576,62 +594,193 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
     });
   });
 
-  // P-110: export_instrument is live again, so the Studio gate re-applies
-  // exactly as it did pre-P-109 (isStudioExportKind + canRunStudioReport,
-  // unchanged from entitlement.ts) — a free caller gets a real upgrade
-  // price again, not a blanket not_ready.
-  it("free session gets upgrade_required for a Studio export kind", async () => {
-    mockAuth = {
-      userId: "user-free",
-      email: "free@example.com",
-      accessTier: "free",
-      subscriptionTier: null,
+  // P-119 / OPS-16 A-103 full coverage matrix. The operator's final package
+  // table: X-ray (dossier) is Solo+ or a property unlock (row 1 and the
+  // Property Unlock row); site plan/terrain/feasibility are Studio/Team OR
+  // a property unlock (Studio+Team rows and the Property Unlock row, which
+  // lists all three). This corrects the connector's old, backwards dossier
+  // gate (Studio/Team-only here while the web app has only ever required
+  // Solo+ — A-068/A-074/A-099) and adds the Property Unlock door that
+  // neither this connector nor (as of this fix) the web app's site-plan/
+  // terrain/feasibility BFF routes had wired yet.
+  function authFor(
+    tier: "free" | "solo" | "studio" | "team",
+  ): SmartsiteAuthContext {
+    if (tier === "free") {
+      return {
+        userId: `user-${tier}`,
+        email: `${tier}@example.com`,
+        accessTier: "free",
+        subscriptionTier: null,
+        devRole: false,
+      };
+    }
+    return {
+      userId: `user-${tier}`,
+      email: `${tier}@example.com`,
+      accessTier: "paid",
+      subscriptionTier: tier,
       devRole: false,
     };
+  }
 
-    await withTestClient(async (client) => {
-      const result = await client.callTool({
-        name: "export_instrument",
-        arguments: {
-          parcelNodeId: "4813500100100100100",
-          kind: "siteplan",
-        },
-      });
-      expect(result.isError).toBe(true);
-      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(parsed).toMatchObject({
-        status: "upgrade_required",
-        reason: "studio_report",
-      });
-      expect(mockCortexFetch).not.toHaveBeenCalled();
-    });
+  /** True once the gate has cleared: never the declared upgrade_required envelope. */
+  function expectGateCleared(result: { isError?: boolean; content?: unknown }): void {
+    const parsed = JSON.parse((result.content as { text: string }[])[0].text);
+    expect(parsed.status).not.toBe("upgrade_required");
+  }
+
+  function expectUpgradeRequired(
+    result: { isError?: boolean; content?: unknown },
+    reason: "studio_report" | "property_export",
+  ): void {
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse((result.content as { text: string }[])[0].text);
+    expect(parsed).toMatchObject({ status: "upgrade_required", reason });
+  }
+
+  describe("site plan / terrain / feasibility: Studio/Team OR a property unlock", () => {
+    it.each(["siteplan", "terrain", "feasibility"] as const)(
+      "%s: free refuses studio_report, never consults property-unlock or upstream",
+      async (kind) => {
+        mockAuth = authFor("free");
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "export_instrument",
+            arguments: { parcelNodeId: "48021:34137", kind },
+          });
+          expectUpgradeRequired(result, "studio_report");
+          expect(mockHasPropertyUnlock).toHaveBeenCalledWith("user-free", "48021:34137");
+          expect(mockCortexFetch).not.toHaveBeenCalled();
+        });
+      },
+    );
+
+    it.each(["siteplan", "terrain", "feasibility"] as const)(
+      "%s: Solo ALONE (no unlock) still refuses studio_report — Solo is not Studio",
+      async (kind) => {
+        mockAuth = authFor("solo");
+        mockHasPropertyUnlock.mockResolvedValue(false);
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "export_instrument",
+            arguments: { parcelNodeId: "48021:34137", kind },
+          });
+          expectUpgradeRequired(result, "studio_report");
+          expect(mockHasPropertyUnlock).toHaveBeenCalledWith("user-solo", "48021:34137");
+        });
+      },
+    );
+
+    it.each(["siteplan", "terrain", "feasibility"] as const)(
+      "%s: Studio clears the gate without ever querying property-unlock (cheap path first)",
+      async (kind) => {
+        mockAuth = authFor("studio");
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "export_instrument",
+            arguments: { parcelNodeId: "48021:34137", kind },
+          });
+          expectGateCleared(result);
+          expect(mockHasPropertyUnlock).not.toHaveBeenCalled();
+        });
+      },
+    );
+
+    it.each(["siteplan", "terrain", "feasibility"] as const)(
+      "%s: Team clears the gate without ever querying property-unlock",
+      async (kind) => {
+        mockAuth = authFor("team");
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "export_instrument",
+            arguments: { parcelNodeId: "48021:34137", kind },
+          });
+          expectGateCleared(result);
+          expect(mockHasPropertyUnlock).not.toHaveBeenCalled();
+        });
+      },
+    );
+
+    it.each(["siteplan", "terrain", "feasibility"] as const)(
+      "%s: Solo WITH a property unlock on this exact parcel clears the gate — the Property Unlock row (P-119)",
+      async (kind) => {
+        mockAuth = authFor("solo");
+        mockHasPropertyUnlock.mockResolvedValue(true);
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "export_instrument",
+            arguments: { parcelNodeId: "48021:34137", kind },
+          });
+          expectGateCleared(result);
+          expect(mockHasPropertyUnlock).toHaveBeenCalledWith("user-solo", "48021:34137");
+        });
+      },
+    );
+
+    it.each(["siteplan", "terrain", "feasibility"] as const)(
+      "%s: free WITH a property unlock on this exact parcel clears the gate too — unlock alone is sufficient, no subscription required",
+      async (kind) => {
+        mockAuth = authFor("free");
+        mockHasPropertyUnlock.mockResolvedValue(true);
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "export_instrument",
+            arguments: { parcelNodeId: "48021:34137", kind },
+          });
+          expectGateCleared(result);
+        });
+      },
+    );
   });
 
-  // The recorded P-104 divergence (dossier is Studio-gated on the connector
-  // but Solo-or-unlocked on the web app) is deliberately NOT resolved here
-  // — entitlement.ts's STUDIO_EXPORT_KINDS is untouched by P-110.
-  it("free session gets upgrade_required for dossier too, matching STUDIO_EXPORT_KINDS", async () => {
-    mockAuth = {
-      userId: "user-free",
-      email: "free@example.com",
-      accessTier: "free",
-      subscriptionTier: null,
-      devRole: false,
-    };
-
-    await withTestClient(async (client) => {
-      const result = await client.callTool({
-        name: "export_instrument",
-        arguments: {
-          parcelNodeId: "4813500100100100100",
-          kind: "dossier",
-        },
+  describe("dossier (X-ray): Solo+ OR a property unlock — corrected to match the web app (P-119, A-103)", () => {
+    it("free refuses property_export, never studio_report — the corrected reason for this weaker gate", async () => {
+      mockAuth = authFor("free");
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "export_instrument",
+          arguments: { parcelNodeId: "48021:34137", kind: "dossier" },
+        });
+        expectUpgradeRequired(result, "property_export");
+        expect(mockHasPropertyUnlock).toHaveBeenCalledWith("user-free", "48021:34137");
       });
-      expect(result.isError).toBe(true);
-      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(parsed).toMatchObject({
-        status: "upgrade_required",
-        reason: "studio_report",
+    });
+
+    it("Solo clears the gate on its own — the divergence this fix closes (was Studio-only)", async () => {
+      mockAuth = authFor("solo");
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "export_instrument",
+          arguments: { parcelNodeId: "48021:34137", kind: "dossier" },
+        });
+        expectGateCleared(result);
+        // Solo is already "paid" (canRunDeepReport): no need to consult
+        // property-unlock at all for this caller.
+        expect(mockHasPropertyUnlock).not.toHaveBeenCalled();
+      });
+    });
+
+    it("Studio clears the gate (a strict superset of Solo)", async () => {
+      mockAuth = authFor("studio");
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "export_instrument",
+          arguments: { parcelNodeId: "48021:34137", kind: "dossier" },
+        });
+        expectGateCleared(result);
+      });
+    });
+
+    it("free WITH a property unlock clears the gate — the R1 line, matching resolveDossierExportAuth on the web", async () => {
+      mockAuth = authFor("free");
+      mockHasPropertyUnlock.mockResolvedValue(true);
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "export_instrument",
+          arguments: { parcelNodeId: "48021:34137", kind: "dossier" },
+        });
+        expectGateCleared(result);
       });
     });
   });
