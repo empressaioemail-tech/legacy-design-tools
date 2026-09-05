@@ -604,7 +604,10 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).toMatch(/loadOwnerFactAtom/);
     expect(routeSrc).toMatch(/ownerFact/);
     expect(routeSrc).toMatch(/authenticatedBrokerageUserId/);
-    expect(routeSrc).toMatch(/subscriptionTierGrantsStudio/);
+    // Widened 2026-09-05 (operator: "owner needs to be a part of unlock
+    // too"): the tier check alone is no longer the gate. grantsOwnerCoGatedFields
+    // (Studio|Team OR an active Property Unlock on this parcel) is.
+    expect(routeSrc).toMatch(/grantsOwnerCoGatedFields/);
     expect(routeSrc).toMatch(/resolvePeEntitlement/);
     expect(routeSrc).toMatch(/studio-gated|studioGatedOwnerFactRefusal/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
@@ -2530,7 +2533,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
   });
 
-  it("unlock-only GET with an owner atom MUST refuse ownerName", async () => {
+  it("unlock-only GET with an owner atom and an ACTIVE Property Unlock on this parcel MUST GRANT ownerName (widened 2026-09-05: owner needs to be a part of unlock too)", async () => {
     const gold = "48021:34137";
     const userId = "user_owner_fact_unlock";
     await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
@@ -2541,6 +2544,60 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       source: "stripe",
     });
     await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("present");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBe("FIXTURE OWNER");
+  });
+
+  it("unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse — Property Unlock is per-parcel, not per-user", async () => {
+    const gold = "48021:34137";
+    const otherParcel = "48021:99999";
+    const userId = "user_owner_fact_unlock_other_parcel";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: otherParcel,
+      source: "stripe",
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock-other-parcel");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("an EXPIRED Property Unlock on this parcel MUST refuse — only an active unlock grants", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_unlock_expired";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock-expired");
     goldOwnerFixture(gold);
     const token = mintSessionToken({
       audience: "user",
@@ -2728,7 +2785,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     });
   });
 
-  it("Property-Unlock-only GET MUST refuse the CAD dollar fields — Property Unlock is NOT Studio (flagged asymmetry, A-104)", async () => {
+  it("Property-Unlock-only GET on THIS parcel MUST GRANT the CAD dollar fields (widened 2026-09-05 — Property Unlock now co-gates like Studio)", async () => {
     const gold = "48021:34137";
     const userId = "user_cadroll_unlock";
     await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
@@ -2739,6 +2796,35 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       source: "stripe",
     });
     await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.landValue).toMatchObject({
+      v: 80000,
+    });
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
+      v: 397260,
+    });
+  });
+
+  it("Property-Unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse the CAD dollar fields — Property Unlock is per-parcel", async () => {
+    const gold = "48021:34137";
+    const otherParcel = "48021:99999";
+    const userId = "user_cadroll_unlock_other_parcel";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: otherParcel,
+      source: "stripe",
+    });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock-other-parcel");
     const token = mintSessionToken({
       audience: "user",
       tenantId: DEFAULT_TENANT_ID,

@@ -33,7 +33,7 @@ import {
   peEntitlementBaseBody,
   resolvePeEntitlement,
   resolvePeOwnerUserId,
-  subscriptionTierGrantsStudio,
+  grantsOwnerCoGatedFields,
 } from "../lib/peEntitlement";
 import { requirePeStudioScreens } from "../lib/peStudioGate";
 import { getPeUserEmail, setPeDevRole } from "../lib/peIdentity";
@@ -158,11 +158,16 @@ function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
  * `grantsCadRollValuation` gates the four CAD tax-assessed dollar rails
  * (marketValue/assessedValue/landValue/improvementValue) — OPS-16 A-103
  * item 5 / A-104, same predicate as owner-info display
- * (`callerGrantsOwnerFact` / `subscriptionTierGrantsStudio`), Studio|Team
- * only. This route already runs behind `requirePeAuthenticated`, so the
- * caller is guaranteed identified before this function is ever reached;
- * the tier check alone is the gate here (never a fourth independent tier
- * check — reuse `subscriptionTierGrantsStudio` directly, OPS-16 A-087).
+ * (`callerGrantsOwnerFact` / `grantsOwnerCoGatedFields`): Studio|Team OR an
+ * active Property Unlock for this specific parcel (widened 2026-09-05 —
+ * Solo stays excluded, confirmed deliberate). This route already runs
+ * behind `requirePeAuthenticated`, so the caller is guaranteed identified
+ * before this function is ever reached. The caller computes this boolean
+ * PER PARCEL (see `grantsCadRollValuationFor` at the route handler) since
+ * Property Unlock is parcel-scoped and cannot be hoisted across a batch
+ * request the way the tier check alone could be — never a fourth
+ * independent tier check, reuse `grantsOwnerCoGatedFields` directly
+ * (OPS-16 A-087).
  */
 async function assembleNodeBriefBody(
   parcelNodeId: string,
@@ -1093,20 +1098,30 @@ router.post(
     }
 
     // CAD tax-assessed dollar rails co-gate with owner info (OPS-16 A-103
-    // item 5 / A-104): Studio|Team only, same predicate as
-    // `callerGrantsOwnerFact` elsewhere. `requirePeAuthenticated` already
-    // guarantees an identified caller ahead of this handler, so the tier
-    // check alone is the gate. Resolved once per request (only for "node"
-    // depth -- "stub" depth never reads cadRoll, see assembleStubBody), so
-    // it does not vary per parcel id below. Fails closed: any entitlement
-    // read that does not resolve to a snapshot reads as ungranted, never
-    // granted-by-default.
-    const grantsCadRollValuation =
-      parsed.depth === "node"
-        ? subscriptionTierGrantsStudio(
-            (await resolvePeEntitlement(req))?.subscriptionTier ?? null,
-          )
-        : false;
+    // item 5 / A-104; co-gate widened 2026-09-05): Studio|Team OR an active
+    // Property Unlock for THIS parcel — the exact same
+    // `grantsOwnerCoGatedFields` predicate `callerGrantsOwnerFact` uses
+    // elsewhere, never a second one. `requirePeAuthenticated` already
+    // guarantees an identified caller ahead of this handler. UNLIKE the old
+    // tier-only check, this cannot be hoisted to one boolean for the whole
+    // request: Property Unlock is scoped to ONE parcel, so a batch request
+    // covering several parcels can grant some and refuse others for the
+    // very same user. `peSnap` (the tier half) is resolved once; the
+    // Property Unlock lookup runs per parcel id below.
+    const peSnap = await resolvePeEntitlement(req);
+    async function grantsCadRollValuationFor(
+      parcelNodeId: string,
+    ): Promise<boolean> {
+      if (parsed.depth !== "node") return false;
+      // Defensive fallback (never null/undefined in production -- guards a
+      // test double or a future entitlement-read failure from throwing here
+      // instead of failing closed).
+      return grantsOwnerCoGatedFields(
+        peSnap?.userId ?? null,
+        peSnap?.subscriptionTier ?? null,
+        parcelNodeId,
+      );
+    }
 
     if (parsed.mode === "single") {
       const parcelNodeId = parsed.ids[0]!;
@@ -1125,7 +1140,7 @@ router.post(
       }
       const body = await assembleNodeBriefBody(
         parcelNodeId,
-        grantsCadRollValuation,
+        await grantsCadRollValuationFor(parcelNodeId),
       );
       if (!body) {
         await sendBriefMiss(res, parcelNodeId);
@@ -1148,7 +1163,7 @@ router.post(
         }
         const row =
           parsed.depth === "node"
-            ? await assembleNodeBriefBody(id, grantsCadRollValuation)
+            ? await assembleNodeBriefBody(id, await grantsCadRollValuationFor(id))
             : await assembleStubBody(id);
         return { id, row };
       }),

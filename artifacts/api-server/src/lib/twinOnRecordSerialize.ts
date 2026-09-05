@@ -74,7 +74,8 @@ function acreageFromBase(base: Record<string, unknown>): TwinOnRecordAcreage {
  *
  * `grantsCadRollValuation` gates the four dollar rails (OPS-16 A-103 item 5
  * / A-104), same predicate as owner-info (`callerGrantsOwnerFact` /
- * `subscriptionTierGrantsStudio`) — Studio|Team only. A refused caller gets
+ * `grantsOwnerCoGatedFields`) — Studio|Team OR an active Property Unlock
+ * for this parcel; Solo stays excluded. A refused caller gets
  * a typed `studio-gated` refusal per dollar field, never a silent omission.
  * `livingAreaSqft` is not a dollar field and is never gated.
  */
