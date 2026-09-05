@@ -15,14 +15,22 @@ import {
  * Williamson's `cad_property` rows — see F-01,
  * `_inbox/2026-09-05_engine-williamson-mclennan-geomgap-nulls_close.json`).
  *
- * One row per land segment on a property, keyed loosely by `prop_id`
- * (the SAME key `cad_property` uses for Williamson, county_fips 48491) —
- * a property can carry many rows (real large ranches sampled with up to
- * ~29 segments), each an additive physical land segment, never
- * competing readings of the same land. `land_type` names the segment
- * kind (R residential, L vacant land, C commercial, several ag/pasture/
- * wildlife-management categories, ...) and is self-documented on every
- * row via `description` — no external code table needed.
+ * One row per land segment on a property — a property can carry many
+ * rows (real large ranches sampled with up to ~29 segments), each an
+ * additive physical land segment, never competing readings of the same
+ * land. `land_type` names the segment kind (R residential, L vacant
+ * land, C commercial, several ag/pasture/wildlife-management
+ * categories, ...) and is self-documented on every row via
+ * `description` — no external code table needed.
+ *
+ * JOIN KEY, live-verified (2026-09-05, 2000-sample against cortex-prod):
+ * `prop_id` here is WCAD's own internal record identifier (e.g.
+ * `R000009`) and is NOT the same id space as `cad_property.prop_id`
+ * (e.g. `163031`) — 0% match rate even after stripping the R-prefix and
+ * leading zeros. The column that actually matches `cad_property.prop_id`
+ * for Williamson (county_fips 48491) is `wcad_property_id`, at 100%
+ * (2000/2000). Never join to `cad_property` on `prop_id` — see
+ * `lib/cad-ingest/src/williamsonAgValuation.ts`.
  *
  * `value` vs `curr_value`: distinct, real columns (differ on ~66% of
  * Residential rows), not a duplicate field. `value` is the market-rate

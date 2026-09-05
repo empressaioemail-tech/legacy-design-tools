@@ -14,11 +14,25 @@
  * pipeline) — this module only reads it. A property carries one row per
  * physical land segment (sampled up to ~29 rows on real large ranches),
  * each an ADDITIVE segment, never a competing reading of the same land,
- * so aggregation is SUM(acres)/SUM(value) grouped by prop_id across
- * every land_type (all 27 codes are legitimate, self-documented via the
- * table's own `description` column — R residential, L vacant, C
- * commercial, and a full set of ag/pasture/wildlife categories; none
- * need special-casing or exclusion).
+ * so aggregation is SUM(acres)/SUM(value) grouped by the property key
+ * (see JOIN KEY below) across every land_type (all 27 codes are
+ * legitimate, self-documented via the table's own `description` column
+ * — R residential, L vacant, C commercial, and a full set of
+ * ag/pasture/wildlife categories; none need special-casing or
+ * exclusion).
+ *
+ * JOIN KEY — this is NOT `tx_wcad_ag_valuation.prop_id`. Live-verified
+ * (doc-repo-bd, cortex-prod, 2026-09-05, 2000-sample): `prop_id` on this
+ * table (e.g. `R000009`) is WCAD's own internal record identifier, a
+ * DIFFERENT id space from `cad_property.prop_id` (e.g. `163031`) — 0%
+ * match rate even after stripping the R-prefix/leading zeros. The real
+ * shared key is `wcad_property_id`, which matches `cad_property.prop_id`
+ * at 100% (2000/2000). An earlier version of this module joined on
+ * `prop_id` and passed every test because the test fixtures coincidentally
+ * used the same string for both columns — a self-consistent fixture is
+ * NOT the same as one verified against the real key relationship; see
+ * the test file's own fixtures for the corrected, intentionally-distinct
+ * values.
  *
  * `value`, not `curr_value`: the two differ on ~66% of Residential rows
  * (not a duplicate field). `land_value` elsewhere in this codebase is
@@ -88,8 +102,14 @@ export function reconcileLandFieldsFromAgValuation(
 }
 
 /**
- * Aggregate tx_wcad_ag_valuation per prop_id for one county. Every
- * land_type contributes (see module doc) — no filtering by code.
+ * Aggregate tx_wcad_ag_valuation per cad_property.prop_id-equivalent key
+ * for one county. Every land_type contributes (see module doc) — no
+ * filtering by code.
+ *
+ * Joins on `wcad_property_id`, NOT `prop_id` — see the module doc's JOIN
+ * KEY section. `wcad_property_id` is nullable on this table; a row that
+ * carries no value there cannot be matched to any cad_property row and
+ * is correctly excluded rather than aggregated under a null key.
  */
 export async function aggregateAgValuationByPropId(
   db: Pick<NodePgDatabase<Record<string, unknown>>, "select">,
@@ -97,17 +117,23 @@ export async function aggregateAgValuationByPropId(
 ): Promise<Map<string, AgValuationTotals>> {
   const rows = await db
     .select({
-      propId: txWcadAgValuation.propId,
+      cadPropId: txWcadAgValuation.wcadPropertyId,
       totalValue: sql<string | null>`SUM(${txWcadAgValuation.value})`,
       totalAcres: sql<string | null>`SUM(${txWcadAgValuation.acres})`,
     })
     .from(txWcadAgValuation)
-    .where(eq(txWcadAgValuation.countyFips, countyFips))
-    .groupBy(txWcadAgValuation.propId);
+    .where(
+      and(
+        eq(txWcadAgValuation.countyFips, countyFips),
+        sql`${txWcadAgValuation.wcadPropertyId} IS NOT NULL`,
+      ),
+    )
+    .groupBy(txWcadAgValuation.wcadPropertyId);
 
   const byPropId = new Map<string, AgValuationTotals>();
   for (const row of rows) {
-    byPropId.set(row.propId, { totalValue: row.totalValue, totalAcres: row.totalAcres });
+    if (row.cadPropId == null) continue;
+    byPropId.set(row.cadPropId, { totalValue: row.totalValue, totalAcres: row.totalAcres });
   }
   return byPropId;
 }
