@@ -66,6 +66,13 @@ import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { structuralFactWithParcelRecordOverlay } from "../lib/structuralFactResolve";
 import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
+import { loadCityLimitsFactForServe } from "../lib/cityLimitsFactServeCutover";
+import { loadUtilityServiceFactForServe } from "../lib/utilityServiceFactServeCutover";
+import { loadOverlayDistrictsFactForServe } from "../lib/overlayDistrictsFactServeCutover";
+import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover";
+import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
+import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
+import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
 import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
@@ -168,6 +175,21 @@ async function assembleNodeBriefBody(
     cadRollOverlay,
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
+    // OPS-16 A-103 item 6 / A-104: get_smart_site depth "node" is the MCP
+    // connector's equivalent of the web app's Brief/Inspect dock (operator
+    // ruling "we need the same brief type information... a snapshot of the
+    // basic property info"). These six reads are the exact facts the dock
+    // shows (InspectCard.tsx's cityLimits/utilityService/overlayDistricts/
+    // agValuation/schoolDistrict/maxImperviousCoverPct rows) that this
+    // response never fetched before -- same loader functions
+    // brokerageNodeFacets.ts's own node-facets route already uses for the
+    // identical facts, reused rather than re-derived (invariant I2).
+    utilityServiceFact,
+    overlayDistrictsFact,
+    agValuationFact,
+    schoolDistrictFact,
+    maxImperviousCoverPctFact,
+    buildingFootprintFact,
   ] = await Promise.all([
     loadBakedNodeFacetSnapshot(parcelNodeId),
     loadFloodHazardFactForServe(parcelNodeId),
@@ -192,12 +214,26 @@ async function assembleNodeBriefBody(
     // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
     loadZoningFactForServe(parcelNodeId),
     loadSetbacksFactForServe(parcelNodeId),
+    loadUtilityServiceFactForServe(parcelNodeId),
+    loadOverlayDistrictsFactForServe(parcelNodeId),
+    loadAgValuationFactForServe(parcelNodeId),
+    loadSchoolDistrictFactForServe(parcelNodeId),
+    loadMaxImperviousCoverPctFactForServe(parcelNodeId),
+    loadBuildingFootprintFactAtom(parcelNodeId),
   ]);
   const structuralFact = structuralFactWithParcelRecordOverlay(structuralFactLegacy, {
     livingAreaSqft: cadRollOverlay.livingAreaSqft,
     yearBuilt: cadRollOverlay.yearBuilt,
   });
   if (!snapshot) return null;
+  // City limits depends on the snapshot's own query point, same call-order
+  // dependency brokerageNodeFacets.ts's route already documents at its own
+  // call site (cityLimitsFactRoute.contract.test.ts pins the order there);
+  // this is a second call site for the same read, not a second mechanism.
+  const cityLimitsFact = await loadCityLimitsFactForServe(
+    parcelNodeId,
+    snapshot.queryPoint ?? null,
+  );
   const root = asRecord(snapshot.facets);
   const bakedAt =
     typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
@@ -232,6 +268,22 @@ async function assembleNodeBriefBody(
       disclosure: brief.disclosure,
     },
     citations: brief.citations,
+    // OPS-16 A-103 item 6 / A-104: the web Brief/Inspect dock's remaining
+    // fact rows this response did not previously carry at all -- structural
+    // (living area, year built) was already read above for the draw's
+    // yearBuilt attr but never attached to the response itself; the other
+    // six are new reads (see the Promise.all above). Same typed FactRead
+    // shape brokerageNodeFacets.ts's own node-facets route already puts on
+    // the wire for these exact facts (present/absent/refused), so an
+    // existing consumer of that shape needs no new parsing to read these.
+    structuralFact,
+    cityLimitsFact,
+    utilityServiceFact,
+    overlayDistrictsFact,
+    agValuationFact,
+    schoolDistrictFact,
+    maxImperviousCoverPctFact,
+    buildingFootprintFact,
     bakedAt,
     source: "baked-snapshot",
     ...(draw ? { draw } : {}),
