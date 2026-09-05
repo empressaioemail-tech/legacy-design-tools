@@ -4801,10 +4801,22 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
     ADD CONSTRAINT pe_property_unlocks_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
+-- Name: pe_saved_properties pe_saved_properties_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
+    ADD CONSTRAINT pe_saved_properties_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
 -- Name: pe_screen_rows pe_screen_rows_screen_id_pe_screens_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
     ADD CONSTRAINT pe_screen_rows_screen_id_pe_screens_id_fk FOREIGN KEY (screen_id) REFERENCES @@SCHEMA@@.pe_screens(id) ON DELETE CASCADE;
+
+
+-- Name: pe_screens pe_screens_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_screens
+    ADD CONSTRAINT pe_screens_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_share_attributions pe_share_attributions_grant_id_pe_share_grants_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
