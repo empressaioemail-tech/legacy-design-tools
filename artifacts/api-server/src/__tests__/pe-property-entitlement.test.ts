@@ -22,12 +22,15 @@ import {
   peChatMessageCounts,
   pePropertyUnlocks,
   peUserEntitlements,
+  placeLayerSnapshots,
   txgioParcel,
   users,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import { placeKeyForNode } from "../routes/brokerageNodeFacets";
+import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
@@ -784,5 +787,173 @@ describe("free counter atomicity", () => {
     expect(await chatCountFor(USER_FREE, PARCEL)).toBe(
       PE_FREE_CHAT_MESSAGE_LIMIT,
     );
+  });
+});
+
+/**
+ * CAD tax-assessed dollar rails co-gate with owner info on research/brief
+ * too (OPS-16 A-103 item 5 / A-104; co-gate widened 2026-09-05 to include
+ * Property Unlock). PARCEL is unlocked for USER_UNLOCKED and OTHER_PARCEL
+ * is not (see the top-level beforeEach) — proof that the grant is scoped to
+ * the specific parcel actually unlocked, not to the user account, and that
+ * a batch request cannot leak one parcel's grant onto another.
+ */
+describe("research/brief CAD dollar rails co-gate with owner info via Property Unlock (OPS-16 A-103 item 5 / A-104)", () => {
+  async function seedBriefSnapshot(parcelNodeId: string, contentHash: string) {
+    await db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcelNodeId),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "29.88000",
+      lngRounded: "-97.68000",
+      payloadJson: {
+        facetSchemaVersion: "node-facets-tier1-v1",
+        tier: 1,
+        parcelNodeId,
+        countyFips: "48055",
+        countyName: "Caldwell",
+        baseFacts: {
+          apn: parcelNodeId.split(":")[1],
+          situsAddress: "1 UNLOCK TEST RD",
+          situsState: "TX",
+          acreage: { value: 1, sqft: 43560, method: "shoelace-wgs84" },
+          cadRoll: {
+            marketValue: { v: 250000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            assessedValue: { v: 250000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            landValue: { v: 60000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            improvementValue: { v: 190000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            livingAreaSqft: { v: 1800, source: "cad_property", vintage: "2025" },
+          },
+        },
+        zoning: null,
+        envelope: { status: "declined", confidence: 0, provisional: true },
+        facetCoverage: { baseFacts: true, landUse: false, acreage: true, zoning: false, envelope: false },
+        provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+        bakedAt: "2026-09-05T00:00:00.000Z",
+      },
+      contentHash,
+    });
+  }
+
+  it("PARCEL (the unlocked one) GRANTS the CAD dollar fields to USER_UNLOCKED via onRecord", async () => {
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-unlocked-parcel");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      USER_UNLOCKED,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.onRecord.cadRoll.marketValue).toMatchObject({
+      state: "present",
+      v: 250000,
+    });
+    expect(res.body.onRecord.cadRoll.landValue).toMatchObject({
+      state: "present",
+      v: 60000,
+    });
+  });
+
+  it("OTHER_PARCEL (never unlocked for this user) is walled off entirely for a Property-Unlock-only user — the outer paywall (requirePePaidOrPropertyUnlocked), not yet even reaching the CAD co-gate", async () => {
+    await seedBriefSnapshot(OTHER_PARCEL, "test-hash-brief-cadroll-other-parcel");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: OTHER_PARCEL }),
+      USER_UNLOCKED,
+    );
+    expect(res.status).toBe(402);
+  });
+
+  it("batch request, same Solo user unlocked on PARCEL only: PARCEL grants via the unlock, OTHER_PARCEL still refuses — per-parcel, not per-user or per-request", async () => {
+    // Solo (paid) tier clears the OUTER paywall for the whole batch (which
+    // degrades to a paid-tier-only check when parcelNodeId isn't a single
+    // string), so this is the one caller shape that can actually reach
+    // assembleNodeBriefBody for BOTH parcels in one request and prove the
+    // CAD co-gate differentiates between them.
+    const soloUser = "user-pp-solo-batch-cadroll";
+    await db.insert(users).values({ id: soloUser, displayName: "Solo Batch User" });
+    await db.insert(peUserEntitlements).values({
+      ownerUserId: soloUser,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: "paid",
+      subscriptionTier: "solo",
+    });
+    await db.insert(pePropertyUnlocks).values({
+      ownerUserId: soloUser,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: PARCEL,
+      source: "stripe",
+    });
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-batch-parcel");
+    await seedBriefSnapshot(OTHER_PARCEL, "test-hash-brief-cadroll-batch-other-parcel");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: [PARCEL, OTHER_PARCEL], depth: "node" }),
+      soloUser,
+    );
+    expect(res.status).toBe(200);
+    const forParcel = res.body.parcels.find(
+      (p: { parcelNodeId: string }) => p.parcelNodeId === PARCEL,
+    );
+    const forOtherParcel = res.body.parcels.find(
+      (p: { parcelNodeId: string }) => p.parcelNodeId === OTHER_PARCEL,
+    );
+    expect(forParcel.onRecord.cadRoll.marketValue).toMatchObject({
+      state: "present",
+      v: 250000,
+    });
+    expect(forOtherParcel.onRecord.cadRoll.marketValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("a Solo (paid, non-Studio, non-unlocked) user on PARCEL still REFUSES the CAD dollar fields — the graduation lever stays intact", async () => {
+    const soloUser = "user-pp-solo-cadroll";
+    await db.insert(users).values({ id: soloUser, displayName: "Solo User" });
+    await db.insert(peUserEntitlements).values({
+      ownerUserId: soloUser,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: "paid",
+      subscriptionTier: "solo",
+    });
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-solo");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      soloUser,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.onRecord.cadRoll.marketValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("a Studio user on PARCEL grants the CAD dollar fields (unchanged — tier path still works)", async () => {
+    const studioUser = "user-pp-studio-cadroll";
+    await db.insert(users).values({ id: studioUser, displayName: "Studio User" });
+    await db.insert(peUserEntitlements).values({
+      ownerUserId: studioUser,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: "paid",
+      subscriptionTier: "studio",
+    });
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-studio");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      studioUser,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.onRecord.cadRoll.marketValue).toMatchObject({
+      state: "present",
+      v: 250000,
+    });
   });
 });

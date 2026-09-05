@@ -96,6 +96,38 @@ export function subscriptionTierGrantsStudio(
   return tier === "studio" || tier === "team";
 }
 
+/**
+ * Studio|Team OR an active (unexpired) Property Unlock for THIS SPECIFIC
+ * parcel — the co-gate for owner info and CAD tax-assessed valuation
+ * (OPS-16 A-103 item 5 / A-104, widened 2026-09-05).
+ *
+ * Operator: "owner needs to be a part of unlock too. i just kept it out of
+ * solo as a way to graduate user through the tiers." Solo stays excluded —
+ * that exclusion is a deliberate, confirmed tier-graduation lever and does
+ * NOT change here. The Property Unlock exclusion was never deliberate in
+ * the same way: it predates Property Unlock's growth into a rich,
+ * near-Studio single-property door under the P-119 package table, and is
+ * corrected by this function.
+ *
+ * `parcelNodeId` matters: unlike the tier check (a user-level grant),
+ * Property Unlock is scoped to ONE parcel. Callers serving more than one
+ * parcel per request must call this once per parcel, never hoist a single
+ * answer across parcels the way the tier-only check could be hoisted.
+ *
+ * The one Property-Unlock lookup this repo has (`hasPePropertyUnlock`) is
+ * reused here rather than re-queried — every caller of this function is the
+ * single co-gate, not a second independent check.
+ */
+export async function grantsOwnerCoGatedFields(
+  userId: string | null,
+  subscriptionTier: PeSubscriptionTier | null,
+  parcelNodeId: string,
+): Promise<boolean> {
+  if (subscriptionTierGrantsStudio(subscriptionTier)) return true;
+  if (!userId) return false;
+  return hasPePropertyUnlock(userId, parcelNodeId);
+}
+
 export function resolvePeOwnerUserId(req: Request): string | null {
   const serviceUserId = resolvePeUserIdFromTrustedServiceCall(req);
   if (serviceUserId) return serviceUserId;

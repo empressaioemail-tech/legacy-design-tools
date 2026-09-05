@@ -33,6 +33,7 @@ import {
   peEntitlementBaseBody,
   resolvePeEntitlement,
   resolvePeOwnerUserId,
+  grantsOwnerCoGatedFields,
 } from "../lib/peEntitlement";
 import { requirePeStudioScreens } from "../lib/peStudioGate";
 import { getPeUserEmail, setPeDevRole } from "../lib/peIdentity";
@@ -74,6 +75,7 @@ import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCu
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
+import { attachCadRollOverlaysToFacets } from "../lib/structuralFactToFacetsWire";
 import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
@@ -159,8 +161,24 @@ function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
   };
 }
 
+/**
+ * `grantsCadRollValuation` gates the four CAD tax-assessed dollar rails
+ * (marketValue/assessedValue/landValue/improvementValue) — OPS-16 A-103
+ * item 5 / A-104, same predicate as owner-info display
+ * (`callerGrantsOwnerFact` / `grantsOwnerCoGatedFields`): Studio|Team OR an
+ * active Property Unlock for this specific parcel (widened 2026-09-05 —
+ * Solo stays excluded, confirmed deliberate). This route already runs
+ * behind `requirePeAuthenticated`, so the caller is guaranteed identified
+ * before this function is ever reached. The caller computes this boolean
+ * PER PARCEL (see `grantsCadRollValuationFor` at the route handler) since
+ * Property Unlock is parcel-scoped and cannot be hoisted across a batch
+ * request the way the tier check alone could be — never a fourth
+ * independent tier check, reuse `grantsOwnerCoGatedFields` directly
+ * (OPS-16 A-087).
+ */
 async function assembleNodeBriefBody(
   parcelNodeId: string,
+  grantsCadRollValuation: boolean,
 ): Promise<Record<string, unknown> | null> {
   const parsedForOverlay = parseParcelNodeId(parcelNodeId);
   const [
@@ -244,9 +262,25 @@ async function assembleNodeBriefBody(
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
   });
+  // PARCEL-B-SLATE2 dollar rails: merge the live overlay onto the offline-
+  // baked baseFacts.cadRoll (item 3, A-104) — previously discarded here
+  // entirely, unlike livingAreaSqft/yearBuilt above. yearBuilt is
+  // deliberately NOT re-merged through this call: it already flows through
+  // `structuralFactWithParcelRecordOverlay` above, and this call exists only
+  // to carry the four dollar fields through to `draw` / `onRecord`.
+  const facetsWithCadRollOverlay = attachCadRollOverlaysToFacets(
+    (asRecord(snapshot.facets) as Record<string, unknown> | null) ?? {},
+    {
+      marketValue: cadRollOverlay.marketValue,
+      assessedValue: cadRollOverlay.assessedValue,
+      landValue: cadRollOverlay.landValue,
+      improvementValue: cadRollOverlay.improvementValue,
+      yearBuilt: null,
+    },
+  );
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
-    facets: snapshot.facets,
+    facets: facetsWithCadRollOverlay,
     bakedAt,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
     queryPoint: snapshot.queryPoint ?? null,
@@ -256,13 +290,18 @@ async function assembleNodeBriefBody(
     well: wellFact,
     specialDistrict: specialDistrictFact,
     structural: structuralFact,
+    grantsCadRollValuation,
   });
   return {
     runId: buildR1RunId(parcelNodeId, bakedAt),
     reportFamily: "R1",
     mode: "baked-facet-intel-v1",
     parcelNodeId,
-    onRecord: serializeTwinOnRecord(snapshot.facets, parcelNodeId),
+    onRecord: serializeTwinOnRecord(
+      facetsWithCadRollOverlay,
+      parcelNodeId,
+      grantsCadRollValuation,
+    ),
     brief: {
       sections: brief.sections,
       disclosure: brief.disclosure,
@@ -1110,6 +1149,32 @@ router.post(
       return;
     }
 
+    // CAD tax-assessed dollar rails co-gate with owner info (OPS-16 A-103
+    // item 5 / A-104; co-gate widened 2026-09-05): Studio|Team OR an active
+    // Property Unlock for THIS parcel — the exact same
+    // `grantsOwnerCoGatedFields` predicate `callerGrantsOwnerFact` uses
+    // elsewhere, never a second one. `requirePeAuthenticated` already
+    // guarantees an identified caller ahead of this handler. UNLIKE the old
+    // tier-only check, this cannot be hoisted to one boolean for the whole
+    // request: Property Unlock is scoped to ONE parcel, so a batch request
+    // covering several parcels can grant some and refuse others for the
+    // very same user. `peSnap` (the tier half) is resolved once; the
+    // Property Unlock lookup runs per parcel id below.
+    const peSnap = await resolvePeEntitlement(req);
+    async function grantsCadRollValuationFor(
+      parcelNodeId: string,
+    ): Promise<boolean> {
+      if (parsed.depth !== "node") return false;
+      // Defensive fallback (never null/undefined in production -- guards a
+      // test double or a future entitlement-read failure from throwing here
+      // instead of failing closed).
+      return grantsOwnerCoGatedFields(
+        peSnap?.userId ?? null,
+        peSnap?.subscriptionTier ?? null,
+        parcelNodeId,
+      );
+    }
+
     if (parsed.mode === "single") {
       const parcelNodeId = parsed.ids[0]!;
       if (!isValidParcelNodeId(parcelNodeId)) {
@@ -1125,7 +1190,10 @@ router.post(
         res.json(stub);
         return;
       }
-      const body = await assembleNodeBriefBody(parcelNodeId);
+      const body = await assembleNodeBriefBody(
+        parcelNodeId,
+        await grantsCadRollValuationFor(parcelNodeId),
+      );
       if (!body) {
         await sendBriefMiss(res, parcelNodeId);
         return;
@@ -1147,7 +1215,7 @@ router.post(
         }
         const row =
           parsed.depth === "node"
-            ? await assembleNodeBriefBody(id)
+            ? await assembleNodeBriefBody(id, await grantsCadRollValuationFor(id))
             : await assembleStubBody(id);
         return { id, row };
       }),

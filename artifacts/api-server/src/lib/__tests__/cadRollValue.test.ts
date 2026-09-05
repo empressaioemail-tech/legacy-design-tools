@@ -9,9 +9,13 @@ import {
   cadRollWireHasPresentValue,
   cadRollWireThreeStatesHold,
   emptyCadRoll,
+  gateBakedCadRollRecord,
+  gateCadRollWireValuation,
   nonNegativeDollarOrNull,
   positiveDollarOrNull,
   positiveSqftOrNull,
+  studioGatedCadRollValuationRefusal,
+  CAD_ROLL_DOLLAR_FIELDS,
   type CadRollWire,
 } from "../cadRollValue";
 import { serializeTwinOnRecord } from "../twinOnRecordSerialize";
@@ -346,6 +350,7 @@ describe("serializeTwinOnRecord (WDLL S1 customer-facing)", () => {
         },
       },
       "48021:34137",
+      true,
     );
     expect(onRecord.apn).toBe("34137");
     expect(onRecord.countyFips).toBe("48021");
@@ -376,10 +381,120 @@ describe("serializeTwinOnRecord (WDLL S1 customer-facing)", () => {
         },
       },
       "48021:vacant",
+      true,
     );
     expect(onRecord.cadRoll.improvementValue.state).toBe("zero");
     expect(onRecord.cadRoll.improvementValue).toMatchObject({ v: 0 });
     expect(onRecord.cadRoll.livingAreaSqft.state).toBe("absent");
-    expect(cadRollWireThreeStatesHold(onRecord.cadRoll)).toBe(true);
+    expect(cadRollWireThreeStatesHold(onRecord.cadRoll as CadRollWire)).toBe(true);
+  });
+
+  it("refused caller (grantsCadRollValuation=false) gets a studio-gated refusal on all four dollar fields, livingAreaSqft untouched", () => {
+    const onRecord = serializeTwinOnRecord(
+      {
+        countyFips: "48021",
+        countyName: "Bastrop",
+        bakedAt: "2026-09-05T00:00:00.000Z",
+        provenance: { parcelVintage: "2025" },
+        baseFacts: {
+          apn: "34137",
+          situsState: "TX",
+          cadRoll: cadRollFromClaim({
+            taxYear: 2025,
+            marketValue: 100000,
+            assessedValue: 100000,
+            landValue: 10000,
+            improvementValue: 90000,
+            livingAreaSqft: 1200,
+          }),
+        },
+      },
+      "48021:34137",
+      false,
+    );
+    for (const field of CAD_ROLL_DOLLAR_FIELDS) {
+      expect(onRecord.cadRoll[field]).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    }
+    // livingAreaSqft is not a dollar field and must never be gated.
+    expect(onRecord.cadRoll.livingAreaSqft.state).toBe("present");
+    expect(onRecord.cadRoll.livingAreaSqft).toMatchObject({ v: 1200 });
+  });
+});
+
+describe("CAD roll valuation gate (OPS-16 A-103 item 5 / A-104)", () => {
+  it("studioGatedCadRollValuationRefusal is a stable typed refusal", () => {
+    const refusal = studioGatedCadRollValuationRefusal();
+    expect(refusal.state).toBe("refused");
+    expect(refusal.code).toBe("studio-gated");
+    expect(typeof refusal.reason).toBe("string");
+    expect(refusal.reason.length).toBeGreaterThan(0);
+  });
+
+  it("gateCadRollWireValuation passes a granted wire through unchanged (same reference)", () => {
+    const wire = cadRollToWire(
+      cadRollFromClaim({
+        taxYear: 2025,
+        marketValue: 100000,
+        assessedValue: 100000,
+        landValue: 10000,
+        improvementValue: 90000,
+        livingAreaSqft: 1200,
+      }),
+      "48021:34137",
+      "2025",
+    );
+    expect(gateCadRollWireValuation(wire, true)).toBe(wire);
+  });
+
+  it("gateCadRollWireValuation replaces every dollar field, including a zero/absent one, and never touches livingAreaSqft", () => {
+    const wire = cadRollToWire(
+      cadRollFromClaim({
+        taxYear: 2025,
+        marketValue: 100000,
+        assessedValue: null,
+        landValue: 45000,
+        improvementValue: 0,
+        livingAreaSqft: 1200,
+      }),
+      "48021:34137",
+      "2025",
+    );
+    const gated = gateCadRollWireValuation(wire, false);
+    for (const field of CAD_ROLL_DOLLAR_FIELDS) {
+      expect(gated[field]).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    }
+    expect(gated.livingAreaSqft).toEqual(wire.livingAreaSqft);
+  });
+
+  it("gateBakedCadRollRecord replaces only the dollar keys that are actually present on a mixed baked/overlay record", () => {
+    const cadRoll = {
+      marketValue: { v: 100000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+      // Simulates a field the live overlay already replaced with a wire-shaped value.
+      assessedValue: { state: "present", v: 100000, source: "cad_property", vintage: "2025" },
+      landValue: null,
+      // improvementValue deliberately omitted -- must not be invented.
+      livingAreaSqft: { v: 1200, source: "cad_property", vintage: "2025" },
+    };
+    const gated = gateBakedCadRollRecord(cadRoll, false);
+    expect(gated.marketValue).toEqual(studioGatedCadRollValuationRefusal());
+    expect(gated.assessedValue).toEqual(studioGatedCadRollValuationRefusal());
+    expect(gated.landValue).toEqual(studioGatedCadRollValuationRefusal());
+    expect("improvementValue" in gated).toBe(false);
+    expect(gated.livingAreaSqft).toEqual(cadRoll.livingAreaSqft);
+  });
+
+  it("gateBakedCadRollRecord is a no-op when granted", () => {
+    const cadRoll = {
+      marketValue: { v: 100000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+    };
+    expect(gateBakedCadRollRecord(cadRoll, true)).toBe(cadRoll);
   });
 });

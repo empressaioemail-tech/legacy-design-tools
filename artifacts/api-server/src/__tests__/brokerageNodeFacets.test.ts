@@ -604,7 +604,10 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).toMatch(/loadOwnerFactAtom/);
     expect(routeSrc).toMatch(/ownerFact/);
     expect(routeSrc).toMatch(/authenticatedBrokerageUserId/);
-    expect(routeSrc).toMatch(/subscriptionTierGrantsStudio/);
+    // Widened 2026-09-05 (operator: "owner needs to be a part of unlock
+    // too"): the tier check alone is no longer the gate. grantsOwnerCoGatedFields
+    // (Studio|Team OR an active Property Unlock on this parcel) is.
+    expect(routeSrc).toMatch(/grantsOwnerCoGatedFields/);
     expect(routeSrc).toMatch(/resolvePeEntitlement/);
     expect(routeSrc).toMatch(/studio-gated|studioGatedOwnerFactRefusal/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
@@ -2530,7 +2533,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
   });
 
-  it("unlock-only GET with an owner atom MUST refuse ownerName", async () => {
+  it("unlock-only GET with an owner atom and an ACTIVE Property Unlock on this parcel MUST GRANT ownerName (widened 2026-09-05: owner needs to be a part of unlock too)", async () => {
     const gold = "48021:34137";
     const userId = "user_owner_fact_unlock";
     await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
@@ -2541,6 +2544,60 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       source: "stripe",
     });
     await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("present");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBe("FIXTURE OWNER");
+  });
+
+  it("unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse — Property Unlock is per-parcel, not per-user", async () => {
+    const gold = "48021:34137";
+    const otherParcel = "48021:99999";
+    const userId = "user_owner_fact_unlock_other_parcel";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: otherParcel,
+      source: "stripe",
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock-other-parcel");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("an EXPIRED Property Unlock on this parcel MUST refuse — only an active unlock grants", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_unlock_expired";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock-expired");
     goldOwnerFixture(gold);
     const token = mintSessionToken({
       audience: "user",
@@ -2604,5 +2661,223 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body.ownerFact)).not.toContain(
       "CAD ROLL MUST NOT LEAK",
     );
+  });
+
+  // -------------------------------------------------------------------
+  // CAD tax-assessed dollar values co-gate with owner info (OPS-16 A-103
+  // item 5 / A-104). The seeded snapshot writes the four dollar fields
+  // straight into baseFacts.cadRoll in the OFFLINE-BAKED shape (the
+  // nodeFacetPatchCadRollFromCadPropertyCli.ts patch path) rather than via
+  // the live parcel_record overlay, because A-104's investigation found
+  // that path is a SECOND, independent, previously-ungated source for
+  // these fields — gating only the overlay would miss it.
+  // -------------------------------------------------------------------
+  async function seedCadRollGoldSnapshot(gold: string, contentHash: string) {
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          cadRoll: {
+            marketValue: {
+              v: 397260,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            assessedValue: {
+              v: 397260,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            landValue: {
+              v: 80000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            improvementValue: {
+              v: 317260,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            livingAreaSqft: { v: 2145, source: "cad_property", vintage: "2025" },
+          },
+        },
+      },
+      contentHash,
+    });
+  }
+
+  it("anonymous GET refuses all four CAD dollar fields with a typed studio-gated refusal", async () => {
+    const gold = "48021:34137";
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-anon");
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    const cadRoll = res.body.facets.baseFacts.cadRoll;
+    for (const field of [
+      "marketValue",
+      "assessedValue",
+      "landValue",
+      "improvementValue",
+    ]) {
+      expect(cadRoll[field]).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    }
+    // livingAreaSqft is not a dollar field and is never gated.
+    expect(cadRoll.livingAreaSqft).toMatchObject({ v: 2145 });
+    expect(JSON.stringify(cadRoll)).not.toContain("397260");
+    expect(JSON.stringify(cadRoll)).not.toContain("317260");
+  });
+
+  it("identified-only GET MUST refuse the CAD dollar fields — identified is not Studio", async () => {
+    const gold = "48021:34137";
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-ident-only");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: "user_cadroll_identified_only" },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("signed-in Solo GET MUST refuse the CAD dollar fields", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_solo";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "solo" });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-solo");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.assessedValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("Property-Unlock-only GET on THIS parcel MUST GRANT the CAD dollar fields (widened 2026-09-05 — Property Unlock now co-gates like Studio)", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_unlock";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+    });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.landValue).toMatchObject({
+      v: 80000,
+    });
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
+      v: 397260,
+    });
+  });
+
+  it("Property-Unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse the CAD dollar fields — Property Unlock is per-parcel", async () => {
+    const gold = "48021:34137";
+    const otherParcel = "48021:99999";
+    const userId = "user_cadroll_unlock_other_parcel";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: otherParcel,
+      source: "stripe",
+    });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock-other-parcel");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.landValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("Studio GET serves the real CAD dollar values straight off the offline-baked snapshot", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_studio";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-studio");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const cadRoll = res.body.facets.baseFacts.cadRoll;
+    expect(cadRoll.marketValue).toMatchObject({ v: 397260, source: "cad_property" });
+    expect(cadRoll.assessedValue).toMatchObject({ v: 397260 });
+    expect(cadRoll.landValue).toMatchObject({ v: 80000 });
+    expect(cadRoll.improvementValue).toMatchObject({ v: 317260 });
+  });
+
+  it("Team GET also serves the real CAD dollar values (Team === Studio for this gate)", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_team";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "team" });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-team");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
+      v: 397260,
+    });
   });
 });

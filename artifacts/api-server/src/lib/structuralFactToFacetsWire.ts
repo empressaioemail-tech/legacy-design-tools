@@ -5,6 +5,7 @@
 import type { LayerAbsenceWire } from "./verdictLayerServe";
 import type { StructuralFactAbsent, StructuralFactPresent, StructuralFactRead } from "./structuralFactResolve";
 import type { LivingAreaSqftFromParcelRecord } from "./cadRollFactFromParcelRecord";
+import { gateBakedCadRollRecord } from "./cadRollValue";
 
 export type LivingAreaSqftLayerWire =
   | { status: "populated"; value: number }
@@ -142,4 +143,44 @@ export function attachCadRollOverlaysToFacets(
 
   out.baseFacts = base;
   return out;
+}
+
+/**
+ * Studio+ gate on the four CAD tax-assessed dollar rails (OPS-16 A-103 item
+ * 5 / A-104), applied at the RESPONSE-SERIALIZATION BOUNDARY — after
+ * {@link attachCadRollOverlaysToFacets} has already merged whatever live
+ * overlay values exist onto the offline-baked `baseFacts.cadRoll`. Gating
+ * only the overlay input is not enough: a separate offline patch job
+ * (`nodeFacetPatchCadRollFromCadPropertyCli.ts`) can write real dollar
+ * values directly into the baked snapshot, bypassing the overlay entirely,
+ * so this must gate the FINAL merged value regardless of which of those two
+ * sources produced it.
+ *
+ * `granted` is the caller's own `callerGrantsOwnerFact`-equivalent
+ * predicate — this function makes no tier decision of its own (never a
+ * fourth independent tier check, OPS-16 A-087). `livingAreaSqft` and every
+ * other facet key are untouched; only the four dollar keys inside
+ * `baseFacts.cadRoll` move.
+ */
+export function gateCadRollValuationOnFacets(
+  facets: Record<string, unknown>,
+  granted: boolean,
+): Record<string, unknown> {
+  if (granted) return facets;
+  const base =
+    facets.baseFacts && typeof facets.baseFacts === "object" && !Array.isArray(facets.baseFacts)
+      ? (facets.baseFacts as Record<string, unknown>)
+      : null;
+  const cadRoll =
+    base?.cadRoll && typeof base.cadRoll === "object" && !Array.isArray(base.cadRoll)
+      ? (base.cadRoll as Record<string, unknown>)
+      : null;
+  if (!base || !cadRoll) return facets;
+  return {
+    ...facets,
+    baseFacts: {
+      ...base,
+      cadRoll: gateBakedCadRollRecord(cadRoll, false),
+    },
+  };
 }

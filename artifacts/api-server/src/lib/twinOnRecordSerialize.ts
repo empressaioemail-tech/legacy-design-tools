@@ -7,7 +7,9 @@
 import type { AcreageMethod } from "./nodeFacetTier1Assemble";
 import {
   cadRollToWire,
+  gateCadRollWireValuation,
   type CadRollBaked,
+  type CadRollValuationRefusal,
   type CadRollValueWire,
   type CadRollWire,
 } from "./cadRollValue";
@@ -18,13 +20,23 @@ export type TwinOnRecordAcreage = {
   method: AcreageMethod;
 } | null;
 
+/** Gated wire: the four dollar keys may carry a studio-gated refusal in
+ *  place of a value; livingAreaSqft is always the plain wire (not gated). */
+export type TwinOnRecordCadRoll = {
+  marketValue: CadRollValueWire | CadRollValuationRefusal;
+  assessedValue: CadRollValueWire | CadRollValuationRefusal;
+  landValue: CadRollValueWire | CadRollValuationRefusal;
+  improvementValue: CadRollValueWire | CadRollValuationRefusal;
+  livingAreaSqft: CadRollValueWire;
+};
+
 export type TwinOnRecordBlock = {
   apn: string | null;
   acreage: TwinOnRecordAcreage;
   countyFips: string | null;
   countyName: string | null;
   situsState: string | null;
-  cadRoll: CadRollWire;
+  cadRoll: TwinOnRecordCadRoll;
   asOf: string | null;
 };
 
@@ -59,10 +71,18 @@ function acreageFromBase(base: Record<string, unknown>): TwinOnRecordAcreage {
 
 /**
  * Project baked Tier-1 facets onto the twin on-record block. Pure.
+ *
+ * `grantsCadRollValuation` gates the four dollar rails (OPS-16 A-103 item 5
+ * / A-104), same predicate as owner-info (`callerGrantsOwnerFact` /
+ * `grantsOwnerCoGatedFields`) — Studio|Team OR an active Property Unlock
+ * for this parcel; Solo stays excluded. A refused caller gets
+ * a typed `studio-gated` refusal per dollar field, never a silent omission.
+ * `livingAreaSqft` is not a dollar field and is never gated.
  */
 export function serializeTwinOnRecord(
   facets: unknown,
   parcelNodeId: string,
+  grantsCadRollValuation: boolean,
 ): TwinOnRecordBlock {
   const root = asRecord(facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
@@ -80,7 +100,10 @@ export function serializeTwinOnRecord(
     countyFips: strOrNull(root.countyFips),
     countyName: strOrNull(root.countyName),
     situsState: strOrNull(baseFacts.situsState),
-    cadRoll: cadRollToWire(cadRoll, parcelNodeId, parcelVintage),
+    cadRoll: gateCadRollWireValuation(
+      cadRollToWire(cadRoll, parcelNodeId, parcelVintage),
+      grantsCadRollValuation,
+    ),
     asOf: bakedAt,
   };
 }
@@ -88,6 +111,6 @@ export function serializeTwinOnRecord(
 /** Map on-record CAD fields into draw attrs (same wire shape as node). */
 export function cadRollAttrsFromOnRecord(
   onRecord: TwinOnRecordBlock,
-): Record<string, CadRollValueWire> {
+): Record<string, CadRollValueWire | CadRollValuationRefusal> {
   return { ...onRecord.cadRoll };
 }

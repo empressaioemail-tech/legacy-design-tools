@@ -217,6 +217,13 @@ export function tryAssembleParcelDrawFromReads(args: {
   well: WellFactRead;
   specialDistrict: SpecialDistrictFactRead;
   structural: StructuralFactRead;
+  /**
+   * Studio+ gate on the four CAD dollar rails (OPS-16 A-103 item 5 / A-104),
+   * same predicate as owner-info. Threaded straight into
+   * {@link serializeTwinOnRecord} so the draw attrs never carry an
+   * ungated dollar value.
+   */
+  grantsCadRollValuation: boolean;
 }): ParcelDrawStub | undefined {
   const root = asRecord(args.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
@@ -239,7 +246,11 @@ export function tryAssembleParcelDrawFromReads(args: {
     });
     return mergeOnRecordAttrs(
       draw,
-      serializeTwinOnRecord(args.facets, args.parcelNodeId),
+      serializeTwinOnRecord(
+        args.facets,
+        args.parcelNodeId,
+        args.grantsCadRollValuation,
+      ),
     );
   } catch {
     return undefined;

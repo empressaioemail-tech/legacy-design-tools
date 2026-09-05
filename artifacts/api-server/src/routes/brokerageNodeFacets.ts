@@ -156,20 +156,42 @@
  * SELECT bake / place_layer_snapshots / CAD / GIS for this field.
  *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
- * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
- * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
- * family as land-use-fact). Dual grammar is LIKE prefix:% on both
- * parcel prefixes; taxYear is the writer suffix. Owner name and mailing
- * leave this route only when PE entitlement is studio or team
- * (`subscriptionTierGrantsStudio` on `pe_user_entitlements`). Anonymous,
- * free, Solo, $15 unlock, and identified-only brokerage sessions receive
- * a typed `studio-gated` refusal with no ownerName and no mailing, and
- * do not query atoms. Identified session is not the gate. Operator /
- * extension API keys are not a session. Share-loop full-fidelity is a
- * locked exception on the share path, not this read. Never SELECT
- * cad-parcel-roll / bake / cad_property / GIS ParcelCardData.owner for
- * this field. Do not run sanitizeNodeFacetPayload on a granted
- * ownerFact (it would strip ownerName).
+ * tightened 2026-08-24; WIDENED 2026-09-05 to include Property Unlock).
+ * `ownerFact` is read from owner-fact atoms. Writer keys
+ * entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year family as
+ * land-use-fact). Dual grammar is LIKE prefix:% on both parcel prefixes;
+ * taxYear is the writer suffix. Owner name and mailing leave this route
+ * only when `grantsOwnerCoGatedFields` grants: PE entitlement is studio or
+ * team, OR the caller holds an active Property Unlock for THIS parcel
+ * (operator, 2026-09-05: "owner needs to be a part of unlock too. i just
+ * kept it out of solo as a way to graduate user through the tiers" — Solo's
+ * exclusion is confirmed deliberate and unchanged). Anonymous, free, Solo,
+ * and identified-only brokerage sessions receive a typed `studio-gated`
+ * refusal with no ownerName and no mailing, and do not query atoms.
+ * Identified session is not the gate. Operator / extension API keys are not
+ * a session. Share-loop full-fidelity is a locked exception on the share
+ * path, not this read. Never SELECT cad-parcel-roll / bake / cad_property /
+ * GIS ParcelCardData.owner for this field. Do not run
+ * sanitizeNodeFacetPayload on a granted ownerFact (it would strip
+ * ownerName).
+ *
+ * CAD TAX-ASSESSED DOLLAR VALUES CO-GATE WITH OWNER (OPS-16 A-103 item 5 /
+ * A-104, 2026-09-05; co-gate widened same day). `facets.baseFacts.cadRoll.
+ * {marketValue,assessedValue,landValue,improvementValue}` are county
+ * tax-assessment figures — the operator's own distinction is that this is a
+ * sourced, factual figure from the CAD roll, NOT a market-valuation
+ * opinion, so Masters 06's "not a valuation tool" stance does not apply to
+ * it. It is cleared to display, and ruled to unlock at the exact same tier
+ * as owner info: gated by `grantsOwnerFact` (Studio|Team OR an active
+ * Property Unlock for this parcel — the SAME predicate `ownerFact` uses
+ * just above, never a second one). Before this gate these four fields were
+ * written into the response by `attachCadRollOverlaysToFacets` with NO GATE
+ * AT ALL, a live (if inert — nothing rendered it) exposure.
+ * `gateCadRollValuationOnFacets` runs AFTER the overlay merge so it catches
+ * dollar values regardless of whether they came from the live overlay or
+ * straight off the offline-baked snapshot; refused callers get a typed
+ * `studio-gated` refusal per field, never a silent omission. `livingAreaSqft`
+ * is not a dollar field and is not part of this ruling.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -198,8 +220,8 @@ import {
   loadOwnerFactAtom,
 } from "../lib/ownerFactRead";
 import {
+  grantsOwnerCoGatedFields,
   resolvePeEntitlement,
-  subscriptionTierGrantsStudio,
 } from "../lib/peEntitlement";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
 import { loadCityLimitsFactForServe } from "../lib/cityLimitsFactServeCutover";
@@ -209,6 +231,7 @@ import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
 import {
   attachVerdictLayersToFacets,
   attachCadRollOverlaysToFacets,
+  gateCadRollValuationOnFacets,
 } from "../lib/structuralFactToFacetsWire";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
 import { parseParcelNodeId } from "../lib/parcelNodeId";
@@ -271,14 +294,21 @@ export function isIdentifiedOwnerFactCaller(req: Request): boolean {
 }
 
 /**
- * Studio|Team PE entitlement is the owner-name gate. Identified session
- * alone is not enough (2026-08-24). Unlock and Solo refuse.
+ * Studio|Team PE entitlement OR an active Property Unlock for THIS parcel
+ * is the owner-name gate (widened 2026-09-05 — operator: "owner needs to
+ * be a part of unlock too. i just kept it out of solo as a way to graduate
+ * user through the tiers." Solo's exclusion is unchanged and deliberate;
+ * Property Unlock's was not). Identified session alone is not enough
+ * (2026-08-24). Solo still refuses.
  */
-export async function callerGrantsOwnerFact(req: Request): Promise<boolean> {
+export async function callerGrantsOwnerFact(
+  req: Request,
+  parcelNodeId: string,
+): Promise<boolean> {
   applyExistingIdentifiedBrokerageSession(req);
   if (authenticatedBrokerageUserId(req) == null) return false;
   const snap = await resolvePeEntitlement(req);
-  return subscriptionTierGrantsStudio(snap.subscriptionTier);
+  return grantsOwnerCoGatedFields(snap.userId, snap.subscriptionTier, parcelNodeId);
 }
 
 function isOwnerIshKey(key: string): boolean {
@@ -669,7 +699,7 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const grantsOwnerFact = await callerGrantsOwnerFact(req);
+    const grantsOwnerFact = await callerGrantsOwnerFact(req, parcelNodeId);
     let snapshot;
     let floodHazardFact;
     let landUseFactRaw;
@@ -788,14 +818,21 @@ brokerageNodeFacetsRouter.get(
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: attachCadRollOverlaysToFacets(
-        attachVerdictLayersToFacets(
-          snapshot.facets as Record<string, unknown>,
-          structuralFact,
-          zoningVerdict,
-          cadRollOverlay.livingAreaSqft,
+      // CAD tax-assessed dollar rails (marketValue/assessedValue/landValue/
+      // improvementValue) are gated Studio|Team, same predicate as ownerFact
+      // just below (OPS-16 A-103 item 5 / A-104). livingAreaSqft is not a
+      // dollar field and is never touched by this gate.
+      facets: gateCadRollValuationOnFacets(
+        attachCadRollOverlaysToFacets(
+          attachVerdictLayersToFacets(
+            snapshot.facets as Record<string, unknown>,
+            structuralFact,
+            zoningVerdict,
+            cadRollOverlay.livingAreaSqft,
+          ),
+          cadRollOverlay,
         ),
-        cadRollOverlay,
+        grantsOwnerFact,
       ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying

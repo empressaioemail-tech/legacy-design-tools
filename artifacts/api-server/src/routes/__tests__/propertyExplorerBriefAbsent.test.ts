@@ -44,6 +44,12 @@ vi.mock("../../lib/peEntitlement", () => ({
     () => (_req: Request, _res: Response, next: NextFunction) => next(),
   resolvePeEntitlement: vi.fn(),
   resolvePeOwnerUserId: () => "user-brief-absent",
+  // OPS-16 A-103 item 5 / A-104 (co-gate widened 2026-09-05):
+  // propertyExplorer.ts now reuses this real predicate to gate the CAD
+  // tax-assessed dollar fields per parcel. This suite is about the brief
+  // miss-split, not entitlement, so a stub that always refuses is enough --
+  // every case here misses before a real dollar value would ever render.
+  grantsOwnerCoGatedFields: vi.fn(async () => false),
 }));
 
 vi.mock("../../lib/peScreenSaveDb", () => ({

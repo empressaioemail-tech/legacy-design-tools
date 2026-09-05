@@ -64,6 +64,10 @@ function drawFrom(args: {
   structural?: StructuralFactRead;
   facets?: unknown;
   queryPoint?: { latitude: number; longitude: number } | null;
+  /** Defaults to true (granted) so existing real-value assertions in this
+   *  file are unaffected; pass false to exercise the OPS-16 A-103/A-104
+   *  studio-gated dollar-field refusal. */
+  grantsCadRollValuation?: boolean;
 }) {
   const boundary = interpretBoundaryEdgeFactRows(GOLD, [
     { entity_id: `${GOLD}:boundary:0`, body: BOUNDARY_BODY },
@@ -93,6 +97,7 @@ function drawFrom(args: {
       ? interpretSpecialDistrictFactRows("48021:99999", args.sdRows)
       : refusedSd(),
     structural: args.structural ?? STRUCTURAL_ABSENT,
+    grantsCadRollValuation: args.grantsCadRollValuation ?? true,
   });
 }
 
@@ -345,5 +350,44 @@ describe("parcelDrawFromReads one-liners", () => {
     });
     expect(draw?.attrs.livingAreaSqft).toMatchObject({ state: "absent" });
     expect((draw?.attrs.livingAreaSqft as { v?: unknown }).v).toBeUndefined();
+  });
+
+  it("grantsCadRollValuation=false replaces the four dollar draw attrs with a studio-gated refusal, livingAreaSqft untouched", () => {
+    const draw = drawFrom({
+      grantsCadRollValuation: false,
+      facets: {
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          apn: "34137",
+          situsState: "TX",
+          cadRoll: {
+            marketValue: {
+              v: 100000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            assessedValue: null,
+            landValue: null,
+            improvementValue: null,
+            livingAreaSqft: { v: 1200, source: "cad_property", vintage: "2025" },
+          },
+        },
+      },
+    });
+    for (const field of [
+      "marketValue",
+      "assessedValue",
+      "landValue",
+      "improvementValue",
+    ] as const) {
+      expect(draw?.attrs[field]).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    }
+    expect(draw?.attrs.livingAreaSqft).toMatchObject({ state: "present", v: 1200 });
   });
 });
