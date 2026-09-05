@@ -537,11 +537,24 @@ describe("Stripe webhook PE routing (WDLL item 5)", () => {
   });
 
   it("brokerage installId-only checkout (no pe_user_id) is unaffected", async () => {
+    // Realistic fixture: createSubscriptionCheckoutSession (brokerageStripe.ts)
+    // always sets metadata.subscription_tier on the session it creates, so a
+    // genuine completed checkout for this legacy install-scoped seam carries
+    // it too. FAIL CLOSED (OPS-16 A-061): a webhook event with NEITHER a
+    // recognized metadata tier NOR a price id matching a configured
+    // STRIPE_PRO_PRICE_ID/STRIPE_MAX_PRICE_ID must refuse rather than default
+    // to "pro" — this fixture supplies the tier the same way the real seam
+    // does, so this test still proves the PE-routing question it was written
+    // for (unaffected by pe_user_id-keyed routing) without relying on the
+    // retired fail-open default.
     const { raw, signature } = signedWebhookPayload(
       checkoutCompletedEvent({
         customer: "cus_test_5",
         client_reference_id: "install-brokerage-only",
-        metadata: { install_id: "install-brokerage-only" },
+        metadata: {
+          install_id: "install-brokerage-only",
+          subscription_tier: "pro",
+        },
       }),
     );
     const result = await handleStripeWebhook(raw, signature);
@@ -551,6 +564,18 @@ describe("Stripe webhook PE routing (WDLL item 5)", () => {
       installId: "install-brokerage-only",
     });
     expect(result).not.toHaveProperty("peUserId");
+  });
+
+  it("VIOLATION: brokerage installId-only checkout with no recognizable tier (no metadata tier, no matching price id) refuses rather than defaulting to pro", async () => {
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_test_6",
+        client_reference_id: "install-brokerage-unrecognized",
+        metadata: { install_id: "install-brokerage-unrecognized" },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result.handled).toBe(false);
   });
 });
 

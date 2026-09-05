@@ -101,6 +101,39 @@ describe("property explorer GTM + billing seam", () => {
     expect(res.body.honestNote).toMatch(/simulated/i);
   });
 
+  it("VIOLATION: configured Stripe + missing STRIPE_PRO_PRICE_ID refuses 503, never a simulated session under a real key", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_configured";
+    delete process.env.STRIPE_PRO_PRICE_ID;
+    const app = getApp();
+    const res = await request(app)
+      .post("/api/brokerage/v1/property-explorer/billing/checkout")
+      .set("Authorization", `Bearer ${SERVICE_KEY}`)
+      .set("X-Hauska-Install-Id", INSTALL_ID)
+      .send({ tier: "pro" });
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("checkout_unavailable");
+    expect(res.body.missing).toBe("STRIPE_PRO_PRICE_ID");
+    expect(res.body.mode).toBeUndefined();
+    delete process.env.STRIPE_SECRET_KEY;
+  });
+
+  it("VIOLATION: configured Stripe + missing STRIPE_MAX_PRICE_ID refuses 503 for the max tier specifically", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_configured";
+    delete process.env.STRIPE_MAX_PRICE_ID;
+    const app = getApp();
+    const res = await request(app)
+      .post("/api/brokerage/v1/property-explorer/billing/checkout")
+      .set("Authorization", `Bearer ${SERVICE_KEY}`)
+      .set("X-Hauska-Install-Id", INSTALL_ID)
+      .send({ tier: "max" });
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("checkout_unavailable");
+    expect(res.body.missing).toBe("STRIPE_MAX_PRICE_ID");
+    delete process.env.STRIPE_SECRET_KEY;
+  });
+
   it("rejects unknown PE event types", async () => {
     const app = getApp();
     await request(app)
