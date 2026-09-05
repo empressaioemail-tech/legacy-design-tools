@@ -39,7 +39,7 @@
 
 import type { CadPropertyRecord, ParseCounters } from "../types";
 import { recordSkip } from "../types";
-import { landAcresFromGis, parseYearBuilt } from "../p78Merge";
+import { landAcresFromGis, landAcresFromLegalDescription, parseYearBuilt } from "../p78Merge";
 
 /** Raw DBF attribute bag for one StratMap land-parcel feature. */
 export type StratMapProperties = Record<string, unknown>;
@@ -148,8 +148,13 @@ export function normalizeStratMapLandUse(
     livingAreaSqft: null,
     landAcres: (() => {
       const gate = landAcresFromGis(properties.GIS_AREA, properties.GIS_AREA_U);
-      if ("refuse" in gate) return null;
-      return gate.landAcres;
+      if (!("refuse" in gate) && gate.landAcres != null) return gate.landAcres;
+      // GIS_AREA/GIS_AREA_U refused or unusable (e.g. McLennan's drop,
+      // which carries no usable GIS_AREA_U on any row) -- fall back to
+      // whatever LEGAL_DESC's own free text carries. Never runs when the
+      // GIS-area path already resolved, so a county that already gets a
+      // real value from GIS_AREA is untouched by this fallback.
+      return landAcresFromLegalDescription(properties.LEGAL_DESC);
     })(),
     propertyUseCode: normalizeStatLandUse(properties.STAT_LAND_),
   };

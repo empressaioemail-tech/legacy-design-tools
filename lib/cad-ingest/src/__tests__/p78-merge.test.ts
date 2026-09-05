@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyPathAMerge,
   landAcresFromGis,
+  landAcresFromLegalDescription,
   parseYearBuilt,
   REFUSE_GIS_AREA_REASON,
 } from "../p78Merge";
@@ -126,5 +127,88 @@ describe("landAcresFromGis unit table", () => {
       refuse: true,
       reason: REFUSE_GIS_AREA_REASON,
     });
+  });
+});
+
+describe("landAcresFromLegalDescription (McLennan leftover-farm fallback, F-01)", () => {
+  it("parses the dominant 'Acres <n>' phrasing (real McLennan example)", () => {
+    expect(
+      landAcresFromLegalDescription("LOT 4 BLOCK 2 RIVER OAKS ADDN Acres 0.414"),
+    ).toBe("0.4140");
+  });
+
+  it("FALSIFIER: prefers 'Total <n> Ac' over an earlier decoy '<n> Ac' in the same string (real McLennan example)", () => {
+    // The decoy (0.116) is a sub-tract figure, not the parcel's real total.
+    // A naive first-match-wins "<number> Ac" regex would return "0.1160".
+    expect(
+      landAcresFromLegalDescription(
+        "AXTELL OT Block 5 Lot 4 5 & 0.116 Ac Aband ROW (A) Total 0.414 Ac",
+      ),
+    ).toBe("0.4140");
+  });
+
+  it("returns null for a description with no parseable acreage (honest absence, never invented)", () => {
+    expect(landAcresFromLegalDescription("LOT 4 BLOCK 2 RIVER OAKS ADDN")).toBeNull();
+  });
+
+  it("returns null for a non-positive or non-finite figure", () => {
+    expect(landAcresFromLegalDescription("Acres 0")).toBeNull();
+    expect(landAcresFromLegalDescription("Acres -1.5")).toBeNull();
+  });
+
+  it("returns null for null/undefined/non-string input", () => {
+    expect(landAcresFromLegalDescription(null)).toBeNull();
+    expect(landAcresFromLegalDescription(undefined)).toBeNull();
+    expect(landAcresFromLegalDescription(12.5)).toBeNull();
+  });
+});
+
+describe("normalizeStratMapLandUse LEGAL_DESC fallback (McLennan, F-01)", () => {
+  const base = {
+    Prop_ID: "1",
+    TAX_YEAR: "2025",
+    STAT_LAND_: "A1",
+  };
+
+  it("falls back to LEGAL_DESC acreage when GIS_AREA_U is unusable (the real McLennan shape: land_value present, land_acres null)", () => {
+    const rec = normalizeStratMapLandUse(
+      "48309",
+      0,
+      {
+        ...base,
+        GIS_AREA: 1.5,
+        GIS_AREA_U: "", // McLennan's real drop: no usable unit on any row
+        LEGAL_DESC: "LOT 4 BLOCK 2 RIVER OAKS ADDN Acres 0.414",
+        LAND_VALUE: 12000,
+      },
+      newCounters(),
+    );
+    expect(rec!.landAcres).toBe("0.4140");
+    expect(rec!.landValue).toBe(12000);
+  });
+
+  it("FALSIFIER: does NOT regress a county whose GIS_AREA already resolves -- the GIS value wins even when LEGAL_DESC also carries a (different) figure", () => {
+    const rec = normalizeStratMapLandUse(
+      "48055",
+      0,
+      {
+        ...base,
+        GIS_AREA: 2.5,
+        GIS_AREA_U: "AC",
+        LEGAL_DESC: "LOT 9 BLOCK 3 SOME OTHER ADDN Acres 9.999",
+      },
+      newCounters(),
+    );
+    expect(rec!.landAcres).toBe("2.5000");
+  });
+
+  it("stays null when neither GIS_AREA nor LEGAL_DESC carries a usable figure (no fabrication)", () => {
+    const rec = normalizeStratMapLandUse(
+      "48309",
+      0,
+      { ...base, GIS_AREA: 1.5, GIS_AREA_U: "", LEGAL_DESC: "LOT 4 BLOCK 2 RIVER OAKS ADDN" },
+      newCounters(),
+    );
+    expect(rec!.landAcres).toBeNull();
   });
 });
