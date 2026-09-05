@@ -52,6 +52,13 @@ vi.mock("../../lib/peEntitlement", () => ({
     () => (_req: Request, _res: Response, next: NextFunction) => next(),
   resolvePeEntitlement: vi.fn(),
   resolvePeOwnerUserId: () => "user-brief-node",
+  // OPS-16 A-103 item 5 / A-104 (co-gate widened 2026-09-05):
+  // propertyExplorer.ts now calls this real predicate once per parcel to
+  // gate the CAD tax-assessed dollar fields. This suite is about the six
+  // previously-missing fact fields (item 6), not entitlement, and none of
+  // its assertions inspect onRecord.cadRoll, so a stub that always refuses
+  // is enough.
+  grantsOwnerCoGatedFields: vi.fn(async () => false),
 }));
 
 vi.mock("../../lib/peScreenSaveDb", () => ({
