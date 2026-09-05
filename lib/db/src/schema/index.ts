@@ -28,6 +28,7 @@ export * from "./briefingGenerationJobs";
 export * from "./adapterResponseCache";
 export * from "./cotalityMapCache";
 export * from "./txParcelCache";
+export * from "./txWcadAgValuation";
 export * from "./reviewerAnnotations";
 export * from "./submissionComments";
 export * from "./submissionCommunications";

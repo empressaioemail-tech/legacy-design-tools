@@ -29,7 +29,8 @@ export function parseYearBuilt(v: unknown): number | null {
   return null;
 }
 
-function formatAcres(n: number): string {
+/** Round to the `land_acres` column's 4 implied decimals, as a string. */
+export function formatAcres(n: number): string {
   const rounded = Math.round(n * 10000 + Number.EPSILON) / 10000;
   return rounded.toFixed(4);
 }

@@ -2354,6 +2354,34 @@ CREATE TABLE @@SCHEMA@@.tx_utility_territory_staging (
 );
 
 
+-- Name: tx_wcad_ag_valuation; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_wcad_ag_valuation (
+    id bigint NOT NULL,
+    prop_id text NOT NULL,
+    wcad_property_id text,
+    property_number text,
+    record_type text,
+    sequence integer,
+    land_type text,
+    description text,
+    state_code text,
+    homesite_flag boolean,
+    appr_method text,
+    acres numeric,
+    value numeric,
+    curr_value numeric,
+    ag_year text,
+    raw_ag_flag text,
+    ag_flag boolean NOT NULL,
+    source text NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    county_fips text
+);
+
+
 -- Name: txgio_address; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.txgio_address (
@@ -3319,6 +3347,12 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_parcel_tile_cache
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_utility_territory_staging
     ADD CONSTRAINT tx_utility_territory_staging_staging_row_id_pk PRIMARY KEY (staging_row_id);
+
+
+-- Name: tx_wcad_ag_valuation tx_wcad_ag_valuation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_wcad_ag_valuation
+    ADD CONSTRAINT tx_wcad_ag_valuation_pkey PRIMARY KEY (id);
 
 
 -- Name: txgio_address txgio_address_county_fips_full_addr_unit_pk; Type: CONSTRAINT; Schema: public; Owner: -
