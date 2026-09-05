@@ -36,7 +36,7 @@ const hasDb =
   process.env.DATABASE_URL !== undefined;
 
 describe("reconcileLandFieldsFromAgValuation (sanity-guarded conversion)", () => {
-  it("resolves a real present value and acres pair (real WCAD example: R349307)", () => {
+  it("resolves a real present value and acres pair (real WCAD land-segment example)", () => {
     expect(
       reconcileLandFieldsFromAgValuation({ totalValue: "306", totalAcres: "1.021" }),
     ).toEqual({ landValue: 306, landAcres: "1.0210" });
@@ -177,22 +177,41 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
   // supplied explicitly since the real schema carries no defaults.
   const REQ = "false, 'test-fixture', 'test-fixture', 'test-fixture'"; // ag_flag, source, source_vintage, source_citation
 
-  it("aggregates multiple additive land segments for the same prop_id (real shape: up to ~29 rows per property)", async () => {
+  it("aggregates multiple additive land segments for the same cad_property prop_id, joined on wcad_property_id NOT prop_id (F-01, live-verified 2026-09-05)", async () => {
     await withTestSchema(async ({ db }) => {
+      // Deliberately DISTINCT prop_id (WCAD's own internal record id, a
+      // different id space) vs wcad_property_id (the real join key,
+      // matching cad_property.prop_id) on every row -- a coincidentally
+      // equal fixture is exactly what let the wrong join pass before.
       await db.execute(sql.raw(`
-        INSERT INTO tx_wcad_ag_valuation (id, prop_id, land_type, acres, value, curr_value, county_fips, ag_flag, source, source_vintage, source_citation)
+        INSERT INTO tx_wcad_ag_valuation (id, prop_id, wcad_property_id, land_type, acres, value, curr_value, county_fips, ag_flag, source, source_vintage, source_citation)
         VALUES
-          (1, 'R349307', 'L', 1.021, 306, 250, '48491', ${REQ}),
-          (2, 'R349307', 'D1', 5.5, 1200, 900, '48491', ${REQ}),
-          (3, 'R500001', 'R', NULL, 48500, 48500, '48491', ${REQ}),
-          (4, 'R999999', 'L', 2.0, 500, 500, '48209', ${REQ});
+          (1, 'R000091', '163031', 'L', 1.021, 306, 250, '48491', ${REQ}),
+          (2, 'R000092', '163031', 'D1', 5.5, 1200, 900, '48491', ${REQ}),
+          (3, 'R000093', '200002', 'R', NULL, 48500, 48500, '48491', ${REQ}),
+          (4, 'R000094', '900009', 'L', 2.0, 500, 500, '48209', ${REQ});
       `));
 
       const aggregated = await aggregateAgValuationByPropId(db, WILLIAMSON_COUNTY_FIPS);
-      expect(aggregated.get("R349307")).toEqual({ totalValue: "1506", totalAcres: "6.521" });
-      expect(aggregated.get("R500001")).toEqual({ totalValue: "48500", totalAcres: null });
+      // Keyed by wcad_property_id's value -- never by prop_id.
+      expect(aggregated.get("163031")).toEqual({ totalValue: "1506", totalAcres: "6.521" });
+      expect(aggregated.get("200002")).toEqual({ totalValue: "48500", totalAcres: null });
+      // Neither WCAD-internal prop_id value must appear as a map key.
+      expect(aggregated.has("R000091")).toBe(false);
+      expect(aggregated.has("R000093")).toBe(false);
       // A different county's row must never leak into Williamson's aggregation.
-      expect(aggregated.has("R999999")).toBe(false);
+      expect(aggregated.has("900009")).toBe(false);
+    });
+  });
+
+  it("FALSIFIER: a row with a null wcad_property_id (unjoinable) is excluded, never aggregated under a null key", async () => {
+    await withTestSchema(async ({ db }) => {
+      await db.execute(sql.raw(`
+        INSERT INTO tx_wcad_ag_valuation (id, prop_id, wcad_property_id, land_type, value, county_fips, ag_flag, source, source_vintage, source_citation)
+        VALUES (1, 'R000095', NULL, 'L', 999, '48491', ${REQ});
+      `));
+      const aggregated = await aggregateAgValuationByPropId(db, WILLIAMSON_COUNTY_FIPS);
+      expect(aggregated.size).toBe(0);
     });
   });
 
@@ -204,7 +223,7 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
       await db.insert(cadProperty).values([
         {
           countyFips: WILLIAMSON_COUNTY_FIPS,
-          propId: "R349307",
+          propId: "163031",
           taxYear: 2026,
           ownerName: "REAL OWNER ON FILE",
           landValue: null,
@@ -228,7 +247,7 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
           // though it also has null land fields and a real ag-valuation
           // match exists for its prop_id below.
           countyFips: WILLIAMSON_COUNTY_FIPS,
-          propId: "R349307",
+          propId: "163031",
           taxYear: 2025,
           landValue: null,
           landAcres: null,
@@ -236,13 +255,17 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
           sourceVintage: "2025-legacy",
         },
       ]);
+      // prop_id ('R000091') is WCAD's own internal id, deliberately
+      // DIFFERENT from wcad_property_id ('163031', the real join key
+      // matching cad_property.prop_id above) -- proves the reconciliation
+      // does not accidentally key off prop_id.
       await db.execute(sql.raw(`
-        INSERT INTO tx_wcad_ag_valuation (id, prop_id, land_type, acres, value, county_fips, ag_flag, source, source_vintage, source_citation)
-        VALUES (1, 'R349307', 'L', 1.021, 306, '48491', ${REQ});
+        INSERT INTO tx_wcad_ag_valuation (id, prop_id, wcad_property_id, land_type, acres, value, county_fips, ag_flag, source, source_vintage, source_citation)
+        VALUES (1, 'R000091', '163031', 'L', 1.021, 306, '48491', ${REQ});
       `));
 
       const summary = await reconcileWilliamsonAgValuation(db, "2026-09-05-test");
-      // Only the declared-vintage (2026) R349307 row is a target -- the
+      // Only the declared-vintage (2026) 163031 row is a target -- the
       // stale 2025 row for the same prop_id is correctly out of scope.
       expect(summary.targetsConsidered).toBe(1);
       expect(summary.landValueResolved).toBe(1);
@@ -252,7 +275,7 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
       const [reconciled] = await db
         .select()
         .from(cadProperty)
-        .where(sql`prop_id = 'R349307' AND tax_year = 2026`);
+        .where(sql`prop_id = '163031' AND tax_year = 2026`);
       expect(reconciled.landValue).toBe(306);
       expect(reconciled.landAcres).toBe("1.0210");
       // COALESCE preserved the existing owner name -- this reconciliation
@@ -266,7 +289,7 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
       const [staleVintage] = await db
         .select()
         .from(cadProperty)
-        .where(sql`prop_id = 'R349307' AND tax_year = 2025`);
+        .where(sql`prop_id = '163031' AND tax_year = 2025`);
       expect(staleVintage.landValue).toBeNull();
       expect(staleVintage.landAcres).toBeNull();
 
