@@ -392,9 +392,15 @@ describe("lib/db schema integration", () => {
         // parallel to) the dormant Cotality spatial-tile cache tables.
         "tx_parcel_tile_cache",
         // 0076 / P-75 — L22 utility who-serves staging. Sorts after
-        // `tx_parcel_tile_cache` and before `txgio_address` (`_utility` <
-        // `txgio`) per `ORDER BY tablename`.
+        // `tx_parcel_tile_cache` and before `tx_wcad_ag_valuation`
+        // (`_utility` < `_wcad`) per `ORDER BY tablename`.
         "tx_utility_territory_staging",
+        // 0098 (F-01) — Williamson CAD per-property land-segment detail,
+        // NOT owned by this repo's own ingest (acquired by a separate
+        // pipeline; declared here for type-safe reads only). Sorts after
+        // `tx_utility_territory_staging` and before `txgio_address`
+        // (`tx_` < `txgio_`, then `_w` < `gio`) per `ORDER BY tablename`.
+        "tx_wcad_ag_valuation",
         // feat/txgio-address-points (0056) — self-hosted TxGIO/StratMap
         // address-POINT store (open paginated ArcGIS REST); point sibling
         // of txgio_parcel, keyed (county_fips, full_addr, unit).
