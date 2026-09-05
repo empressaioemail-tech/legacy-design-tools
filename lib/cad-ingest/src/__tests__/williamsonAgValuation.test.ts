@@ -217,11 +217,14 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
   it("full reconcile: targets missing land_value/land_acres get filled via COALESCE, existing correct rows are untouched", async () => {
     await withTestSchema(async ({ db }) => {
       await createAgValuationFixtureTable(db);
+      // Williamson's DECLARED vintage (DECLARED_CAD_VINTAGES["48491"] in
+      // vintage.ts) is tax_year 2026 -- this reconciliation must only
+      // ever touch that year's rows, never a stale prior-vintage one.
       await db.insert(cadProperty).values([
         {
           countyFips: WILLIAMSON_COUNTY_FIPS,
           propId: "R349307",
-          taxYear: 2025,
+          taxYear: 2026,
           ownerName: "REAL OWNER ON FILE",
           landValue: null,
           landAcres: "0.0000",
@@ -232,11 +235,24 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
           // Already correct -- must not be touched by this reconciliation at all.
           countyFips: WILLIAMSON_COUNTY_FIPS,
           propId: "ALREADY-GOOD",
-          taxYear: 2025,
+          taxYear: 2026,
           landValue: 999_000,
           landAcres: "12.3400",
           sourceFile: "property.csv",
           sourceVintage: "2026-08-20",
+        },
+        {
+          // FALSIFIER: same prop_id family, but a STALE non-declared
+          // vintage (2025, not 2026) -- must be excluded entirely, even
+          // though it also has null land fields and a real ag-valuation
+          // match exists for its prop_id below.
+          countyFips: WILLIAMSON_COUNTY_FIPS,
+          propId: "R349307",
+          taxYear: 2025,
+          landValue: null,
+          landAcres: null,
+          sourceFile: "stratmap25-landparcels_48491_lp.zip",
+          sourceVintage: "2025-legacy",
         },
       ]);
       await db.execute(sql`
@@ -245,6 +261,9 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
       `);
 
       const summary = await reconcileWilliamsonAgValuation(db, "2026-09-05-test");
+      // Only the declared-vintage (2026) R349307 row is a target -- the
+      // stale 2025 row for the same prop_id is correctly out of scope.
+      expect(summary.targetsConsidered).toBe(1);
       expect(summary.landValueResolved).toBe(1);
       expect(summary.landAcresResolved).toBe(1);
       expect(summary.upsert.rowsUpserted).toBe(1);
@@ -252,12 +271,23 @@ describe.skipIf(!hasDb)("Williamson ag-valuation reconciliation (DB integration)
       const [reconciled] = await db
         .select()
         .from(cadProperty)
-        .where(sql`prop_id = 'R349307'`);
+        .where(sql`prop_id = 'R349307' AND tax_year = 2026`);
       expect(reconciled.landValue).toBe(306);
       expect(reconciled.landAcres).toBe("1.0210");
       // COALESCE preserved the existing owner name -- this reconciliation
       // never touches fields it didn't set.
       expect(reconciled.ownerName).toBe("REAL OWNER ON FILE");
+
+      // FALSIFIER: the stale 2025 vintage row for the SAME prop_id, with
+      // the SAME real ag-valuation match available, must stay exactly as
+      // it was -- the declared-vintage scoping is a hard boundary, not a
+      // best-effort preference.
+      const [staleVintage] = await db
+        .select()
+        .from(cadProperty)
+        .where(sql`prop_id = 'R349307' AND tax_year = 2025`);
+      expect(staleVintage.landValue).toBeNull();
+      expect(staleVintage.landAcres).toBeNull();
 
       const [untouched] = await db
         .select()

@@ -42,6 +42,7 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { cadProperty, txWcadAgValuation } from "@workspace/db/schema";
 import { formatAcres } from "./p78Merge";
 import { upsertCadProperties } from "./ingest";
+import { resolveDeclaredCadVintage } from "./vintage.js";
 import type { CadPropertyRecord, UpsertSummary } from "./types";
 
 export const WILLIAMSON_COUNTY_FIPS = "48491";
@@ -121,17 +122,26 @@ export interface TargetCadPropertyRow {
  * Existing rows in `cad_property` for this county missing land_value
  * and/or land_acres — the reconciliation's actual targets. Rows that
  * already carry both are left alone entirely (never re-touched).
+ *
+ * Scoped to the county's DECLARED vintage only (L17/P-25 invariant:
+ * every cad_property reader filters to the single declared tax_year,
+ * never a silent cross-vintage read) — resolveDeclaredCadVintage fails
+ * closed rather than inventing a year from max(tax_year). This is a
+ * writer/apply path, so the fail-closed resolver is the correct one
+ * per its own doc, not the tryResolve serve-path variant.
  */
 export async function findWilliamsonReconciliationTargets(
   db: Pick<NodePgDatabase<Record<string, unknown>>, "select">,
   countyFips: string,
 ): Promise<TargetCadPropertyRow[]> {
+  const declared = resolveDeclaredCadVintage(countyFips);
   const rows = await db
     .select({ propId: cadProperty.propId, taxYear: cadProperty.taxYear })
     .from(cadProperty)
     .where(
       and(
         eq(cadProperty.countyFips, countyFips),
+        eq(cadProperty.taxYear, declared.taxYear),
         sql`(${cadProperty.landValue} IS NULL OR ${cadProperty.landAcres} IS NULL OR ${cadProperty.landAcres} = 0)`,
       ),
     );
