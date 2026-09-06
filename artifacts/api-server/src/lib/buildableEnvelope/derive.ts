@@ -24,10 +24,7 @@ import {
   type EdgeLabelingResult,
 } from "./edgeLabeling";
 import type { DistrictMappingResult } from "./districtMapping";
-import {
-  roadClassSetbackTableForJurisdiction,
-  type RoadClassSetbackDistrictRow,
-} from "./roadClassSetbacks";
+import type { RoadClassSetbackDistrictRow } from "./roadClassSetbacks";
 
 export interface BuildableEnvelopeProps {
   kind: "buildable-envelope";
@@ -181,12 +178,10 @@ export function deriveBuildableEnvelope(
   };
   const hasSilent = Object.keys(not_specified).length > 0;
 
-  const roadClassTable =
-    input.roadClassSetbackTable ??
-    roadClassSetbackTableForJurisdiction(
-      table.jurisdictionKey,
-      d.district_name,
-    );
+  // A road class is not a setback (engine-side precedent: commit 293633a,
+  // "refuse road-class setbacks"). Never silently substitute one by default —
+  // only a caller that explicitly opts in gets road-class-aware insets.
+  const roadClassTable = input.roadClassSetbackTable ?? null;
 
   const insetFeet = insetFeetForLabeling(
     labeling,

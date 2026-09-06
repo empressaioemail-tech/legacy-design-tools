@@ -649,12 +649,16 @@ describe("POST /place/buildable-envelope — atom-chain provenanceRefs (R3)", ()
       .send(body);
   }
 
+  // No `outcome` on buildableEnvelope: these tests are scoped to DID-based
+  // provenanceRefs attachment (R3), not the atom-outcome reconciliation
+  // (reconcileAtomEnvelope.ts) — an incidental "buildable" outcome here
+  // would otherwise trigger reconciliation and change derivePath, which
+  // neither test asserts on or intends to exercise.
   function baseChainWire(): Record<string, unknown> {
     return {
       zoningFact: { district: "R-MD" },
       setbackRule: { front: 25, side: 5, rear: 10, districtCode: "R-MD" },
       buildableEnvelope: {
-        outcome: { kind: "buildable", areaSqFt: 4200 },
         readContract: { axes: { assertedConfidence: { estimate: 0.62 } } },
       },
     };

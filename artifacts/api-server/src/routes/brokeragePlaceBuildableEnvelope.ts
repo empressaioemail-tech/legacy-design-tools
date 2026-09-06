@@ -65,6 +65,7 @@ import {
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
 import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
+import { reconcileWithAtomEnvelope } from "../lib/buildableEnvelope/reconcileAtomEnvelope";
 import {
   fetchPropertyAtomChain,
   type PropertyAtomChainWire,
@@ -884,12 +885,17 @@ async function deriveLabelAndRespond(args: {
     return;
   }
 
-  const derived = deriveBuildableEnvelope({
+  const rawDerived = deriveBuildableEnvelope({
     ring: parcel.ring,
     table: resolved.table,
     district: resolved.district,
     labeling,
   });
+  const derived = reconcileWithAtomEnvelope(
+    rawDerived,
+    atomChain?.buildableEnvelope?.outcome ?? null,
+  );
+  const atomReconciled = derived !== rawDerived;
 
   const estimate =
     atomChain?.buildableEnvelope?.readContract?.axes?.assertedConfidence
@@ -897,9 +903,14 @@ async function deriveLabelAndRespond(args: {
   const confidenceValue =
     typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
 
+  const derivePath = atomReconciled ? "labelEdges+derive+atom-reconciled" : "labelEdges+derive";
   const provenanceNote = spineZoning
     ? spineZoningProvenanceNote(spineZoning)
-    : `Setbacks from ${resolved.sourceKind} (${resolved.sourceLabel}, effective ${resolved.effectiveDate}). Geometry from labelEdges+derive (map/export parity).`;
+    : `Setbacks from ${resolved.sourceKind} (${resolved.sourceLabel}, effective ${resolved.effectiveDate}). ${
+        atomReconciled
+          ? "Buildable area reconciled against the property atom chain (map/export parity)."
+          : "Geometry from labelEdges+derive (map/export parity)."
+      }`;
 
   const honesty: EngineHonesty = {
     confidence: { value: confidenceValue, kind: "asserted" },
@@ -976,7 +987,7 @@ async function deriveLabelAndRespond(args: {
         status: wireStatus,
         layer: "buildable-envelope",
         parcel_node_id: parcelNodeId,
-        derivePath: "labelEdges+derive",
+        derivePath,
         setbackSource: resolved.sourceKind,
         effectiveZoningCode,
         ...(provenanceRefs ? { provenanceRefs } : {}),

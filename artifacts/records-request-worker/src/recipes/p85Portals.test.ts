@@ -75,6 +75,16 @@ describe("runRecipeForJob — Aumentum index search", () => {
     },
   };
 
+  // These four tests exercise the Aumentum recipe's real setTimeout-based
+  // poll loop (assertBastropSearchSettled in searchOutcome.ts: timeoutMs
+  // default 20000, fillMissAfterMs default 4000 -- real wall-clock time,
+  // not fake timers), which is inherently marginal against vitest's 5000ms
+  // default per-test timeout under any CI host slowdown. Explicit per-test
+  // timeout comfortably above 20000+4000 so real, correct runs don't get
+  // killed early by CI variance. Pre-existing test-timing fragility, not
+  // caused by or fixed at the recipe/polling logic itself -- flagged for
+  // whoever owns P-85/records-request to look at properly (see
+  // doc_repo/_inbox/2026-09-06_legacy-design-tools-shared-reader_p85-timeout-fragility_close.json).
   it("completes Bastrop index search when queries submit", async () => {
     const browser = mockBrowser({
       fill: vi.fn().mockResolvedValue({ ok: true }),
@@ -97,7 +107,7 @@ describe("runRecipeForJob — Aumentum index search", () => {
         expect.objectContaining({ kind: "owner-name" }),
       ]),
     );
-  });
+  }, 25000);
 
   it("fails closed when owner search stays on SearchEntry after submit", async () => {
     const browser = mockBrowser({
@@ -116,7 +126,7 @@ describe("runRecipeForJob — Aumentum index search", () => {
     expect(result.status).toBe("failed");
     expect(result.errorCode).toBe(SEARCH_FILL_DID_NOT_SUBMIT);
     expect(result.status).not.toBe("complete");
-  });
+  }, 25000);
 
   it("fails closed when entry navigation fails", async () => {
     const browser = mockBrowser({
@@ -125,7 +135,7 @@ describe("runRecipeForJob — Aumentum index search", () => {
     const result = await runRecipeForJob(bastropCtx, browser);
     expect(result.status).toBe("failed");
     expect(result.errorCode).toBe("portal-unreachable");
-  });
+  }, 25000);
 
   it("routes to needs-human when search terms are absent", async () => {
     const browser = mockBrowser({
@@ -137,7 +147,7 @@ describe("runRecipeForJob — Aumentum index search", () => {
     );
     expect(result.status).toBe("needs-human");
     expect(result.errorCode).toBe("search-terms-missing");
-  });
+  }, 25000);
 });
 
 describe("runRecipeForJob — Caldwell CountyGovernmentRecords index search (P-113)", () => {
