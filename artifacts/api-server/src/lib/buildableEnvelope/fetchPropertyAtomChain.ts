@@ -25,7 +25,7 @@ export type PropertyAtomChainWire = {
     atomDid?: string | null;
   } | null;
   buildableEnvelope?: {
-    outcome?: { kind?: string; areaSqFt?: number } | null;
+    outcome?: { kind?: string; areaSqFt?: number; reason?: string } | null;
     readContract?: {
       axes?: { assertedConfidence?: { estimate?: number } };
     } | null;

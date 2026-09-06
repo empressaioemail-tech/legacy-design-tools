@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SetbackTable } from "@workspace/adapters";
 import { feetToMeters, insetPerEdge, type Ring } from "./geometry";
-import { labelEdges } from "./edgeLabeling";
+import { labelEdges, insetFeetForLabeling } from "./edgeLabeling";
 import { mapDistrict } from "./districtMapping";
 import { deriveBuildableEnvelope } from "./derive";
 
@@ -16,6 +16,14 @@ import { deriveBuildableEnvelope } from "./derive";
 vi.mock("./geometry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./geometry")>();
   return { ...actual, insetPerEdge: vi.fn(actual.insetPerEdge) };
+});
+
+// Spy-only (calls through to the real implementation) so the road-class
+// default-retirement test below can inspect what derive.ts actually passes
+// as `roadClassTable`, without changing behavior for any other test.
+vi.mock("./edgeLabeling", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./edgeLabeling")>();
+  return { ...actual, insetFeetForLabeling: vi.fn(actual.insetFeetForLabeling) };
 });
 
 const LNG0 = -97.31;
@@ -184,5 +192,63 @@ describe("deriveBuildableEnvelope — geometry helper (no product confidence)", 
     });
     expect(res.geojson.features[0]!.properties.disclosure).toMatch(/build-to-line/i);
     expect(res.geojson.features[0]!.properties.disclosure).not.toMatch(/consume/i);
+  });
+});
+
+describe("deriveBuildableEnvelope — road-class setback default retirement (F-11 / 293633a precedent)", () => {
+  const P5_TABLE: SetbackTable = {
+    jurisdictionKey: "bastrop-city-tx",
+    jurisdictionDisplayName: "Bastrop B3",
+    districts: [
+      {
+        district_name: "P-5 Core",
+        front_ft: 25,
+        rear_ft: 20,
+        side_ft: 7.5,
+        side_corner_ft: 15,
+        max_height_ft: 35,
+        max_lot_coverage_pct: 40,
+        max_impervious_pct: 55,
+        citation_url: "https://library.municode.com/tx/bastrop",
+      },
+    ],
+  };
+
+  it("never auto-applies a road-class table by default, even for bastrop-city-tx P-5 (the one jurisdiction/district the retired default used to match)", () => {
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const district = mapDistrict(P5_TABLE, "P-5")!;
+
+    deriveBuildableEnvelope({ ring, table: P5_TABLE, district, labeling });
+
+    expect(insetFeetForLabeling).toHaveBeenCalledWith(
+      labeling,
+      expect.anything(),
+      expect.objectContaining({ roadClassTable: null }),
+    );
+  });
+
+  it("still honors a caller-supplied roadClassSetbackTable (opt-in stays available)", () => {
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const district = mapDistrict(P5_TABLE, "P-5")!;
+    const explicitTable = {
+      district_code: "P-5",
+      entries: [{ road_class: "residential" as const, edge_role: "front" as const, setback_ft: 15 }],
+    };
+
+    deriveBuildableEnvelope({
+      ring,
+      table: P5_TABLE,
+      district,
+      labeling,
+      roadClassSetbackTable: explicitTable,
+    });
+
+    expect(insetFeetForLabeling).toHaveBeenCalledWith(
+      labeling,
+      expect.anything(),
+      expect.objectContaining({ roadClassTable: explicitTable }),
+    );
   });
 });
