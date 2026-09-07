@@ -67,16 +67,13 @@ describe("GET /api/brokerage/v1/map-data/gis-layers", () => {
     expect(res.body.error).toBe("unauthorized");
   });
 
-  it("returns 403 for free-tier brokerage user (extension public key)", async () => {
-    process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = "test-extension-public-key";
-    resetBrokerageApiKeysForTests();
-
+  it("the old extension_public key is unauthorized, not merely tier-gated (tier retired 2026-09-07)", async () => {
     const res = await request(getApp())
       .get("/api/brokerage/v1/map-data/gis-layers")
       .set("X-Hauska-Key", "test-extension-public-key");
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("tier_required");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 });
 

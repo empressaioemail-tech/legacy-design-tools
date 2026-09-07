@@ -192,6 +192,10 @@ function mockGrokResponses() {
 }
 
 beforeEach(async () => {
+  // A real recognized key, so brokerageAuth's keys-configured gate passes for
+  // the sessionHeaders (session-JWT) tests in this file — unrelated to the
+  // one test below that exercises the now-retired extension_public branch.
+  process.env.BROKERAGE_OPERATOR_API_KEYS = "brokerage-user-entitlement-operator-key";
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
   process.env.BROKERAGE_WALLET_BYPASS = "1";
   resetBrokerageApiKeysForTests();
@@ -333,7 +337,7 @@ describe("user-aware brokerage entitlement + workspaces", () => {
     expect(res.body.subscriptionTier).toBe("max");
   });
 
-  it("GET /entitlement stays install-scoped for extension_public", async () => {
+  it("GET /entitlement: the old extension_public key is unauthorized (tier retired 2026-09-07)", async () => {
     const res = await request(getApp())
       .get("/api/brokerage/v1/entitlement")
       .set({
@@ -341,9 +345,8 @@ describe("user-aware brokerage entitlement + workspaces", () => {
         "X-Hauska-Install-Id": INSTALL_NEW,
       });
 
-    expect(res.status).toBe(200);
-    expect(res.body.maxActive).toBe(false);
-    expect(res.body.subscriptionTier).toBeNull();
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 
   it("GET /workspaces/recent returns workspaces across claimed installs for tier user", async () => {

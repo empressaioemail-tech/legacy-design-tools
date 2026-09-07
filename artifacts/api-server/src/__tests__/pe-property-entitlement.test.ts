@@ -137,6 +137,10 @@ async function chatCountFor(userId: string, parcelNodeId: string) {
 }
 
 beforeEach(async () => {
+  // A real recognized key, so brokerageAuth's keys-configured gate passes for
+  // the peSessionHeaders (session-JWT) tests in this file — unrelated to the
+  // one test below that exercises the now-retired extension_public branch.
+  process.env.BROKERAGE_OPERATOR_API_KEYS = "pe-property-entitlement-operator-key";
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
   resetBrokerageApiKeysForTests();
   process.env.SERVICE_API_KEY = SERVICE_TOKEN;
@@ -663,13 +667,13 @@ describe("research/chat PE-session free counter", () => {
     expect(res.body.error).toBe("upgrade_required");
   });
 
-  it("does not touch the extension_public branch (install-id required as before)", async () => {
+  it("the old extension_public key is unauthorized (tier retired 2026-09-07)", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/research/chat")
       .set({ Authorization: `Bearer ${EXT_KEY}` })
       .send(chatBody());
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("install_id_required");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 });
 

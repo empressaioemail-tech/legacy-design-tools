@@ -12,7 +12,7 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 
-const EXT_KEY = "brokerage-billing-ext-public-key";
+const BROKERAGE_KEY = "brokerage-billing-operator-key";
 const INSTALL = "install-billing-checkout-test";
 
 vi.mock("@workspace/db", async () => {
@@ -50,7 +50,7 @@ setupRouteTests((g) => {
 });
 
 const authHeaders = {
-  "X-Hauska-Key": EXT_KEY,
+  "X-Hauska-Key": BROKERAGE_KEY,
   "X-Hauska-Install-Id": INSTALL,
   "Content-Type": "application/json",
 };
@@ -60,7 +60,7 @@ beforeEach(async () => {
   delete process.env.STRIPE_PUBLISHABLE_KEY;
   delete process.env.STRIPE_WEBHOOK_SECRET;
   delete process.env.STRIPE_PRO_PRICE_ID;
-  process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
+  process.env.BROKERAGE_API_KEYS = BROKERAGE_KEY;
   resetBrokerageApiKeysForTests();
 
   if (!ctx.schema) return;
@@ -165,7 +165,7 @@ describe("brokerage billing (simulated)", () => {
   it("requires X-Hauska-Install-Id", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/billing/checkout")
-      .set({ "X-Hauska-Key": EXT_KEY, "Content-Type": "application/json" })
+      .set({ "X-Hauska-Key": BROKERAGE_KEY, "Content-Type": "application/json" })
       .send({
         successUrl: "https://extension.example/success",
         cancelUrl: "https://extension.example/cancel",
