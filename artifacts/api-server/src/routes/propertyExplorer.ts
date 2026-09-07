@@ -65,6 +65,7 @@ import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
 import { loadWellFactForServe } from "../lib/wellFactServeCutover";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
+import { loadLandUseFactAtom } from "../lib/landUseFactRead";
 import { structuralFactWithParcelRecordOverlay } from "../lib/structuralFactResolve";
 import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { loadCityLimitsFactForServe } from "../lib/cityLimitsFactServeCutover";
@@ -73,6 +74,8 @@ import { loadOverlayDistrictsFactForServe } from "../lib/overlayDistrictsFactSer
 import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover";
 import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
+import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
+import { loadOwnerFactAtom, studioGatedOwnerFactRefusal } from "../lib/ownerFactRead";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
 import { attachCadRollOverlaysToFacets } from "../lib/structuralFactToFacetsWire";
@@ -208,6 +211,29 @@ async function assembleNodeBriefBody(
     schoolDistrictFact,
     maxImperviousCoverPctFact,
     buildingFootprintFact,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D1): valueHistoryFact was
+    // fetched and served by brokerageNodeFacets.ts's facets route but never
+    // fetched here at all -- same loader, reused rather than re-derived.
+    valueHistoryFact,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D3): ownerFact was checked
+    // first, not just added -- confirmed the SAME gate already flows into
+    // this function. `grantsCadRollValuation` (this function's own
+    // parameter) IS `grantsOwnerCoGatedFields(...)`'s result at every real
+    // call site (the route handler's `grantsCadRollValuationFor` returns
+    // false immediately unless depth === "node", which is the only depth
+    // that ever reaches this function) -- the exact predicate
+    // brokerageNodeFacets.ts's `callerGrantsOwnerFact` uses to gate its own
+    // ownerFact. This route also already runs behind `requirePeAuthenticated`,
+    // so the caller is guaranteed identified before this function is ever
+    // reached (stronger than that route's own extra identified-session
+    // check). Reusing the gate that already exists, never a second one.
+    ownerFactLoaded,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D2): brokerageNodeFacets.ts's
+    // facets route already reads the real land-use-fact atom; this response
+    // only ever read the retired baked/CAD-roll baseFacts.landUse value.
+    // Unconditional, same as that route -- no allowlist/gate cutover exists
+    // for this fact (landUseFactRead.ts).
+    landUseFact,
   ] = await Promise.all([
     loadBakedNodeFacetSnapshot(parcelNodeId),
     loadFloodHazardFactForServe(parcelNodeId),
@@ -238,7 +264,13 @@ async function assembleNodeBriefBody(
     loadSchoolDistrictFactForServe(parcelNodeId),
     loadMaxImperviousCoverPctFactForServe(parcelNodeId),
     loadBuildingFootprintFactAtom(parcelNodeId),
+    loadValueHistoryFactForServe(parcelNodeId),
+    grantsCadRollValuation
+      ? loadOwnerFactAtom(parcelNodeId)
+      : Promise.resolve(null),
+    loadLandUseFactAtom(parcelNodeId),
   ]);
+  const ownerFact = ownerFactLoaded ?? studioGatedOwnerFactRefusal(parcelNodeId);
   const structuralFact = structuralFactWithParcelRecordOverlay(structuralFactLegacy, {
     livingAreaSqft: cadRollOverlay.livingAreaSqft,
     yearBuilt: cadRollOverlay.yearBuilt,
@@ -261,6 +293,7 @@ async function assembleNodeBriefBody(
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
+    landUseFact,
   });
   // PARCEL-B-SLATE2 dollar rails: merge the live overlay onto the offline-
   // baked baseFacts.cadRoll (item 3, A-104) — previously discarded here
@@ -323,6 +356,32 @@ async function assembleNodeBriefBody(
     schoolDistrictFact,
     maxImperviousCoverPctFact,
     buildingFootprintFact,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D1): same loader
+    // brokerageNodeFacets.ts's facets route already uses; this response
+    // never fetched or carried it at all before.
+    valueHistoryFact,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D4): these four were
+    // already being fetched above (Promise.all) to feed `draw` but were
+    // never exposed as their own typed fields the way
+    // brokerageNodeFacets.ts's facets route exposes all four directly -- a
+    // caller of this route had no way to read them as structured data, and
+    // got nothing at all when `draw` was absent. Same FactRead values,
+    // additive only; `draw`'s own inputs are unchanged.
+    specialDistrictFact,
+    pipelineFact,
+    wellFact,
+    boundaryEdgeFact: boundaryFact,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D3): gated by the SAME
+    // grantsCadRollValuation predicate as the CAD-roll dollar fields above
+    // (grantsOwnerCoGatedFields) -- confirmed identical to
+    // brokerageNodeFacets.ts's callerGrantsOwnerFact gate before adding this,
+    // never a second independent tier check.
+    ownerFact,
+    // PE/MCP-vs-facets parity audit (2026-09-07, D2): same atom
+    // brokerageNodeFacets.ts's facets route already reads and exposes; also
+    // now feeds the brief's own "land-use" section (see buildR1Brief above),
+    // taking priority over the retired baked baseFacts.landUse value.
+    landUseFact,
     bakedAt,
     source: "baked-snapshot",
     ...(draw ? { draw } : {}),

@@ -957,3 +957,129 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
     });
   });
 });
+
+/**
+ * PE/MCP-vs-facets parity audit (2026-09-07), D1 + D2 + D3 + D4.
+ * valueHistoryFact was fetched and served by brokerageNodeFacets.ts's
+ * facets route but never fetched by assembleNodeBriefBody at all (D1).
+ * specialDistrictFact, pipelineFact, wellFact, and boundaryEdgeFact were
+ * already being fetched here to feed the optional `draw` block but were
+ * never exposed as their own typed fields the way the facets route exposes
+ * all four directly (D4) -- a caller of research/brief had no way to read
+ * them as structured data, and got nothing at all when `draw` was absent.
+ * landUseFact (D2) was never fetched at all -- the brief's land-use section
+ * read only the retired baked value. ownerFact (D3) was checked before
+ * adding: the SAME grantsCadRollValuation/grantsOwnerCoGatedFields gate the
+ * CAD-roll dollar fields already use also gates this. This proves all
+ * fields genuinely reach the wire on the real route (and that ownerFact is
+ * actually gated, not just present), not just that the assembler function
+ * was edited.
+ */
+describe("research/brief now carries valueHistoryFact/landUseFact/ownerFact/specialDistrictFact/pipelineFact/wellFact/boundaryEdgeFact (PE/MCP-vs-facets parity audit, 2026-09-07, D1/D2/D3/D4)", () => {
+  it("a paid, non-Studio, non-unlocked user's node-depth brief carries all new fields on the wire, and ownerFact is correctly studio-gated (not a leak)", async () => {
+    await db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(PARCEL),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "29.88000",
+      lngRounded: "-97.68000",
+      payloadJson: {
+        facetSchemaVersion: "node-facets-tier1-v1",
+        tier: 1,
+        parcelNodeId: PARCEL,
+        countyFips: "48055",
+        countyName: "Caldwell",
+        baseFacts: {
+          apn: PARCEL.split(":")[1],
+          situsAddress: "1 D1 D4 TEST RD",
+          situsState: "TX",
+          acreage: { value: 1, sqft: 43560, method: "shoelace-wgs84" },
+        },
+        zoning: null,
+        envelope: { status: "declined", confidence: 0, provisional: true },
+        facetCoverage: { baseFacts: true, landUse: false, acreage: true, zoning: false, envelope: false },
+        provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+        bakedAt: "2026-09-07T00:00:00.000Z",
+      },
+      contentHash: "test-hash-brief-d1-d4",
+    });
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    // D1: the field exists at all -- no atoms seeded, so a typed refusal is
+    // the correct, honest present value, not the absence of the key itself.
+    expect(res.body.valueHistoryFact).not.toBeUndefined();
+    expect(res.body.valueHistoryFact).not.toBeNull();
+    // D4: all four previously-internal-only facts are now their own fields.
+    expect(res.body.specialDistrictFact).not.toBeUndefined();
+    expect(res.body.specialDistrictFact).not.toBeNull();
+    expect(res.body.pipelineFact).not.toBeUndefined();
+    expect(res.body.pipelineFact).not.toBeNull();
+    expect(res.body.wellFact).not.toBeUndefined();
+    expect(res.body.wellFact).not.toBeNull();
+    expect(res.body.boundaryEdgeFact).not.toBeUndefined();
+    expect(res.body.boundaryEdgeFact).not.toBeNull();
+    // D2: the field exists, and now feeds the brief's land-use section too
+    // (proven at the unit level in r1BriefComposeLandUse.test.ts; this only
+    // proves the wiring reaches the real route).
+    expect(res.body.landUseFact).not.toBeUndefined();
+    expect(res.body.landUseFact).not.toBeNull();
+    // D3: USER_PAID is accessTier "paid" with NO subscriptionTier and NO
+    // Property Unlock on PARCEL -- grantsCadRollValuation must be false, so
+    // ownerFact must be the SAME typed studio-gated refusal
+    // brokerageNodeFacets.ts's facets route would return for this caller,
+    // never real owner data. This is the leak-prevention half of D3, not
+    // just presence.
+    expect(res.body.ownerFact).toMatchObject({
+      state: "refused",
+      code: "studio-gated",
+    });
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("an unlocked user (Property Unlock on THIS parcel, same gate as the CAD dollar fields) GRANTS ownerFact -- not just present, actually gated open", async () => {
+    await db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(PARCEL),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "29.88000",
+      lngRounded: "-97.68000",
+      payloadJson: {
+        facetSchemaVersion: "node-facets-tier1-v1",
+        tier: 1,
+        parcelNodeId: PARCEL,
+        countyFips: "48055",
+        countyName: "Caldwell",
+        baseFacts: {
+          apn: PARCEL.split(":")[1],
+          situsAddress: "1 D3 UNLOCK TEST RD",
+          situsState: "TX",
+          acreage: { value: 1, sqft: 43560, method: "shoelace-wgs84" },
+        },
+        zoning: null,
+        envelope: { status: "declined", confidence: 0, provisional: true },
+        facetCoverage: { baseFacts: true, landUse: false, acreage: true, zoning: false, envelope: false },
+        provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+        bakedAt: "2026-09-07T00:00:00.000Z",
+      },
+      contentHash: "test-hash-brief-d3-unlocked",
+    });
+    // USER_UNLOCKED has an active Property Unlock on PARCEL (top-level
+    // beforeEach) but is accessTier "free" -- so a grant here can only come
+    // from the Property Unlock half of grantsOwnerCoGatedFields, exactly
+    // mirroring how the CAD dollar fields already prove this same gate.
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      USER_UNLOCKED,
+    );
+    expect(res.status).toBe(200);
+    // No owner-fact atom seeded, so the gate is open but the atom read
+    // itself misses -- still proves the gate did NOT refuse with
+    // studio-gated, which is the behavior under test.
+    expect(res.body.ownerFact.code).not.toBe("studio-gated");
+  });
+});

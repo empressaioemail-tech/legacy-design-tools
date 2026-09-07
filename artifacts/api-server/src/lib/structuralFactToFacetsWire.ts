@@ -5,6 +5,7 @@
 import type { LayerAbsenceWire } from "./verdictLayerServe";
 import type { StructuralFactAbsent, StructuralFactPresent, StructuralFactRead } from "./structuralFactResolve";
 import type { LivingAreaSqftFromParcelRecord } from "./cadRollFactFromParcelRecord";
+import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import { gateBakedCadRollRecord } from "./cadRollValue";
 
 export type LivingAreaSqftLayerWire =
@@ -65,12 +66,25 @@ function bakedZoningHasDistrict(zoning: unknown): boolean {
  * verdicts (`not-applicable`, `stamp-missing`, `unmeasured`). Before this card
  * the zoning absence was read back off the land-use fact, which had been
  * merged from a situsCity predicate; that coupling is gone.
+ *
+ * PE/MCP-vs-facets parity audit (2026-09-07, D5): `parcelRecordZoningFact`
+ * carries the SAME precedence rule r1BriefCompose.ts's
+ * composeZoningBriefSectionFromParcelRecord already applies for the
+ * research/brief path -- OPS-16 A-096/A-097/A-098's parcel_record zoning
+ * determination wins UNCONDITIONALLY over the baked stamp whenever it has
+ * genuinely earned one (present, or a verified absence), never the reverse.
+ * Before this fix this route had no path to the live ledger at all and the
+ * baked stamp always won when present, so the two surfaces could report
+ * different zoning districts for the same parcel. Checked BEFORE the
+ * city-limits-verdict branch below and wins even over an existing stamp --
+ * unlike that branch, which only ever fills a genuine absence.
  */
 export function attachVerdictLayersToFacets(
   facets: Record<string, unknown>,
   structuralFact: StructuralFactRead,
   zoningVerdict: LayerAbsenceWire | null | undefined,
   livingAreaOverlay?: LivingAreaSqftFromParcelRecord,
+  parcelRecordZoningFact?: ZoningFactRead | null,
 ): Record<string, unknown> {
   const out = { ...facets };
   const cov =
@@ -87,7 +101,21 @@ export function attachVerdictLayersToFacets(
     out.livingAreaSqft = livingWire;
   }
 
-  if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
+  if (parcelRecordZoningFact && parcelRecordZoningFact.state !== "refused") {
+    if (parcelRecordZoningFact.state === "present") {
+      out.zoning = {
+        district: parcelRecordZoningFact.district,
+        jurisdictionKey: parcelRecordZoningFact.jurisdictionKey,
+        provenance: parcelRecordZoningFact.provenance,
+      };
+      cov.zoning = true;
+    } else {
+      // absent-verified / not-applicable -- same "data: fact" choice
+      // composeZoningBriefSectionFromParcelRecord makes for its absent branch.
+      out.zoning = parcelRecordZoningFact;
+      cov.zoning = false;
+    }
+  } else if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
     out.zoning = zoningVerdict;
     cov.zoning = false;
   }

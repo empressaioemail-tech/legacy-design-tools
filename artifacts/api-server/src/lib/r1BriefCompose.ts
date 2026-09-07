@@ -24,6 +24,7 @@ import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
+import type { LandUseFactRead } from "./landUseFactRead";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -552,6 +553,42 @@ export function composeSetbacksBriefSectionFromParcelRecord(
   };
 }
 
+/**
+ * Exported for unit tests. PE/MCP-vs-facets parity audit (2026-09-07, D2):
+ * before this fix, the land-use section always read `baseFacts.landUse` --
+ * the retired-store cad-roll object -- and never the real land-use-fact
+ * atom brokerageNodeFacets.ts's facets route already reads
+ * (`loadLandUseFactAtom`). Same "record wins whenever it has genuinely
+ * earned one (present, or a verified absence)" rule
+ * composeZoningBriefSectionFromParcelRecord and
+ * composeSetbacksBriefSectionFromParcelRecord already apply for their own
+ * sections. UNLIKE those two, land-use-fact has no allowlist/gate cutover
+ * step -- loadLandUseFactAtom is unconditional, so "no atom at all" arrives
+ * here as a REFUSED code (atom-miss), not an absent state; refused still
+ * falls through to the legacy baked value exactly like the other two.
+ */
+export function composeLandUseBriefSectionFromAtom(
+  fact: Exclude<LandUseFactRead, { state: "refused" }>,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (fact.state === "present") {
+    const data = { landUseCode: fact.landUseCode, landUseLabel: fact.landUseLabel };
+    return withCitationPosture({
+      data,
+      citations: [],
+      asOf: fact.evaluatedAt ?? bakedAt,
+      disposition: "present",
+    });
+  }
+  // absent
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+  };
+}
+
 function composeSetbacksEnvelopeBriefSection(
   envelope: unknown,
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null,
@@ -654,6 +691,8 @@ export function buildR1Brief(
     parcelRecordZoningFact?: ZoningFactRead | null;
     /** OPS-16 A-096/A-097/A-098. Non-null only when (county, setbackFrontFt) is slated and gate-passing -- see setbacksFactServeCutover.ts. */
     parcelRecordSetbacksFact?: SetbacksFactRead | null;
+    /** PE/MCP-vs-facets parity audit (2026-09-07, D2). Unconditional (no allowlist/gate cutover) -- see landUseFactRead.ts. */
+    landUseFact?: LandUseFactRead | null;
   },
 ): {
   sections: R1BriefSection[];
@@ -688,12 +727,16 @@ export function buildR1Brief(
     options?.floodHazardFact,
     options?.parcelRecordFloodFact,
   );
-  const landUseSection = withCitationPosture({
-    data: baseFacts.landUse ?? null,
-    citations: urlsFrom(baseFacts.landUse),
-    asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
-    disposition: landUseDisposition(baseFacts.landUse),
-  });
+  const landUseFactOpt = options?.landUseFact;
+  const landUseSection =
+    landUseFactOpt && landUseFactOpt.state !== "refused"
+      ? composeLandUseBriefSectionFromAtom(landUseFactOpt, bakedAt)
+      : withCitationPosture({
+          data: baseFacts.landUse ?? null,
+          citations: urlsFrom(baseFacts.landUse),
+          asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
+          disposition: landUseDisposition(baseFacts.landUse),
+        });
   const drainageSection = composeDrainageBriefSection(
     root.drainage ?? null,
     bakedAt,
