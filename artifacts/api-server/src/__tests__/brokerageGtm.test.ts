@@ -63,7 +63,7 @@ beforeAll(async () => {
 });
 
 describe("brokerage GTM", () => {
-  it("POST /gtm/consent accepts extension_public key via X-Hauska-Key", async () => {
+  it("POST /gtm/consent: the old extension_public key is unauthorized (tier retired 2026-09-07)", async () => {
     const app = getApp();
     const res = await request(app)
       .post("/api/brokerage/v1/gtm/consent")
@@ -73,19 +73,13 @@ describe("brokerage GTM", () => {
         consentVersion: "2026-05-26-v1",
         graphOptIn: false,
       });
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-    expect(res.body.installId).toBe("install-public-aaaaaaaa");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 
-  it("POST /gtm/events accepts extension_public key via X-Hauska-Key after consent", async () => {
+  it("POST /gtm/events: the old extension_public key is unauthorized (tier retired 2026-09-07)", async () => {
     const installId = "install-public-events-bbbb";
     const app = getApp();
-    await request(app)
-      .post("/api/brokerage/v1/gtm/consent")
-      .set({ "X-Hauska-Key": PUBLIC_API_KEY })
-      .send({ installId, graphOptIn: false });
-
     const ev = await request(app)
       .post("/api/brokerage/v1/gtm/events")
       .set({ "X-Hauska-Key": PUBLIC_API_KEY })
@@ -94,8 +88,8 @@ describe("brokerage GTM", () => {
         eventType: "extension_install",
         payload: { version: "0.4.3" },
       });
-    expect(ev.status).toBe(201);
-    expect(ev.body.eventId).toBeTruthy();
+    expect(ev.status).toBe(401);
+    expect(ev.body.error).toBe("unauthorized");
   });
 
   it("POST /gtm/consent then GET consent", async () => {

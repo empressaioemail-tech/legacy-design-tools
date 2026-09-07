@@ -1,6 +1,21 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifySessionToken } from "../lib/sessionToken";
 
+/**
+ * RETIRED (operator ruling, 2026-09-07: "cut the chrome extension we don't
+ * need it"). "extension_public" was the ONLY tier the chrome extension
+ * (hauska-brief-extension) ever authenticated as — confirmed dead in
+ * production before retiring: 248 brokerage_brief_runs total, ever, since
+ * 2026-05-26, ZERO since 2026-08-09. Kept in the type union (rather than
+ * deleted outright) because `/brief`, `/brief/summarize`, and
+ * `/research/chat` still branch on `isExtensionPublicClient` for their own
+ * rate-limiting/billing logic — that branching is now permanently dead code
+ * (this tier can never be assigned again, see loadBrokerageApiKeys and
+ * resolveBrokerageClientTier below), not a route deletion. A caller
+ * presenting the old BROKERAGE_EXTENSION_PUBLIC_KEY now falls straight
+ * through brokerageAuth's own unauthorized path — same 401 an unrecognized
+ * key already got, no new response shape.
+ */
 export type BrokerageClientTier = "operator" | "extension_public" | "user";
 
 declare global {
@@ -14,24 +29,16 @@ declare global {
 }
 
 let cachedKeys: Set<string> | null = null;
-let cachedExtensionPublicKey: string | null | undefined;
-
-function loadExtensionPublicKey(): string | null {
-  if (cachedExtensionPublicKey !== undefined) {
-    return cachedExtensionPublicKey;
-  }
-  const raw = process.env.BROKERAGE_EXTENSION_PUBLIC_KEY?.trim();
-  cachedExtensionPublicKey = raw || null;
-  return cachedExtensionPublicKey;
-}
 
 export function loadBrokerageApiKeys(): Set<string> {
   if (cachedKeys) return cachedKeys;
   const keys = new Set<string>();
+  // RETIRED: "BROKERAGE_EXTENSION_PUBLIC_KEY" deliberately removed from this
+  // list (see the BrokerageClientTier doc comment above) — a caller
+  // presenting that key must no longer authenticate as anything.
   for (const envName of [
     "BROKERAGE_OPERATOR_API_KEYS",
     "BROKERAGE_API_KEYS",
-    "BROKERAGE_EXTENSION_PUBLIC_KEY",
   ]) {
     const raw = process.env[envName]?.trim();
     if (!raw) continue;
@@ -47,12 +54,13 @@ export function loadBrokerageApiKeys(): Set<string> {
 /** TEST-ONLY: reset cached keys after env changes. */
 export function resetBrokerageApiKeysForTests(): void {
   cachedKeys = null;
-  cachedExtensionPublicKey = undefined;
 }
 
-export function resolveBrokerageClientTier(providedKey: string): BrokerageClientTier {
-  const publicKey = loadExtensionPublicKey();
-  if (publicKey && providedKey === publicKey) return "extension_public";
+export function resolveBrokerageClientTier(_providedKey: string): BrokerageClientTier {
+  // RETIRED: never resolves "extension_public" — a second, independent
+  // enforcement point alongside loadBrokerageApiKeys' own removal of
+  // BROKERAGE_EXTENSION_PUBLIC_KEY from the recognized-key set, so re-adding
+  // the key to only one of the two spots still can't reopen the tier.
   return "operator";
 }
 

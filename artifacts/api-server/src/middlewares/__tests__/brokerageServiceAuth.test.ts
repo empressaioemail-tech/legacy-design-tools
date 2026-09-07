@@ -78,7 +78,7 @@ describe("requireBrokerageAuthOrServiceToken", () => {
     expect(req.brokerageServiceCaller).toBeUndefined();
   });
 
-  it("accepts extension_public key via X-Hauska-Key", () => {
+  it("the old extension_public key via X-Hauska-Key is unauthorized (tier retired 2026-09-07)", () => {
     process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = PUBLIC_KEY;
     resetBrokerageApiKeysForTests();
 
@@ -88,8 +88,9 @@ describe("requireBrokerageAuthOrServiceToken", () => {
 
     requireBrokerageAuthOrServiceToken(req, res, next);
 
-    expect(next).toHaveBeenCalledOnce();
-    expect(req.brokerageAuth).toEqual({ tier: "extension_public" });
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(401);
+    expect(res._json).toMatchObject({ error: "unauthorized" });
   });
 
   it("rejects unknown bearer token", () => {
