@@ -81,11 +81,19 @@ export const P85_CLERK_PORTALS: readonly ClerkPortalSpec[] = [
     countyFips: "48055",
     countyName: "Caldwell",
     portalId: "caldwell-clerk-web",
-    portalUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
-    termsUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
-    loginRequired: false,
+    // P-113 (verified live 2026-09-03, legacy-design-tools#597): real vendor
+    // is Tyler Technologies "CountyGovernmentRecords.com" (landrecords
+    // product), not the informational co.caldwell.tx.us page this row
+    // previously pointed at. That vendor gates ALL index search behind free
+    // registration/login with no anonymous search path at all — loginRequired
+    // corrected from false to true to match. See
+    // artifacts/records-request-worker/src/recipes/p85Portals.ts for the
+    // recipe-side source of truth this was reconciled against.
+    portalUrl: "https://tx.countygovernmentrecords.com/texas/web/",
+    termsUrl: "https://tx.countygovernmentrecords.com/texas/web/",
+    loginRequired: true,
     imagePurchase: {
-      method: "verify with clerk; vendor unconfirmed at recon",
+      method: "verify with clerk; vendor confirmed, purchase flow unconfirmed",
       notes: "PIA letter recommends phone/mail first",
     },
   },
@@ -93,11 +101,16 @@ export const P85_CLERK_PORTALS: readonly ClerkPortalSpec[] = [
     countyFips: "48309",
     countyName: "McLennan",
     portalId: "mclennan-online-records",
-    portalUrl: "https://www.mclennan.gov/166/County-Clerk",
-    termsUrl: "https://www.mclennan.gov/166/County-Clerk",
+    // P-113 (verified live 2026-09-03, legacy-design-tools#597): real vendor
+    // is Tyler self-service (same product family as Hays ERSS), reachable
+    // headless, not the informational mclennan.gov page this row previously
+    // pointed at. See p85Portals.ts (records-request-worker) for the
+    // recipe-side source of truth this was reconciled against.
+    portalUrl: "https://mclennancountytx-web.tylerhost.net/web/",
+    termsUrl: "https://mclennancountytx-web.tylerhost.net/web/user/disclaimer",
     loginRequired: false,
     imagePurchase: {
-      method: "Online Records Search on county site",
+      method: "Tyler self-service cart",
       notes: "Electronic records from 1996-01-01 forward",
     },
   },

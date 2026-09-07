@@ -53,24 +53,34 @@ export const P85_CLERK_PORTAL_SEED = [
     },
   },
   {
+    // P-113 (verified live 2026-09-03, legacy-design-tools#597): real vendor
+    // is Tyler Technologies "CountyGovernmentRecords.com", not the
+    // informational co.caldwell.tx.us page this row previously pointed at.
+    // Gates ALL index search behind free registration/login, no anonymous
+    // path — loginRequired corrected from false to true. Reconciled against
+    // artifacts/records-request-worker/src/recipes/p85Portals.ts.
     countyFips: "48055",
     portalId: "caldwell-clerk-web",
-    portalUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
-    termsUrl: "https://www.co.caldwell.tx.us/page/County.Clerk",
-    loginRequired: false,
+    portalUrl: "https://tx.countygovernmentrecords.com/texas/web/",
+    termsUrl: "https://tx.countygovernmentrecords.com/texas/web/",
+    loginRequired: true,
     imagePurchase: {
-      method: "verify with clerk; vendor unconfirmed at recon",
+      method: "verify with clerk; vendor confirmed, purchase flow unconfirmed",
       notes: "PIA letter recommends phone/mail first",
     },
   },
   {
+    // P-113 (verified live 2026-09-03, legacy-design-tools#597): real vendor
+    // is Tyler self-service (same product family as Hays), not the
+    // informational mclennan.gov page this row previously pointed at.
+    // Reconciled against p85Portals.ts (records-request-worker).
     countyFips: "48309",
     portalId: "mclennan-online-records",
-    portalUrl: "https://www.mclennan.gov/166/County-Clerk",
-    termsUrl: "https://www.mclennan.gov/166/County-Clerk",
+    portalUrl: "https://mclennancountytx-web.tylerhost.net/web/",
+    termsUrl: "https://mclennancountytx-web.tylerhost.net/web/user/disclaimer",
     loginRequired: false,
     imagePurchase: {
-      method: "Online Records Search on county site",
+      method: "Tyler self-service cart",
       notes: "Electronic records from 1996-01-01 forward",
     },
   },
