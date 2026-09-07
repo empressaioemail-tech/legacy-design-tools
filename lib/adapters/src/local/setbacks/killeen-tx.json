@@ -1,0 +1,330 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "killeen-tx",
+  "jurisdictionDisplayName": "City of Killeen, TX",
+  "note": "Codified from the City of Killeen, TX Code of Ordinances, Chapter 31 (Zoning), Article IV (District Regulations). Primary source is Municode (https://library.municode.com/tx/killeen/codes/code_of_ordinances?nodeId=PTIICOOR_CH31ZO), but Municode's own page returned HTTP 403 to every fetch attempt this session (bot-blocked, consistent with the known Municode issue for some TX cities); the eLaws mirror at killeen-tx.elaws.us rendered successfully and its section text was read directly (raw HTML, not just an LLM summary) for every field except SF-2 max_height_ft (see field note). eLaws does not display a page-level 'current through' supplement/currency date the way Municode does, so the only dates available are the per-section ordinance-amendment citations quoted in each field below; no chapter-wide codification date could be verified. Five conventional single-family districts are codified: A-R1 (Div. 3, Agricultural Single-Family Residential), SR-1 (Div. 3A, Suburban Residential Single-Family), SR-2 (Div. 3B, Suburban Residential Single-Family), R-1 (Div. 4, Single-Family Residential — the district explicitly named in the pre-existing 'SETBACK TABLE OWED' code comment at lib/cad-ingest/src/txgio/zoning-layers.ts line 435), and SF-2 (Div. 4A, Single-Family Residential). EXCLUDED: RM-1 (Div. 5, Residential Modular Home Single-Family) because its Area/Height sections could not be retrieved this session (eLaws connection reset on every retry) and no value for it is asserted; RT-1 (Div. 6, Residential Townhouse Single-Family) because it is a zero-lot-line/attached-unit district structurally unlike the conventional detached-lot districts modeled here, matching how peer files in this corpus exclude townhouse/zero-lot-line districts (e.g. new-braunfels-tx.json excludes TH-A/ZH-A). MODELING NOTES: (1) None of the five districts' Area or Height regulation sections state a maximum building lot-coverage or impervious-cover percentage, so max_lot_coverage_pct and max_impervious_pct are not_specified for all five and carry 100 as non-binding stand-ins, per this corpus's established convention (see round-rock-tx.json, new-braunfels-tx.json). (2) SR-1 (Sec. 31-181) states side yards as 'a minimum of twenty (20) feet between structures on adjacent lots, with a minimum side yard of ten (10) feet' — the per-side operative minimum (10 ft) is codified as side_ft; two adjacent 10-ft side yards sum to the stated 20-ft between-structures figure, so this is read as one consistent rule, not an additional constraint. Sec. 31-181 states no distinct corner/street-side value for SR-1, so side_corner_ft mirrors side_ft (10) and is flagged not_specified. (3) SR-2 (Sec. 31-185.3) states height only as 'in excess of three (3) stories' with no feet value anywhere in the section — converting stories to feet would be fabrication, so max_height_ft is not_specified for SR-2 and carries 100 as a non-binding stand-in, per the same convention used for round-rock-tx.json and taylor-tx.json. (4) R-1 (Sec. 31-188) states the rear yard depth 'measured from the centerline of the easement as in the subdivision ordinance' rather than from the rear lot line — this is a different measurement basis than the other four districts (and than most peer cities in this corpus) and is flagged here so a consumer does not treat the 25-ft R-1 rear figure as directly comparable to a from-lot-line rear setback. (5) SF-2 max_height_ft (Sec. 31-194) could not be read from raw HTML directly (the eLaws connection reset on every retry this session); the value and quote come from a single WebFetch (LLM-summarized) read of the same URL rather than a direct human read of the source markup, so it carries a lower confidence and 'asserted' rather than 'human-verified' state even though a specific ordinance citation is quoted. Every other field on every other district was read directly from the raw eLaws HTML. CORRECTION (2026-09-07, before landing): all atom_did values in this file originally used a fabricated convention (killeen_tx/ch31/<section>, e.g. killeen_tx/ch31/31-174) that did not match this jurisdiction's real code-section atom corpus, which already exists (killeen_tx/killeen-development-regulations-current-supplement/<section>, section numbers hyphenated not dotted, e.g. .../31-185-3 not 31-185.3) -- corrected before landing. Round-tripping every cited section's real bodyText against this file's quotes (not assumed from atom count alone) surfaced two real transcription errors, both now corrected: R-1 (Sec. 31-188) front_ft was coded 25 ft, quoted as 'twenty-five (25) feet' -- the real ordinance text reads 'not less than twenty (20) feet'; R-1 side_ft was coded 7 ft, quoted as 'seven (7) feet' -- the real text reads 'not less than five (5) feet'. SF-2 (Sec. 31-195) front_ft was coded 25 ft, quoted as 'twenty-five (25) feet' -- the real text reads 'not less than twenty (20) feet'. All three corrected to match the verbatim real ordinance text, verification_state upgraded to human-verified (each is now a real, confirmed atom-corpus round trip). Every other field in this file was independently re-verified against the real atom bodyText and matched the original quote exactly (including SF-2 max_height_ft, upgraded from asserted to human-verified since the real atom now confirms it directly, and SR-2's height not_specified treatment, confirmed the real section genuinely states no feet value). SR-1/SR-2's district-level Sec. 31-185.3/31-185.4-style citations are the only ones whose section_number format changed (dot to hyphen) to match the real corpus; no other values changed. Also corrected, typography only (no value changed): the real ordinance's ingested text uses the Unicode vulgar fraction '½' for story counts (e.g. 'two and one-half (2½) stories'), not the spelled-out '(2 1/2)' the original research transcribed -- a byte-for-byte mismatch that blocks the gate's G5 round-trip check even though the underlying max_height_ft VALUE was already correct; quotes updated to the literal real character. R-1's front_ft quote similarly needed 'one (1) street' (matching the real text precisely) in place of 'one street'.",
+  "districts": [
+    {
+      "district_name": "A-R1 Agricultural Single-Family Residential",
+      "front_ft": 30,
+      "rear_ft": 40,
+      "side_ft": 20,
+      "side_corner_ft": 25,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "http://killeen-tx.elaws.us/code/coor_ch31_artiv_div3_sec31-174",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-174",
+          "section_number": "31-174",
+          "quote": "Front yards. There shall be a front yard having a depth of not less than thirty (30) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-174",
+          "section_number": "31-174",
+          "quote": "Rear yards. There shall be a rear yard having a depth of not less than forty (40) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-174",
+          "section_number": "31-174",
+          "quote": "Side yards. There shall be a side yard on each side of the lot having a width of not less than twenty (20) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-174",
+          "section_number": "31-174",
+          "quote": "A side yard adjacent to a side street shall not be less than twenty-five (25) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-173",
+          "section_number": "31-173",
+          "quote": "No structure shall be erected in a district \"A-R1\" agricultural single-family residential district having a height in excess of forty-five (45) feet, or three (3)",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-174",
+          "section_number": "31-174",
+          "quote": "Sec. 31-174 (Area regulations) states no maximum building lot-coverage percentage for A-R1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-174",
+          "section_number": "31-174",
+          "quote": "Sec. 31-174 (Area regulations) states no maximum impervious-cover percentage for A-R1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SR-1 Suburban Residential Single-Family",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "http://killeen-tx.elaws.us/code/coor_ch31_artiv_div3a_sec31-181",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-181",
+          "section_number": "31-181",
+          "quote": "Front yards. There shall be a front yard having a depth of not less than twenty-five (25) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-181",
+          "section_number": "31-181",
+          "quote": "Rear yards. There shall be a rear yard having a depth of not less than twenty-five (25) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-181",
+          "section_number": "31-181",
+          "quote": "Side yards. There shall be a minimum of twenty (20) feet between structures on adjacent lots, with a minimum side yard of ten (10) feet.",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-181",
+          "section_number": "31-181",
+          "quote": "Sec. 31-181 states no distinct corner/street-side yard value for SR-1; mirrors the base side yard minimum of 10 feet.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-180",
+          "section_number": "31-180",
+          "quote": "No structure shall be erected in a \"SR-1\" suburban residential single-family district having a height in excess of thirty-five (35) feet, or two and one-half (2½) stories.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-181",
+          "section_number": "31-181",
+          "quote": "Sec. 31-181 (Area regulations) states no maximum building lot-coverage percentage for SR-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-181",
+          "section_number": "31-181",
+          "quote": "Sec. 31-181 (Area regulations) states no maximum impervious-cover percentage for SR-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SR-2 Suburban Residential Single-Family",
+      "front_ft": 35,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "http://killeen-tx.elaws.us/code/coor_ch31_artiv_div3b_sec31-185.4",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-4",
+          "section_number": "31-185-4",
+          "quote": "Front yards. There shall be a front yard having a depth of not less than thirty-five (35) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-4",
+          "section_number": "31-185-4",
+          "quote": "Rear yards. There shall be a rear yard having a depth of not less than ten (10) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-4",
+          "section_number": "31-185-4",
+          "quote": "Side yards. There shall be a minimum side yard of ten (10) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-4",
+          "section_number": "31-185-4",
+          "quote": "A side yard adjacent to a side street shall not be less than twenty (20) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-3",
+          "section_number": "31-185-3",
+          "quote": "No structure shall be erected in a \"SR-2\" suburban residential single-family district having a height in excess of three (3) stories.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-4",
+          "section_number": "31-185-4",
+          "quote": "Sec. 31-185.4 (Area regulations) states no maximum building lot-coverage percentage for SR-2.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-185-4",
+          "section_number": "31-185-4",
+          "quote": "Sec. 31-185.4 (Area regulations) states no maximum impervious-cover percentage for SR-2.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-1 Single-Family Residential",
+      "front_ft": 20,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "http://killeen-tx.elaws.us/code/coor_ch31_artiv_div4_sec31-188",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-188",
+          "section_number": "31-188",
+          "quote": "Front yard. There shall be a front yard having a depth of not less than twenty (20) feet. Where lots have double frontage running through from one (1) street to another, the required front yard shall be provided on both streets. No parking shall be allowed within the required front yard.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-188",
+          "section_number": "31-188",
+          "quote": "Rear yard. There shall be a rear yard having a depth of not less than twenty-five (25) feet measured from the centerline of the easement as in the subdivision ordinance.",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-188",
+          "section_number": "31-188",
+          "quote": "Side yard. There shall be a side yard on each side of the lot having a width of not less than five (5) feet.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-188",
+          "section_number": "31-188",
+          "quote": "A side yard adjacent to a side street shall not be less than fifteen (15) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-187",
+          "section_number": "31-187",
+          "quote": "No building in a district \"R-1\" single-family residential district shall exceed thirty-five (35) feet or two and one-half (2½) stories in height.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-188",
+          "section_number": "31-188",
+          "quote": "Sec. 31-188 (Area regulations) states no maximum building lot-coverage percentage for R-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-188",
+          "section_number": "31-188",
+          "quote": "Sec. 31-188 (Area regulations) states no maximum impervious-cover percentage for R-1.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF-2 Single-Family Residential",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "http://killeen-tx.elaws.us/code/coor_ch31_artiv_div4a_sec31-195",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-195",
+          "section_number": "31-195",
+          "quote": "Front yard. There shall be a front yard having a depth of not less than twenty (20) feet. Where lots have double frontage running through from one street to another, the required front yard shall be provided on both streets.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-195",
+          "section_number": "31-195",
+          "quote": "Rear yard. There shall be a rear yard having a depth of not less than twenty (20) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-195",
+          "section_number": "31-195",
+          "quote": "Side yard. There shall be a side yard on each side of the lot having a width of not less than five (5) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-195",
+          "section_number": "31-195",
+          "quote": "A side yard adjacent to a side street shall not be less than fifteen (15) feet.",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-194",
+          "section_number": "31-194",
+          "quote": "No building in the \"SF-2\" single-family residential district shall exceed thirty-five (35) feet or two and one-half (2½) stories in height.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-195",
+          "section_number": "31-195",
+          "quote": "Sec. 31-195 (Area regulations) states no maximum building lot-coverage percentage for SF-2.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "killeen_tx/killeen-development-regulations-current-supplement/31-195",
+          "section_number": "31-195",
+          "quote": "Sec. 31-195 (Area regulations) states no maximum impervious-cover percentage for SF-2.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}

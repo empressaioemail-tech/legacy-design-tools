@@ -442,7 +442,9 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     layerWhere: "ZONING NOT IN ('OUT','STATE')",
   },
   // Killeen (Bell 48027). Zoning/MapServer/7 Current Zoning `CODE`
-  // (R-1/R-2/R-3/B-*/…). SETBACK TABLE OWED.
+  // (R-1/R-2/R-3/B-*/…). Setback table delivered for A-R1/SR-1/SR-2/R-1/
+  // SF-2, human-verified against Killeen's real code-section atom corpus
+  // (researched 2026-09-06, corrected 2026-09-07) — killeen-tx.json.
   "killeen-tx": {
     cityKey: "killeen-tx",
     cityName: "Killeen",
