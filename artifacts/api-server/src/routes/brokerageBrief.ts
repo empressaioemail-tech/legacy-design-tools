@@ -42,6 +42,7 @@ import { logger } from "../lib/logger";
 import {
   generateReasoningSummary,
   generateSummarize,
+  generateNarrativeSection,
   generateResearchChat,
   type BriefAtomInput,
 } from "../lib/brokerageBriefLlm";
@@ -207,6 +208,27 @@ const SUMMARIZE_BODY = z.object({
       snippet: z.string(),
     }),
   ),
+});
+
+/**
+ * OPS-16 P-120 item 6. Server-to-server only in practice (behind this
+ * router's own requireBrokerageAuthOrServiceToken, same as every other
+ * brokerageV1 route) — hauska-engine's Feasibility narrative composer is
+ * the intended caller. `facts` is intentionally z.unknown()-valued: each
+ * category's own present/absent shape is the caller's contract with the
+ * LLM prompt, not something this route validates field-by-field.
+ */
+const NARRATIVE_SECTION_BODY = z.object({
+  parcelNodeId: z.string().min(1),
+  facts: z.record(z.string(), z.unknown()),
+  courthouseDocuments: z
+    .array(
+      z.object({
+        citation: z.string().min(1),
+        excerpt: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 const RESEARCH_CHAT_BASE = z.object({
@@ -1069,6 +1091,36 @@ brokerageV1.post(
       })),
     });
 
+    res.json(result);
+  },
+);
+
+/**
+ * OPS-16 P-120 item 6 — Feasibility narrative-section generator.
+ * Server-to-server: reuses this router's own requireBrokerageAuthOrServiceToken
+ * gate (the same SERVICE_API_KEY bearer path hauska-mcp-server already
+ * authenticates with), never a second auth mechanism. Contract locked
+ * directly with hauska-engine (cente-67, 2026-09-07): request carries
+ * parcelNodeId + a nested per-category facts payload (each category
+ * self-reporting present/absent) + optional courthouseDocuments; response
+ * is the narrative text plus provenance only — no citedSections field,
+ * since the caller derives that itself by scanning the returned text for
+ * its own facts keys as [category] markers.
+ */
+brokerageV1.post(
+  "/research/narrative-section",
+  async (req: Request, res: Response) => {
+    const parse = NARRATIVE_SECTION_BODY.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({
+        error: "invalid_request",
+        message: "Invalid narrative-section body",
+        details: parse.error.flatten(),
+      });
+      return;
+    }
+
+    const result = await generateNarrativeSection(parse.data);
     res.json(result);
   },
 );
