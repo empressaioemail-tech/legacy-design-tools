@@ -276,6 +276,22 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
     expect(res.status).toBe(401);
   });
 
+  it("extension_public is retired: a caller presenting the old chrome-extension key gets a real 401, not a granted tier (operator ruling 2026-09-07)", async () => {
+    process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = "formerly-real-extension-key";
+    resetBrokerageApiKeysForTests();
+    try {
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/brief")
+        .set({ Authorization: "Bearer formerly-real-extension-key" })
+        .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("unauthorized");
+    } finally {
+      delete process.env.BROKERAGE_EXTENSION_PUBLIC_KEY;
+      resetBrokerageApiKeysForTests();
+    }
+  });
+
   it("returns validation_error errorClass on invalid body", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
