@@ -1,0 +1,228 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "cibolo-tx",
+  "jurisdictionDisplayName": "City of Cibolo, TX",
+  "note": "SETBACK TABLE OWED gap fill (researched 2026-09-06). Source is the City of Cibolo's own currently-posted Unified Development Code, printed 'Cibolo Unified Development Code / January 10, 2024' (the city's Codes & Ordinances page labels this file '2024 Unified Development Code (January 2024)'), fetched directly from https://cms2.revize.com/revize/cibolo/planning/UDC/2024_January%20UDC%20Update.pdf (a Revize CMS asset host linked from the official https://www.cibolotx.gov/codes___ordinances/index.php page). Municode's hosted copy (https://library.municode.com/tx/cibolo/codes/code_of_ordinances, and every nodeId tested under it including the Article 4 and Article 14 deep links) returned nothing but the AngularJS 'MunicodeNEXT' application shell (an ng-app page with no server-rendered content; also 403'd on a stock fetch) and could not be used for extraction -- consistent with the known Municode JS-shell block on some Texas cities. All figures below are transcribed from the city-hosted PDF via pdftotext, cross-checked against a second, independent page-image read of the same PDF pages (PyMuPDF) to rule out an OCR/extraction artifact. ARTICLE 14.1 ('LOT DESIGN STANDARDS'), Section 14.2 ('Lot Design') [document pages 236-239 of the PDF's own printed pagination; the Article is labeled '14.1' while the Section inside it is labeled '14.2' in the source document itself, which reads as an internal numbering inconsistency in the City's own codification, not a transcription error here], item 'd. Lot Design Requirements' under each numbered district states Minimum Lot Area, Minimum Lot Width, Minimum Front/Rear/Side Setback, Maximum Height of Principal Building, and ONE combined 'Maximum Lot/Impervious Coverage' percentage per district -- the ordinance does not state lot coverage and impervious coverage separately, so that single figure is mapped to both max_lot_coverage_pct and max_impervious_pct below (flagged per-value). There is no per-district corner-lot setback line for any SF district. side_corner_ft is DERIVED, not a directly-stated per-district figure: Section 14.2.D states 'Corner lots for residential development shall have enough width to permit the required building setbacks and proper orientation to both streets. In all single-family residential developments, corner lots shall be required to have a minimum of five (5) feet of additional setback from the adjacent side street,' applied here as side_ft + 5 and carrying lower confidence than the directly-quoted fields. Article 4, Section 4.5.1 (district purpose statements, PDF page ~78-79) restates the same district list with intent language only and no dimensional numbers, so it does not conflict with or corroborate the Article 14.1 figures independently -- it is the same document, not a second source. GAP, FAIL CLOSED -- SF-5 and SF-6: the City's live zoning GIS layer (https://services3.arcgis.com/D32JCd9p0r1BYMwd/arcgis/rest/services/City_of_Cibolo__Zoning_(view)/FeatureServer/0; ZONING field coded-value domain; probed 2026-08-12 per this repo's texas_roster_v1.json, 633 features; distinct in-use values re-queried 2026-09-06: AG, C-1, C-3, C-4, SF-2, SF-6) shows SF-6 ('High Density Single-Family Residential') actually stamped on live parcels today, and the field domain also carries SF-5 ('Medium-High Density Single-Family Residential') as a valid code, but NEITHER district has a Lot Design Requirements entry nor any front/rear/side/height/coverage figure anywhere in the current UDC text: Section 4.5.1's subsection numbering explicitly skips 4.5.1.5 and 4.5.1.6 (jumping from SF-4 at 4.5.1.4 straight to TF-1 at 4.5.1.7), and the string 'SF-6' does not appear anywhere in the 438-page document. The same gap (same skipped subsection numbers, zero SF-6 hits) already exists in the City's 2023-08 UDC update PDF, so whatever repealed SF-5/SF-6's standalone standards predates August 2023; earlier versions (2022, 2018, 2013) were not checked, so the exact repeal date is not established here. SF-5 is not fully scrubbed from the current text, however -- it still appears as an eligible district in the small-lot flexibility table at Section 14.3.D (SF-5 minimum lot area 7,200 sq ft / 6,600 sq ft for the 15%-of-lots allowance) and in an Exhibit list tied to front-yard-encroachment provisions ('SF-5  SF-1, SF-2, SF-3, SF-4 and AG') -- meaning SF-5 is still cross-referenced as a live category even though its own dimensional-standards subsection is missing. This reads as an incomplete repeal / codification gap in the City's own document, not a research miss on this pass. No front/rear/side/corner/height/coverage values are asserted for SF-5 or SF-6 here; they are omitted from districts[] rather than interpolated from SF-4's or SF-2's numbers. TF-1 (Two-Family/duplex) and AG (Agricultural-Homestead, itself explicitly called a residential district by 4.5.1.12 because single-family homes are a permitted use) are out of scope for this pass, which was scoped to Cibolo's standard single-family districts, and are not included. The live GIS layer also carries C-1, C-3, and C-4 (commercial) in active use; the same PDF's Article 14.1 numbered items for C-1 and C-2 show internally scrambled field order relative to every SF/MF/MH entry (label/value pairs appear out of sequence, e.g. a '70%' value sitting next to 'Minimum Side Setback' and a '35’' sitting next to 'Maximum Lot/Impervious Coverage') -- flagged here as a source-document extraction hazard for whoever picks up the commercial districts next; not resolved or guessed at, and out of scope for this pass regardless.",
+  "districts": [
+    {
+      "district_name": "SF-1 Estate Residential",
+      "front_ft": 40,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 30,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 35,
+      "max_impervious_pct": 35,
+      "citation_url": "https://cms2.revize.com/revize/cibolo/planning/UDC/2024_January%20UDC%20Update.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "14.2",
+          "quote": "1. Zoning District SF-1, Estate Residential ... d. Lot Design Requirements ... (3) Minimum Front Setback 40 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "14.2",
+          "quote": "1. Zoning District SF-1, Estate Residential ... (4) Minimum Rear Setback 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "14.2",
+          "quote": "1. Zoning District SF-1, Estate Residential ... (5) Minimum Side Setback 25 feet. The ordinance states one figure without specifying 'each side' vs. combined; read here as the minimum required on each side per standard zoning-code convention.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "14.2.D",
+          "quote": "Section 14.2.D: 'In all single-family residential developments, corner lots shall be required to have a minimum of five (5) feet of additional setback from the adjacent side street.' No per-district corner figure is stated; DERIVED as side_ft (25) + 5 = 30.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "14.2",
+          "quote": "1. Zoning District SF-1, Estate Residential ... (6) Maximum Height of Principal Building 35 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "14.2",
+          "quote": "1. Zoning District SF-1, Estate Residential ... (7) Maximum Lot/Impervious Coverage 35%. The ordinance states ONE combined lot/impervious coverage cap, not two separate figures; the same 35% is used for both fields here.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "14.2",
+          "quote": "1. Zoning District SF-1, Estate Residential ... (7) Maximum Lot/Impervious Coverage 35%. Same combined-cap caveat as max_lot_coverage_pct.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "SF-2 Low Density Residential",
+      "front_ft": 35,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 35,
+      "max_impervious_pct": 35,
+      "citation_url": "https://cms2.revize.com/revize/cibolo/planning/UDC/2024_January%20UDC%20Update.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "14.2",
+          "quote": "2. Zoning District SF-2, Low Density Residential ... d. Lot Design Requirements ... (3) Minimum Front Setback 35 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "14.2",
+          "quote": "2. Zoning District SF-2, Low Density Residential ... (4) Minimum Rear Setback 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "14.2",
+          "quote": "2. Zoning District SF-2, Low Density Residential ... (5) Minimum Side Setback 10 feet. Read as minimum on each side per standard convention (not stated explicitly as 'each side' in the source).",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "14.2.D",
+          "quote": "Section 14.2.D general corner-lot rule (see SF-1 entry for full quote). DERIVED as side_ft (10) + 5 = 15.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "14.2",
+          "quote": "2. Zoning District SF-2, Low Density Residential ... (6) Maximum Height of Principal Building 35 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "14.2",
+          "quote": "2. Zoning District SF-2, Low Density Residential ... (7) Maximum Lot/Impervious Coverage 35%. Single combined figure, mapped to both fields; see SF-1 caveat.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "14.2",
+          "quote": "2. Zoning District SF-2, Low Density Residential ... (7) Maximum Lot/Impervious Coverage 35%. Same combined-cap caveat as max_lot_coverage_pct.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "SF-3 Low-Medium Density Residential",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 40,
+      "citation_url": "https://cms2.revize.com/revize/cibolo/planning/UDC/2024_January%20UDC%20Update.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "14.2",
+          "quote": "3. Zoning District SF-3, Low-Medium Density Residential ... d. Lot Design Requirements ... (3) Minimum Front Setback 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "14.2",
+          "quote": "3. Zoning District SF-3, Low-Medium Density Residential ... (4) Minimum Rear Setback 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "14.2",
+          "quote": "3. Zoning District SF-3, Low-Medium Density Residential ... (5) Minimum Side Setback 15 feet. Read as minimum on each side per standard convention (not stated explicitly as 'each side' in the source).",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "14.2.D",
+          "quote": "Section 14.2.D general corner-lot rule (see SF-1 entry for full quote). DERIVED as side_ft (15) + 5 = 20.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "14.2",
+          "quote": "3. Zoning District SF-3, Low-Medium Density Residential ... (6) Maximum Height of Principal Building 35 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "14.2",
+          "quote": "3. Zoning District SF-3, Low-Medium Density Residential ... (7) Maximum Lot/Impervious Coverage 40%. Single combined figure, mapped to both fields; see SF-1 caveat.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "14.2",
+          "quote": "3. Zoning District SF-3, Low-Medium Density Residential ... (7) Maximum Lot/Impervious Coverage 40%. Same combined-cap caveat as max_lot_coverage_pct.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "SF-4 Medium Density Residential",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 50,
+      "citation_url": "https://cms2.revize.com/revize/cibolo/planning/UDC/2024_January%20UDC%20Update.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "14.2",
+          "quote": "4. Zoning District SF-4, Medium Density Residential ... d. Lot Design Requirements ... (3) Minimum Front Setback 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "14.2",
+          "quote": "4. Zoning District SF-4, Medium Density Residential ... (4) Minimum Rear Setback 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "14.2",
+          "quote": "4. Zoning District SF-4, Medium Density Residential ... (5) Minimum Side Setback 15 feet. Read as minimum on each side per standard convention (not stated explicitly as 'each side' in the source).",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "14.2.D",
+          "quote": "Section 14.2.D general corner-lot rule (see SF-1 entry for full quote). DERIVED as side_ft (15) + 5 = 20.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "14.2",
+          "quote": "4. Zoning District SF-4, Medium Density Residential ... (6) Maximum Height of Principal Building 35 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "14.2",
+          "quote": "4. Zoning District SF-4, Medium Density Residential ... (7) Maximum Lot/Impervious Coverage 50%. Single combined figure, mapped to both fields; see SF-1 caveat.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "14.2",
+          "quote": "4. Zoning District SF-4, Medium Density Residential ... (7) Maximum Lot/Impervious Coverage 50%. Same combined-cap caveat as max_lot_coverage_pct.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    }
+  ]
+}

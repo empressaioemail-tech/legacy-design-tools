@@ -37,6 +37,9 @@ import taylorTx from "./taylor-tx.json" with { type: "json" };
 import bastropCityTx from "./bastrop-city-tx.json" with { type: "json" };
 import bastropDevelopmentCode from "./bastrop-development-code.json" with { type: "json" };
 import elginDevelopmentCode from "./elgin-development-code.json" with { type: "json" };
+import beltonTx from "./belton-tx.json" with { type: "json" };
+import seguinTx from "./seguin-tx.json" with { type: "json" };
+import ciboloTx from "./cibolo-tx.json" with { type: "json" };
 import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
@@ -129,6 +132,17 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // where it was authored and ratified; ratification never depended on this
   // repo's own registration landing separately.
   "elgin-development-code": elginDevelopmentCode as SetbackTable,
+  // Researched 2026-09-06/07 (SETBACK TABLE OWED gap fill): no code-section
+  // atom corpus exists yet for any of these three (live-verified zero via
+  // the atoms store), so every value is primary-source-verified rather than
+  // asserted/human-verified. See each file's own note for the full source
+  // trail and honest gaps (Belton's O-2 side-yard ambiguity at reduced
+  // confidence; Cibolo's SF-5/SF-6 districts live on the ground with no
+  // dimensional-standards subsection in the current code, omitted rather
+  // than interpolated).
+  "belton-tx": beltonTx as SetbackTable,
+  "seguin-tx": seguinTx as SetbackTable,
+  "cibolo-tx": ciboloTx as SetbackTable,
   "san-antonio-tx": sanAntonioTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,

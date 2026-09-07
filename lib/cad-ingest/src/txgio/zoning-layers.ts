@@ -401,7 +401,9 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // ---------------------------------------------------------------------------
 
   // Seguin (Guadalupe 48187). Planning/Zoning layer 1 `zone` (A-R/R-1/M-R/…).
-  // Layer 0 is corridor overlays — do NOT use. SETBACK TABLE OWED.
+  // Layer 0 is corridor overlays — do NOT use. Setback table delivered,
+  // primary-source-verified, no atom corpus (researched 2026-09-06) —
+  // seguin-tx.json.
   "seguin-tx": {
     cityKey: "seguin-tx",
     cityName: "Seguin",
@@ -413,7 +415,11 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     nullDistrictCodes: ["None", "ROW"],
   },
   // Cibolo (Guadalupe 48187). Hosted view `ZONING` (SF-1..SF-6/MF-*/C-*/…).
-  // SETBACK TABLE OWED.
+  // Setback table delivered for SF-1..SF-4, primary-source-verified, no
+  // atom corpus (researched 2026-09-06) — cibolo-tx.json. SF-5/SF-6 are
+  // live GIS codes with no dimensional-standards subsection in the city's
+  // current code (an incomplete-repeal gap in the source document, not a
+  // research miss) — honestly omitted, not interpolated.
   "cibolo-tx": {
     cityKey: "cibolo-tx",
     cityName: "Cibolo",
@@ -446,8 +452,11 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "CODE",
   },
   // Belton (Bell 48027). Planning FS layer 6 Current_Zoning `Zoning_Abbr`.
-  // Values include PD composites — stamped RAW (fact); setback match may
-  // miss until a table lands. SETBACK TABLE OWED. Temple remains unwired
+  // Values include PD composites — stamped RAW (fact); PD composites and a
+  // handful of transect-looking GIS codes (MS/U/T/N) not in the ordinance's
+  // own district list will honestly miss. Setback table delivered for all
+  // 22 codified base districts, primary-source-verified, no atom corpus
+  // (researched 2026-09-06) — belton-tx.json. Temple remains unwired
   // (no verified public FeatureServer as of 2026-07-24).
   "belton-tx": {
     cityKey: "belton-tx",

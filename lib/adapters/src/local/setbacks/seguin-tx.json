@@ -1,0 +1,624 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "seguin-tx",
+  "jurisdictionDisplayName": "City of Seguin, TX",
+  "note": "Codified from the City of Seguin, Texas Code of Ordinances, Appendix A (Unified Development Code), Chapter 3 (Zoning and Land Use), Section 3.6 (Lot dimensional and development standards), subsection 3.6.2 (Standards - Residential Districts). Source read via the eLaws mirror (seguin.elaws.us/code/coor_apxa_ch3_sec3.6), page marked 'Latest version' at retrieval on 2026-09-06; Section 3.6 carries a history note citing Ord. No. 2015-27 Sec. 3 (adopted 5-5-15) and Ord. No. 2016-68 Sec. 3 (adopted 10-18-16), so this table is current at least through the 2016-10-18 amendment plus whatever later amendments the 'latest version' label reflects. Municode's hosted copy (library.municode.com/tx/seguin/codes/code_of_ordinances) returned only a client-side JS shell with no article text when fetched directly and could not be read; a web search summary separately reported the Municode client codified through Ordinance No. 2025-052 (adopted 2025-09-16), but that figure was not independently confirmed by direct fetch and is reported here as unverified secondary information, not a verified fact, and is NOT relied on for any value below. MODELING NOTES: (1) The residential table (Sec. 3.6.2) covers twelve districts: A-R, R-R, S-R, R-1, R-2, DP-1, DP-2, ZL, MF-1, MF-2, MF-3, M-R. ZL (Zero Lot Line) is EXCLUDED from this file: its 'Side Setback (internal lot)' and 'Side Setback (corner lot)' cells both read 'See district info' with no numeric value given anywhere in the table, and the ZL district description at Sec. 3.2.7 lists 'Setbacks' only as a cross-reference to Chapter 5's general site-development standards without stating a ZL-specific number, so no non-fabricated side setback exists to codify for ZL. (2) A-R and R-R state 'Rear Yard Setback (Primary Structure) Min.' as a formula: '20% of lot depth up to 40 feet.' Both districts also carry a 200-foot minimum lot depth in this same table, and 20% of any lot depth of 200 feet or more is at least 40 feet (i.e. the formula is capped at exactly the value it produces at the district's own minimum conforming depth), so 40 is codified here as a derived reading of the ordinance's own stated numbers rather than a directly-stated flat figure; confidence is reduced to 0.7 and verification_state is 'asserted' to flag that derivation. (3) S-R states the same formula shape at a lower cap, '20% of lot up to 30 feet,' but S-R's minimum lot depth is only 100 feet, at which 20% is 20 feet -- well under the 30-foot cap -- so the cap does NOT reliably describe the district's actual minimum requirement across its conforming lot-depth range. 30 is codified only as the ordinance-stated ceiling, flagged with LOW confidence (0.4); the true required rear setback for a specific S-R lot may be as low as 20 feet and must be computed from that lot's actual depth before being relied on for a compliance determination. (4) The table states no separate maximum building lot-coverage row (only 'Impervious Coverage Max.'), so max_lot_coverage_pct is not_specified and carries 100 as a non-binding stand-in, matching the convention used elsewhere in this corpus (e.g. new-braunfels-tx.json, hutto-tx.json). (5) 'Height of Structures Max. (whichever is less)' is stated as '30 feet or 2 1/2 stories' for every residential district except MF-2 and MF-3, which state '45 feet or 3 stories'; the foot figure is codified per district and the stories alternative is not modeled (the schema has no stories field). (6) R-2's front-yard cell carries an asterisked footnote: the garage (attached or detached) and all accessory structures must meet a 20-foot front setback, and the primary structure's front line may encroach an additional 5 feet into the stated 25-foot front setback (i.e. to 20 feet); 25 is codified as the table's stated base figure for front_ft and the encroachment allowance is flagged in the R-2 front_ft provenance quote rather than silently applied. (7) The non-residential table (Sec. 3.6.3: NC, C, P, LI, I) is EXCLUDED from this file: its 'Maximum Height of Structures' row reads 'n/a' for every listed district, and its rear-yard row is a stories-dependent formula ('5 feet with an additional 2 feet for each story above 24 feet, with a max of 25 feet') with no stated reference height to resolve it against, so no defensible flat rear_ft exists for that table without a fabricated assumption. Commercial/industrial setback coverage for Seguin remains an open gap, tracked separately from this residential delivery.",
+  "districts": [
+    {
+      "district_name": "A-R Agricultural Ranch",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 20,
+      "side_corner_ft": 25,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 20,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (A-R column): 40 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (A-R column): '20% of lot depth up to 40 feet.' A-R's own Lot Depth Min. in the same table is 200 feet, and 20% of any depth >= 200 feet is >= 40 feet, so the formula resolves to a flat 40 feet for every conforming A-R lot; codified as a derived reading, not a directly-stated flat figure.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (A-R column): 20 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (A-R column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (A-R column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (A-R column): 20% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "R-R Rural Residential",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 20,
+      "side_corner_ft": 25,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 40,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (R-R column): 40 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (R-R column): '20% of lot depth up to 40 feet.' R-R's own Lot Depth Min. in the same table is 200 feet, and 20% of any depth >= 200 feet is >= 40 feet, so the formula resolves to a flat 40 feet for every conforming R-R lot; codified as a derived reading, not a directly-stated flat figure.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (R-R column): 20 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (R-R column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (R-R column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (R-R column): 40% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "S-R Suburban Residential",
+      "front_ft": 25,
+      "rear_ft": 30,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 40,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (S-R column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (S-R column): '20% of lot up to 30 feet.' S-R's own Lot Depth Min. in the same table is only 100 feet, at which 20% is 20 feet -- well under the 30-foot cap -- so the cap does NOT reliably describe the district's actual minimum across its conforming range. 30 is codified only as the stated ceiling; the true minimum for a given lot may be as low as 20 feet and must be computed from that lot's actual depth.",
+          "confidence": 0.4,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (S-R column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (S-R column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (S-R column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (S-R column): 40% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "R-1 Single-Family Residential",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (R-1 column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (R-1 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (R-1 column): 5 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (R-1 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (R-1 column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (R-1 column): 60% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "R-2 Single-Family Residential",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (R-2 column): 25 feet, footnoted: 'In the R-2 district, the garage (attached or detached) and all accessory structures must meet the 20' front setback; the front of the primary structure may encroach an additional 5' into the front setback.' 25 is codified as the table's stated base figure; the encroachment allowance (effectively to 20 feet) is not applied to the served number.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (R-2 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (R-2 column): 5 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (R-2 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (R-2 column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (R-2 column): 60% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "DP-1 Duplex Low Density",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (DP-1 column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (DP-1 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (DP-1 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (DP-1 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (DP-1 column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (DP-1 column): 60% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "DP-2 Duplex High Density",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 6,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (DP-2 column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (DP-2 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (DP-2 column): 6 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (DP-2 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (DP-2 column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (DP-2 column): 60% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "MF-1 Multi-family Low Density",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 70,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (MF-1 column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (MF-1 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (MF-1 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (MF-1 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (MF-1 column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (MF-1 column): 70% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "MF-2 Multi-family Medium Density",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 70,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (MF-2 column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (MF-2 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (MF-2 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (MF-2 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (MF-2 column): 45 feet or 3 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (MF-2 column): 70% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "MF-3 Multi-family High Density",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 70,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (MF-3 column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (MF-3 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (MF-3 column): 10 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (MF-3 column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (MF-3 column): 45 feet or 3 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (MF-3 column): 70% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "M-R Manufactured and Residential",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://seguin.elaws.us/code/coor_apxa_ch3_sec3.6",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Front Yard Setback Min. (M-R column): 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Rear Yard Setback (Primary Structure) Min. (M-R column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (internal lot) Min. (M-R column): 5 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Side Setback (corner lot) Min. (M-R column): 15 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Height of Structures Max. (whichever is less) (M-R column): 30 feet or 2 1/2 stories.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "The residential dimensional standards table states no separate maximum building lot-coverage row (only Impervious Coverage Max.); not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "Sec. 3.6.2",
+          "quote": "Impervious Coverage Max. (M-R column): 60% of lot area.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    }
+  ]
+}
