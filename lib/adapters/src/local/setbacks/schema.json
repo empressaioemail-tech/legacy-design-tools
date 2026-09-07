@@ -47,20 +47,22 @@
           "additionalProperties": {
             "type": "object",
             "required": [
-              "atom_did",
               "section_number",
               "quote",
               "confidence",
               "verification_state"
             ],
             "properties": {
-              "atom_did": { "type": "string" },
+              "atom_did": {
+                "type": "string",
+                "description": "Omitted for verification_state \"primary-source-verified\" -- no real atom exists yet to reference. Required in practice (by gate.ts rule G2) for \"asserted\" / \"human-verified\", both of which claim atom backing."
+              },
               "section_number": { "type": "string" },
               "quote": { "type": "string" },
               "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
               "verification_state": {
                 "type": "string",
-                "enum": ["asserted", "human-verified"]
+                "enum": ["asserted", "human-verified", "primary-source-verified"]
               },
               "not_specified": { "type": "boolean" }
             }

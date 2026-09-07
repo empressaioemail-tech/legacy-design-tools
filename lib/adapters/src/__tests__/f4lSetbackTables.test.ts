@@ -103,11 +103,14 @@ describe("F4l setback tables", () => {
         "MF-1 Multifamily Residential 1",
       ]),
     );
-    // Spot-check: SF-1 front 30, coverage 40; height not_specified -> stand-in 100.
+    // Spot-check: SF-1 front 30, coverage 40; height not_specified -> stand-in
+    // 999 (CTX-B, 2026-09-07: RULING 4 unified the sentinel to 999 across all
+    // districts -- 999 cannot be mistaken for a real building height the way
+    // 100 can).
     const sf1 = getSetbackDistrict("round_rock_tx", "SF-1 Single-Family Residential 1");
     expect(sf1?.front_ft).toBe(30);
     expect(sf1?.max_lot_coverage_pct).toBe(40);
-    expect(sf1?.max_height_ft).toBe(100);
+    expect(sf1?.max_height_ft).toBe(999);
   });
 
   it("resolves Leander under its synthesized key", () => {
