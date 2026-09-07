@@ -40,6 +40,7 @@ import elginDevelopmentCode from "./elgin-development-code.json" with { type: "j
 import beltonTx from "./belton-tx.json" with { type: "json" };
 import seguinTx from "./seguin-tx.json" with { type: "json" };
 import ciboloTx from "./cibolo-tx.json" with { type: "json" };
+import killeenTx from "./killeen-tx.json" with { type: "json" };
 import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
@@ -143,6 +144,16 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "belton-tx": beltonTx as SetbackTable,
   "seguin-tx": seguinTx as SetbackTable,
   "cibolo-tx": ciboloTx as SetbackTable,
+  // Killeen (researched 2026-09-06/07): unlike Belton/Seguin/Cibolo, a real
+  // code-section atom corpus already exists for this jurisdiction
+  // (killeen_tx/killeen-development-regulations-current-supplement/*).
+  // Every citation here is human-verified against that real corpus, not
+  // primary-source-verified -- round-tripping the real bodyText against the
+  // original research surfaced and corrected two real transcription errors
+  // (R-1 and SF-2 front_ft coded 25 ft where the real ordinance states 20
+  // ft; R-1 side_ft coded 7 ft where the real ordinance states 5 ft). See
+  // the file's own note for the full correction record.
+  "killeen-tx": killeenTx as SetbackTable,
   "san-antonio-tx": sanAntonioTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
