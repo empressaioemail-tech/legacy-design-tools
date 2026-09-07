@@ -432,6 +432,73 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief/summarize", () => {
   });
 });
 
+describe.skipIf(!hasDb)(
+  "POST /api/brokerage/v1/research/narrative-section (OPS-16 P-120 item 6)",
+  () => {
+    it("rejects an unauthenticated caller — reuses the router's own auth gate, no bypass", async () => {
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .send({
+          parcelNodeId: "48453:12345",
+          facts: { zoning: { status: "present", district: "SF-3" } },
+        });
+      expect(res.status).toBe(401);
+    });
+
+    it("a real MCP service-token caller (the same SERVICE_API_KEY path hauska-mcp-server already uses) gets a real narrative with per-category markers", async () => {
+      completeChatMock.mockResolvedValueOnce(
+        "The parcel is zoned SF-3, permitting single-family residential use [zoning]. No flood hazard determination could be made for this parcel [flood].",
+      );
+
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+        .send({
+          parcelNodeId: "48453:12345",
+          facts: {
+            zoning: { status: "present", district: "SF-3" },
+            flood: { status: "absent" },
+          },
+          courthouseDocuments: [
+            { citation: "Deed Restriction 2019-004521", excerpt: "No mobile homes." },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.narrative).toContain("[zoning]");
+      expect(res.body.narrative).toContain("[flood]");
+      expect(res.body.generatedBy).toBe("grok");
+      expect(typeof res.body.generatedAt).toBe("string");
+      // Locked contract with hauska-engine: no citedSections field — the
+      // caller derives it itself by scanning for its own facts keys.
+      expect(res.body.citedSections).toBeUndefined();
+    });
+
+    it("400s on a missing parcelNodeId — the router's own validation, not a silent pass-through", async () => {
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+        .send({ facts: { zoning: { status: "present" } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+    });
+
+    it("falls back to rules-v1 honestly when the LLM returns nothing, never a fabricated narrative", async () => {
+      completeChatMock.mockResolvedValueOnce(null);
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+        .send({
+          parcelNodeId: "48453:12345",
+          facts: { zoning: { status: "absent" } },
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.generatedBy).toBe("rules-v1");
+      expect(res.body.narrative).toMatch(/unavailable/i);
+    });
+  },
+);
+
 describe.skipIf(!hasDb)("POST /api/brokerage/v1/research/chat", () => {
   it("returns 404 for unknown runId", async () => {
     const res = await request(getApp())
