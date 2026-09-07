@@ -223,6 +223,59 @@ export function bakedExemptionCodes(
   return { v: codes, source: CAD_PROPERTY_SOURCE, vintage };
 }
 
+/**
+ * Street-segment key for cross-validating a `cad_property` propId match
+ * against the snapshot's own (TxGIO-derived) situs address — NOT the same
+ * normalizer as `normalizeSitusAddress` in joinNormalize.ts (that one keys a
+ * full-string address-to-address recovery JOIN for gate-blocked counties;
+ * this one VALIDATES an already-matched propId JOIN, so it must tolerate a
+ * `cad_property.situs_address` that carries only the street and drops
+ * city/zip — a real, common truncation, not a mismatch). Takes the text
+ * before the first comma, uppercases, strips punctuation, collapses
+ * whitespace. An address with no comma is used whole.
+ */
+function situsStreetKey(address: string | null | undefined): string {
+  if (address == null) return "";
+  const cleaned = String(address).toUpperCase().replace(/[^A-Z0-9, ]/g, "").trim();
+  return cleaned.split(",")[0].replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Three-way verdict on whether a `cad_property` row's situs address
+ * corroborates the propId match against the snapshot's own situs address.
+ * Never collapse `inconclusive` into either `agree` or `disagree` — a
+ * blank side is not evidence either way, and reporting it as agreement
+ * would hide exactly the rows nobody could actually check.
+ */
+export type SitusCorroboration = "agree" | "disagree" | "inconclusive";
+
+/**
+ * CTX-C 2026-09-07 finding: the propId join `fetchCountyCadPropertyRoll` /
+ * this patch CLI use has NO integrity gate (unlike `landUseJoinKey`'s
+ * blockedFips), and for two of the six Central-TX counties a plain propId
+ * equality match is WRONG often enough to matter: Hays (48209) 45.2%
+ * disagreement, Travis (48453) 4.4%, both measured on live TABLESAMPLE
+ * draws comparing this street key between the existing snapshot and the
+ * matched cad_property row (examples: different streets, different
+ * cities — not a formatting artifact). Bastrop, Caldwell, McLennan,
+ * Williamson measured 0.0% on 500-800 row samples each.
+ *
+ * `agree` / `disagree` require BOTH sides to carry comparable street text
+ * (equal, or one a prefix of the other — tolerates `cad_property
+ * .situs_address` dropping city/zip). `inconclusive` when either side is
+ * blank: nothing to contradict, but also nothing corroborating — the
+ * caller must not treat this the same as a verified `agree`.
+ */
+export function corroborateCadPropertyMatchBySitus(
+  snapshotSitusAddress: unknown,
+  cadSitusAddress: string | null | undefined,
+): SitusCorroboration {
+  const a = situsStreetKey(typeof snapshotSitusAddress === "string" ? snapshotSitusAddress : null);
+  const b = situsStreetKey(cadSitusAddress);
+  if (!a || !b) return "inconclusive";
+  return a === b || a.startsWith(b) || b.startsWith(a) ? "agree" : "disagree";
+}
+
 export interface CadPropertyRollSlice {
   taxYear: number | null;
   marketValue: unknown;
