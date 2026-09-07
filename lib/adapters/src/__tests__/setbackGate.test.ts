@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   runSetbackGate,
   formatGateReport,
+  SETBACK_NUMERIC_FIELDS,
   type SourceAtom,
   type GatedSetbackTable,
   type GatedSetbackDistrict,
@@ -297,6 +298,121 @@ describe("runSetbackGate", () => {
     const text = formatGateReport(report);
     expect(text).toContain("demo-tx");
     expect(text).toContain("PASS");
+  });
+
+  describe("primary-source-verified", () => {
+    function primarySourceDistrict(): GatedSetbackDistrict {
+      const d = cleanDistrict();
+      for (const field of Object.keys(d.provenance!) as Array<
+        keyof typeof d.provenance
+      >) {
+        const p = d.provenance![field]!;
+        p.verification_state = "primary-source-verified";
+        delete (p as { atom_did?: string }).atom_did;
+      }
+      return d;
+    }
+
+    it("PASSES a table with no atom corpus at all when every value is primary-source-verified", () => {
+      const report = runSetbackGate({
+        table: tableWith(primarySourceDistrict()),
+        atoms: [], // no code-section atom corpus exists for this jurisdiction
+        expectedDistricts: ["SF-6 Single Family"],
+      });
+      expect(report.passed).toBe(true);
+      expect(report.counts.block).toBe(0);
+      expect(report.gated).toBe(true);
+      // Reported, not silently passed: an explicit PASS-level G2 result per
+      // value, distinguishable from atom-verified values (which today log no
+      // result row at all on the happy path).
+      const psv = report.results.filter(
+        (r) => r.rule === "G2" && r.level === "pass",
+      );
+      expect(psv.length).toBe(SETBACK_NUMERIC_FIELDS.length);
+    });
+
+    it("does not require atom_did for primary-source-verified", () => {
+      const d = primarySourceDistrict();
+      expect(d.provenance!.front_ft!.atom_did).toBeUndefined();
+      const report = runSetbackGate({
+        table: tableWith(d),
+        atoms: [],
+      });
+      expect(
+        report.results.some(
+          (r) => r.field === "front_ft" && r.level === "block",
+        ),
+      ).toBe(false);
+    });
+
+    it("still G1 BLOCKS a primary-source-verified table with a missing citation", () => {
+      const d = primarySourceDistrict();
+      delete d.provenance!.front_ft;
+      const report = runSetbackGate({
+        table: tableWith(d),
+        atoms: [],
+        expectedDistricts: ["SF-6 Single Family"],
+      });
+      expect(report.passed).toBe(false);
+      expect(
+        report.results.some((r) => r.rule === "G1" && r.field === "front_ft"),
+      ).toBe(true);
+    });
+
+    it("still G3 FLAGS an out-of-band primary-source-verified value", () => {
+      const d = primarySourceDistrict();
+      d.front_ft = 250; // outside [0,100]
+      const report = runSetbackGate({
+        table: tableWith(d),
+        atoms: [],
+        expectedDistricts: ["SF-6 Single Family"],
+      });
+      expect(report.passed).toBe(true); // G3 flags, never blocks
+      expect(
+        report.results.some((r) => r.rule === "G3" && r.level === "flag"),
+      ).toBe(true);
+    });
+
+    it("still G6 BLOCKS a primary-source-verified value with confidence out of range", () => {
+      const d = primarySourceDistrict();
+      d.provenance!.front_ft!.confidence = 1.5;
+      const report = runSetbackGate({
+        table: tableWith(d),
+        atoms: [],
+        expectedDistricts: ["SF-6 Single Family"],
+      });
+      expect(report.passed).toBe(false);
+      expect(report.results.some((r) => r.rule === "G6")).toBe(true);
+    });
+
+    it("skips G5 quote round-trip for primary-source-verified (no atom body to check)", () => {
+      const d = primarySourceDistrict();
+      d.provenance!.front_ft!.quote = "this text exists nowhere, no atom to check it against";
+      const report = runSetbackGate({
+        table: tableWith(d),
+        atoms: [],
+        expectedDistricts: ["SF-6 Single Family"],
+      });
+      expect(report.passed).toBe(true);
+      expect(report.results.some((r) => r.rule === "G5")).toBe(false);
+    });
+
+    it("ignores a stray atom_did on a primary-source-verified value (state governs, not incidental presence)", () => {
+      const d = primarySourceDistrict();
+      // Even if a real-looking atom_did is present, primary-source-verified
+      // means "not claiming atom backing" -- G2 must not silently start
+      // depending on whether the field happens to be populated.
+      d.provenance!.front_ft!.atom_did = "demo_tx/demo-udc-2025/9.9.9-does-not-exist";
+      const report = runSetbackGate({
+        table: tableWith(d),
+        atoms: ATOMS,
+        expectedDistricts: ["SF-6 Single Family"],
+      });
+      expect(report.passed).toBe(true);
+      expect(
+        report.results.some((r) => r.field === "front_ft" && r.level === "block"),
+      ).toBe(false);
+    });
   });
 });
 

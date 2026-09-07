@@ -44,11 +44,37 @@ export const SANITY_BOUNDS: Record<SetbackNumericField, [number, number]> = {
 /** Sentinel a value carries when the ordinance genuinely does not state it. */
 export const NOT_SPECIFIED = "not_specified" as const;
 
-export type VerificationState = "asserted" | "human-verified";
+/**
+ * "primary-source-verified" is distinct from both existing states: the value
+ * was read directly off a real primary legal source (ordinance text, an
+ * official published summary table) and cross-checked against a second
+ * primary source where one was available, but has never been round-tripped
+ * against a real ingested code-section atom, because code-ontology ingestion
+ * (zoning ordinances -> code-section atoms) has not shipped for this
+ * jurisdiction yet. It is not a weaker "asserted" (which already means
+ * something else in this corpus — lower confidence in a specific or derived
+ * figure) and it is not "human-verified" (which the gate reads as an
+ * implicit claim that atom_did resolves against a real corpus entry, which
+ * would be false here). G2/G5 do not apply to it — there is no atom to
+ * resolve or round-trip a quote against — see runSetbackGate. Only use this
+ * state when a real check confirms no code-section atom corpus exists yet
+ * for the jurisdiction (some jurisdictions already have one — check first).
+ */
+export type VerificationState =
+  | "asserted"
+  | "human-verified"
+  | "primary-source-verified";
 
 /** One value's provenance entry. */
 export interface ValueProvenance {
-  atom_did: string;
+  /**
+   * Omitted for `verification_state: "primary-source-verified"` — no real
+   * atom exists yet to reference, and populating a best-guess, repo-style
+   * convention ID here (e.g. `waco_tx/coor/28-276`) that resolves against
+   * nothing is what actually trips G2's "fabricated citation" block. Required
+   * for "asserted" / "human-verified", both of which claim atom backing.
+   */
+  atom_did?: string;
   section_number: string;
   quote: string;
   confidence: number;
@@ -157,7 +183,8 @@ export function runSetbackGate(input: GateInput): GateReport {
       // G6 — verification state + confidence present and valid.
       if (
         p.verification_state !== "asserted" &&
-        p.verification_state !== "human-verified"
+        p.verification_state !== "human-verified" &&
+        p.verification_state !== "primary-source-verified"
       ) {
         results.push({
           rule: "G6",
@@ -178,31 +205,55 @@ export function runSetbackGate(input: GateInput): GateReport {
       }
 
       // G2 — citation resolves to a real atom at the cited section.
-      const atom = atomByDid.get(p.atom_did);
-      if (!atom) {
+      // primary-source-verified makes no atom-backing claim (see
+      // ValueProvenance.atom_did): checking it against the corpus is not the
+      // right check for this state, so it's reported as its own honest
+      // category (a PASS-level G2 result) rather than silently skipped or
+      // blocked on a corpus lookup that was never the point.
+      let atom: SourceAtom | undefined;
+      if (p.verification_state === "primary-source-verified") {
         results.push({
           rule: "G2",
-          level: "block",
+          level: "pass",
           district: district.district_name,
           field,
-          message: `cited atom_did not found in corpus: ${p.atom_did}`,
+          message:
+            "primary-source-verified: read directly from a primary source, not round-tripped against a corpus atom (no code-section atom corpus exists yet for this jurisdiction)",
         });
-      } else if (
-        p.section_number &&
-        atom.sectionNumber &&
-        norm(atom.sectionNumber) !== norm(p.section_number)
-      ) {
-        results.push({
-          rule: "G2",
-          level: "block",
-          district: district.district_name,
-          field,
-          message: `cited section ${p.section_number} != atom section ${atom.sectionNumber}`,
-        });
+      } else {
+        atom = p.atom_did ? atomByDid.get(p.atom_did) : undefined;
+        if (!atom) {
+          results.push({
+            rule: "G2",
+            level: "block",
+            district: district.district_name,
+            field,
+            message: p.atom_did
+              ? `cited atom_did not found in corpus: ${p.atom_did}`
+              : `atom_did required for verification_state "${p.verification_state}" but missing`,
+          });
+        } else if (
+          p.section_number &&
+          atom.sectionNumber &&
+          norm(atom.sectionNumber) !== norm(p.section_number)
+        ) {
+          results.push({
+            rule: "G2",
+            level: "block",
+            district: district.district_name,
+            field,
+            message: `cited section ${p.section_number} != atom section ${atom.sectionNumber}`,
+          });
+        }
       }
 
       const isNotSpecified =
         p.not_specified === true || value === NOT_SPECIFIED;
+      // No atom exists to round-trip a quote against for primary-source-
+      // verified — same reporting shape as not_specified (skip G5) but for a
+      // different reason (no corpus, not an intentional absence).
+      const skipQuoteRoundTrip =
+        isNotSpecified || p.verification_state === "primary-source-verified";
 
       // G3 — numeric sanity bounds (FLAG). Skipped for not_specified.
       if (!isNotSpecified) {
@@ -230,8 +281,9 @@ export function runSetbackGate(input: GateInput): GateReport {
 
       // G5 — round-trip quote. Block on human-verified mismatch, flag on
       // asserted mismatch. Skipped for not_specified (quote is of the silent
-      // section, presence already required via G1).
-      if (!isNotSpecified) {
+      // section, presence already required via G1) and for
+      // primary-source-verified (no atom body exists to round-trip against).
+      if (!skipQuoteRoundTrip) {
         const body = atom?.bodyText ?? "";
         const quoteOk =
           typeof p.quote === "string" &&
