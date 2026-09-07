@@ -274,14 +274,27 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // codes stamp as zoning-present / setback-pending (honest). Match contract
   // CLEAN (leading-token). Second Travis layer — jurisdiction is per-parcel
   // via stamped zoning_jurisdiction (PIP cityKey), not a county sole-key.
+  // Austin (Travis). `Publish_Zoning_AGOL` is Austin GIS staff's internal
+  // staging layer (499 Token Required as of 2026-09-07 — not a
+  // misconfiguration, working access control; no legitimate self-service
+  // credential path, per the operator's own investigation of the org).
+  // Repointed to the public, tokenless mirror
+  // `PLANNINGCADASTRE_zoning_large_map_scale`, whose real field names
+  // (verified live 2026-09-07) are ZONING_BASE (code) and ZONING_ZTYPE — NOT
+  // BASE_ZONE/BASE_ZONE_CATEGORY, a different service, not just an
+  // unauthenticated version of the same one. Provenance on newly-stamped
+  // Austin parcels will cite this mirror's URL, not the old staging layer's
+  // — more honest than what was there, but it means a post-swap Austin
+  // count is being compared against a target the old staging layer
+  // produced, not a defect in itself.
   "austin-tx": {
     cityKey: "austin-tx",
     cityName: "Austin",
     countyFips: "48453",
     layerUrl:
-      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/Publish_Zoning_AGOL/FeatureServer/0",
-    codeField: "BASE_ZONE",
-    descriptionField: "BASE_ZONE_CATEGORY",
+      "https://services.arcgis.com/0L95CJ0VTaxqcmED/ArcGIS/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0",
+    codeField: "ZONING_BASE",
+    descriptionField: "ZONING_ZTYPE",
   },
   // Bastrop city (Bastrop). B3 Place Types are REPEALED (Ord. 2026-06 /
   // 2026-04-14). LIVE law is BDC Euclidean districts. Stamp reads
