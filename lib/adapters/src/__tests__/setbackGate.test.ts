@@ -483,6 +483,14 @@ describe("San Marcos pilot registration", () => {
     expect(table!.note).toMatch(/^.*https:\/\//);
   });
 
+  it("resolves waco-tx (CTX-B, 2026-09-07: McLennan County had zero setback coverage before this)", () => {
+    const table = getSetbackTable("waco-tx");
+    expect(table).not.toBeNull();
+    expect(table!.jurisdictionKey).toBe("waco-tx");
+    expect(table!.districts.length).toBeGreaterThan(0);
+    expect(getSetbackTable("waco_tx")?.jurisdictionKey).toBe("waco-tx");
+  });
+
   it("reports the legacy Bastrop table as un-gated (no provenance)", () => {
     // Bastrop predates the gate: its rows carry a municode-root citation_url
     // and no per-value provenance, so the gate treats it as legacy/un-gated.

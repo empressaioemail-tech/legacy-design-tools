@@ -44,6 +44,7 @@ import killeenTx from "./killeen-tx.json" with { type: "json" };
 import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
+import wacoTx from "./waco-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -157,6 +158,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "san-antonio-tx": sanAntonioTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
+  // CTX-B, 2026-09-07: McLennan County (Waco) was wired for zoning (6,332
+  // staged district polygons, 21 distinct codes) but had zero setback
+  // coverage -- 48,431 parcels carrying a real zoning district and 0
+  // setback-rule atoms as a direct consequence. Ported from hauska-engine's
+  // packages/adapters/src/local/setbacks/ copy (identical to the corpus
+  // package's waco-tx.json) rather than re-authored; see that file's own
+  // note for the full source trail.
+  "waco-tx": wacoTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);

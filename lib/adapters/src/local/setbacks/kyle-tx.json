@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "kyle-tx",
   "jurisdictionDisplayName": "City of Kyle, TX",
-  "note": "Codified from the City of Kyle Code of Ordinances, Chapter 53 (Zoning), Section 53-33 'General requirements' — the consolidated Chart 1 (Front/Side/Corner/Rear setbacks + Height Limit) and Chart 2 (impervious coverage). Source is eCode360 (General Code); every district's setbacks are cross-referenced from its own division to 'chart 1, section 53-33(k)' and impervious to '53-33(l) / chart 2'. IMPORTANT MODELING NOTE: Chart 2 is captioned 'Maximum Lot Coverage by Percent' but Section 53-33(l) defines it as the maximum IMPERVIOUS coverage ('percentage of lot area which may hereafter be covered by improved surfaces and structures which do not allow for the penetration ... of stormwater'), so its values populate max_impervious_pct. Kyle's zoning charts do NOT state a separate building-only lot-coverage cap, so max_lot_coverage_pct is flagged not_specified in provenance and carries the impervious value as a conservative stand-in (the envelope draw uses setbacks, not this field). Front-setback footnote (9) permits a council-approved reduction of up to 20% (never below 16 ft) on up to 50% of lots; the base district value is codified here. ADDED R-1-A, RS, and M-2 from Chart 1/2 for live GIS frequency. R-1-A side_ft uses the non-zero-lot-line side (10 ft) as the conservative envelope base. OMITTED bare GIS R-1: Ord.92 legacy row would prefix-match R-1-T townhouse stamps into a false envelope; bare R-1 stays unmatched or falls to longer R-1-* prefix only. An additional standard (53-33(l) note) caps single-family lots over 22,000 sqft at 35% impervious regardless of district; that lot-size-conditional override is not modeled per-district.",
+  "note": "Codified from the City of Kyle Code of Ordinances, Chapter 53 (Zoning), Section 53-33 'General requirements' — the consolidated Chart 1 (Front/Side/Corner/Rear setbacks + Height Limit) and Chart 2 (impervious coverage). Source is eCode360 (General Code); every district's setbacks are cross-referenced from its own division to 'chart 1, section 53-33(k)' and impervious to '53-33(l) / chart 2'. IMPORTANT MODELING NOTE: Chart 2 is captioned 'Maximum Lot Coverage by Percent' but Section 53-33(l) defines it as the maximum IMPERVIOUS coverage ('percentage of lot area which may hereafter be covered by improved surfaces and structures which do not allow for the penetration ... of stormwater'), so its values populate max_impervious_pct. Kyle's zoning charts do NOT state a separate building-only lot-coverage cap, so max_lot_coverage_pct is flagged not_specified in provenance and carries the impervious value as a conservative stand-in (the envelope draw uses setbacks, not this field). Front-setback footnote (9) permits a council-approved reduction of up to 20% (never below 16 ft) on up to 50% of lots; the base district value is codified here. ADDED R-1-A, RS, and M-2 from Chart 1/2 for live GIS frequency. R-1-A side_ft uses the non-zero-lot-line side (10 ft) as the conservative envelope base. OMITTED bare GIS R-1: Ord.92 legacy row would prefix-match R-1-T townhouse stamps into a false envelope; bare R-1 stays unmatched or falls to longer R-1-* prefix only. An additional standard (53-33(l) note) caps single-family lots over 22,000 sqft at 35% impervious regardless of district; that lot-size-conditional override is not modeled per-district. CORRECTION (2026-09-07, CTX-B dispatch, the Kyle regression): every field on every district in this file shipped with a fabricated, repo-style atom_did ('kyle_tx/ch53/53-33') under 'human-verified' (6 fields) or 'asserted' (max_lot_coverage_pct) that never resolved against any real ingested code-section atom -- no code-section atom corpus exists for kyle_tx at all (confirmed directly against the live atoms store, zero atoms). This file is the original source of that fabrication: hauska-engine PR #393 (2026-09-07 01:59 UTC) caught and fixed it independently for the 5 districts engine then carried, but the 2026-09-07 14:09 UTC corpus merge took this file's un-fixed data over engine's fix, reverting the correction and carrying the fabrication onto 4 more districts (R-3-1, R-3-2, RS, M-2) engine's fix never reviewed -- see hauska-setback-corpus's kyle-tx.json for the full incident writeup. Relabeled all 9 districts' 7 fields to 'primary-source-verified' (the state added in this repo's own PR #628 for exactly this gap) and removed every atom_did here; the underlying research (eCode360 Chart 1/2 transcription) is unchanged, only the overclaimed verification status is corrected. max_lot_coverage_pct remains not_specified on all 9 districts, unchanged.",
   "districts": [
     {
       "district_name": "R-1-1 Single-Family Residential 1",
@@ -16,54 +16,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-1 | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-1 ... Rear Setback (feet) | 20",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-1 | ... Side Setback (feet) | 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-1 ... Corner Lot at Side Street or Alleyway Setback (feet) | 20",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-1 ... Height Limit (feet) | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-1-1 | 50",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -79,54 +72,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-2 | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-2 ... Rear Setback (feet) | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-2 ... Side Setback (feet) | 7.5",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-2 ... Corner ... Setback (feet) | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-2 ... Height Limit (feet) | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-1-2 | 60",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -142,54 +128,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-3 | 20",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-3 ... Rear Setback (feet) | 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-3 ... Side Setback (feet) | 5",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-3 ... Corner ... Setback (feet) | 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-3 ... Height Limit (feet) | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-1-3 | 65",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -205,54 +184,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-2 | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-2 ... Rear Setback (feet) | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-2 ... Side Setback (feet) | 7",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-2 ... Corner ... Setback (feet) | 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-2 ... Height Limit (feet) | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-2 | 55",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -268,54 +240,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-1 | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-1 ... Rear Setback (feet) | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-1 ... Side Setback (feet) | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-1 ... Corner ... Setback (feet) | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-1 ... Height Limit (feet) | 35 (not to exceed two stories, footnote 6)",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-3-1 | 80",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -331,54 +296,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-2 | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-2 ... Rear Setback (feet) | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-2 ... Side Setback (feet) | 20",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-2 ... Corner ... Setback (feet) | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-3-2 ... Height Limit (feet) | 45 (not to exceed three stories, footnote 7)",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-3-2 | 80",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -394,54 +352,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-A | Front 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-A ... Rear | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-A side footnote (2): 10 ft on one side / zero-lot-line other; envelope uses 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-A ... Corner | 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... R-1-A ... Height | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R-1-A | 65",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -457,54 +408,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... RS | Front 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... RS ... Rear | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... RS ... Side | 10",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... RS ... Corner | 15",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... RS ... Height | 45",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... R/S | 80",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -520,54 +464,47 @@
       "citation_url": "https://ecode360.com/45580717",
       "provenance": {
         "front_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... M-2 | Front 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... M-2 ... Rear | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... M-2 ... Side | 7",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... M-2 ... Corner | 25",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(k)",
           "quote": "Chart 1 ... M-2 ... Height | 35",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Kyle zoning states impervious coverage (Chart 2), not a separate building lot-coverage cap; stand-in equals impervious value.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "kyle_tx/ch53/53-33",
           "section_number": "53-33(l)",
           "quote": "Chart 2 ... M-2 | 50",
           "confidence": 0.95,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     }
