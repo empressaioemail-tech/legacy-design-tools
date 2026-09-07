@@ -66,18 +66,25 @@ describe("F4l setback tables", () => {
     expect(table!.jurisdictionDisplayName).toBe("City of Georgetown, TX");
     assertWellFormed(table!);
     const names = table!.districts.map((d) => d.district_name);
+    // The three original single-family districts (RE/RL/RS) were replaced
+    // 2026-09-07 by the rewrite's four SF districts (RE/RT/RS/RM, effective
+    // 2026-11-01); MF-2/C-3 and the rest of the non-SF districts are
+    // unchanged from the currently-governing code -- see georgetown-tx.json's
+    // own note for the full two-vintage record.
     expect(names).toEqual(
       expect.arrayContaining([
-        "RE Residential Estate",
-        "RS Residential Single-Family",
+        "RE Residential Estate District",
+        "RT Residential Traditional District",
+        "RS Residential Suburban District",
+        "RM Residential Mix District",
         "MF-2 High Density Multifamily",
         "C-3 General Commercial",
       ]),
     );
-    // Spot-check verified values: RS front 20, side 6; MF-2 height 45.
-    const rs = getSetbackDistrict("georgetown_tx", "RS Residential Single-Family");
+    // Spot-check verified values: rewrite RS front 20, side 5; MF-2 height 45 (unchanged, current code).
+    const rs = getSetbackDistrict("georgetown_tx", "RS Residential Suburban District");
     expect(rs?.front_ft).toBe(20);
-    expect(rs?.side_ft).toBe(6);
+    expect(rs?.side_ft).toBe(5);
     const mf2 = getSetbackDistrict("georgetown_tx", "MF-2 High Density Multifamily");
     expect(mf2?.max_height_ft).toBe(45);
   });

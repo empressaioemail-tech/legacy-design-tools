@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "san-marcos-tx",
   "jurisdictionDisplayName": "City of San Marcos, TX",
-  "note": "Codified from the City of San Marcos, TX Development Code, amended January 21, 2025. Conventional SF-6/SF-4.5 from Chapter 4 §§4.4.1.3–4.4.1.4; legacy MU/CC/GC/P/NC/OP from Chapter 9 §9.1.1.1 Dimensional and Development Standards (flipbook pp. 424–425 / code 9:2–9:3) at https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025. Legacy side_corner_ft uses the table Secondary Street minimum. max_height_ft for story-capped districts uses the code footnote (stories may not exceed 14 ft floor-to-ceiling). OMITTED: CD-*, FD, SF-R, ND-*, TH, D, DR, PH-ZL, MF-*, VMU (form/building-type or conditional rules), HC/LI/HI/MH, and PUD/plan districts. OMITTED — ND-3: front setback conditional (15 ft min or Avg); remains honest gap until conditional model exists.",
+  "note": "Codified from the City of San Marcos, TX Development Code, amended January 21, 2025. Conventional SF-6/SF-4.5 from Chapter 4 §§4.4.1.3–4.4.1.4; legacy MU/CC/GC/P/NC/OP from Chapter 9 §9.1.1.1 Dimensional and Development Standards (flipbook pp. 424–425 / code 9:2–9:3) at https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025. Legacy side_corner_ft uses the table Secondary Street minimum. max_height_ft for story-capped districts uses the code footnote (stories may not exceed 14 ft floor-to-ceiling). OMITTED: CD-*, FD, SF-R, ND-*, TH, D, DR, PH-ZL, MF-*, VMU (form/building-type or conditional rules), HC/LI/HI/MH, and PUD/plan districts. OMITTED — ND-3: front setback conditional (15 ft min or Avg); remains honest gap until conditional model exists. LIVE GIS VERIFICATION (2026-09-07, before landing): queried the real zoning layer (smgis.sanmarcostx.gov MPN/MyPermitNowFeatures/6) with an area-weighted group-by on ZONECODE (not raw polygon count, which would be misleading). The two covered current-code districts, SF-6 and SF-4.5, together account for 12.93% of the city's total zoned area. The legacy Chapter 9 residential system this supersedes (D, DR, TH) accounts for 0.90%; SF-11 does not appear in the live layer at all anymore -- every parcel once zoned SF-11 has already been rezoned. Current-code coverage clearly dominates by roughly 14:1, well past the threshold for landing this table as researched. SF-R (2.46% of area) is a separate, small current-code district this research pass does not cover (see OMITTED list above) -- not part of either the covered or legacy figures.",
   "districts": [
     {
       "district_name": "SF-6 Single Family 6",
@@ -16,54 +16,47 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/209",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6, Setbacks - Principal Building: Primary Street 25 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6, Setbacks - Principal Building: Rear 20 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6, Setbacks - Principal Building: Side 5 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6, Setbacks - Principal Building: Secondary Street 15 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6 Building Height: 35 ft. max.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6 cited district pages state impervious cover but no maximum lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.3",
           "section_number": "4.4.1.3",
           "quote": "SF-6 Impervious Cover: 50% max.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -79,54 +72,47 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/211",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5, Setbacks - Principal Building: Primary Street 20 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5, Setbacks - Principal Building: Rear 15 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5, Setbacks - Principal Building: Side 5 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5, Setbacks - Principal Building: Secondary Street 15 ft. min.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5 Building Height: 35 ft. max.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5 cited district pages state impervious cover but no maximum lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/4.4.1.4",
           "section_number": "4.4.1.4",
           "quote": "SF-4.5 Impervious Cover: 60% max.",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -142,54 +128,47 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/425",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "MU Primary Street Setback, Min Ft: 25",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "MU Rear Yard Setback, Minimum Feet: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "MU Side Setback, Minimum Feet, Interior: 7.5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "MU Side Setback, secondary street Min. Ft.: 15",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "MU Building height, Maximum Stories: 4 (≤14 ft/story ⇒ 56 ft)",
           "confidence": 0.85,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "Legacy nonresidential table states impervious cover but no separate lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "MU Impervious Cover, Max. %: 60",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -205,55 +184,48 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/425",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "CC Primary Street Setback, Min Ft: 20",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "CC Rear Yard Setback, Minimum Feet: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "CC Side Setback, Minimum Feet, Interior: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "CC Side Setback, secondary street Min. Ft.: 15",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "CC Building height Maximum Stories not stated in §9.1.1.1 nonresidential table; 100 sentinel not_specified.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "Legacy nonresidential table states impervious cover but no separate lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "CC Impervious Cover, Max. %: 80",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -269,55 +241,48 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/425",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "GC Primary Street Setback, Min Ft: 0 (table row Lot Frontage/Width/Primary: 0 / 0 / 0)",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "GC Rear Yard Setback, Minimum Feet: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "GC Side Setback, Minimum Feet, Interior: 15",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "GC Side Setback, secondary street Min. Ft.: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "GC Building height Maximum Stories not stated; 100 sentinel not_specified.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "Legacy nonresidential table states impervious cover but no separate lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "GC Impervious Cover, Max. %: 80",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -333,54 +298,47 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/425",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "P Primary Street Setback, Min Ft: 20",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "P Rear Yard Setback, Minimum Feet: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "P Side Setback, Minimum Feet, Interior: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "P Side Setback, secondary street Min. Ft.: 15",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "P Building height, Maximum Stories: 4 (≤14 ft/story ⇒ 56 ft)",
           "confidence": 0.85,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "Legacy nonresidential table states impervious cover but no separate lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "P Impervious Cover, Max. %: 80",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -396,55 +354,48 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/425",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "NC Primary Street Setback, Min Ft: 20",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "NC Rear Yard Setback, Minimum Feet: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "NC Side Setback, Minimum Feet, Interior: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "NC Side Setback, secondary street Min. Ft.: 15",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "NC Building height Maximum Stories not stated; 100 sentinel not_specified.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "Legacy nonresidential table states impervious cover but no separate lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "NC Impervious Cover, Max. %: 80",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     },
@@ -460,55 +411,48 @@
       "citation_url": "https://user-3vpeqil.cld.bz/ORD-2025-01-Development-Code-Effective-January-25-2025/425",
       "provenance": {
         "front_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "OP Primary Street Setback, Min Ft: 20",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "rear_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "OP Rear Yard Setback, Minimum Feet: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "OP Side Setback, Minimum Feet, Interior: 5",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "side_corner_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "OP Side Setback, secondary street Min. Ft.: 15",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         },
         "max_height_ft": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "OP Building height Maximum Stories not stated; 100 sentinel not_specified.",
           "confidence": 0.6,
-          "verification_state": "asserted",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_lot_coverage_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "Legacy nonresidential table states impervious cover but no separate lot-coverage percentage.",
           "confidence": 0.8,
-          "verification_state": "human-verified",
+          "verification_state": "primary-source-verified",
           "not_specified": true
         },
         "max_impervious_pct": {
-          "atom_did": "san_marcos_tx/dev_code/9.1.1.1",
           "section_number": "9.1.1.1",
           "quote": "OP Impervious Cover, Max. %: 80",
           "confidence": 0.9,
-          "verification_state": "human-verified"
+          "verification_state": "primary-source-verified"
         }
       }
     }
