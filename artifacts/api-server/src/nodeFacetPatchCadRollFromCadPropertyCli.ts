@@ -14,6 +14,7 @@ import { fetchCountyCadPropertyRoll } from "./lib/joinIntegrityGate.js";
 import {
   applyCadPropertyFactsToPayload,
   cadPropertyFactsFromRow,
+  corroborateCadPropertyMatchBySitus,
 } from "./lib/cadRollValue.js";
 
 const DEFAULT_PAGE = 2000;
@@ -53,6 +54,9 @@ async function main() {
   let scanned = 0;
   let patched = 0;
   let noCadRow = 0;
+  let situsAgree = 0;
+  let situsInconclusive = 0;
+  let situsDisagree = 0;
   let marketPresent = 0;
   let improvementZero = 0;
   let livingPresent = 0;
@@ -87,8 +91,25 @@ async function main() {
       const propId = row.place_key.slice(prefix.length);
       if (propIds && !propIds.includes(propId)) continue;
       scanned += 1;
-      const cad = roll.consulted ? (roll.byPropId.get(propId) ?? null) : null;
-      if (!cad) noCadRow += 1;
+      let cad = roll.consulted ? (roll.byPropId.get(propId) ?? null) : null;
+      if (!cad) {
+        noCadRow += 1;
+      } else {
+        const baseFacts =
+          row.payload_json.baseFacts && typeof row.payload_json.baseFacts === "object"
+            ? (row.payload_json.baseFacts as Record<string, unknown>)
+            : null;
+        const verdict = corroborateCadPropertyMatchBySitus(
+          baseFacts?.situsAddress,
+          cad.situsAddress,
+        );
+        if (verdict === "agree") situsAgree += 1;
+        else if (verdict === "inconclusive") situsInconclusive += 1;
+        else {
+          situsDisagree += 1;
+          cad = null; // proven propId collision (CTX-C 2026-09-07) — honest absence, never a fabricated value
+        }
+      }
       const facts = cadPropertyFactsFromRow(cad);
       if (facts.cadRoll.marketValue && facts.cadRoll.marketValue.v > 0) marketPresent += 1;
       if (facts.cadRoll.assessedValue != null) assessedPresent += 1;
@@ -130,6 +151,9 @@ async function main() {
       scanned,
       patched,
       noCadRow,
+      situsAgree,
+      situsInconclusive,
+      situsDisagree,
       marketPresent,
       assessedPresent,
       improvementZero,

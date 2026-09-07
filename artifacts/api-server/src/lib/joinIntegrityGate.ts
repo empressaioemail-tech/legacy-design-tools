@@ -318,6 +318,7 @@ export interface PropIdCadPropertyEntry {
   propId: string;
   taxYear: number;
   sourceVintage: string;
+  situsAddress: string | null;
   marketValue: number | null;
   assessedValue: number | null;
   landValue: number | null;
@@ -362,6 +363,7 @@ export async function fetchCountyCadPropertyRoll(
     prop_id: string;
     tax_year: number;
     source_vintage: string;
+    situs_address: string | null;
     market_value: unknown;
     assessed_value: unknown;
     land_value: unknown;
@@ -371,7 +373,7 @@ export async function fetchCountyCadPropertyRoll(
     legal_description: string | null;
     exemption_codes: string[] | null;
   }>(
-    `SELECT prop_id, tax_year, source_vintage,
+    `SELECT prop_id, tax_year, source_vintage, situs_address,
             market_value, assessed_value, land_value, improvement_value,
             living_area_sqft, year_built, legal_description, exemption_codes
        FROM cad_property
@@ -384,6 +386,10 @@ export async function fetchCountyCadPropertyRoll(
       propId: row.prop_id,
       taxYear: row.tax_year,
       sourceVintage: row.source_vintage,
+      situsAddress:
+        typeof row.situs_address === "string" && row.situs_address.trim()
+          ? row.situs_address.trim()
+          : null,
       marketValue: numericOrNull(row.market_value),
       assessedValue: numericOrNull(row.assessed_value),
       landValue: numericOrNull(row.land_value),

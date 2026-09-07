@@ -1,0 +1,104 @@
+{
+  "lane": "CTX-C",
+  "planRow": "P-124",
+  "checkpoint": "CP1",
+  "type": "design/pre-build adversarial checkpoint",
+  "filedAt": "2026-09-07T21:50:00Z",
+  "worktree": "P:/tmp/ctx-c-cadroll",
+  "branch": "feat/ctx-c-cad-completeness",
+  "repo": "legacy-design-tools",
+  "missionPremise": "Every Tier-1 bake writes baseFacts.cadRoll ALL-NULL by design (nodeFacetBakeTier1Cli.ts:507-514, verified at source); population is deferred to a separate CLI, nodeFacetPatchCadRollFromCadPropertyCli.ts, which had NEVER been run for any of the six Central-TX counties before this session. facetScore (the monotonic guard) does not count cadRoll as a coverage dimension, so a future re-bake without the patch folded in silently re-nulls it even at an equal-or-better score. The onboarding runbook (factory_onboarding_runbook.md Step Z7, lines 80-92, verified at source) documents only the bake half.",
+  "correctionsToDispatch": [
+    {
+      "claim": "dispatch's Warning section describes the patch CLI's write as an unconditional ON CONFLICT DO UPDATE",
+      "sourceCheck": "nodeFacetPatchCadRollFromCadPropertyCli.ts:108-118 (pre-fix) is a plain UPDATE ... FROM unnest(...) WHERE adapter_key=$4 AND place_key=v.place_key — no ON CONFLICT clause. That pattern belongs to nodeFacetBakeTier1Cli.ts's writeSnapshot (genuinely INSERT...ON CONFLICT DO UPDATE, gated upstream by shouldPromote/facetScore).",
+      "disposition": "Filed as correction (DEV_PROCESS 3.2a) to doc-repo-26, accepted. Practical risk (no compare-and-swap; a concurrent bake write between the patch's SELECT and UPDATE is silently lost) holds regardless of the SQL mechanism.",
+      "acceptedBy": "doc-repo-26"
+    }
+  ],
+  "newFindingNotInDispatch": {
+    "summary": "The propId-to-cad_property join the patch CLI (and fetchCountyCadPropertyRoll generally) uses carried NO integrity gate, unlike landUseJoinKey's blockedFips. For two of six counties this produced material silent fabrication risk if patched blindly.",
+    "method": "Compared the existing (TxGIO-derived) snapshot's baseFacts.situsAddress against the matched cad_property.situs_address, street-segment-tolerant (handles cad_property rows that drop city/zip). Verified first on random TABLESAMPLE draws (500-800 rows/county), then confirmed on full-population dry-runs after the fix landed.",
+    "fullPopulationResults": {
+      "48209_hays": { "matched": 134606, "disagree": 37473, "disagreeRate": "27.8%", "note": "examples were unrelated properties in different cities (Kyle vs Buda vs San Marcos vs Austin)" },
+      "48453_travis": { "matched": 492848, "disagree": 14403, "disagreeRate": "2.9%", "note": "not previously documented anywhere as a collision county; at Travis's scale this is 14,403 real parcels" },
+      "48021_bastrop": { "disagree": 0, "note": "0/513 on 800-row TABLESAMPLE; 0 on full run" },
+      "48055_caldwell": { "disagree": 212, "matched": 48382, "disagreeRate": "0.44%", "note": "small but real; TABLESAMPLE (n=246) missed it entirely, full population run caught it" },
+      "48309_mclennan": { "disagree": 0, "matched": 114255, "disagreeRate": "0.0%" },
+      "48491_williamson": { "matched": 319480, "disagree": 0, "disagreeRate": "0.0%", "note": "319,466 agree + 14 inconclusive = 319,480 matched exactly; full-population run confirms the TABLESAMPLE result" }
+    },
+    "reconciliationOpenQuestion": "joinNormalize.ts documents Hays owner-match rate two ways in the same file: ~0.013% (10/78k, line 29) and ~1.1% (line 69) — internally inconsistent with each other, and both far below my street-address-based 54.8%-72.2% true-match reading (varies by sample method). Not reconciled; recorded as an open question per doc-repo-26's instruction rather than picking one number. Possible explanations neither confirmed nor ruled out: owner-name matching under-counts real matches (trusts/LLCs/formatting drift) vs. situs-address matching over-counts (shared/generic addresses) vs. the underlying data changed since the owner-match figure was measured.",
+    "remedyBuilt": {
+      "what": "corroborateCadPropertyMatchBySitus (cadRollValue.ts) — three-way verdict agree/disagree/inconclusive, never collapsed. Wired into nodeFacetPatchCadRollFromCadPropertyCli.ts: a propId match promotes to a real cadRoll value only on agree or inconclusive; a proven disagree writes honest absence, never a fabricated value.",
+      "filesChanged": [
+        "artifacts/api-server/src/lib/cadRollValue.ts (new export corroborateCadPropertyMatchBySitus + SitusCorroboration type)",
+        "artifacts/api-server/src/lib/joinIntegrityGate.ts (PropIdCadPropertyEntry + fetchCountyCadPropertyRoll now carry situsAddress)",
+        "artifacts/api-server/src/nodeFacetPatchCadRollFromCadPropertyCli.ts (wired the check; output JSON now reports situsAgree/situsInconclusive/situsDisagree alongside the existing counts)"
+      ],
+      "verifiedBy": "Re-ran dry-run for all six counties after the fix; confirmed marketPresent == situsAgree + situsInconclusive exactly for every county (mechanical proof the gate is doing what it claims, not just producing plausible-looking numbers)."
+    },
+    "routedTo": [
+      "doc-repo-26 (full finding + remedy, approved before implementation)",
+      "cente-2f / CTX-F (rail names + check + situs finding; CTX-F determined the check belongs in the patch's write path / bake fold-in, not its pre-bake gate, since a pre-bake check cannot see a bake that is about to re-null the field regardless — agreed)",
+      "cente-ae / CTX-G (Williamson land-use gate staleness — see below; not acted on, routed only)"
+    ]
+  },
+  "williamsonLandUseGateFinding": {
+    "claim": "Williamson (48491) sits in LANDUSE_JOIN_DISABLED_FIPS_SEED on a documented R-account/CAD-numbering collision. joinNormalize.ts's own header states the R-prefix strip that caused the collision is RETIRED; current normalizeForJoin/normalizeCadPropId never strip a non-numeric prefix.",
+    "liveVerification": "800-row TABLESAMPLE: 644 propId-matched, 0 situs disagreements (0.0%). Consistent with the four other clean counties, not with a live collision.",
+    "disposition": "NOT acted on — routed to CTX-G (ledger owner) per doc-repo-26. Do not touch the gate (explicit instruction). CTX-G independently corroborated with a related finding: Williamson only 46.9% instantiated in parcel_record (282,570/602,050). doc-repo-26 has since also routed a third Williamson finding from CTX-D (34,811 R-prefix parcels with real geometry but null Tier-1 envelope) and asked CTX-C to investigate whether one upstream mechanism explains all three — queued as post-CP1 work, not started yet.",
+    "doNotTouch": ["LANDUSE_JOIN_DISABLED_FIPS_SEED / landUseJoinKey", "nodeFacetBakeTier1Cli.ts's Z7 envelope writer"],
+    "rootCauseInvestigation": {
+      "status": "in progress, handed back to doc-repo-26/CTX-A/CTX-D — not concluded",
+      "supersededHypothesis": "Initial framing ('two disjoint cad_property ingests under different declared tax_years, DECLARED_CAD_VINTAGES points at the wrong one') is TRUE as a description of cad_property's own structure (verified: tax_year=2025 stratmap-roll rows are 100% R-prefixed, tax_year=2026 cad-export rows are 100% numeric) but was WRONGLY presented as the mechanism behind place_layer_snapshots's R-vs-numeric node split. Retracted after row-level testing.",
+      "correctedFinding": "Both an R-prefixed and a numeric-id sample node were written by the CONFORMANT bake (nodeFacetBakeTier1ConformantCli.ts / lib/nodeFacetBakeTier1Conformant.ts, parcelSource='conformant-v1-cad-parcel-roll'), which reads cad-parcel-roll ATOMS from hauska_mcp (a different database, CTX-A's ingest domain) and cross-walks to txgio_parcel geometry via situs-address, not propId. Colocation test: 500-row random sample of R-prefixed nodes (excluding a 0.00000 coordinate sentinel), checked for a numeric-id node sharing the exact same rounded lat/lng (5-decimal, ~1m) — 448/500 (89.6%) colocated. Conclusion: the R-prefixed and numeric-id populations are mostly the SAME physical parcels represented under two valid-but-different identity conventions (TxGIO/CAD's public 'R-account' display id vs CAD's separate internal numeric account number — both real, per joinNormalize.ts's own documented duality), not two disjoint halves of the county. 602,050 total Tier-1 nodes for Williamson is very likely inflated by this duplication, not the true unique parcel count.",
+      "followUpTestsCompleted": {
+        "reverseColocation": "500/500 (100%) numeric nodes have an R-twin at the same rounded coordinates, vs 448/500 (89.6%) the other direction. Asymmetric: R-account is the complete/primary convention (matches all current live txgio_parcel geometry, which is 100% R-format); numeric is a secondary cad-parcel-roll-atom-crosswalk-derived subset covering ~90% of parcels, not all.",
+        "factAgreementOnColocatedPairs": "359 colocated R/numeric pairs compared on zoning.district, baseFacts.landUse.code, baseFacts.acreage.value. Zero disagreements on any of the three, every pair. Duplication is redundant storage of identical facts, not a correctness problem — a customer query resolving to either id (when both exist) gets the same data."
+      },
+      "notVerified": "Which node-id format the live SERVING path (PMTiles click-to-resolve / Property Explorer) actually queries by today — this is the one remaining open question and I could not answer it: PMTiles appears to be a GCS-hosted file artifact, not a queryable Postgres table, and tracing it further goes into serving infrastructure outside this lane's scope and outside this database. Handed back to doc-repo-26/CTX-A/CTX-D.",
+      "urgentCoordination": "doc-repo-26 pulled this into an active, time-sensitive question ahead of the rest of the investigation: whether CTX-A's imminent Williamson zoning re-stamp (7 city layers) would reach nodes actually served, given current txgio_parcel is 100% R-prefixed with zero numeric rows while the richest existing zoning data (115,832 of 228,639 zoned nodes) is numeric-id with real city-stamp provenance and R-prefixed nodes have a 0-for-0 track record with that stamping pipeline. Reported the data directly to doc-repo-26 and cente-c1/CTX-A; corrected the framing once the colocation finding landed; did not reach a final verdict on CTX-A's write safety — that decision needs the serving-path answer and belongs to CTX-A/doc-repo-26, not CTX-C."
+    }
+  },
+  "landUseSecondScope": {
+    "method": "Cross-referenced county_facet_coverage ledger (facet=land-use, checked_at 2026-07-21, verified live) against actual current baseFacts.landUse population counted directly from place_layer_snapshots (not trusted from the dispatch's own figures — verified at source).",
+    "perCounty": {
+      "48021_bastrop": { "ledgerVerdict": "pass", "ledgerCoveragePct": 98.01, "ledgerOwnerMatch": 0.9819, "liveLandUsePresent": 15712, "liveTotal": 77799, "livePct": "20.2%", "classification": "partial, not investigated further (not named in dispatch's second-scope list)" },
+      "48055_caldwell": { "ledgerVerdict": "pass", "ledgerCoveragePct": 95.48, "ledgerOwnerMatch": 0.9568, "ledgerSourceVintage": "2026-caldwell-cad-export_june-5-2026 (matches DECLARED_CAD_VINTAGES 2026)", "liveLandUsePresent": 0, "liveTotal": 48649, "livePct": "0.0%", "classification": "STALE — join proven capable of 95.48% coverage at the currently-declared vintage, but the live bake shows 0%. Not a block; a gap nobody re-baked." },
+      "48209_hays": { "ledgerVerdict": "pass", "ledgerCoveragePct": 81.29, "ledgerOwnerMatch": 0.8315, "ledgerSource": "cad-roll-address-join (recovery path, as expected — propId join gate-blocked)", "liveLandUsePresent": 130663, "liveTotal": 173050, "livePct": "75.5%", "classification": "REAL — gate-blocked-but-recovered, working as designed. Live % reasonably tracks ledger capability." },
+      "48309_mclennan": { "ledgerVerdict": "pass", "ledgerCoveragePct": 79.21, "ledgerOwnerMatch": 1.0, "ledgerSourceVintage": "stratmap25-landparcels_48309_mclennan_202503 (matches DECLARED_CAD_VINTAGES 2025)", "liveLandUsePresent": 34, "liveTotal": 114255, "livePct": "0.03%", "classification": "STALE — join proven capable of 79.21% coverage at 100% owner-match reliability, but live bake shows essentially nothing (34 rows). Dispatch's own figure (34) confirmed at source. Not a block; a severely stale gap." },
+      "48453_travis": { "ledgerVerdict": "pass", "ledgerCoveragePct": 46.76, "ledgerOwnerMatch": 0.9265, "ledgerSourceVintage": "2026 preliminary appraisal export supp 0_07072026 (matches DECLARED_CAD_VINTAGES 2026)", "liveLandUsePresent": 0, "liveTotal": 500307, "livePct": "0.0%", "classification": "STALE — join proven capable of 46.76% coverage, live bake shows 0%. Largest absolute gap of the six (500K+ parcels). Not a block; a gap nobody re-baked." },
+      "48491_williamson": { "ledgerVerdict": "pass", "ledgerCoveragePct": 89.14, "ledgerOwnerMatch": 0.889, "ledgerSource": "cad-roll-address-join (recovery path, as expected)", "liveLandUsePresent": 511029, "liveTotal": 602050, "livePct": "84.9%", "classification": "REAL — gate-blocked-but-recovered, working as designed. Live % reasonably tracks ledger capability." }
+    },
+    "twoTaxYearsNote": "McLennan declared 2025, Williamson declared 2026 (DECLARED_CAD_VINTAGES, verified at source) — confirmed as two different reads per the dispatch's instruction, not conflated.",
+    "acceptanceStatus": "Established per county: blocked-and-recovered (Hays, Williamson — real), stale (Caldwell, McLennan, Travis — join proven capable, bake never captured it). Remediating the staleness requires a Tier-1 bake run, which this dispatch explicitly forbids (\"Do not run the Tier-1 or Tier-2 bake\"). Reporting only; not fixed."
+  },
+  "foldIntoBakeSequence": {
+    "built": "nodeFacetBakeTier1WithCadRollCli.ts — spawns the Tier-1 bake CLI then the cad-roll patch CLI for the same county + --dry-run flag, one command, so there is no longer a way to run one half and skip the other. Registered as pnpm script node-facet-bake-tier1-with-cad-roll.",
+    "notExecuted": "Per dispatch Do-Not (\"Do not run the Tier-1 or Tier-2 bake\"), this wrapper has NOT been executed even in --dry-run, since its first step invokes the bake CLI. Verified by code review + tsc type-check only, not by running it. Flagged as an open verification gap.",
+    "onboardingRunbookEdit": "Drafted in artifacts/api-server/CTX-C_onboarding_runbook_patch.md (own repo, not doc_repo) — exact replacement text for factory_onboarding_runbook.md Step Z7, for doc-repo-26 to land since CTX-C does not touch doc_repo.",
+    "hauskaFactoryDependency": "cente-2f/CTX-F reports hauska-factory's own bake sequence (BAKE_CLI_FILES / build-publish-bake-clis.mjs) is pinned to an _LDT_SHA that predates this fold-in and CTX-F is deliberately holding that pin bump pending an unrelated review (loadLedgerBlockedFips widening, buildable-envelope changes, setback-table value changes). So the fold-in exists on legacy-design-tools main (once merged) but will not reach the Factory's automated bake path until that pin question resolves. Not this lane's blocker to clear."
+  },
+  "writePathVerification": {
+    "leaseCheck": "No atoms_writer_lease / write-slot requirement found in either CLI (grepped both files). AGENT_CONTRACT section 3's write-slot law scopes to the ATOMS store (DATABASE_URL / hauska_mcp database); place_layer_snapshots lives in DEPLOYMENT_DATABASE_URL / neondb / txgio_parcel, a different store per OPS-13 topology (confirmed live: DEPLOYMENT_DATABASE_URL secret resolves to host ep-lucky-truth-apodo8hr-pooler.c-7.us-east-1.aws.neon.tech, database neondb, matching factory_onboarding_runbook.md's documented topology).",
+    "concurrencyRisk": "Neither the patch's plain UPDATE nor the bake's INSERT...ON CONFLICT carries a compare-and-swap; a concurrent write on the same rows from a different lane/process would silently lose one side's write. Confirmed with doc-repo-26: nothing serializes this path today (STORE_TOKEN_HELD dead since 2026-09-01); doc-repo-26 is sequencing lanes manually this sprint and confirmed it will not schedule a bake to overlap this patch run."
+  },
+  "sourceDbVerification": {
+    "secret": "DEPLOYMENT_DATABASE_URL via gcloud secrets versions access --project=legacy-design-tools-prod",
+    "hostVerifiedAgainst": "factory_onboarding_runbook.md:387 documented host, matches"
+  },
+  "planForApply": "Pending doc-repo-26 sign-off per their explicit request (\"come back to me before any apply\"). Intent: --apply for all six counties now that the situs gate makes all six safe (including Hays/Travis, which were originally going to be held back). Sample rows before/after per county per the dispatch's write-path warning.",
+  "allSixDryRunSummary": {
+    "note": "All six counties now show the gate producing a mechanically-consistent result (marketPresent == situsAgree + situsInconclusive, exactly, every county). Williamson's cadPropertyRows (319,480) and noCadRow (282,570) numerically match CTX-G's independently-reported parcel_record instantiation numbers (282,570 instantiated / 602,050 total, i.e. 319,480 missing) in a way that looks inverted rather than coincidental — flagged as the first concrete lead for the post-CP1 root-cause investigation, not yet verified as a real set-level relationship (could be coincidental scale, not identity).",
+    "48021_bastrop": "scanned 77799, cadPropertyRows 77799 (100% cad coverage), disagree 0",
+    "48055_caldwell": "scanned 48649, cadPropertyRows 48382 (267 noCadRow), disagree 212",
+    "48209_hays": "scanned 173050, cadPropertyRows 134606 (38444 noCadRow), disagree 37473",
+    "48309_mclennan": "scanned 114255, cadPropertyRows 114255 (100% cad coverage), disagree 0",
+    "48453_travis": "scanned 500307, cadPropertyRows 492848 (7459 noCadRow), disagree 14403",
+    "48491_williamson": "scanned 602050, cadPropertyRows 319480 (282570 noCadRow — large, unexplained, see root-cause thread), disagree 0"
+  },
+  "openBeforeApply": [
+    "doc-repo-26 sign-off on proceeding to --apply (requested; not yet received)",
+    "Williamson root-cause investigation (R-prefix land-use gate + parcel_record 46.9% instantiation + CTX-D's 34,811 null-envelope-despite-geometry parcels + this session's own noCadRow=282,570 number-match) — explicitly deprioritized by doc-repo-26 until after this checkpoint; starting now"
+  ]
+}
