@@ -232,8 +232,8 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   },
   // Taylor (Williamson). Form-based SmartCode "Place Type" system (P2/P2.5/
   // P3/P3M/P4/P5/EC/CS) — no conventional R-1/C-1 districts. `First_Plac`
-  // holds the clean place-type code. SETBACK TABLE OWED (a form-based /
-  // place-type table, if one is codifiable).
+  // holds the clean place-type code. Setback table delivered (WDLL 51,
+  // transcribed 2026-07-23) — taylor-tx.json.
   "taylor-tx": {
     cityKey: "taylor-tx",
     cityName: "Taylor",
@@ -243,10 +243,10 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "First_Plac",
     descriptionField: "First_Plac",
   },
-  // Liberty Hill (Williamson). No setback table yet. Field names are INVERTED:
-  // `SHORT_DESC` holds the clean CODE (AG/C1/C2/C3/SF1/SF2/SF3/MF2/I-1/MH1/
-  // PUD/PARK), `ZONING` holds the long name -> descriptionField. SETBACK TABLE
-  // OWED (liberty-hill-tx.json).
+  // Liberty Hill (Williamson). Field names are INVERTED: `SHORT_DESC` holds
+  // the clean CODE (AG/C1/C2/C3/SF1/SF2/SF3/MF2/I-1/MH1/PUD/PARK), `ZONING`
+  // holds the long name -> descriptionField. Setback table delivered (WDLL
+  // 51, transcribed 2026-07-23) — liberty-hill-tx.json.
   "liberty-hill-tx": {
     cityKey: "liberty-hill-tx",
     cityName: "Liberty Hill",
@@ -350,11 +350,12 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // above), when the map is present ONLY listed values stamp — unmapped
   // raw codes become NULL — so the other 7 districts are listed here too,
   // each as an identity mapping (e.g. "R-1" -> "R-1"), to keep them
-  // stamping rather than silently falling through to NULL. SETBACK TABLE
-  // OWED (elgin-development-code.json is a DRAFT in hauska-engine
-  // packages/adapters/src/local/setbacks/, pending planner row-
-  // verification + operator ratification — not yet ported to this repo's
-  // lib/adapters copy or registered for serve).
+  // stamping rather than silently falling through to NULL. Setback table
+  // ratified by the operator 2026-08-04 (doc_repo
+  // _decisions/2026-08-04_elgin_setback_table_ratified.md) and ported from
+  // hauska-engine's packages/adapters/src/local/setbacks/ copy — registered
+  // here as elgin-development-code.json, routed from this cityKey
+  // (elgin-tx) via isElginCityJurisdiction in lib/adapters's setbacks index.
   "elgin-tx": {
     cityKey: "elgin-tx",
     cityName: "Elgin",
@@ -375,9 +376,12 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       I: "I",
     },
   },
-  // Lockhart (Caldwell). No setback table yet. GIS `ZONING` carries the bare
-  // code (RLD/RMD/RHD/CCB/CHB/CLB/CMB/IH/IL/MH/PDD/PI/AO). First Caldwell-
-  // county zoning layer. SETBACK TABLE OWED (lockhart-tx.json).
+  // Lockhart (Caldwell). GIS `ZONING` carries the bare code (RLD/RMD/RHD/
+  // CCB/CHB/CLB/CMB/IH/IL/MH/PDD/PI/AO). First Caldwell-county zoning layer.
+  // Setback table delivered for RLD/RMD/RHD (Ordinance 2024-18 Appendix II,
+  // transcribed 2026-07-23) — lockhart-tx.json. Commercial/industrial codes
+  // remain a deliberate, disclosed gap per that file's own note (OMITTED
+  // list), not yet owed as a fresh transcription task.
   "lockhart-tx": {
     cityKey: "lockhart-tx",
     cityName: "Lockhart",

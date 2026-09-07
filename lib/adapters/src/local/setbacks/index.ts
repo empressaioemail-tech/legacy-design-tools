@@ -36,6 +36,7 @@ import lockhartTx from "./lockhart-tx.json" with { type: "json" };
 import taylorTx from "./taylor-tx.json" with { type: "json" };
 import bastropCityTx from "./bastrop-city-tx.json" with { type: "json" };
 import bastropDevelopmentCode from "./bastrop-development-code.json" with { type: "json" };
+import elginDevelopmentCode from "./elgin-development-code.json" with { type: "json" };
 import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
@@ -122,6 +123,12 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "bastrop-city-tx": bastropCityTx as SetbackTable,
   // CURRENT City of Bastrop Euclidean setbacks (BDC Sec. 14.02.003 / Ord. 2026-06).
   "bastrop-development-code": bastropDevelopmentCode as SetbackTable,
+  // RATIFIED 2026-08-04 (doc_repo _decisions/2026-08-04_elgin_setback_table_ratified.md).
+  // All 8 Euclidean districts per Elgin Code of Ordinances Ch. 46 Zoning.
+  // Ported from hauska-engine's packages/adapters/src/local/setbacks/ copy,
+  // where it was authored and ratified; ratification never depended on this
+  // repo's own registration landing separately.
+  "elgin-development-code": elginDevelopmentCode as SetbackTable,
   "san-antonio-tx": sanAntonioTx as SetbackTable,
   "utah-unincorporated": utahUnincorporated as SetbackTable,
   "idaho-unincorporated": idahoUnincorporated as SetbackTable,
@@ -180,6 +187,16 @@ function isBastropCityJurisdiction(normalizedKey: string): boolean {
 }
 
 /**
+ * The Elgin GIS zoning layer's cityKey (elgin-tx, zoning-layers.ts) is a
+ * separate key from the ratified table's own jurisdictionKey
+ * (elgin-development-code) -- same two-key shape as Bastrop's GIS cityKey
+ * vs. its BDC table key. Route the GIS key to the table.
+ */
+function isElginCityJurisdiction(normalizedKey: string): boolean {
+  return normalizedKey === "elgin-tx" || normalizedKey === "elgin-development-code";
+}
+
+/**
  * Returns the setback table for a jurisdiction key, or null if no table
  * exists. The briefing engine should treat null as "no codified
  * dimensional rules available — fall back to base IBC/IRC".
@@ -224,6 +241,10 @@ export function getSetbackTableForZoning(
     }
 
     return SETBACK_TABLES["bastrop-development-code"] ?? null;
+  }
+
+  if (isElginCityJurisdiction(normalized)) {
+    return SETBACK_TABLES["elgin-development-code"] ?? null;
   }
 
   return SETBACK_TABLES[normalized] ?? null;
