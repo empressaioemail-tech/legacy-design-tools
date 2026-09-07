@@ -155,6 +155,33 @@
  * an anomaly). No gate verdict has yet been computed for this rail. Never
  * SELECT bake / place_layer_snapshots / CAD / GIS for this field.
  *
+ * SETBACKS IS A ROOT SIBLING, PARCEL_RECORD-ONLY (PE/MCP-vs-facets parity
+ * audit, 2026-09-07, finding D6). `setbacksFact` is read from parcel_record
+ * via loadSetbacksFactForServe -- the SAME loader propertyExplorer.ts's
+ * research/brief path already uses. Before this fix, this route's baked
+ * `facets.envelope` was UNCONDITIONALLY null (stripZombieEnvelopeFromFacets,
+ * anti-zombie WDLL 3.7) and no live setbacks fact was ever fetched, so this
+ * route reported NO setback data for ANY parcel, in ANY county, ever, while
+ * the brief/MCP path already had real frontFt/sideFt/rearFt/cornerFt figures
+ * for gate-passing counties -- the single largest capability gap the audit
+ * found. `setbacksFact` is additive: it does NOT resurrect `facets.envelope`
+ * (that stays permanently null by design), it is a new sibling field, same
+ * pattern as utilityServiceFact/overlayDistrictsFact/etc. above. No gate
+ * verdict has yet been computed for this rail. Never SELECT bake /
+ * place_layer_snapshots / CAD / GIS for this field.
+ *
+ * ZONING LEDGER PARITY (PE/MCP-vs-facets parity audit, 2026-09-07, finding
+ * D5). `facets.zoning` above (attachVerdictLayersToFacets) now also takes a
+ * `parcelRecordZoningFact` read via loadZoningFactForServe -- the SAME
+ * loader and the SAME "record wins unconditionally over the baked stamp
+ * whenever it has genuinely earned one" rule
+ * r1BriefCompose.ts's composeZoningBriefSectionFromParcelRecord already
+ * applies for the brief path. Before this fix the baked stamp always won
+ * here when present and this route never consulted the live ledger at all,
+ * so the two surfaces could report different zoning districts for the same
+ * parcel. See structuralFactToFacetsWire.ts's own module doc for the exact
+ * precedence logic.
+ *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
  * tightened 2026-08-24; WIDENED 2026-09-05 to include Property Unlock).
  * `ownerFact` is read from owner-fact atoms. Writer keys
@@ -213,6 +240,8 @@ import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover"
 import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
+import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
+import { loadSetbacksFactForServe } from "../lib/setbacksFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -717,6 +746,8 @@ brokerageNodeFacetsRouter.get(
     let schoolDistrictFact;
     let maxImperviousCoverPctFact;
     let valueHistoryFact;
+    let setbacksFact;
+    let parcelRecordZoningFact;
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
@@ -737,6 +768,8 @@ brokerageNodeFacetsRouter.get(
         schoolDistrictFact,
         maxImperviousCoverPctFact,
         valueHistoryFact,
+        setbacksFact,
+        parcelRecordZoningFact,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -770,6 +803,8 @@ brokerageNodeFacetsRouter.get(
         loadSchoolDistrictFactForServe(parcelNodeId),
         loadMaxImperviousCoverPctFactForServe(parcelNodeId),
         loadValueHistoryFactForServe(parcelNodeId),
+        loadSetbacksFactForServe(parcelNodeId),
+        loadZoningFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -829,6 +864,7 @@ brokerageNodeFacetsRouter.get(
             structuralFact,
             zoningVerdict,
             cadRollOverlay.livingAreaSqft,
+            parcelRecordZoningFact,
           ),
           cadRollOverlay,
         ),
@@ -908,6 +944,11 @@ brokerageNodeFacetsRouter.get(
       // picked lead. Resolves to a typed not-cut-over refusal until a gate
       // evaluation for this rail lands.
       valueHistoryFact,
+      // parcel_record-only, no legacy path (see module doc, D6). Additive --
+      // does not resurrect facets.envelope, which stays permanently null.
+      // Resolves to a typed not-cut-over refusal until a gate evaluation for
+      // this rail lands.
+      setbacksFact,
       }),
     );
   },

@@ -79,6 +79,31 @@ import {
   resetOwnerFactAtomQueryableForTests,
   setOwnerFactAtomQueryableForTests,
 } from "../lib/ownerFactRead";
+import { memoryParcelGateVerdicts } from "../lib/parcelGateVerdictRead";
+import {
+  memoryParcelRecordStore,
+  resetParcelRecordQueryableForTests,
+  setParcelRecordQueryableForTests,
+} from "../lib/parcelRecordCellRead";
+import {
+  SETBACK_FRONT_FT_RAIL_KEY,
+  SETBACK_SIDE_FT_RAIL_KEY,
+  SETBACK_REAR_FT_RAIL_KEY,
+  SETBACK_CORNER_FT_RAIL_KEY,
+} from "../lib/setbacksFactFromParcelRecord";
+import {
+  resetSetbacksVerdictStoreForTests,
+  setSetbacksVerdictStoreForTests,
+} from "../lib/setbacksFactServeCutover";
+import {
+  ZONING_DISTRICT_RAIL_KEY,
+  ZONING_JURISDICTION_KEY_RAIL_KEY,
+  ZONING_PROVENANCE_RAIL_KEY,
+} from "../lib/zoningFactFromParcelRecord";
+import {
+  resetZoningVerdictStoreForTests,
+  setZoningVerdictStoreForTests,
+} from "../lib/zoningFactServeCutover";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
@@ -2881,3 +2906,192 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     });
   });
 });
+
+// -----------------------------------------------------------------------
+// PE/MCP-vs-facets parity audit (2026-09-07). D6: this route's baked
+// `facets.envelope` was UNCONDITIONALLY null and no live setbacks fact was
+// ever fetched, so it reported NO setback data for ANY parcel, ever, while
+// the research/brief path already had real numbers. D5: the baked zoning
+// stamp always won here when present, and this route never consulted the
+// live parcel_record ledger at all, so a live, gate-passing ledger
+// determination could silently disagree with a stale baked stamp forever.
+// Both are fixed by wiring this route onto the SAME loadSetbacksFactForServe
+// / loadZoningFactForServe loaders the research/brief path already uses
+// (setbacksFactServeCutover.ts / zoningFactServeCutover.ts), never a second
+// implementation.
+// -----------------------------------------------------------------------
+
+describe.skipIf(!hasDb)(
+  "setbacksFact wiring + zoning ledger precedence (PE/MCP-vs-facets parity audit, 2026-09-07)",
+  () => {
+    const LEDGER_NODE_ID = "48021:103387";
+    const ledgerBakedPayload = {
+      facetSchemaVersion: "node-facets-tier1-v1",
+      tier: 1,
+      parcelNodeId: LEDGER_NODE_ID,
+      countyFips: "48021",
+      countyName: "Bastrop",
+      baseFacts: {
+        apn: "103387",
+        situsAddress: "1 TEST LEDGER RD",
+        situsCity: "BASTROP",
+        situsState: "TX",
+        landUse: null,
+        acreage: { value: 1.0, sqft: 43560, method: "shoelace-wgs84" },
+      },
+      // A STALE baked stamp -- the fix must NOT serve this once a live,
+      // gate-passing parcel_record ledger fact exists for this parcel.
+      zoning: {
+        district: "SF-STALE-BAKE",
+        jurisdictionKey: "bastrop_city_tx_legacy",
+        provenance: null,
+      },
+      envelope: { status: "declined", confidence: 0, provisional: true },
+      facetCoverage: {
+        baseFacts: true,
+        landUse: false,
+        acreage: true,
+        zoning: true,
+        envelope: false,
+      },
+      provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+      bakedAt: "2026-07-20T22:34:46.946Z",
+    };
+
+    beforeEach(async () => {
+      if (!ctx.schema) return;
+      await dbMod.db.insert(placeLayerSnapshots).values([
+        {
+          placeKey: placeKeyForNode(LEDGER_NODE_ID),
+          adapterKey: TIER1_ADAPTER_KEY,
+          latRounded: "30.11000",
+          lngRounded: "-97.32000",
+          payloadJson: ledgerBakedPayload,
+          contentHash: "test-hash-ledger-node",
+        },
+      ]);
+    });
+
+    afterEach(async () => {
+      resetZoningVerdictStoreForTests();
+      resetSetbacksVerdictStoreForTests();
+      resetParcelRecordQueryableForTests();
+      if (!ctx.schema) return;
+      await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
+    });
+
+    it("D6: a gate-passing county now serves REAL setback numbers this route never showed before", async () => {
+      setSetbacksVerdictStoreForTests(
+        memoryParcelGateVerdicts([
+          {
+            countyFips: "48021",
+            railKey: SETBACK_FRONT_FT_RAIL_KEY,
+            verdict: "pass",
+            unaccountedCount: 0,
+            evaluatedAt: "2026-09-07T00:00:00Z",
+            runId: "test",
+          },
+        ]),
+      );
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordStore({
+          cells: [
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_FRONT_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 25, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_SIDE_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 7, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_REAR_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 20, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_CORNER_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 15, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+          ],
+        }),
+      );
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.setbacksFact.state).toBe("present");
+      expect(res.body.setbacksFact.frontFt).toBe(25);
+      expect(res.body.setbacksFact.sideFt).toBe(7);
+      expect(res.body.setbacksFact.rearFt).toBe(20);
+      expect(res.body.setbacksFact.cornerFt).toBe(15);
+      // Additive, not a resurrection: facets.envelope stays permanently null.
+      expect(res.body.facets.envelope).toBeNull();
+    });
+
+    it("D6: an unslated county's setbacksFact is null and facets.envelope stays the pre-existing permanent null (no regression)", async () => {
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.setbacksFact).toBeNull();
+      expect(res.body.facets.envelope).toBeNull();
+    });
+
+    it("D5: a gate-passing live zoning ledger fact overrides the STALE baked stamp -- the exact cross-surface disagreement the audit found", async () => {
+      setZoningVerdictStoreForTests(
+        memoryParcelGateVerdicts([
+          {
+            countyFips: "48021",
+            railKey: ZONING_DISTRICT_RAIL_KEY,
+            verdict: "pass",
+            unaccountedCount: 0,
+            evaluatedAt: "2026-09-07T00:00:00Z",
+            runId: "test",
+          },
+        ]),
+      );
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordStore({
+          cells: [
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: ZONING_DISTRICT_RAIL_KEY,
+              cellState: { kind: "value", value: "SF-1", source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: ZONING_JURISDICTION_KEY_RAIL_KEY,
+              cellState: { kind: "value", value: "bastrop_city_tx", source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: ZONING_PROVENANCE_RAIL_KEY,
+              cellState: { kind: "value", value: "https://gis.example.test/zoning/bastrop", source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+          ],
+        }),
+      );
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      // The live ledger wins -- NOT the stale baked "SF-STALE-BAKE" stamp.
+      expect(res.body.facets.zoning.district).toBe("SF-1");
+      expect(res.body.facets.zoning.jurisdictionKey).toBe("bastrop_city_tx");
+      expect(res.body.facets.zoning.district).not.toBe("SF-STALE-BAKE");
+      expect(res.body.facets.facetCoverage.zoning).toBe(true);
+    });
+
+    it("D5: with no gate-passing ledger fact, the baked stamp still wins (unchanged, no regression)", async () => {
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.facets.zoning.district).toBe("SF-STALE-BAKE");
+    });
+  },
+);
