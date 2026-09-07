@@ -1,0 +1,1271 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "belton-tx",
+  "jurisdictionDisplayName": "City of Belton, TX",
+  "note": "Codified from the City of Belton Zoning Ordinance No. 22790-1 (originally adopted 1990-02-20, repealing prior Ordinance 12975-1 of 1975-12-09), text current through Ordinance 2025-47 (adopted 2025-07-22), PDF republished by the City on 2026-08-11 as \"Zoning Ordinance with Cover and Appendix Updated 8-11-26.pdf\" -- the current, live document at the cited URL as of 2026-09-06. This is a classic enumerated Euclidean ordinance (Sections 8-31 define one base district each with its own numbered AREA REGULATIONS subsection), NOT a form-based code, so front/side/rear/corner numbers are direct district-specific citations rather than build-to-line ranges. DISAMBIGUATION: belton.org and the domain-adjacent \"City of Belton\" planning pages surfaced by generic web search are Belton, MISSOURI (Cass County, MO; Municode client library.municode.com/mo/belton) -- a same-name, different-state city. This table is sourced exclusively from beltontexas.gov / Bell County TX primary documents; no Missouri content was used. Belton, TX's Code of Ordinances is split across two properties: Municode (library.municode.com/tx/belton, a JavaScript-shell SPA that returns no server-rendered ordinance text to a non-browser fetch -- confirmed empty on direct fetch) and an eLaws.us mirror (belton-tx.elaws.us/code/coor_ch17), which DOES render but covers only Chapter 17 Article II (the Planning and Zoning Commission's establishment, Sec. 17-16 through 17-19) -- the substantive Zoning Ordinance with its district-by-district dimensional standards is NOT codified into either the Municode or eLaws copies of the base Code of Ordinances; it is maintained by the City as its own standalone document, linked from the beltontexas.gov Planning Department page and hosted on the City's Revize CMS at the citation_url above. There is no separate Municode \"unified_development_code\" product for Belton, TX (unlike Belton, MO, which does have one at the analogous URL -- verified this does NOT exist for the TX city via search, not assumed from an HTTP 200 on the SPA route, which returns 200 for any client-routed path regardless of whether the underlying product exists). GIS zoning codes verified live against the City's own ArcGIS FeatureServer (services5.arcgis.com/FkDUU6xkZJTbBa9X/arcgis/rest/services/Planning/FeatureServer/6, field Zoning_Abbr, queried 2026-09-06) match every base-district code coded here (A, RE, SF-1, SF-2, SF-3, PH, 2F, MF, MH, O-1, O-2, UC-1, UC-2, NS, R, CH, C-1, C-2, LI, HI, RD) except IP (Industrial Park, Section 26), which is defined in the ordinance but did not appear in the live GIS distinct-value sample -- included anyway since the ordinance text is real and a future parcel could carry it. OMITTED: CD/CBD (Section 22's own text says \"This section has been replaced by the adopted Imagine Belton Standards\" -- a separate, not-yet-located form-based-code document, analogous to how the existing Taylor and Hutto tables exclude their form-based/transect chapters); the live GIS layer also carries codes MS (\"Main Street\"), U (\"Uptown\"), T (\"Transition\"), and N (\"Neighborhood\") that do not appear anywhere in this Zoning Ordinance's district list (Sections 8-31) and are inferred -- NOT confirmed -- to be transect/place-type zones defined in that same replaced-by-Imagine-Belton-Standards document; no numeric standards are asserted for CD, MS, U, T, or N here. Also omitted: HP Historic Preservation Overlay (Section 29), CR Residential Conservation and Revitalization Overlay (Section 30), and PD Planned Development (Section 32) -- these are overlay/prefix districts layered on a base zoning district rather than independent dimensional standards, and the live GIS data shows the overwhelming majority of Belton's actual PD-prefixed parcels carry unique per-ordinance conditions (e.g. \"PD-C1 Wedding Chapel\", \"PD-SF-1-SUP\") that cannot be reduced to one table row without reading each individual PD ordinance, which was out of scope for this pass. SUP (Specific Use Permit, Section 33) is a permit overlay, not a district, and is likewise omitted. Sign regulations (Section 38) are bound into the same PDF as \"Section 38\" per the Planning Department page's own description (\"Includes Sign Ordinance as Section 38\") but are a distinct regulatory subject and are not reflected in this setback table. MODELING NOTES ACROSS ALL 22 CODIFIED DISTRICTS: (1) Height is stated in STORIES rather than feet for A, RE, SF-1, SF-2, SF-3, PH, 2F, MF, C-1, C-2, and RD; max_height_ft is a non-binding 100 sentinel for all of these, matching the established repo convention (see taylor-tx.json, hutto-tx.json) of never converting a stories-only standard into a fabricated feet number. MH (Section 16) has NO height regulations subsection at all -- height is entirely unaddressed for that district. CH, IP, O-2, and UC-1 state height as unlimited (\"None\") with no stories figure either; UC-2 uses an unlimited-height-with-scaling-setback formula. Only NS (20 ft), R (40 ft), LI (35 ft), and HI (60 ft) state a true numeric height maximum in feet, and those four are coded as real, human-verified values. (2) No district in this ordinance defines a separate \"impervious cover\" percentage anywhere -- confirmed by a full-text search of the entire 10,134-line extracted document for the string \"impervious\", which returns zero hits used as a zoning standard; max_impervious_pct is a not_specified 100 sentinel for all 22 districts. Only \"lot coverage\" (building footprint) is regulated, and only for some districts. (3) Where the ordinance states a base value plus a conditional exception (e.g. O-1's rear yard being 0 generally but 10 ft when adjoining a residential district; HI's side/rear yard being 0 generally but 60 ft near residential districts or where wall openings face the line), the GENERAL/BASE case is codified as the district's number and the conditional exception is preserved verbatim in that field's provenance quote, matching the precedent set by hutto-tx.json's treatment of its B-1/B-2 residential-adjacency exceptions. (4) PH (Patio Home, Section 13) is a genuine zero-lot-line district with an asymmetric 8-inch/10-foot side yard rather than a single flat side setback; side_ft is coded 0 with not_specified:true and a quote carrying the full real standard -- treat this as flagged-for-review rather than a clean number. (5) O-2's (Section 18) side-yard clause is internally ambiguous in the source PDF between a \"None (interior)\" reading and a \"twenty-five feet (25') adjacent side property lines\" reading that appear in the same sentence without a clear delimiter; side_ft is coded 0 (interior/base) at reduced confidence (0.55, asserted) and the ambiguity is called out explicitly rather than silently resolved -- this is the single lowest-confidence numeric value in the table and should be confirmed against the ordinance before being treated as final. (6) Two apparent drafting typos in the source ordinance are preserved verbatim in citation quotes rather than silently corrected: C-2's lot-coverage subsection reads \"Fifty permit (50%)\" (Section 25.4.C) and IP's lot-coverage subsection is labeled \"Minimum Lot Coverage\" (Section 26.4.C) where every other district uses \"Maximum Lot Coverage\" -- both are coded at the evident intended value (50% and not_specified respectively) with the typo flagged.",
+  "districts": [
+    {
+      "district_name": "A Agricultural District",
+      "front_ft": 50,
+      "rear_ft": 25,
+      "side_ft": 20,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "8.4",
+          "quote": "Minimum Front Yard - Fifty feet (50')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "8.4",
+          "quote": "Minimum Rear Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "8.4",
+          "quote": "Minimum Side Yard - Twenty feet (20'); Twenty-five feet (25') on corner adjacent to street (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "8.4",
+          "quote": "Minimum Side Yard - Twenty feet (20'); Twenty-five feet (25') on corner adjacent to street (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "8.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 8.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "8.4",
+          "quote": "C. Lot Coverage: N/A (Section 8.4) -- the ordinance states no numeric cap for this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "8.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RE Residential Estate District",
+      "front_ft": 40,
+      "rear_ft": 20,
+      "side_ft": 15,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "9.4",
+          "quote": "Minimum Front Yard - Forty Feet (40')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "9.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "9.4",
+          "quote": "Minimum Side Yard - Fifteen feet (15'); twenty-five feet (25') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "9.4",
+          "quote": "Minimum Side Yard - Fifteen feet (15'); twenty-five feet (25') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "9.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 9.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "9.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%) by main buildings; sixty percent (60%) including accessory buildings, driveways and parking areas. The 40% main-building figure is codified; the 60% all-impervious-structure figure is a distinct, narrower metric (excludes patios/walkways) and is not coded to max_impervious_pct.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "9.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF-1 Single Family Residential District-1",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "10.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "10.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "10.4",
+          "quote": "Minimum Side Yard - Seven feet (7'); fifteen feet (15') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "10.4",
+          "quote": "Minimum Side Yard - Seven feet (7'); fifteen feet (15') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "10.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 10.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "10.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%) by main buildings",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "10.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF-2 Single Family Residential District-2",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 6,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "11.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "11.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "11.4",
+          "quote": "Minimum Side Yard - Six feet (6'); fifteen feet (15') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "11.4",
+          "quote": "Minimum Side Yard - Six feet (6'); fifteen feet (15') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "11.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 11.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "11.4",
+          "quote": "C. Maximum Lot Coverage: Forty-five percent (45%) by main buildings and accessory buildings",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "11.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF-3 Single Family Residential District-3",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "12.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "12.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "12.4",
+          "quote": "Minimum Side Yard - Five feet (5'); fifteen feet (15') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "12.4",
+          "quote": "Minimum Side Yard - Five feet (5'); fifteen feet (15') from street right-of-way (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "12.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 12.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "12.4",
+          "quote": "C. Maximum Lot Coverage: Forty-five percent (45%) by main buildings and accessory buildings",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "12.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "PH Patio Home District",
+      "front_ft": 25,
+      "rear_ft": 12,
+      "side_ft": 0,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "13.4",
+          "quote": "Minimum Front Yard: Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "13.4",
+          "quote": "Minimum Rear Yard: Twelve feet (12'); twenty feet (20') for structure accommodating required off-street parking if provided access from a dedicated or private alley (also see Section 36.4)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "13.4",
+          "quote": "Side Yard Setback: Side setbacks are eight inches (8\") on one side and ten feet (10') on the opposite side. The dwelling shall be no closer than ten feet, eight inches (10'8\") between the face of exterior walls of neighboring dwelling units. This is a genuine zero-lot-line/asymmetric standard, not a single flat side setback; 0 is coded for the \"zero\" side, which is the district's defining feature, but the real rule requires BOTH the 8-inch minimum on one side AND the 10-foot minimum on the opposite side plus the 10'8\" building-separation floor -- do not treat 0 as the only applicable number.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "13.4",
+          "quote": "f. Minimum Side Yard Setback Adjacent to Street Right-of-Way - Fifteen feet (15')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "13.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 13.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "13.4",
+          "quote": "C. Maximum Lot Coverage: Sixty percent (60%) total, including main and accessory buildings",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "13.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "2F Two Family Residential District (Duplex)",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 8,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "14.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "14.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "14.4",
+          "quote": "Minimum Side Yard - Eight feet (8'); fifteen feet (15') on corner lot adjacent to street (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "14.4",
+          "quote": "Minimum Side Yard - Eight feet (8'); fifteen feet (15') on corner lot adjacent to street (also see Section 36.4)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "14.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 14.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "14.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%) by main buildings and accessory buildings",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "14.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF Multiple Family District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 8,
+      "side_corner_ft": 15,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "15.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "15.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20'); sixty feet (60') when the building is in excess of one story and adjacent to a Single Family Zoning District. 20 ft is the base; the 60 ft figure is a real conditional exception near SF districts, not captured by a single number.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "15.4",
+          "quote": "Minimum Side Yard - Eight feet (8'); ten feet (10') between buildings without openings (windows); fifteen feet (15') between buildings with openings and when adjacent to side street; sixty feet (60') when building is in excess of one story in height and adjacent to Single Family Zoning District (also see Section 36.4). 8 ft is coded as the flat base minimum; the building-separation and SF-adjacency conditions are real additional requirements layered on top, not captured by a single number.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "15.4",
+          "quote": "Minimum Side Yard - ... fifteen feet (15') between buildings with openings and when adjacent to side street ...",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "15.3",
+          "quote": "15.3 HEIGHT REGULATIONS: Maximum Height - three (3) stories. Height is stated in stories, not feet; 100 is a non-binding sentinel.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "15.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%) total, including main and accessory buildings",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "15.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MH Mobile Home District",
+      "front_ft": 30,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 5,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "16.3",
+          "quote": "Minimum Front Yard - Thirty feet (30') from a dedicated street; fifteen feet (15') from any private street or drive. 30 ft (dedicated-street case) is coded as the base.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "16.3",
+          "quote": "Minimum Rear Yard - Ten feet (10'); twenty feet (20') from any zoning district line",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "16.3",
+          "quote": "Minimum Side Yard - Five feet (5'); twenty feet (20') between units; twenty feet (20') from any zoning district line (also see Section 36.4). 5 ft is the base per-space minimum; the 20 ft figures are real additional conditions (between units / at a zoning district line), not captured by a single number.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "16.3",
+          "quote": "Section 16.3 states no separate corner-lot / street-side-adjacent side yard for MH spaces (only a general 20 ft \"from any zoning district line\" condition, which is not corner-lot-specific); mirrors the base side yard of 5 ft.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "16",
+          "quote": "Section 16 (MH) contains no HEIGHT REGULATIONS subsection at all -- the ordinance jumps from 16.2 PERMITTED USES directly to 16.3 AREA REGULATIONS. No height standard, in feet or stories, is stated for this district anywhere in the ordinance.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "16.3",
+          "quote": "D. Maximum Lot Coverage: N/A (Section 16.3) -- the ordinance states no numeric cap for this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "16.3",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "O-1 Office District-1",
+      "front_ft": 25,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "17.4",
+          "quote": "Minimum Front Yard: Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "17.4",
+          "quote": "Minimum Rear Yard: No rear yard shall be required except when it adjoins a residential zoning district, then a rear yard of ten feet (10') is required. 0 is the general-case base; 10 ft is a real conditional exception when adjoining a residential district.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "17.4",
+          "quote": "Minimum Side Yard: Exterior, twenty feet (20'); interior, none. \"Interior\" (non-street-adjacent) side yard is coded as 0.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "17.4",
+          "quote": "Minimum Side Yard: Exterior, twenty feet (20'); interior, none. \"Exterior\" (street-adjacent / corner) side yard is coded as 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "17.3",
+          "quote": "17.3 HEIGHT REGULATIONS: Maximum Heights - One (1) story; two and one-half (2 1/2) stories if located more than sixty feet (60') from any property zoned or used for single-family residential. Height is stated in stories, not feet; 100 is a non-binding sentinel.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "17.4",
+          "quote": "Section 17.4/17.5 state a Maximum Floor Area Ratio of 0.5:1 and a 10,000 sq ft floor-area cap, but no lot-coverage PERCENTAGE for this district -- not specified.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "17.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "O-2 Office District 2",
+      "front_ft": 50,
+      "rear_ft": 20,
+      "side_ft": 0,
+      "side_corner_ft": 50,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "18.4",
+          "quote": "Minimum Front Yard - Fifty feet (50')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "18.4",
+          "quote": "Minimum Rear Yard - Ten feet (10') from any alley line; twenty feet (20') where no alley line, lot line or easement line abuts the rear yard. 20 ft (the no-alley / general case) is coded as base; 10 ft applies only where an alley abuts.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "18.4",
+          "quote": "Minimum Side Yard - None (interior); Twenty-five feet (25') adjacent side property lines; fifty feet (50') on corner lot. The ordinance text is internally ambiguous between the \"None (interior)\" clause and the \"25 ft adjacent side property lines\" clause -- 0 (interior/base) is coded here, but the 25 ft clause is NOT resolved and should be confirmed against a clean copy of Section 18.4 before this value is treated as final.",
+          "confidence": 0.55,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "18.4",
+          "quote": "Minimum Side Yard - ... fifty feet (50') on corner lot",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "18.3",
+          "quote": "18.3 HEIGHT REGULATIONS: Maximum height: None (except when adjacent to residential uses per Section 18.4, which imposes a stepback -- additional setback distance scaling with building height above two stories -- rather than a flat height cap). No numeric height maximum, in feet or stories, applies to this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "18.4",
+          "quote": "C. Maximum Lot Coverage: Fifty percent (50%), including a maximum of thirty percent (30%) for accessory buildings and structures",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "18.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "UC-1 University Campus-1",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 10,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "19.4A",
+          "quote": "Minimum Front Yard - Zero feet (0').",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "19.4A",
+          "quote": "Minimum Rear Yard - Zero feet (0'), except ten feet (10') if adjacent to non-university owned structures or a street.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "19.4A",
+          "quote": "Minimum Side Yard - Zero feet (0'), except ten feet (10') if adjacent to non-university owned structures or a street.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "19.4A",
+          "quote": "Minimum Side Yard - Zero feet (0'), except ten feet (10') if adjacent to non-university owned structures or a street.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "19.3A",
+          "quote": "19.3A HEIGHT REGULATIONS: Maximum height: None. No numeric height maximum, in feet or stories, applies to this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "19.4A",
+          "quote": "C. Maximum Lot Coverage - None (Section 19.4A). The ordinance states no numeric cap for this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "19.4A",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "UC-2 University Campus-2",
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 80,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "19.3B",
+          "quote": "B. Building Setbacks: 1. Minimum Front Setback - Twenty-five feet (25').",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "19.3B",
+          "quote": "3. Minimum Rear Setback - Fifteen feet (15')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "19.3B",
+          "quote": "2. Minimum Side Setback - Fifteen feet (15'); twenty feet (20') if adjacent to public street.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "19.3B",
+          "quote": "2. Minimum Side Setback - Fifteen feet (15'); twenty feet (20') if adjacent to public street.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "19.3B",
+          "quote": "19.3B.A Maximum Height: Beginning with a height of three (3) stories (defined as twelve feet [12'] per the City of Belton Zoning Ordinance), for every two feet (2') in height above three (3) stories, Building Setbacks increase by one foot (1'). This is an unlimited-height-with-scaling-setback system, not a flat maximum; 100 is a non-binding sentinel.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "19.3B",
+          "quote": "D. Maximum Lot Coverage - The lesser of (i) Eighty percent (80%) of the buildable acreage, or (ii) in the case of a PD, the percentage coverage required by the base zoning to which a development is most similar. 80% (the general, non-PD case) is coded.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "19.3B",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "NS Neighborhood Service District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 25,
+      "max_height_ft": 20,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20.4",
+          "quote": "Minimum Side Yard - Five feet (5'); twenty-five feet (25') adjacent to a public street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20.4",
+          "quote": "Minimum Side Yard - Five feet (5'); twenty-five feet (25') adjacent to a public street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "20.3",
+          "quote": "20.3 HEIGHT REGULATIONS: Maximum Height - One (1) story or twenty feet (20'); except cooling towers, roof gables, chimneys, vent stacks or mechanical equipment rooms may project, not to exceed six feet (6') beyond maximum building height.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20.4",
+          "quote": "C. Maximum Lot Coverage: Fifty percent (50%)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "20.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R Retail District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "21.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "21.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "21.4",
+          "quote": "Minimum Side Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "21.4",
+          "quote": "Section 21.4 states a single flat Minimum Side Yard of twenty-five feet (25') with no separate corner-lot / street-side-adjacent figure; mirrors the base side yard.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "21.3",
+          "quote": "21.3 HEIGHT REGULATIONS: Maximum Height - Two (2) stories or forty feet (40'); except cooling towers, roof gables, chimneys, vent stacks, or mechanical equipment rooms may project, not to exceed twelve feet (12') beyond maximum building height.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "21.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "21.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "CH Commercial Highway District",
+      "front_ft": 60,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "23.4",
+          "quote": "Minimum Front Yard - Sixty feet (60')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "23.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "23.4",
+          "quote": "Minimum Side Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "23.4",
+          "quote": "Section 23.4 states a single flat Minimum Side Yard of twenty feet (20') with no separate corner-lot / street-side-adjacent figure; mirrors the base side yard.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "23.3",
+          "quote": "23.3 HEIGHT REGULATIONS: 1. None; but the height shall not exceed two (2) stories on any portion of a site within two hundred feet (200') of property zoned or developed as SF or 2F. No flat numeric height maximum, in feet, applies outside that 200 ft buffer.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "23.4",
+          "quote": "C. Maximum Lot Coverage: Fifty percent (50%)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "23.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-1 Commercial District-1",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 25,
+      "side_corner_ft": 30,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "24.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "24.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "24.4",
+          "quote": "Minimum Side Yard - Twenty-five feet (25'); thirty feet (30') adjacent to a street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "24.4",
+          "quote": "Minimum Side Yard - Twenty-five feet (25'); thirty feet (30') adjacent to a street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "24.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 24.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "24.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "24.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-2 Commercial District-2",
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "25.4",
+          "quote": "Minimum Front Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "25.4",
+          "quote": "Minimum Rear Yard - Fifteen feet (15')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "25.4",
+          "quote": "Minimum Side Yard - Fifteen feet (15'); twenty feet (20') adjacent to a street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "25.4",
+          "quote": "Minimum Side Yard - Fifteen feet (15'); twenty feet (20') adjacent to a street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "25.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 25.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "25.4",
+          "quote": "C. Maximum Lot Coverage: Fifty permit (50%) [sic -- source ordinance text reads \"permit\", an apparent drafting typo for \"percent\"; 50% is the coded value].",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "25.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "IP Industrial Park District",
+      "front_ft": 50,
+      "rear_ft": 20,
+      "side_ft": 50,
+      "side_corner_ft": 50,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "26.4",
+          "quote": "Minimum Front Yard - Fifty feet (50')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "26.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "26.4",
+          "quote": "Minimum Side Yard - Fifty feet (50')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "26.4",
+          "quote": "Section 26.4 states a single flat Minimum Side Yard of fifty feet (50') with no separate corner-lot / street-side-adjacent figure; mirrors the base side yard.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "26.3",
+          "quote": "26.3 HEIGHT REGULATIONS: Maximum Height - None. No numeric height maximum, in feet or stories, applies to this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "26.4",
+          "quote": "C. Minimum Lot Coverage: N/A (Section 26.4) [sic -- source ordinance labels this subsection \"Minimum\" Lot Coverage, an apparent drafting error for \"Maximum\"; the ordinance states no numeric cap either way for this district].",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "26.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "LI Light Industrial District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "27.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "27.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "27.4",
+          "quote": "Minimum Side Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "27.4",
+          "quote": "Section 27.4 states a single flat Minimum Side Yard of twenty feet (20') with no separate corner-lot / street-side-adjacent figure; mirrors the base side yard.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "27.3",
+          "quote": "27.3 HEIGHT REGULATIONS: Maximum Height: Thirty-five feet (35'), or two (2) stories.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "27.4",
+          "quote": "C. Maximum Lot Coverage: N/A (Section 27.4) -- the ordinance states no numeric cap for this district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "27.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "HI Heavy Industrial District",
+      "front_ft": 25,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 0,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "28.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "28.4",
+          "quote": "Minimum Rear Yard - None, unless adjacent to a residential district or openings are provided (either doors or windows), then a sixty foot (60') rear setback shall be observed. 0 is the general-case base; 60 ft is a real conditional exception.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "28.4",
+          "quote": "Minimum Side Yard - None, unless adjacent to a residential district or openings are provided (either doors or windows), then a sixty-foot (60') rear setback shall be observed. [sic -- ordinance text says \"rear setback\" in the side-yard clause, an apparent drafting cross-reference error; 0 is the general-case base, 60 ft is a real conditional exception near residential districts or where wall openings face the property line.]",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "28.4",
+          "quote": "Section 28.4 states no separate corner-lot / street-side-adjacent side yard for this district; mirrors the base side yard (0, subject to the same 60 ft residential/openings exception).",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "28.3",
+          "quote": "28.3 HEIGHT REGULATIONS: Maximum Height - Sixty feet (60') or three (3) stories.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "28.4",
+          "quote": "C. Maximum Lot Coverage: In no case shall more than fifty percent (50%) of the lot area be covered by the main building and accessory buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "28.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RD Redevelopment District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 25,
+      "max_height_ft": 100,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://cms6.revize.com/revize/belton/document_center/Planning/Zoning%20Ordinance%20with%20Cover%20and%20Appendix%20Updated%208-11-26.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "31.4",
+          "quote": "Minimum Front Yard - Twenty-five feet (25')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "31.4",
+          "quote": "Minimum Rear Yard - Twenty feet (20')",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "31.4",
+          "quote": "Minimum Side Yard - Five feet (5'); twenty-five feet (25') adjacent to a street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "31.4",
+          "quote": "Minimum Side Yard - Five feet (5'); twenty-five feet (25') adjacent to a street",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "31.3",
+          "quote": "Maximum Height - two and one-half (2 1/2) stories (Section 31.3). Height is stated in stories, not feet, for this district; 100 is a non-binding sentinel, not an asserted feet entitlement.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "31.4",
+          "quote": "C. Maximum Lot Coverage: Forty percent (40%)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "31.4",
+          "quote": "Full-text search of the Belton Zoning Ordinance (all 53 sections plus appendix) finds zero occurrences of \"impervious\" used as a zoning-cap concept anywhere in the document; only \"lot coverage\" (building footprint, defined per district in the AREA REGULATIONS subsection) is regulated where stated. No impervious-cover standard exists to cite for this or any district.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}
