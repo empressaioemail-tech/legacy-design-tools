@@ -33,6 +33,8 @@ import {
   applyCadPropertyFactsToPayload,
   cadPropertyFactsFromRow,
   type CadRollBaked,
+  corroborateCadPropertyMatchBySitus,
+  type SitusCorroboration,
 } from "./lib/cadRollValue.js";
 import {
   AUTHORISATION_ENV_VAR,
@@ -103,16 +105,26 @@ function computeRowPatch(
   propId: string,
   roll: CountyCadPropertyRoll,
 ) {
-  const cad = roll.consulted ? (roll.byPropId.get(propId) ?? null) : null;
-  const facts = cadPropertyFactsFromRow(cad);
+  let cad = roll.consulted ? (roll.byPropId.get(propId) ?? null) : null;
   const oldBase =
     row.payload_json.baseFacts && typeof row.payload_json.baseFacts === "object"
       ? (row.payload_json.baseFacts as Record<string, unknown>)
       : null;
+  // Situs cross-validation (CTX-C 2026-09-07): a propId match whose situs street
+  // contradicts the snapshot's own is a proven propId collision (Hays 45.2%, Travis
+  // 4.4%) -- honest absence, never a fabricated value. `inconclusive` (a blank side)
+  // is counted separately and is NOT treated as a verified agree.
+  let situs: SitusCorroboration | null = null;
+  if (cad) {
+    situs = corroborateCadPropertyMatchBySitus(oldBase?.situsAddress, cad.situsAddress);
+    if (situs === "disagree") cad = null;
+  }
+  const facts = cadPropertyFactsFromRow(cad);
   const oldCadRoll = (oldBase?.cadRoll as Partial<CadRollBaked> | null | undefined) ?? null;
   const next = applyCadPropertyFactsToPayload(row.payload_json, facts);
   return {
     cad,
+    situs,
     facts,
     next,
     destructive: isDestructiveOverwrite(oldCadRoll, facts.cadRoll),
@@ -172,6 +184,9 @@ async function main() {
   let scanned = 0;
   let destructive = 0;
   let noCadRow = 0;
+  let situsAgree = 0;
+  let situsInconclusive = 0;
+  let situsDisagree = 0;
   let marketPresent = 0;
   let improvementZero = 0;
   let livingPresent = 0;
@@ -182,7 +197,10 @@ async function main() {
   // ---- PASS 1: MEASURE ONLY. No write happens in this pass, in dry-run or not.
   await scanCounty(neondb, prefix, propIds, pageSize, (row, propId) => {
     scanned += 1;
-    const { cad, facts, destructive: isDestructive } = computeRowPatch(row, propId, roll);
+    const { cad, situs, facts, destructive: isDestructive } = computeRowPatch(row, propId, roll);
+    if (situs === "agree") situsAgree += 1;
+    else if (situs === "inconclusive") situsInconclusive += 1;
+    else if (situs === "disagree") situsDisagree += 1;
     if (!cad) noCadRow += 1;
     if (facts.cadRoll.marketValue && facts.cadRoll.marketValue.v > 0) marketPresent += 1;
     if (facts.cadRoll.assessedValue != null) assessedPresent += 1;
@@ -240,6 +258,9 @@ async function main() {
       destructive,
       blastRadius,
       noCadRow,
+      situsAgree,
+      situsInconclusive,
+      situsDisagree,
       marketPresent,
       assessedPresent,
       improvementZero,
