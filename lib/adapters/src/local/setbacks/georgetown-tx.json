@@ -2,68 +2,8 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "georgetown-tx",
   "jurisdictionDisplayName": "City of Georgetown, TX",
-  "note": "Codified from the City of Georgetown Unified Development Code (UDC), Chapter 6 (Residential Development Standards) Section 6.02 and Chapter 7 (Non-Residential Development Standards) Table 7.02.020 — Supplement 15, codified through Ordinance No. 2025-54 adopted September 9, 2025 (Municode ProductID 13943, job Id 480427). Source is Municode; each district cites its own Section 6.02.0x0 (residential) or the shared Table 7.02.020 (non-residential) deep-link. PENDING REWRITE CAVEAT: Georgetown's UDC is mid-rewrite with an updated version expected ~mid-2026; this table pins the CURRENT IN-FORCE edition (Supp. 15 / Ord. 2025-54) and MUST be re-verified when the rewrite lands. MODELING NOTES: (1) The Georgetown UDC dimensional tables state 'Impervious Cover, maximum %: See Section 11.02' (residential) / 'Impervious coverage: Refer to Section 11.02' (non-residential) and state NO per-district building lot-coverage cap, so both max_impervious_pct and max_lot_coverage_pct are flagged not_specified in provenance and carry 100 as a non-binding stand-in (the envelope draw uses setbacks, not these fields). (2) The UDC's corner/street-facing value is 'Side/Rear Street Setback' — codified as side_corner_ft. (3) Residential 'Side Setback' is the base interior side; the MF-1/MF-2 larger side/rear values are the setback-to-residential-district figures and are NOT used as the base side_ft (base interior side is codified). (4) TH (Townhouse) side_ft uses the 'Non-shared Wall Side Setback' (10 ft); the shared-wall side is 0. (5) Non-residential districts (CN/C-1/C-3/OF/BP/IN/PF) draw from the single shared Table 7.02.020; side_ft is the base 'Side setback, min.' and side_corner_ft mirrors that base where the table states no distinct corner value (non-res table has no separate street-side column, so side_corner_ft = side_ft, flagged). (6) AG (Agriculture) and MU-DT/MU (form-based, 'See Section 4.09') are EXCLUDED — no simple per-district front/side/rear setback table.",
+  "note": "TWO VINTAGES IN THIS TABLE. (A) The 9 non-single-family districts below (TF, TH, MF-1, MF-2, CN, C-1, C-3, OF, IN) are unchanged from the currently-governing code and use the ORIGINAL note that follows. (B) The 4 single-family districts (RE, RT, RS, RM) were replaced 2026-09-07 with data from Georgetown's adopted-but-not-yet-effective UDC rewrite (City Council adopted 2026-08-11; effective 2026-11-01 per rewrite Section 1.09) -- these are primary-source-verified against the rewrite PDF, not against the real code-section atom corpus, because that corpus only contains the CURRENTLY-in-force (pre-rewrite) text (confirmed live: zero real atoms mention the rewrite's new district name 'Residential Traditional', while several mention the pre-rewrite name 'Residential Low Density') -- there is nothing in the real corpus to round-trip rewrite text against. FOLLOW-UP NEEDED (not done here): once the rewrite is closer to taking effect or after 2026-11-01, the other 9 districts need the same post-rewrite research the 4 SF ones just got, or this table carries two vintages indefinitely. See each district's own provenance for adopted_date/effective_date/pre_rewrite_value_verified fields marking which vintage a given value belongs to. --- ORIGINAL NOTE (districts TF/TH/MF-1/MF-2/CN/C-1/C-3/OF/IN, current code): Codified from the City of Georgetown Unified Development Code (UDC), Chapter 6 (Residential Development Standards) Section 6.02 and Chapter 7 (Non-Residential Development Standards) Table 7.02.020 — Supplement 15, codified through Ordinance No. 2025-54 adopted September 9, 2025 (Municode ProductID 13943, job Id 480427). Source is Municode; each district cites its own Section 6.02.0x0 (residential) or the shared Table 7.02.020 (non-residential) deep-link. PENDING REWRITE CAVEAT: Georgetown's UDC is mid-rewrite with an updated version expected ~mid-2026; this table pins the CURRENT IN-FORCE edition (Supp. 15 / Ord. 2025-54) and MUST be re-verified when the rewrite lands. MODELING NOTES: (1) The Georgetown UDC dimensional tables state 'Impervious Cover, maximum %: See Section 11.02' (residential) / 'Impervious coverage: Refer to Section 11.02' (non-residential) and state NO per-district building lot-coverage cap, so both max_impervious_pct and max_lot_coverage_pct are flagged not_specified in provenance and carry 100 as a non-binding stand-in (the envelope draw uses setbacks, not these fields). (2) The UDC's corner/street-facing value is 'Side/Rear Street Setback' — codified as side_corner_ft. (3) Residential 'Side Setback' is the base interior side; the MF-1/MF-2 larger side/rear values are the setback-to-residential-district figures and are NOT used as the base side_ft (base interior side is codified). (4) TH (Townhouse) side_ft uses the 'Non-shared Wall Side Setback' (10 ft); the shared-wall side is 0. (5) Non-residential districts (CN/C-1/C-3/OF/BP/IN/PF) draw from the single shared Table 7.02.020; side_ft is the base 'Side setback, min.' and side_corner_ft mirrors that base where the table states no distinct corner value (non-res table has no separate street-side column, so side_corner_ft = side_ft, flagged). (6) AG (Agriculture) and MU-DT/MU (form-based, 'See Section 4.09') are EXCLUDED — no simple per-district front/side/rear setback table. --- REWRITE RESEARCH NOTE (districts RE/RT/RS/RM, effective 2026-11-01): IMPORTANT TIMING CAVEAT: Georgetown's original UDC (adopted 2003-03-11, in force today) is being wholesale replaced. City Council adopted a full UDC rewrite on 2026-08-11; per UDC Section 1.09 the rewrite becomes effective 2026-11-01. This file is coded from the REWRITE text (City of Georgetown, 'Unified Development Code 2026', PDF published at https://cms3.revize.com/revize/georgetowntx/Documents/Development%20Services/Planning/Unified%20Development%20Code/UDC%20Rewrite%20Draft%20Content/Unified%20Development%20Code%208.11.2026.pdf, accessed 2026-09-06), NOT from the pre-rewrite code that is the only code legally in force between now and 2026-10-31. The rewrite's own Section 4.02 'Zoning District Equivalency Table' confirms these are direct successors of the pre-rewrite districts, same short codes, same lineage: pre-rewrite 'RE Residential Estate'->RE (unchanged), 'RL Residential Low Density'->RT Residential Traditional, 'RS Residential Single-family'->RS Residential Suburban, 'TF Two-family'/'TH Townhouse'->RM Residential Mix. Max building height for RS is independently cross-checked at 35 ft under BOTH codes via a City of Georgetown Planning Department staff report (Sofia Nelson, Planning Director; City Council item, 2026-01-14, https://d2kbkoa27fdvtw.cloudfront.net/georgetown/e60a6c7d2d185c1f926d7bba471eb3350.pdf, 'Current UDC' height table, RS = 35'), which is the only pre-rewrite dimensional figure this pass could independently verify -- the pre-rewrite code's front/side/rear/corner setback and impervious-cover numbers could NOT be verified (see confidence report; Municode's current-UDC pages at https://library.municode.com/tx/georgetown/codes/unified_development_code render client-side via an Angular SPA that returned only an empty app shell to every fetch method available this session, including a browser-UA curl GET (HTTP 200, 6KB shell, zero table content) and the Wayback Machine's historical crawls of the same URL pattern (all captures 1.8-3.3KB, same shell, per CDX API query), so no pre-rewrite chapter text was retrievable this session). SCOPE: covers the rewrite's four Chapter 7 residential districts whose descriptions explicitly allow single-family detached and/or attached housing -- RE Residential Estate (Sec. 7.02.030), RT Residential Traditional (Sec. 7.02.040), RS Residential Suburban (Sec. 7.02.050, the City's standard single-family-detached district and the direct successor to pre-rewrite 'RS'), and RM Residential Mix (Sec. 7.02.060, allows single-family detached/attached alongside duplex/townhouse). OMITTED as out of scope for a single-family corpus: AG Agriculture, MF-1/MF-2 multifamily, MH Manufactured Housing, all non-residential and overlay districts, and all ETJ-specific standards. Where a district's Chapter 7 table splits values by garage/parking access (front-loaded vs. alley-loaded lots), this file reports the front-loaded ('front-access') column as the canonical row, since front-loaded is the default/majority lot configuration; alley-loaded variants are captured in each field's provenance quote and are NOT separately rowed (schema is one row per district). Georgetown's 2026 code has no 'lot coverage' concept distinct from impervious cover (full-text search for 'lot coverage'/'building coverage' in the 501-page rewrite returned zero hits) -- max_lot_coverage_pct uses the same non-binding sentinel-100 convention established in this corpus's pflugerville-tx.json for a genuinely absent metric. max_impervious_pct values for RE and RT carry lower confidence: Table 13.02.010-2 (p.320) labels every row with a 'front-access'/'alley-access' qualifier, but RE's and RT's own Chapter 7 dimensional tables have no alley-loaded lot type at all, so the qualifier attached to their single impervious-cover row in Table 13.02.010-2 is very likely a pdftotext column-bleed artifact from the neighboring RS/RM rows -- the numeric value (RE 20%, RT 40%) is transcribed exactly as printed and directly adjacent to the correct district name, but the access-type label should not be trusted. See per-field provenance for full detail and the accompanying sourcing/confidence note delivered alongside this file.",
   "districts": [
-    {
-      "district_name": "RE Residential Estate",
-      "front_ft": 25,
-      "rear_ft": 20,
-      "side_ft": 10,
-      "side_corner_ft": 20,
-      "max_height_ft": 35,
-      "max_lot_coverage_pct": 100,
-      "max_impervious_pct": 100,
-      "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.030ESESDI",
-      "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "Front Setback, minimum feet 25", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "Rear Setback, minimum feet 20", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "Side Setback, minimum feet 10", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "Side/Rear Street Setback, minimum feet 20", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "Building Height, maximum feet 35", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.030", "section_number": "6.02.030", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
-      }
-    },
-    {
-      "district_name": "RL Residential Low Density",
-      "front_ft": 20,
-      "rear_ft": 10,
-      "side_ft": 10,
-      "side_corner_ft": 15,
-      "max_height_ft": 35,
-      "max_lot_coverage_pct": 100,
-      "max_impervious_pct": 100,
-      "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.040ESLODEDI",
-      "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "Front Setback, minimum feet 20", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "Rear Setback, minimum feet 10", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "Side Setback, minimum feet 10", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "Side/Rear Street Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "Building Height, maximum feet 35", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.040", "section_number": "6.02.040", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
-      }
-    },
-    {
-      "district_name": "RS Residential Single-Family",
-      "front_ft": 20,
-      "rear_ft": 10,
-      "side_ft": 6,
-      "side_corner_ft": 15,
-      "max_height_ft": 35,
-      "max_lot_coverage_pct": 100,
-      "max_impervious_pct": 100,
-      "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.050ESSIMIDI",
-      "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "Front Setback, minimum feet 20", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "Rear Setback, minimum feet 10", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "Side Setback, minimum feet 6", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "Side/Rear Street Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "Building Height, maximum feet 35", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.050", "section_number": "6.02.050", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
-      }
-    },
     {
       "district_name": "TF Two-Family",
       "front_ft": 20,
@@ -75,13 +15,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.060MIDI",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "Front Setback, minimum feet 20", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "Rear Setback, minimum feet 10", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "Side Setback, minimum feet 6", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "Side/Rear Street Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "Building Height, maximum feet 35", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.060", "section_number": "6.02.060", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "Front Setback, minimum feet 20",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "Rear Setback, minimum feet 10",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "Side Setback, minimum feet 6",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "Side/Rear Street Setback, minimum feet 15",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "Building Height, maximum feet 35",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.060",
+          "section_number": "6.02.060",
+          "quote": "Impervious Cover, maximum % See Section 11.02",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -95,13 +79,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.070OWDI",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "Front Setback, minimum feet 15", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "Rear Setback, minimum feet 15", "confidence": 0.95, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "Non-shared Wall Side Setback, minimum feet 10", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "Side/Rear Street Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "Building Height, maximum feet 35", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.070", "section_number": "6.02.070", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "Front Setback, minimum feet 15",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "Rear Setback, minimum feet 15",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "Non-shared Wall Side Setback, minimum feet 10",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "Side/Rear Street Setback, minimum feet 15",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "Building Height, maximum feet 35",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.070",
+          "section_number": "6.02.070",
+          "quote": "Impervious Cover, maximum % See Section 11.02",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -115,13 +143,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.080-LDEMUDI",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "Front Setback, minimum feet 20", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "Rear Setback, minimum feet 10", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "Side Setback, minimum feet 10", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "Side/Rear Street Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "Building Height, maximum feet 35", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.080", "section_number": "6.02.080", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "Front Setback, minimum feet 20",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "Rear Setback, minimum feet 10",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "Side Setback, minimum feet 10",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "Side/Rear Street Setback, minimum feet 15",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "Building Height, maximum feet 35",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.080",
+          "section_number": "6.02.080",
+          "quote": "Impervious Cover, maximum % See Section 11.02",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -135,13 +207,57 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH6REDEST_S6.02DEST_S6.02.090-HDEMUDI",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "Front Setback, minimum feet 25", "confidence": 0.95, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "Rear Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "Side Setback, minimum feet 15", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "Side/Rear Street Setback, minimum feet 20", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "Building Height, maximum feet 45", "confidence": 0.95, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/6.02.090", "section_number": "6.02.090", "quote": "Impervious Cover, maximum % See Section 11.02", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "Front Setback, minimum feet 25",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "Rear Setback, minimum feet 15",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "Side Setback, minimum feet 15",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "Side/Rear Street Setback, minimum feet 20",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "Building Height, maximum feet 45",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/6.02.090",
+          "section_number": "6.02.090",
+          "quote": "Impervious Cover, maximum % See Section 11.02",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -155,13 +271,58 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH7NSIDEST_S7.02DEST_S7.02.020NSILODIST",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Front/street setback, min. feet 20", "confidence": 0.9, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Rear setback, min. feet 0", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Side setback, min. feet 5", "confidence": 0.9, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 5 feet.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Building height, max. feet 30", "confidence": 0.9, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Front/street setback, min. feet 20",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Rear setback, min. feet 0",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Side setback, min. feet 5",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 5 feet.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Building height, max. feet 30",
+          "confidence": 0.9,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -175,13 +336,58 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH7NSIDEST_S7.02DEST_S7.02.020NSILODIST",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Front/street setback, min. feet 20 25 25 25", "confidence": 0.85, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Rear setback, min. feet 0 0 10 10", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Side setback, min. feet 5 10 10 10", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Building height, max. feet 30 35 60 45", "confidence": 0.85, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Front/street setback, min. feet 20 25 25 25",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Rear setback, min. feet 0 0 10 10",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Side setback, min. feet 5 10 10 10",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Building height, max. feet 30 35 60 45",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -195,13 +401,58 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH7NSIDEST_S7.02DEST_S7.02.020NSILODIST",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Front/street setback, min. feet 20 25 25 25", "confidence": 0.85, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Rear setback, min. feet 0 0 10 10", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Side setback, min. feet 5 10 10 10", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Building height, max. feet 30 35 60 45", "confidence": 0.85, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Front/street setback, min. feet 20 25 25 25",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Rear setback, min. feet 0 0 10 10",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Side setback, min. feet 5 10 10 10",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Building height, max. feet 30 35 60 45",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -215,13 +466,58 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH7NSIDEST_S7.02DEST_S7.02.020NSILODIST",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Front/street setback, min. feet 20 25 25 25", "confidence": 0.85, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Rear setback, min. feet 0 0 10 10", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Side setback, min. feet 5 10 10 10", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Building height, max. feet 30 35 60 45", "confidence": 0.85, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Front/street setback, min. feet 20 25 25 25",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Rear setback, min. feet 0 0 10 10",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Side setback, min. feet 5 10 10 10",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Building height, max. feet 30 35 60 45",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
       }
     },
     {
@@ -235,13 +531,370 @@
       "max_impervious_pct": 100,
       "citation_url": "https://library.municode.com/tx/georgetown/codes/unified_development_code?nodeId=UNDECO_CH7NSIDEST_S7.02DEST_S7.02.020NSILODIST",
       "provenance": {
-        "front_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Front/street setback, min. feet", "confidence": 0.8, "verification_state": "human-verified" },
-        "rear_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Rear setback, min. feet 0 0 10 10 10 10 0", "confidence": 0.8, "verification_state": "human-verified" },
-        "side_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Side setback, min. feet 5 10 10 10 10 10 5", "confidence": 0.85, "verification_state": "human-verified" },
-        "side_corner_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_height_ft": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Building height, max. feet 30 35 60 45 60 60 45", "confidence": 0.85, "verification_state": "human-verified" },
-        "max_lot_coverage_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.", "confidence": 0.6, "verification_state": "asserted", "not_specified": true },
-        "max_impervious_pct": { "atom_did": "georgetown_tx/udc/7.02.020", "section_number": "7.02.020", "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements", "confidence": 0.6, "verification_state": "asserted", "not_specified": true }
+        "front_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Front/street setback, min. feet",
+          "confidence": 0.8,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Rear setback, min. feet 0 0 10 10 10 10 0",
+          "confidence": 0.8,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Side setback, min. feet 5 10 10 10 10 10 5",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Table 7.02.020 states no distinct corner/street-side setback for non-residential districts; mirrors base side setback of 10 feet.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Building height, max. feet 30 35 60 45 60 60 45",
+          "confidence": 0.85,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "The Georgetown UDC states no per-district building lot-coverage cap; not specified.",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "georgetown_tx/udc/7.02.020",
+          "section_number": "7.02.020",
+          "quote": "Impervious coverage Refer to Section 11.02 for Impervious Coverage Requirements",
+          "confidence": 0.6,
+          "verification_state": "asserted",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "RE Residential Estate District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 20,
+      "citation_url": "https://cms3.revize.com/revize/georgetowntx/Documents/Development%20Services/Planning/Unified%20Development%20Code/UDC%20Rewrite%20Draft%20Content/Unified%20Development%20Code%208.11.2026.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "7.02.030.A",
+          "quote": "RE Residential Estate District, Lot and Dimensional Standards, row C: 'Front/primary street setback, minimum feet: 25'. Single lot type only (no front/alley split in this District's table).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "rear_ft": {
+          "section_number": "7.02.030.A",
+          "quote": "RE Residential Estate District, Lot and Dimensional Standards, row G: 'Rear setback, minimum feet: 20'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_ft": {
+          "section_number": "7.02.030.A",
+          "quote": "RE Residential Estate District, Lot and Dimensional Standards, row F: 'Side setback, minimum feet: 10'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_corner_ft": {
+          "section_number": "7.02.030.A",
+          "quote": "RE Residential Estate District, Lot and Dimensional Standards, row D: 'Corner side/secondary street setback, minimum feet: 25'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "max_height_ft": {
+          "section_number": "7.02.030.A",
+          "quote": "RE Residential Estate District, Lot and Dimensional Standards, row H: 'Building height, maximum feet: 35'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false,
+          "cross_check_note": "Independently corroborated for the pre-rewrite code by a City of Georgetown Planning Dept. staff report (2026-01-14) listing 'RS- 35'... RE- 35'' under 'current maximum building heights (by zoning)'; height appears unchanged by the rewrite."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "n/a",
+          "quote": "Full-text search of the 2026 UDC (501 pages) for 'lot coverage' and 'building coverage' returned zero matches; the code regulates site coverage only via impervious cover (Section 13.02), not a separate lot/building coverage percentage.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "13.02.010",
+          "quote": "Table 13.02.010-2, Impervious Cover (Max. %) for Residential Zoning Districts: 'RE Residential Estate ... 20%'. Row's access-type qualifier ('front-access') is not trusted -- RE's own Sec. 7.02.030 dimensional table has no alley-loaded lot type, so this is likely a single unqualified district-wide value and the printed qualifier a table-extraction artifact from the adjacent RS row.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        }
+      },
+      "display_meta": {
+        "min_lot_size": "43,560 sq ft (1 acre)"
+      }
+    },
+    {
+      "district_name": "RT Residential Traditional District",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 40,
+      "citation_url": "https://cms3.revize.com/revize/georgetowntx/Documents/Development%20Services/Planning/Unified%20Development%20Code/UDC%20Rewrite%20Draft%20Content/Unified%20Development%20Code%208.11.2026.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "7.02.040.A",
+          "quote": "RT Residential Traditional District, Lot and Dimensional Standards, row C: 'Front/primary street setback, minimum feet: 20'. Single lot type only (no front/alley split in this District's table).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "rear_ft": {
+          "section_number": "7.02.040.A",
+          "quote": "RT Residential Traditional District, Lot and Dimensional Standards, row G: 'Rear setback, minimum feet: 10'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_ft": {
+          "section_number": "7.02.040.A",
+          "quote": "RT Residential Traditional District, Lot and Dimensional Standards, row F: 'Side setback, minimum feet: 5'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_corner_ft": {
+          "section_number": "7.02.040.A",
+          "quote": "RT Residential Traditional District, Lot and Dimensional Standards, row D: 'Corner side/secondary street setback, minimum feet: 20'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "max_height_ft": {
+          "section_number": "7.02.040.A",
+          "quote": "RT Residential Traditional District, Lot and Dimensional Standards, row H: 'Building height, maximum feet: 35'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false,
+          "cross_check_note": "RT is the rewrite's successor to pre-rewrite 'RL Residential Low Density' per the Sec. 4.02 Equivalency Table; the 2026-01-14 staff report lists pre-rewrite 'RL- 35'' also, so height appears unchanged by the rewrite for this lineage too."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "n/a",
+          "quote": "Full-text search of the 2026 UDC (501 pages) for 'lot coverage' and 'building coverage' returned zero matches; the code regulates site coverage only via impervious cover (Section 13.02), not a separate lot/building coverage percentage.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "13.02.010",
+          "quote": "Table 13.02.010-2, Impervious Cover (Max. %) for Residential Zoning Districts: 'RT Residential Transition ... 40%'. Row's access-type qualifier ('alley-access') is not trusted -- RT's own Sec. 7.02.040 dimensional table has no alley-loaded lot type, so this is likely a single unqualified district-wide value and the printed qualifier a table-extraction artifact from the adjacent RS row.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        }
+      },
+      "display_meta": {
+        "min_lot_size": "7,500 sq ft"
+      }
+    },
+    {
+      "district_name": "RS Residential Suburban District",
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 40,
+      "citation_url": "https://cms3.revize.com/revize/georgetowntx/Documents/Development%20Services/Planning/Unified%20Development%20Code/UDC%20Rewrite%20Draft%20Content/Unified%20Development%20Code%208.11.2026.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "7.02.050.A",
+          "quote": "RS Residential Suburban District, Lot and Dimensional Standards, row C, Single-Family Detached / Front garage-parking access column: 'Front/primary street setback, minimum feet: 20'. Alley-access column for the same lot type reads 15 feet; front-access reported here as the canonical/majority configuration.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "rear_ft": {
+          "section_number": "7.02.050.A",
+          "quote": "RS Residential Suburban District, Lot and Dimensional Standards, row I, Single-Family Detached (both Front and Alley access): 'Rear setback, minimum feet: 10'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_ft": {
+          "section_number": "7.02.050.A",
+          "quote": "RS Residential Suburban District, Lot and Dimensional Standards, row F, Single-Family Detached (both Front and Alley access): 'Side setback, minimum feet: 5'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_corner_ft": {
+          "section_number": "7.02.050.A",
+          "quote": "RS Residential Suburban District, Lot and Dimensional Standards, row D, Single-Family Detached (both Front and Alley access): 'Corner side/secondary street setback, minimum feet: 15'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "max_height_ft": {
+          "section_number": "7.02.050.A",
+          "quote": "RS Residential Suburban District, Lot and Dimensional Standards, row J, Single-Family Detached (both Front and Alley access): 'Building height, maximum feet: 35'.",
+          "confidence": 0.95,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": true,
+          "cross_check_note": "Independently corroborated for the pre-rewrite code (RS is this District's direct predecessor per Sec. 4.02 Equivalency Table) by a City of Georgetown Planning Dept. staff report, City Council item 2026-01-14 (Sofia Nelson, Planning Director), 'Current UDC' section, listing pre-rewrite max building heights by zoning: 'RS- 35''. Height for RS is the one dimension in this file verified under BOTH the pre-rewrite and rewrite codes and unchanged between them."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "n/a",
+          "quote": "Full-text search of the 2026 UDC (501 pages) for 'lot coverage' and 'building coverage' returned zero matches; the code regulates site coverage only via impervious cover (Section 13.02), not a separate lot/building coverage percentage.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "13.02.010",
+          "quote": "Table 13.02.010-2, Impervious Cover (Max. %) for Residential Zoning Districts: 'RS Residential Suburban, All types front-access: 40%; All types alley-access: 60%'. Front-access value (40%) reported as canonical; both rows are explicitly and unambiguously labeled in the source table.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        }
+      },
+      "display_meta": {
+        "min_lot_size": "5,500 sq ft front-access / 4,000 sq ft alley-access (Single-Family Detached)"
+      }
+    },
+    {
+      "district_name": "RM Residential Mix District",
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 70,
+      "citation_url": "https://cms3.revize.com/revize/georgetowntx/Documents/Development%20Services/Planning/Unified%20Development%20Code/UDC%20Rewrite%20Draft%20Content/Unified%20Development%20Code%208.11.2026.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "7.02.060.A",
+          "quote": "RM Residential Mix District, Lot and Dimensional Standards, row C, Single-Family Detached / Front garage-parking access column: 'Front/primary street setback, minimum feet: 15'. Identical value (15 ft) applies across Single-Family Detached, Single-Family Attached, and Two-Family Duplex lot types for both Front and Alley access in this District's table; Townhouse alley-access reads 10 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "rear_ft": {
+          "section_number": "7.02.060.A",
+          "quote": "RM Residential Mix District, Lot and Dimensional Standards, row I: 'Rear setback, minimum feet: 10' (uniform across all listed lot types and access configurations).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_ft": {
+          "section_number": "7.02.060.A",
+          "quote": "RM Residential Mix District, Lot and Dimensional Standards, row F, Single-Family Detached / Two-Family Duplex columns: 'Side setback, minimum feet: 5'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "side_corner_ft": {
+          "section_number": "7.02.060.A",
+          "quote": "RM Residential Mix District, Lot and Dimensional Standards, row D, Single-Family Detached / Front garage-parking access column: 'Corner side/secondary street setback, minimum feet: 15'.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        },
+        "max_height_ft": {
+          "section_number": "7.02.060.A",
+          "quote": "RM Residential Mix District, Lot and Dimensional Standards, row J: 'Building height, maximum feet: 35' (uniform across all listed lot types).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false,
+          "cross_check_note": "RM is the rewrite's successor to pre-rewrite 'TF Two-family'/'TH Townhouse' per the Sec. 4.02 Equivalency Table; the 2026-01-14 staff report lists pre-rewrite 'TF- 35'' and 'TH- 35'' also, so height appears unchanged by the rewrite for this lineage too."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "n/a",
+          "quote": "Full-text search of the 2026 UDC (501 pages) for 'lot coverage' and 'building coverage' returned zero matches; the code regulates site coverage only via impervious cover (Section 13.02), not a separate lot/building coverage percentage.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "13.02.010",
+          "quote": "Table 13.02.010-2, Impervious Cover (Max. %) for Residential Zoning Districts: 'RM Residential Mix, All types front-access: 70%; All types alley-access: 60%'. Front-access value (70%) reported as canonical. Flagged for reviewer attention: this is a HIGHER cover allowance for front-access than alley-access, the reverse of the pattern in the RS row directly above it in the same table -- transcribed exactly as printed; not adjusted to fit the expected pattern.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "adopted_date": "2026-08-11",
+          "effective_date": "2026-11-01",
+          "pre_rewrite_value_verified": false
+        }
+      },
+      "display_meta": {
+        "min_lot_size": "4,400 sq ft front-access / 4,000 sq ft alley-access (Single-Family Detached)"
       }
     }
   ]
