@@ -97,6 +97,26 @@ export function brokerageAuth(
   res: Response,
   next: NextFunction,
 ): void {
+  const provided = extractBrokerageApiKey(req);
+
+  // Session-JWT verification is independent of whether any static API key
+  // is configured — checked FIRST so an unconfigured key set never blocks a
+  // real logged-in user. Production has never provisioned
+  // BROKERAGE_OPERATOR_API_KEYS/BROKERAGE_API_KEYS as Cloud Run secrets;
+  // BROKERAGE_EXTENSION_PUBLIC_KEY was the only thing keeping
+  // loadBrokerageApiKeys() non-empty, so its retirement (2026-09-07) would
+  // otherwise 503 every session-authenticated request too, not just
+  // API-key callers.
+  if (provided?.includes(".")) {
+    const verified = verifySessionToken(provided);
+    if (verified.ok && verified.session.requestor?.kind === "user") {
+      req.session = verified.session;
+      req.brokerageAuth = { tier: "user" };
+      next();
+      return;
+    }
+  }
+
   const keys = loadBrokerageApiKeys();
   if (keys.size === 0) {
     res.status(503).json({
@@ -106,22 +126,10 @@ export function brokerageAuth(
     return;
   }
 
-  const provided = extractBrokerageApiKey(req);
-
   if (provided && keys.has(provided)) {
     req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
     next();
     return;
-  }
-
-  if (provided?.includes(".")) {
-    const verified = verifySessionToken(provided);
-    if (verified.ok && verified.session.requestor?.kind === "user") {
-      req.session = verified.session;
-      req.brokerageAuth = { tier: "user" };
-      next();
-      return;
-    }
   }
 
   res.status(401).json({

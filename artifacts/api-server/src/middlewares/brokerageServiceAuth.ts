@@ -63,14 +63,6 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
     }
 
     const keys = loadBrokerageApiKeys();
-    if (keys.size === 0) {
-      res.status(503).json({
-        error: "property_brief_api_unconfigured",
-        message: "Property Brief API key is not configured on this server",
-      });
-      return;
-    }
-
     if (keys.has(provided)) {
       req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
       next();
@@ -78,7 +70,8 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
     }
 
     // Session JWT bearer or any other brokerageAuth path — do not hard-401
-    // before brokerageAuth can classify.
+    // (or hard-503 on an empty key set) before brokerageAuth can classify;
+    // it checks the session-JWT path before the keys-configured gate.
     brokerageAuth(req, res, next);
     return;
   }
