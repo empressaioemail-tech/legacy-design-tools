@@ -274,14 +274,27 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // codes stamp as zoning-present / setback-pending (honest). Match contract
   // CLEAN (leading-token). Second Travis layer — jurisdiction is per-parcel
   // via stamped zoning_jurisdiction (PIP cityKey), not a county sole-key.
+  // Austin (Travis). `Publish_Zoning_AGOL` is Austin GIS staff's internal
+  // staging layer (499 Token Required as of 2026-09-07 — not a
+  // misconfiguration, working access control; no legitimate self-service
+  // credential path, per the operator's own investigation of the org).
+  // Repointed to the public, tokenless mirror
+  // `PLANNINGCADASTRE_zoning_large_map_scale`, whose real field names
+  // (verified live 2026-09-07) are ZONING_BASE (code) and ZONING_ZTYPE — NOT
+  // BASE_ZONE/BASE_ZONE_CATEGORY, a different service, not just an
+  // unauthenticated version of the same one. Provenance on newly-stamped
+  // Austin parcels will cite this mirror's URL, not the old staging layer's
+  // — more honest than what was there, but it means a post-swap Austin
+  // count is being compared against a target the old staging layer
+  // produced, not a defect in itself.
   "austin-tx": {
     cityKey: "austin-tx",
     cityName: "Austin",
     countyFips: "48453",
     layerUrl:
-      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/Publish_Zoning_AGOL/FeatureServer/0",
-    codeField: "BASE_ZONE",
-    descriptionField: "BASE_ZONE_CATEGORY",
+      "https://services.arcgis.com/0L95CJ0VTaxqcmED/ArcGIS/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0",
+    codeField: "ZONING_BASE",
+    descriptionField: "ZONING_ZTYPE",
   },
   // Bastrop city (Bastrop). B3 Place Types are REPEALED (Ord. 2026-06 /
   // 2026-04-14). LIVE law is BDC Euclidean districts. Stamp reads
@@ -389,6 +402,65 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     layerUrl:
       "https://services3.arcgis.com/kPfGI7KGlXn5IaHL/arcgis/rest/services/Lockhart_City_Zoning_Online/FeatureServer/0",
     codeField: "ZONING",
+  },
+
+  // ---------------------------------------------------------------------------
+  // Band 1 stamp-gap wires (2026-09-01). Layers already staged. Stamp is
+  // county-scoped PIP against one city layer: a Waco run writes waco-tx onto
+  // any McLennan centroid inside a Waco polygon. That bleed is the SHAPE of
+  // the stamp, not bad data. The meaning-shaped fix is requiring the PIP hit
+  // AND landing containment city to AGREE — not built here. These wires plus
+  // --prop-ids-file scoped to in-city parcels are the Band 1 stopgap.
+  // SETBACK TABLES OWED for all six; Smithville BDC is Bastrop-city, not
+  // Smithville, and applying it is fabricated authority.
+  // ---------------------------------------------------------------------------
+  "smithville-tx": {
+    cityKey: "smithville-tx",
+    cityName: "Smithville",
+    countyFips: "48021",
+    layerUrl:
+      "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Smithville_Zoning/FeatureServer/0",
+    codeField: "ZONING",
+  },
+  "luling-tx": {
+    cityKey: "luling-tx",
+    cityName: "Luling",
+    countyFips: "48055",
+    layerUrl:
+      "https://services.arcgis.com/rVxY74DxxIDrDbc0/arcgis/rest/services/Caldwell_CAD_Parcel_Map/FeatureServer/50",
+    codeField: "ZONING",
+  },
+  "martindale-tx": {
+    cityKey: "martindale-tx",
+    cityName: "Martindale",
+    countyFips: "48055",
+    layerUrl:
+      "https://services.arcgis.com/rVxY74DxxIDrDbc0/arcgis/rest/services/Caldwell_CAD_Parcel_Map/FeatureServer/51",
+    codeField: "Zoning",
+  },
+  "woodcreek-tx": {
+    cityKey: "woodcreek-tx",
+    cityName: "Woodcreek",
+    countyFips: "48209",
+    layerUrl:
+      "https://services3.arcgis.com/NYBb8GS1tDodacOa/arcgis/rest/services/Woodcreek_Zoning/FeatureServer/0",
+    codeField: "Zoning",
+  },
+  "lakeway-tx": {
+    cityKey: "lakeway-tx",
+    cityName: "Lakeway",
+    countyFips: "48453",
+    layerUrl:
+      "https://services8.arcgis.com/Ovzem8VyXkJhfTgz/arcgis/rest/services/Zoning_Districts/FeatureServer/0",
+    codeField: "Zoning",
+  },
+  "robinson-tx": {
+    cityKey: "robinson-tx",
+    cityName: "Robinson",
+    countyFips: "48309",
+    layerUrl:
+      "https://services7.arcgis.com/Ls5quuABi3I5K4Lg/arcgis/rest/services/Zoning_2024/FeatureServer/21",
+    codeField: "ZoneCode",
   },
 
   // ---------------------------------------------------------------------------
