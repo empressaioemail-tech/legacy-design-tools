@@ -12,7 +12,7 @@ import {
   type PeBillingInterval,
   type PeSubscriptionTier,
 } from "@workspace/db";
-import { getPeAccessTier, getPeEntitlementRow } from "./peIdentity";
+import { getPeAccessTier, getPeEntitlementRow, getPeUserEmail } from "./peIdentity";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 import { resolvePeUserIdFromTrustedServiceCall } from "./peServiceUserId";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
@@ -83,6 +83,18 @@ export type PeEntitlementSnapshot = {
    * and with-parcel bodies are unchanged.
    */
   hasBillingAccount: boolean;
+  /**
+   * The signed-in account's email (P-125). Settings > Account renders
+   * "Signed in as: <email>" and read "Not read" for everyone until this
+   * shipped — the client half (hauska-map PR #372) already reads
+   * `account.email` off the account entitlement body and falls back to
+   * "Not read" until the server sends it.
+   *
+   * `null` FOR ANONYMOUS, same reasoning as `hasBillingAccount`'s own
+   * comment: an anonymous caller has no account, so there is nothing to
+   * know. Account-body-only, same shape as `hasBillingAccount` above.
+   */
+  email: string | null;
 };
 
 /**
@@ -164,6 +176,8 @@ export async function resolvePeEntitlement(
       // Not "unknown": there is no account, so there is definitively no
       // billing account to manage. A positive determination, not a default.
       hasBillingAccount: false,
+      // No account, nothing to know. Absent, not an empty string.
+      email: null,
     };
   }
   const row = await getPeEntitlementRow(userId);
@@ -202,6 +216,10 @@ export async function resolvePeEntitlement(
     // so the two cannot disagree about what counts as present.
     hasBillingAccount:
       typeof row.stripeCustomerId === "string" && row.stripeCustomerId.trim() !== "",
+    // P-125. Real account, real lookup — same table `getPeUserEmail` already
+    // reads for Stripe checkout (`peIdentity.ts`), reused here rather than a
+    // second query.
+    email: await getPeUserEmail(userId),
   };
 }
 
@@ -289,6 +307,7 @@ export function peEntitlementAccountBody(snap: PeEntitlementSnapshot): ReturnTyp
   seatsPurchased: number | null;
   billingInterval: PeBillingInterval | null;
   hasBillingAccount: boolean;
+  email: string | null;
 } {
   return {
     ...peEntitlementBaseBody(snap),
@@ -306,6 +325,13 @@ export function peEntitlementAccountBody(snap: PeEntitlementSnapshot): ReturnTyp
      * and the per-property client is untouched.
      */
     hasBillingAccount: snap.hasBillingAccount,
+    /**
+     * P-125. Settings > Account renders "Signed in as: <email>" off this
+     * field (hauska-map PR #372, already merged) and shows "Not read" until
+     * the server sends it. ADDED ONLY TO THE ACCOUNT BODY, same reasoning as
+     * `hasBillingAccount` immediately above.
+     */
+    email: snap.email,
   };
 }
 

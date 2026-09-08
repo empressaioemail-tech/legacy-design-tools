@@ -74,6 +74,7 @@ function paidTeamSnapshot(): PeEntitlementSnapshot {
     seatsPurchased: 5,
     billingInterval: "month",
     hasBillingAccount: true,
+    email: "user-p98@example.com",
   };
 }
 
@@ -89,6 +90,7 @@ function anonymousSnapshot(): PeEntitlementSnapshot {
     seatsPurchased: null,
     billingInterval: null,
     hasBillingAccount: false,
+    email: null,
   };
 }
 
@@ -136,6 +138,9 @@ describe("with-parcel response (pinned contract, must not move)", () => {
     // ACCOUNT body only; widening `base` would put it on every with-parcel
     // response the PE BFF is pinned to, which is the defect this test names.
     expect("hasBillingAccount" in body).toBe(false);
+    // P-125 joins the same list, same reasoning: the with-parcel and
+    // anonymous responses have no reason to carry an account email.
+    expect("email" in body).toBe(false);
     expect("property" in body).toBe(false);
   });
 
@@ -220,6 +225,7 @@ describe("without-parcel account response (P-98)", () => {
       "seatsPurchased",
       "billingInterval",
       "hasBillingAccount",
+      "email",
     ]);
     expect(body.seatsPurchased).toBe(5);
     expect(body.billingInterval).toBe("month");
@@ -307,5 +313,24 @@ describe("without-parcel account response (P-98)", () => {
       billingInterval: "year",
     });
     expect(body.billingInterval).toBe("year");
+  });
+
+  // P-125: Settings > Account "Signed in as: <email>" (hauska-map PR #372).
+  it("P-125: email travels straight through, both ways", () => {
+    expect(peEntitlementAccountBody(paidTeamSnapshot()).email).toBe(
+      "user-p98@example.com",
+    );
+    expect(
+      peEntitlementAccountBody({ ...paidTeamSnapshot(), email: null }).email,
+    ).toBeNull();
+  });
+
+  it("P-125 VIOLATION: the anonymous account body carries a determined null, not a lookup", () => {
+    // No account, so there is nothing to know -- same reasoning as
+    // hasBillingAccount's own anonymous case, not a failed lookup.
+    const body = peEntitlementAccountBody(anonymousSnapshot());
+    expect(body.email).toBeNull();
+    expect("email" in body).toBe(true);
+    expect(JSON.stringify(body)).toContain('"email":null');
   });
 });

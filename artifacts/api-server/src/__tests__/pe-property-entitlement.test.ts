@@ -313,6 +313,10 @@ describe("GET /entitlement without a parcel (P-98 account scope)", () => {
       // this still asserts an EXACT list in an EXACT order, so removing or
       // reordering anything ahead of it still fails.
       "hasBillingAccount",
+      // P-125, same reasoning as hasBillingAccount immediately above:
+      // account-body-only, deliberate widening, exact-order assertion still
+      // fails on removal or reordering.
+      "email",
     ]);
     expect(res.body.tier).toBe("paid");
     expect(res.body.seatsPurchased).toBe(5);
