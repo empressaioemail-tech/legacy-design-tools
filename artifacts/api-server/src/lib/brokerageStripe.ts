@@ -184,14 +184,25 @@ export async function stripePostForm(
   return json;
 }
 
-/** Exported so `pePaywallStripe.ts` can reuse the same signed HTTP call. */
+/**
+ * Exported so `pePaywallStripe.ts` and `peSubscriptionStripe.ts` can reuse the
+ * same signed HTTP call.
+ *
+ * `extraHeaders` is optional and additive (never overrides `Authorization`).
+ * Its one purpose today is letting a single call pin `Stripe-Version`
+ * explicitly (P-129) without changing this function's default behaviour for
+ * every other caller, none of which pins a version. Do not use this to widen
+ * the pin repo-wide by accident -- a caller that wants the account default
+ * simply omits the argument, exactly as before.
+ */
 export async function stripeGet(
   path: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<Record<string, unknown>> {
   const secret = process.env.STRIPE_SECRET_KEY!.trim();
   const res = await fetch(`https://api.stripe.com/v1${path}`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${secret}` },
+    headers: { Authorization: `Bearer ${secret}`, ...extraHeaders },
   });
   const json = (await res.json()) as Record<string, unknown> & {
     error?: { message?: string };
