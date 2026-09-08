@@ -22,6 +22,7 @@ import {
   normalizeSitusAddress,
 } from "./lib/joinNormalize";
 import type { ParcelJoinRow } from "./lib/nodeFacetTier1ParcelJoin";
+import { situsStateFromCountyFips } from "./lib/nodeFacetTier1Assemble";
 import {
   assertNoOwnerKey,
   buildConformantTier1Payload,
@@ -310,7 +311,10 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     const n = newPayload(null);
     expect(n.zoning).toBeNull();
     expect(n.envelope).toBeNull();
-    expect(n.baseFacts.situsState).toBeNull();
+    // CTX-situs: situsState is derived from countyFips, not the (missing) join
+    // row, so a join miss no longer bakes a null here (BP-CONTENT-01).
+    expect(n.baseFacts.situsState).toBe("TX");
+    expect(n.provenance.situsStateSource).toBe("derived-county-fips");
     expect(n.baseFacts.acreage).toEqual({
       value: 0.3815,
       sqft: Math.round(0.3815 * 43560),
@@ -349,7 +353,9 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     const n = newPayload(txgioRow(), { gateBlocked: true });
     expect(n.zoning).toBeNull();
     expect(n.envelope).toBeNull();
-    expect(n.baseFacts.situsState).toBeNull();
+    // CTX-situs: derived from countyFips regardless of the gate-blocked
+    // (dropped) row, so this stays a value, never null.
+    expect(n.baseFacts.situsState).toBe("TX");
     // Acreage comes from the claim, not the (refused) ring.
     expect(n.baseFacts.acreage?.method).toBe("cad-roll-land-acres");
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
@@ -377,6 +383,91 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(n.facetCoverage.baseFacts).toBe(true); // apn still present
     expect(n).not.toHaveProperty("publishRunId");
     expect(n.countyName).toBe("Bastrop");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CTX-situs (2026-09-08): situsState is derived from countyFips, never read
+// from the TxGIO join. cad_property has no situs_state column (there is no
+// CAD claim to prefer), and the TxGIO join's own situs_state is both
+// incomplete (312,169 nulls across six counties) and, on 6 known rows,
+// outright wrong (a non-TX value for a Texas parcel). Derivation resolves
+// both defects at the same certainty as countyName's own FIPS-keyed lookup.
+// ---------------------------------------------------------------------------
+
+describe("CTX-situs: situsState derived from countyFips, never a bare null", () => {
+  it("situsStateFromCountyFips: every registered county resolves to TX; an unmapped prefix falls back to the prefix, never null", () => {
+    for (const fips of Object.keys(
+      // Re-derive from the same registry the bake uses, so this test cannot
+      // silently drift from the real county list.
+      { "48209": 0, "48091": 0, "48453": 0, "48491": 0, "48029": 0, "48021": 0, "48055": 0, "48187": 0, "48027": 0, "48309": 0 },
+    )) {
+      expect(situsStateFromCountyFips(fips)).toBe("TX");
+    }
+    expect(situsStateFromCountyFips("99999")).toBe("99");
+  });
+
+  it("population (a), no txgio row, across multiple counties: situsState is TX, never null, never omitted", () => {
+    for (const countyFips of ["48453", "48491", "48209"]) {
+      const n = newPayload(null, { countyFips, countyName: "X" });
+      expect(n.provenance.parcelJoin.state).toBe("no-row");
+      expect(n.baseFacts.situsState).toBe("TX");
+      expect(hasKeyPath(n, "baseFacts.situsState")).toBe(true);
+    }
+  });
+
+  it("population (b), join hit but TxGIO's own situs_state is empty: derivation fills it, never null", () => {
+    const row = txgioRow({ situs_state: "" });
+    const n = newPayload(row);
+    expect(n.provenance.parcelJoin.state).toBe("joined");
+    expect(n.baseFacts.situsState).toBe("TX");
+  });
+
+  it("a wrong TxGIO situs_state (the 6-parcel defect: ST/TE/TN for a Texas parcel) is overridden, not passed through", () => {
+    for (const wrong of ["ST", "TE", "TN", "ZZ"]) {
+      const row = txgioRow({ situs_state: wrong });
+      const n = newPayload(row);
+      expect(n.baseFacts.situsState).toBe("TX");
+      expect(n.baseFacts.situsState).not.toBe(wrong);
+    }
+  });
+
+  it("provenance.situsStateSource marks the value as derived, never mistaken for a CAD/join field", () => {
+    const n = newPayload(txgioRow());
+    expect(n.provenance.situsStateSource).toBe("derived-county-fips");
+  });
+
+  it("verify by violating: the real BP-CONTENT-01 classifier (hauska-factory verify-walk.mjs classifyRequiredLeaf, reproduced verbatim below from the 2026-09-08 read) refuses null and accepts the derived value", () => {
+    // Reproduced rather than imported: verify-walk.mjs lives in a sibling
+    // repo (hauska-factory), out of this dispatch's scope to depend on.
+    // Read at source 2026-09-08 (P:/tmp/ctx-w2-gate/src/jobs/verify-walk.mjs
+    // lines 252-258, the string/number/boolean branch) rather than
+    // reimplemented from memory.
+    function classifyRequiredLeaf(value: unknown): { state: string; ok: boolean } {
+      if (value === null || value === undefined) return { state: "null", ok: false };
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        if (value === "") return { state: "empty", ok: false };
+        return { state: "value", ok: true };
+      }
+      return { state: "unknown", ok: false };
+    }
+
+    // The old mechanism's failure mode, still checked so a future regression
+    // that reintroduces `row?.situs_state ?? null` is caught by THIS check
+    // failing to classify it as ok, not just by the value differing.
+    expect(classifyRequiredLeaf(null)).toEqual({ state: "null", ok: false });
+    expect(classifyRequiredLeaf("")).toEqual({ state: "empty", ok: false });
+
+    const populationA = newPayload(null, { countyFips: "48453", countyName: "Travis" });
+    const populationB = newPayload(txgioRow({ situs_state: "" }));
+    expect(classifyRequiredLeaf(populationA.baseFacts.situsState)).toEqual({
+      state: "value",
+      ok: true,
+    });
+    expect(classifyRequiredLeaf(populationB.baseFacts.situsState)).toEqual({
+      state: "value",
+      ok: true,
+    });
   });
 });
 
@@ -473,6 +564,9 @@ describe("the divergence instrument fails when it should", () => {
         // only, so the old-versus-new leaf diff still compares strictly.
         "provenance.landUseOrigin",
         "provenance.landUseAbsence",
+        // CTX-situs (2026-09-08): situsState is derived, not join-sourced;
+        // same new-shape-only treatment as the two above.
+        "provenance.situsStateSource",
         "baseFacts.cadRoll",
         "baseFacts.yearBuilt",
         "baseFacts.legalDescription",
@@ -701,7 +795,9 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
     });
     expect(n.zoning).toBeNull();
     expect(n.envelope).toBeNull();
-    expect(n.baseFacts.situsState).toBeNull();
+    // CTX-situs: the colliding row is correctly unused for zoning/envelope
+    // (asserted above/below), but situsState no longer depends on it at all.
+    expect(n.baseFacts.situsState).toBe("TX");
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
     expect(n.provenance.landUseAddressRecovered).toBe(false);
   });

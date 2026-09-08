@@ -15,7 +15,11 @@
  *
  *   - baseFacts: the CAD claim fields mapped by name (apn from the node id,
  *     situsAddress/situsCity from the claim, landUse from the claim's
- *     propertyUseCode + tax year) plus situsState from the parcel join;
+ *     propertyUseCode + tax year) plus situsState DERIVED from countyFips
+ *     (CTX-situs, 2026-09-08) — cad_property has no situs_state column and
+ *     the txgio parcel join's own situs_state is null or wrong often enough
+ *     to block every county's publish (BP-CONTENT-01); the county FIPS state
+ *     prefix is certain regardless of whether the join hit;
  *   - zoning: the same zoning-stamp join keyed by parcel node id
  *     (`txgio_parcel.zoning_district` / `zoning_jurisdiction`), the same
  *     jurisdiction resolution and layer provenance;
@@ -70,6 +74,7 @@ import {
   assembleTier1Payload,
   COUNTY_NAMES,
   firstRing,
+  situsStateFromCountyFips,
   type BaseFacts,
   type Tier1FacetPayload,
 } from "./nodeFacetTier1Assemble";
@@ -552,7 +557,8 @@ export function buildConformantTier1Payload(
     apn,
     situsAddress: input.situsAddress,
     situsCity: claim.situsCity,
-    situsState: row?.situs_state ?? null,
+    situsState: situsStateFromCountyFips(countyFips),
+    situsStateSource: "derived-county-fips",
     situsZip: claim.situsZip,
     landUse,
     cadRoll: cadFacts.cadRoll,
@@ -911,6 +917,10 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   "provenance.parcelJoin",
   "provenance.landUseOrigin",
   "provenance.landUseAbsence",
+  // CTX-situs (2026-09-08): situsState is now derived, not join-sourced;
+  // this marks that provenance. New-shape-only, same treatment as
+  // landUseOrigin/landUseAbsence above.
+  "provenance.situsStateSource",
   "baseFacts.cadRoll",
   "baseFacts.yearBuilt",
   "baseFacts.legalDescription",

@@ -66,6 +66,31 @@ export const COUNTY_NAMES: Record<string, string> = {
   "48309": "McLennan",
 };
 
+// State FIPS prefix -> two-letter code, same table shape as
+// lib/cad-ingest/src/jurisdictions.ts's stateFromFips (kept local rather than
+// imported: three literals, no reason to widen that package's export surface
+// for it). Every COUNTY_NAMES key above is a "48" county; this program is
+// Texas-only today.
+const STATE_BY_FIPS_PREFIX: Record<string, string> = {
+  "48": "TX",
+  "49": "UT",
+  "16": "ID",
+};
+
+/**
+ * The situs state derived from the county FIPS prefix — the same order of
+ * certainty as `COUNTY_NAMES`'s own FIPS-keyed derivation above. A property's
+ * situs state is the state its county sits in, definitionally; unlike
+ * `situsCity`/`situsZip`, `cad_property` carries no `situs_state` column at
+ * all, so there is no CAD claim to prefer over this. Never null: an unmapped
+ * prefix falls back to the prefix itself rather than admitting a fifth cell
+ * state (this program only ever sees "48", so the fallback is not expected to
+ * fire).
+ */
+export function situsStateFromCountyFips(countyFips: string): string {
+  return STATE_BY_FIPS_PREFIX[countyFips.slice(0, 2)] ?? countyFips.slice(0, 2);
+}
+
 /** The provenance of a recovered land-use — prop_id join vs address recovery. */
 export type LandUseSource = "cad-roll" | "cad-roll-address-join";
 
@@ -181,6 +206,17 @@ export interface Tier1FacetPayload {
      * present (COMPLETE-BASTROP A1). Null when zoning is honestly absent.
      */
     zoningSource: string | null;
+    /**
+     * Where `baseFacts.situsState` came from. New-shape-only (present ONLY
+     * when the caller supplies it, i.e. the conformant bake, never the
+     * legacy bake) so this stays an additive key the divergence diff must
+     * allowlist, same treatment as `landUseOrigin`/`landUseAbsence` below —
+     * NOT a change to `REQUIRED_TIER1_FACET_PATHS`'s leaf set, which is
+     * hand-mirrored into hauska-factory's verify-walk.mjs and out of this
+     * dispatch's scope to touch. Lets a later reader tell a derived value
+     * apart from a sourced one rather than mistaking it for a CAD field.
+     */
+    situsStateSource?: string;
   };
   bakedAt: string;
 }
@@ -264,6 +300,9 @@ export interface Tier1AssemblyInput {
   zoningJurisdictionRaw: string | null | undefined;
   parcelSource: ParcelSource;
   parcelVintage: string | null | undefined;
+  /** See `provenance.situsStateSource`. Omitted entirely when not supplied
+   * (the legacy bake's call site never sets this and gains no new leaf). */
+  situsStateSource?: string;
   nowIso: string;
   onSitusFallback?: (info: {
     cityKey: string;
@@ -386,6 +425,7 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
       tierNote: TIER_NOTE,
       landUseGateBlocked: input.landUseGateBlocked,
       zoningSource: zoningGisProvenance?.sourceUrl ?? null,
+      ...(input.situsStateSource ? { situsStateSource: input.situsStateSource } : {}),
     },
     bakedAt: nowIso,
   };
