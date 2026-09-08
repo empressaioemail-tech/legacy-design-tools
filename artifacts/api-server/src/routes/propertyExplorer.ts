@@ -108,6 +108,10 @@ import {
   PE_BILLING_PORTAL_ROUTE,
   PE_TEAM_INCLUDED_SEATS,
 } from "../lib/pePaywallStripe";
+import {
+  PE_SUBSCRIPTION_ROUTE,
+  readPeSubscriptionSnapshot,
+} from "../lib/peSubscriptionStripe";
 import { countyFipsFromParcelNodeId } from "../lib/verdictLayerServe";
 import { isP85CountyFips } from "../lib/p85ClerkPortalRegistry";
 import {
@@ -1725,6 +1729,82 @@ router.post(
     } catch (err) {
       res.status(502).json({
         error: "portal_failed",
+        message: String((err as Error).message || err),
+        stripeConfigured: isStripeConfigured(),
+      });
+    }
+  },
+);
+
+/**
+ * P-129 -- live Stripe subscription read for the signed-in PE user (renewal
+ * date + cancellation status). Serves BOTH the Settings > Plan "Renewal
+ * date" display (previously always "Not read" -- see peSubscriptionStripe.ts
+ * file header for why it was never stored) and whatever the cancellation
+ * flow needs to show before it sends the customer to the hosted portal
+ * (A-062, PE_BILLING_PORTAL_ROUTE above).
+ *
+ * Auth and error-arm shape mirror A-062's billing-portal route exactly:
+ * requirePeAuthenticated + an inner resolvePeOwnerUserId 401 check, a
+ * discriminated result read rather than a fabricated field, and no arm of
+ * this route is 500.
+ *
+ * Status codes, each a distinct state:
+ *   401 authentication_required     no session (requirePeAuthenticated)
+ *   200 { hasSubscription: false }  signed in, no live Stripe subscription
+ *                                   (never had one, or it already ended) --
+ *                                   the ordinary state of every free account
+ *   200 { hasSubscription: true, status, currentPeriodEnd, cancelAtPeriodEnd }
+ *   503 subscription_unavailable    Stripe is not configured on this
+ *                                   deployment -- distinct from "no
+ *                                   subscription": this means "could not
+ *                                   check", never rendered as "no renewal"
+ *   502 subscription_check_failed   Stripe answered with an error, returned a
+ *                                   malformed subscription (extraction failed
+ *                                   closed), or the customer carries more
+ *                                   than one live subscription (ambiguity
+ *                                   refused rather than guessed)
+ */
+router.get(
+  PE_SUBSCRIPTION_ROUTE,
+  requirePeAuthenticated,
+  async (req: Request, res: Response) => {
+    const userId = resolvePeOwnerUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+
+    try {
+      const snapshot = await readPeSubscriptionSnapshot(userId);
+      if (snapshot.kind === "not-configured") {
+        res.status(503).json({
+          error: "subscription_unavailable",
+          message:
+            "Stripe is not configured on this deployment, so no live subscription data can be read.",
+          stripeConfigured: false,
+        });
+        return;
+      }
+      if (snapshot.kind === "no-subscription") {
+        res.json({
+          ok: true,
+          hasSubscription: false,
+          stripeConfigured: isStripeConfigured(),
+        });
+        return;
+      }
+      res.json({
+        ok: true,
+        hasSubscription: true,
+        status: snapshot.status,
+        currentPeriodEnd: snapshot.currentPeriodEnd,
+        cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
+        stripeConfigured: true,
+      });
+    } catch (err) {
+      res.status(502).json({
+        error: "subscription_check_failed",
         message: String((err as Error).message || err),
         stripeConfigured: isStripeConfigured(),
       });
