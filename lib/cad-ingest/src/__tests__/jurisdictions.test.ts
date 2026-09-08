@@ -127,7 +127,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(getSetbackTable("liberty-hill-tx")?.note).toMatch(/WDLL 51/i);
   });
 
-  it("Travis (48453): geometry + pacs CAD, no free bulk source; multi-city Austin+Pflugerville zoning SET", () => {
+  it("Travis (48453): geometry + pacs CAD, no free bulk source; multi-city Austin+Pflugerville+Elgin zoning SET", () => {
     const j = getJurisdictionConfig("48453");
     if (!j) throw new Error("expected Travis");
 
@@ -140,8 +140,11 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       (z) => z.countyFips === "48453",
     );
     expect(j.zoningLayers).toEqual(travisCities);
+    // "elgin-tx" appears here from the "elgin-tx-travis" registry entry
+    // (CTX-ELGIN, P-124, 2026-09-08) — same cityKey as the Bastrop-side
+    // Elgin entry, so it collapses into one set member, not a fourth city.
     expect(new Set(travisCities.map((c) => c.cityKey))).toEqual(
-      new Set(["pflugerville-tx", "austin-tx"]),
+      new Set(["pflugerville-tx", "austin-tx", "elgin-tx"]),
     );
     const pflugerville = getSetbackTable("pflugerville-tx");
     const austin = getSetbackTable("austin-tx");
@@ -246,9 +249,13 @@ describe("listJurisdictions / listJurisdictionFips", () => {
 });
 
 describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
-  it("Travis composes the SET {austin-tx, pflugerville-tx}", () => {
+  it("Travis composes the SET {austin-tx, pflugerville-tx, elgin-tx}", () => {
+    // elgin-tx added by the "elgin-tx-travis" registry entry (CTX-ELGIN,
+    // P-124, 2026-09-08): layer 1 of the Elgin_Zoning FeatureServer, the
+    // Travis-county-side sliver, wired to the same cityKey as the
+    // Bastrop-side entry so it collapses into the set, not a fourth key.
     expect(wiredZoningCityKeys("48453")).toEqual(
-      new Set(["austin-tx", "pflugerville-tx"]),
+      new Set(["austin-tx", "pflugerville-tx", "elgin-tx"]),
     );
   });
 

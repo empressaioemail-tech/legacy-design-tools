@@ -336,9 +336,13 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // Elgin (Bastrop, 48021). SECOND Bastrop-county city zoning layer
   // (Bastrop city is "bastrop-city-tx" above). Elgin_Zoning FeatureServer
   // layer 0 covers the Bastrop-county-side cohort (CITY_LIMIT='ELGIN',
-  // ~3,220 parcels); the SAME FeatureServer's layer 1 (~500 parcels,
-  // fips 48453 Travis-county-side sliver) is a NAMED FOLLOW-ON, out of
-  // this pass — not wired here. `Zone_Code` carries the raw district
+  // 3,220 parcels, verified live 2026-09-08). Layer 1 (fips 48453
+  // Travis-county-side sliver, 500 features) is wired below as the
+  // separate "elgin-tx-travis" registry entry (CTX-ELGIN dispatch,
+  // P-124, 2026-09-08): layer 0's own layerWhere filter matches 100% of
+  // its features (no dropped-polygon defect on this layer), so layer 1
+  // needed wiring, not a filter fix, for the Travis-county-side cohort.
+  // `Zone_Code` carries the raw district
   // token; every district's raw value equals its canonical setback
   // district_name leading token (Sec. 46-203 roster: R-1/R-2/R-3/C-1/
   // C-2/C-3/I) EXCEPT the multifamily district, which the ordinance names
@@ -362,6 +366,49 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     countyFips: "48021",
     layerUrl:
       "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Elgin_Zoning/FeatureServer/0",
+    codeField: "Zone_Code",
+    descriptionField: "Zoning",
+    layerWhere: "CITY_LIMIT = 'ELGIN'",
+    codeDomainMap: {
+      "R-1": "R-1",
+      "R-2": "R-2",
+      "R-3": "R-3",
+      A: "R-4",
+      "C-1": "C-1",
+      "C-2": "C-2",
+      "C-3": "C-3",
+      I: "I",
+    },
+  },
+  // Elgin (Travis, 48453). Same FeatureServer as "elgin-tx" above, layer 1
+  // (service name "City of Elgin Zoning: Travis County") — the follow-on
+  // that entry's own comment named as out of its pass. This is a SEPARATE
+  // registry entry (own countyFips, own layerUrl) because the stamp is
+  // county-scoped and one config carries one county, but `cityKey` is set
+  // to the literal "elgin-tx" (not a distinct key) so `stampCountyZoning`
+  // persists `zoning_jurisdiction = 'elgin-tx'` on every match — the exact
+  // string `isElginCityJurisdiction` (lib/adapters's setbacks index)
+  // checks for, so Travis-side Elgin parcels route to the same ratified
+  // elgin-development-code setback table as the Bastrop-side cohort. Same
+  // `Zone_Code` domain as layer 0 (verified live 2026-09-08: R-1/R-3/A/
+  // C-1/C-2/C-3 present, no R-2/I/S-P currently in this layer) — the
+  // identical codeDomainMap is reused unmodified rather than duplicated
+  // with drift. layerWhere mirrors layer 0's own filter (499 of 500
+  // features carry CITY_LIMIT='ELGIN'; the one remaining feature carries
+  // a blank value and is excluded, consistent with layer 0's filter
+  // semantics). CTX-ELGIN dispatch (P-124, 2026-09-08): a live
+  // point-in-polygon sample of 25 of the 1,680 Travis parcels the
+  // pre-bake gate held as zoningDistrict-unaccounted found 21/25 (84%)
+  // already covered by this layer today — this was the live, verified
+  // basis for wiring it, not an assumption. Re-run the elgin-tx stamp for
+  // county 48453 after this lands; a full re-measurement (not the 25-
+  // sample estimate) is required before any completeness claim.
+  "elgin-tx-travis": {
+    cityKey: "elgin-tx",
+    cityName: "Elgin",
+    countyFips: "48453",
+    layerUrl:
+      "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Elgin_Zoning/FeatureServer/1",
     codeField: "Zone_Code",
     descriptionField: "Zoning",
     layerWhere: "CITY_LIMIT = 'ELGIN'",

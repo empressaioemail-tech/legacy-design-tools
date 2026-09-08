@@ -463,9 +463,26 @@ describe("resolveZoningLayer (the 5 newly registered cities)", () => {
     expect(cfg.codeField).toBe("Zone_Code");
     expect(cfg.layerWhere).toBe("CITY_LIMIT = 'ELGIN'");
     expect(cfg.codeExtractRegex).toBeUndefined();
-    // Named follow-on: the same FeatureServer's layer 1 (Travis-side sliver,
-    // fips 48453) is NOT this layer's URL.
+    // Layer 1 (Travis-side sliver, fips 48453) is NOT this layer's URL —
+    // it is the separate "elgin-tx-travis" registry entry below.
     expect(cfg.layerUrl).not.toContain("FeatureServer/1");
+  });
+
+  it("wires elgin-tx-travis to Elgin_Zoning/1 for county 48453, same cityKey as the Bastrop-side entry (CTX-ELGIN, P-124, 2026-09-08)", () => {
+    const cfg = resolveZoningLayer("elgin-tx-travis")!;
+    expect(cfg.countyFips).toBe("48453");
+    expect(cfg.layerUrl).toBe(
+      "https://services3.arcgis.com/wdTkTU0MdZbNBEZy/arcgis/rest/services/Elgin_Zoning/FeatureServer/1",
+    );
+    expect(cfg.codeField).toBe("Zone_Code");
+    expect(cfg.layerWhere).toBe("CITY_LIMIT = 'ELGIN'");
+    // Not a distinct jurisdiction: cityKey stays "elgin-tx" so
+    // stampCountyZoning persists zoning_jurisdiction="elgin-tx" and
+    // isElginCityJurisdiction (lib/adapters's setbacks index) still routes
+    // Travis-side Elgin parcels to the ratified elgin-development-code
+    // setback table, same as the Bastrop-side cohort.
+    expect(cfg.cityKey).toBe("elgin-tx");
+    expect(cfg.cityKey).not.toBe("elgin-tx-travis");
   });
 
   it("elgin-tx codeDomainMap: identity for 7 districts, A -> R-4 for the sole GIS/ordinance-naming divergence", () => {
