@@ -462,6 +462,122 @@ export const BAKE_OWNED_REQUIRED_LEAF_PATHS: readonly string[] = [
   "provenance.landUseSource",
 ];
 
+// ---------------------------------------------------------------------------
+// RECORD RETIREMENT (P-124 CTX-RETIRE, 2026-09-09). An account absent from the
+// county's CURRENT declared-vintage cad_property roll -- split, merged,
+// renumbered or removed -- must serve a declared retirement that names why,
+// never the prior vintage's snapshot presented as though it were current, and
+// never a silent skip that leaves an even-older payload in place untouched.
+//
+// This is the SAME family as Tier1LeafAbsence one level up: a leaf says one
+// field has no value and why; this says the WHOLE record is no longer on the
+// roll and why. The predicate is built ONLY from `cadPropertyRoll` -- the
+// same declared-vintage `cad_property` read this bake already does for the
+// dollar facets, ALL rows at that vintage, not filtered to a use code -- so a
+// prop_id present in the current roll can never earn this state. It does not
+// depend on situs shape, acreage, or any other heuristic.
+// ---------------------------------------------------------------------------
+
+/**
+ * A RECORD-LEVEL retirement declaration. `null` for a record that IS on the
+ * current declared-vintage roll; a well-formed `Tier1RecordRetirement` for
+ * one that is not. Present on every conformant payload (never an omitted
+ * key) so a reader following an old link gets an answer, not a void -- the
+ * rest of the payload still carries the account's LAST-KNOWN claim content,
+ * unmodified; this field is the thing that says it is not current.
+ */
+export interface Tier1RecordRetirement {
+  status: "retired";
+  verdict: "absent-verified";
+  authority: string;
+  scopeSearched: string;
+  asOf: string;
+  basis: string;
+  /** The tax_year this prop_id's OWN claim last carried, when known. */
+  lastSeenTaxYear: number | null;
+}
+
+const RECORD_RETIREMENT_STRING_FIELDS = [
+  "authority",
+  "scopeSearched",
+  "asOf",
+  "basis",
+] as const;
+
+/**
+ * True for a WELL-FORMED record retirement -- the same discipline
+ * `isEarnedLeafAbsence` applies one level down. A half-built object must not
+ * buy the tolerance a genuine retirement earns.
+ */
+export function isEarnedRecordRetirement(
+  value: unknown,
+): value is Tier1RecordRetirement {
+  const rec = asRecord(value);
+  if (!rec) return false;
+  if (rec.status !== "retired") return false;
+  if (rec.verdict !== "absent-verified") return false;
+  for (const field of RECORD_RETIREMENT_STRING_FIELDS) {
+    const v = rec[field];
+    if (typeof v !== "string" || v.trim() === "") return false;
+  }
+  if (rec.lastSeenTaxYear !== null && typeof rec.lastSeenTaxYear !== "number") {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Build the retirement declaration. The basis names THIS parcel, the county,
+ * the declared vintage that was checked, and the last vintage the record's
+ * own claim carried -- never a basis identical across parcels (that is a
+ * ceremony, not a justification, the same rule `buildLandUseAbsence` follows).
+ * It deliberately says NO successor is named: this mission's own successor
+ * search (crosswalk + geometry) came back negative, and fabricating one would
+ * be worse than naming none.
+ */
+function buildRecordRetirement(input: {
+  parcelNodeId: string;
+  countyFips: string;
+  countyName: string;
+  apn: string;
+  declaredTaxYear: number | null;
+  lastSeenTaxYear: number | null;
+  nowIso: string;
+}): Tier1RecordRetirement {
+  const {
+    parcelNodeId,
+    countyFips,
+    countyName,
+    apn,
+    declaredTaxYear,
+    lastSeenTaxYear,
+    nowIso,
+  } = input;
+  return {
+    status: "retired",
+    verdict: "absent-verified",
+    authority:
+      `${countyName} County CAD roll (cad_property) for county_fips ${countyFips}` +
+      (declaredTaxYear != null
+        ? ` at declared tax_year ${declaredTaxYear}`
+        : " (no declared CAD tax year)"),
+    scopeSearched:
+      `cad_property, ALL rows (not filtered to a use code), county_fips ${countyFips}` +
+      (declaredTaxYear != null ? ` tax_year ${declaredTaxYear}` : ""),
+    asOf: nowIso,
+    basis:
+      `${parcelNodeId}: prop_id ${apn} carries no row in the ${countyName} County ` +
+      `CAD roll's declared tax_year ${declaredTaxYear ?? "unknown"}` +
+      (lastSeenTaxYear != null
+        ? `; this record's own claim last carried tax_year ${lastSeenTaxYear}`
+        : "") +
+      `. This account is not on the current roll -- split, merged, renumbered ` +
+      `or removed; no successor account has been verified. The facts elsewhere ` +
+      `on this payload are the LAST-KNOWN claim, not current.`,
+    lastSeenTaxYear,
+  };
+}
+
 export interface ConformantBaseFacts
   extends Omit<BaseFacts, "situsCity" | "situsZip" | "landUse"> {
   situsCity: string | Tier1LeafAbsence;
@@ -480,6 +596,8 @@ export interface ConformantTier1Payload extends Omit<
   access: { discoverability: string; entitlement: string };
   accessNormalizedFrom?: string;
   publishRunId?: string;
+  /** Record-level declared retirement; see the RECORD RETIREMENT block above. */
+  recordRetirement: Tier1RecordRetirement | null;
   facets: {
     base: { parcelNodeId: string; situsAddress: string | null; apn: string | null };
   };
@@ -547,6 +665,15 @@ export interface ConformantTier1BuildInput {
    * exemption. ALWAYS consulted when the CLI read the table. Seed does not
    * apply (CAD-to-CAD on the parcel node's own CAD prop_id). OMITTING it
    * bakes null cadRoll fields, never the atom claim.
+   *
+   * CTX-RETIRE (2026-09-09): this is also the ONLY input `recordRetirement`
+   * reads. `byPropId` holds ALL rows at the declared vintage (not filtered to
+   * a use code), so a miss here is a positive statement that the prop_id is
+   * absent from the county's current roll, not merely lacking one field.
+   * OMITTING this input (or an undeclared/unconsulted county) means
+   * `recordRetirement` stays null -- no positive determination, no
+   * retirement, same "empty is not an absence" discipline as everywhere else
+   * in this module.
    */
   cadPropertyRoll?: ConformantCadPropertyRoll;
   /**
@@ -691,6 +818,23 @@ export function buildConformantTier1Payload(
       : null;
   const cadFacts = cadPropertyFactsFromRow(cadPropRow);
 
+  // RECORD RETIREMENT: the declared-vintage cad_property roll was consulted
+  // (not merely absent/undeclared) AND carries no row at all for this prop_id
+  // -- not "no coded row", ALL rows, the same table the dollar facets already
+  // read. A prop_id present in the current roll can never reach this branch.
+  const recordRetirement: Tier1RecordRetirement | null =
+    apn != null && cadPropConsulted && cadPropRow == null
+      ? buildRecordRetirement({
+          parcelNodeId,
+          countyFips,
+          countyName,
+          apn,
+          declaredTaxYear: input.cadPropertyRoll?.declaredTaxYear ?? null,
+          lastSeenTaxYear: claim.taxYear,
+          nowIso,
+        })
+      : null;
+
   const tier1 = assembleTier1Payload({
     nodeId: parcelNodeId,
     countyFips,
@@ -803,6 +947,7 @@ export function buildConformantTier1Payload(
     baked: true,
     source: CONFORMANT_TIER1_SOURCE,
     access: input.access,
+    recordRetirement,
     ...(input.accessNormalizedFrom
       ? { accessNormalizedFrom: input.accessNormalizedFrom }
       : {}),
@@ -1265,6 +1410,9 @@ export const DIVERGENCE_IGNORE_NEW_SHAPE_KEYS: readonly string[] = [
   "access",
   "accessNormalizedFrom",
   "publishRunId",
+  // CTX-RETIRE (2026-09-09): record-level retirement declaration, new-shape
+  // only, same treatment as the keys above.
+  "recordRetirement",
 ];
 
 /** Key-path prefixes the new shape deliberately ADDS (allowlist). */
