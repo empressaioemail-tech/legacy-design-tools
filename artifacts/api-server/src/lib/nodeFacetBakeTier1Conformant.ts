@@ -31,6 +31,18 @@
  *     gate-blocked, joined-situs). Absent is a state the key carries, never
  *     an omission.
  *
+ * CELL STATES, NOT NULLS (P-124 CTX-LEAVES, 2026-09-08). "Absent is a state
+ * the key carries" was true of the KEY and false of the VALUE: four leaves
+ * this bake owns handed a required cell a bare `null` whenever their input was
+ * missing, and `BP-CONTENT-01` says a present key holding null is none of
+ * `value | absent-verified | not-applicable | refused`. Those four —
+ * `baseFacts.situsCity`, `baseFacts.situsZip`, `baseFacts.landUse` and its
+ * twin `provenance.landUseSource` — now carry an EARNED absence
+ * (`Tier1LeafAbsence`), and `assertRequiredLeafStatesEarned` refuses the write
+ * if any of them is ever a bare null again. `provenance.zoningSource` is NOT
+ * among them: its state belongs to the zoning rail, which the SERVE earns, and
+ * the twin is mirrored there — see the EARNED LEAF STATES block below.
+ *
  * Kept from the conformant shape: `shapeSource`, `baked`, `source`, `access`
  * (canonical pair, A-023), `accessNormalizedFrom` when serve translation
  * applies, `publishRunId`, `facets.base` (read by `refusePayloadAtServe` and
@@ -334,10 +346,134 @@ export interface ConformantCadPropertyRoll {
   consulted: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// EARNED LEAF STATES (P-124 CTX-LEAVES, 2026-09-08).
+//
+// `BP-CONTENT-01` requires every REQUIRED tier-1 leaf to classify as one of
+// `value | absent-verified | not-applicable | refused`, and states plainly
+// that a present key holding null is NONE of those. Until this change four
+// leaves this bake owns handed a bare null to a required cell whenever their
+// input was missing — `baseFacts.situsCity`, `baseFacts.situsZip`,
+// `baseFacts.landUse` and its twin `provenance.landUseSource`. Measured on
+// staging 2026-09-08 that is 500,307 of 500,307 Travis parcels for land use
+// and 363,797 for situs city; the walk's street-local sweep never sampled a
+// jurisdiction where they varied, which is why they were invisible rather
+// than new.
+//
+// The rule this module now follows: a leaf carries a VALUE, or it carries the
+// EARNED ABSENCE that says who was asked, in what scope, when, and why THIS
+// parcel has nothing. Never a bare null.
+//
+// TWO THINGS THIS DELIBERATELY DOES NOT DO.
+//
+// It does not decide `provenance.zoningSource`. That leaf is the top-level
+// twin of the zoning cell, and the zoning cell's state is not knowable here:
+// the bake writes `zoning: null` for an unstamped parcel and the SERVE earns
+// the four-state, from the Factory's parcel_record zoningDistrict rail and
+// the city-limits containment fact (`attachVerdictLayersToFacets`,
+// `zoningVerdictFromCityLimits`). A verdict invented here would be a second
+// answer to a question the rail answers later with more information — and on
+// Elgin, whose layer is declared incomplete and whose unmatched parcels are
+// therefore NOT verifiably unzoned, it would be the exact lie that passes
+// every check. The twin is mirrored onto the rail at serve instead.
+//
+// It does not upgrade `lookup-failed` to `absent-verified`. A land-use
+// absence the bake could not measure (gate-blocked county, no join key, roll
+// never consulted) becomes `refused` — a positive statement of
+// non-determination — and carries its original `lookupVerdict` so the two are
+// never collapsed.
+// ---------------------------------------------------------------------------
+
+/**
+ * The earned cell state of a required leaf that carries no value, in the
+ * vocabulary `19_the_instrument_contract.md` requires and the Factory walk
+ * grades (`classifyRequiredLeaf`): a verdict, the authority that was asked,
+ * the scope it was asked in, an EVALUATION-time `asOf` (the bake clock, never
+ * a request clock), and a basis naming THIS parcel — a basis identical across
+ * parcels is a ceremony and `gradeAbsentVerifiedBasisDiversity` fails it.
+ *
+ * `status: "absent"` matches the `LayerAbsenceWire` shape the serve already
+ * puts on `zoning` and `livingAreaSqft`, so a reader meets one shape.
+ */
+export interface Tier1LeafAbsence {
+  status: "absent";
+  verdict: "absent-verified" | "not-applicable" | "refused";
+  authority: string;
+  scopeSearched: string;
+  asOf: string;
+  basis: string;
+  /**
+   * Set when this cell's state is COPIED from another cell rather than
+   * decided here, naming the cell it copies. A mirrored leaf cannot disagree
+   * with the leaf it mirrors, which is the whole point of mirroring it.
+   */
+  mirrors?: string;
+  /**
+   * The un-collapsed upstream verdict when that verdict is not itself one of
+   * the four states. Only `lookup-failed` reaches this today, on a `refused`
+   * cell: we could not look, and that is not the same as looking and finding
+   * nothing.
+   */
+  lookupVerdict?: "lookup-failed";
+}
+
+const LEAF_ABSENCE_VERDICTS: ReadonlySet<string> = new Set([
+  "absent-verified",
+  "not-applicable",
+  "refused",
+]);
+
+/**
+ * True for a WELL-FORMED earned absence. Every field is checked, because this
+ * predicate is what the divergence instrument trusts when it accepts a leaf
+ * that used to be a null — a half-built object must not buy that tolerance.
+ */
+export function isEarnedLeafAbsence(value: unknown): value is Tier1LeafAbsence {
+  const rec = asRecord(value);
+  if (!rec) return false;
+  if (rec.status !== "absent") return false;
+  if (typeof rec.verdict !== "string" || !LEAF_ABSENCE_VERDICTS.has(rec.verdict)) {
+    return false;
+  }
+  for (const field of ["authority", "scopeSearched", "asOf", "basis"] as const) {
+    const v = rec[field];
+    if (typeof v !== "string" || v.trim() === "") return false;
+  }
+  return true;
+}
+
+/**
+ * A land use that actually RESOLVED, as opposed to the earned absence that now
+ * shares that key. Every consumer of `baseFacts.landUse` must narrow through
+ * this rather than through `!= null`, which no longer means "has a land use".
+ */
+export function isResolvedLandUseFacet(
+  value: unknown,
+): value is NonNullable<BaseFacts["landUse"]> {
+  const rec = asRecord(value);
+  return !!rec && typeof rec.code === "string" && rec.code.trim() !== "";
+}
+
+/** The four leaves this bake owns the cell state of. `zoning`/`zoningSource` are the serve's. */
+export const BAKE_OWNED_REQUIRED_LEAF_PATHS: readonly string[] = [
+  "baseFacts.situsCity",
+  "baseFacts.situsZip",
+  "baseFacts.landUse",
+  "provenance.landUseSource",
+];
+
+export interface ConformantBaseFacts
+  extends Omit<BaseFacts, "situsCity" | "situsZip" | "landUse"> {
+  situsCity: string | Tier1LeafAbsence;
+  situsZip: string | Tier1LeafAbsence;
+  landUse: NonNullable<BaseFacts["landUse"]> | Tier1LeafAbsence;
+}
+
 export interface ConformantTier1Payload extends Omit<
   Tier1FacetPayload,
-  "facetCoverage" | "provenance"
+  "facetCoverage" | "provenance" | "baseFacts"
 > {
+  baseFacts: ConformantBaseFacts;
   shapeSource: typeof CONFORMANT_SHAPE_SOURCE;
   baked: true;
   source: typeof CONFORMANT_TIER1_SOURCE;
@@ -348,7 +484,13 @@ export interface ConformantTier1Payload extends Omit<
     base: { parcelNodeId: string; situsAddress: string | null; apn: string | null };
   };
   facetCoverage: Tier1FacetPayload["facetCoverage"] & { tier1: "populated" };
-  provenance: Tier1FacetPayload["provenance"] & {
+  provenance: Omit<Tier1FacetPayload["provenance"], "landUseSource"> & {
+    /**
+     * The source enum when a land use resolved; otherwise a VERBATIM mirror of
+     * `baseFacts.landUse`'s earned absence. Never a bare null: the two are one
+     * cell asked twice and must not be able to answer differently.
+     */
+    landUseSource: Tier1FacetPayload["provenance"]["landUseSource"] | Tier1LeafAbsence;
     parcelJoin: ParcelJoinRecord;
     /** Which upstream supplied the land use; null when none did. */
     landUseOrigin: LandUseOrigin | null;
@@ -622,7 +764,40 @@ export function buildConformantTier1Payload(
           basis: `no ${table} row for (county_fips ${countyFips}, prop_id ${apn ?? "?"}); zoning stamp and geometry unavailable`,
         };
 
-  const { facetCoverage, provenance, ...rest } = tier1;
+  // --- Earned cell states for the four leaves this bake owns ---------------
+  // AFTER assembly, never before: `assembleTier1Payload` reads
+  // `baseFacts.situsCity` internally for `resolveZoningJurisdiction` and
+  // `computeTier1Envelope`, and both must keep seeing a plain string-or-null.
+  // The shared assembler, and therefore the legacy bake that also calls it,
+  // are untouched by this.
+  const { placement } = conformantClaimRecord(input.body);
+  const claimAbsence = (field: "situsCity" | "situsZip"): Tier1LeafAbsence =>
+    claimLeafAbsence({
+      parcelNodeId,
+      countyFips,
+      countyName,
+      field,
+      placement,
+      access: input.access,
+      nowIso,
+    });
+  const landUseLeaf: ConformantBaseFacts["landUse"] =
+    tier1.baseFacts.landUse ??
+    leafAbsenceFromLandUseAbsence(landUseAbsence as LandUseAbsence, parcelNodeId);
+  const landUseSourceLeaf =
+    tier1.baseFacts.landUse != null
+      ? tier1.provenance.landUseSource
+      : // VERBATIM mirror, basis byte-identical, so the twin cannot state
+        // anything the leaf it mirrors does not state.
+        { ...(landUseLeaf as Tier1LeafAbsence), mirrors: "baseFacts.landUse" };
+
+  const { facetCoverage, provenance, baseFacts: assembledBaseFacts, ...rest } = tier1;
+  const baseFacts: ConformantBaseFacts = {
+    ...assembledBaseFacts,
+    situsCity: assembledBaseFacts.situsCity ?? claimAbsence("situsCity"),
+    situsZip: assembledBaseFacts.situsZip ?? claimAbsence("situsZip"),
+    landUse: landUseLeaf,
+  };
   const payload: ConformantTier1Payload = {
     shapeSource: CONFORMANT_SHAPE_SOURCE,
     baked: true,
@@ -640,12 +815,21 @@ export function buildConformantTier1Payload(
       },
     },
     ...rest,
+    baseFacts,
     facetCoverage: { ...facetCoverage, tier1: "populated" },
-    provenance: { ...provenance, parcelJoin, landUseOrigin, landUseAbsence },
+    provenance: {
+      ...provenance,
+      landUseSource: landUseSourceLeaf,
+      parcelJoin,
+      landUseOrigin,
+      landUseAbsence,
+    },
   };
   // Fail closed at the builder as well as at the write: a null land use that
   // reaches a payload without an earned absence never leaves this function.
   assertLandUseAbsenceEarned(payload);
+  // ... and neither does a bare null at any leaf this bake owns the state of.
+  assertRequiredLeafStatesEarned(payload);
   return payload;
 }
 
@@ -748,6 +932,139 @@ function buildLandUseAbsence(input: LandUseAbsenceInput): LandUseAbsence {
   };
 }
 
+/**
+ * The land-use LEAF state from the absence record the bake already earned.
+ *
+ * This mints no new claim: `buildLandUseAbsence` above decided the verdict,
+ * named the authority, the scope and the per-parcel basis, and stamped the
+ * bake clock. All this does is put that earned record at the cell whose state
+ * it describes, instead of leaving the cell a bare null with the explanation
+ * filed one level away in `provenance`.
+ *
+ * `lookup-failed` is NOT one of the four states and is not quietly turned
+ * into one: it becomes `refused` — we could not determine this — and keeps
+ * `lookupVerdict` so a reader can still tell "could not look" from "looked
+ * and found nothing". It is never `absent-verified`, which is the upgrade
+ * `assertNoVerdictUpgrade` forbids everywhere else in this codebase.
+ */
+export function leafAbsenceFromLandUseAbsence(
+  absence: LandUseAbsence,
+  parcelNodeId: string,
+): Tier1LeafAbsence {
+  const common = {
+    status: "absent" as const,
+    authority: absence.authority,
+    scopeSearched: absence.scopeSearched,
+    asOf: absence.asOf,
+    basis: absence.basis,
+  };
+  if (absence.verdict === "absent-verified") {
+    return { ...common, verdict: "absent-verified" };
+  }
+  return { ...common, verdict: "refused", lookupVerdict: "lookup-failed" };
+}
+
+/** Human label for a claim field, used only inside a basis string. */
+const CLAIM_FIELD_LABEL: Record<"situsCity" | "situsZip", string> = {
+  situsCity: "situs city",
+  situsZip: "situs ZIP",
+};
+
+/**
+ * The earned absence for a situs field the CAD claim carries.
+ *
+ * `absent-verified` is honest here and needs no `lookup-failed` counterpart,
+ * because the claim is not a JOIN that can miss — it is the atom body this
+ * bake is projecting FROM, so it is always read, for every parcel, by
+ * construction.
+ *
+ * THE PRECISION THAT MATTERS. This asserts an absence of the CAD-CARRIED
+ * field, not an absence of the fact. The leaf's own contract (see
+ * `BaseFacts.situsZip`) is "as the source carries it" — a postal fact, never
+ * read as incorporation, which the serve derives from city-limits
+ * containment instead. So the scope names `claim.<field>` and the basis says
+ * in words that the parcel is not being claimed to have no city. Travis
+ * leaves `situs_city` null on most of its roll; those parcels are in Austin,
+ * and nothing here says otherwise.
+ */
+export function claimLeafAbsence(input: {
+  parcelNodeId: string;
+  countyFips: string;
+  countyName: string;
+  field: "situsCity" | "situsZip";
+  placement: "nested" | "flat";
+  access: { discoverability: string; entitlement: string };
+  nowIso: string;
+}): Tier1LeafAbsence {
+  const { parcelNodeId, countyFips, countyName, field, placement, nowIso } = input;
+  const label = CLAIM_FIELD_LABEL[field];
+  return {
+    status: "absent",
+    verdict: "absent-verified",
+    authority:
+      `${countyName} County CAD roll as published in the conformant-v1 ` +
+      `cad-parcel-roll claim for county_fips ${countyFips}`,
+    scopeSearched:
+      `claim.${field} on the cad-parcel-roll atom body for ${parcelNodeId} ` +
+      `(${placement} claim placement); entitlement bound ` +
+      `${input.access.discoverability}/${input.access.entitlement}`,
+    asOf: nowIso,
+    basis:
+      `${parcelNodeId}: the cad-parcel-roll claim for this parcel was read and ` +
+      `carries no ${field}. This is a verified absence of the CAD-carried ` +
+      `${label}, not a finding that the parcel has none`,
+  };
+}
+
+/**
+ * Refuse (throw, code REQUIRED_LEAF_BARE_NULL) a conformant payload where any
+ * leaf this bake owns the cell state of is a bare null.
+ *
+ * This is the control that makes the defect a WRITE REFUSAL rather than
+ * something a verify walk discovers on a served row days later — which is
+ * exactly how these four leaves survived: they were only measurable once the
+ * walk gained a jurisdiction-stratified cohort. Proven able to FIRE in
+ * `../nodeFacetBakeTier1Conformant.test.ts`; a check observed only passing
+ * has not been observed working.
+ *
+ * `zoning` and `provenance.zoningSource` are deliberately NOT in scope here.
+ * Their state is earned at serve, from the rail, and asserting a four-state
+ * on them at bake time would demand something the bake cannot know.
+ */
+export function assertRequiredLeafStatesEarned(payload: unknown): void {
+  const refuse = (why: string): never => {
+    throw Object.assign(new Error(`required tier-1 leaf: ${why}`), {
+      code: "REQUIRED_LEAF_BARE_NULL",
+    });
+  };
+  const rec = asRecord(payload);
+  if (!rec) return refuse("payload is not an object");
+  const parcelNodeId =
+    typeof rec.parcelNodeId === "string" ? rec.parcelNodeId.trim() : "";
+  if (!parcelNodeId) return refuse("parcelNodeId is required to name the parcel");
+  for (const path of BAKE_OWNED_REQUIRED_LEAF_PATHS) {
+    const [parentKey, leafKey] = path.split(".") as [string, string];
+    const parent = asRecord(rec[parentKey]);
+    if (!parent || !Object.prototype.hasOwnProperty.call(parent, leafKey)) {
+      return refuse(`${parcelNodeId} is missing the key ${path} entirely`);
+    }
+    const value = parent[leafKey];
+    if (value === null || value === undefined) {
+      return refuse(
+        `${parcelNodeId} carries a bare null at ${path}; null is not ` +
+          "value|absent-verified|not-applicable|refused (BP-CONTENT-01)",
+      );
+    }
+    const rendered = asRecord(value);
+    if (rendered && !isEarnedLeafAbsence(value) && !isResolvedLandUseFacet(value)) {
+      return refuse(
+        `${parcelNodeId} carries an object at ${path} that is neither a ` +
+          "resolved value nor a well-formed earned absence",
+      );
+    }
+  }
+}
+
 const LAND_USE_ABSENCE_FIELDS = [
   "verdict",
   "authority",
@@ -788,7 +1105,12 @@ export function assertLandUseAbsenceEarned(payload: unknown): void {
   const covered = facetCoverage.landUse;
   if (typeof covered !== "boolean") return refuse("facetCoverage.landUse must be a boolean");
 
-  if (baseFacts.landUse != null) {
+  // CTX-LEAVES: `baseFacts.landUse` now carries EITHER a resolved land use OR
+  // the earned absence itself, so "not null" no longer means "has a land
+  // use". A wire at that key is an absence wearing the cell it describes, and
+  // must be treated as the absent branch, not the present one.
+  const leafIsEarnedAbsence = isEarnedLeafAbsence(baseFacts.landUse);
+  if (baseFacts.landUse != null && !leafIsEarnedAbsence) {
     if (covered !== true) {
       return refuse(`${parcelNodeId} projects a land use but scores facetCoverage.landUse false`);
     }
@@ -824,6 +1146,41 @@ export function assertLandUseAbsenceEarned(payload: unknown): void {
       `provenance.landUseAbsence.basis does not name ${parcelNodeId}; a basis identical ` +
         "across parcels is a ceremony, not a justification",
     );
+  }
+
+  // One fact now has two copies — the leaf state at `baseFacts.landUse` and
+  // the record at `provenance.landUseAbsence`. Two implementations of one rule
+  // is the CTRL-1 shape, and the divergence check IS the control (DEV_PROCESS
+  // 2.4): they must correspond, or the payload is refused.
+  if (leafIsEarnedAbsence) {
+    const leaf = asRecord(baseFacts.landUse)!;
+    const expected = absence.verdict === "absent-verified" ? "absent-verified" : "refused";
+    if (leaf.verdict !== expected) {
+      return refuse(
+        `${parcelNodeId} baseFacts.landUse verdict is ${String(leaf.verdict)} while ` +
+          `provenance.landUseAbsence verdict is ${String(absence.verdict)}; the leaf state ` +
+          `and its absence record must correspond (${absence.verdict} maps to ${expected})`,
+      );
+    }
+    if (expected === "refused" && leaf.lookupVerdict !== "lookup-failed") {
+      return refuse(
+        `${parcelNodeId} baseFacts.landUse is refused but does not carry ` +
+          "lookupVerdict 'lookup-failed'; could-not-look must stay tellable from found-nothing",
+      );
+    }
+    if (leaf.basis !== absence.basis) {
+      return refuse(
+        `${parcelNodeId} baseFacts.landUse basis differs from provenance.landUseAbsence basis; ` +
+          "the leaf carries the earned record, it does not paraphrase it",
+      );
+    }
+    const source = asRecord(provenance.landUseSource);
+    if (!source || source.mirrors !== "baseFacts.landUse" || source.basis !== absence.basis) {
+      return refuse(
+        `${parcelNodeId} has an absent land use but provenance.landUseSource is not a verbatim ` +
+          "mirror of baseFacts.landUse; the twin must not be able to answer differently",
+      );
+    }
   }
 }
 
@@ -962,9 +1319,30 @@ export interface KeyPathDiff {
 export function diffTier1KeyPaths(oldPayload: unknown, newPayload: unknown): KeyPathDiff {
   const oldLeaves = leafKeyPaths(oldPayload);
   const newLeaves = leafKeyPaths(newPayload);
-  const missing = [...oldLeaves].filter((p) => !newLeaves.has(p)).sort();
+  // CTX-LEAVES: an old NULL leaf whose new counterpart is a well-formed EARNED
+  // ABSENCE at the same path is ANSWERED, not dropped. The old bake writes
+  // `baseFacts.situsCity: null` (one leaf); the conformant bake writes the
+  // verdict/authority/scope/asOf/basis that says why (five). Same cell, richer
+  // state — reporting that as a missing leaf would make the instrument fight
+  // the fix.
+  //
+  // This is a SHAPE rule, not a path allowlist, and it cannot launder a
+  // genuinely dropped leaf: the new payload has to carry a complete absence
+  // wire at that exact path to earn the tolerance, and `isEarnedLeafAbsence`
+  // checks every field. `DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES` is
+  // deliberately not widened for this.
+  const answered = new Set<string>();
+  for (const p of oldLeaves) {
+    if (newLeaves.has(p)) continue;
+    if (isEarnedLeafAbsence(keyPathValue(newPayload, p))) answered.add(p);
+  }
+  const underAnswered = (path: string): boolean =>
+    [...answered].some((a) => path.startsWith(`${a}.`));
+  const missing = [...oldLeaves]
+    .filter((p) => !newLeaves.has(p) && !answered.has(p))
+    .sort();
   const unexpected = [...newLeaves]
-    .filter((p) => !oldLeaves.has(p) && !isIgnoredOrAllowedNewPath(p))
+    .filter((p) => !oldLeaves.has(p) && !isIgnoredOrAllowedNewPath(p) && !underAnswered(p))
     .sort();
   return {
     missing,
@@ -1021,6 +1399,17 @@ export const REQUIRED_TIER1_FACET_PATHS: readonly string[] = [
   "provenance.zoningSource",
   "bakedAt",
 ];
+
+/** The value at a dotted path, or undefined when any segment is missing. */
+export function keyPathValue(value: unknown, path: string): unknown {
+  let cur: unknown = value;
+  for (const part of path.split(".")) {
+    const rec = asRecord(cur);
+    if (!rec || !Object.prototype.hasOwnProperty.call(rec, part)) return undefined;
+    cur = rec[part];
+  }
+  return cur;
+}
 
 /** True when the dotted path's final key EXISTS on its parent object. */
 export function hasKeyPath(value: unknown, path: string): boolean {

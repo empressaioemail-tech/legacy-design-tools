@@ -56,6 +56,118 @@ function bakedZoningHasDistrict(zoning: unknown): boolean {
   return typeof district === "string" && district.trim().length > 0;
 }
 
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * `provenance.zoningSource` MIRRORED onto the zoning rail this function just
+ * decided (P-124 CTX-LEAVES, 2026-09-08).
+ *
+ * WHY THIS IS HERE AND NOT IN THE BAKE. `provenance.zoningSource` is the
+ * top-level twin of the zoning cell's own provenance, and it is a REQUIRED
+ * leaf that `BP-CONTENT-01` grades as one of
+ * `value | absent-verified | not-applicable | refused`. Measured on staging
+ * 2026-09-08 it is a bare null on 486,218 Williamson and 267,076 Travis rows,
+ * so it fails that contract wherever a parcel carries no zoning stamp.
+ *
+ * The bake CANNOT honestly fix it. The bake knows only whether a GIS stamp
+ * joined; the zoning cell's actual state is decided HERE, from two inputs the
+ * bake has no access to — the Factory's `parcel_record` zoningDistrict rail
+ * and the city-limits containment verdict. `facets.zoning` is itself baked as
+ * a bare null and only becomes a four-state on this line, which is exactly
+ * the precedent: the twin has to be earned wherever the rail is earned.
+ *
+ * So this leaf never decides anything. It COPIES. A mirrored cell cannot
+ * disagree with the cell it mirrors, and that is the entire requirement: one
+ * question must not get two answers. It matters most where the answer is
+ * uncomfortable — Elgin's zoning layer is declared incomplete, so
+ * `parcel_record` keeps its unmatched parcels `unaccounted` (served here as
+ * state `refused`), and a twin that decided for itself could quietly write
+ * `absent-verified` over that. Copying cannot: if the rail refuses, the twin
+ * refuses.
+ *
+ * IT ALSO CLOSES A LIVE CONTRADICTION. Since the 2026-09-07 parity fix, a
+ * `parcel_record` determination wins UNCONDITIONALLY over the baked stamp —
+ * but `provenance.zoningSource` kept citing the old GIS layer URL for the
+ * district that no longer came from it. The payload disagreed with its own
+ * rail. It now cites what the rail cites.
+ *
+ * Returns `undefined` when nothing has earned a state (no district, no
+ * verdict, no record) — the baked value is then left exactly as it is, and
+ * the leaf goes on failing the walk, which is the honest outcome rather than
+ * a manufactured one.
+ */
+export function zoningSourceMirror(
+  zoningCell: unknown,
+  bakedZoningSource: unknown,
+  asOf: string,
+): unknown {
+  const rec = asPlainRecord(zoningCell);
+  if (!rec) return undefined;
+
+  // 1. The cell is a VALUE: a district stands. Cite what THIS cell cites.
+  if (bakedZoningHasDistrict(rec)) {
+    const prov = rec.provenance;
+    if (typeof prov === "string" && prov.trim()) return prov.trim();
+    const provRec = asPlainRecord(prov);
+    const sourceUrl = provRec?.sourceUrl;
+    if (typeof sourceUrl === "string" && sourceUrl.trim()) return sourceUrl.trim();
+    if (typeof bakedZoningSource === "string" && bakedZoningSource.trim()) {
+      return bakedZoningSource.trim();
+    }
+    // A district with no recorded citation anywhere. Not an absence we
+    // verified — we simply have no source on file, and saying which is the
+    // difference between refusing and fabricating.
+    return {
+      status: "absent",
+      verdict: "refused",
+      authority: "unresolved",
+      scopeSearched:
+        "the served zoning cell's own provenance, and the baked " +
+        "provenance.zoningSource twin",
+      asOf,
+      basis:
+        `the zoning determination for ${String(rec.district)} carries no source ` +
+        "citation on the cell it came from, so no source can be cited for it",
+      mirrors: "zoning",
+    };
+  }
+
+  // 2. The cell is a LayerAbsenceWire (city-limits verdict). Mirror verbatim —
+  //    same verdict string, deliberately NOT normalised into the four-state
+  //    vocabulary, because translating `stamp-missing` or `unmeasured` into
+  //    something else would make the twin say what the rail does not.
+  if (typeof rec.verdict === "string" && rec.status === "absent") {
+    return { ...rec, mirrors: "zoning" };
+  }
+
+  // 3. The cell is a parcel_record ZoningFactAbsent ({state, absence:{kind,
+  //    reason}}). Project its earned verdict and its own reason as the basis;
+  //    nothing is added to what parcel_record already determined.
+  const absence = asPlainRecord(rec.absence);
+  if (rec.state === "absent" && absence && typeof absence.kind === "string") {
+    return {
+      status: "absent",
+      verdict: absence.kind,
+      authority: "hauska-factory parcel_record zoningDistrict rail",
+      scopeSearched:
+        `parcel_record_cell zoningDistrict for ${String(rec.entityId ?? "this parcel")}` +
+        (rec.sourceVintage ? ` at vintage ${String(rec.sourceVintage)}` : ""),
+      asOf,
+      basis:
+        typeof absence.reason === "string" && absence.reason.trim()
+          ? absence.reason
+          : `parcel_record recorded zoningDistrict as ${absence.kind} for ` +
+            `${String(rec.entityId ?? "this parcel")} with no reason attached`,
+      mirrors: "zoning",
+    };
+  }
+
+  return undefined;
+}
+
 /**
  * Attach P-63 verdict wires onto baked facets for inspect (livingAreaSqft +
  * the zoning verdict).
@@ -118,6 +230,19 @@ export function attachVerdictLayersToFacets(
   } else if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
     out.zoning = zoningVerdict;
     cov.zoning = false;
+  }
+
+  // The twin follows the rail (see zoningSourceMirror). Copied, never decided.
+  const prov = asPlainRecord(out.provenance);
+  if (prov) {
+    const mirrored = zoningSourceMirror(
+      out.zoning,
+      prov.zoningSource,
+      zoningVerdict?.asOf ?? new Date().toISOString(),
+    );
+    if (mirrored !== undefined) {
+      out.provenance = { ...prov, zoningSource: mirrored };
+    }
   }
 
   out.facetCoverage = cov;

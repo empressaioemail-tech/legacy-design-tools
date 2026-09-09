@@ -61,6 +61,7 @@ import {
 import {
   assertLandUseAbsenceEarned,
   assertNoOwnerKey,
+  assertRequiredLeafStatesEarned,
   buildConformantTier1Payload,
   parcelNodeIdFromBody,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
@@ -374,6 +375,12 @@ async function main() {
     // coverage flag is a scoring field and must not read false where the value
     // exists (OPS-19 A-025 items 1 and 5).
     assertLandUseAbsenceEarned(payload);
+    // CTX-LEAVES (P-124): a bare null at any leaf this bake owns the cell
+    // state of is refused, not written. BP-CONTENT-01 says a present key
+    // holding null is none of value|absent-verified|not-applicable|refused,
+    // and a walk discovering that on a served row days later is how these
+    // four leaves survived unmeasured for months.
+    assertRequiredLeafStatesEarned(payload);
 
     if (payload.provenance.landUseOrigin === "claim") landUseOrigins.claim += 1;
     else if (payload.provenance.landUseOrigin === "cad-property-prop-id-join") {
