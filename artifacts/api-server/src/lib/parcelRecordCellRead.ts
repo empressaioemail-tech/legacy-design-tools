@@ -294,8 +294,14 @@ export function interpretParcelRecordCell(
         placeKey,
         railKey,
         code: "engine-refused",
+        // P-124 CTX-MIRROR (2026-09-09): the engine writes this key as
+        // `reason`, not `refusal` -- confirmed live against the real store
+        // (549 of 549 Caldwell zoningDistrict refused cells, and 0 of 0
+        // anywhere carrying a `refusal` key). Reading the wrong key meant
+        // every refused cell, on every rail, served the generic fallback
+        // below instead of the engine's real, specific refusal string.
         reason:
-          asNullableString(rec.refusal) ??
+          asNullableString(rec.reason) ??
           "parcel_record marked this cell refused with no reason recorded.",
       };
     }

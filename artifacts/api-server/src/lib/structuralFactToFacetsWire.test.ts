@@ -74,6 +74,23 @@ const REFUSED_LEDGER_FACT: ZoningFactRead = {
   reason: "test fixture -- a genuinely broken record read",
 };
 
+/**
+ * P-124 CTX-MIRROR: the zoningDistrict rail's OWN cell is kind=refused --
+ * the Factory engine looked and deliberately declined, with a real, specific
+ * reason. Distinct from REFUSED_LEDGER_FACT above (an adapter-level read
+ * failure, code parcel-record-malformed-cell) and from ELGIN_UNACCOUNTED
+ * below (code parcel-record-unaccounted, "not examined yet") -- this is the
+ * one refusal code this dispatch's fix targets. Values match the dispatch's
+ * own live-canary example (48055:103436).
+ */
+const ENGINE_REFUSED_LEDGER_FACT: ZoningFactRead = {
+  state: "refused",
+  code: "parcel-record-engine-refused",
+  source: "zoning-fact-parcel-record",
+  entityId: "48055:103436",
+  reason: "no tx_zoning_district_staging base layer exists for Mustang Ridge yet",
+};
+
 const BAKED_STAMP = { district: "SF-2", jurisdictionKey: "austin-tx-legacy", provenance: null };
 
 describe("attachVerdictLayersToFacets zoning precedence", () => {
@@ -152,6 +169,45 @@ describe("attachVerdictLayersToFacets zoning precedence", () => {
       CITY_LIMITS_VERDICT,
       undefined,
       REFUSED_LEDGER_FACT,
+    );
+    expect(out.zoning).toEqual(CITY_LIMITS_VERDICT);
+  });
+
+  it("P-124 CTX-MIRROR: an ENGINE-REFUSED ledger fact (code parcel-record-engine-refused) is now surfaced honestly, not silently replaced by the baked stamp", () => {
+    const out = attachVerdictLayersToFacets(
+      { zoning: BAKED_STAMP, facetCoverage: { zoning: true } },
+      ABSENT_STRUCTURAL,
+      CITY_LIMITS_VERDICT,
+      undefined,
+      ENGINE_REFUSED_LEDGER_FACT,
+    );
+    expect(out.zoning).toEqual(ENGINE_REFUSED_LEDGER_FACT);
+    expect((out.facetCoverage as Record<string, unknown>).zoning).toBe(false);
+  });
+
+  it("P-124 CTX-MIRROR: an ENGINE-REFUSED ledger fact wins even with no baked stamp -- never the generic city-limits stamp-missing fallback", () => {
+    const out = attachVerdictLayersToFacets(
+      { zoning: null, facetCoverage: { zoning: false } },
+      ABSENT_STRUCTURAL,
+      CITY_LIMITS_VERDICT,
+      undefined,
+      ENGINE_REFUSED_LEDGER_FACT,
+    );
+    expect(out.zoning).toEqual(ENGINE_REFUSED_LEDGER_FACT);
+    expect(out.zoning).not.toEqual(CITY_LIMITS_VERDICT);
+  });
+
+  it("other refusal codes are UNCHANGED by the CTX-MIRROR fix: unaccounted still falls through to the city-limits fallback, not to \"refused\"", () => {
+    // Regression guard for the narrowed scope decided at CP1: only
+    // code===\"parcel-record-engine-refused\" gets the honest projection.
+    // ELGIN_UNACCOUNTED (defined below) must keep falling through exactly as
+    // before this fix.
+    const out = attachVerdictLayersToFacets(
+      { zoning: null, facetCoverage: { zoning: false } },
+      ABSENT_STRUCTURAL,
+      CITY_LIMITS_VERDICT,
+      undefined,
+      { ...REFUSED_LEDGER_FACT, code: "parcel-record-unaccounted" },
     );
     expect(out.zoning).toEqual(CITY_LIMITS_VERDICT);
   });
@@ -349,5 +405,167 @@ describe("CTX-LEAVES: provenance.zoningSource mirrors the zoning rail", () => {
     expect(zoningSourceMirror(null, "x", "2026-09-08T00:00:00.000Z")).toBeUndefined();
     expect(zoningSourceMirror("not an object", "x", "2026-09-08T00:00:00.000Z")).toBeUndefined();
     expect(zoningSourceMirror({ nothing: true }, "x", "2026-09-08T00:00:00.000Z")).toBeUndefined();
+  });
+});
+
+/**
+ * P-124 CTX-MIRROR (2026-09-09): the mirror projected `not-applicable` and a
+ * present district's citation correctly but had no branch for `refused` --
+ * a parcel_record cell of kind=refused fell through to the generic
+ * city-limits stamp-missing fallback, which is not one of
+ * value|absent-verified|not-applicable|refused and fails BP-CONTENT-01.
+ *
+ * classifyRequiredLeafVerbatim below is reproduced verbatim from
+ * `P:/tmp/ctx-w2-gate/src/jobs/verify-walk.mjs`'s exported
+ * `classifyRequiredLeaf` (lines 304-386 as read 2026-09-09, HEAD 7a53c65,
+ * confirmed 0 commits behind origin/main -- the live grader, not a stale
+ * copy). Reproduced rather than imported for the same reason CTX-LEAVES gave:
+ * verify-walk.mjs lives in the sibling hauska-factory repo, out of this
+ * dispatch's scope to depend on. Reproduced rather than paraphrased so this
+ * test grades what the walk actually does, not what it is assumed to do.
+ *
+ * `zoning` and `provenance.zoningSource` are BOTH independently listed in
+ * verify-walk.mjs's REQUIRED_TIER1_FACET_PATHS (confirmed by reading that
+ * export directly), so both are graded below.
+ */
+function classifyRequiredLeafVerbatim(
+  value: unknown,
+  { requestClock, path = "leaf" }: { requestClock?: string; path?: string } = {},
+): { state: string; ok: boolean; reason?: string } {
+  const ABSENCE_STATE_TOKENS = ["absent-verified", "not-applicable", "refused"];
+  const POPULATED_STATE_TOKENS = ["value", "present", "populated"];
+  const asRecord = (v: unknown): Record<string, unknown> | null =>
+    v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  const declaredStateOf = (rec: Record<string, unknown>) => {
+    const nested = rec.absence;
+    const raw = rec.verdict ?? rec.state ?? null;
+    if (raw == null) return null;
+    const token = String(raw).trim();
+    if (token === "absent" && nested && typeof nested === "object") {
+      const kind = (nested as Record<string, unknown>).kind;
+      return { token: kind == null ? "" : String(kind).trim(), via: "absence.kind" as const, outer: token };
+    }
+    const via: "verdict" | "state" = rec.verdict != null ? "verdict" : "state";
+    return { token, via, outer: token };
+  };
+
+  if (value === null || value === undefined) {
+    return { state: "null", ok: false, reason: `${path} is null; null is not value|absent-verified|not-applicable|refused` };
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (value === "") return { state: "empty", ok: false, reason: `${path} is empty` };
+    return { state: "value", ok: true };
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0
+      ? { state: "value", ok: true }
+      : { state: "empty", ok: false, reason: `${path} is an empty array` };
+  }
+  const rec = asRecord(value);
+  if (!rec) return { state: "unknown", ok: false, reason: `${path} is not a four-state leaf` };
+
+  const declared = declaredStateOf(rec);
+  const verdict = declared?.token ?? null;
+  const absence = verdict != null && ABSENCE_STATE_TOKENS.includes(verdict);
+  const ev =
+    declared?.via === "absence.kind" && rec.absence && typeof rec.absence === "object"
+      ? {
+          ...rec,
+          basis: rec.basis ?? (rec.absence as Record<string, unknown>).basis ?? (rec.absence as Record<string, unknown>).reason,
+          scope: rec.scope ?? rec.scopeSearched ?? (rec.absence as Record<string, unknown>).scope ?? (rec.absence as Record<string, unknown>).scopeSearched,
+          asOf: rec.asOf ?? (rec.absence as Record<string, unknown>).asOf,
+        }
+      : rec;
+  if (absence) {
+    if (verdict === "absent-verified") {
+      const scope = (ev as Record<string, unknown>).scope ?? (ev as Record<string, unknown>).scopeSearched;
+      const evAsOf = (ev as Record<string, unknown>).asOf;
+      const basis = (ev as Record<string, unknown>).basis;
+      if (scope == null || String(scope).trim() === "") return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing scope` };
+      if (evAsOf == null || String(evAsOf).trim() === "") return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing asOf` };
+      if (basis == null || String(basis).trim() === "") return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing basis` };
+      if (requestClock != null && String(evAsOf) === String(requestClock)) {
+        return { state: "absent-verified", ok: false, reason: `${path} asOf equals request clock; evaluation-time asOf required` };
+      }
+      return { state: "absent-verified", ok: true };
+    }
+    if (verdict === "not-applicable") {
+      const basis = (ev as Record<string, unknown>).basis;
+      if (basis == null || String(basis).trim() === "") return { state: "not-applicable", ok: false, reason: `${path} not-applicable missing basis` };
+      return { state: "not-applicable", ok: true };
+    }
+    return { state: "refused", ok: true };
+  }
+  if (Object.keys(rec).length === 0) {
+    return { state: "empty", ok: false, reason: `${path} is an empty object` };
+  }
+  if (declared !== null && !POPULATED_STATE_TOKENS.includes(verdict as string)) {
+    return {
+      state: "unrecognised-declared-state",
+      ok: false,
+      reason: `${path} declares ${declared.via}=${JSON.stringify(declared.outer)} which is not a recognised state`,
+    };
+  }
+  return { state: "value", ok: true };
+}
+
+describe("P-124 CTX-MIRROR: refused rail state projects honestly on both required leaves", () => {
+  it("verify by violating -- PASS case: the fixed shape grades {state:refused, ok:true} on both facets.zoning and provenance.zoningSource, and carries the rail's real reason", () => {
+    const out = attachVerdictLayersToFacets(
+      withProvenance({ zoning: null, facetCoverage: { zoning: false } }),
+      ABSENT_STRUCTURAL,
+      CITY_LIMITS_VERDICT,
+      undefined,
+      ENGINE_REFUSED_LEDGER_FACT,
+    );
+    expect(classifyRequiredLeafVerbatim(out.zoning, { path: "zoning" })).toEqual({ state: "refused", ok: true });
+    expect(classifyRequiredLeafVerbatim(mirrorOf(out), { path: "provenance.zoningSource" })).toEqual({
+      state: "refused",
+      ok: true,
+    });
+    expect((out.zoning as { reason: string }).reason).toBe(
+      "no tx_zoning_district_staging base layer exists for Mustang Ridge yet",
+    );
+    expect(mirrorOf(out).reason).toBe(
+      "no tx_zoning_district_staging base layer exists for Mustang Ridge yet",
+    );
+    expect(mirrorOf(out).mirrors).toBe("zoning");
+  });
+
+  it("verify by violating -- FAIL case: the pre-fix shape this defect actually produced (the city-limits stamp-missing fallback standing in for the rail's refusal) still fails the four-state contract", () => {
+    // This is exactly what attachVerdictLayersToFacets wrote to out.zoning
+    // (and zoningSourceMirror then copied verbatim onto provenance.zoningSource)
+    // before this fix, for a parcel whose rail cell was kind=refused. Proves
+    // the check above is capable of failing for the right reason, not just
+    // capable of passing.
+    const preFixShape = CITY_LIMITS_VERDICT;
+    const graded = classifyRequiredLeafVerbatim(preFixShape, { path: "provenance.zoningSource" });
+    expect(graded.ok).toBe(false);
+    expect(graded.state).toBe("unrecognised-declared-state");
+  });
+
+  it("a fixture with the rail's own reason field stripped away is never produced by the real adapter -- but if it somehow were, the served shape's `reason` would read blank rather than silently substituting a fabricated one", () => {
+    // zoningFactFromParcelRecord.ts's ZoningFactRefusal always carries a real,
+    // non-empty `reason` for every one of its return paths (verified by
+    // reading the source, not assumed) -- there is no code path that produces
+    // {state:\"refused\", code:\"parcel-record-engine-refused\", reason: \"\"}
+    // for real data. This fixture exists only to prove the mirror does not
+    // invent a substitute reason when handed a malformed one.
+    const malformed: ZoningFactRead = { ...ENGINE_REFUSED_LEDGER_FACT, reason: "" };
+    const out = attachVerdictLayersToFacets(
+      withProvenance({ zoning: null, facetCoverage: { zoning: false } }),
+      ABSENT_STRUCTURAL,
+      CITY_LIMITS_VERDICT,
+      undefined,
+      malformed,
+    );
+    expect((out.zoning as { reason: string }).reason).toBe("");
+    expect(mirrorOf(out).reason).toBe("");
+    // classifyRequiredLeaf's own \"refused\" branch does not check reason
+    // content (confirmed by reading verify-walk.mjs directly) -- it still
+    // grades ok:true. Documented here rather than silently assumed: this
+    // program's own house rule (\"every absence carries its basis\") is
+    // stricter than this specific grader instance is today.
+    expect(classifyRequiredLeafVerbatim(out.zoning, { path: "zoning" })).toEqual({ state: "refused", ok: true });
   });
 });

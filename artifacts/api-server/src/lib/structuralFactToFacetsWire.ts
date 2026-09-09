@@ -165,6 +165,19 @@ export function zoningSourceMirror(
     };
   }
 
+  // 4. The cell is a parcel_record ZoningFactRefusal for the rail's OWN
+  //    engine-level refusal ({state:"refused", code:"parcel-record-engine-
+  //    refused", reason}) -- the Factory looked and declined, with a real,
+  //    specific reason (P-124 CTX-MIRROR). Mirror verbatim, same as branch 2:
+  //    the twin cannot assert either way when the rail itself would not.
+  //    Every OTHER refusal code (unaccounted, invalid-parcel-node-id,
+  //    parcel-record-cell-miss, malformed-cell, store-not-configured) never
+  //    reaches here -- attachVerdictLayersToFacets keeps out.zoning on the
+  //    city-limits fallback for those, unchanged.
+  if (rec.state === "refused" && rec.code === "parcel-record-engine-refused") {
+    return { ...rec, mirrors: "zoning" };
+  }
+
   return undefined;
 }
 
@@ -227,6 +240,20 @@ export function attachVerdictLayersToFacets(
       out.zoning = parcelRecordZoningFact;
       cov.zoning = false;
     }
+  } else if (
+    parcelRecordZoningFact?.state === "refused" &&
+    parcelRecordZoningFact.code === "parcel-record-engine-refused"
+  ) {
+    // P-124 CTX-MIRROR: the zoningDistrict rail's own cell is kind=refused --
+    // the Factory engine looked and deliberately declined (e.g. "no
+    // tx_zoning_district_staging base layer exists for Mustang Ridge yet").
+    // That is an earned state with a real, specific reason, not a plumbing
+    // failure -- project it exactly like the absent branch above, never the
+    // generic city-limits fallback. Every OTHER refusal code (unaccounted,
+    // invalid-parcel-node-id, parcel-record-cell-miss, malformed-cell,
+    // store-not-configured) is left on the fallback below, unchanged.
+    out.zoning = parcelRecordZoningFact;
+    cov.zoning = false;
   } else if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
     out.zoning = zoningVerdict;
     cov.zoning = false;
