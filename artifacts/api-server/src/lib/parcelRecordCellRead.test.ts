@@ -135,10 +135,18 @@ describe("interpretParcelRecordCell — pure, fixture-driven", () => {
     });
   });
 
-  it("refused (the engine's own kind) interprets as a refusal carrying the engine's refusal string", () => {
+  it("refused (the engine's own kind) interprets as a refusal carrying the engine's own reason string", () => {
+    // P-124 CTX-MIRROR (2026-09-09): the fixture key is `reason`, matching
+    // the real engine's write shape -- confirmed live against the store (549
+    // of 549 Caldwell zoningDistrict refused cells carry `reason`, 0 carry
+    // `refusal`). This test previously used `refusal:` here, which matched
+    // the reader's OLD (wrong) field read and therefore could never fail for
+    // the right reason -- both sides agreed on a key the real data never
+    // uses. See the sibling "reads `reason`, not `refusal`" test below for
+    // the falsifier this test alone could not provide.
     const result = interpretParcelRecordCell("48021:34137", "someRail", {
       kind: "refused",
-      refusal: "ambiguous crosswalk match, ties not broken",
+      reason: "ambiguous crosswalk match, ties not broken",
     }, []);
     expect(result).toEqual({
       state: "refused",
@@ -148,6 +156,30 @@ describe("interpretParcelRecordCell — pure, fixture-driven", () => {
       code: "engine-refused",
       reason: "ambiguous crosswalk match, ties not broken",
     });
+  });
+
+  it("verify by violating: a cell body carrying the OLD, wrong `refusal` key (never written by the real engine) is NOT read -- it falls to the generic fallback, proving the reader keys on `reason`", () => {
+    const result = interpretParcelRecordCell("48021:34137", "someRail", {
+      kind: "refused",
+      refusal: "ambiguous crosswalk match, ties not broken",
+    }, []);
+    expect(result.state).toBe("refused");
+    if (result.state !== "refused") throw new Error("unreachable");
+    expect(result.reason).toBe(
+      "parcel_record marked this cell refused with no reason recorded.",
+    );
+    expect(result.reason).not.toBe("ambiguous crosswalk match, ties not broken");
+  });
+
+  it("a refused cell with neither `reason` nor `refusal` falls to the generic fallback rather than a blank or fabricated string", () => {
+    const result = interpretParcelRecordCell("48021:34137", "someRail", {
+      kind: "refused",
+    }, []);
+    expect(result.state).toBe("refused");
+    if (result.state !== "refused") throw new Error("unreachable");
+    expect(result.reason).toBe(
+      "parcel_record marked this cell refused with no reason recorded.",
+    );
   });
 
   it("THE LOAD-BEARING CASE: unaccounted interprets as a refusal, never present or absent — no pipeline word reaches the wire", () => {
