@@ -24,7 +24,10 @@ import {
 import type { ParcelJoinRow } from "./lib/nodeFacetTier1ParcelJoin";
 import { situsStateFromCountyFips } from "./lib/nodeFacetTier1Assemble";
 import {
+  assertLandUseAbsenceEarned,
   assertNoOwnerKey,
+  assertRequiredLeafStatesEarned,
+  BAKE_OWNED_REQUIRED_LEAF_PATHS,
   buildConformantTier1Payload,
   conformantAcreageFromClaim,
   conformantClaimRecord,
@@ -33,6 +36,9 @@ import {
   DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES,
   DIVERGENCE_IGNORE_NEW_SHAPE_KEYS,
   hasKeyPath,
+  isEarnedLeafAbsence,
+  isResolvedLandUseFacet,
+  keyPathValue,
   leafKeyPaths,
   OLD_SHAPE_SCHEMA_VERSION_REJECTED_BY_WALK,
   parcelNodeIdFromBody,
@@ -40,7 +46,16 @@ import {
   REQUIRED_TIER1_FACET_PATHS,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
   type ConformantTier1BuildInput,
+  type Tier1LeafAbsence,
 } from "./lib/nodeFacetBakeTier1Conformant";
+
+/**
+ * CTX-LEAVES (P-124): `baseFacts.landUse` now carries EITHER a resolved land
+ * use OR the earned absence that says why there is none, so a test that wants
+ * the resolved facet narrows through the same guard every real consumer must.
+ */
+const resolvedLandUse = (p: { baseFacts: { landUse: unknown } }) =>
+  isResolvedLandUseFacet(p.baseFacts.landUse) ? p.baseFacts.landUse : undefined;
 
 // A ~100ft x 150ft rectangular lot near Bastrop, TX (same as the old test).
 const LNG0 = -97.31;
@@ -136,6 +151,7 @@ function newPayload(
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
+    landUseRoll?: ConformantTier1BuildInput["landUseRoll"];
   } = {},
 ) {
   return buildConformantTier1Payload({
@@ -155,6 +171,7 @@ function newPayload(
     },
     ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
     ...(opts.cadPropertyRoll ? { cadPropertyRoll: opts.cadPropertyRoll } : {}),
+    ...(opts.landUseRoll ? { landUseRoll: opts.landUseRoll } : {}),
     nowIso: NOW,
   });
 }
@@ -246,10 +263,10 @@ describe("old versus new is a test: same fixture parcel through both bakes", () 
     // Card F: the two new base-fact paths agree in value as well as in presence.
     expect(n.baseFacts.situsZip).toBe(o.baseFacts.situsZip);
     expect(n.baseFacts.situsZip).toBe("78602");
-    expect(n.baseFacts.landUse?.code).toBe("A1");
-    expect(n.baseFacts.landUse?.description).toBe(o.baseFacts.landUse?.description);
-    expect(n.baseFacts.landUse?.source).toBe("cad-roll");
-    expect(n.baseFacts.landUse?.vintage).toBe("2025");
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(resolvedLandUse(n)?.description).toBe(o.baseFacts.landUse?.description);
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll");
+    expect(resolvedLandUse(n)?.vintage).toBe("2025");
     expect(n.facetCoverage).toEqual({ ...o.facetCoverage, tier1: "populated" });
     expect(n.provenance.zoningSource).toBe(o.provenance.zoningSource);
     expect(n.provenance.parcelSource).toBe("conformant-v1-cad-parcel-roll");
@@ -335,17 +352,28 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(req.unexpectedRoots).toEqual([]);
   });
 
-  it("no txgio row and no landAcres and no use code: every facet is an explicit null and coverage says so", () => {
+  it("no txgio row and no landAcres and no use code: the land-use leaf carries an EARNED state, not a bare null (CTX-LEAVES)", () => {
     const n = newPayload(null, {
       body: conformantBody({ claim: { landAcres: null, propertyUseCode: null } }),
     });
-    expect(n.baseFacts.landUse).toBeNull();
+    // CTX-LEAVES (P-124): this test asserted `landUse: null` and
+    // `landUseSource: null`, which is precisely the defect -- BP-CONTENT-01
+    // says a present key holding null is none of the four states. No roll was
+    // supplied here, so the bake could not look, and could-not-look is
+    // `refused`, never `absent-verified`.
+    expect(isEarnedLeafAbsence(n.baseFacts.landUse)).toBe(true);
+    const lu = n.baseFacts.landUse as Tier1LeafAbsence;
+    expect(lu.verdict).toBe("refused");
+    expect(lu.lookupVerdict).toBe("lookup-failed");
+    expect(lu.basis).toContain("48021:34137");
+    // The twin is a VERBATIM mirror and cannot disagree with it.
+    expect(n.provenance.landUseSource).toEqual({ ...lu, mirrors: "baseFacts.landUse" });
+    // Everything the old assertion protected is still protected.
     expect(n.baseFacts.acreage).toBeNull();
     expect(n.zoning).toBeNull();
     expect(n.envelope).toBeNull();
     expect(n.facetCoverage.landUse).toBe(false);
     expect(n.facetCoverage.acreage).toBe(false);
-    expect(n.provenance.landUseSource).toBeNull();
     expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
   });
 
@@ -361,7 +389,7 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
     expect(n.provenance.parcelJoin.basis).toMatch(/unmeasured/);
     // Land use is the claim's own field: the join gate does not strip it.
-    expect(n.baseFacts.landUse?.code).toBe("A1");
+    expect(resolvedLandUse(n)?.code).toBe("A1");
     expect(n.provenance.landUseGateBlocked).toBe(false);
     expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
   });
@@ -685,8 +713,19 @@ describe("claim reading and node identity", () => {
       parcelJoin: { table: "txgio_parcel", row: null, gateBlocked: false },
       nowIso: NOW,
     });
-    expect(noCity.baseFacts.situsCity).toBeNull();
-    expect(noCity.baseFacts.situsZip).toBeNull();
+    // CTX-LEAVES (P-124): these two asserted a bare null. The claim IS the
+    // source and it is always read, so a missing value is a verified absence
+    // OF THE CAD-CARRIED FIELD -- and the basis says in words that it is not a
+    // finding that the parcel has no city.
+    for (const field of ["situsCity", "situsZip"] as const) {
+      const cell = noCity.baseFacts[field];
+      expect(isEarnedLeafAbsence(cell)).toBe(true);
+      const wire = cell as Tier1LeafAbsence;
+      expect(wire.verdict).toBe("absent-verified");
+      expect(wire.scopeSearched).toContain(`claim.${field}`);
+      expect(wire.basis).toContain("48021:10090");
+      expect(wire.basis).toContain("not a finding that the parcel has none");
+    }
     expect(hasKeyPath(noCity, "baseFacts.situsCity")).toBe(true);
     expect(hasKeyPath(noCity, "baseFacts.situsZip")).toBe(true);
     expect(JSON.stringify(noCity)).not.toMatch(/owner/i);
@@ -815,8 +854,8 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "PURVIS, MICHAEL J",
       },
     });
-    expect(n.baseFacts.landUse?.code).toBe("F1");
-    expect(n.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(resolvedLandUse(n)?.code).toBe("F1");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll-address-join");
     expect(n.provenance.landUseSource).toBe("cad-roll-address-join");
     expect(n.provenance.landUseAddressRecovered).toBe(true);
     expect(n.facetCoverage.landUse).toBe(true);
@@ -838,9 +877,13 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "BREM SARAH",
       },
     });
-    expect(n.baseFacts.landUse).toBeNull();
+    // CTX-LEAVES: a refused recovery is `refused`, and never the mismatched
+    // code -- the point the original assertion was making, now stated in the
+    // four-state vocabulary instead of as a null.
+    expect((n.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
+    expect(JSON.stringify(n.baseFacts.landUse)).not.toContain("F1");
     expect(n.facetCoverage.landUse).toBe(false);
-    expect(n.provenance.landUseSource).toBeNull();
+    expect((n.provenance.landUseSource as Tier1LeafAbsence).mirrors).toBe("baseFacts.landUse");
     expect(n.provenance.landUseAddressRecovered).toBe(false);
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
   });
@@ -858,7 +901,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "PURVIS MICHAEL",
       },
     });
-    expect(blankCad.baseFacts.landUse).toBeNull();
+    expect((blankCad.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
     expect(blankCad.provenance.landUseAddressRecovered).toBe(false);
 
     const blankTxgio = newPayload(null, {
@@ -873,7 +916,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: null,
       },
     });
-    expect(blankTxgio.baseFacts.landUse).toBeNull();
+    expect((blankTxgio.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
     expect(blankTxgio.provenance.parcelJoin.state).toBe("gate-blocked");
   });
 
@@ -892,7 +935,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "PURVIS MICHAEL",
       },
     });
-    expect(n.baseFacts.landUse).toBeNull();
+    expect((n.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
     expect(n.provenance.landUseAddressRecovered).toBe(false);
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
   });
@@ -944,7 +987,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
     expect(n.zoning?.district).toBe("SF-2");
     expect(n.zoning?.jurisdictionKey).toBe("kyle_city_tx");
     expect(n.baseFacts.situsState).toBe("TX");
-    expect(n.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll-address-join");
     expect(n.provenance.landUseAddressRecovered).toBe(true);
     expect(n.provenance.parcelJoin.state).toBe("joined-situs");
     expect(n.provenance.parcelJoin).toMatchObject({
@@ -980,8 +1023,8 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "OWNER X",
       },
     });
-    expect(n.baseFacts.landUse?.code).toBe("A1");
-    expect(n.baseFacts.landUse?.source).toBe("cad-roll");
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll");
     expect(n.provenance.landUseAddressRecovered).toBe(false);
     expect(n.provenance.parcelJoin.state).toBe("joined");
     expect(n.zoning?.district).toBe("SF-1");
@@ -1025,7 +1068,7 @@ describe("CTX card H: situs recovery on blocked counties, never prop_id", () => 
         txgioOwner: "ACME HOLDINGS INC",
       },
     });
-    expect(n.baseFacts.landUse?.source).toBe("cad-roll-address-join");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll-address-join");
     expect(n.provenance.landUseAddressRecovered).toBe(true);
     expect(n.zoning?.district).toBe("R-1");
     expect(n.zoning?.district).not.toBe("COLLISION");
@@ -1244,5 +1287,326 @@ describe("Wave R: cad_property is the only dollar source", () => {
       valueBasis: "county-assessed",
     });
     expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-124 CTX-LEAVES (2026-09-08): six required leaves were bare nulls.
+//
+// The dispatch's own instruction is that a check observed only passing has not
+// been observed working, so every block below proves the negative case too.
+// ---------------------------------------------------------------------------
+
+/**
+ * hauska-factory's REAL BP-CONTENT-01 leaf classifier, reproduced verbatim
+ * from `P:/tmp/ctx-w2-gate/src/jobs/verify-walk.mjs` lines 252-306 as read on
+ * 2026-09-08 -- the WHOLE function this time, object branch included, not the
+ * scalar-only slice CTX-situs needed. Reproduced rather than imported because
+ * verify-walk.mjs lives in a sibling repo this dispatch does not depend on;
+ * reproduced rather than paraphrased because a check written from memory
+ * grades what we think the walk does, not what it does.
+ */
+function classifyRequiredLeafVerbatim(
+  value: unknown,
+  { requestClock, path = "leaf" }: { requestClock?: string; path?: string } = {},
+): { state: string; ok: boolean; reason?: string; basis?: unknown } {
+  if (value === null || value === undefined) {
+    return { state: "null", ok: false, reason: `${path} is null; null is not value|absent-verified|not-applicable|refused` };
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (value === "") return { state: "empty", ok: false, reason: `${path} is empty` };
+    return { state: "value", ok: true };
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0
+      ? { state: "value", ok: true }
+      : { state: "empty", ok: false, reason: `${path} is an empty array` };
+  }
+  const rec =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!rec) return { state: "unknown", ok: false, reason: `${path} is not a four-state leaf` };
+
+  const verdict = rec.verdict ?? rec.state ?? null;
+  const absence = verdict === "absent-verified" || verdict === "not-applicable" || verdict === "refused";
+  if (absence) {
+    if (verdict === "absent-verified") {
+      const scope = rec.scope ?? rec.scopeSearched;
+      const asOf = rec.asOf;
+      const basis = rec.basis;
+      if (scope == null || String(scope).trim() === "") {
+        return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing scope` };
+      }
+      if (asOf == null || String(asOf).trim() === "") {
+        return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing asOf` };
+      }
+      if (basis == null || String(basis).trim() === "") {
+        return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing basis` };
+      }
+      if (requestClock != null && String(asOf) === String(requestClock)) {
+        return { state: "absent-verified", ok: false, reason: `${path} asOf equals request clock; evaluation-time asOf required` };
+      }
+      return { state: "absent-verified", ok: true, basis };
+    }
+    if (verdict === "not-applicable") {
+      const basis = rec.basis;
+      if (basis == null || String(basis).trim() === "") {
+        return { state: "not-applicable", ok: false, reason: `${path} not-applicable missing basis` };
+      }
+      return { state: "not-applicable", ok: true, basis };
+    }
+    return { state: "refused", ok: true };
+  }
+  if (Object.keys(rec).length === 0) {
+    return { state: "empty", ok: false, reason: `${path} is an empty object` };
+  }
+  return { state: "value", ok: true };
+}
+
+/** A parcel whose CAD roll WAS consulted and simply carries no coded row for it. */
+function rollConsultedButMisses(parcelNodeId = "48021:34137") {
+  const propId = parcelNodeId.split(":")[1]!;
+  return newPayload(null, {
+    parcelNodeId,
+    body: conformantBody({
+      nodeId: parcelNodeId,
+      claim: {
+        propertyUseCode: null,
+        sourceIdentifiers: { prop_id: propId, taxYear: 2025 },
+      },
+    }),
+    landUseRoll: { byPropId: new Map(), declaredTaxYear: 2025, consulted: true },
+  });
+}
+
+describe("CTX-LEAVES: the four bake-owned leaves classify as a four-state, never a bare null", () => {
+  it("POPULATED case is untouched: every leaf is still a plain value the walk grades as a value", () => {
+    const n = newPayload(txgioRow());
+    for (const [path, v] of [
+      ["baseFacts.situsCity", n.baseFacts.situsCity],
+      ["baseFacts.situsZip", n.baseFacts.situsZip],
+      ["baseFacts.landUse", n.baseFacts.landUse],
+      ["provenance.landUseSource", n.provenance.landUseSource],
+    ] as const) {
+      expect(classifyRequiredLeafVerbatim(v, { path })).toEqual({ state: "value", ok: true });
+    }
+    // Still the literal strings/objects the old bake produced -- this fix adds
+    // a state for the ABSENT case and changes nothing about the present one.
+    expect(n.baseFacts.situsCity).toBe("BASTROP");
+    expect(n.baseFacts.situsZip).toBe("78602");
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(n.provenance.landUseSource).toBe("cad-roll");
+  });
+
+  it("ABSENT case: situsCity and situsZip earn absent-verified scoped to the CAD claim, not to the parcel", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48453", "1000000", 2026, {
+        situsAddress: null,
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48453:1000000",
+      countyFips: "48453",
+      countyName: "Travis",
+      situsAddress: null,
+    });
+    for (const field of ["situsCity", "situsZip"] as const) {
+      const cls = classifyRequiredLeafVerbatim(n.baseFacts[field], { path: `baseFacts.${field}` });
+      expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+      const wire = n.baseFacts[field] as Tier1LeafAbsence;
+      // The claim was consulted -- there is no join here that could have missed.
+      expect(wire.scopeSearched).toContain("cad-parcel-roll atom body");
+      expect(wire.asOf).toBe(NOW);
+      // THE PRECISION: an absence of the CAD-carried field, never of the fact.
+      // Travis leaves situs_city null on most of its roll and those parcels
+      // are in Austin.
+      expect(wire.basis).toContain("not a finding that the parcel has none");
+    }
+  });
+
+  it("ABSENT case: a consulted-and-missed CAD roll earns absent-verified on landUse (the 09-05 join-miss ruling)", () => {
+    const n = rollConsultedButMisses();
+    const cls = classifyRequiredLeafVerbatim(n.baseFacts.landUse, { path: "baseFacts.landUse" });
+    expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+    const wire = n.baseFacts.landUse as Tier1LeafAbsence;
+    expect(wire.lookupVerdict).toBeUndefined();
+    // The leaf carries the record the bake already earned -- byte-identical,
+    // not a paraphrase of it.
+    expect(wire.basis).toBe(n.provenance.landUseAbsence?.basis);
+    expect(wire.scopeSearched).toBe(n.provenance.landUseAbsence?.scopeSearched);
+    // The scope names the DECLARED tax year, because that is what
+    // fetchCountyLandUseRoll actually queries -- the absence travels with the
+    // scope it was earned in.
+    expect(wire.scopeSearched).toContain("tax_year 2025");
+  });
+
+  it("lookup-failed becomes refused, NEVER absent-verified: could-not-look stays tellable from found-nothing", () => {
+    // No roll supplied: the bake could not consult one.
+    const notConsulted = newPayload(null, {
+      body: conformantBody({ claim: { propertyUseCode: null } }),
+    });
+    const wire = notConsulted.baseFacts.landUse as Tier1LeafAbsence;
+    expect(wire.verdict).toBe("refused");
+    expect(wire.verdict).not.toBe("absent-verified");
+    expect(wire.lookupVerdict).toBe("lookup-failed");
+    expect(notConsulted.provenance.landUseAbsence?.verdict).toBe("lookup-failed");
+    expect(classifyRequiredLeafVerbatim(wire, { path: "baseFacts.landUse" })).toEqual({
+      state: "refused",
+      ok: true,
+    });
+    // And the walk's own hole is not being exploited: a wire that kept the raw
+    // lookup-failed verdict would have slipped through as a VALUE, reading as
+    // a populated land use. That is why it is mapped rather than passed on.
+    expect(
+      classifyRequiredLeafVerbatim({ ...wire, verdict: "lookup-failed" }, { path: "x" }),
+    ).toEqual({ state: "value", ok: true });
+  });
+
+  it("the twin cannot disagree: provenance.landUseSource is a VERBATIM mirror of baseFacts.landUse", () => {
+    const cases = [
+      rollConsultedButMisses(),
+      newPayload(null, { body: conformantBody({ claim: { propertyUseCode: null } }) }),
+    ];
+    for (const n of cases) {
+      const leaf = n.baseFacts.landUse as Tier1LeafAbsence;
+      const twin = n.provenance.landUseSource as Tier1LeafAbsence;
+      expect(twin).toEqual({ ...leaf, mirrors: "baseFacts.landUse" });
+      expect(classifyRequiredLeafVerbatim(twin).state).toBe(
+        classifyRequiredLeafVerbatim(leaf).state,
+      );
+    }
+  });
+
+  it("absent-verified bases DIFFER between parcels (gradeAbsentVerifiedBasisDiversity cannot fire)", () => {
+    // Reproduced from verify-walk.mjs lines 309-331 (read 2026-09-08): two
+    // earned absences on the same path must not share a character-identical
+    // basis, because a basis identical across parcels is a ceremony.
+    const a = rollConsultedButMisses("48021:34137");
+    const b = rollConsultedButMisses("48021:8720522");
+    for (const path of ["baseFacts.landUse"] as const) {
+      const seen = new Set<string>();
+      for (const payload of [a, b]) {
+        const cls = classifyRequiredLeafVerbatim(keyPathValue(payload, path), { path });
+        expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+        expect(seen.has(String(cls.basis))).toBe(false);
+        seen.add(String(cls.basis));
+      }
+      expect(seen.size).toBe(2);
+    }
+  });
+
+  it("no leaf is REMOVED and no fifth state is admitted: the required set and its presence rule are unchanged", () => {
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsCity");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsZip");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.landUse");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("provenance.landUseSource");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("provenance.zoningSource");
+    const n = rollConsultedButMisses();
+    expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
+    // A malformed wire is NOT a state: isEarnedLeafAbsence checks every field.
+    expect(isEarnedLeafAbsence({ status: "absent", verdict: "absent-verified" })).toBe(false);
+    expect(
+      isEarnedLeafAbsence({
+        status: "absent",
+        verdict: "made-up",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+      }),
+    ).toBe(false);
+    expect(isEarnedLeafAbsence(null)).toBe(false);
+  });
+
+  it("the ENVELOPE strip is untouched: this fix writes no state onto the anti-zombie leaf", () => {
+    const n = newPayload(null, { body: conformantBody({ claim: { landAcres: null } }) });
+    expect(n.envelope).toBeNull();
+    expect(isEarnedLeafAbsence(n.envelope)).toBe(false);
+    // provenance.zoningSource is deliberately still whatever the bake wrote:
+    // its state is the SERVE's to earn, from the rail, and a verdict invented
+    // here would be a second answer to the same question.
+    expect(n.provenance.zoningSource).toBeNull();
+  });
+});
+
+describe("CTX-LEAVES: the controls are proven able to FIRE", () => {
+  const nulled = (path: string): Record<string, unknown> => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    const [parent, leaf] = path.split(".") as [string, string];
+    (n[parent] as Record<string, unknown>)[leaf] = null;
+    return n;
+  };
+
+  it("assertRequiredLeafStatesEarned REFUSES a bare null at each of the four leaves", () => {
+    expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+      "baseFacts.landUse",
+      "provenance.landUseSource",
+    ]);
+    for (const path of BAKE_OWNED_REQUIRED_LEAF_PATHS) {
+      let code: string | undefined;
+      try {
+        assertRequiredLeafStatesEarned(nulled(path));
+      } catch (err) {
+        code = (err as { code?: string }).code;
+        expect((err as Error).message).toContain(path);
+      }
+      expect(code).toBe("REQUIRED_LEAF_BARE_NULL");
+    }
+    // ... and passes the payload the builder actually produces.
+    expect(() => assertRequiredLeafStatesEarned(rollConsultedButMisses())).not.toThrow();
+  });
+
+  it("assertRequiredLeafStatesEarned REFUSES a half-built wire (the tolerance cannot be bought with a shape)", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    (n.baseFacts as Record<string, unknown>).situsCity = {
+      status: "absent",
+      verdict: "absent-verified",
+    };
+    expect(() => assertRequiredLeafStatesEarned(n)).toThrow(
+      /neither a resolved value nor a well-formed earned absence/,
+    );
+  });
+
+  it("assertLandUseAbsenceEarned REFUSES a leaf whose verdict contradicts its own absence record", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    // The record says absent-verified; the leaf claims refused.
+    ((n.baseFacts as Record<string, unknown>).landUse as Record<string, unknown>).verdict =
+      "refused";
+    expect(() => assertLandUseAbsenceEarned(n)).toThrow(/must correspond/);
+  });
+
+  it("assertLandUseAbsenceEarned REFUSES a twin that is not a verbatim mirror", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    ((n.provenance as Record<string, unknown>).landUseSource as Record<string, unknown>).basis =
+      "a tidier sentence";
+    expect(() => assertLandUseAbsenceEarned(n)).toThrow(/verbatim mirror/);
+  });
+
+  it("the divergence instrument still reports a GENUINELY dropped leaf as missing", () => {
+    const o = oldPayload(txgioRow({ situs_city: null }), null);
+    const n = rollConsultedButMisses() as unknown as Record<string, unknown>;
+    // An earned absence answers the old null leaf -- not missing, not unexpected.
+    expect(diffTier1KeyPaths(o, n).missing.filter((p) => p.startsWith("baseFacts.situsCity"))).toEqual([]);
+    expect(diffTier1KeyPaths(o, n).unexpected.filter((p) => p.startsWith("baseFacts.situsCity"))).toEqual([]);
+    // Delete the key outright and it is missing again, immediately.
+    const dropped = {
+      ...n,
+      baseFacts: Object.fromEntries(
+        Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "situsCity"),
+      ),
+    };
+    expect(diffTier1KeyPaths(o, dropped).missing).toContain("baseFacts.situsCity");
+    // A HALF-BUILT wire buys nothing either: only a complete one is answered.
+    const half = {
+      ...n,
+      baseFacts: {
+        ...(n.baseFacts as Record<string, unknown>),
+        situsCity: { status: "absent", verdict: "absent-verified" },
+      },
+    };
+    expect(diffTier1KeyPaths(o, half).missing).toContain("baseFacts.situsCity");
   });
 });
