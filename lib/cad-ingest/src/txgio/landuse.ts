@@ -91,11 +91,38 @@ export function normalizeStatLandUse(raw: unknown): string | null {
 }
 
 /**
+ * Reason code for a `Prop_ID` DBF value that is not a parcel account at
+ * all (P-124 CTX-LEAVES2). Recorded on the skip sample so a run's summary
+ * names the class, not just a count.
+ */
+export const NOT_A_PARCEL_PROP_ID_REASON = "prop_id_not_numeric_or_r_account";
+
+/**
+ * True for a `Prop_ID` shaped like a real CAD/appraisal-district account:
+ * bare-numeric (the ordinary form) or Williamson's own StratMap "R-account"
+ * convention (`R062578` -- `joinNormalize.ts` documents this as a real,
+ * distinct numbering system, not a typo). Anything else is not a taxable
+ * account; it is a StratMap attribute-table artifact landing in the wrong
+ * column -- confirmed live 2026-09-09/10 for one Williamson (48491) feature
+ * whose `Prop_ID` carries the literal string `"PRIVATE ROAD"` (a right-of-way
+ * label from the source shapefile, same P-78 "leftover farm" ingest family as
+ * the StratMap greenfield fill). Deliberately permissive on case and digit
+ * count -- this is a SHAPE check, not a checksum -- but a multi-word phrase
+ * with a space can never match either branch.
+ */
+export function isParcelShapedPropId(propId: string): boolean {
+  return /^\d+$/.test(propId) || /^[Rr]\d+$/.test(propId);
+}
+
+/**
  * Map one StratMap DBF attribute row to a `cad_property` record.
  * Returns null (and counts a skip) when the row carries no usable
- * `Prop_ID` or no `TAX_YEAR` - without either the row cannot key into
- * `cad_property`'s (county_fips, prop_id, tax_year) primary key and so
- * cannot join to a map feature.
+ * `Prop_ID`, a `Prop_ID` that is not parcel-shaped (P-124 CTX-LEAVES2 --
+ * see {@link isParcelShapedPropId}), or no `TAX_YEAR` - without a real
+ * parcel id the row cannot key into `cad_property`'s (county_fips,
+ * prop_id, tax_year) primary key as an actual taxable account, and
+ * writing it anyway is exactly the leftover-farm defect class this
+ * guard exists to close.
  *
  * `propId` is normalized identically to `normalizeCadPropId` (leading
  * zeros stripped from all-numeric ids) so the row lands on the SAME key
@@ -112,6 +139,14 @@ export function normalizeStratMapLandUse(
   const rawPropId = str(properties.Prop_ID);
   if (!rawPropId) {
     recordSkip(counters, `feature ${featureIndex}: no Prop_ID`);
+    return null;
+  }
+  if (!isParcelShapedPropId(rawPropId)) {
+    recordSkip(
+      counters,
+      `feature ${featureIndex}: Prop_ID ${JSON.stringify(rawPropId)} is not a ` +
+        `numeric or R-account parcel id (${NOT_A_PARCEL_PROP_ID_REASON})`,
+    );
     return null;
   }
   // Mirror normalizeCadPropId: strip leading zeros on all-numeric ids.
