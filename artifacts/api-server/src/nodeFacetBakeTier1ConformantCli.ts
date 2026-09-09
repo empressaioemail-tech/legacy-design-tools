@@ -94,16 +94,35 @@ function publishRunIdFromEnv(): string | undefined {
   return id || undefined;
 }
 
-function situsForBake(body: Record<string, unknown>): { situs: string | null; refuse: boolean } {
+function rawClaimSitusAddress(body: Record<string, unknown>): string | null {
   const claim = body.claim as Record<string, unknown> | undefined;
-  const raw =
-    (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
+  return (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
+}
+
+function situsForBake(body: Record<string, unknown>): { situs: string | null; refuse: boolean } {
+  const raw = rawClaimSitusAddress(body);
   if (raw == null || raw === "") return { situs: null, refuse: false };
   try {
     return { situs: assertSitusNotPunctuationOnly(raw), refuse: false };
   } catch {
     return { situs: null, refuse: true };
   }
+}
+
+/**
+ * Situs for a RETIRED (roll-absent) record: the claim's raw value, trimmed,
+ * with NO punctuation-only guard. CTX-RETIRE (2026-09-09) -- a retirement
+ * declaration must not be gated by the very data-quality symptom (a
+ * punctuation-only situs on stale claim content) that today causes these
+ * accounts to be silently skipped instead of honestly retired. The value is
+ * shown as-is because it is the LAST-KNOWN CAD claim, not a live record this
+ * bake vouches for.
+ */
+function situsForRetiredBake(body: Record<string, unknown>): string | null {
+  const raw = rawClaimSitusAddress(body);
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  return s === "" ? null : s;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -281,6 +300,7 @@ async function main() {
   const joinTable = parcelTable?.table ?? DEFAULT_PARCEL_TABLE;
 
   let written = 0;
+  let retired = 0;
   let skippedBadSitus = 0;
   let skippedBadAccess = 0;
   let txgioJoined = 0;
@@ -306,12 +326,25 @@ async function main() {
       skippedBadAccess += 1;
       continue;
     }
-    const { situs, refuse: refuseSitus } = situsForBake(body);
-    if (refuseSitus) {
-      skippedBadSitus += 1;
-      continue;
-    }
     const propId = parcelNodeId.split(":")[1] ?? "";
+    // CTX-RETIRE (2026-09-09): the SAME miss that starves baseFacts.cadRoll
+    // below -- this prop_id has no row anywhere in the declared-vintage
+    // cad_property roll -- means the account is not on the current roll.
+    // Retired records take a situs read that is never gated by punctuation
+    // quality: an honest retirement declaration must not depend on whether
+    // the stale claim happens to carry a well-formed address.
+    const rollAbsent = cadPropertyRoll.consulted && !cadPropertyRoll.byPropId.has(propId);
+    let situs: string | null;
+    if (rollAbsent) {
+      situs = situsForRetiredBake(body);
+    } else {
+      const { situs: s, refuse: refuseSitus } = situsForBake(body);
+      if (refuseSitus) {
+        skippedBadSitus += 1;
+        continue;
+      }
+      situs = s;
+    }
     const propIdRow = joinGateBlocked ? null : (parcelRows.get(propId) ?? null);
     let situsRow: ParcelJoinRow | null = null;
     let txgioOwner: string | null = null;
@@ -434,6 +467,7 @@ async function main() {
       );
     }
     written += 1;
+    if (payload.recordRetirement) retired += 1;
   }
   console.log(
     JSON.stringify({
@@ -443,6 +477,7 @@ async function main() {
       schemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
       conformantCadRows: cadRows.length,
       written,
+      retired,
       skippedNoNode,
       skippedBadSitus,
       skippedBadAccess,

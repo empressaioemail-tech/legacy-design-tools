@@ -37,6 +37,7 @@ import {
   DIVERGENCE_IGNORE_NEW_SHAPE_KEYS,
   hasKeyPath,
   isEarnedLeafAbsence,
+  isEarnedRecordRetirement,
   isResolvedLandUseFacet,
   keyPathValue,
   leafKeyPaths,
@@ -47,6 +48,7 @@ import {
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
   type ConformantTier1BuildInput,
   type Tier1LeafAbsence,
+  type Tier1RecordRetirement,
 } from "./lib/nodeFacetBakeTier1Conformant";
 
 /**
@@ -580,7 +582,15 @@ describe("the divergence instrument fails when it should", () => {
 
   it("the ignore list and the allowlist are the ones the card names", () => {
     expect([...DIVERGENCE_IGNORE_NEW_SHAPE_KEYS].sort()).toEqual(
-      ["access", "accessNormalizedFrom", "baked", "publishRunId", "shapeSource", "source"].sort(),
+      [
+        "access",
+        "accessNormalizedFrom",
+        "baked",
+        "publishRunId",
+        "shapeSource",
+        "source",
+        "recordRetirement",
+      ].sort(),
     );
     expect([...DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES].sort()).toEqual(
       [
@@ -1608,5 +1618,203 @@ describe("CTX-LEAVES: the controls are proven able to FIRE", () => {
       },
     };
     expect(diffTier1KeyPaths(o, half).missing).toContain("baseFacts.situsCity");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-124 CTX-RETIRE (2026-09-09): an account absent from the county's CURRENT
+// declared-vintage cad_property roll -- split, merged, renumbered or removed
+// -- must serve a declared retirement that names why, never a silent skip
+// and never the prior vintage's snapshot presented as though it were
+// current. Same family as CTX-LEAVES's Tier1LeafAbsence, one level up: at
+// the RECORD rather than the leaf.
+// ---------------------------------------------------------------------------
+
+/** A cadPropertyRoll that WAS consulted and carries no row for ANY prop_id -- the shape of Caldwell's 267 roll-dropouts (CP1). */
+function rollConsultedNoRowFor(
+  declaredTaxYear: number,
+): ConformantTier1BuildInput["cadPropertyRoll"] {
+  return { consulted: true, declaredTaxYear, byPropId: new Map() };
+}
+
+describe("CTX-RETIRE: record-level retirement for an account absent from the current roll", () => {
+  // The real production atom body for Caldwell (48055) prop_id 1 -- the
+  // dispatch's own worked example -- read live 2026-09-09: situsAddress is a
+  // punctuation-only placeholder, every CAD attribute is null, this record's
+  // own claim last carried tax_year 2025.
+  const RETIRED_48055_1 = flatProductionBody("48055", "1", 2025, {
+    situsAddress: ", ,",
+    situsCity: null,
+    situsZip: null,
+    landAcres: null,
+    propertyUseCode: null,
+  });
+
+  // A live 48055 sibling: same county, same body shape, but its prop_id IS
+  // present in the 2026 roll -- the negative case the mission requires proof
+  // of ("an account that IS on the current roll must never receive a
+  // retirement declaration").
+  const LIVE_48055_SIBLING = flatProductionBody("48055", "51716", 2026, {
+    situsAddress: "123 FM 1854, LULING, TX 78648",
+    situsCity: "LULING",
+    situsZip: "78648",
+    landAcres: 12.4,
+    propertyUseCode: "A1",
+  });
+
+  it("retired: roll consulted, no row for this prop_id -> a well-formed Tier1RecordRetirement, never a bare marker", () => {
+    const n = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: rollConsultedNoRowFor(2026),
+    });
+    expect(isEarnedRecordRetirement(n.recordRetirement)).toBe(true);
+    const r = n.recordRetirement as Tier1RecordRetirement;
+    expect(r.status).toBe("retired");
+    expect(r.verdict).toBe("absent-verified");
+    expect(r.basis).toContain("48055:1");
+    expect(r.basis).toContain("tax_year 2026");
+    expect(r.basis).toContain("no successor account has been verified");
+    expect(r.scopeSearched).toContain("48055");
+    expect(r.lastSeenTaxYear).toBe(2025);
+    // Not deleted, not voided: the rest of the payload is still the
+    // last-known claim, side by side with the retirement.
+    expect(n.baseFacts.situsAddress).toBe(", ,");
+    expect(n.facetSchemaVersion).toBe(TIER1_CONFORMANT_FACET_SCHEMA_VERSION);
+  });
+
+  it("live: the SAME county, a prop_id the current roll DOES carry -> recordRetirement is null, by construction", () => {
+    const n = newPayload(null, {
+      body: LIVE_48055_SIBLING,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:51716",
+      situsAddress: "123 FM 1854, LULING, TX 78648",
+      cadPropertyRoll: cadPropertyRollFor("51716", { taxYear: 2026, marketValue: 210000 }),
+    });
+    expect(n.recordRetirement).toBeNull();
+  });
+
+  it("verify by violating: the two payloads side by side -- retired carries the declaration, live does not", () => {
+    const retired = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: rollConsultedNoRowFor(2026),
+    });
+    const live = newPayload(null, {
+      body: LIVE_48055_SIBLING,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:51716",
+      situsAddress: "123 FM 1854, LULING, TX 78648",
+      cadPropertyRoll: cadPropertyRollFor("51716", { taxYear: 2026, marketValue: 210000 }),
+    });
+    expect(retired.recordRetirement).not.toBeNull();
+    expect(live.recordRetirement).toBeNull();
+    // Same schema, same shape -- retirement is a field, not a fork.
+    expect(retired.facetSchemaVersion).toBe(live.facetSchemaVersion);
+  });
+
+  it("no positive determination, no retirement: an UNCONSULTED roll (undeclared county, or cad_property absent) never earns the state", () => {
+    const noRollAtAll = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      // cadPropertyRoll omitted entirely.
+    });
+    expect(noRollAtAll.recordRetirement).toBeNull();
+
+    const consultedFalse = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: { consulted: false, declaredTaxYear: 2026, byPropId: new Map() },
+    });
+    expect(consultedFalse.recordRetirement).toBeNull();
+  });
+
+  it("the leaf-level guards are NOT weakened for a retired record: a bare-null leaf still refuses the write", () => {
+    const n = JSON.parse(
+      JSON.stringify(
+        newPayload(null, {
+          body: RETIRED_48055_1,
+          countyFips: "48055",
+          countyName: "Caldwell",
+          parcelNodeId: "48055:1",
+          situsAddress: ", ,",
+          cadPropertyRoll: rollConsultedNoRowFor(2026),
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(n.recordRetirement).not.toBeNull();
+    (n.baseFacts as Record<string, unknown>).situsCity = null;
+    expect(() => assertRequiredLeafStatesEarned(n)).toThrow(
+      expect.objectContaining({ code: "REQUIRED_LEAF_BARE_NULL" }),
+    );
+  });
+
+  it("isEarnedRecordRetirement rejects a half-built object (the tolerance cannot be bought with a shape)", () => {
+    expect(isEarnedRecordRetirement(null)).toBe(false);
+    expect(isEarnedRecordRetirement({ status: "retired", verdict: "absent-verified" })).toBe(
+      false,
+    );
+    expect(
+      isEarnedRecordRetirement({
+        status: "retired",
+        verdict: "absent-verified",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+        lastSeenTaxYear: "not-a-number",
+      }),
+    ).toBe(false);
+    expect(
+      isEarnedRecordRetirement({
+        status: "retired",
+        verdict: "absent-verified",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+        lastSeenTaxYear: 2025,
+      }),
+    ).toBe(true);
+    expect(
+      isEarnedRecordRetirement({
+        status: "retired",
+        verdict: "absent-verified",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+        lastSeenTaxYear: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("the divergence instrument tolerates recordRetirement on both sides: a retired payload is not flagged as an unexpected new key", () => {
+    const o = oldPayload(txgioRow());
+    const retired = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: rollConsultedNoRowFor(2026),
+    }) as unknown as Record<string, unknown>;
+    const diff = diffTier1KeyPaths(o, retired);
+    expect(diff.unexpected.filter((p) => p.startsWith("recordRetirement"))).toEqual([]);
+    expect(diffAgainstRequiredFacetPaths(retired).unexpectedRoots).toEqual([]);
   });
 });
