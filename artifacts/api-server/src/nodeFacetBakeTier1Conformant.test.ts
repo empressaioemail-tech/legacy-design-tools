@@ -23,10 +23,12 @@ import {
 } from "./lib/joinNormalize";
 import type { ParcelJoinRow } from "./lib/nodeFacetTier1ParcelJoin";
 import { situsStateFromCountyFips } from "./lib/nodeFacetTier1Assemble";
+import { assertSitusNotPunctuationOnly } from "./lib/serveGuards";
 import {
   assertLandUseAbsenceEarned,
   assertNoOwnerKey,
   assertRequiredLeafStatesEarned,
+  assertSitusAddressAbsenceEarned,
   BAKE_OWNED_REQUIRED_LEAF_PATHS,
   buildConformantTier1Payload,
   conformantAcreageFromClaim,
@@ -45,6 +47,7 @@ import {
   parcelNodeIdFromBody,
   readConformantCadClaim,
   REQUIRED_TIER1_FACET_PATHS,
+  situsAddressPunctuationOnlyAbsence,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
   type ConformantTier1BuildInput,
   type Tier1LeafAbsence,
@@ -150,6 +153,7 @@ function newPayload(
     countyName?: string;
     parcelNodeId?: string;
     situsAddress?: string | null;
+    situsAddressPunctuationOnlyRaw?: string | null;
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
@@ -161,7 +165,13 @@ function newPayload(
     parcelNodeId: opts.parcelNodeId ?? "48021:34137",
     countyFips: opts.countyFips ?? "48021",
     countyName: opts.countyName ?? "Bastrop",
-    situsAddress: opts.situsAddress ?? "908 PINE , BASTROP, TX 78602",
+    // `"situsAddress" in opts` (not `??`) so an explicit `situsAddress: null`
+    // means null, not "fall back to the default" -- `??` cannot distinguish
+    // "the caller wants null" from "the caller omitted this".
+    situsAddress: "situsAddress" in opts ? (opts.situsAddress ?? null) : "908 PINE , BASTROP, TX 78602",
+    ...(opts.situsAddressPunctuationOnlyRaw !== undefined
+      ? { situsAddressPunctuationOnlyRaw: opts.situsAddressPunctuationOnlyRaw }
+      : {}),
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
     publishRunId: "8e7dc598-e079-41b9-88e1-df1e4c49e33d",
@@ -1816,5 +1826,226 @@ describe("CTX-RETIRE: record-level retirement for an account absent from the cur
     const diff = diffTier1KeyPaths(o, retired);
     expect(diff.unexpected.filter((p) => p.startsWith("recordRetirement"))).toEqual([]);
     expect(diffAgainstRequiredFacetPaths(retired).unexpectedRoots).toEqual([]);
+  });
+});
+
+/**
+ * CTX-SITUS-SKIP (P-124, 2026-09-09). CTX-PROV located the mechanism: an
+ * on-roll claim whose raw situsAddress is punctuation-only (e.g. `", ,"`) was
+ * refused by `assertSitusNotPunctuationOnly`, and the CLI's per-row loop
+ * `continue`d on that refusal BEFORE any write -- the row's snapshot stayed
+ * frozen on whatever pre-conformant shape it last held, forever. 18,037 rows
+ * live (Bastrop 16,104, Hays 768, McLennan 1,165), 100% correlated with a
+ * StratMap land-parcels `source_file` lineage (verified live against staging
+ * `cad_property` 2026-09-09; see the SITUS ADDRESS block in
+ * nodeFacetBakeTier1Conformant.ts for the full finding).
+ *
+ * The fix does NOT touch `PUNCTUATION_ONLY_RE` or
+ * `assertSitusNotPunctuationOnly` (untouched import; still the guard from
+ * `serveGuards.ts`, tested in `lib/__tests__/serveGuards.test.ts`). It writes
+ * the row instead of skipping it, with an EARNED absence on
+ * `baseFacts.situsAddress` naming why.
+ */
+describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an earned absence, never skipped", () => {
+  it("the refusal writes: baseFacts.situsAddress earns a well-formed, four-state-compliant absence", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999001", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999001",
+      situsAddress: null, // the guard already refused it -- this mirrors the CLI
+      situsAddressPunctuationOnlyRaw: ", ,",
+    });
+    // It was WRITTEN (the builder returned a payload at all) -- the old
+    // defect was that the CLI never reached buildConformantTier1Payload for
+    // this row.
+    expect(n).toBeTruthy();
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    const wire = n.baseFacts.situsAddress as Tier1LeafAbsence;
+    expect(wire.verdict).toBe("absent-verified");
+    expect(wire.basis).toContain("48021:999001");
+    expect(wire.basis).toContain('", ,"'); // the raw offending value, quoted verbatim
+    expect(wire.scopeSearched).toContain("claim.situsAddress");
+    expect(wire.scopeSearched).toContain("assertSitusNotPunctuationOnly");
+    expect(wire.asOf).toBe(NOW);
+    const cls = classifyRequiredLeafVerbatim(wire, { path: "baseFacts.situsAddress" });
+    expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+  });
+
+  it("facets.base.situsAddress NEVER carries the refused raw value: the serve guard would refuse it again", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999001", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999001",
+      situsAddress: null,
+      situsAddressPunctuationOnlyRaw: ", ,",
+    });
+    // The legacy mirror stays null -- never the punctuation-only literal.
+    expect(n.facets.base.situsAddress).toBeNull();
+    // Proof the guard would in fact refuse it, so writing null here (rather
+    // than the raw value) is load-bearing, not cosmetic.
+    expect(() => assertSitusNotPunctuationOnly(", ,")).toThrow(/punctuation only/);
+  });
+
+  it("situsCity/situsZip are decided INDEPENDENTLY of the situsAddress refusal: a real city/zip still bakes as a value", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999002", 2025, {
+        situsAddress: ", ,",
+        situsCity: "BASTROP",
+        situsZip: "78602",
+      }),
+      parcelNodeId: "48021:999002",
+      situsAddress: null,
+      situsAddressPunctuationOnlyRaw: ", ,",
+    });
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    // situsCity/situsZip are read straight from the claim, never derived from
+    // situsAddress -- a punctuation-only address does not blanket them absent.
+    expect(n.baseFacts.situsCity).toBe("BASTROP");
+    expect(n.baseFacts.situsZip).toBe("78602");
+  });
+
+  it("situsCity/situsZip earn their OWN independent absence when the claim carries neither (matches the live population: 0 of 16,104 Bastrop rows carry either)", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999003", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999003",
+      situsAddress: null,
+      situsAddressPunctuationOnlyRaw: ", ,",
+    });
+    for (const field of ["situsCity", "situsZip"] as const) {
+      expect(isEarnedLeafAbsence(n.baseFacts[field])).toBe(true);
+      const wire = n.baseFacts[field] as Tier1LeafAbsence;
+      // A distinct absence, not a copy of situsAddress's: no `mirrors` key,
+      // and its own basis naming its own field.
+      expect(wire.mirrors).toBeUndefined();
+      expect(wire.basis).not.toBe((n.baseFacts.situsAddress as Tier1LeafAbsence).basis);
+    }
+  });
+
+  it("the pre-existing, genuinely blank claim (raw null, never guard-refused) stays a bare null: NOT this card's population, byte-identical to before", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48453", "999004", 2026, {
+        situsAddress: null,
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48453:999004",
+      countyFips: "48453",
+      countyName: "Travis",
+      situsAddress: null,
+      // situsAddressPunctuationOnlyRaw NOT set -- the CLI never sets it unless
+      // the guard actually refused something.
+    });
+    expect(n.baseFacts.situsAddress).toBeNull();
+    // Not required, not earning an absence: `assertRequiredLeafStatesEarned`
+    // does not know this path and must not start refusing it.
+    expect(() => assertRequiredLeafStatesEarned(n)).not.toThrow();
+    expect(() => assertSitusAddressAbsenceEarned(n)).not.toThrow();
+  });
+
+  it("a normal, usable situsAddress bakes IDENTICALLY to today: the 1.5M healthy rows are untouched", () => {
+    const n = newPayload(txgioRow());
+    expect(n.baseFacts.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
+    expect(n.facets.base.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(false);
+  });
+
+  it("situsAddressPunctuationOnlyAbsence never fabricates: the raw value is quoted verbatim, and it is a well-formed leaf on its own", () => {
+    const wire = situsAddressPunctuationOnlyAbsence({
+      parcelNodeId: "48309:103671",
+      countyFips: "48309",
+      countyName: "McLennan",
+      placement: "flat",
+      access: CANONICAL_ACCESS,
+      rawValue: ", ,",
+      nowIso: NOW,
+    });
+    expect(isEarnedLeafAbsence(wire)).toBe(true);
+    expect(wire.verdict).toBe("absent-verified");
+    expect(wire.basis).toContain("48309:103671");
+    expect(wire.basis).toContain(JSON.stringify(", ,"));
+  });
+
+  it("BAKE_OWNED_REQUIRED_LEAF_PATHS is deliberately unchanged: situsAddress's absence is narrower than the four owned leaves", () => {
+    expect(BAKE_OWNED_REQUIRED_LEAF_PATHS).not.toContain("baseFacts.situsAddress");
+    expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+      "baseFacts.landUse",
+      "provenance.landUseSource",
+    ]);
+  });
+
+  it("the divergence instrument answers the old bake's null situsAddress leaf with the new earned absence, not a missing leaf", () => {
+    const o = oldPayload(txgioRow({ situs_address: "" }));
+    expect(o.baseFacts.situsAddress).toBeNull();
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "34137", 2025, {
+        situsAddress: ", ,",
+        situsCity: "BASTROP",
+        situsZip: "78602",
+      }),
+      situsAddress: null,
+      situsAddressPunctuationOnlyRaw: ", ,",
+    }) as unknown as Record<string, unknown>;
+    const diff = diffTier1KeyPaths(o, n);
+    expect(diff.missing.filter((p) => p.startsWith("baseFacts.situsAddress"))).toEqual([]);
+    expect(diff.unexpected.filter((p) => p.startsWith("baseFacts.situsAddress"))).toEqual([]);
+  });
+
+  it("verify by violating: assertSitusAddressAbsenceEarned REFUSES a malformed object and a basis that does not name the parcel", () => {
+    const good = newPayload(null, {
+      body: flatProductionBody("48021", "999005", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999005",
+      situsAddress: null,
+      situsAddressPunctuationOnlyRaw: ", ,",
+    });
+    expect(() => assertSitusAddressAbsenceEarned(good)).not.toThrow();
+
+    const halfBuilt = JSON.parse(JSON.stringify(good)) as Record<string, unknown>;
+    (halfBuilt.baseFacts as Record<string, unknown>).situsAddress = {
+      status: "absent",
+      verdict: "absent-verified",
+    };
+    let code: string | undefined;
+    try {
+      assertSitusAddressAbsenceEarned(halfBuilt);
+    } catch (err) {
+      code = (err as { code?: string }).code;
+    }
+    expect(code).toBe("SITUS_ADDRESS_ABSENCE_UNEARNED");
+
+    const wrongBasis = JSON.parse(JSON.stringify(good)) as Record<string, unknown>;
+    ((wrongBasis.baseFacts as Record<string, unknown>).situsAddress as Record<string, unknown>).basis =
+      "a basis that names no parcel at all";
+    expect(() => assertSitusAddressAbsenceEarned(wrongBasis)).toThrow(/does not name the parcel/);
+  });
+
+  it("verify by violating: the guard itself is untouched and still refuses the exact live defect string", () => {
+    // The literal 2026-09-09 finding: 100% of Bastrop/McLennan/Hays'
+    // punctuation-only rows carry EXACTLY this raw value.
+    expect(() => assertSitusNotPunctuationOnly(", ,")).toThrow(/punctuation only/);
+    // And a genuinely malformed absence marker (not this fix's output) is
+    // still rejected by the required-leaf guard on the four owned leaves --
+    // proving the fix did not weaken that instrument either.
+    const n = rollConsultedButMisses();
+    const mutated = JSON.parse(JSON.stringify(n)) as Record<string, unknown>;
+    (mutated.baseFacts as Record<string, unknown>).situsCity = { status: "absent" };
+    expect(() => assertRequiredLeafStatesEarned(mutated)).toThrow(
+      /neither a resolved value nor a well-formed earned absence/,
+    );
   });
 });
