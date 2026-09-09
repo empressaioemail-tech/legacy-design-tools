@@ -62,6 +62,7 @@ import {
   assertLandUseAbsenceEarned,
   assertNoOwnerKey,
   assertRequiredLeafStatesEarned,
+  assertSitusAddressAbsenceEarned,
   buildConformantTier1Payload,
   parcelNodeIdFromBody,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
@@ -99,13 +100,21 @@ function rawClaimSitusAddress(body: Record<string, unknown>): string | null {
   return (claim?.situsAddress as string | undefined) ?? (body.situsAddress as string | undefined) ?? null;
 }
 
-function situsForBake(body: Record<string, unknown>): { situs: string | null; refuse: boolean } {
+/**
+ * `raw` is always the claim's own trimmed-or-null situsAddress, independent of
+ * `refuse` -- CTX-SITUS-SKIP threads it through so a caller whose guard
+ * refusal it is can quote the offending value in an earned absence, rather
+ * than dropping the row (see the per-row loop below).
+ */
+function situsForBake(
+  body: Record<string, unknown>,
+): { situs: string | null; refuse: boolean; raw: string | null } {
   const raw = rawClaimSitusAddress(body);
-  if (raw == null || raw === "") return { situs: null, refuse: false };
+  if (raw == null || raw === "") return { situs: null, refuse: false, raw: null };
   try {
-    return { situs: assertSitusNotPunctuationOnly(raw), refuse: false };
+    return { situs: assertSitusNotPunctuationOnly(raw), refuse: false, raw };
   } catch {
-    return { situs: null, refuse: true };
+    return { situs: null, refuse: true, raw };
   }
 }
 
@@ -301,7 +310,13 @@ async function main() {
 
   let written = 0;
   let retired = 0;
-  let skippedBadSitus = 0;
+  // CTX-SITUS-SKIP (2026-09-09): no longer a skip. An on-roll row whose CAD
+  // claim's situsAddress is punctuation-only is now WRITTEN, with an earned
+  // absence on baseFacts.situsAddress -- this counts those rows so the
+  // outcome stays countable and visible, never silently absorbed the way
+  // `skippedBadSitus` (this counter's old name) was: it incremented for
+  // 18,037 rows and was never read by anything that would have caught them.
+  let situsPunctuationOnlyAbsence = 0;
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
@@ -335,13 +350,27 @@ async function main() {
     // the stale claim happens to carry a well-formed address.
     const rollAbsent = cadPropertyRoll.consulted && !cadPropertyRoll.byPropId.has(propId);
     let situs: string | null;
+    // CTX-SITUS-SKIP (2026-09-09): the raw offending value when the guard
+    // refuses an on-roll claim's situsAddress; null in every other case
+    // (usable address, blank claim, or a retired/roll-absent record, whose
+    // situs is never guard-gated -- see situsForRetiredBake). Threaded to
+    // buildConformantTier1Payload so it can earn the absence, never to fill
+    // `situs` itself: `assertSitusNotPunctuationOnly` still refused this
+    // value and it must never reach `facets.base.situsAddress` or the serve
+    // guard verbatim.
+    let situsPunctuationOnlyRaw: string | null = null;
     if (rollAbsent) {
       situs = situsForRetiredBake(body);
     } else {
-      const { situs: s, refuse: refuseSitus } = situsForBake(body);
+      const { situs: s, refuse: refuseSitus, raw } = situsForBake(body);
       if (refuseSitus) {
-        skippedBadSitus += 1;
-        continue;
+        // Previously: skippedBadSitus += 1; continue -- the row was never
+        // written and its snapshot stayed frozen forever. Now: write it, with
+        // an earned absence on baseFacts.situsAddress naming why (P-124
+        // CTX-SITUS-SKIP). A bad situs is a fact about one leaf, not a reason
+        // to discard every other correct fact this row carries.
+        situsPunctuationOnlyAbsence += 1;
+        situsPunctuationOnlyRaw = raw;
       }
       situs = s;
     }
@@ -372,6 +401,7 @@ async function main() {
       countyFips: county,
       countyName,
       situsAddress: situs,
+      situsAddressPunctuationOnlyRaw: situsPunctuationOnlyRaw,
       access,
       accessNormalizedFrom,
       publishRunId,
@@ -414,6 +444,11 @@ async function main() {
     // and a walk discovering that on a served row days later is how these
     // four leaves survived unmeasured for months.
     assertRequiredLeafStatesEarned(payload);
+    // CTX-SITUS-SKIP (P-124): a punctuation-only situs refusal must reach the
+    // write as a well-formed earned absence, never a malformed object -- the
+    // same fail-closed discipline as the four leaves above, applied to the
+    // one new write path this card introduces.
+    assertSitusAddressAbsenceEarned(payload);
 
     if (payload.provenance.landUseOrigin === "claim") landUseOrigins.claim += 1;
     else if (payload.provenance.landUseOrigin === "cad-property-prop-id-join") {
@@ -469,6 +504,19 @@ async function main() {
     written += 1;
     if (payload.recordRetirement) retired += 1;
   }
+  // CTX-SITUS-SKIP: visible on stdout for every run, not only in the tail
+  // summary line -- the old `skippedBadSitus` counter existed but nothing
+  // ever surfaced it where it would have been noticed at 16,104 rows for one
+  // county. This line makes the count impossible to miss in the bake's own
+  // log, matching the visibility the cadPropertyRoll/landUseRoll lines above
+  // already give their own counts.
+  if (situsPunctuationOnlyAbsence > 0) {
+    console.log(
+      `[node-facet-bake-t1-conformant] situs-punctuation-only earned absence for ${county}: ` +
+        `${situsPunctuationOnlyAbsence} of ${cadRows.length} rows (on-roll, CAD claim ` +
+        "situsAddress punctuation-only; written with baseFacts.situsAddress earned absence, not skipped)",
+    );
+  }
   console.log(
     JSON.stringify({
       county,
@@ -479,7 +527,7 @@ async function main() {
       written,
       retired,
       skippedNoNode,
-      skippedBadSitus,
+      situsPunctuationOnlyAbsence,
       skippedBadAccess,
       parcelTable: parcelTable?.table ?? null,
       joinGateBlocked,
