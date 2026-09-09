@@ -1084,25 +1084,30 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.landUseFact.verdict).toBe("not-applicable");
   });
 
-  it("card F fixture 3: an EMPTY city-limits index serves unmeasured with the index's reason, never not-applicable", async () => {
+  it("card F fixture 3: an EMPTY city-limits index serves refused (P-124 CTX-LEAVES2) with the index's reason, never not-applicable", async () => {
     await seedUnstampedTravis("30.26000", "-97.75000");
     setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
     const res = await getUnstampedTravis();
     expect(res.status).toBe(200);
+    // cityLimitsFact.status is the underlying containment determination
+    // (CityLimitsStatus) and is unaffected by this card; facets.zoning.verdict
+    // is the served four-state contract cell (LayerAbsenceVerdict), which
+    // _decisions/2026-09-01_serve_path_never_emits_pipeline_state.md rules
+    // must never surface `unmeasured` -- the basis prose is unchanged.
     expect(res.body.cityLimitsFact.status).toBe("unmeasured");
-    expect(res.body.facets.zoning.verdict).toBe("unmeasured");
+    expect(res.body.facets.zoning.verdict).toBe("refused");
     expect(res.body.facets.zoning.basis).toContain("unmeasured, not unincorporated");
     expect(res.body.landUseFact.verdict).toBeUndefined();
   });
 
-  it("card F: the 0,0 bake sentinel (the three unstamped golds as stored on 2026-08-28) serves unmeasured for lack of a query point", async () => {
+  it("card F: the 0,0 bake sentinel (the three unstamped golds as stored on 2026-08-28) serves refused (P-124 CTX-LEAVES2) for lack of a query point", async () => {
     await seedUnstampedTravis("0.00000", "0.00000");
     setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
     const res = await getUnstampedTravis();
     expect(res.status).toBe(200);
     expect(res.body.cityLimitsFact.status).toBe("unmeasured");
     expect(res.body.cityLimitsFact.queryPoint).toBeNull();
-    expect(res.body.facets.zoning.verdict).toBe("unmeasured");
+    expect(res.body.facets.zoning.verdict).toBe("refused");
     expect(res.body.facets.zoning.basis).toBe("no usable parcel query point; city limits are unmeasured");
   });
 

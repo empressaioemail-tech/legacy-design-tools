@@ -279,20 +279,26 @@ describe("zoningVerdictFromCityLimits: the served zoning layer for an unstamped 
     expect(JSON.stringify(wire)).not.toContain("situs");
   });
 
-  it("outside every polygon in a county with no declared doctrine: unmeasured, not-applicable is not asserted from silence", () => {
+  it("outside every polygon in a county with no declared doctrine: refused (P-124 CTX-LEAVES2), not-applicable is not asserted from silence", () => {
+    // _decisions/2026-09-01_serve_path_never_emits_pipeline_state.md: the
+    // serve boundary's four-state contract does not permit `unmeasured`; this
+    // branch used to emit it and now emits `refused`, same authority/scope/
+    // basis (the word "unmeasured" stays in the basis PROSE, which is still
+    // an honest description of why -- only the contract-level verdict token
+    // changed).
     const wire = zoningVerdictFromCityLimits("49019:1", UNSTAMPED_NULL_CITY, OUTSIDE_EVERY_POLYGON, AS_OF);
     expect(wire).toMatchObject({
-      verdict: "unmeasured",
+      verdict: "refused",
       authority: "unresolved",
       derivation: { cityLimitsStatus: "unincorporated", countyDoctrine: "undeclared" },
     });
     expect(wire!.basis).toContain("county 49019 does not declare zoning_regime.unincorporated=unzoned");
   });
 
-  it("an empty index: unmeasured with the index's reason", () => {
+  it("an empty index: refused (P-124 CTX-LEAVES2) with the index's reason", () => {
     const wire = zoningVerdictFromCityLimits("48453:1", UNSTAMPED_NULL_CITY, EMPTY_INDEX, AS_OF);
     expect(wire).toMatchObject({
-      verdict: "unmeasured",
+      verdict: "refused",
       authority: "unresolved",
       basis: EMPTY_INDEX.basis,
       scopeSearched: "incorporated-place polygons in tx_city_boundary; query point lng -97.75 lat 30.26",
@@ -300,10 +306,10 @@ describe("zoningVerdictFromCityLimits: the served zoning layer for an unstamped 
     });
   });
 
-  it("no usable query point: unmeasured with that reason and a null point", () => {
+  it("no usable query point: refused (P-124 CTX-LEAVES2) with that reason and a null point", () => {
     const wire = zoningVerdictFromCityLimits("48453:1", UNSTAMPED_NULL_CITY, NO_POINT, AS_OF);
     expect(wire).toMatchObject({
-      verdict: "unmeasured",
+      verdict: "refused",
       authority: "unresolved",
       basis: "no usable parcel query point; city limits are unmeasured",
       scopeSearched: "incorporated-place polygons in tx_city_boundary; no usable query point",
@@ -345,11 +351,11 @@ describe("the four golds: served zoning verdict after card F, from their stored 
     ["48453:493738", "no-row"],
     ["48491:76149", "gate-blocked"],
     ["48209:135570", "gate-blocked"],
-  ] as const)("%s (join %s): unmeasured, never not-applicable, until the bake holds a point", (id, join) => {
+  ] as const)("%s (join %s): refused (P-124 CTX-LEAVES2), never not-applicable, until the bake holds a point", (id, join) => {
     const wire = zoningVerdictFromCityLimits(id, unstampedStored(join), NO_POINT, AS_OF);
     expect(wire).toMatchObject({
       status: "absent",
-      verdict: "unmeasured",
+      verdict: "refused",
       authority: "unresolved",
       scopeSearched: "incorporated-place polygons in tx_city_boundary; no usable query point",
       basis: "no usable parcel query point; city limits are unmeasured",
