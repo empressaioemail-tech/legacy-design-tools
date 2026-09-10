@@ -55,7 +55,6 @@ import {
   type MemberDiscrimination,
 } from "./publishedIdentifierBackfill";
 
-const { Pool } = pg;
 
 function log(msg: string): void {
   console.log(`[cad-backfill-ids] ${msg}`);
@@ -259,16 +258,41 @@ async function main(): Promise<void> {
       `${read.blankPropIdRows} blank PropertyID rows`,
   );
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  // ONE CONNECTION, ONE TRANSACTION. A Pool would spread the run across
+  // several connections, and then BEGIN would mean nothing.
+  //
+  // WHY THE TRANSACTION IS THE POINT AND NOT A DETAIL. The untouched-columns
+  // digest DETECTS a column that moved. Detection on its own leaves the run
+  // committed and tells you afterwards, which for a money column is a report
+  // rather than a control. Inside a transaction the same detection becomes
+  // PREVENTION: the digest mismatch throws, the catch rolls back, and nothing
+  // this tool wrote survives. That is the difference between "provably tells
+  // you it altered a market value" and "provably unable to alter one".
+  //
+  // It also removes the partial-run state. 135 separate statements can fail at
+  // 130 and leave a county two-thirds written; one transaction either lands or
+  // does not. The operation is idempotent either way, so re-running after a
+  // rollback costs nothing.
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
   // `pg` types its rows as QueryResultRow; the executor interface is generic
   // so tests can hand back typed fakes. The cast is at the seam, once.
   const exec: BackfillExecutor = {
     async query(text, values) {
-      const r = await pool.query(text, values);
+      const r = await client.query(text, values);
       return { rows: r.rows as never[] };
     },
   };
+  let inTransaction = false;
   try {
+    if (!dryRun) {
+      await client.query("BEGIN");
+      inTransaction = true;
+      // Exit-bounded at the server too: a hung statement inside a transaction
+      // holds locks on the county for as long as it hangs.
+      await client.query("SET LOCAL statement_timeout = '900s'");
+      log("BEGIN — the whole run is one transaction; a digest mismatch rolls it back");
+    }
     const summary = await runPublishedIdentifierBackfill(
       exec,
       read,
@@ -315,8 +339,31 @@ async function main(): Promise<void> {
       }`,
     );
     if (record.path) log(`record written:            ${record.path}`);
+
+    if (inTransaction) {
+      await client.query("COMMIT");
+      inTransaction = false;
+      record.write({ kind: "committed", at: new Date().toISOString() });
+      log("COMMIT — the run is durable");
+    }
+  } catch (err) {
+    if (inTransaction) {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+      // The rollback is itself a state-changing event and gets a record line.
+      // A refusal that leaves no name is how an unattributed mutation becomes
+      // unanswerable.
+      record.write({
+        kind: "rolled-back",
+        at: new Date().toISOString(),
+        reason: err instanceof Error ? err.message : String(err),
+        read: "every prop_id named in the batch lines above was UNDONE. Nothing this run wrote survives.",
+      });
+      log("ROLLBACK — nothing this run wrote survives");
+    }
+    throw err;
   } finally {
-    await pool.end();
+    await client.end();
   }
 }
 
