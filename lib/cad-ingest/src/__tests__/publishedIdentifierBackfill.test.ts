@@ -11,6 +11,8 @@
 
 import { describe, expect, it } from "vitest";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { HeaderIndex } from "../csv";
 import {
@@ -22,6 +24,7 @@ import {
   buildBackfillUpdate,
   buildUntouchedDigestSql,
   assertDigestScopeIntact,
+  createFileRecordWriter,
   createMemoryRecordWriter,
   DIGEST_EXCLUDED_COLUMNS,
   DIGEST_MUST_COVER,
@@ -341,6 +344,29 @@ describe("digest scope — the defect a mutation run found", () => {
     for (const c of ["market_value", "assessed_value", "land_value", "improvement_value", "source_file", "source_vintage", "ingested_at"]) {
       expect([...DIGEST_MUST_COVER]).toContain(c);
     }
+  });
+});
+
+describe("the durable record", () => {
+  // "If the record cannot be written, the mutation does not run." The CLI
+  // opens the record BEFORE it constructs a Pool, so this throw is what makes
+  // that sentence true rather than aspirational. Verified by violating it: a
+  // writer that only discovered a bad path on its first append would already
+  // have landed a batch.
+  it("REFUSES to open on an unwritable path, before any connection exists", () => {
+    expect(() =>
+      createFileRecordWriter(join(here, "__no_such_dir__", "deeper", "rec.jsonl")),
+    ).toThrow(/ENOENT/);
+  });
+
+  it("truncates on open, so a stale record cannot be mistaken for this run", () => {
+    const p = join(tmpdir(), `ctx-hays-backfill-record-${process.pid}.jsonl`);
+    writeFileSync(p, '{"kind":"stale-run-from-yesterday"}\n', "utf8");
+    const w = createFileRecordWriter(p);
+    expect(readFileSync(p, "utf8")).toBe("");
+    w.write({ kind: "probe" });
+    expect(readFileSync(p, "utf8")).toBe('{"kind":"probe"}\n');
+    rmSync(p, { force: true });
   });
 });
 
