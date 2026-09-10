@@ -48,6 +48,7 @@ import {
   parcelNodeIdFromBody,
   readConformantCadClaim,
   REQUIRED_TIER1_FACET_PATHS,
+  resolveConformantSitusAddress,
   situsAddressUnusableAbsence,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
   type ConformantTier1BuildInput,
@@ -155,6 +156,8 @@ function newPayload(
     parcelNodeId?: string;
     situsAddress?: string | null;
     situsAddressUnusable?: ConformantTier1BuildInput["situsAddressUnusable"];
+    situsAddressOrigin?: ConformantTier1BuildInput["situsAddressOrigin"];
+    situsAddressSupersededClaim?: ConformantTier1BuildInput["situsAddressSupersededClaim"];
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
@@ -172,6 +175,12 @@ function newPayload(
     situsAddress: "situsAddress" in opts ? (opts.situsAddress ?? null) : "908 PINE , BASTROP, TX 78602",
     ...(opts.situsAddressUnusable !== undefined
       ? { situsAddressUnusable: opts.situsAddressUnusable }
+      : {}),
+    ...(opts.situsAddressOrigin !== undefined
+      ? { situsAddressOrigin: opts.situsAddressOrigin }
+      : {}),
+    ...(opts.situsAddressSupersededClaim !== undefined
+      ? { situsAddressSupersededClaim: opts.situsAddressSupersededClaim }
       : {}),
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
@@ -633,6 +642,13 @@ describe("the divergence instrument fails when it should", () => {
         // CTX-situs (2026-09-08): situsState is derived, not join-sourced;
         // same new-shape-only treatment as the two above.
         "provenance.situsStateSource",
+        // CTX-B6 (2026-09-10, reopened): which upstream supplied the situs, and
+        // the claim value the declared roll overrode. This pin FIRED when the
+        // two keys were added, which is the control working: widening the
+        // allowlist is a deliberate act with a reason, never a silent one. The
+        // old bake had no concept of a situs SOURCE because it had only one.
+        "provenance.situsAddressSource",
+        "provenance.situsAddressSupersededClaim",
         "baseFacts.cadRoll",
         "baseFacts.yearBuilt",
         "baseFacts.legalDescription",
@@ -2184,6 +2200,133 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       expect(wire.basis).toContain("48309:103671");
       expect(wire.basis).toContain(JSON.stringify(rawValue));
     }
+  });
+
+  /**
+   * CTX-B6 REOPENED (2026-09-10). The first pass had the shape right and the
+   * SOURCE wrong. It read `provenance.parcelVintage` (which is the CLAIM's
+   * taxYear) as the county's declared CAD vintage, concluded the stale
+   * StratMap situs was correct-by-declaration, and was about to convert
+   * 139,256 Travis addresses that exist in the declared 2026 roll into
+   * "verified absent". Travis is declared 2026 in DECLARED_CAD_VINTAGES;
+   * 48453:224793 carries "4709 SHOALWOOD AVE" there.
+   *
+   * Measured per county against each county's OWN declared vintage:
+   * Travis 139,256 of 146,494 street-less rows recoverable (95.1%), Hays 27 of
+   * its 2,973 bare nulls, and zero in Bastrop, Caldwell, McLennan and
+   * Williamson.
+   */
+  describe("CTX-B6 reopened: the declared-vintage roll is preferred over the claim", () => {
+    const resolve = resolveConformantSitusAddress;
+
+    it("the declared roll wins when it carries a street: the Travis worked example recovers", () => {
+      const r = resolve({
+        claimRaw: ", TX 78756", // the 2025 StratMap drop
+        rollRaw: "4709 SHOALWOOD AVE", // cad_property at the declared 2026 vintage
+        rollAbsent: false,
+      });
+      expect(r.situs).toBe("4709 SHOALWOOD AVE");
+      expect(r.origin).toBe("declared-roll");
+      expect(r.unusable).toBeNull();
+      // The overridden claim is RECORDED, not discarded silently.
+      expect(r.supersededClaimValue).toBe(", TX 78756");
+    });
+
+    it("the claim is used only when the declared roll carries nothing usable", () => {
+      expect(resolve({ claimRaw: "12 OAK ST", rollRaw: null, rollAbsent: false })).toEqual({
+        situs: "12 OAK ST",
+        origin: "claim",
+        unusable: null,
+        supersededClaimValue: null,
+      });
+      expect(
+        resolve({ claimRaw: "12 OAK ST", rollRaw: ", TX 78701", rollAbsent: false }),
+      ).toMatchObject({ situs: "12 OAK ST", origin: "claim" });
+    });
+
+    it("both sources unusable earns the absence, quoting the DECLARED ROLL's value", () => {
+      const r = resolve({ claimRaw: ", ,", rollRaw: ", TX 78612", rollAbsent: false });
+      expect(r.situs).toBeNull();
+      expect(r.origin).toBe("none");
+      // The roll is the authority the rest of the payload reports, so its
+      // refusal is the one shown -- not the claim's.
+      expect(r.unusable).toEqual({ raw: ", TX 78612", reason: "no-street-component" });
+    });
+
+    it("both sources empty earns the blank-claim absence, with nothing to quote", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, rollAbsent: false })).toEqual({
+        situs: null,
+        origin: "none",
+        unusable: null,
+        supersededClaimValue: null,
+      });
+    });
+
+    it("ORDERING: the retired branch is reached BEFORE the roll is consulted at all", () => {
+      // A roll-absent record has no declared-roll row by construction, so a
+      // rollRaw here is a contradiction -- and the resolver must still take the
+      // retired branch. This is the test that keeps CTX-RETIRE and CTX-B1
+      // working: if the preference ever ran first, 48055:1 would stop serving
+      // its last-known situs.
+      const r = resolve({ claimRaw: ", ,", rollRaw: "999 SHOULD NOT WIN", rollAbsent: true });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.situs).toBe(", ,");
+      expect(r.unusable).toBeNull();
+    });
+
+    it("a retired record with no claim situs resolves null, and the builder earns its absence", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, rollAbsent: true })).toMatchObject({
+        situs: null,
+        origin: "retired-claim",
+      });
+    });
+
+    it("a claim that AGREES with the roll supersedes nothing", () => {
+      expect(
+        resolve({ claimRaw: "4709 SHOALWOOD AVE", rollRaw: "4709 SHOALWOOD AVE", rollAbsent: false }),
+      ).toMatchObject({ origin: "declared-roll", supersededClaimValue: null });
+    });
+
+    it("the payload records the source, so a re-bake that stopped preferring the roll is visible", () => {
+      const recovered = newPayload(null, {
+        body: flatProductionBody("48453", "224793", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: "78756",
+        }),
+        parcelNodeId: "48453:224793",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: "4709 SHOALWOOD AVE",
+        situsAddressOrigin: "declared-roll",
+        situsAddressSupersededClaim: ", TX 78756",
+      });
+      expect(recovered.baseFacts.situsAddress).toBe("4709 SHOALWOOD AVE");
+      expect(recovered.facets.base.situsAddress).toBe("4709 SHOALWOOD AVE");
+      expect(recovered.provenance.situsAddressSource).toBe("declared-roll");
+      expect(recovered.provenance.situsAddressSupersededClaim).toBe(", TX 78756");
+      // and it is a plain value, not an absence
+      expect(isEarnedLeafAbsence(recovered.baseFacts.situsAddress)).toBe(false);
+    });
+
+    it("an absence still records source \"none\", never a missing key", () => {
+      const absent = newPayload(null, {
+        body: flatProductionBody("48453", "999007", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: null,
+        }),
+        parcelNodeId: "48453:999007",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: null,
+        situsAddressUnusable: { raw: ", TX 78756", reason: "no-street-component" },
+        situsAddressOrigin: "none",
+      });
+      expect(isEarnedLeafAbsence(absent.baseFacts.situsAddress)).toBe(true);
+      expect(absent.provenance.situsAddressSource).toBe("none");
+      expect(absent.provenance.situsAddressSupersededClaim).toBeNull();
+    });
   });
 
   it("CTX-B6 SUPERSEDES: baseFacts.situsAddress IS in BAKE_OWNED_REQUIRED_LEAF_PATHS, and the list is exactly six", () => {

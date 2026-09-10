@@ -142,7 +142,7 @@ import {
   isEarnedRecordRetirement,
   type Tier1RecordRetirement,
 } from "./recordRetirement";
-import type { SitusAddressUnusableReason } from "./serveGuards";
+import { classifyRawSitusAddress, type SitusAddressUnusableReason } from "./serveGuards";
 
 export const CONFORMANT_SHAPE_SOURCE = "conformant-v1";
 export const CONFORMANT_TIER1_SOURCE = "conformant-v1-cad-parcel-roll";
@@ -390,6 +390,8 @@ export interface ConformantCadPropertyRoll {
       yearBuilt?: unknown;
       legalDescription?: unknown;
       exemptionCodes?: unknown;
+      /** The declared-vintage roll's own situs (CTX-B6). Optional so old callers still type-check. */
+      situsAddress?: unknown;
     }
   >;
   declaredTaxYear: number | null;
@@ -793,6 +795,20 @@ export interface ConformantTier1Payload extends Omit<
     parcelJoin: ParcelJoinRecord;
     /** Which upstream supplied the land use; null when none did. */
     landUseOrigin: LandUseOrigin | null;
+    /**
+     * Which upstream supplied `baseFacts.situsAddress` (CTX-B6). Never null:
+     * `"none"` is the state when the leaf holds an earned absence. This exists
+     * because the payload used to mix vintages across leaves silently -- the
+     * dollars at the declared vintage, the situs at the claim's -- and nothing
+     * in the payload said which leaf came from where.
+     */
+    situsAddressSource: SitusAddressOrigin;
+    /**
+     * The claim's situs that the declared roll overrode, when the two differed;
+     * null otherwise. Makes the upgrade auditable rather than invisible after a
+     * re-bake.
+     */
+    situsAddressSupersededClaim: string | null;
     /** The earned absence when no land use was projected; null when one was. */
     landUseAbsence: LandUseAbsence | null;
   };
@@ -829,6 +845,17 @@ export interface ConformantTier1BuildInput {
    * rather than a sentinel on `situsAddress`.
    */
   situsAddressUnusable?: { raw: string; reason: SitusAddressUnusableReason } | null;
+  /**
+   * WHERE `situsAddress` came from (CTX-B6 reopened, 2026-09-10). Written
+   * verbatim to `provenance.situsAddressSource`. Defaults to `"claim"` when a
+   * caller omits it, which is what every pre-CTX-B6 caller meant.
+   */
+  situsAddressOrigin?: SitusAddressOrigin;
+  /**
+   * The claim value the declared roll overrode, when they differ. Written to
+   * `provenance.situsAddressSupersededClaim`. Null on every other origin.
+   */
+  situsAddressSupersededClaim?: string | null;
   access: { discoverability: string; entitlement: string };
   accessNormalizedFrom: string | null;
   publishRunId: string | undefined;
@@ -1064,6 +1091,17 @@ export function buildConformantTier1Payload(
     zoningDistrictRaw: row?.zoning_district ?? null,
     zoningJurisdictionRaw: row?.zoning_jurisdiction ?? null,
     parcelSource: CONFORMANT_TIER1_SOURCE,
+    // READ THIS BEFORE USING IT AS A VINTAGE. `provenance.parcelVintage` is
+    // the CLAIM's taxYear and nothing else. It is NOT the county's declared
+    // CAD vintage (that is `tryResolveDeclaredCadVintage`, and it is what the
+    // cadRoll dollars, yearBuilt, legalDescription and exemptionCodes report),
+    // and it is NOT the TxGIO parcel-join vintage (that is
+    // `provenance.parcelJoin.sourceVintage`). On Travis the claim says 2025
+    // while the declared vintage is 2026, and CTX-B6's first pass misread this
+    // field as the declared vintage and concluded from it that the stale situs
+    // was correct-by-declaration. It was not; 139,256 Travis parcels had a
+    // real street in the declared roll. Three different vintages live on this
+    // payload and this key names only one of them.
     parcelVintage: claim.taxYear != null ? String(claim.taxYear) : null,
     nowIso,
     onSitusFallback: input.onSitusFallback,
@@ -1214,6 +1252,8 @@ export function buildConformantTier1Payload(
     facetCoverage: { ...facetCoverage, tier1: "populated" },
     provenance: {
       ...provenance,
+      situsAddressSource: input.situsAddressOrigin ?? "claim",
+      situsAddressSupersededClaim: input.situsAddressSupersededClaim ?? null,
       landUseSource: landUseSourceLeaf,
       parcelJoin,
       landUseOrigin,
@@ -1455,6 +1495,156 @@ export function claimLeafAbsence(input: {
 // function. This is a finding about the upstream StratMap ingest, not a
 // defect in this guard or this bake; no fix to the ingest is made here.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// WHICH SOURCE THE SITUS COMES FROM (P-124 CTX-B6, 2026-09-10, reopened).
+//
+// THE DEFECT IS IN THE READ, NOT IN AN ASSEMBLER. Nothing in this repo
+// composes an address string -- that finding stands. What was missed is that
+// ONE PAYLOAD CARRIES TWO VINTAGES. The dollar facets come from
+// `cadPropertyRoll`, which `fetchCountyCadPropertyRoll` filters to
+// `tax_year = <declared>`. The situs came from the cad-parcel-roll ATOM
+// CLAIM, which carries whatever vintage the Factory staged. For Travis those
+// are different years and the claim is the stale one.
+//
+// Live, 48453:224793, one stored row, read 2026-09-10:
+//     marketValue   { v: 1238899, vintage: "2026", valueBasis: "county-assessed" }
+//     landUse       vintage 2026 preliminary appraisal export
+//     situsAddress  ", TX 78756"          <- the 2025 StratMap drop
+//     provenance.parcelVintage "2025"     <- and this is the CLAIM's taxYear
+//                                            (see the assembleTier1Payload call
+//                                            below), so the payload was already
+//                                            SAYING its situs was a year behind
+//                                            its dollars. Nobody read it.
+// `cad_property` for that prop_id at the declared 2026 vintage carries
+// "4709 SHOALWOOD AVE".
+//
+// MEASURED PAYOFF, full scan of the staging store 2026-09-10, per county
+// against each county's OWN declared vintage (48021 and 48309 are declared
+// 2025; 48055, 48209, 48453 and 48491 are declared 2026):
+//
+//     county           served street-less   recoverable from declared roll
+//     48453 Travis            146,494              139,256   (95.1%)
+//     48309 McLennan              696                    0
+//     48021 Bastrop                 9                    0
+//     48055 Caldwell               63                    0   (all 63 retired)
+//     48209 Hays                  768                    0   (all 768 retired)
+//   and in the BARE-NULL population, which the same rule covers:
+//     48209 Hays                2,973                   27
+//
+// So 139,283 of the 170,835 defective cells hold a real street in the roll
+// this payload's dollars already came from. Writing an earned absence over
+// them is exactly what ruling A1 forbids -- converting usable data into an
+// absence -- and it would have been done at scale by a control built to be
+// honest. The remaining 31,552 are genuinely absent and the absence machinery
+// below is right for them.
+//
+// THE RULE. Prefer the declared-vintage roll, then the claim, then earn an
+// absence. The roll wins even over a usable claim, because the roll is the
+// vintage this payload's dollars, land use, year built, legal description and
+// exemption codes already report; a payload that mixes vintages across leaves
+// is the defect, and preferring the roll is what makes it single-vintage.
+//
+// The one exception is a RETIRED record, which by CTX-RETIRE has no row in
+// the declared roll at all and must keep serving its last-known claim
+// ungated. That branch is reached first and is untouched.
+// ---------------------------------------------------------------------------
+
+/** Where `baseFacts.situsAddress` came from. Recorded on `provenance.situsAddressSource`. */
+export type SitusAddressOrigin =
+  /** `cad_property` at the county's declared tax_year -- the same row the dollars come from. */
+  | "declared-roll"
+  /** The cad-parcel-roll atom claim, because the declared roll carried nothing usable. */
+  | "claim"
+  /** A roll-absent (retired) record's last-known claim, read ungated per CTX-RETIRE. */
+  | "retired-claim"
+  /** Neither source carried a usable address; the leaf holds an earned absence. */
+  | "none";
+
+export interface ResolvedSitusAddress {
+  /** The value the payload is built from. Null whenever the leaf earns an absence. */
+  situs: string | null;
+  origin: SitusAddressOrigin;
+  /** Set only when something was READ and REFUSED, so the absence can quote it. */
+  unusable: { raw: string; reason: SitusAddressUnusableReason } | null;
+  /**
+   * The claim value the declared roll overrode, when the two differ. Non-null
+   * ONLY on `declared-roll`. It is what makes the upgrade auditable: a reader
+   * can see that this parcel used to serve a different string and which source
+   * replaced it, rather than the change being invisible after a re-bake.
+   */
+  supersededClaimValue: string | null;
+}
+
+/**
+ * Decide the situs and say where it came from. PURE -- the caller supplies the
+ * declared-roll row it ALREADY loaded for the dollar facets, so this adds no
+ * query; only one column had to be added to that existing SELECT
+ * (`joinIntegrityGate.ts` `fetchCountyCadPropertyRoll`).
+ *
+ * Every branch is proven in `../nodeFacetBakeTier1Conformant.test.ts`,
+ * including that the retired branch is reached BEFORE any preference logic.
+ */
+export function resolveConformantSitusAddress(input: {
+  /** `claim.situsAddress`, verbatim and untrimmed. */
+  claimRaw: string | null | undefined;
+  /** `cad_property.situs_address` at the county's DECLARED tax_year, or null when no row. */
+  rollRaw: string | null | undefined;
+  /** True when the prop_id has no row at all in the declared roll (CTX-RETIRE). */
+  rollAbsent: boolean;
+}): ResolvedSitusAddress {
+  // RETIRED FIRST, and unconditionally. A retirement declaration must not be
+  // gated by data quality (CTX-RETIRE), and by construction there is no
+  // declared-roll row to prefer.
+  if (input.rollAbsent) {
+    const raw = input.claimRaw == null ? null : String(input.claimRaw).trim();
+    return {
+      situs: raw === "" ? null : raw,
+      origin: "retired-claim",
+      unusable: null,
+      supersededClaimValue: null,
+    };
+  }
+
+  const roll = classifyRawSitusAddress(input.rollRaw);
+  const claim = classifyRawSitusAddress(input.claimRaw);
+
+  if (roll.kind === "usable") {
+    return {
+      situs: roll.value,
+      origin: "declared-roll",
+      unusable: null,
+      // Only when the claim actually said something ELSE. A claim that agreed,
+      // or carried nothing, supersedes nothing and records nothing.
+      supersededClaimValue:
+        claim.kind === "usable" && claim.value !== roll.value
+          ? claim.value
+          : claim.kind === "unusable"
+            ? claim.raw
+            : null,
+    };
+  }
+
+  if (claim.kind === "usable") {
+    return {
+      situs: claim.value,
+      origin: "claim",
+      unusable: null,
+      supersededClaimValue: null,
+    };
+  }
+
+  // Neither carried a usable address. Quote whichever source carried
+  // SOMETHING, preferring the declared roll: it is the authority this payload
+  // otherwise reports, so its refusal is the one worth showing.
+  const unusable =
+    roll.kind === "unusable"
+      ? { raw: roll.raw, reason: roll.reason }
+      : claim.kind === "unusable"
+        ? { raw: claim.raw, reason: claim.reason }
+        : null;
+  return { situs: null, origin: "none", unusable, supersededClaimValue: null };
+}
 
 /**
  * The earned absence for an on-roll claim's situsAddress when
@@ -1852,6 +2042,13 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   // this marks that provenance. New-shape-only, same treatment as
   // landUseOrigin/landUseAbsence above.
   "provenance.situsStateSource",
+  // CTX-B6 (2026-09-10): which upstream supplied the situs, and the claim the
+  // declared roll overrode. New-shape-only, same treatment as landUseOrigin.
+  // These are NOT a widening of what the instrument tolerates in the leaves it
+  // already watches -- they are two new provenance keys the old bake had no
+  // concept of, because the old bake had only one situs source.
+  "provenance.situsAddressSource",
+  "provenance.situsAddressSupersededClaim",
   "baseFacts.cadRoll",
   "baseFacts.yearBuilt",
   "baseFacts.legalDescription",

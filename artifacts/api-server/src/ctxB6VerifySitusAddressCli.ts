@@ -41,6 +41,7 @@ import {
   assertSitusAddressAbsenceEarned,
   isEarnedLeafAbsence,
   isEarnedRecordRetirement,
+  resolveConformantSitusAddress,
 } from "./lib/nodeFacetBakeTier1Conformant.js";
 import {
   classifyRawSitusAddress,
@@ -135,7 +136,7 @@ type Verdict = {
   rawClaimSitus: string | null;
   before: { leaf: unknown; content: ReturnType<typeof classifyRequiredLeaf>; sentinel: boolean };
   after: { leaf: unknown; content: ReturnType<typeof classifyRequiredLeaf>; sentinel: boolean };
-  expectation: "defective-before-clean-after" | "untouched";
+  expectation: "recovered-from-declared-roll" | "defective-before-clean-after" | "untouched";
   pass: boolean;
   why: string;
 };
@@ -166,10 +167,12 @@ function afterLeaf(input: {
   parcelNodeId: string;
   countyFips: string;
   rawClaimSitus: string | null;
+  /** `cad_property.situs_address` at the county's DECLARED tax_year. */
+  rollSitus: string | null;
   claim: Record<string, unknown>;
   cadPropertyRoll: CountyCadPropertyRoll;
   nowIso: string;
-}): { leaf: unknown; retired: boolean; servesOk: boolean } {
+}): { leaf: unknown; retired: boolean; servesOk: boolean; origin: string } {
   // The CLI's own branch, reproduced: a record ABSENT from the declared-vintage
   // roll takes `situsForRetiredBake` -- the last-known claim, trimmed, never
   // gated (CTX-RETIRE). Getting this wrong is not academic: the first run of
@@ -179,21 +182,24 @@ function afterLeaf(input: {
   const propId = input.parcelNodeId.split(":")[1] ?? "";
   const rollAbsent =
     input.cadPropertyRoll.consulted && !input.cadPropertyRoll.byPropId.has(propId);
-  const cls = classifyRawSitusAddress(input.rawClaimSitus);
-  const retiredSitus =
-    input.rawClaimSitus == null || String(input.rawClaimSitus).trim() === ""
-      ? null
-      : String(input.rawClaimSitus).trim();
+  // The SAME resolver the bake CLI calls, with the SAME inputs -- the claim's
+  // raw situs and the declared-vintage roll's own situs. Reimplementing the
+  // preference here would let the instrument agree with a bake that had
+  // stopped preferring the roll.
+  const resolved = resolveConformantSitusAddress({
+    claimRaw: input.rawClaimSitus,
+    rollRaw: input.rollSitus,
+    rollAbsent,
+  });
   const payload = buildConformantTier1Payload({
     body: { ...input.claim, parcelNodeId: input.parcelNodeId },
     parcelNodeId: input.parcelNodeId,
     countyFips: input.countyFips,
     countyName: COUNTY_NAMES[input.countyFips] ?? input.countyFips,
-    situsAddress: rollAbsent ? retiredSitus : cls.kind === "usable" ? cls.value : null,
-    situsAddressUnusable:
-      !rollAbsent && cls.kind === "unusable"
-        ? { raw: cls.raw, reason: cls.reason }
-        : null,
+    situsAddress: resolved.situs,
+    situsAddressUnusable: resolved.unusable,
+    situsAddressOrigin: resolved.origin,
+    situsAddressSupersededClaim: resolved.supersededClaimValue,
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
     publishRunId: undefined,
@@ -216,7 +222,12 @@ function afterLeaf(input: {
   } catch {
     servesOk = false;
   }
-  return { leaf: payload.baseFacts.situsAddress, retired, servesOk };
+  return {
+    leaf: payload.baseFacts.situsAddress,
+    retired,
+    servesOk,
+    origin: payload.provenance.situsAddressSource,
+  };
 }
 
 function selfTest(): number {
@@ -296,19 +307,25 @@ async function main(): Promise<void> {
   // Named, real parcels. The street-less ones are the dispatch's own worked
   // example plus one measured member of each other street-less shape; the
   // control set is a real-street parcel in each affected county.
+  // RECOVERABLE: served street-less today, and the county's DECLARED-vintage
+  // cad_property row carries a real street. These must serve THAT STREET after
+  // the change, never an absence -- converting them would be exactly what
+  // ruling A1 forbids. 139,283 cells across the six counties are in this class
+  // (Travis 139,256 street-less + Hays 27 bare-null), measured 2026-09-10.
+  const recoverable: string[] = [
+    "48453:224793", // ", TX 78756"  -> "4709 SHOALWOOD AVE" at declared 2026
+    "48453:1000059", // ", TX"        -> a real street at declared 2026
+    "48453:302677", // ", TX 78653"
+  ];
+  // GENUINELY ABSENT: street-less or null served, and the declared roll has no
+  // usable street either (or no row at all). The absence machinery is right for
+  // these. 31,552 cells.
   const streetLess: string[] = [
-    // a STRING with no street. Defective today because S1 or the meaning of
-    // the field says so; BP-CONTENT-01 alone grades every one of these a value.
-    "48453:224793", // ", TX 78756"          Travis, the dispatch's worked example
-    "48453:1000059", // ", TX"                Travis, 16,010 rows, NO factory regex matches
-    "48309:111788", // ", WACO, TX 76705"    McLennan, 157 rows, city+zip, no street
-    "48021:53205", // ", CEDAR CREEK, TX 78612"  Bastrop
-    "48021:10811", // ", , TX"               Bastrop, matches S1 empty-commas
-    // a BARE NULL. Defective today because BP-CONTENT-01 rejects it -- this is
-    // the exact class Hays failed its 2026-09-10 staging walk on.
-    "48209:100005", // Hays,     one of 2,973
-    "48055:101047", // Caldwell, one of 15,289
-    "48021:100800", // Bastrop,  one of 2,979
+    "48309:111788", // ", WACO, TX 76705"        McLennan, declared 2025, roll agrees
+    "48021:53205", // ", CEDAR CREEK, TX 78612"  Bastrop, declared 2025, roll agrees
+    "48021:10811", // ", , TX"                   Bastrop, matches S1 empty-commas
+    "48055:101047", // bare null, Caldwell, roll also carries none
+    "48021:100800", // bare null, Bastrop,  roll also carries none
   ];
   const controls: string[] = [
     "48021:34137", // the Bastrop gold parcel
@@ -327,10 +344,12 @@ async function main(): Promise<void> {
     const swap = streetLess.splice(0, streetLess.length);
     streetLess.push(...controls.splice(0, controls.length));
     controls.push(...swap);
-    console.log("[violate] street-less and control sets swapped; this run MUST exit 1");
+    // and the recoverable set is asserted to be absences, which it must not be
+    streetLess.push(...recoverable);
+    console.log("[violate] expectation sets swapped; this run MUST exit 1");
   }
 
-  const wanted = [...streetLess, ...controls, retiredControl];
+  const wanted = [...recoverable, ...streetLess, ...controls, retiredControl];
   const { rows } = await pool.query<{ place_key: string; payload_json: Record<string, unknown> }>(
     `SELECT place_key, payload_json FROM place_layer_snapshots
       WHERE adapter_key = $1 AND place_key = ANY($2::text[])`,
@@ -339,6 +358,13 @@ async function main(): Promise<void> {
   const stored = new Map(rows.map((r) => [r.place_key.replace(/^node:/, ""), r.payload_json]));
 
   const nowIso = new Date().toISOString();
+  const gradeStored = process.argv.includes("--grade-stored");
+  if (gradeStored) {
+    console.log(
+      "[grade-stored] evaluating the rows AS SERVED TODAY against the new contract; " +
+        "this is the BEFORE run and it MUST exit 1",
+    );
+  }
   const verdicts: Verdict[] = [];
   let failures = 0;
   /** How many street-less rows the FACTORY's own two graders let through. */
@@ -394,10 +420,11 @@ async function main(): Promise<void> {
       exemption_codes: string[] | null;
       situs_city: string | null;
       situs_zip: string | null;
+      situs_address: string | null;
     }>(
       `SELECT prop_id, tax_year, source_vintage, market_value, assessed_value, land_value,
               improvement_value, living_area_sqft, year_built, legal_description,
-              exemption_codes, situs_city, situs_zip
+              exemption_codes, situs_city, situs_zip, situs_address
          FROM cad_property WHERE county_fips=$1 AND prop_id=$2
         ORDER BY tax_year DESC`,
       [countyFips, propId],
@@ -432,6 +459,7 @@ async function main(): Promise<void> {
         yearBuilt: declaredRow.year_built == null ? null : Number(declaredRow.year_built),
         legalDescription: declaredRow.legal_description,
         exemptionCodes: declaredRow.exemption_codes,
+        situsAddress: declaredRow.situs_address,
       } as never);
     }
     const cadPropertyRoll: CountyCadPropertyRoll = {
@@ -448,23 +476,56 @@ async function main(): Promise<void> {
       taxYear: declaredTaxYear,
     };
 
-    const { leaf: after, retired, servesOk } = afterLeaf({
+    const rollSitus = declaredRow?.situs_address ?? null;
+    const built = afterLeaf({
       parcelNodeId,
       countyFips,
       rawClaimSitus,
+      rollSitus,
       claim,
       cadPropertyRoll,
       nowIso,
     });
+    // `--grade-stored` puts the row AS SERVED TODAY in the "after" position, so
+    // the new contract is evaluated against the pre-change bake's own output.
+    // It is the BEFORE run, and it must exit 1: that is what "observe it
+    // failing before" means with an exit code rather than a narrative.
+    const after = gradeStored ? beforeLeaf : built.leaf;
+    const retired = gradeStored ? isEarnedRecordRetirement(payload.recordRetirement) : built.retired;
+    const servesOk = gradeStored ? true : built.servesOk;
+    const origin = gradeStored
+      ? ((payload.provenance as Record<string, unknown> | undefined)?.situsAddressSource as
+          | string
+          | undefined) ?? "(absent on the stored row)"
+      : built.origin;
 
     const before = grade(beforeLeaf);
     const afterG = grade(after);
-    const expectation: Verdict["expectation"] =
-      streetLess.includes(parcelNodeId) ? "defective-before-clean-after" : "untouched";
+    const expectation: Verdict["expectation"] = recoverable.includes(parcelNodeId)
+      ? "recovered-from-declared-roll"
+      : streetLess.includes(parcelNodeId)
+        ? "defective-before-clean-after"
+        : "untouched";
 
     let pass: boolean;
     let why: string;
-    if (expectation === "defective-before-clean-after") {
+    if (expectation === "recovered-from-declared-roll") {
+      // THE REOPENED CARD'S CORE ASSERTION. Before: a street-less string.
+      // After: the declared roll's real street, as a plain string value, from
+      // source "declared-roll". An earned absence here is a FAILURE -- it
+      // would mean a real address was converted into "verified absent".
+      const beforeStreetLess =
+        beforeLeaf === null ||
+        (typeof beforeLeaf === "string" && !situsCarriesStreetComponent(beforeLeaf));
+      const afterIsRealStreet =
+        typeof after === "string" && situsCarriesStreetComponent(after);
+      const notAnAbsence = !isEarnedLeafAbsence(after);
+      pass = beforeStreetLess && afterIsRealStreet && notAnAbsence && origin === "declared-roll";
+      why =
+        `before street-less=${beforeStreetLess}; after real street=${afterIsRealStreet} ` +
+        `(${JSON.stringify(after)}); NOT an absence=${notAnAbsence}; source=${origin}; ` +
+        `declared-roll situs=${JSON.stringify(rollSitus)}`;
+    } else if (expectation === "defective-before-clean-after") {
       // THE PASS CONDITION IS THE MEANING, NOT THE FACTORY'S GRADE. Requiring
       // "the factory graders called this defective before" would tune this
       // instrument to the factory's blind spots: BP-CONTENT-01 grades any
@@ -529,7 +590,9 @@ async function main(): Promise<void> {
     JSON.stringify({
       checked: verdicts.length,
       failures,
+      recoverableChecked: recoverable.length,
       streetLessChecked: streetLess.length,
+      mode: gradeStored ? "grade-stored (BEFORE)" : "rebuilt (AFTER)",
       factoryGradersMissed: factoryMissed,
       countingRule:
         "factoryGradersMissed = named street-less parcels that BP-CONTENT-01 and S1 " +
