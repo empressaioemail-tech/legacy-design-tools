@@ -6,6 +6,7 @@ import {
   AccessParseError,
   type AccessPair,
 } from "@empressaio/atom-contract/access";
+import { isEarnedRecordRetirement } from "./recordRetirement";
 
 const PUNCTUATION_ONLY_RE = /^[\s,.\-;:'"`]+$/;
 
@@ -81,6 +82,17 @@ export function refusePayloadAtServe(payload: unknown): void {
       p.accessNormalizedFrom = normalizedFrom;
     }
   }
+  // CTX-B1 (operator ruling A3, 2026-09-10): an earned record retirement's
+  // situs is the account's LAST-KNOWN claim, deliberately written ungated
+  // by `situsForRetiredBake` (nodeFacetBakeTier1ConformantCli.ts) so an
+  // honest retirement declaration never depends on whether the stale claim
+  // happens to carry a well-formed address. Gating it here again -- the
+  // same punctuation-only check CTX-SITUS-SKIP applies to ON-roll claims --
+  // reintroduced the exact defect CTX-RETIRE fixed: Caldwell 48055:1's
+  // last-known ", ," situs 422ing at serve even though the bake wrote it by
+  // design. The retirement declaration itself is already gated well-formed
+  // by `isEarnedRecordRetirement`, so this is not a blanket exemption.
+  if (isEarnedRecordRetirement(p.recordRetirement)) return;
   const facets = p.facets as Record<string, unknown> | undefined;
   const base = facets?.base as Record<string, unknown> | undefined;
   if (base?.situsAddress != null) assertSitusNotPunctuationOnly(base.situsAddress);

@@ -112,6 +112,10 @@ import {
 import { cadPropertyFactsFromRow } from "./cadRollValue";
 import type { ParcelJoinRow } from "./nodeFacetTier1ParcelJoin";
 import { ptadLandUseDescription } from "./ptadLandUse";
+import {
+  isEarnedRecordRetirement,
+  type Tier1RecordRetirement,
+} from "./recordRetirement";
 
 export const CONFORMANT_SHAPE_SOURCE = "conformant-v1";
 export const CONFORMANT_TIER1_SOURCE = "conformant-v1-cad-parcel-roll";
@@ -622,46 +626,13 @@ export const BAKE_OWNED_REQUIRED_LEAF_PATHS: readonly string[] = [
  * key) so a reader following an old link gets an answer, not a void -- the
  * rest of the payload still carries the account's LAST-KNOWN claim content,
  * unmodified; this field is the thing that says it is not current.
+ *
+ * Defined in `./recordRetirement` (CTX-B1) so a light consumer like
+ * serveGuards.ts does not have to pull in this module's heavy import chain;
+ * re-exported here unchanged so every existing importer of this module is
+ * unaffected.
  */
-export interface Tier1RecordRetirement {
-  status: "retired";
-  verdict: "absent-verified";
-  authority: string;
-  scopeSearched: string;
-  asOf: string;
-  basis: string;
-  /** The tax_year this prop_id's OWN claim last carried, when known. */
-  lastSeenTaxYear: number | null;
-}
-
-const RECORD_RETIREMENT_STRING_FIELDS = [
-  "authority",
-  "scopeSearched",
-  "asOf",
-  "basis",
-] as const;
-
-/**
- * True for a WELL-FORMED record retirement -- the same discipline
- * `isEarnedLeafAbsence` applies one level down. A half-built object must not
- * buy the tolerance a genuine retirement earns.
- */
-export function isEarnedRecordRetirement(
-  value: unknown,
-): value is Tier1RecordRetirement {
-  const rec = asRecord(value);
-  if (!rec) return false;
-  if (rec.status !== "retired") return false;
-  if (rec.verdict !== "absent-verified") return false;
-  for (const field of RECORD_RETIREMENT_STRING_FIELDS) {
-    const v = rec[field];
-    if (typeof v !== "string" || v.trim() === "") return false;
-  }
-  if (rec.lastSeenTaxYear !== null && typeof rec.lastSeenTaxYear !== "number") {
-    return false;
-  }
-  return true;
-}
+export { isEarnedRecordRetirement, type Tier1RecordRetirement } from "./recordRetirement";
 
 /**
  * Build the retirement declaration. The basis names THIS parcel, the county,

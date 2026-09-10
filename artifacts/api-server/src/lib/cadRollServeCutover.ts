@@ -30,12 +30,13 @@ import {
   dollarFactFromParcelRecord,
   livingAreaSqftFromParcelRecord,
   yearBuiltFromParcelRecord,
+  resolveValueBasisFromParcelRecord,
   DOLLAR_SCALAR_RAIL_KEYS,
   type DollarScalarRailKey,
   type LivingAreaSqftFromParcelRecord,
   type YearBuiltFromParcelRecord,
 } from "./cadRollFactFromParcelRecord";
-import type { CadRollValueWire } from "./cadRollValue";
+import type { CadRollValueWire, ValueBasis } from "./cadRollValue";
 import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
 
 /** Test/deploy seam, same shape as wellFactServeCutover.ts's own. */
@@ -65,10 +66,11 @@ async function dollarOverlayIfRecord(
   countyFips: string,
   propId: string,
   railKey: DollarScalarRailKey,
+  valueBasis: ValueBasis,
 ): Promise<CadRollValueWire | null> {
   const state = await resolveAllowlist(store, countyFips, railKey);
   if (state !== "record") return null;
-  return dollarFactFromParcelRecord(countyFips, propId, railKey);
+  return dollarFactFromParcelRecord(countyFips, propId, railKey, valueBasis);
 }
 
 async function livingAreaOverlayIfRecord(
@@ -103,12 +105,16 @@ export async function resolveCadRollOverlaysForServe(
   propId: string,
 ): Promise<CadRollOverlay> {
   const store = resolveVerdictStore(injectedVerdictStore);
+  // One tier determination per parcel, shared by all four dollar rails
+  // (CTX-B1, operator ruling A1) -- never re-derived per rail, so a single
+  // row cannot serve two different valueBasis values across its own fields.
+  const valueBasis = await resolveValueBasisFromParcelRecord(countyFips, propId);
   const [marketValue, assessedValue, landValue, improvementValue, livingAreaSqft, yearBuilt] =
     await Promise.all([
-      dollarOverlayIfRecord(store, countyFips, propId, "marketValue"),
-      dollarOverlayIfRecord(store, countyFips, propId, "assessedValue"),
-      dollarOverlayIfRecord(store, countyFips, propId, "landValue"),
-      dollarOverlayIfRecord(store, countyFips, propId, "improvementValue"),
+      dollarOverlayIfRecord(store, countyFips, propId, "marketValue", valueBasis),
+      dollarOverlayIfRecord(store, countyFips, propId, "assessedValue", valueBasis),
+      dollarOverlayIfRecord(store, countyFips, propId, "landValue", valueBasis),
+      dollarOverlayIfRecord(store, countyFips, propId, "improvementValue", valueBasis),
       livingAreaOverlayIfRecord(store, countyFips, propId),
       yearBuiltOverlayIfRecord(store, countyFips, propId),
     ]);

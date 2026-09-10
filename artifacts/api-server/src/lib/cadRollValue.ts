@@ -14,13 +14,24 @@ export const CAD_PROPERTY_SOURCE = "cad_property" as const;
 /** @deprecated value is cad_property. The atom name must not be the source. */
 export const CAD_PARCEL_ROLL_SOURCE = CAD_PROPERTY_SOURCE;
 export const COUNTY_ASSESSED_VALUE_BASIS = "county-assessed" as const;
+/**
+ * CTX-B1 (2026-09-10, operator ruling A1): a dollar value merged into
+ * `cad_property` from the StratMap redistribution adapter, not from the
+ * county appraisal district's own export. Served as a labelled present
+ * value, never as an absence -- see `valueBasisFromRow` for the
+ * discriminator and why `county-assessed` was previously stamped on both.
+ */
+export const STRATMAP_REDISTRIBUTED_VALUE_BASIS = "stratmap-redistributed" as const;
+export type ValueBasis =
+  | typeof COUNTY_ASSESSED_VALUE_BASIS
+  | typeof STRATMAP_REDISTRIBUTED_VALUE_BASIS;
 
 /** One field as stored on `baseFacts.cadRoll` after the bake. */
 export type CadRollBakedDollar = {
   v: number;
   source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
-  valueBasis: typeof COUNTY_ASSESSED_VALUE_BASIS;
+  valueBasis: ValueBasis;
 };
 
 export type CadRollBakedSqft = {
@@ -60,7 +71,7 @@ export type CadRollPresentWire = {
   v: number;
   source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
-  valueBasis?: typeof COUNTY_ASSESSED_VALUE_BASIS;
+  valueBasis?: ValueBasis;
 };
 
 export type CadRollZeroWire = {
@@ -68,7 +79,7 @@ export type CadRollZeroWire = {
   v: 0;
   source: typeof CAD_PROPERTY_SOURCE;
   vintage: string | null;
-  valueBasis?: typeof COUNTY_ASSESSED_VALUE_BASIS;
+  valueBasis?: ValueBasis;
   basis?: string;
 };
 
@@ -130,6 +141,7 @@ export function positiveSqftOrNull(v: unknown): number | null {
 function bakedDollar(
   v: unknown,
   vintage: string | null,
+  valueBasis: ValueBasis,
 ): CadRollBakedDollar | null {
   const dollars = nonNegativeDollarOrNull(v);
   if (dollars == null) return null;
@@ -137,8 +149,46 @@ function bakedDollar(
     v: dollars,
     source: CAD_PROPERTY_SOURCE,
     vintage,
-    valueBasis: COUNTY_ASSESSED_VALUE_BASIS,
+    valueBasis,
   };
+}
+
+/**
+ * CTX-B1 discriminator (operator ruling A1, 2026-09-10). `cad_property.
+ * source_file` and `source_vintage` are overwritten unconditionally by
+ * `p78Merge.ts`'s `ON CONFLICT` clause -- on a county merged more than once
+ * at one tax year they are the LAST WRITER, never the lineage, so neither
+ * may be read as the tier. `assessed_value` is different: the StratMap
+ * adapter (`txgio/landuse.ts`) hard-codes `assessedValue: null` on every
+ * row it produces -- it cannot structurally populate this field -- while
+ * `p78Merge.ts`'s `applyPathAMerge` COALESCEs `assessedValue` (never
+ * overwrites it unconditionally), so a genuine CAD import's assessed value
+ * survives a later StratMap merge at the same declared tax year even
+ * though `source_file` does not. This is the same discriminator
+ * CTX-HAYS-SPLIT used (`assessed_value IS NOT NULL`) to recover 244
+ * genuine CAD rows from under an overwritten StratMap source tag. A row is
+ * only ever read here already scoped to the declared vintage
+ * (`fetchCountyCadPropertyRoll`'s `WHERE tax_year = declared.taxYear`), so
+ * the declared-vintage half of the derivation is structural, not an extra
+ * check against `row`.
+ *
+ * Absence of a positive assessed value is the DEFAULT (StratMap), never
+ * the reverse: this must never assert `county-assessed` without the
+ * evidence, per the same never-claim-without-a-positive-determination
+ * discipline the rest of this file already applies to absence.
+ */
+export function isGenuineCadExportRow(
+  row: Pick<CadPropertyRollSlice, "assessedValue">,
+): boolean {
+  return nonNegativeDollarOrNull(row.assessedValue) != null;
+}
+
+export function valueBasisFromRow(
+  row: Pick<CadPropertyRollSlice, "assessedValue">,
+): ValueBasis {
+  return isGenuineCadExportRow(row)
+    ? COUNTY_ASSESSED_VALUE_BASIS
+    : STRATMAP_REDISTRIBUTED_VALUE_BASIS;
 }
 
 export interface CadPropertyBakedFacts {
@@ -249,11 +299,12 @@ export function emptyCadRoll(): CadRollBaked {
 /** Map a `cad_property` row to baked `baseFacts.cadRoll`. Never an atom claim. */
 export function cadRollFromCadProperty(row: CadPropertyRollSlice): CadRollBaked {
   const vintage = row.taxYear != null ? String(row.taxYear) : null;
+  const valueBasis = valueBasisFromRow(row);
   return {
-    marketValue: bakedDollar(row.marketValue, vintage),
-    assessedValue: bakedDollar(row.assessedValue, vintage),
-    landValue: bakedDollar(row.landValue, vintage),
-    improvementValue: bakedDollar(row.improvementValue, vintage),
+    marketValue: bakedDollar(row.marketValue, vintage, valueBasis),
+    assessedValue: bakedDollar(row.assessedValue, vintage, valueBasis),
+    landValue: bakedDollar(row.landValue, vintage, valueBasis),
+    improvementValue: bakedDollar(row.improvementValue, vintage, valueBasis),
     livingAreaSqft: bakedSqft(row.livingAreaSqft, vintage),
   };
 }

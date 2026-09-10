@@ -72,3 +72,51 @@ describe("serveGuards", () => {
     });
   });
 });
+
+describe("refusePayloadAtServe / A3 (operator ruling, 2026-09-10): earned retirement exempts the punctuation-only situs guard", () => {
+  const wellFormedRetirement = {
+    status: "retired",
+    verdict: "absent-verified",
+    authority: "48055 Caldwell CAD, declared vintage 2026",
+    scopeSearched: "cad_property at the declared tax year",
+    asOf: "2026-09-09T22:48:00.000Z",
+    basis: "48055:1 has no row in the declared-vintage cad_property roll",
+    lastSeenTaxYear: 2025,
+  };
+
+  it("an on-roll (non-retired) payload with a punctuation-only situs still refuses -- CTX-SITUS-SKIP's guard is untouched", () => {
+    expect(() =>
+      refusePayloadAtServe({
+        recordRetirement: null,
+        facets: { base: { situsAddress: ", ," } },
+      }),
+    ).toThrow(expect.objectContaining({ code: "SITUS_PUNCTUATION_ONLY" }));
+  });
+
+  it("required regression test: an earned retirement (Caldwell 48055:1 shape) with the raw punctuation-only last-known situs does NOT 422 at serve", () => {
+    expect(() =>
+      refusePayloadAtServe({
+        recordRetirement: wellFormedRetirement,
+        facets: { base: { situsAddress: ", ," } },
+      }),
+    ).not.toThrow();
+  });
+
+  it("a half-built retirement object (fails isEarnedRecordRetirement) buys no exemption -- the guard still refuses", () => {
+    expect(() =>
+      refusePayloadAtServe({
+        recordRetirement: { status: "retired" }, // missing verdict/authority/etc.
+        facets: { base: { situsAddress: ", ," } },
+      }),
+    ).toThrow(expect.objectContaining({ code: "SITUS_PUNCTUATION_ONLY" }));
+  });
+
+  it("an earned retirement with a well-formed situs is untouched (the exemption is not needed and changes nothing)", () => {
+    expect(() =>
+      refusePayloadAtServe({
+        recordRetirement: wellFormedRetirement,
+        facets: { base: { situsAddress: "308 W San Antonio St" } },
+      }),
+    ).not.toThrow();
+  });
+});

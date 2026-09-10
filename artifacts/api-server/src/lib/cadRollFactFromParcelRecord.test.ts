@@ -19,6 +19,7 @@ import {
 import {
   dollarFactFromParcelRecord,
   livingAreaSqftFromParcelRecord,
+  resolveValueBasisFromParcelRecord,
   yearBuiltFromParcelRecord,
 } from "./cadRollFactFromParcelRecord";
 
@@ -47,7 +48,7 @@ describe("dollarFactFromParcelRecord", () => {
         ],
       }),
     );
-    const result = await dollarFactFromParcelRecord("48021", "34137", "improvementValue");
+    const result = await dollarFactFromParcelRecord("48021", "34137", "improvementValue", "county-assessed");
     expect(result).toEqual({
       state: "present",
       v: 404630,
@@ -65,7 +66,7 @@ describe("dollarFactFromParcelRecord", () => {
         ],
       }),
     );
-    const result = await dollarFactFromParcelRecord("48021", "34137", "assessedValue");
+    const result = await dollarFactFromParcelRecord("48021", "34137", "assessedValue", "county-assessed");
     expect(result?.state).toBe("absent");
   });
 
@@ -77,7 +78,7 @@ describe("dollarFactFromParcelRecord", () => {
         ],
       }),
     );
-    const result = await dollarFactFromParcelRecord("48021", "99999", "improvementValue");
+    const result = await dollarFactFromParcelRecord("48021", "99999", "improvementValue", "county-assessed");
     expect(result).toEqual({ state: "zero", v: 0, source: "cad_property", vintage: "2026-09-02T18:13:56.751Z", valueBasis: "county-assessed" });
   });
 
@@ -89,8 +90,8 @@ describe("dollarFactFromParcelRecord", () => {
       ],
     });
     setParcelRecordQueryableForTests(store);
-    const a = await dollarFactFromParcelRecord("48491", "R664999", "marketValue");
-    const b = await dollarFactFromParcelRecord("48491", "R665023", "marketValue");
+    const a = await dollarFactFromParcelRecord("48491", "R664999", "marketValue", "county-assessed");
+    const b = await dollarFactFromParcelRecord("48491", "R665023", "marketValue", "county-assessed");
     expect(a).toEqual({ state: "present", v: 134000, source: "cad_property", vintage: "2026-09-02T16:23:02.321Z", valueBasis: "county-assessed" });
     expect(b).toEqual(a);
   });
@@ -103,7 +104,7 @@ describe("dollarFactFromParcelRecord", () => {
         ],
       }),
     );
-    const result = await dollarFactFromParcelRecord("48491", "R664999", "landValue");
+    const result = await dollarFactFromParcelRecord("48491", "R664999", "landValue", "county-assessed");
     expect(result?.state).toBe("absent");
   });
 
@@ -111,14 +112,61 @@ describe("dollarFactFromParcelRecord", () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "marketValue", cellState: { kind: "unaccounted" } }] }),
     );
-    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue");
+    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue", "county-assessed");
     expect(result).toBeNull();
   });
 
   it("store not configured returns null, never throws -- caller keeps the legacy value", async () => {
     setParcelRecordQueryableForTests(null);
-    const result = await dollarFactFromParcelRecord("48021", "34137", "marketValue");
+    const result = await dollarFactFromParcelRecord("48021", "34137", "marketValue", "county-assessed");
     expect(result).toBeNull();
+  });
+
+  it("CTX-B1: valueBasis is a pass-through parameter, not re-derived per rail -- a stratmap-redistributed tier serialises unchanged, never coerced to county-assessed", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48309:184293", railKey: "marketValue", cellState: { kind: "value", value: "6506490", source: "cad_property", vintage: "2025" } },
+        ],
+      }),
+    );
+    const result = await dollarFactFromParcelRecord("48309", "184293", "marketValue", "stratmap-redistributed");
+    expect(result).toMatchObject({ state: "present", v: 6506490, valueBasis: "stratmap-redistributed" });
+  });
+});
+
+describe("resolveValueBasisFromParcelRecord", () => {
+  it("required violation test: assessedValue absent (StratMap structurally cannot populate it) resolves stratmap-redistributed, never county-assessed", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48309:184293", railKey: "assessedValue", cellState: { kind: "absent-verified", basis: GOLD_ABSENT_BASIS } },
+        ],
+      }),
+    );
+    const basis = await resolveValueBasisFromParcelRecord("48309", "184293");
+    expect(basis).not.toBe("county-assessed");
+    expect(basis).toBe("stratmap-redistributed");
+  });
+
+  it("control: a genuine present assessedValue resolves county-assessed -- Caldwell 48055:32541", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48055:32541", railKey: "assessedValue", cellState: { kind: "value", value: "1884580", source: "cad_property", vintage: "2026-caldwell-cad-export_june-5-2026" } },
+        ],
+      }),
+    );
+    const basis = await resolveValueBasisFromParcelRecord("48055", "32541");
+    expect(basis).toBe("county-assessed");
+  });
+
+  it("a refused or unreadable assessedValue cell defaults to stratmap-redistributed, never asserts county-assessed without evidence", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "assessedValue", cellState: { kind: "unaccounted" } }] }),
+    );
+    const basis = await resolveValueBasisFromParcelRecord("48021", "1");
+    expect(basis).toBe("stratmap-redistributed");
   });
 });
 
