@@ -348,18 +348,36 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     if (inTransaction) {
-      await client.query("ROLLBACK");
-      inTransaction = false;
-      // The rollback is itself a state-changing event and gets a record line.
+      // The ROLLBACK is attempted inside its own try so that a FAILED rollback
+      // is recorded rather than replacing the original error and leaving the
+      // record ending at `run-end`, which a reader could take for a commit.
       // A refusal that leaves no name is how an unattributed mutation becomes
-      // unanswerable.
+      // unanswerable, and that applies to a rollback that did not happen at
+      // least as much as to one that did.
+      let rollbackOutcome = "rolled back";
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackErr) {
+        rollbackOutcome = `ROLLBACK FAILED: ${
+          rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+        }`;
+      }
+      inTransaction = false;
       record.write({
         kind: "rolled-back",
         at: new Date().toISOString(),
         reason: err instanceof Error ? err.message : String(err),
-        read: "every prop_id named in the batch lines above was UNDONE. Nothing this run wrote survives.",
+        rollbackOutcome,
+        read:
+          rollbackOutcome === "rolled back"
+            ? "every prop_id named in the batch lines above was UNDONE. Nothing this run wrote survives."
+            : "THE ROLLBACK ITSELF FAILED. The server aborts an open transaction when its connection dies, so the writes are almost certainly gone, but that is an inference and not an observation. VERIFY THE STORE before assuming either way.",
       });
-      log("ROLLBACK — nothing this run wrote survives");
+      if (rollbackOutcome === "rolled back") {
+        log("ROLLBACK — nothing this run wrote survives");
+      } else {
+        console.error(`[cad-backfill-ids] ${rollbackOutcome} — VERIFY THE STORE`);
+      }
     }
     throw err;
   } finally {
