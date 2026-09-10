@@ -74,6 +74,50 @@ export const cadProperty = pgTable(
     ingestedAt: timestamp("ingested_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    //
+    // DECLARED LAST, ON PURPOSE. The test schema fixture
+    // (lib/db/src/__tests__/__fixtures__/schema.sql.template) is a pg_dump of
+    // what `drizzle-kit push` builds from THIS file, and CI diffs it. A fresh
+    // push emits columns in declaration order while migration 0099's
+    // `ALTER TABLE ... ADD COLUMN` appends them to the live table. Declaring
+    // them last is what makes those two orders identical, so the fixture
+    // describes the real production table rather than only the CI one.
+    /**
+     * The CAD's OTHER two published identifiers for the same account, when
+     * the export carries them (P-124 CTX-HAYS-REBIND, 2026-09-10).
+     *
+     * EVIDENCE, NOT KEYS. The primary key stays
+     * (county_fips, prop_id, tax_year) so no existing consumer moves.
+     *
+     * Tyler Orion publishes three ids per account in adjacent columns:
+     * `PropertyID` (what `prop_id` above holds), `QuickRefID` (the R/P/M/N
+     * account number, e.g. `R26199`) and `PropertyNumber` (the county's
+     * Geographic ID, e.g. `11-2520-0000-03100-2`). Until this column existed
+     * the parser read the first and dropped the other two, and the program
+     * had no way to say that Hays CAD account 40138 and TxGIO parcel 26199
+     * are the SAME parcel -- because TxGIO publishes Hays parcels under the
+     * QuickRefID number with the R stripped at source, into the same
+     * bare-numeric space PropertyID occupies. That collision is why 30,862
+     * Hays parcel nodes draw another parcel's polygon today.
+     *
+     * `propertyNumber` is the join key to `txgio_parcel.geo_id`;
+     * `quickRefId` is the SECOND, independently derived identifier that
+     * corroborates it against `txgio_parcel.prop_id`. Two published columns
+     * on each side, so a bind is a meaning-shaped agreement between two
+     * derivations rather than a presence check on one.
+     *
+     * Nullable and honestly null: an export that does not publish them
+     * writes NULL, never an empty string. A NULL here means "this export did
+     * not publish it", which is distinct from a published blank. Measured
+     * rather than assumed: WCAD's Socrata property dataset DOES publish both
+     * (propertyid 63514 carries quickrefid R002338 and propertynumber
+     * R-17-W338-401P-0013-0006), so Williamson is not a county without a
+     * key. It is a county whose GEOMETRY publisher carries no geo_id at all
+     * (0 non-blank of 304,298 txgio_parcel rows, staging and production,
+     * read-only 2026-09-10), which is what actually leaves it unchanged.
+     */
+    quickRefId: text("quick_ref_id"),
+    propertyNumber: text("property_number"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.countyFips, t.propId, t.taxYear] }),

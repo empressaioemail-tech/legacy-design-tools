@@ -45,6 +45,8 @@ function toInsertRow(rec: CadPropertyRecord, sourceFile: string, sourceVintage: 
     livingAreaSqft: rec.livingAreaSqft,
     landAcres: rec.landAcres,
     propertyUseCode: rec.propertyUseCode,
+    quickRefId: rec.quickRefId,
+    propertyNumber: rec.propertyNumber,
     sourceFile,
     sourceVintage,
   };
@@ -97,6 +99,15 @@ export async function upsertCadProperties(
           assessedValue: sql`COALESCE(excluded.assessed_value, ${cadProperty.assessedValue})`,
           landAcres: sql`COALESCE(excluded.land_acres, ${cadProperty.landAcres})`,
           propertyUseCode: sql`COALESCE(excluded.property_use_code, ${cadProperty.propertyUseCode})`,
+          // CTX-HAYS-REBIND. COALESCE incoming-first like every other
+          // attribute cell, which for THESE two is the safe direction and is
+          // safe for a reason worth stating: the only non-appraisal writer
+          // (the StratMap/TxGIO geometry loader) emits null for both, so a
+          // geometry re-apply can never blank an identifier a real CAD export
+          // established. An appraisal export re-publishing a corrected
+          // identifier should win, and does.
+          quickRefId: sql`COALESCE(excluded.quick_ref_id, ${cadProperty.quickRefId})`,
+          propertyNumber: sql`COALESCE(excluded.property_number, ${cadProperty.propertyNumber})`,
           yearBuilt: sql`CASE
             WHEN NULLIF(excluded.year_built, 0) IS NULL THEN NULLIF(${cadProperty.yearBuilt}, 0)
             WHEN NULLIF(${cadProperty.yearBuilt}, 0) IS NULL THEN NULLIF(excluded.year_built, 0)

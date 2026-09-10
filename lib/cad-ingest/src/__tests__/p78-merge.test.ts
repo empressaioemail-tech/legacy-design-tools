@@ -212,3 +212,92 @@ describe("normalizeStratMapLandUse LEGAL_DESC fallback (McLennan, F-01)", () => 
     expect(rec!.landAcres).toBeNull();
   });
 });
+
+describe("CTX-HAYS-REBIND: a geometry apply cannot blank a published crosswalk", () => {
+  it("a StratMap re-apply LEAVES an existing quick_ref_id / property_number intact", () => {
+    // The whole safety argument for putting these two under coalesce. The
+    // StratMap loader emits null for both (hardcoded, see
+    // txgio/landuse.ts), so coalesce(incoming, existing) returns the EXISTING
+    // value and the crosswalk a real CAD export established survives.
+    //
+    // This is NOT true of source_file, which applyPathAMerge overwrites
+    // unconditionally -- which is exactly why lineage could not be recovered
+    // from it and why the crosswalk had to come from the county rather than
+    // from provenance.
+    const existing = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2025,
+      quickRefId: "R26199",
+      propertyNumber: "11-2520-0000-03100-2",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      sourceFile: "2026-PROPERTY-DATA-EXPORT-FILES.zip",
+      sourceVintage: "tier:cad-export;2026",
+    };
+    const stratmapIncoming = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2025,
+      quickRefId: null,
+      propertyNumber: null,
+      situsAddress: "100 RIVERSIDE DR, SAN MARCOS, TX 78666",
+      sourceFile: "stratmap25-landparcels_48209_lp.zip",
+      sourceVintage: "stratmap25",
+    };
+    const merged = applyPathAMerge(existing, stratmapIncoming);
+    expect(merged.quickRefId).toBe("R26199");
+    expect(merged.propertyNumber).toBe("11-2520-0000-03100-2");
+    // And the control that makes this test mean something: the SAME merge DOES
+    // overwrite the situs and the source file, which is the defect the
+    // crosswalk exists to route around. If this expectation ever flipped, the
+    // coalesce direction above would no longer be the thing being tested.
+    expect(merged.situsAddress).toBe("100 RIVERSIDE DR, SAN MARCOS, TX 78666");
+    expect(merged.sourceFile).toBe("stratmap25-landparcels_48209_lp.zip");
+  });
+
+  it("a real CAD export re-publishing a corrected identifier DOES win", () => {
+    const existing = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2026,
+      quickRefId: "R00000",
+      propertyNumber: "00-0000-0000-00000-0",
+      sourceFile: "old.zip",
+      sourceVintage: "tier:cad-export;2025",
+    };
+    const corrected = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2026,
+      quickRefId: "R26199",
+      propertyNumber: "11-2520-0000-03100-2",
+      sourceFile: "2026-PROPERTY-DATA-EXPORT-FILES.zip",
+      sourceVintage: "tier:cad-export;2026",
+    };
+    const merged = applyPathAMerge(existing, corrected);
+    expect(merged.quickRefId).toBe("R26199");
+    expect(merged.propertyNumber).toBe("11-2520-0000-03100-2");
+  });
+
+  it("the StratMap loader emits null for both, which is what makes the above safe", () => {
+    // Read from the loader rather than restated: if normalizeStratMapLandUse
+    // ever started mapping the shapefile's GEO_ID into property_number, the
+    // crosswalk's two sides would both come from the geometry publisher and
+    // the corroboration would agree by construction.
+    const rec = normalizeStratMapLandUse(
+      "48209",
+      0,
+      {
+        Prop_ID: "26199",
+        GEO_ID: "11-2520-0000-03100-2",
+        SITUS_ADDR: "340 WINDMILL WAY, BUDA, TX 78610",
+        GIS_AREA: 0.45,
+        GIS_AREA_U: "AC",
+      } as never,
+      newCounters(),
+      2025,
+    );
+    expect(rec?.quickRefId).toBeNull();
+    expect(rec?.propertyNumber).toBeNull();
+  });
+});

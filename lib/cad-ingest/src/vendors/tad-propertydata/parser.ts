@@ -139,6 +139,16 @@ export function parseTadPropertyLine(
     livingAreaSqft: livingAreaSqft(header.get(row, "living_area")),
     landAcres: explicitAcresOrNull(header.get(row, "land_acres")),
     propertyUseCode: textOrNull(header.get(row, "state_use_code")),
+    // CTX-HAYS-REBIND. NULL DELIBERATELY, and this is the one vendor where
+    // that needs a reason. TAD keys this table on `gis_link`, so `propId`
+    // above ALREADY IS Tarrant's geographic identifier. Copying it into
+    // `propertyNumber` would let one source satisfy both halves of the
+    // crosswalk's corroboration check -- internal consistency wearing the
+    // shape of an agreement between two derivations, which is exactly what
+    // that check exists to refuse. Tarrant is also not gate-blocked, so the
+    // crosswalk key would be null for it regardless.
+    quickRefId: null,
+    propertyNumber: null,
   };
 }
 

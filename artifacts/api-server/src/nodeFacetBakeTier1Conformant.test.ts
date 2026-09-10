@@ -91,6 +91,9 @@ function txgioRow(overrides: Partial<ParcelJoinRow> = {}): ParcelJoinRow {
   return {
     feature_index: 24587,
     prop_id: "34137",
+    // CTX-HAYS-REBIND: the geometry publisher's own parcel id, now selected by
+    // both bakes. Bastrop 48021 populates it (64,652 of 74,729 rows live).
+    geo_id: "R34137",
     situs_address: "908 PINE , BASTROP, TX 78602",
     situs_city: "BASTROP",
     situs_state: "TX",
@@ -169,6 +172,8 @@ function newPayload(
     situsLocality?: ConformantTier1BuildInput["situsLocality"];
     acreageWithoutRing?: ConformantTier1BuildInput["acreageWithoutRing"];
     situsRow?: ParcelJoinRow | null;
+    /** CTX-HAYS-REBIND: the published-identifier crosswalk row. */
+    crosswalkRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
     landUseRoll?: ConformantTier1BuildInput["landUseRoll"];
@@ -210,6 +215,7 @@ function newPayload(
       row,
       gateBlocked: opts.gateBlocked ?? false,
       ...(opts.situsRow !== undefined ? { situsRow: opts.situsRow } : {}),
+      ...(opts.crosswalkRow !== undefined ? { crosswalkRow: opts.crosswalkRow } : {}),
     },
     ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
     ...(opts.cadPropertyRoll ? { cadPropertyRoll: opts.cadPropertyRoll } : {}),
@@ -2912,5 +2918,371 @@ describe("CTX-B7: the declared roll is preferred only where the row is provably 
       expect(legacy.scopeSearched).not.toContain("cad_property");
       expect(legacy.basis).not.toContain("declared-vintage");
     });
+  });
+});
+
+/**
+ * P-124 CTX-HAYS-REBIND (2026-09-10): bind Hays geometry to the parcel the
+ * county's own published identifiers name, not to the parcel whose address a
+ * merge copied into the CAD row.
+ *
+ * EVERY VALUE BELOW IS A REAL ROW, read 2026-09-10 from two sources that do
+ * not know about each other:
+ *
+ *   Hays CAD public export 2026-PROPERTY-DATA-EXPORT-FILES-AS-OF-8-26-2026:
+ *     PropertyID 26199  QuickRefID R117015  PropertyNumber 11-2242-000I-02900-2
+ *                       Situs "134 LEAR AVE, BUDA, TX  78610"  CurrMarketValue 426,950
+ *     PropertyID 40138  QuickRefID R26199   PropertyNumber 11-2520-0000-03100-2
+ *                       Situs "340 WINDMILL WAY, BUDA, TX  78610"  CurrMarketValue 172,700
+ *
+ *   txgio_parcel 48209 (staging, read-only):
+ *     feature 40337  prop_id 117015  geo_id 11-2242-000I-02900-2  "134 LEAR AVE, BUDA, TX 78610"
+ *     feature 57725  prop_id 26199   geo_id 11-2520-0000-03100-2  "340 WINDMILL WAY, BUDA, TX 78610"
+ *
+ * And the defect, read verbatim off PRODUCTION place_layer_snapshots on the
+ * same day: node:48209:26199 carries baseFacts.situsAddress
+ * "340 WINDMILL WAY, BUDA, TX 78610", provenance.parcelJoin.state
+ * "joined-situs", featureIndex 57725, provenance.parcelVintage 2025. That is
+ * account 40138's parcel, drawn for account 26199, with account 26199's money
+ * beside it.
+ *
+ * Measured consequence across the county: 30,862 of 173,050 Hays tier-1 rows
+ * bind a DIFFERENT feature than the crosswalk names, and 19,902 more bind
+ * nothing where the crosswalk names a parcel.
+ */
+describe("CTX-HAYS-REBIND: geometry binds on the published crosswalk", () => {
+  // The account whose polygon is wrong on production today.
+  const LEAR_BODY = () =>
+    conformantBody({
+      nodeId: "48209:26199",
+      claim: {
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "26199", taxYear: 2025 },
+        // The CONTAMINATED claim: the 2025 cad_property row for account 26199
+        // carries TxGIO parcel 26199's address, because the P-78 StratMap
+        // merge coalesced it in over the account's own.
+        situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+        situsCity: "BUDA",
+        situsZip: "78610",
+        propertyUseCode: "A1",
+      },
+    });
+
+  /** txgio feature 57725: TxGIO parcel 26199 = CAD account 40138's parcel. */
+  const windmillParcel = () =>
+    txgioRow({
+      feature_index: 57725,
+      prop_id: "26199",
+      geo_id: "11-2520-0000-03100-2",
+      situs_address: "340 WINDMILL WAY, BUDA, TX 78610",
+      situs_city: "BUDA",
+      situs_state: "TX",
+      situs_zip: "78610",
+      zoning_district: "SF-4",
+      zoning_jurisdiction: "buda-city-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      txgio_owner_for_gate: "OWNER OF WINDMILL",
+    });
+
+  /** txgio feature 40337: the parcel account 26199's OWN PropertyNumber names. */
+  const learParcel = () =>
+    txgioRow({
+      feature_index: 40337,
+      prop_id: "117015",
+      geo_id: "11-2242-000I-02900-2",
+      situs_address: "134 LEAR AVE, BUDA, TX 78610",
+      situs_city: "BUDA",
+      situs_state: "TX",
+      situs_zip: "78610",
+      zoning_district: "SF-2",
+      zoning_jurisdiction: "buda-city-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      txgio_owner_for_gate: "OWNER OF LEAR",
+    });
+
+  const learRoll = (): ConformantTier1BuildInput["cadPropertyRoll"] => ({
+    byPropId: new Map([
+      [
+        "26199",
+        {
+          taxYear: 2026,
+          marketValue: 426950,
+          assessedValue: 426950,
+          landValue: 102660,
+          improvementValue: 324290,
+          livingAreaSqft: 2216,
+          situsAddress: "134 LEAR AVE, BUDA, TX 78610",
+          situsCity: "BUDA",
+          situsZip: "78610",
+          propertyNumber: "11-2242-000I-02900-2",
+        },
+      ],
+    ]),
+    declaredTaxYear: 2026,
+    consulted: true,
+  });
+
+  it("VIOLATION, BEFORE: without a crosswalk row the address recovery draws the WRONG parcel", () => {
+    // This is production's behaviour, reproduced. The claim's contaminated
+    // situs matches txgio 57725's situs exactly -- because one was copied from
+    // the other -- so the recovery "succeeds" and returns another parcel.
+    const before = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      cadPropertyRoll: learRoll(),
+    });
+    expect(before.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(
+      (before.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(57725);
+    // Account 26199 is at 134 LEAR AVE and is drawing the 340 WINDMILL WAY
+    // polygon with 340 WINDMILL WAY's zoning stamp.
+    expect(before.zoning?.district).toBe("SF-4");
+  });
+
+  it("VIOLATION, AFTER: the crosswalk binds account 26199 to feature 40337", () => {
+    const after = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      // The situs recovery still offers the wrong parcel and is still
+      // accepted for LAND USE. The crosswalk overrules it for GEOMETRY only.
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    expect(after.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(
+      (after.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(40337);
+    // The zoning stamp moves with the polygon, which is the point: a stamp is
+    // a fact about a parcel, not about a record.
+    expect(after.zoning?.district).toBe("SF-2");
+    // The basis names BOTH published identifiers and both columns, so the bind
+    // can be re-run from the basis alone rather than trusted.
+    expect(after.provenance.parcelJoin.basis).toContain("11-2242-000I-02900-2");
+    expect(after.provenance.parcelJoin.basis).toContain("feature_index 40337");
+    expect(after.provenance.parcelJoin.basis).toContain("geo_id");
+    // The prop_id gate is NOT lifted by this bind and the basis says so.
+    expect(after.provenance.parcelJoin.basis).toContain("gate-blocked");
+  });
+
+  it("the recorded state can never claim a bind the geometry did not take", () => {
+    // The provenance record is derived from the row every geometry consumer
+    // reads, not from the offered crosswalk row. So a payload that says
+    // `joined-crosswalk` at feature 40337 is drawing feature 40337, and the
+    // two cannot be edited apart without this assertion failing.
+    const bound = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    const recordedFeature = (
+      bound.provenance.parcelJoin as { featureIndex?: number | null }
+    ).featureIndex;
+    expect(recordedFeature).toBe(40337);
+    // The stamp is only on feature 40337, so this reads the geometry side of
+    // the payload rather than the provenance side and asserts they agree.
+    expect(bound.zoning?.district).toBe("SF-2");
+    expect(
+      (bound.provenance.parcelJoin as { sourceVintage?: string | null }).sourceVintage,
+    ).toBe("stratmap25-landparcels_48209_hays_202503");
+  });
+
+  it("NO-CHANGE CONTROL: account 40138 already binds 57725 and must stay there", () => {
+    // The dispatch named 40138 as the parcel that must MOVE. It does not: its
+    // claim carries taxYear 2026, so its situs was never the contaminated
+    // copy and the address recovery already lands on the right parcel. Its
+    // crosswalk resolves the SAME feature. A change that moved this parcel
+    // would be breaking something that works.
+    const windmillBody = conformantBody({
+      nodeId: "48209:40138",
+      claim: {
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "40138", taxYear: 2026 },
+        situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+        situsCity: "BUDA",
+        situsZip: "78610",
+        propertyUseCode: "A1",
+      },
+    });
+    const shared = {
+      gateBlocked: true as const,
+      body: windmillBody,
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:40138",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+    };
+    const before = newPayload(null, shared);
+    const after = newPayload(null, { ...shared, crosswalkRow: windmillParcel() });
+    expect(
+      (before.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(57725);
+    expect(
+      (after.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(57725);
+    expect(before.zoning?.district).toBe(after.zoning?.district);
+    expect(before.baseFacts.acreage).toEqual(after.baseFacts.acreage);
+  });
+
+  it("a crosswalk bind still runs the acreage ring check rather than skipping it", () => {
+    // ringRowAvailable must include the new state. If it did not, a
+    // crosswalk-bound parcel with unusable geometry would report `refused`
+    // ("never looked") where the truth is that it WAS looked at.
+    const bound = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    expect(bound.facetCoverage.acreage).toBe(true);
+    // The METHOD is the discriminator, not truthiness: a claim-carried acreage
+    // would also be truthy, so asserting only truthiness would pass even if
+    // the crosswalk ring were never read.
+    expect(bound.baseFacts.acreage).toMatchObject({ method: "shoelace-wgs84" });
+  });
+
+  it("with no crosswalk row the county behaves exactly as it does today", () => {
+    // The fallback is the whole reason this is a rebind and not a withdrawal:
+    // 58,015 Hays rows have no crosswalk key and none of them loses anything.
+    const withOut = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: null,
+    });
+    expect(withOut.provenance.parcelJoin.state).toBe("joined-situs");
+  });
+
+  it("a NON-blocked county ignores a crosswalk row entirely", () => {
+    // The Williamson-class proof at the code level, and also the Travis and
+    // Bastrop proof: a county that joins correctly on prop_id must not acquire
+    // a second geometry path. Offering one here must change nothing.
+    const propIdRow = txgioRow();
+    const plain = newPayload(propIdRow, {});
+    const offered = newPayload(propIdRow, { crosswalkRow: learParcel() });
+    expect(plain.provenance.parcelJoin.state).toBe("joined");
+    expect(offered.provenance.parcelJoin.state).toBe("joined");
+    expect(offered.provenance.parcelJoin).toEqual(plain.provenance.parcelJoin);
+    expect(offered.baseFacts).toEqual(plain.baseFacts);
+    expect(offered.zoning).toEqual(plain.zoning);
+  });
+
+  it("a crosswalk bind does NOT promote a land use the owner gate refused", () => {
+    // Scope discipline, enforced rather than asserted. The crosswalk supplies
+    // the parcel row; land use on a gate-blocked county still comes from the
+    // owner-gated address join and from nothing else. If this ever inverted,
+    // the five counties that are not Hays would start moving land-use codes
+    // through a path nobody reviewed for them.
+    const ownerDisagrees = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "SOMEBODY ELSE ENTIRELY",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    expect(ownerDisagrees.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(resolvedLandUse(ownerDisagrees)).toBeUndefined();
+    expect(ownerDisagrees.provenance.landUseAddressRecovered).toBe(false);
+    // ...and the refusal is still EARNED, not a bare null.
+    expect(ownerDisagrees.provenance.landUseAbsence).toBeTruthy();
+  });
+
+  it("a retired record still takes its retirement branch, crosswalk or not", () => {
+    // CTX-RETIRE and CTX-B1 ordering must survive this card. A prop_id absent
+    // from the declared roll is retired regardless of whether its geometry
+    // could be crosswalk bound.
+    const retired = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: { byPropId: new Map(), declaredTaxYear: 2026, consulted: true },
+    });
+    expect(retired.recordRetirement?.status).toBe("retired");
+    expect(retired.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(
+      (retired.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(40337);
+    expect(retired.zoning?.district).toBe("SF-2");
   });
 });

@@ -28,6 +28,27 @@ export interface CadPropertyRecord {
   /** Decimal string, 4 fraction digits (numeric(14,4) column). */
   landAcres: string | null;
   propertyUseCode: string | null;
+  /**
+   * The CAD's OTHER two published identifiers for this account, when the
+   * export carries them (P-124 CTX-HAYS-REBIND).
+   *
+   * Tyler Orion publishes `PropertyID`, `QuickRefID` and `PropertyNumber` in
+   * adjacent columns. `propId` above is PropertyID. `quickRefId` is the
+   * R/P/M/N account number (`R26199`); `propertyNumber` is the county's
+   * Geographic ID (`11-2520-0000-03100-2`), which is the identifier
+   * TxGIO/StratMap publishes as `geo_id`.
+   *
+   * NULL means the export did not publish the column -- never an empty
+   * string, and never a value inferred from `propId`. A publisher whose
+   * shape does not carry them yields null on both. NOTE, measured 2026-09-10
+   * and not assumed: WCAD's Socrata property dataset DOES publish both
+   * (propertyid 63514 -> quickrefid R002338, propertynumber
+   * R-17-W338-401P-0013-0006), so Williamson is not a no-key county. What
+   * keeps its geometry unchanged is that txgio_parcel 48491 carries zero
+   * non-blank geo_id across 304,298 rows.
+   */
+  quickRefId: string | null;
+  propertyNumber: string | null;
 }
 
 /**
