@@ -722,6 +722,32 @@ export function assertDigestScopeIntact(
   }
 }
 
+/**
+ * Does the target store actually HAVE the two columns this tool writes?
+ *
+ * Measured 2026-09-10 against information_schema on both Neon branches:
+ * production carries 23 columns on `cad_property` including both identifiers;
+ * the `f06-staging-neondb` branch carries 21 and has NEITHER. Migration 0099
+ * is applied to production and NOT to staging, and the dispatch's own sequence
+ * -- integration seat runs staging first -- lands straight on that.
+ *
+ * Without this the run fails anyway, at the first UPDATE, with Postgres'
+ * `column "quick_ref_id" of relation "cad_property" does not exist`. That is
+ * fail-closed and it is useless: it arrives after the plan and the first
+ * digest, and it says nothing about which migration is missing from which
+ * branch. This turns it into a named refusal before anything is read or
+ * written, which is what the operator on the other end of a staging run needs.
+ *
+ * READ THE CATALOG, NOT A PROXY. The question "does this column exist" is
+ * answered by information_schema, never by the shape of a failed query.
+ */
+export const TARGET_COLUMNS_SQL =
+  `SELECT column_name\n` +
+  `  FROM information_schema.columns\n` +
+  ` WHERE table_schema = current_schema()\n` +
+  `   AND table_name = 'cad_property'\n` +
+  `   AND column_name = ANY ($1::text[])`;
+
 export const UNTOUCHED_COLUMNS_SQL =
   `SELECT column_name\n` +
   `  FROM information_schema.columns\n` +
@@ -884,6 +910,29 @@ export interface BackfillSummary {
 
 export const DEFAULT_BACKFILL_BATCH_SIZE = 1000;
 
+async function assertTargetColumnsPresent(
+  exec: BackfillExecutor,
+  columns: readonly string[] = BACKFILL_WRITABLE_COLUMNS,
+): Promise<void> {
+  const res = await exec.query<{ column_name: string }>(TARGET_COLUMNS_SQL, [
+    [...columns],
+  ]);
+  const found = new Set(res.rows.map((r) => r.column_name));
+  const missing = columns.filter((c) => !found.has(c));
+  if (missing.length > 0) {
+    throw new BackfillRefusal(
+      "target-columns",
+      `backfill FAIL CLOSED: cad_property on this store has no ` +
+        `${missing.join(", ")} column. Migration ` +
+        "0099_cad_property_published_identifiers has not been applied here. " +
+        "Apply it to this branch before running the backfill against it; " +
+        "verified 2026-09-10 that production has both columns and the " +
+        "f06-staging-neondb branch has neither.",
+      { missing, found: [...found] },
+    );
+  }
+}
+
 async function readUntouchedDigest(
   exec: BackfillExecutor,
   countyFips: string,
@@ -965,6 +1014,11 @@ export async function runPublishedIdentifierBackfill(
       accountsOffered: read.rows.length,
     },
   });
+
+  // BEFORE anything else touches the store: does it even have the columns?
+  // A dry run must refuse here too, because a dry run against staging is
+  // exactly where this is meant to be discovered.
+  await assertTargetColumnsPresent(exec);
 
   // The roll, at the declared vintage. CAD_PROPERTY_MULTI_YEAR_INVENTORY does
   // not apply: this is a single-year read filtered on the declared vintage

@@ -377,6 +377,8 @@ function fakeExecutor(opts: {
   rollPropIds: string[];
   digests?: [string, string];
   catalogColumns?: string[];
+  /** What information_schema says cad_property actually has, for the preflight. */
+  targetColumns?: string[];
 }): BackfillExecutor & { issued: Issued[] } {
   const issued: Issued[] = [];
   let digestCalls = 0;
@@ -384,6 +386,10 @@ function fakeExecutor(opts: {
     issued,
     async query(text: string, values?: unknown[]) {
       issued.push({ text, values });
+      if (/column_name = ANY /.test(text)) {
+        const present = opts.targetColumns ?? ["quick_ref_id", "property_number"];
+        return { rows: present.map((c) => ({ column_name: c })) as never[] };
+      }
       if (/FROM information_schema\.columns/.test(text)) {
         const cols = opts.catalogColumns ?? [
           "prop_id",
@@ -465,6 +471,36 @@ describe("runPublishedIdentifierBackfill", () => {
     const batches = record.entries.filter((e) => e.kind === "batch");
     expect(batches).toHaveLength(1);
     expect((batches[0] as Record<string, unknown>).updatedPropIds).toHaveLength(4);
+  });
+
+  // Measured 2026-09-10: production carries both columns and the
+  // f06-staging-neondb branch carries NEITHER, and the dispatch's own sequence
+  // sends the integration seat to staging first.
+  it("REFUSES a store where migration 0099 has not been applied, and names it", async () => {
+    const read = await readPublishedIdentifiers(fx("hays_property_backfill_sample.txt"));
+    const exec = fakeExecutor({ rollPropIds: ["10001"], targetColumns: [] });
+    await expect(
+      runPublishedIdentifierBackfill(exec, read, {
+        countyFips: "48209", taxYear: 2026, sourceArchive: "hays.zip",
+        sourceMember: "m.txt", sourceSha256: null, invocation: "test",
+        dryRun: false, record: createMemoryRecordWriter(),
+      }),
+    ).rejects.toMatchObject({ rule: "target-columns" });
+  });
+
+  it("a DRY RUN refuses that store too, which is the point of running it there", async () => {
+    // A dry run that sailed past a missing column would report a clean plan
+    // for a run that cannot happen.
+    const read = await readPublishedIdentifiers(fx("hays_property_backfill_sample.txt"));
+    const exec = fakeExecutor({ rollPropIds: ["10001"], targetColumns: ["quick_ref_id"] });
+    await expect(
+      runPublishedIdentifierBackfill(exec, read, {
+        countyFips: "48209", taxYear: 2026, sourceArchive: "hays.zip",
+        sourceMember: "m.txt", sourceSha256: null, invocation: "test",
+        dryRun: true, record: createMemoryRecordWriter(),
+      }),
+    ).rejects.toMatchObject({ rule: "target-columns" });
+    expect(exec.issued.some((s) => /^UPDATE/.test(s.text))).toBe(false);
   });
 
   it("a dry run computes the plan and issues no UPDATE at all", async () => {
