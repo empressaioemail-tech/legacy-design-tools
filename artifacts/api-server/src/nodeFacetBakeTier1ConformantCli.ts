@@ -48,10 +48,17 @@ import {
   type CountyCadPropertyRoll,
   type CountyLandUseRoll,
 } from "./lib/joinIntegrityGate.js";
-import { addressJoinKey, normalizeSitusAddress } from "./lib/joinNormalize.js";
+import {
+  addressJoinKey,
+  cadAccountNumberStem,
+  crosswalkBindCorroborated,
+  normalizeSitusAddress,
+  parcelCrosswalkJoinKey,
+} from "./lib/joinNormalize.js";
 import { ringCentroid } from "./lib/nodeFacetBakeTier1.js";
 import { COUNTY_NAMES, effectiveBlockedFips, firstRing } from "./lib/nodeFacetTier1Assemble.js";
 import {
+  fetchParcelRowsByGeoIds,
   fetchParcelRowsByPropIds,
   fetchParcelRowsBySitusKeys,
   resolveParcelTableForCounty,
@@ -246,6 +253,73 @@ async function joinParcelRowsBySitus(
   return { bySitus, multiFeature: seenMulti.size };
 }
 
+/**
+ * Join parcel rows for the county's published Geographic IDs
+ * (`cad_property.property_number` against `txgio_parcel.geo_id`), and the
+ * corroborating index on the CAD account number (against
+ * `txgio_parcel.prop_id`). P-124 CTX-HAYS-REBIND.
+ *
+ * TWO INDEXES, ON PURPOSE, BUILT FROM ONE FETCH EACH. The bind is only taken
+ * when the two published identifiers name the SAME feature, and two indexes
+ * built from two different columns is what makes that a check between
+ * independent derivations rather than a field compared with itself.
+ *
+ * First feature_index wins inside each index, matching both sibling joiners.
+ * A geo_id or prop_id carried by several features increments `multiFeature`.
+ */
+async function joinParcelRowsByCrosswalk(
+  neondb: pg.Pool,
+  county: string,
+  src: ParcelTableSource,
+  geoIds: string[],
+  accountStems: string[],
+  pageSize: number,
+): Promise<{
+  byGeoId: Map<string, ParcelJoinRow>;
+  byAccountStem: Map<string, ParcelJoinRow>;
+  multiFeature: number;
+}> {
+  const byGeoId = new Map<string, ParcelJoinRow>();
+  const byAccountStem = new Map<string, ParcelJoinRow>();
+  const seenMulti = new Set<string>();
+  for (const keys of chunk(geoIds, pageSize)) {
+    const rows = await fetchParcelRowsByGeoIds(neondb, county, src, keys);
+    for (const row of rows) {
+      const key = row.geo_id?.trim();
+      if (!key) continue;
+      if (byGeoId.has(key)) {
+        seenMulti.add(key);
+        continue;
+      }
+      byGeoId.set(key, row);
+    }
+  }
+  // The corroborator, SKIPPED ENTIRELY when the Geographic ID index came back
+  // empty. Not an optimisation: a county whose parcel table publishes no
+  // geo_id can never produce a bind, and fetching a corroborator for binds
+  // that cannot happen would run a several-hundred-thousand-key query to
+  // corroborate nothing. Williamson 48491 is exactly that county today
+  // (0 non-blank geo_id of 304,298 rows), and its CAD export DOES publish a
+  // property number, so this branch is the one that keeps a general change
+  // cheap on it rather than merely correct.
+  if (byGeoId.size === 0) {
+    return { byGeoId, byAccountStem, multiFeature: seenMulti.size };
+  }
+  // `fetchParcelRowsByPropIds` with the owner column ON, because a
+  // crosswalk-bound row must still be able to feed the per-match owner gate
+  // the land-use recovery runs rather than bypass it.
+  for (const ids of chunk(accountStems, pageSize)) {
+    const rows = await fetchParcelRowsByPropIds(neondb, county, src, ids, true);
+    for (const row of rows) {
+      const key = row.prop_id?.trim();
+      if (!key) continue;
+      if (byAccountStem.has(key)) continue;
+      byAccountStem.set(key, row);
+    }
+  }
+  return { byGeoId, byAccountStem, multiFeature: seenMulti.size };
+}
+
 async function main() {
   const { county, dryRun, propIds, pageSize } = parseArgs(process.argv.slice(2));
   const mcpUrl = process.env.HAUSKA_MCP_DATABASE_URL;
@@ -328,6 +402,72 @@ async function main() {
       `${cadPropertyRoll.byPropId.size} (consulted=${cadPropertyRoll.consulted} ` +
       `declaredTaxYear=${cadPropertyRoll.declaredTaxYear ?? "none"})`,
   );
+  // CTX-HAYS-REBIND (P-124, 2026-09-10). The CROSSWALK bind, built BEFORE the
+  // situs prepass because it is the preferred evidence and because its
+  // coverage decides how much the address recovery is still asked to do.
+  //
+  // The key comes off the DECLARED-VINTAGE cad_property row this bake already
+  // loaded -- no new query, the same `cadPropertyRoll.byPropId` map the dollar
+  // path uses. A county whose export publishes no Geographic ID contributes an
+  // empty key list and this whole block is a no-op, which is the entire reason
+  // one code path serves Hays and provably does not touch Williamson: that
+  // county's parcel table carries ZERO non-blank geo_id (0 of 304,298 rows,
+  // measured read-only on staging AND production 2026-09-10). Its CAD export
+  // DOES publish a property number, so the key side is not what holds -- the
+  // empty index is.
+  //
+  // AMBIGUITY IS REFUSED, NOT RESOLVED. A property_number claimed by more than
+  // one prop_id at the declared vintage cannot identify a parcel, so every
+  // account holding it is dropped from the crosswalk and falls back. Measured
+  // on Hays: exactly ONE such property_number, on two personal-property
+  // accounts, neither of which has a txgio geo_id anyway. The guard does not
+  // depend on that staying true.
+  let crosswalkByGeoId = new Map<string, ParcelJoinRow>();
+  let crosswalkByAccountStem = new Map<string, ParcelJoinRow>();
+  const crosswalkKeyByPropId = new Map<string, string>();
+  const accountStemByPropId = new Map<string, string>();
+  let crosswalkAmbiguousKeys = 0;
+  if (joinGateBlocked && parcelTable && cadPropertyRoll.consulted) {
+    const propIdsByCrosswalkKey = new Map<string, string[]>();
+    for (const [rollPropId, entry] of cadPropertyRoll.byPropId) {
+      const key = parcelCrosswalkJoinKey(county, entry.propertyNumber, blockedSet);
+      if (key == null) continue;
+      const bucket = propIdsByCrosswalkKey.get(key);
+      if (bucket) bucket.push(rollPropId);
+      else propIdsByCrosswalkKey.set(key, [rollPropId]);
+    }
+    for (const [key, owners] of propIdsByCrosswalkKey) {
+      if (owners.length > 1) {
+        crosswalkAmbiguousKeys += 1;
+        continue;
+      }
+      crosswalkKeyByPropId.set(owners[0] as string, key);
+    }
+    for (const [rollPropId, entry] of cadPropertyRoll.byPropId) {
+      if (!crosswalkKeyByPropId.has(rollPropId)) continue;
+      const stem = cadAccountNumberStem(entry.quickRefId);
+      if (stem != null) accountStemByPropId.set(rollPropId, stem);
+    }
+    const joined = await joinParcelRowsByCrosswalk(
+      neondb,
+      county,
+      parcelTable,
+      [...new Set(crosswalkKeyByPropId.values())],
+      [...new Set(accountStemByPropId.values())],
+      pageSize,
+    );
+    crosswalkByGeoId = joined.byGeoId;
+    crosswalkByAccountStem = joined.byAccountStem;
+    txgioMultiFeature += joined.multiFeature;
+    console.log(
+      `[node-facet-bake-t1-conformant] crosswalk index for ${county}: ` +
+        `${crosswalkKeyByPropId.size} accounts publish a Geographic ID, ` +
+        `${crosswalkByGeoId.size} of those resolve a ${parcelTable.table} row, ` +
+        `${accountStemByPropId.size} carry a corroborating account number ` +
+        `(${crosswalkByAccountStem.size} resolve), ` +
+        `${crosswalkAmbiguousKeys} Geographic IDs refused as ambiguous`,
+    );
+  }
   if (joinGateBlocked && parcelTable) {
     const situsKeys = [
       ...new Set(
@@ -431,6 +571,15 @@ async function main() {
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
+  // CTX-HAYS-REBIND. Four counters, not one, because a single "crosswalk
+  // worked" number could not tell a run that bound 115,035 parcels from one
+  // that bound none and refused none because the column was never ingested.
+  // `crosswalkCorroborationRefused` is the one that must not go quiet: it
+  // counts a bind the two published identifiers DISAGREED about.
+  let crosswalkBound = 0;
+  let crosswalkNoKey = 0;
+  let crosswalkKeyNoParcel = 0;
+  let crosswalkCorroborationRefused = 0;
   const facetHits = { landUse: 0, acreage: 0, zoning: 0, envelopeDerived: 0 };
   const landUseOrigins = {
     claim: 0,
@@ -544,6 +693,38 @@ async function main() {
       }
     }
     const propIdRow = joinGateBlocked ? null : (parcelRows.get(propId) ?? null);
+    // CTX-HAYS-REBIND. The crosswalk bind, decided per row from the county's
+    // own two published identifiers. Every outcome is counted, including the
+    // three ways it declines, so a run cannot report silence as success.
+    let crosswalkRow: ParcelJoinRow | null = null;
+    if (joinGateBlocked) {
+      const key = crosswalkKeyByPropId.get(propId) ?? null;
+      if (key == null) {
+        crosswalkNoKey += 1;
+      } else {
+        const offered = crosswalkByGeoId.get(key) ?? null;
+        if (offered == null) {
+          crosswalkKeyNoParcel += 1;
+        } else {
+          const stem = accountStemByPropId.get(propId) ?? null;
+          const stemRow = stem != null ? (crosswalkByAccountStem.get(stem) ?? null) : null;
+          if (
+            crosswalkBindCorroborated(
+              offered.feature_index,
+              stemRow ? stemRow.feature_index : null,
+            )
+          ) {
+            crosswalkRow = offered;
+            crosswalkBound += 1;
+          } else {
+            // The two published identifiers name DIFFERENT parcels. Positive
+            // evidence the crosswalk is wrong for this row, so neither is
+            // taken and the row falls back to today's behaviour.
+            crosswalkCorroborationRefused += 1;
+          }
+        }
+      }
+    }
     let situsRow: ParcelJoinRow | null = null;
     let txgioOwner: string | null = null;
     if (joinGateBlocked && addressLandUse) {
@@ -554,9 +735,11 @@ async function main() {
       const hit = resolveAddressLandUse(addrKey, txgioOwner, addressLandUse);
       situsRow = hit ? offered : null;
     }
-    const row = joinGateBlocked ? situsRow : propIdRow;
+    // CTX-HAYS-REBIND. The crosswalk row wins the geometry when it exists;
+    // the situs recovery remains the fallback, so nothing is withdrawn.
+    const row = joinGateBlocked ? (crosswalkRow ?? situsRow) : propIdRow;
     if (joinGateBlocked) {
-      if (situsRow) txgioJoined += 1;
+      if (row) txgioJoined += 1;
       else txgioNoRow += 1;
     } else if (propIdRow) {
       txgioJoined += 1;
@@ -584,7 +767,7 @@ async function main() {
         table: joinTable,
         row: propIdRow,
         gateBlocked: joinGateBlocked,
-        ...(joinGateBlocked ? { situsRow } : {}),
+        ...(joinGateBlocked ? { situsRow, crosswalkRow } : {}),
       },
       ...(joinGateBlocked && addressLandUse
         ? {
@@ -722,10 +905,34 @@ async function main() {
       `(superseded ${citySupersededClaim}), situsZip=${zipFromDeclaredRoll} ` +
       `(superseded ${zipSupersededClaim}), acreage=${acreageFromDeclaredRoll}`,
   );
+  // CTX-HAYS-REBIND. On stdout for every gate-blocked run, for the same
+  // reason CTX-B7 put its gate there: a bind that stops happening produces no
+  // complaint, and nobody finds the miss from the outside. The three decline
+  // counters are printed beside the bind count so a run that binds nothing is
+  // legible as WHY it bound nothing -- no key ingested, key with no parcel, or
+  // two published identifiers that disagreed.
+  if (joinGateBlocked) {
+    console.log(
+      `[node-facet-bake-t1-conformant] published-identifier crosswalk for ${county}: ` +
+        `bound=${crosswalkBound}, no-key=${crosswalkNoKey}, ` +
+        `key-but-no-parcel=${crosswalkKeyNoParcel}, ` +
+        `corroboration-refused=${crosswalkCorroborationRefused}, ` +
+        `ambiguous-keys-dropped=${crosswalkAmbiguousKeys} ` +
+        "(a bound row takes its ring, centroid and zoning stamp from the parcel " +
+        "its own published Geographic ID names; land use is untouched by this path)",
+    );
+  }
   console.log(
     JSON.stringify({
       county,
       dryRun,
+      crosswalkBound,
+      crosswalkNoKey,
+      crosswalkKeyNoParcel,
+      crosswalkCorroborationRefused,
+      crosswalkAmbiguousKeys,
+      crosswalkAccountsWithKey: crosswalkKeyByPropId.size,
+      crosswalkParcelsIndexed: crosswalkByGeoId.size,
       propIds,
       schemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
       declaredRollTrust: trustCounts,

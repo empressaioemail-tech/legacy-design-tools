@@ -194,6 +194,11 @@ export function parsePacsInfoLine(
     propertyUseCode:
       textOrNull(cut(line, APPRAISAL_INFO.imprvStateCd)) ??
       textOrNull(cut(line, APPRAISAL_INFO.landStateCd)),
+    // CTX-HAYS-REBIND. PACS 8.0.x APPRAISAL_INFO publishes ONE identifier,
+    // prop_id. Explicit nulls rather than an omitted field, so a reader can
+    // tell "this publisher does not carry it" from "nobody wired it".
+    quickRefId: null,
+    propertyNumber: null,
   };
 }
 

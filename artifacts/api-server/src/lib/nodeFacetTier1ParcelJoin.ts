@@ -44,6 +44,19 @@ export interface ParcelTableSource {
 export interface ParcelJoinRow {
   feature_index: number;
   prop_id: string | null;
+  /**
+   * The GEOMETRY publisher's own parcel identifier (P-124 CTX-HAYS-REBIND).
+   *
+   * Selected so the crosswalk bind can record WHICH published identifier it
+   * matched on, rather than asserting it. Both parcel tables carry the column
+   * (production `information_schema.columns`, read 2026-09-10), but its
+   * POPULATION varies by county and the difference is decisive: Hays 48209 has
+   * 130,246 of 131,734 rows populated (115,533 distinct) while Williamson
+   * 48491 has ZERO of 304,298. A county with no `geo_id` cannot be crosswalk
+   * bound at all, which is why the same code change moves Hays and provably
+   * does not touch Williamson.
+   */
+  geo_id: string | null;
   situs_address: string | null;
   situs_city: string | null;
   situs_state: string | null;
@@ -141,7 +154,7 @@ export function parcelSelectList(
   const ownerSelect = needsOwnerForGate
     ? "owner_name AS txgio_owner_for_gate"
     : "NULL::text AS txgio_owner_for_gate";
-  return `feature_index, prop_id, situs_address, situs_city, situs_state, situs_zip,
+  return `feature_index, prop_id, geo_id, situs_address, situs_city, situs_state, situs_zip,
           ${zoningSelect}, ${zoningJurisdictionSelect}, ${ownerSelect},
           source_vintage, geometry`;
 }
@@ -195,6 +208,58 @@ export async function fetchParcelRowsBySitusKeys(
         AND upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) = ANY($2::text[])
       ORDER BY feature_index`,
     [fips, [...situsKeys]],
+  );
+  return r.rows;
+}
+
+/**
+ * Parcel rows for a list of the CAD's published Geographic IDs
+ * (`cad_property.property_number`) matched against `txgio_parcel.geo_id`, in
+ * one county. The CROSSWALK bind (P-124 CTX-HAYS-REBIND).
+ *
+ * The third sibling of `fetchParcelRowsByPropIds` and `fetchParcelRowsBySitusKeys`
+ * and the only one whose key is published on both sides. Used when a
+ * gate-blocked county's CAD roll carries a Geographic ID, in preference to the
+ * situs-address recovery, because that recovery is circular for a county whose
+ * `cad_property.situs_address` was itself overwritten by the parcel store (see
+ * `parcelCrosswalkJoinKey`).
+ *
+ * The owner column is selected for the same reason the situs fetcher selects
+ * it: the caller's land-use recovery still runs its per-match owner gate, and
+ * a crosswalk-bound row must be able to feed that gate rather than bypass it.
+ * It is never copied into a payload.
+ *
+ * `DISTINCT ON (feature_index)` collapses the one-row-per-cell duplication;
+ * blank geo_ids never reach here because `parcelCrosswalkJoinKey` refuses an
+ * empty key, and the `btrim(geo_id) <> ''` guard makes that structural rather
+ * than a caller convention. A geo_id carried by several features returns
+ * several rows; the caller keeps the first, matching both siblings.
+ *
+ * THE COMPARISON IS ON THE RAW COLUMN, not on `btrim(geo_id)`. Measured on
+ * staging 2026-09-10: zero of Hays 48209's 130,246 non-null geo_ids carry
+ * surrounding whitespace, so trimming the comparand changes no result today
+ * and would permanently prevent a plain `(county_fips, geo_id)` index from
+ * being used -- the same trap the situs join already pays for, which needed a
+ * 34-call functional index to escape. If a publisher ever pads a geo_id the
+ * failure is a MISS, which is an honest geometry absence, never a wrong bind.
+ */
+export async function fetchParcelRowsByGeoIds(
+  pool: QueryablePool,
+  fips: string,
+  src: ParcelTableSource,
+  geoIds: readonly string[],
+): Promise<ParcelJoinRow[]> {
+  if (geoIds.length === 0) return [];
+  const r = await pool.query<ParcelJoinRow>(
+    `SELECT DISTINCT ON (feature_index)
+            ${parcelSelectList(src, true)}
+       FROM ${src.table}
+      WHERE county_fips = $1
+        AND geo_id IS NOT NULL
+        AND btrim(geo_id) <> ''
+        AND geo_id = ANY($2::text[])
+      ORDER BY feature_index`,
+    [fips, [...geoIds]],
   );
   return r.rows;
 }

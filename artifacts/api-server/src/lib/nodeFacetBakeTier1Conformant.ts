@@ -28,7 +28,7 @@
  *     `landAcres` only when there is no ring, under a distinct method;
  *   - facetCoverage / provenance / bakedAt: the same predicates and slots,
  *     plus `provenance.parcelJoin` naming what the join did (joined, no row,
- *     gate-blocked, joined-situs). Absent is a state the key carries, never
+ *     gate-blocked, joined-situs, joined-crosswalk). Absent is a state the key carries, never
  *     an omission.
  *
  * CELL STATES, NOT NULLS (P-124 CTX-LEAVES, 2026-09-08). "Absent is a state
@@ -322,6 +322,27 @@ export type ParcelJoinRecord =
       featureIndex: number | null;
       sourceVintage: string | null;
     }
+  | {
+      /**
+       * Bound by the county's own published CROSSWALK (P-124
+       * CTX-HAYS-REBIND): `cad_property.property_number` matched against
+       * `txgio_parcel.geo_id`, corroborated by the CAD account number against
+       * `txgio_parcel.prop_id`.
+       *
+       * A DISTINCT state rather than a flag on `joined-situs`, because the two
+       * are different claims about how a parcel was identified: one is an
+       * agreement between two publishers' identifiers, the other is a string
+       * match on an address that, for the county this was built for, one
+       * publisher had already copied from the other. A consumer counting
+       * geometry provenance must be able to tell them apart, and a census that
+       * folded them together could not report that a rebind had happened.
+       */
+      table: string;
+      state: "joined-crosswalk";
+      basis: string;
+      featureIndex: number;
+      sourceVintage: string | null;
+    }
   | { table: string; state: "no-row"; basis: string }
   | { table: string; state: "gate-blocked"; basis: string };
 
@@ -400,6 +421,16 @@ export interface ConformantCadPropertyRoll {
       situsCity?: unknown;
       situsZip?: unknown;
       landAcres?: unknown;
+      /**
+       * The county's published Geographic ID (CTX-HAYS-REBIND). Optional for
+       * the same reason the four fields above are: a caller built before this
+       * card still type-checks and simply never offers a crosswalk row.
+       *
+       * Read here for ONE purpose -- naming the CAD-side identifier in
+       * `parcelJoin.basis`, so the bind can be re-run from the basis alone.
+       * The bind DECISION is the caller's, never re-derived at this site.
+       */
+      propertyNumber?: unknown;
     }
   >;
   declaredTaxYear: number | null;
@@ -551,7 +582,7 @@ export function isResolvedAcreageFacet(
  * actually checked: `firstRing(row.geometry)` returning null on a REAL row
  * is a genuine check; `row` itself being null (`no-row`, `gate-blocked`, or
  * `joined-situs` with no matched row) means geometry was never looked up at
- * all — the parcel join's own basis text says so verbatim ("geometry
+ * all. A `joined-crosswalk` row is a REAL row and is checked (CTX-HAYS-REBIND) — the parcel join's own basis text says so verbatim ("geometry
  * unavailable" / "zoning stamp and geometry unavailable"), the same
  * lookup-failed shape `buildLandUseAbsence` already recognizes for a
  * gate-blocked or unconsulted land-use join.
@@ -577,7 +608,15 @@ function buildAcreageAbsence(input: {
   countyName: string;
   placement: "nested" | "flat";
   access: { discoverability: string; entitlement: string };
-  /** True when a parcel-join row existed to examine (state `joined`/`joined-situs` with a matched row). */
+  /**
+   * True when a parcel-join row existed to examine (state `joined`,
+   * `joined-crosswalk`, or `joined-situs` with a matched row).
+   *
+   * CTX-HAYS-REBIND added `joined-crosswalk` to that set. It widens the
+   * population that reaches the ring check rather than the population that
+   * skips it, so the `refused` verdict below still means what it said: the
+   * geometry was never looked up, not that it was looked up and found wanting.
+   */
   ringRowAvailable: boolean;
   claimLandAcres: number | null;
   /** True when the declared-vintage `cad_property` read actually happened (CTX-B7). */
@@ -979,6 +1018,23 @@ export interface ConformantTier1BuildInput {
      * gate accepts. A prop_id-keyed row in `row` is still ignored.
      */
     situsRow?: ParcelJoinRow | null;
+    /**
+     * CROSSWALK-keyed row for a gate-blocked county (P-124 CTX-HAYS-REBIND):
+     * the parcel whose `geo_id` equals this account's published
+     * `property_number`, already corroborated by the caller against the
+     * account number.
+     *
+     * PREFERRED over `situsRow` when present, and preferred unconditionally:
+     * a bind on two published identifiers is not a better guess than an
+     * address match, it is a different KIND of evidence. The address recovery
+     * remains the fallback for the rows the crosswalk cannot reach (a county
+     * that publishes no Geographic ID, an account minted since the parcel
+     * vintage, a row ingested before the parser read the column), so this
+     * change is a rebind and never a withdrawal.
+     *
+     * Optional, so a pre-CTX-HAYS-REBIND caller keeps its exact behaviour.
+     */
+    crosswalkRow?: ParcelJoinRow | null;
   };
   /**
    * Owner-gated situs recovery for a gate-blocked county. When present,
@@ -1046,6 +1102,15 @@ export interface ConformantTier1BuildInput {
  * `parcelJoin.state` is `joined-situs` on recovery, `gate-blocked` when
  * recovery fails, `joined` on a legal prop_id join, `no-row` when the legal
  * join finds nothing.
+ *
+ * CTX-HAYS-REBIND (P-124, 2026-09-10) adds a FIFTH state ahead of the
+ * recovery: `joined-crosswalk`, the parcel whose `geo_id` equals this
+ * account's own published `property_number`, corroborated by the account
+ * number against `txgio_parcel.prop_id`. It supplies GEOMETRY ONLY. Land use
+ * on a gate-blocked county still comes from the owner-gated address join and
+ * from nothing else, so the five counties that are not Hays cannot move a
+ * land-use code through this path, and a county whose roll publishes no
+ * Geographic ID keeps today's behaviour exactly.
  */
 export function buildConformantTier1Payload(
   input: ConformantTier1BuildInput,
@@ -1095,6 +1160,23 @@ export function buildConformantTier1Payload(
     }
   }
 
+  // CTX-HAYS-REBIND. The crosswalk bind, decided BEFORE the situs recovery so
+  // the recovery cannot claim a parcel the county's own published identifiers
+  // already named. `crosswalkRow` is only ever non-null when the caller
+  // corroborated it (`crosswalkBindCorroborated`), so this site does not
+  // re-derive the verdict and cannot disagree with the caller's counters.
+  const crosswalkRow = gateBlocked ? (input.parcelJoin.crosswalkRow ?? null) : null;
+  // Read for the BASIS TEXT only -- never to decide the bind. `unknown` in the
+  // structural roll type, so it is narrowed to a string here rather than
+  // asserted, and a non-string reads as absent instead of as "[object Object]".
+  const crosswalkPropertyNumberRaw = crosswalkRow
+    ? input.cadPropertyRoll?.byPropId.get(apn ?? "")?.propertyNumber
+    : undefined;
+  const crosswalkPropertyNumberForBasis =
+    typeof crosswalkPropertyNumberRaw === "string" && crosswalkPropertyNumberRaw.trim()
+      ? crosswalkPropertyNumberRaw.trim()
+      : null;
+
   if (gateBlocked && input.situsRecovery) {
     const blocked =
       input.situsRecovery.blockedFips ?? LANDUSE_JOIN_DISABLED_FIPS_SEED;
@@ -1129,6 +1211,20 @@ export function buildConformantTier1Payload(
       row = null;
     }
   }
+
+  // CTX-HAYS-REBIND. The crosswalk row wins the GEOMETRY. Deliberately AFTER
+  // the land-use block and deliberately narrow: it replaces which parcel this
+  // record draws, and it does NOT touch `landUse`, `landUseOrigin` or
+  // `landUseAddressRecovered`. Land use on a gate-blocked county still comes
+  // from the owner-gated address join and nothing else, so this change cannot
+  // move a land-use code on the five counties that are not Hays, and the
+  // land-use absence below stays earned on exactly the evidence it was before.
+  //
+  // Reordering this above the land-use block would be the silent version of
+  // the same edit: `row` would be set before `resolveAddressLandUse` had a
+  // chance to null it, and a refused land-use recovery would start shipping a
+  // ring it did not ship yesterday for a reason nobody asked for.
+  if (crosswalkRow) row = crosswalkRow;
 
   const landUseAbsence: LandUseAbsence | null = landUse
     ? null
@@ -1245,8 +1341,35 @@ export function buildConformantTier1Payload(
     typeof r.source_vintage === "string" && r.source_vintage.trim()
       ? r.source_vintage.trim()
       : null;
+  // CTX-HAYS-REBIND. Derived from `row`, the SAME variable every geometry
+  // consumer below reads, and NOT from `crosswalkRow` on its own. Those two
+  // can only be made to disagree by an edit to the assignment above, and if
+  // they ever did the payload would claim `joined-crosswalk` with feature X
+  // while drawing feature Y -- a provenance record describing a bind that did
+  // not happen, which is worse than either outcome on its own. Proven by
+  // violation: disabling `row = crosswalkRow` makes this evaluate false and
+  // the state falls back to what actually happened.
+  const crosswalkBound = crosswalkRow != null && row === crosswalkRow;
+
   const parcelJoin: ParcelJoinRecord = gateBlocked
-    ? situsRecoveryAccepted
+    ? crosswalkBound && crosswalkRow
+      ? {
+          table,
+          state: "joined-crosswalk",
+          // Names BOTH published identifiers and both columns they were
+          // matched against, so a reader can re-run the bind from the basis
+          // alone rather than trusting the state string.
+          basis:
+            `${table} row feature_index ${crosswalkRow.feature_index} matched on the ` +
+            `county's published Geographic ID (cad_property.property_number ` +
+            `${crosswalkPropertyNumberForBasis ?? "?"} = ` +
+            `${table}.geo_id ${crosswalkRow.geo_id ?? "?"}) for county ${countyFips}, ` +
+            `corroborated by the CAD account number against ${table}.prop_id. ` +
+            `The prop_id join stays gate-blocked; this bind does not lift it.`,
+          featureIndex: crosswalkRow.feature_index,
+          sourceVintage: sourceVintageOf(crosswalkRow),
+        }
+      : situsRecoveryAccepted
       ? {
           table,
           state: "joined-situs",

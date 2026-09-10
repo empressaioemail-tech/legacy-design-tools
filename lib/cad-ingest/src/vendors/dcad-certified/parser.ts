@@ -306,6 +306,12 @@ export async function* parseDcadCertifiedExport(
       livingAreaSqft: res?.livingAreaSqft ?? null,
       landAcres: landRow?.landAcres ?? null,
       propertyUseCode: landRow?.propertyUseCode ?? null,
+      // CTX-HAYS-REBIND. DCAD's certified roll publishes ONE identifier per
+      // record, `account_num`, which is what `propId` above holds. Explicit
+      // nulls rather than an omitted field so a reader can tell "this
+      // publisher does not carry it" from "nobody wired it".
+      quickRefId: null,
+      propertyNumber: null,
     };
     if (opts.limit !== undefined && counters.rowsParsed >= opts.limit) break;
   }

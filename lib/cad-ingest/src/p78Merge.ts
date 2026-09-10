@@ -139,6 +139,8 @@ export type CadPropertyMergeRow = {
   assessedValue?: number | null;
   landAcres?: string | null;
   propertyUseCode?: string | null;
+  quickRefId?: string | null;
+  propertyNumber?: string | null;
   yearBuilt?: number | null;
   livingAreaSqft?: number | null;
   sourceFile?: string;
@@ -159,6 +161,16 @@ const COALESCE_FIELDS = [
   "assessedValue",
   "landAcres",
   "propertyUseCode",
+  // CTX-HAYS-REBIND (P-124, 2026-09-10). The two OTHER identifiers the CAD
+  // publishes for the same account. They belong under coalesce for the same
+  // reason `assessedValue` survives a StratMap re-apply: the geometry loader
+  // emits null for both (it has no appraisal columns at all), so
+  // `coalesce(incoming, existing)` returns the EXISTING value and a
+  // geometry-only apply cannot blank a crosswalk a real CAD export
+  // established. Omitting them from this list would drop them from the merge
+  // output entirely, which is the failure mode this comment exists to prevent.
+  "quickRefId",
+  "propertyNumber",
 ] as const;
 
 /** JS reference for Path A ON CONFLICT merge (matches spec SET clause). */

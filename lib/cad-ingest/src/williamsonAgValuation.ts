@@ -243,6 +243,15 @@ export function buildReconciliationRecords(
       livingAreaSqft: null,
       landAcres,
       propertyUseCode: null,
+      // CTX-HAYS-REBIND. This reconciliation writes land_value and land_acres
+      // only; it does not republish identity. tx_wcad_ag_valuation DOES carry
+      // a property_number column, and it is deliberately not copied here: it
+      // would populate the crosswalk key for Williamson from a table this
+      // repo does not own the ingest of, on a county whose parcel store
+      // carries zero geo_id (0 of 304,298 rows, staging, 2026-09-10) and can
+      // therefore corroborate nothing.
+      quickRefId: null,
+      propertyNumber: null,
     });
   }
 

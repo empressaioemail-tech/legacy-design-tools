@@ -350,6 +350,23 @@ export interface PropIdCadPropertyEntry {
   situsCity: string | null;
   situsZip: string | null;
   landAcres: number | null;
+  /**
+   * The county's OTHER two published identifiers for this account
+   * (P-124 CTX-HAYS-REBIND, 2026-09-10).
+   *
+   * The same pattern CTX-B6 and CTX-B7 each used one field at a time: the row
+   * is already loaded and already keyed by prop_id, so these cost no extra
+   * query and no second pass. `propertyNumber` is the county's Geographic ID
+   * and is the crosswalk join key to `txgio_parcel.geo_id`; `quickRefId` is
+   * the CAD account number and is the SECOND, independently published
+   * identifier that corroborates the bind against `txgio_parcel.prop_id`.
+   *
+   * Both are null for every county whose export does not publish them and for
+   * every row ingested before the parser read them. A null is an honest "not
+   * published / not acquired" and can never produce a bind.
+   */
+  propertyNumber: string | null;
+  quickRefId: string | null;
   marketValue: number | null;
   assessedValue: number | null;
   landValue: number | null;
@@ -406,11 +423,14 @@ export async function fetchCountyCadPropertyRoll(
     situs_city: string | null;
     situs_zip: string | null;
     land_acres: unknown;
+    property_number: string | null;
+    quick_ref_id: string | null;
   }>(
     `SELECT prop_id, tax_year, source_vintage,
             market_value, assessed_value, land_value, improvement_value,
             living_area_sqft, year_built, legal_description, exemption_codes,
-            situs_address, situs_city, situs_zip, land_acres
+            situs_address, situs_city, situs_zip, land_acres,
+            property_number, quick_ref_id
        FROM cad_property
       WHERE county_fips = $1
         AND tax_year = $2`,
@@ -452,6 +472,18 @@ export async function fetchCountyCadPropertyRoll(
           ? row.situs_zip.trim()
           : null,
       landAcres: numericOrNull(row.land_acres),
+      // CTX-HAYS-REBIND. Trimmed-or-null, the same rule the situs cells above
+      // use: a whitespace-only identifier is NOT an identifier, and admitting
+      // one would let a blank cell become a join key that matches nothing and
+      // reads as a key that was tried.
+      propertyNumber:
+        typeof row.property_number === "string" && row.property_number.trim()
+          ? row.property_number.trim()
+          : null,
+      quickRefId:
+        typeof row.quick_ref_id === "string" && row.quick_ref_id.trim()
+          ? row.quick_ref_id.trim()
+          : null,
     });
   }
   return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };

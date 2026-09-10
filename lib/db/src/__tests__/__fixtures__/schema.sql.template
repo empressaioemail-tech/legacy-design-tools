@@ -353,7 +353,9 @@ CREATE TABLE @@SCHEMA@@.cad_property (
     property_use_code text,
     source_file text NOT NULL,
     source_vintage text NOT NULL,
-    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    quick_ref_id text,
+    property_number text
 );
 
 

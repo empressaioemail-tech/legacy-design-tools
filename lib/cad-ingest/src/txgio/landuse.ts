@@ -192,5 +192,17 @@ export function normalizeStratMapLandUse(
       return landAcresFromLegalDescription(properties.LEGAL_DESC);
     })(),
     propertyUseCode: normalizeStatLandUse(properties.STAT_LAND_),
+    // CTX-HAYS-REBIND. HARDCODED NULL, and load-bearing. This loader is not
+    // an appraisal roll: it must never write a CAD account's published
+    // identifiers, and `coalesce(incoming, existing)` in p78Merge returns the
+    // EXISTING value for a null incoming, so a StratMap re-apply cannot blank
+    // a crosswalk a real CAD export established. The StratMap shapefile does
+    // carry GEO_ID, and it is deliberately NOT mapped here: geo_id is the
+    // GEOMETRY publisher's key and lives in txgio_parcel.geo_id. Copying it
+    // into cad_property.property_number would make the crosswalk agree with
+    // itself by construction -- one party satisfying both sides of the check,
+    // which is the internal-consistency trap, not a corroboration.
+    quickRefId: null,
+    propertyNumber: null,
   };
 }
