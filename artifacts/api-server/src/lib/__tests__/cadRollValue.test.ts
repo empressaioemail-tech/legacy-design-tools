@@ -11,11 +11,15 @@ import {
   emptyCadRoll,
   gateBakedCadRollRecord,
   gateCadRollWireValuation,
+  isGenuineCadExportRow,
   nonNegativeDollarOrNull,
   positiveDollarOrNull,
   positiveSqftOrNull,
   studioGatedCadRollValuationRefusal,
+  valueBasisFromRow,
   CAD_ROLL_DOLLAR_FIELDS,
+  COUNTY_ASSESSED_VALUE_BASIS,
+  STRATMAP_REDISTRIBUTED_VALUE_BASIS,
   type CadRollWire,
 } from "../cadRollValue";
 import { serializeTwinOnRecord } from "../twinOnRecordSerialize";
@@ -32,11 +36,13 @@ describe("cadRollValue", () => {
     });
     expect(baked.marketValue?.source).toBe("cad_property");
     expect(baked.assessedValue).toBeNull();
+    // CTX-B1: assessedValue null (StratMap structurally cannot populate it)
+    // means this row is stratmap-redistributed, never county-assessed.
     expect(baked.improvementValue).toEqual({
       v: 0,
       source: "cad_property",
       vintage: "2025",
-      valueBasis: "county-assessed",
+      valueBasis: "stratmap-redistributed",
     });
     expect(emptyCadRoll().marketValue).toBeNull();
   });
@@ -134,6 +140,87 @@ describe("cadRollValue", () => {
       valueBasis: "county-assessed",
     });
     expect(baked.livingAreaSqft).toBeNull();
+  });
+});
+
+describe("CTX-B1 (operator ruling A1, 2026-09-10): valueBasis derived from assessed_value, never from source_file", () => {
+  const parcelNodeId = "48021:34137";
+
+  it("required violation test: a StratMap-tier row (assessedValue null) must not serialise with valueBasis: county-assessed", () => {
+    // Shape of McLennan 48309:184293 as measured on production
+    // (_inbox/2026-09-10_ctx_third_party_review.md section 3): market
+    // 6,506,490, land 6,124,540, improvement 381,950, StratMap-redistributed
+    // -- the adapter that produced these dollars structurally never
+    // populates assessed_value (lib/cad-ingest/src/txgio/landuse.ts:181).
+    const stratmapRow = {
+      taxYear: 2025,
+      marketValue: 6506490,
+      assessedValue: null,
+      landValue: 6124540,
+      improvementValue: 381950,
+      livingAreaSqft: null,
+    };
+    expect(isGenuineCadExportRow(stratmapRow)).toBe(false);
+    expect(valueBasisFromRow(stratmapRow)).toBe(STRATMAP_REDISTRIBUTED_VALUE_BASIS);
+
+    const baked = cadRollFromCadProperty(stratmapRow);
+    const wire = cadRollToWire(baked, parcelNodeId, "2025");
+
+    for (const field of CAD_ROLL_DOLLAR_FIELDS) {
+      const f = wire[field];
+      if (f.state === "present" || f.state === "zero") {
+        expect(f.valueBasis).not.toBe(COUNTY_ASSESSED_VALUE_BASIS);
+        expect(f.valueBasis).toBe(STRATMAP_REDISTRIBUTED_VALUE_BASIS);
+      }
+    }
+    // Observed failing before the fix: this exact wire.marketValue.valueBasis
+    // was "county-assessed" (bakedDollar stamped the constant unconditionally).
+    expect(wire.marketValue).toMatchObject({
+      state: "present",
+      v: 6506490,
+      valueBasis: "stratmap-redistributed",
+    });
+  });
+
+  it("control: a genuine CAD-export row (assessedValue present) still serialises unchanged as county-assessed -- Caldwell 48055:32541", () => {
+    // 48055:32541, 308 W San Antonio, Lockhart -- the known-good CAD control
+    // from the same measurement: market 1,884,580, land 431,050, improvement
+    // 1,453,530, "genuine CAD export" with no StratMap origin on any field.
+    // The actual on-file assessed_value is not itself under test here (only
+    // that SOME positive assessed value is on record, which is what a
+    // genuine county export structurally guarantees and StratMap cannot);
+    // a representative non-null figure stands in for it.
+    const cadExportRow = {
+      taxYear: 2026,
+      marketValue: 1884580,
+      assessedValue: 1884580,
+      landValue: 431050,
+      improvementValue: 1453530,
+      livingAreaSqft: null,
+    };
+    expect(isGenuineCadExportRow(cadExportRow)).toBe(true);
+    expect(valueBasisFromRow(cadExportRow)).toBe(COUNTY_ASSESSED_VALUE_BASIS);
+
+    const baked = cadRollFromCadProperty(cadExportRow);
+    const wire = cadRollToWire(baked, "48055:32541", "2026");
+    expect(wire.marketValue).toMatchObject({
+      state: "present",
+      v: 1884580,
+      valueBasis: "county-assessed",
+    });
+    expect(wire.landValue).toMatchObject({ valueBasis: "county-assessed" });
+    expect(wire.improvementValue).toMatchObject({ valueBasis: "county-assessed" });
+  });
+
+  it("assessedValue present at stored 0 is still genuine (0 is a recorded value, not absence)", () => {
+    expect(isGenuineCadExportRow({ assessedValue: 0 })).toBe(true);
+    expect(valueBasisFromRow({ assessedValue: 0 })).toBe(COUNTY_ASSESSED_VALUE_BASIS);
+  });
+
+  it("assessedValue negative or non-finite is treated as not-genuine, same as null", () => {
+    expect(isGenuineCadExportRow({ assessedValue: -1 })).toBe(false);
+    expect(isGenuineCadExportRow({ assessedValue: undefined })).toBe(false);
+    expect(isGenuineCadExportRow({ assessedValue: "not-a-number" })).toBe(false);
   });
 });
 

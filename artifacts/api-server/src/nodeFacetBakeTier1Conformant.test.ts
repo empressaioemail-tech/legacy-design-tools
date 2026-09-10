@@ -1307,6 +1307,11 @@ describe("Wave R: cad_property is the only dollar source", () => {
       cadPropertyRoll: cadPropertyRollFor("1", {
         taxYear: 2025,
         marketValue: 45000,
+        // CTX-B1: Caldwell is a genuine CAD-export county (48055:32541 is
+        // this program's own known-good CAD control) -- assessedValue
+        // present is what makes valueBasis county-assessed rather than
+        // stratmap-redistributed; a real Caldwell row always carries one.
+        assessedValue: 45000,
         landValue: 45000,
         improvementValue: 0,
         livingAreaSqft: null,

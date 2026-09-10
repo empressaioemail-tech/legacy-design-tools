@@ -24,9 +24,11 @@ import { loadParcelRecordCell } from "./parcelRecordCellRead";
 import {
   CAD_PROPERTY_SOURCE,
   COUNTY_ASSESSED_VALUE_BASIS,
+  STRATMAP_REDISTRIBUTED_VALUE_BASIS,
   nonNegativeDollarOrNull,
   positiveSqftOrNull,
   type CadRollValueWire,
+  type ValueBasis,
 } from "./cadRollValue";
 
 export const PARCEL_RECORD_CAD_SOURCE = "parcel_record" as const;
@@ -56,11 +58,18 @@ function reasonFromBasis(basis: string | Record<string, unknown> | null): string
  * `refused` cells (unaccounted, engine-refused, store-not-configured, etc.)
  * fall back to `null` -- the caller keeps the legacy value in that case,
  * same as a slate-miss; refusal is not this wire's own fourth state.
+ *
+ * `valueBasis` is passed in rather than re-derived per rail (CTX-B1,
+ * operator ruling A1): it is one determination per parcel, computed once by
+ * {@link resolveValueBasisFromParcelRecord} and shared across all four
+ * dollar rails so a parcel cannot serve marketValue as county-assessed and
+ * landValue as stratmap-redistributed from the same row.
  */
 export async function dollarFactFromParcelRecord(
   countyFips: string,
   propId: string,
   railKey: DollarScalarRailKey,
+  valueBasis: ValueBasis,
 ): Promise<CadRollValueWire | null> {
   const cell = await loadParcelRecordCell(countyFips, propId, railKey);
   if (cell.state === "refused") return null;
@@ -84,7 +93,7 @@ export async function dollarFactFromParcelRecord(
       v: 0,
       source: CAD_PROPERTY_SOURCE,
       vintage: cell.vintage || null,
-      valueBasis: COUNTY_ASSESSED_VALUE_BASIS,
+      valueBasis,
     };
   }
   return {
@@ -92,8 +101,32 @@ export async function dollarFactFromParcelRecord(
     v: dollars,
     source: CAD_PROPERTY_SOURCE,
     vintage: cell.vintage || null,
-    valueBasis: COUNTY_ASSESSED_VALUE_BASIS,
+    valueBasis,
   };
+}
+
+/**
+ * CTX-B1 (operator ruling A1): the same assessed-value discriminator as the
+ * bake path (`cadRollValue.ts`'s `valueBasisFromRow`), applied to the live
+ * parcel_record overlay. Reads the assessedValue cell directly -- never
+ * gated by that rail's own allowlist state -- because this is a tier
+ * determination, not a value serve: whether or not assessedValue itself is
+ * cut over to live serving for this parcel, its presence in the store is
+ * still positive evidence of a genuine CAD-district export (the StratMap
+ * adapter structurally cannot populate it). Anything other than a present,
+ * coercible non-negative dollar (absent, refused, not-applicable,
+ * unaccounted, malformed) defaults to stratmap-redistributed -- this must
+ * never assert county-assessed without the evidence.
+ */
+export async function resolveValueBasisFromParcelRecord(
+  countyFips: string,
+  propId: string,
+): Promise<ValueBasis> {
+  const cell = await loadParcelRecordCell(countyFips, propId, "assessedValue");
+  if (cell.state === "present" && nonNegativeDollarOrNull(cell.value) != null) {
+    return COUNTY_ASSESSED_VALUE_BASIS;
+  }
+  return STRATMAP_REDISTRIBUTED_VALUE_BASIS;
 }
 
 export type LivingAreaSqftFromParcelRecord =
