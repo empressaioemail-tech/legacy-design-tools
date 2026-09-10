@@ -128,11 +128,12 @@ describe("verdictLayerServe", () => {
     }
   });
 
-  it("the verdict vocabulary carries stamp-missing and unmeasured beside the three P-63 verdicts", () => {
+  it("the verdict vocabulary carries refused, stamp-missing and unmeasured beside the original three P-63 verdicts", () => {
     expect([...LAYER_ABSENCE_VERDICTS]).toEqual([
       "absent-verified",
       "lookup-failed",
       "not-applicable",
+      "refused",
       "stamp-missing",
       "unmeasured",
     ]);

@@ -21,6 +21,21 @@ export const LAYER_ABSENCE_VERDICTS = [
   "lookup-failed",
   "not-applicable",
   /**
+   * P-124 CTX-LEAVES2 (2026-09-10): one of the serve contract's own four
+   * canonical states (`_decisions/2026-09-01_serve_path_never_emits_pipeline_
+   * state.md`: value | absent-verified | not-applicable | refused), not a
+   * pipeline-internal word. Already constructed at runtime by
+   * `zoningSourceMirror` (structuralFactToFacetsWire.ts, the "a district with
+   * no recorded citation" branch) before this card -- that call site was
+   * untyped against `LayerAbsenceWire` and so never surfaced the gap.
+   * `zoningVerdictFromCityLimits` below now also returns it, for its own two
+   * `unmeasured`-emitting branches. This is completing the four canonical
+   * states this type must be able to carry, not adding a fifth
+   * pipeline-internal one -- `unmeasured` below stays for exactly that
+   * distinction.
+   */
+  "refused",
+  /**
    * CTX card F (2026-08-28): the parcel sits inside an incorporated place and
    * carries no zoning stamp. The stamp is missing; authority is not absent.
    */
