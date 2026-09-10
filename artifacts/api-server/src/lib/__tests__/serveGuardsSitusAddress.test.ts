@@ -19,13 +19,20 @@
  * of truth across the two repos is filed as a leave-behind and this test is
  * the interim, one-directional guard.
  *
- * The containment also holds on real data: over all 1,505,610 stored tier-1
+ * The containment also holds on real data: over all 1,516,110 stored tier-1
  * rows in the six CTX counties (staging, read-only, 2026-09-10) there is not
  * one row where an S1 regex matches and this predicate says the string
  * carries a street. In the other direction the predicate is strictly wider:
  * the S1 pair catches 124,319 of the 147,199 street-less rows (84.5%), and
- * the 22,880 it misses are shapes like `", TX"` (22,039 Travis rows) and
- * `", WACO, TX 76705"` (McLennan) that neither regex was written for.
+ * the 22,880 it misses are shapes like `", TX"` and `", WACO, TX 76705"` that
+ * neither regex was written for.
+ *
+ * Counting rules, because these three numbers travel together and are easy to
+ * mix up: 147,199 is every stored situsAddress STRING whose pre-first-comma
+ * segment is empty after btrim, retired records included. 124,319 is the
+ * subset matching /^,\s*,/ or /^,\s*TX\s+\d{5}/i, retired included.
+ * `", TX"` is 22,039 rows on that exact string, of which 16,010 are not
+ * retired. All three from one pass on 2026-09-10.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -95,8 +102,10 @@ describe("CTX-B6 situs address classification", () => {
    */
   it("refuses every street-less shape measured live in the six CTX counties", () => {
     for (const raw of [
-      ", TX 78756", // Travis, 123,120 rows on this regex family
-      ", TX", // Travis, 22,039 rows -- neither factory regex matches this
+      ", TX 78756", // Travis. The ", TX <5-digit zip>" family is 124,319 rows
+      //                across the six counties (123,120 of them not retired).
+      ", TX", // Travis, 22,039 rows on this exact string (16,010 not retired)
+      //          -- and NEITHER factory regex matches it.
       ", TX 0", // Travis, 75 rows -- a degenerate ZIP
       ", WACO, TX 76705", // McLennan, 157 rows -- a city and a ZIP, no street
       ", LORENA, TX 76655", // McLennan
