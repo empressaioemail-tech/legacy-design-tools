@@ -392,6 +392,14 @@ export interface ConformantCadPropertyRoll {
       exemptionCodes?: unknown;
       /** The declared-vintage roll's own situs (CTX-B6). Optional so old callers still type-check. */
       situsAddress?: unknown;
+      /**
+       * The declared-vintage roll's own city, ZIP and acreage (CTX-B7).
+       * Optional for the same reason `situsAddress` is: a caller built before
+       * this card still type-checks and simply resolves to the claim.
+       */
+      situsCity?: unknown;
+      situsZip?: unknown;
+      landAcres?: unknown;
     }
   >;
   declaredTaxYear: number | null;
@@ -572,6 +580,10 @@ function buildAcreageAbsence(input: {
   /** True when a parcel-join row existed to examine (state `joined`/`joined-situs` with a matched row). */
   ringRowAvailable: boolean;
   claimLandAcres: number | null;
+  /** True when the declared-vintage `cad_property` read actually happened (CTX-B7). */
+  declaredRollConsulted: boolean;
+  /** True when that read returned a row for this prop_id (CTX-B7). */
+  declaredRollRowPresent: boolean;
   nowIso: string;
 }): Tier1LeafAbsence {
   const {
@@ -581,20 +593,36 @@ function buildAcreageAbsence(input: {
     placement,
     ringRowAvailable,
     claimLandAcres,
+    declaredRollConsulted,
+    declaredRollRowPresent,
     nowIso,
   } = input;
   const entitlement = `${input.access.discoverability}/${input.access.entitlement}`;
+  // CTX-B7: the THIRD source is named in the authority and the scope, because
+  // the scope of an absence is part of the absence. Until this card this
+  // absence said "the ring and the claim were checked" while
+  // cad_property.land_acres at the declared vintage -- sitting in the row this
+  // payload's dollars come from -- had never been read. 103,913 of these
+  // refusals had a usable value there.
+  const rollPhrase = !declaredRollConsulted
+    ? "the declared-vintage cad_property roll was NOT consulted for this county"
+    : declaredRollRowPresent
+      ? "cad_property.land_acres at this county's declared CAD vintage carries nothing usable"
+      : "cad_property at this county's declared CAD vintage carries no row for this prop_id";
   const authority =
-    `${countyName} County parcel-join geometry (see provenance.parcelJoin) and the ` +
-    `conformant-v1 cad-parcel-roll claim for county_fips ${countyFips}`;
+    `${countyName} County parcel-join geometry (see provenance.parcelJoin), the ` +
+    `declared-vintage cad_property roll, and the conformant-v1 cad-parcel-roll ` +
+    `claim for county_fips ${countyFips}`;
   const scopeSearched =
     `parcel-join geometry for ${parcelNodeId} (see provenance.parcelJoin); ` +
+    `cad_property.land_acres at this county's declared CAD vintage; ` +
     `claim.landAcres on the cad-parcel-roll atom body (${placement} claim placement); ` +
     `entitlement bound ${entitlement}`;
   const claimText =
-    claimLandAcres == null
+    (claimLandAcres == null
       ? "the claim carries no landAcres"
-      : `the claim's landAcres (${claimLandAcres}) is not a usable positive number`;
+      : `the claim's landAcres (${claimLandAcres}) is not a usable positive number`) +
+    `, and ${rollPhrase}`;
 
   if (!ringRowAvailable) {
     return {
@@ -619,7 +647,7 @@ function buildAcreageAbsence(input: {
     asOf: nowIso,
     basis:
       `${parcelNodeId}: the parcel-join row's geometry did not yield a usable ring, and ` +
-      `${claimText} — both the ring and the claim were genuinely checked and carry nothing`,
+      `${claimText} — all three sources were genuinely checked and carry nothing`,
   };
 }
 
@@ -809,6 +837,51 @@ export interface ConformantTier1Payload extends Omit<
      * re-bake.
      */
     situsAddressSupersededClaim: string | null;
+    /**
+     * Which upstream supplied `baseFacts.situsCity` / `baseFacts.situsZip`
+     * (CTX-B7). Never null: `"none"` is the state when the leaf holds an earned
+     * absence. Two separate keys because the two leaves resolve independently
+     * -- a roll row can carry a city and no ZIP, and a payload that reported
+     * one source for both would be asserting something it did not check.
+     */
+    situsCitySource: SitusLocalityOrigin;
+    situsZipSource: SitusLocalityOrigin;
+    /**
+     * The claim values the declared roll overrode, when they differed; null
+     * otherwise. Same audit purpose as `situsAddressSupersededClaim`: without
+     * them a re-bake that silently stopped preferring the roll is invisible,
+     * and 30,841 parcels change city under this rule.
+     */
+    situsCitySupersededClaim: string | null;
+    situsZipSupersededClaim: string | null;
+    /**
+     * Whether the declared-vintage `cad_property` row was provably this parcel
+     * (CTX-B7). One roll row decides all four leaves, so the verdict is
+     * recorded once. `zip-conflict` means the row's own situs ZIP disagreed
+     * with the claim's, i.e. the prop_id names a different parcel in the two
+     * vintages, and every roll-over-claim preference was refused for it.
+     */
+    declaredRollTrust: DeclaredRollTrust;
+    /**
+     * What the same-parcel gate REFUSED, per leaf. Null where it refused
+     * nothing. A refusal nobody can count is how a re-bake stops refusing
+     * without anyone noticing; the per-run counters in the CLI are the
+     * aggregate half of the same control.
+     */
+    declaredRollRefused: {
+      situsAddress: string | null;
+      situsCity: string | null;
+      situsZip: string | null;
+      acreage: number | null;
+    };
+    /**
+     * Which of the THREE acreage sources supplied `baseFacts.acreage` (CTX-B7).
+     * `"parcel-ring"` is a measurement of this parcel's geometry and outranks
+     * both transcribed cells; `"declared-roll"` is `cad_property.land_acres` at
+     * the county's declared vintage; `"claim"` is the atom body's `landAcres`.
+     * Never null: `"none"` is the state when the leaf holds an earned absence.
+     */
+    acreageSource: AcreageOrigin;
     /** The earned absence when no land use was projected; null when one was. */
     landUseAbsence: LandUseAbsence | null;
   };
@@ -856,6 +929,41 @@ export interface ConformantTier1BuildInput {
    * `provenance.situsAddressSupersededClaim`. Null on every other origin.
    */
   situsAddressSupersededClaim?: string | null;
+  /**
+   * A usable declared-roll address the same-parcel gate refused (CTX-B7).
+   * Written to `provenance.declaredRollRefused.situsAddress`.
+   */
+  situsAddressRefusedRoll?: string | null;
+  /**
+   * CTX-B7. The resolved situs city / ZIP and the acreage-without-a-ring, each
+   * with the origin that decided it. Threaded from the CLI, which owns the
+   * declared-roll read, so this module stays pure and DB-free.
+   *
+   * OMITTING THESE IS A VALID PRE-CTX-B7 CALL and resolves to the claim,
+   * exactly as `situsAddressOrigin` does one field up: the builder falls back
+   * to `claim.situsCity` / `claim.situsZip` / `conformantAcreageFromClaim`, so
+   * an old caller keeps its old behaviour rather than silently losing a leaf.
+   */
+  situsLocality?: {
+    city: ResolvedSitusLocality;
+    zip: ResolvedSitusLocality;
+  } | null;
+  /**
+   * The acreage to use when the parcel-join ring yields nothing, and where it
+   * came from. When omitted the builder uses `conformantAcreageFromClaim` and
+   * records origin `"claim"` / `"none"`, which is the pre-CTX-B7 behaviour.
+   */
+  acreageWithoutRing?: {
+    acreage: BaseFacts["acreage"];
+    origin: AcreageOrigin;
+    refusedRollAcres: number | null;
+  } | null;
+  /**
+   * Whether the declared-vintage roll row is provably this parcel (CTX-B7).
+   * Threaded from the CLI so the same verdict decides all four leaves and the
+   * payload can record it once. Omitted by a pre-CTX-B7 caller.
+   */
+  declaredRollTrust?: DeclaredRollTrust;
   access: { discoverability: string; entitlement: string };
   accessNormalizedFrom: string | null;
   publishRunId: string | undefined;
@@ -1066,6 +1174,31 @@ export function buildConformantTier1Payload(
         })
       : null;
 
+  // CTX-B7. The declared-vintage roll, then the claim, then an absence -- the
+  // same rule and the same already-loaded row the dollars come from. Omitted by
+  // a pre-CTX-B7 caller, which resolves to the claim and keeps its behaviour.
+  const localityFallback = (raw: string | null): ResolvedSitusLocality => ({
+    value: raw,
+    origin: raw == null ? "none" : "claim",
+    supersededClaimValue: null,
+    refusedRollValue: null,
+    trust: "uncorroborated",
+  });
+  const situsCityResolved =
+    input.situsLocality?.city ?? localityFallback(claim.situsCity);
+  const situsZipResolved =
+    input.situsLocality?.zip ?? localityFallback(claim.situsZip);
+  const acreageResolved =
+    input.acreageWithoutRing ??
+    (() => {
+      const a = conformantAcreageFromClaim(claim.landAcres);
+      return {
+        acreage: a,
+        origin: (a ? "claim" : "none") as AcreageOrigin,
+        refusedRollAcres: null,
+      };
+    })();
+
   const tier1 = assembleTier1Payload({
     nodeId: parcelNodeId,
     countyFips,
@@ -1073,10 +1206,10 @@ export function buildConformantTier1Payload(
     facetSchemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
     apn,
     situsAddress: input.situsAddress,
-    situsCity: claim.situsCity,
+    situsCity: situsCityResolved.value,
     situsState: situsStateFromCountyFips(countyFips),
     situsStateSource: "derived-county-fips",
-    situsZip: claim.situsZip,
+    situsZip: situsZipResolved.value,
     landUse,
     cadRoll: cadFacts.cadRoll,
     yearBuilt: cadFacts.yearBuilt,
@@ -1087,7 +1220,7 @@ export function buildConformantTier1Payload(
     // the prop_id join gate is recorded on provenance.parcelJoin instead.
     landUseGateBlocked: false,
     ring,
-    acreageWithoutRing: conformantAcreageFromClaim(claim.landAcres),
+    acreageWithoutRing: acreageResolved.acreage,
     zoningDistrictRaw: row?.zoning_district ?? null,
     zoningJurisdictionRaw: row?.zoning_jurisdiction ?? null,
     parcelSource: CONFORMANT_TIER1_SOURCE,
@@ -1165,6 +1298,10 @@ export function buildConformantTier1Payload(
       field,
       placement,
       access: input.access,
+      // CTX-B7: name the second source in the absence's own scope. The read
+      // state is derived from the roll read itself, never from what a caller
+      // passed, so the absence cannot claim a scope nobody searched.
+      declaredRoll: { consulted: cadPropConsulted, rowPresent: cadPropRow != null },
       nowIso,
     });
   const landUseLeaf: ConformantBaseFacts["landUse"] =
@@ -1218,6 +1355,17 @@ export function buildConformantTier1Payload(
       access: input.access,
       ringRowAvailable: row != null,
       claimLandAcres: claim.landAcres,
+      // CTX-B7: the THIRD source, so this absence can no longer say "both the
+      // ring and the claim were checked" while a declared-roll `land_acres`
+      // sat unread in the row this payload's dollars came from. Derived from
+      // the roll read itself (`cadPropConsulted` / `cadPropRow`), never from
+      // whether a caller happened to pass a resolution -- a control whose
+      // input can be supplied by the thing it is checking is not a control.
+      // Reaching this branch at all now means the roll carried nothing usable:
+      // had it carried a value, `acreageResolved` would have supplied it and
+      // `tier1.baseFacts.acreage` would be non-null.
+      declaredRollConsulted: cadPropConsulted,
+      declaredRollRowPresent: cadPropRow != null,
       nowIso,
     });
 
@@ -1254,6 +1402,35 @@ export function buildConformantTier1Payload(
       ...provenance,
       situsAddressSource: input.situsAddressOrigin ?? "claim",
       situsAddressSupersededClaim: input.situsAddressSupersededClaim ?? null,
+      // CTX-B7. Which upstream supplied each locality leaf and which claim the
+      // declared roll overrode. The counters in the CLI are the run-level half
+      // of the same control; these two are the per-parcel half, and they are
+      // what makes a silent regression on a re-bake visible on the row itself.
+      situsCitySource: situsCityResolved.origin,
+      situsCitySupersededClaim: situsCityResolved.supersededClaimValue,
+      situsZipSource: situsZipResolved.origin,
+      situsZipSupersededClaim: situsZipResolved.supersededClaimValue,
+      // The same-parcel gate's verdict, recorded ONCE for the whole payload
+      // because one roll row decides all four leaves. Without this key a reader
+      // cannot tell a parcel whose claim simply matched the roll from one whose
+      // roll row was REFUSED as a different parcel, and those are opposite
+      // facts wearing the same served value.
+      declaredRollTrust: input.declaredRollTrust ?? "uncorroborated",
+      // What the gate refused, per leaf. Null when it refused nothing.
+      declaredRollRefused: {
+        situsAddress: input.situsAddressRefusedRoll ?? null,
+        situsCity: situsCityResolved.refusedRollValue,
+        situsZip: situsZipResolved.refusedRollValue,
+        acreage: acreageResolved.refusedRollAcres,
+      },
+      // The ring wins whenever it produced a value; `acreageResolved` is only
+      // ever consulted for the without-a-ring slot, so read the real outcome
+      // off the assembled payload rather than restating the caller's intent.
+      acreageSource: tier1.baseFacts.acreage
+        ? ring
+          ? "parcel-ring"
+          : acreageResolved.origin
+        : "none",
       landUseSource: landUseSourceLeaf,
       parcelJoin,
       landUseOrigin,
@@ -1417,6 +1594,16 @@ const CLAIM_FIELD_LABEL: Record<ClaimAbsenceField, string> = {
 };
 
 /**
+ * The `cad_property` column each claim field is recoverable from, named in the
+ * absence's own scope so a reader can reproduce the search (CTX-B7).
+ */
+const CLAIM_FIELD_COLUMN: Record<ClaimAbsenceField, string> = {
+  situsCity: "situs_city",
+  situsZip: "situs_zip",
+  situsAddress: "situs_address",
+};
+
+/**
  * The earned absence for a situs field the CAD claim carries.
  *
  * `absent-verified` is honest here and needs no `lookup-failed` counterpart,
@@ -1440,10 +1627,42 @@ export function claimLeafAbsence(input: {
   field: ClaimAbsenceField;
   placement: "nested" | "flat";
   access: { discoverability: string; entitlement: string };
+  /**
+   * What the DECLARED-VINTAGE `cad_property` read did for this parcel (CTX-B7).
+   *
+   * THE SCOPE OF AN ABSENCE IS PART OF THE ABSENCE. Until this card the basis
+   * said "the cad-parcel-roll claim was read and carries no situsCity" while a
+   * second source -- the declared-vintage row this same payload's dollars come
+   * from -- had never been consulted. That sentence was literally true about
+   * the claim and materially wrong about the parcel, and it is exactly what
+   * made 78,428 recoverable cities survive six leaf audits looking like
+   * finished work: a well-formed `absent-verified` reads as a positive finding.
+   * Naming both sources is what makes the absence say what it actually
+   * establishes.
+   *
+   * Omitted by a pre-CTX-B7 caller, which keeps the old single-source wording
+   * rather than asserting a scope it did not search.
+   */
+  declaredRoll?: { consulted: boolean; rowPresent: boolean } | null;
   nowIso: string;
 }): Tier1LeafAbsence {
   const { parcelNodeId, countyFips, countyName, field, placement, nowIso } = input;
   const label = CLAIM_FIELD_LABEL[field];
+  const roll = input.declaredRoll ?? null;
+  const rollScope = roll
+    ? roll.consulted
+      ? roll.rowPresent
+        ? `; and cad_property.${CLAIM_FIELD_COLUMN[field]} at this county's declared CAD vintage`
+        : `; cad_property at this county's declared CAD vintage carries no row for this prop_id`
+      : "; the declared-vintage cad_property roll was NOT consulted for this county"
+    : "";
+  const rollBasis = roll
+    ? roll.consulted
+      ? roll.rowPresent
+        ? ` The declared-vintage cad_property row -- the same row this payload's cadRoll dollars, year built, legal description and exemption codes come from -- was also read and its ${CLAIM_FIELD_COLUMN[field]} is empty, so both sources agree`
+        : ` The declared-vintage cad_property roll was consulted and holds no row for this prop_id at all, so it could not supply one either`
+      : ` The declared-vintage cad_property roll was NOT consulted for this county, so this absence is scoped to the claim alone and is not evidence about the roll`
+    : "";
   return {
     status: "absent",
     verdict: "absent-verified",
@@ -1452,13 +1671,13 @@ export function claimLeafAbsence(input: {
       `cad-parcel-roll claim for county_fips ${countyFips}`,
     scopeSearched:
       `claim.${field} on the cad-parcel-roll atom body for ${parcelNodeId} ` +
-      `(${placement} claim placement); entitlement bound ` +
+      `(${placement} claim placement)${rollScope}; entitlement bound ` +
       `${input.access.discoverability}/${input.access.entitlement}`,
     asOf: nowIso,
     basis:
       `${parcelNodeId}: the cad-parcel-roll claim for this parcel was read and ` +
       `carries no ${field}. This is a verified absence of the CAD-carried ` +
-      `${label}, not a finding that the parcel has none`,
+      `${label}, not a finding that the parcel has none.${rollBasis}`,
   };
 }
 
@@ -1574,6 +1793,16 @@ export interface ResolvedSitusAddress {
    * replaced it, rather than the change being invisible after a re-bake.
    */
   supersededClaimValue: string | null;
+  /**
+   * A usable declared-roll address the same-parcel gate REFUSED (CTX-B7).
+   * Non-null only when `declaredRollMayOverride` said no and the roll carried a
+   * usable value. The counterpart of `supersededClaimValue` on the other side
+   * of the gate: a refusal nobody can see is how a re-bake stops refusing
+   * without anyone noticing.
+   */
+  refusedRollValue: string | null;
+  /** Why the roll was or was not allowed to win. Recorded on the payload. */
+  trust: DeclaredRollTrust;
 }
 
 /**
@@ -1590,26 +1819,47 @@ export function resolveConformantSitusAddress(input: {
   claimRaw: string | null | undefined;
   /** `cad_property.situs_address` at the county's DECLARED tax_year, or null when no row. */
   rollRaw: string | null | undefined;
-  /** True when the prop_id has no row at all in the declared roll (CTX-RETIRE). */
-  rollAbsent: boolean;
+  /**
+   * Whether the declared-vintage row is provably THIS parcel (P-124 CTX-B7).
+   * `no-roll-row` is the retired branch and replaces the `rollAbsent` boolean
+   * this function took as merged.
+   *
+   * WHY THIS PARAMETER EXISTS. As CTX-B6 merged it, this function stated "the
+   * roll wins even over a usable claim", unconditionally. On a county whose
+   * prop_ids are renumbered between vintages that writes ANOTHER PARCEL'S
+   * street over a correct one. Measured 2026-09-10 on the six CTX counties:
+   * 52,158 parcels would have a usable claim street replaced by a different
+   * roll street, and 29,539 of those sit on a row whose situs ZIP proves it is
+   * a different parcel (Hays 29,395, Caldwell 77, Travis 67). None of it had
+   * written yet -- CTX-B6 fixed the writer and the re-bake had not run -- so
+   * the gate lands before the first row is written rather than after.
+   */
+  trust: DeclaredRollTrust;
 }): ResolvedSitusAddress {
   // RETIRED FIRST, and unconditionally. A retirement declaration must not be
   // gated by data quality (CTX-RETIRE), and by construction there is no
   // declared-roll row to prefer.
-  if (input.rollAbsent) {
+  if (input.trust === "no-roll-row") {
     const raw = input.claimRaw == null ? null : String(input.claimRaw).trim();
     return {
       situs: raw === "" ? null : raw,
       origin: "retired-claim",
       unusable: null,
       supersededClaimValue: null,
+      refusedRollValue: null,
+      trust: input.trust,
     };
   }
 
   const roll = classifyRawSitusAddress(input.rollRaw);
   const claim = classifyRawSitusAddress(input.claimRaw);
 
-  if (roll.kind === "usable") {
+  // Computed once, BEFORE the branches, so the "did the gate refuse this roll
+  // row" question has one answer per parcel rather than two evaluations that
+  // could drift.
+  const gateAcceptsRoll = declaredRollMayOverride(input.trust, claim.kind === "usable");
+
+  if (roll.kind === "usable" && gateAcceptsRoll) {
     return {
       situs: roll.value,
       origin: "declared-roll",
@@ -1622,8 +1872,14 @@ export function resolveConformantSitusAddress(input: {
           : claim.kind === "unusable"
             ? claim.raw
             : null,
+      refusedRollValue: null,
+      trust: input.trust,
     };
   }
+  // CTX-B7: a usable roll address the gate REFUSED. Recorded, never silently
+  // dropped, and it does NOT make the claim unusable -- the claim is still the
+  // best value this parcel has.
+  const refusedRollValue = roll.kind === "usable" ? roll.value : null;
 
   if (claim.kind === "usable") {
     return {
@@ -1631,19 +1887,32 @@ export function resolveConformantSitusAddress(input: {
       origin: "claim",
       unusable: null,
       supersededClaimValue: null,
+      refusedRollValue,
+      trust: input.trust,
     };
   }
 
-  // Neither carried a usable address. Quote whichever source carried
-  // SOMETHING, preferring the declared roll: it is the authority this payload
-  // otherwise reports, so its refusal is the one worth showing.
-  const unusable =
-    roll.kind === "unusable"
+  // Neither carried a usable address the gate would accept. Quote whichever
+  // source carried SOMETHING. The claim is preferred here, not the roll: when
+  // the gate refused the roll row, that row is not this parcel, so quoting ITS
+  // junk in this parcel's basis would be attributing another parcel's defect.
+  // Where the gate did NOT refuse, the roll is preferred for CTX-B6's reason --
+  // it is the authority this payload otherwise reports.
+  const rollUnusable =
+    roll.kind === "unusable" && gateAcceptsRoll
       ? { raw: roll.raw, reason: roll.reason }
-      : claim.kind === "unusable"
-        ? { raw: claim.raw, reason: claim.reason }
-        : null;
-  return { situs: null, origin: "none", unusable, supersededClaimValue: null };
+      : null;
+  const claimUnusable =
+    claim.kind === "unusable" ? { raw: claim.raw, reason: claim.reason } : null;
+  const unusable = rollUnusable ?? claimUnusable;
+  return {
+    situs: null,
+    origin: "none",
+    unusable,
+    supersededClaimValue: null,
+    refusedRollValue,
+    trust: input.trust,
+  };
 }
 
 /**
@@ -1712,6 +1981,406 @@ export function situsAddressUnusableAbsence(input: {
       "the parcel has no address, and any situs city or ZIP this parcel does " +
       "carry is unaffected and stays on its own leaf",
   };
+}
+
+// ---------------------------------------------------------------------------
+// THE SIBLINGS CTX-B6 LEFT (P-124 CTX-B7, 2026-09-10).
+//
+// CTX-B6 fixed `situsAddress` and named three leaves recoverable from the SAME
+// already-loaded declared-vintage row: `situsCity`, `situsZip` and the acreage
+// claim fallback. It left them because it believed `situsCity` moved zoning
+// jurisdiction for roughly 78,000 parcels. THAT BELIEF IS FALSE, and this card
+// disproved it two ways rather than one:
+//
+//   CODE. `resolveZoningJurisdiction` (cad-ingest zoning-layers.ts:571-575)
+//   consults `situsCity` ONLY when `txgio_parcel.zoning_jurisdiction` is blank.
+//   `assembleTier1Payload` (nodeFacetTier1Assemble.ts:350-384) writes the
+//   `zoning` facet -- the only place `jurisdictionKey` survives -- ONLY when
+//   `zoning_district` is non-blank. And the single writer of either column,
+//   `flushBatch` in cad-ingest zoning-stamp-db.ts:139-141, sets BOTH in one
+//   UPDATE. The other writer (backfill-bastrop-tier1-zoning-provenance.mjs)
+//   only ever FILLS a missing jurisdiction where a district exists. So a
+//   district without a jurisdiction is unwritable, and where a district exists
+//   the situs fallback is unreachable.
+//
+//   MEASUREMENT. 1,568,849 txgio_parcel rows across the six CTX counties,
+//   staging, 2026-09-10: 621,147 carry both columns, 947,702 carry neither,
+//   and ZERO carry one without the other.
+//
+// The situs fallback is therefore live code that cannot reach a served zoning
+// jurisdiction on this data. It is not dead -- a county stamped by some future
+// writer that sets only one column would reach it -- but it is unreachable
+// today, and the coupling that blocked CTX-B6 does not exist.
+//
+// WHAT THE PRECEDENCE IS RIGHT FOR, PER LEAF. It is not one answer three times:
+//
+//   situsZip  -- display only (its one consumer outside the assembler is
+//                smartSiteStub.ts's composeSitusLabel). Roll-over-claim, same
+//                as situsAddress, symmetrical and low-risk.
+//   situsCity -- the same, once the zoning coupling is disproved. Recorded with
+//                its own provenance pair so a re-bake that stopped preferring
+//                the roll is visible.
+//   acreage   -- NOT the same rule. Acreage has a THIRD source that outranks
+//                both: the parcel-join ring, which is a measurement of this
+//                parcel's geometry rather than a transcription of a roll cell.
+//                The roll's `land_acres` slots BELOW the ring and ABOVE the
+//                claim's `landAcres`. Applying B6's rule verbatim here would
+//                have put a roll cell above a measured ring, which is a
+//                different and worse defect than the one being fixed.
+//
+// AND THE FINDING THAT IS WORTH MORE THAN THE FIX. Every one of the 103,913
+// acreage cells whose declared roll holds a usable `land_acres` is served today
+// as `verdict: "refused"` with `lookupVerdict: "lookup-failed"` -- a DECLARED
+// REFUSAL, sitting on top of a value the same payload's dollars already came
+// from. Zero of them are bare nulls. CTX-LEAVES2's basis text is literally true
+// ("geometry was never looked up ... and the claim carries no landAcres") and
+// materially false about the parcel, because a third source was never
+// consulted. ENFORCEMENT names the inverse of ruling A1 for exactly this:
+// do not serve a declared absence or refusal over a value the declared roll
+// holds. An honest refusal over recoverable data is worse than a bare null,
+// because a refusal reads as a finding.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// IS THE DECLARED-ROLL ROW THE SAME PARCEL? (P-124 CTX-B7, 2026-09-10)
+//
+// Every roll-over-claim preference in this module -- CTX-B6's `situsAddress`
+// included -- joins the atom CLAIM to `cad_property` on `prop_id` alone, at the
+// county's DECLARED tax_year. That join is only sound if a prop_id names the
+// same parcel in both vintages. On one of the six CTX counties it does not.
+//
+// MEASURED, staging, 2026-09-10, `cad_property` 2025 JOINed to 2026 on
+// (county_fips, prop_id) where both rows carry a situs ZIP:
+//
+//     48453 Travis     333,032 of 333,937 same ZIP    99.73%
+//     48055 Caldwell    24,356 of  24,549 same ZIP    99.21%
+//     48209 Hays        68,305 of 126,808 same ZIP    53.86%
+//
+// The ZIP is the right discriminator precisely because neither vintage
+// FORMATS it: a differently-transcribed street proves nothing, a different ZIP
+// proves a different parcel. Three independent fields converge on the Hays
+// figure -- ZIP 53.86%, situs city 53.2%, normalised street ~52% -- and Hays
+// claims agree with their OWN vintage on 104,937 of 104,937 rows. Each claim is
+// a perfect copy of its own vintage; the disagreement is entirely cross-vintage.
+// That is prop_id RENUMBERING, which `buildRecordRetirement`'s own basis text
+// already names ("split, merged, renumbered or removed"), and it shows up in the
+// city data as a near-symmetric all-pairs scramble (SAN MARCOS->KYLE 2,268
+// beside KYLE->SAN MARCOS 1,641) rather than the one-directional shift a real
+// annexation produces.
+//
+// The codebase already knew this about this county. 48209 and 48491 are the two
+// entries in `LANDUSE_JOIN_DISABLED_FIPS_SEED` (`./joinNormalize`), gate-blocked
+// because "a CAD prop_id joined into a divergent TxGIO numbering attaches
+// another parcel's zoning stamp and geometry". That is the same failure with the
+// same key; it was applied to the CAD-to-TxGIO join and never to the CAD-to-CAD
+// join across vintages.
+//
+// SO THE PREFERENCE IS GATED, per parcel, and it costs nothing: the claim
+// already carries `situsZip` and the declared row already carries `situs_zip`,
+// and both are already loaded. No new query, no county-level threshold, no
+// tuned constant, no allowlist to go stale.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the declared-vintage `cad_property` row can be trusted to be THIS
+ * parcel. Five states, and they are not collapsible: "nothing was established"
+ * is a different fact from "it was established false", and the rule below
+ * treats them differently.
+ */
+export type DeclaredRollTrust =
+  /** No row at all in the declared roll: a retired record (CTX-RETIRE). */
+  | "no-roll-row"
+  /** The claim's own taxYear IS the declared vintage, so it is literally the same row. */
+  | "same-vintage"
+  /** Claim ZIP and roll ZIP both present and equal. */
+  | "zip-corroborated"
+  /** Claim ZIP and roll ZIP both present and DIFFERENT: not this parcel. */
+  | "zip-conflict"
+  /** One or both ZIPs absent. Nothing established either way. */
+  | "uncorroborated";
+
+/** First five digits of a situs ZIP, or null. ZIP+4 and stray spacing collapse. */
+function zip5(v: unknown): string | null {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v).slice(0, 5);
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t === "" ? null : t.slice(0, 5);
+}
+
+/**
+ * Decide whether the declared-vintage roll row is the same parcel as the claim.
+ * PURE, and every input is already in hand at the call site.
+ */
+export function resolveDeclaredRollTrust(input: {
+  /** True when the prop_id has no row at all in the declared roll. */
+  rollAbsent: boolean;
+  /** `claim.taxYear` from the atom body's sourceIdentifiers. */
+  claimTaxYear: number | null;
+  /** The county's declared CAD tax year, from `tryResolveDeclaredCadVintage`. */
+  declaredTaxYear: number | null;
+  /** `claim.situsZip`, verbatim. */
+  claimSitusZip: string | null | undefined;
+  /** `cad_property.situs_zip` on the declared-vintage row. */
+  rollSitusZip: unknown;
+}): DeclaredRollTrust {
+  if (input.rollAbsent) return "no-roll-row";
+  if (
+    input.claimTaxYear != null &&
+    input.declaredTaxYear != null &&
+    input.claimTaxYear === input.declaredTaxYear
+  ) {
+    return "same-vintage";
+  }
+  const claimZip = zip5(input.claimSitusZip);
+  const rollZip = zip5(input.rollSitusZip);
+  if (claimZip == null || rollZip == null) return "uncorroborated";
+  return claimZip === rollZip ? "zip-corroborated" : "zip-conflict";
+}
+
+/**
+ * May the declared roll override what the claim carries at this leaf?
+ *
+ * THE RULE IS DELIBERATELY ASYMMETRIC, because the two risks are not symmetric.
+ *
+ *   A GAIN -- the claim carries nothing and the roll carries something --
+ *   converts an absence into data. Nothing usable is destroyed, and ENFORCEMENT's
+ *   inverse of ruling A1 positively requires it: do not serve a declared absence
+ *   or refusal over a value the declared roll holds. So a gain is taken unless
+ *   the ZIP actively CONTRADICTS the row, which is the one state where the roll
+ *   value is known to belong to a different parcel.
+ *
+ *   A SWAP -- the claim carries something and the roll carries something else --
+ *   converts data into other data. On an unverified key that means another
+ *   parcel's data written over a value that is currently correct for its own
+ *   vintage. So a swap is taken ONLY on positive corroboration. "Nothing was
+ *   established" is not a licence to overwrite.
+ *
+ * Measured consequence across the six CTX counties, 2026-09-10: 78,360 of 78,428
+ * gains are taken, 1,219 swaps are taken (real corrections on parcels the ZIP
+ * confirms), and 29,621 swaps are REFUSED -- every one of which would have
+ * written another parcel's value. Applied to `situsAddress` it also refuses the
+ * 29,539 other-parcel street overwrites CTX-B6's merged rule would otherwise
+ * perform on the next re-bake, while leaving all 139,283 of its recoveries and
+ * its 14,364 legitimate Travis formatting corrections intact.
+ */
+export function declaredRollMayOverride(
+  trust: DeclaredRollTrust,
+  claimCarriesAValue: boolean,
+): boolean {
+  switch (trust) {
+    case "no-roll-row":
+      // Retired. There is no roll row to prefer, and a retirement declaration is
+      // never gated by data quality (CTX-RETIRE). Reached first everywhere.
+      return false;
+    case "zip-conflict":
+      return false;
+    case "same-vintage":
+    case "zip-corroborated":
+      return true;
+    case "uncorroborated":
+      return !claimCarriesAValue;
+  }
+}
+
+/** Where a situs city or ZIP came from. Recorded on `provenance.situsLocalitySource`. */
+export type SitusLocalityOrigin =
+  /** `cad_property` at the county's declared tax_year -- the same row the dollars come from. */
+  | "declared-roll"
+  /** The cad-parcel-roll atom claim, because the declared roll carried nothing. */
+  | "claim"
+  /** A roll-absent (retired) record's last-known claim, read ungated per CTX-RETIRE. */
+  | "retired-claim"
+  /** Neither source carried anything; the leaf holds an earned absence. */
+  | "none";
+
+export interface ResolvedSitusLocality {
+  /** The value the payload is built from. Null whenever the leaf earns an absence. */
+  value: string | null;
+  origin: SitusLocalityOrigin;
+  /**
+   * The claim value the declared roll overrode, when the two differ. Non-null
+   * ONLY on `declared-roll`, exactly like `situsAddressSupersededClaim`.
+   */
+  supersededClaimValue: string | null;
+  /**
+   * The roll value that was REFUSED because the row is not provably this parcel
+   * (CTX-B7). Non-null only when `declaredRollMayOverride` returned false and
+   * the roll actually carried something. It is the counterpart of
+   * `supersededClaimValue` on the other side of the gate: without it, a refusal
+   * leaves no record and a re-bake that quietly stopped refusing is invisible.
+   */
+  refusedRollValue: string | null;
+  /** Why the roll was or was not allowed to win. Recorded on the payload. */
+  trust: DeclaredRollTrust;
+}
+
+/**
+ * Decide `situsCity` / `situsZip` and say where it came from. PURE, and it adds
+ * no query: the caller supplies the declared-roll row it ALREADY loaded for the
+ * dollar facets. `joinIntegrityGate.ts` `fetchCountyCadPropertyRoll` gained two
+ * columns, not a second read.
+ *
+ * The rule is `resolveConformantSitusAddress`'s, deliberately: retired first
+ * and unconditionally (CTX-RETIRE -- a retirement declaration is never gated by
+ * data quality, and by construction there is no declared-roll row to prefer),
+ * then the declared roll, then the claim, then an earned absence.
+ *
+ * A BLANK ROLL CELL FALLS THROUGH TO THE CLAIM. That is what makes this fix
+ * incapable of destroying data: 1,676 Hays parcels carry a claim city where the
+ * declared roll's own cell is empty, and every one of them keeps its city.
+ * Measured 2026-09-10; the case is pinned in the tests as `roll blank, claim
+ * kept`.
+ */
+export function resolveConformantSitusLocality(input: {
+  /** `claim.situsCity` / `claim.situsZip`, verbatim. */
+  claimRaw: string | null | undefined;
+  /** `cad_property.situs_city` / `.situs_zip` at the DECLARED tax_year, or null when no row. */
+  rollRaw: string | null | undefined;
+  /**
+   * Whether the declared-vintage row is provably THIS parcel. See
+   * `resolveDeclaredRollTrust`. `no-roll-row` is the retired branch.
+   */
+  trust: DeclaredRollTrust;
+}): ResolvedSitusLocality {
+  const trim = (v: string | null | undefined): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t === "" ? null : t;
+  };
+  const claim = trim(input.claimRaw);
+  // RETIRED FIRST, and unconditionally, exactly as in
+  // `resolveConformantSitusAddress`: a retirement declaration must not be gated
+  // by data quality (CTX-RETIRE), and by construction there is no declared-roll
+  // row to prefer.
+  if (input.trust === "no-roll-row") {
+    return {
+      value: claim,
+      origin: claim == null ? "none" : "retired-claim",
+      supersededClaimValue: null,
+      refusedRollValue: null,
+      trust: input.trust,
+    };
+  }
+  const roll = trim(input.rollRaw);
+  if (roll != null && declaredRollMayOverride(input.trust, claim != null)) {
+    return {
+      value: roll,
+      origin: "declared-roll",
+      // Only when the claim actually said something ELSE.
+      supersededClaimValue: claim != null && claim !== roll ? claim : null,
+      refusedRollValue: null,
+      trust: input.trust,
+    };
+  }
+  // The gate refused, or the roll carried nothing. Keep the claim, and RECORD
+  // the roll value that was refused so the refusal is countable rather than
+  // silent -- a refusal nobody can see is how a re-bake stops refusing without
+  // anyone noticing.
+  const refused = roll != null ? roll : null;
+  if (claim != null) {
+    return {
+      value: claim,
+      origin: "claim",
+      supersededClaimValue: null,
+      refusedRollValue: refused,
+      trust: input.trust,
+    };
+  }
+  return {
+    value: null,
+    origin: "none",
+    supersededClaimValue: null,
+    refusedRollValue: refused,
+    trust: input.trust,
+  };
+}
+
+/** Where `baseFacts.acreage` came from. Recorded on `provenance.acreageSource`. */
+export type AcreageOrigin =
+  /** The parcel-join ring, measured by shoelace. Outranks every transcribed cell. */
+  | "parcel-ring"
+  /** `cad_property.land_acres` at the county's declared tax_year (CTX-B7). */
+  | "declared-roll"
+  /** The cad-parcel-roll atom claim's `landAcres`. */
+  | "claim"
+  /** A roll-absent (retired) record's last-known claim `landAcres`. */
+  | "retired-claim"
+  /** No source carried a usable acreage; the leaf holds an earned absence. */
+  | "none";
+
+/**
+ * The declared-vintage roll's acreage, shaped exactly like
+ * `conformantAcreageFromClaim` but carrying its own `method` string so the two
+ * are never confused in a served payload or in a later census.
+ *
+ * `cad_property.land_acres` is `numeric`, which arrives from node-postgres as a
+ * STRING. `fetchCountyCadPropertyRoll` runs it through `numericOrNull`; this
+ * function re-validates rather than trusting, because a caller that passed the
+ * raw string would otherwise produce `Math.round(NaN)`.
+ */
+export function conformantAcreageFromDeclaredRoll(
+  landAcres: number | null | undefined,
+): BaseFacts["acreage"] {
+  if (
+    landAcres == null ||
+    typeof landAcres !== "number" ||
+    !Number.isFinite(landAcres) ||
+    landAcres <= 0
+  ) {
+    return null;
+  }
+  return {
+    value: Math.round(landAcres * 10_000) / 10_000,
+    sqft: Math.round(landAcres * SQFT_PER_ACRE),
+    method: "cad-roll-declared-land-acres",
+  };
+}
+
+/**
+ * Decide the acreage a payload with NO usable ring carries, and say where it
+ * came from. PURE. The ring is decided upstream in `assembleTier1Payload` and
+ * is never overridden here -- this function is only ever consulted for the
+ * `acreageWithoutRing` slot.
+ *
+ * WHY THE ORDER IS NOT B6's ORDER. `situsAddress`, `situsCity` and `situsZip`
+ * are transcriptions: every candidate is some source's copy of the same
+ * clerical fact, so preferring the vintage the rest of the payload reports is
+ * strictly right. Acreage is not. The ring is a MEASUREMENT of this parcel's
+ * own geometry and the roll cell is a transcription, so the ring keeps
+ * precedence over both and this function never sees the ring case at all.
+ * Below the ring, the declared roll beats the claim for B6's reason exactly:
+ * it is the vintage the dollars, land use, year built, legal description and
+ * exemption codes on this same payload already report.
+ *
+ * RETIRED FIRST, same as everywhere else: a record absent from the declared
+ * roll has no roll cell to prefer and keeps its last-known claim ungated.
+ */
+export function resolveConformantAcreageWithoutRing(input: {
+  /** `claim.landAcres` off the atom body. */
+  claimLandAcres: number | null;
+  /** `cad_property.land_acres` at the DECLARED tax_year, or null when no row/no value. */
+  rollLandAcres: number | null | undefined;
+  /**
+   * Whether the declared-vintage row is provably THIS parcel. See
+   * `resolveDeclaredRollTrust`. `no-roll-row` is the retired branch.
+   */
+  trust: DeclaredRollTrust;
+}): { acreage: BaseFacts["acreage"]; origin: AcreageOrigin; refusedRollAcres: number | null } {
+  const claim = conformantAcreageFromClaim(input.claimLandAcres);
+  if (input.trust === "no-roll-row") {
+    return {
+      acreage: claim,
+      origin: claim ? "retired-claim" : "none",
+      refusedRollAcres: null,
+    };
+  }
+  const roll = conformantAcreageFromDeclaredRoll(input.rollLandAcres ?? null);
+  if (roll && declaredRollMayOverride(input.trust, claim != null)) {
+    return { acreage: roll, origin: "declared-roll", refusedRollAcres: null };
+  }
+  const refusedRollAcres = roll ? roll.value : null;
+  if (claim) return { acreage: claim, origin: "claim", refusedRollAcres };
+  return { acreage: null, origin: "none", refusedRollAcres };
 }
 
 /**
@@ -2049,6 +2718,19 @@ export const DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES: readonly string[] = [
   // concept of, because the old bake had only one situs source.
   "provenance.situsAddressSource",
   "provenance.situsAddressSupersededClaim",
+  // CTX-B7 (2026-09-10): the same treatment for the three sibling leaves, plus
+  // the same-parcel gate's verdict and what it refused. New-shape-only keys the
+  // old bake had no concept of -- it had ONE source per leaf and no gate, so
+  // there is nothing on the old side these could be laundering. Widening this
+  // allowlist is a deliberate act with a pin test attached, and the pin test
+  // failing on this edit is that control working.
+  "provenance.situsCitySource",
+  "provenance.situsCitySupersededClaim",
+  "provenance.situsZipSource",
+  "provenance.situsZipSupersededClaim",
+  "provenance.acreageSource",
+  "provenance.declaredRollTrust",
+  "provenance.declaredRollRefused",
   "baseFacts.cadRoll",
   "baseFacts.yearBuilt",
   "baseFacts.legalDescription",

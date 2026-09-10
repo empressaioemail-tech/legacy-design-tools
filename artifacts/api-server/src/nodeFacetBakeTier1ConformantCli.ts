@@ -65,8 +65,13 @@ import {
   assertSitusAddressAbsenceEarned,
   buildConformantTier1Payload,
   parcelNodeIdFromBody,
+  readConformantCadClaim,
+  resolveConformantAcreageWithoutRing,
   resolveConformantSitusAddress,
+  resolveConformantSitusLocality,
+  resolveDeclaredRollTrust,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
+  type DeclaredRollTrust,
 } from "./lib/nodeFacetBakeTier1Conformant.js";
 
 const PLACE_COORD_SENTINEL = "0.00000";
@@ -129,12 +134,38 @@ function rawClaimSitusAddress(body: Record<string, unknown>): string | null {
 function situsForBake(
   body: Record<string, unknown>,
   rollSitus: string | null,
-  rollAbsent: boolean,
+  trust: DeclaredRollTrust,
 ) {
   return resolveConformantSitusAddress({
     claimRaw: rawClaimSitusAddress(body),
     rollRaw: rollSitus,
-    rollAbsent,
+    trust,
+  });
+}
+
+/**
+ * The same-parcel gate's verdict for one parcel (P-124 CTX-B7). ONE call site,
+ * ONE verdict, used by all four roll-preferring leaves and recorded once on the
+ * payload -- because they are all reading the SAME row and a payload where two
+ * leaves disagreed about whether that row is this parcel would be incoherent.
+ *
+ * `claim.taxYear` and `claim.situsZip` come off the atom body; the roll's
+ * `taxYear` and `situs_zip` come off the row already loaded for the dollars.
+ * No query is added.
+ */
+function declaredRollTrustFor(
+  body: Record<string, unknown>,
+  rollEntry: { taxYear?: number | null; situsZip?: string | null } | null,
+  rollConsulted: boolean,
+  declaredTaxYear: number | null,
+): DeclaredRollTrust {
+  const claim = readConformantCadClaim(body);
+  return resolveDeclaredRollTrust({
+    rollAbsent: rollConsulted && rollEntry == null,
+    claimTaxYear: claim.taxYear,
+    declaredTaxYear,
+    claimSitusZip: claim.situsZip,
+    rollSitusZip: rollEntry?.situsZip ?? null,
   });
 }
 
@@ -317,7 +348,16 @@ async function main() {
             const { situs, unusable } = situsForBake(
               w.body,
               rollEntry?.situsAddress ?? null,
-              cadPropertyRoll.consulted && rollEntry == null,
+              // CTX-B7: the SAME gate the per-row loop applies. If this prepass
+              // used a different verdict, the key it builds would not be the
+              // key the loop then looks up and the recovery join would silently
+              // miss every parcel the gate refused.
+              declaredRollTrustFor(
+                w.body,
+                rollEntry,
+                cadPropertyRoll.consulted,
+                cadPropertyRoll.declaredTaxYear,
+              ),
             );
             if (unusable) return null;
             return addressJoinKey(county, situs, blockedSet);
@@ -366,6 +406,28 @@ async function main() {
   let situsFromDeclaredRoll = 0;
   let situsFromClaim = 0;
   let situsRollSupersededClaim = 0;
+  // CTX-B7 (2026-09-10). The run-level half of the same-parcel gate. The
+  // per-parcel half is `provenance.declaredRollTrust` and
+  // `provenance.declaredRollRefused`; these are what make a re-bake that
+  // silently stopped refusing visible in one log line instead of only on the
+  // rows nobody re-reads. `*RefusedByGate` counts a USABLE roll value the gate
+  // would not let win, which is the number that must not quietly go to zero.
+  const trustCounts: Record<DeclaredRollTrust, number> = {
+    "no-roll-row": 0,
+    "same-vintage": 0,
+    "zip-corroborated": 0,
+    "zip-conflict": 0,
+    uncorroborated: 0,
+  };
+  let situsRollRefusedByGate = 0;
+  let cityFromDeclaredRoll = 0;
+  let citySupersededClaim = 0;
+  let cityRollRefusedByGate = 0;
+  let zipFromDeclaredRoll = 0;
+  let zipSupersededClaim = 0;
+  let zipRollRefusedByGate = 0;
+  let acreageFromDeclaredRoll = 0;
+  let acreageRollRefusedByGate = 0;
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
@@ -397,7 +459,6 @@ async function main() {
     // Retired records take a situs read that is never gated by punctuation
     // quality: an honest retirement declaration must not depend on whether
     // the stale claim happens to carry a well-formed address.
-    const rollAbsent = cadPropertyRoll.consulted && !cadPropertyRoll.byPropId.has(propId);
     // CTX-B6 (reopened): the situs comes from the DECLARED-VINTAGE roll when
     // that row carries a usable one, then the claim, then an earned absence.
     // `rollEntry` is the exact row the dollar facets below already use --
@@ -408,12 +469,59 @@ async function main() {
     // roll-absent record, but the branch now lives inside the resolver so the
     // ordering (retired BEFORE any preference) cannot drift between this call
     // site and the prepass above.
+    //
+    // CTX-B7 (2026-09-10): and the preference is now GATED on that roll row
+    // being provably THIS parcel. `rollAbsent` folded into the trust verdict --
+    // `no-roll-row` IS the retired state, so there is one verdict rather than a
+    // boolean beside an enum that could disagree with it.
     const rollEntry = cadPropertyRoll.consulted
       ? (cadPropertyRoll.byPropId.get(propId) ?? null)
       : null;
-    const resolvedSitus = situsForBake(body, rollEntry?.situsAddress ?? null, rollAbsent);
+    const declaredRollTrust = declaredRollTrustFor(
+      body,
+      rollEntry,
+      cadPropertyRoll.consulted,
+      cadPropertyRoll.declaredTaxYear,
+    );
+    trustCounts[declaredRollTrust] += 1;
+    const resolvedSitus = situsForBake(
+      body,
+      rollEntry?.situsAddress ?? null,
+      declaredRollTrust,
+    );
     const situs = resolvedSitus.situs;
     const situsUnusable = resolvedSitus.unusable;
+    if (resolvedSitus.refusedRollValue != null) situsRollRefusedByGate += 1;
+    // CTX-B7. The two sibling locality leaves and the acreage-without-a-ring,
+    // decided by the SAME row and the SAME gate.
+    const claimForLocality = readConformantCadClaim(body);
+    const situsCityResolved = resolveConformantSitusLocality({
+      claimRaw: claimForLocality.situsCity,
+      rollRaw: rollEntry?.situsCity ?? null,
+      trust: declaredRollTrust,
+    });
+    const situsZipResolved = resolveConformantSitusLocality({
+      claimRaw: claimForLocality.situsZip,
+      rollRaw: rollEntry?.situsZip ?? null,
+      trust: declaredRollTrust,
+    });
+    const acreageResolved = resolveConformantAcreageWithoutRing({
+      claimLandAcres: claimForLocality.landAcres,
+      rollLandAcres: rollEntry?.landAcres ?? null,
+      trust: declaredRollTrust,
+    });
+    if (situsCityResolved.origin === "declared-roll") {
+      cityFromDeclaredRoll += 1;
+      if (situsCityResolved.supersededClaimValue != null) citySupersededClaim += 1;
+    }
+    if (situsCityResolved.refusedRollValue != null) cityRollRefusedByGate += 1;
+    if (situsZipResolved.origin === "declared-roll") {
+      zipFromDeclaredRoll += 1;
+      if (situsZipResolved.supersededClaimValue != null) zipSupersededClaim += 1;
+    }
+    if (situsZipResolved.refusedRollValue != null) zipRollRefusedByGate += 1;
+    if (acreageResolved.origin === "declared-roll") acreageFromDeclaredRoll += 1;
+    if (acreageResolved.refusedRollAcres != null) acreageRollRefusedByGate += 1;
     if (resolvedSitus.origin === "declared-roll") {
       situsFromDeclaredRoll += 1;
       if (resolvedSitus.supersededClaimValue != null) situsRollSupersededClaim += 1;
@@ -465,6 +573,10 @@ async function main() {
       situsAddressUnusable: situsUnusable,
       situsAddressOrigin: resolvedSitus.origin,
       situsAddressSupersededClaim: resolvedSitus.supersededClaimValue,
+      situsAddressRefusedRoll: resolvedSitus.refusedRollValue,
+      declaredRollTrust,
+      situsLocality: { city: situsCityResolved, zip: situsZipResolved },
+      acreageWithoutRing: acreageResolved,
       access,
       accessNormalizedFrom,
       publishRunId,
@@ -592,12 +704,40 @@ async function main() {
         "never skipped and never a bare null)",
     );
   }
+  // CTX-B7: the same-parcel gate, on stdout for every run. A gate whose
+  // refusals are only visible on the rows nobody re-reads is a gate nobody
+  // notices going quiet. `*RefusedByGate` is the number that must not silently
+  // fall to zero: it counts a USABLE declared-roll value the gate would not let
+  // win because the row's own situs ZIP says it is a different parcel.
+  console.log(
+    `[node-facet-bake-t1-conformant] declared-roll same-parcel gate for ${county}: ` +
+      `same-vintage=${trustCounts["same-vintage"]}, ` +
+      `zip-corroborated=${trustCounts["zip-corroborated"]}, ` +
+      `zip-conflict=${trustCounts["zip-conflict"]}, ` +
+      `uncorroborated=${trustCounts.uncorroborated}, ` +
+      `no-roll-row=${trustCounts["no-roll-row"]} | refused a usable roll value: ` +
+      `situsAddress=${situsRollRefusedByGate}, situsCity=${cityRollRefusedByGate}, ` +
+      `situsZip=${zipRollRefusedByGate}, acreage=${acreageRollRefusedByGate} | ` +
+      `took the declared roll: situsCity=${cityFromDeclaredRoll} ` +
+      `(superseded ${citySupersededClaim}), situsZip=${zipFromDeclaredRoll} ` +
+      `(superseded ${zipSupersededClaim}), acreage=${acreageFromDeclaredRoll}`,
+  );
   console.log(
     JSON.stringify({
       county,
       dryRun,
       propIds,
       schemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
+      declaredRollTrust: trustCounts,
+      situsRollRefusedByGate,
+      cityFromDeclaredRoll,
+      citySupersededClaim,
+      cityRollRefusedByGate,
+      zipFromDeclaredRoll,
+      zipSupersededClaim,
+      zipRollRefusedByGate,
+      acreageFromDeclaredRoll,
+      acreageRollRefusedByGate,
       conformantCadRows: cadRows.length,
       written,
       retired,

@@ -330,6 +330,26 @@ export interface PropIdCadPropertyEntry {
    * extra query -- the row is already loaded and already keyed by prop_id.
    */
   situsAddress: string | null;
+  /**
+   * The declared-vintage roll's own situs city, ZIP and land acreage
+   * (P-124 CTX-B7, 2026-09-10).
+   *
+   * The same mechanism as `situsAddress` one field up, found by the same
+   * card and deliberately left for this one. `baseFacts.situsCity`,
+   * `baseFacts.situsZip` and the `acreage` claim fallback are all read off
+   * the atom CLAIM while every dollar facet beside them comes from THIS row,
+   * so one payload reports two vintages across five leaves rather than one.
+   * These three columns are in the table (`information_schema.columns`,
+   * staging, 2026-09-10) and were simply never selected. Adding them costs
+   * no extra query: the row is already loaded and already keyed by prop_id.
+   *
+   * `landAcres` is `numeric` in Postgres and arrives as a string through
+   * node-postgres; `numericOrNull` is what makes it a number here, and no
+   * consumer may re-parse it.
+   */
+  situsCity: string | null;
+  situsZip: string | null;
+  landAcres: number | null;
   marketValue: number | null;
   assessedValue: number | null;
   landValue: number | null;
@@ -383,11 +403,14 @@ export async function fetchCountyCadPropertyRoll(
     legal_description: string | null;
     exemption_codes: string[] | null;
     situs_address: string | null;
+    situs_city: string | null;
+    situs_zip: string | null;
+    land_acres: unknown;
   }>(
     `SELECT prop_id, tax_year, source_vintage,
             market_value, assessed_value, land_value, improvement_value,
             living_area_sqft, year_built, legal_description, exemption_codes,
-            situs_address
+            situs_address, situs_city, situs_zip, land_acres
        FROM cad_property
       WHERE county_fips = $1
         AND tax_year = $2`,
@@ -417,6 +440,18 @@ export async function fetchCountyCadPropertyRoll(
         typeof row.situs_address === "string" && row.situs_address.trim()
           ? row.situs_address.trim()
           : null,
+      // CTX-B7. Trimmed-or-null, the same rule as situsAddress above: a
+      // whitespace-only cell in the roll is NOT a value, and admitting one
+      // would let an empty roll cell supersede a real claim.
+      situsCity:
+        typeof row.situs_city === "string" && row.situs_city.trim()
+          ? row.situs_city.trim()
+          : null,
+      situsZip:
+        typeof row.situs_zip === "string" && row.situs_zip.trim()
+          ? row.situs_zip.trim()
+          : null,
+      landAcres: numericOrNull(row.land_acres),
     });
   }
   return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
