@@ -100,7 +100,21 @@ export type LandUseSource = "cad-roll" | "cad-roll-address-join";
  * `landAcres`, used ONLY when the bake holds no ring, so a reader can tell a
  * measured value from a declared one.
  */
-export type AcreageMethod = "shoelace-wgs84" | "cad-roll-land-acres";
+export type AcreageMethod =
+  /** Shoelace on the parcel-join ring: a MEASUREMENT of this parcel's geometry. */
+  | "shoelace-wgs84"
+  /** The cad-parcel-roll atom claim's own `landAcres`: a transcription. */
+  | "cad-roll-land-acres"
+  /**
+   * `cad_property.land_acres` at the county's DECLARED CAD vintage -- the same
+   * row this payload's dollars, year built, legal description and exemption
+   * codes come from (P-124 CTX-B7, 2026-09-10). A transcription like
+   * `cad-roll-land-acres`, but at the payload's own vintage rather than the
+   * claim's, and it is a DISTINCT method string on purpose: 103,913 cells move
+   * from a declared refusal to this source, and a census that could not tell
+   * the two roll sources apart could not see that happen.
+   */
+  | "cad-roll-declared-land-acres";
 
 /** Where the parcel identity in `baseFacts` came from. */
 export type ParcelSource = "txgio" | "conformant-v1-cad-parcel-roll";

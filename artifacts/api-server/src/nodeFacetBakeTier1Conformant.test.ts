@@ -31,8 +31,14 @@ import {
   assertSitusAddressAbsenceEarned,
   BAKE_OWNED_REQUIRED_LEAF_PATHS,
   buildConformantTier1Payload,
+  claimLeafAbsence,
   conformantAcreageFromClaim,
+  conformantAcreageFromDeclaredRoll,
   conformantClaimRecord,
+  declaredRollMayOverride,
+  resolveConformantAcreageWithoutRing,
+  resolveConformantSitusLocality,
+  resolveDeclaredRollTrust,
   diffAgainstRequiredFacetPaths,
   diffTier1KeyPaths,
   DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES,
@@ -158,6 +164,10 @@ function newPayload(
     situsAddressUnusable?: ConformantTier1BuildInput["situsAddressUnusable"];
     situsAddressOrigin?: ConformantTier1BuildInput["situsAddressOrigin"];
     situsAddressSupersededClaim?: ConformantTier1BuildInput["situsAddressSupersededClaim"];
+    situsAddressRefusedRoll?: ConformantTier1BuildInput["situsAddressRefusedRoll"];
+    declaredRollTrust?: ConformantTier1BuildInput["declaredRollTrust"];
+    situsLocality?: ConformantTier1BuildInput["situsLocality"];
+    acreageWithoutRing?: ConformantTier1BuildInput["acreageWithoutRing"];
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
@@ -181,6 +191,16 @@ function newPayload(
       : {}),
     ...(opts.situsAddressSupersededClaim !== undefined
       ? { situsAddressSupersededClaim: opts.situsAddressSupersededClaim }
+      : {}),
+    ...(opts.situsAddressRefusedRoll !== undefined
+      ? { situsAddressRefusedRoll: opts.situsAddressRefusedRoll }
+      : {}),
+    ...(opts.declaredRollTrust !== undefined
+      ? { declaredRollTrust: opts.declaredRollTrust }
+      : {}),
+    ...(opts.situsLocality !== undefined ? { situsLocality: opts.situsLocality } : {}),
+    ...(opts.acreageWithoutRing !== undefined
+      ? { acreageWithoutRing: opts.acreageWithoutRing }
       : {}),
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
@@ -649,6 +669,18 @@ describe("the divergence instrument fails when it should", () => {
         // old bake had no concept of a situs SOURCE because it had only one.
         "provenance.situsAddressSource",
         "provenance.situsAddressSupersededClaim",
+        // CTX-B7 (2026-09-10): the same treatment for the three sibling leaves,
+        // plus the same-parcel gate's verdict and what it refused. This pin FIRED
+        // AGAIN when these seven keys were added, on a lane whose dispatch had
+        // pre-declared that it would -- which is the difference between a control
+        // that works and one nobody has watched fire twice.
+        "provenance.situsCitySource",
+        "provenance.situsCitySupersededClaim",
+        "provenance.situsZipSource",
+        "provenance.situsZipSupersededClaim",
+        "provenance.acreageSource",
+        "provenance.declaredRollTrust",
+        "provenance.declaredRollRefused",
         "baseFacts.cadRoll",
         "baseFacts.yearBuilt",
         "baseFacts.legalDescription",
@@ -2223,7 +2255,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       const r = resolve({
         claimRaw: ", TX 78756", // the 2025 StratMap drop
         rollRaw: "4709 SHOALWOOD AVE", // cad_property at the declared 2026 vintage
-        rollAbsent: false,
+        trust: "same-vintage",
       });
       expect(r.situs).toBe("4709 SHOALWOOD AVE");
       expect(r.origin).toBe("declared-roll");
@@ -2233,19 +2265,24 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
     });
 
     it("the claim is used only when the declared roll carries nothing usable", () => {
-      expect(resolve({ claimRaw: "12 OAK ST", rollRaw: null, rollAbsent: false })).toEqual({
+      expect(resolve({ claimRaw: "12 OAK ST", rollRaw: null, trust: "same-vintage" })).toEqual({
         situs: "12 OAK ST",
         origin: "claim",
         unusable: null,
         supersededClaimValue: null,
+        // CTX-B7: nothing was refused -- the roll simply carried nothing.
+        // `refusedRollValue` is reserved for a USABLE roll value the
+        // same-parcel gate would not let win, so it must stay null here.
+        refusedRollValue: null,
+        trust: "same-vintage",
       });
       expect(
-        resolve({ claimRaw: "12 OAK ST", rollRaw: ", TX 78701", rollAbsent: false }),
+        resolve({ claimRaw: "12 OAK ST", rollRaw: ", TX 78701", trust: "same-vintage" }),
       ).toMatchObject({ situs: "12 OAK ST", origin: "claim" });
     });
 
     it("both sources unusable earns the absence, quoting the DECLARED ROLL's value", () => {
-      const r = resolve({ claimRaw: ", ,", rollRaw: ", TX 78612", rollAbsent: false });
+      const r = resolve({ claimRaw: ", ,", rollRaw: ", TX 78612", trust: "same-vintage" });
       expect(r.situs).toBeNull();
       expect(r.origin).toBe("none");
       // The roll is the authority the rest of the payload reports, so its
@@ -2254,11 +2291,13 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
     });
 
     it("both sources empty earns the blank-claim absence, with nothing to quote", () => {
-      expect(resolve({ claimRaw: null, rollRaw: null, rollAbsent: false })).toEqual({
+      expect(resolve({ claimRaw: null, rollRaw: null, trust: "same-vintage" })).toEqual({
         situs: null,
         origin: "none",
         unusable: null,
         supersededClaimValue: null,
+        refusedRollValue: null,
+        trust: "same-vintage",
       });
     });
 
@@ -2268,14 +2307,14 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       // retired branch. This is the test that keeps CTX-RETIRE and CTX-B1
       // working: if the preference ever ran first, 48055:1 would stop serving
       // its last-known situs.
-      const r = resolve({ claimRaw: ", ,", rollRaw: "999 SHOULD NOT WIN", rollAbsent: true });
+      const r = resolve({ claimRaw: ", ,", rollRaw: "999 SHOULD NOT WIN", trust: "no-roll-row" });
       expect(r.origin).toBe("retired-claim");
       expect(r.situs).toBe(", ,");
       expect(r.unusable).toBeNull();
     });
 
     it("a retired record with no claim situs resolves null, and the builder earns its absence", () => {
-      expect(resolve({ claimRaw: null, rollRaw: null, rollAbsent: true })).toMatchObject({
+      expect(resolve({ claimRaw: null, rollRaw: null, trust: "no-roll-row" })).toMatchObject({
         situs: null,
         origin: "retired-claim",
       });
@@ -2283,7 +2322,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
 
     it("a claim that AGREES with the roll supersedes nothing", () => {
       expect(
-        resolve({ claimRaw: "4709 SHOALWOOD AVE", rollRaw: "4709 SHOALWOOD AVE", rollAbsent: false }),
+        resolve({ claimRaw: "4709 SHOALWOOD AVE", rollRaw: "4709 SHOALWOOD AVE", trust: "same-vintage" }),
       ).toMatchObject({ origin: "declared-roll", supersededClaimValue: null });
     });
 
@@ -2439,5 +2478,439 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
     expect(() => assertRequiredLeafStatesEarned(mutated)).toThrow(
       /neither a resolved value nor a well-formed earned absence/,
     );
+  });
+});
+
+/**
+ * P-124 CTX-B7 (2026-09-10). The three siblings CTX-B6 named and left, plus the
+ * same-parcel gate that had to exist before any of them could be taken.
+ *
+ * THE CARD'S PREMISE WAS FALSE AND THAT IS THE FIRST RESULT. B6 left situsCity
+ * because it believed the leaf moved zoning jurisdiction for ~78,000 parcels.
+ * It moves ZERO, in every county, and the reason is structural: the situs
+ * fallback in resolveZoningJurisdiction is consulted ONLY when
+ * txgio_parcel.zoning_jurisdiction is blank, the zoning facet exists ONLY when
+ * zoning_district is non-blank, and the single writer of either column
+ * (cad-ingest zoning-stamp-db.ts flushBatch) sets BOTH in one UPDATE. Measured:
+ * 0 of 1,568,849 txgio_parcel rows in the six CTX counties carry one without
+ * the other, and 0 of 109,269 city changes land on an unstamped parcel with a
+ * district.
+ *
+ * THE REAL BLOCKER WAS SOMEWHERE ELSE. The join under all four roll-preferring
+ * leaves is prop_id at the declared vintage, and on Hays a prop_id names a
+ * different parcel in 2025 than in 2026: cross-vintage situs-ZIP agreement is
+ * 53.86% there against 99.73% on Travis and 99.21% on Caldwell. Hays claims
+ * agree with their OWN vintage on 104,937 of 104,937 rows, so the disagreement
+ * is entirely cross-vintage -- renumbering, not correction.
+ */
+describe("CTX-B7: the declared roll is preferred only where the row is provably this parcel", () => {
+  describe("resolveDeclaredRollTrust", () => {
+    it("no row at all is the RETIRED state, and it outranks every other signal", () => {
+      expect(
+        resolveDeclaredRollTrust({
+          rollAbsent: true,
+          claimTaxYear: 2025,
+          declaredTaxYear: 2026,
+          claimSitusZip: "78640",
+          rollSitusZip: "78666",
+        }),
+      ).toBe("no-roll-row");
+    });
+
+    it("claim taxYear === declared vintage is the SAME ROW, so nothing needs corroborating", () => {
+      expect(
+        resolveDeclaredRollTrust({
+          rollAbsent: false,
+          claimTaxYear: 2026,
+          declaredTaxYear: 2026,
+          claimSitusZip: null,
+          rollSitusZip: null,
+        }),
+      ).toBe("same-vintage");
+    });
+
+    it("agreeing ZIPs corroborate; conflicting ZIPs refuse", () => {
+      const base = { rollAbsent: false, claimTaxYear: 2025, declaredTaxYear: 2026 };
+      expect(
+        resolveDeclaredRollTrust({ ...base, claimSitusZip: "78756", rollSitusZip: "78756" }),
+      ).toBe("zip-corroborated");
+      expect(
+        resolveDeclaredRollTrust({ ...base, claimSitusZip: "78640", rollSitusZip: "78666" }),
+      ).toBe("zip-conflict");
+    });
+
+    it("ZIP+4 and stray spacing collapse to the 5-digit comparison, so formatting is not a conflict", () => {
+      expect(
+        resolveDeclaredRollTrust({
+          rollAbsent: false,
+          claimTaxYear: 2025,
+          declaredTaxYear: 2026,
+          claimSitusZip: " 78756-1234 ",
+          rollSitusZip: "78756",
+        }),
+      ).toBe("zip-corroborated");
+    });
+
+    it("a missing ZIP on either side is UNCORROBORATED, which is not corroborated AND not conflicting", () => {
+      const base = { rollAbsent: false, claimTaxYear: 2025, declaredTaxYear: 2026 };
+      expect(resolveDeclaredRollTrust({ ...base, claimSitusZip: null, rollSitusZip: "78756" })).toBe(
+        "uncorroborated",
+      );
+      expect(resolveDeclaredRollTrust({ ...base, claimSitusZip: "78756", rollSitusZip: null })).toBe(
+        "uncorroborated",
+      );
+      // ...and an unknown claim vintage cannot claim same-vintage either.
+      expect(
+        resolveDeclaredRollTrust({
+          ...base,
+          claimTaxYear: null,
+          claimSitusZip: null,
+          rollSitusZip: null,
+        }),
+      ).toBe("uncorroborated");
+    });
+  });
+
+  describe("declaredRollMayOverride: the asymmetry is the rule, not an oversight", () => {
+    it("a GAIN is taken on uncorroborated; a SWAP is not", () => {
+      // The whole design in two assertions. A gain converts an absence into
+      // data and destroys nothing; a swap converts data into ANOTHER PARCEL'S
+      // data. "Nothing was established" licenses the first and not the second.
+      expect(declaredRollMayOverride("uncorroborated", false)).toBe(true);
+      expect(declaredRollMayOverride("uncorroborated", true)).toBe(false);
+    });
+
+    it("zip-conflict refuses BOTH, because the row is known not to be this parcel", () => {
+      expect(declaredRollMayOverride("zip-conflict", false)).toBe(false);
+      expect(declaredRollMayOverride("zip-conflict", true)).toBe(false);
+    });
+
+    it("same-vintage and zip-corroborated take both", () => {
+      for (const t of ["same-vintage", "zip-corroborated"] as const) {
+        expect(declaredRollMayOverride(t, false)).toBe(true);
+        expect(declaredRollMayOverride(t, true)).toBe(true);
+      }
+    });
+
+    it("no-roll-row never overrides: a retirement is not gated by data quality (CTX-RETIRE)", () => {
+      expect(declaredRollMayOverride("no-roll-row", false)).toBe(false);
+      expect(declaredRollMayOverride("no-roll-row", true)).toBe(false);
+    });
+  });
+
+  describe("the gate PROVEN ABLE TO FIRE on situsAddress, which is CTX-B6 merged code", () => {
+    it("REGRESSION CONTROL FOR MERGED CODE: a conflicting ZIP stops the roll overwriting a usable claim street", () => {
+      // Measured 2026-09-10: 52,158 parcels across the six counties would have
+      // a usable claim street replaced by a DIFFERENT roll street under B6's
+      // rule as merged, and 29,539 of those sit on a zip-conflict row (Hays
+      // 29,395). The store had not re-baked yet, so this gate lands before the
+      // first wrong row is written rather than after.
+      const refused = resolveConformantSitusAddress({
+        claimRaw: "1200 KOHLERS CROSSING",
+        rollRaw: "500 SOME OTHER PARCEL RD",
+        trust: "zip-conflict",
+      });
+      expect(refused.situs).toBe("1200 KOHLERS CROSSING");
+      expect(refused.origin).toBe("claim");
+      // The refusal is RECORDED. A refusal nobody can count is how a re-bake
+      // stops refusing without anyone noticing.
+      expect(refused.refusedRollValue).toBe("500 SOME OTHER PARCEL RD");
+      expect(refused.trust).toBe("zip-conflict");
+    });
+
+    it("NON-VACUITY: the identical inputs with a corroborated ZIP DO take the roll", () => {
+      // Without this the test above would pass on a resolver that never
+      // preferred the roll at all.
+      const taken = resolveConformantSitusAddress({
+        claimRaw: "1200 KOHLERS CROSSING",
+        rollRaw: "500 SOME OTHER PARCEL RD",
+        trust: "zip-corroborated",
+      });
+      expect(taken.situs).toBe("500 SOME OTHER PARCEL RD");
+      expect(taken.origin).toBe("declared-roll");
+      expect(taken.supersededClaimValue).toBe("1200 KOHLERS CROSSING");
+      expect(taken.refusedRollValue).toBeNull();
+    });
+
+    it("B6 Travis recovery is UNTOUCHED: a street-less claim still takes the roll real street", () => {
+      // The 139,283 cells B6 recovers must not be collateral damage. A
+      // street-less claim carries no usable value, so it is a GAIN, and a gain
+      // is taken even uncorroborated.
+      const r = resolveConformantSitusAddress({
+        claimRaw: ", TX 78756",
+        rollRaw: "4709 SHOALWOOD AVE",
+        trust: "uncorroborated",
+      });
+      expect(r.situs).toBe("4709 SHOALWOOD AVE");
+      expect(r.origin).toBe("declared-roll");
+    });
+
+    it("a zip-conflict on a street-less claim earns the absence rather than importing another parcel street", () => {
+      const r = resolveConformantSitusAddress({
+        claimRaw: ", TX 78756",
+        rollRaw: "4709 SHOALWOOD AVE",
+        trust: "zip-conflict",
+      });
+      expect(r.situs).toBeNull();
+      expect(r.origin).toBe("none");
+      // The quoted raw is the CLAIM value, never the refused roll row: quoting a
+      // different parcel junk in this parcel basis would attribute it here.
+      expect(r.unusable).toEqual({ raw: ", TX 78756", reason: "no-street-component" });
+      expect(r.refusedRollValue).toBe("4709 SHOALWOOD AVE");
+    });
+  });
+
+  describe("situsCity and situsZip", () => {
+    const resolve = resolveConformantSitusLocality;
+
+    it("GAIN: a blank Travis claim city takes the declared roll, which is 78,332 of the 78,428", () => {
+      const r = resolve({ claimRaw: null, rollRaw: "AUSTIN", trust: "zip-corroborated" });
+      expect(r).toEqual({
+        value: "AUSTIN",
+        origin: "declared-roll",
+        supersededClaimValue: null,
+        refusedRollValue: null,
+        trust: "zip-corroborated",
+      });
+    });
+
+    it("SWAP REFUSED: the Hays KYLE-vs-SAN-MARCOS scramble keeps the claim and records the refusal", () => {
+      const r = resolve({ claimRaw: "SAN MARCOS", rollRaw: "KYLE", trust: "zip-conflict" });
+      expect(r.value).toBe("SAN MARCOS");
+      expect(r.origin).toBe("claim");
+      expect(r.refusedRollValue).toBe("KYLE");
+    });
+
+    it("SWAP TAKEN when the ZIP corroborates: the 1,127 real Hays city corrections still land", () => {
+      const r = resolve({ claimRaw: "BUDA", rollRaw: "KYLE", trust: "zip-corroborated" });
+      expect(r.value).toBe("KYLE");
+      expect(r.origin).toBe("declared-roll");
+      expect(r.supersededClaimValue).toBe("BUDA");
+    });
+
+    it("A BLANK ROLL CELL NEVER DESTROYS A CLAIM CITY: the 1,676 Hays parcels keep theirs", () => {
+      // The falsifier CP1 pre-registered as "what would prove the whole card
+      // wrong". change_loss measured 0 in every county, and this is why.
+      for (const trust of [
+        "same-vintage",
+        "zip-corroborated",
+        "uncorroborated",
+        "zip-conflict",
+      ] as const) {
+        expect(resolve({ claimRaw: "KYLE", rollRaw: null, trust })).toMatchObject({
+          value: "KYLE",
+          origin: "claim",
+          refusedRollValue: null,
+        });
+      }
+      expect(resolve({ claimRaw: "KYLE", rollRaw: "   ", trust: "same-vintage" })).toMatchObject({
+        value: "KYLE",
+        origin: "claim",
+      });
+    });
+
+    it("RETIRED FIRST: a roll-absent record keeps its last-known claim even against a contradicting roll", () => {
+      const r = resolve({ claimRaw: "LOCKHART", rollRaw: "SHOULD NOT WIN", trust: "no-roll-row" });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.value).toBe("LOCKHART");
+    });
+
+    it("both empty resolves null and the builder earns the absence", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, trust: "same-vintage" })).toMatchObject({
+        value: null,
+        origin: "none",
+      });
+    });
+  });
+
+  describe("acreage: three sources, and the ring is a MEASUREMENT that outranks both transcriptions", () => {
+    it("the declared roll beats the claim, under its OWN method string", () => {
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: 0.5,
+        rollLandAcres: 0.3815,
+        trust: "same-vintage",
+      });
+      expect(r.origin).toBe("declared-roll");
+      expect(r.acreage).toEqual({
+        value: 0.3815,
+        sqft: Math.round(0.3815 * 43_560),
+        // NOT "cad-roll-land-acres". 103,913 cells move to this source and a
+        // census that could not tell the two roll sources apart could not see
+        // it happen.
+        method: "cad-roll-declared-land-acres",
+      });
+    });
+
+    it("a zip-conflict refuses the roll acreage and keeps the claim, recording what was refused", () => {
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: 0.5,
+        rollLandAcres: 0.3815,
+        trust: "zip-conflict",
+      });
+      expect(r.origin).toBe("claim");
+      expect(r.acreage?.method).toBe("cad-roll-land-acres");
+      expect(r.refusedRollAcres).toBe(0.3815);
+    });
+
+    it("THE DISPATCH OWN FINDING: a refused acreage with a usable roll value stops being a refusal", () => {
+      // 103,913 of the 292,578 stored acreage refusals have a usable
+      // land_acres at the declared vintage. Every one of them is served today
+      // as verdict "refused" and ZERO as a bare null -- a declared refusal
+      // sitting on top of data the same payload dollars already came from.
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: null,
+        rollLandAcres: 2.75,
+        trust: "same-vintage",
+      });
+      expect(r.origin).toBe("declared-roll");
+      expect(r.acreage?.value).toBe(2.75);
+    });
+
+    it("a non-positive or non-finite roll acreage is NOT a value, and falls through honestly", () => {
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(conformantAcreageFromDeclaredRoll(bad)).toBeNull();
+      }
+      // numeric arrives from node-postgres as a STRING; this function re-validates
+      // rather than trusting, so a caller that passed the raw string gets null
+      // instead of Math.round(NaN).
+      expect(conformantAcreageFromDeclaredRoll("0.3815" as unknown as number)).toBeNull();
+    });
+
+    it("retired keeps the claim acreage and never consults the roll", () => {
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: 0.5,
+        rollLandAcres: 99,
+        trust: "no-roll-row",
+      });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.acreage?.value).toBe(0.5);
+    });
+  });
+
+  describe("the payload records the gate, so a re-bake that stopped gating is visible", () => {
+    it("provenance carries the trust verdict and everything the gate refused", () => {
+      const payload = newPayload(null, {
+        body: flatProductionBody("48209", "111222", 2025, {
+          situsAddress: "1200 KOHLERS CROSSING",
+          situsCity: "SAN MARCOS",
+          situsZip: "78666",
+          landAcres: 0.5,
+        }),
+        parcelNodeId: "48209:111222",
+        countyFips: "48209",
+        countyName: "Hays",
+        situsAddress: "1200 KOHLERS CROSSING",
+        situsAddressOrigin: "claim",
+        situsAddressRefusedRoll: "500 SOME OTHER PARCEL RD",
+        declaredRollTrust: "zip-conflict",
+        situsLocality: {
+          city: {
+            value: "SAN MARCOS",
+            origin: "claim",
+            supersededClaimValue: null,
+            refusedRollValue: "KYLE",
+            trust: "zip-conflict",
+          },
+          zip: {
+            value: "78666",
+            origin: "claim",
+            supersededClaimValue: null,
+            refusedRollValue: "78640",
+            trust: "zip-conflict",
+          },
+        },
+        acreageWithoutRing: {
+          acreage: { value: 0.5, sqft: 21780, method: "cad-roll-land-acres" },
+          origin: "claim",
+          refusedRollAcres: 0.3815,
+        },
+      });
+      expect(payload.provenance.declaredRollTrust).toBe("zip-conflict");
+      expect(payload.provenance.declaredRollRefused).toEqual({
+        situsAddress: "500 SOME OTHER PARCEL RD",
+        situsCity: "KYLE",
+        situsZip: "78640",
+        acreage: 0.3815,
+      });
+      expect(payload.provenance.situsCitySource).toBe("claim");
+      expect(payload.provenance.situsZipSource).toBe("claim");
+      expect(payload.provenance.acreageSource).toBe("claim");
+      // ...and the leaves themselves kept the claim, not the other parcel data.
+      expect(payload.baseFacts.situsCity).toBe("SAN MARCOS");
+      expect(payload.baseFacts.situsZip).toBe("78666");
+    });
+
+    it("a PRE-CTX-B7 caller that omits the new inputs keeps its old behaviour rather than losing a leaf", () => {
+      const payload = newPayload(null, {
+        body: flatProductionBody("48021", "34137", 2025, {
+          situsAddress: "908 PINE , BASTROP, TX 78602",
+          situsCity: "BASTROP",
+          situsZip: "78602",
+          landAcres: 0.3815,
+        }),
+      });
+      expect(payload.baseFacts.situsCity).toBe("BASTROP");
+      expect(payload.baseFacts.situsZip).toBe("78602");
+      expect(payload.provenance.situsCitySource).toBe("claim");
+      expect(payload.provenance.acreageSource).toBe("claim");
+      expect(payload.provenance.declaredRollTrust).toBe("uncorroborated");
+    });
+  });
+
+  describe("the earned absences now name the SECOND source they searched", () => {
+    it("a claim absence says the declared roll was read too, and what it held", () => {
+      const searched = claimLeafAbsence({
+        parcelNodeId: "48453:1",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        declaredRoll: { consulted: true, rowPresent: true },
+        nowIso: NOW,
+      });
+      expect(searched.scopeSearched).toContain("cad_property.situs_city");
+      expect(searched.basis).toContain("both sources agree");
+
+      const noRow = claimLeafAbsence({
+        parcelNodeId: "48453:2",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        declaredRoll: { consulted: true, rowPresent: false },
+        nowIso: NOW,
+      });
+      expect(noRow.basis).toContain("holds no row for this prop_id");
+
+      const notConsulted = claimLeafAbsence({
+        parcelNodeId: "48453:3",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        declaredRoll: { consulted: false, rowPresent: false },
+        nowIso: NOW,
+      });
+      // The honest form: this absence is scoped to the claim ALONE and says so,
+      // rather than implying a search nobody ran.
+      expect(notConsulted.basis).toContain("scoped to the claim alone");
+    });
+
+    it("a pre-CTX-B7 caller that omits declaredRoll gets the old wording, not a false scope", () => {
+      const legacy = claimLeafAbsence({
+        parcelNodeId: "48453:4",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        nowIso: NOW,
+      });
+      expect(legacy.scopeSearched).not.toContain("cad_property");
+      expect(legacy.basis).not.toContain("declared-vintage");
+    });
   });
 });

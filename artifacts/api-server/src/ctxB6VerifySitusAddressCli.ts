@@ -41,7 +41,12 @@ import {
   assertSitusAddressAbsenceEarned,
   isEarnedLeafAbsence,
   isEarnedRecordRetirement,
+  resolveConformantAcreageWithoutRing,
   resolveConformantSitusAddress,
+  resolveConformantSitusLocality,
+  resolveDeclaredRollTrust,
+  declaredRollMayOverride,
+  type DeclaredRollTrust,
 } from "./lib/nodeFacetBakeTier1Conformant.js";
 import {
   classifyRawSitusAddress,
@@ -136,7 +141,11 @@ type Verdict = {
   rawClaimSitus: string | null;
   before: { leaf: unknown; content: ReturnType<typeof classifyRequiredLeaf>; sentinel: boolean };
   after: { leaf: unknown; content: ReturnType<typeof classifyRequiredLeaf>; sentinel: boolean };
-  expectation: "recovered-from-declared-roll" | "defective-before-clean-after" | "untouched";
+  expectation:
+    | "recovered-from-declared-roll"
+    | "defective-before-clean-after"
+    | "gate-refused-keeps-claim"
+    | "untouched";
   pass: boolean;
   why: string;
 };
@@ -169,10 +178,32 @@ function afterLeaf(input: {
   rawClaimSitus: string | null;
   /** `cad_property.situs_address` at the county's DECLARED tax_year. */
   rollSitus: string | null;
+  /** CTX-B7: the claim's OWN values, read off the stored payload, never off cad_property. */
+  claimTaxYear: number | null;
+  claimSitusCity: string | null;
+  claimSitusZip: string | null;
+  claimLandAcres: number | null;
+  /** CTX-B7: the declared-vintage row's own values. */
+  rollSitusCity: string | null;
+  rollSitusZip: string | null;
+  rollLandAcres: number | null;
   claim: Record<string, unknown>;
   cadPropertyRoll: CountyCadPropertyRoll;
   nowIso: string;
-}): { leaf: unknown; retired: boolean; servesOk: boolean; origin: string } {
+}): {
+  leaf: unknown;
+  retired: boolean;
+  servesOk: boolean;
+  origin: string;
+  trust: DeclaredRollTrust;
+  cityLeaf: unknown;
+  zipLeaf: unknown;
+  acreageLeaf: unknown;
+  citySource: string;
+  zipSource: string;
+  acreageSource: string;
+  refused: Record<string, unknown>;
+} {
   // The CLI's own branch, reproduced: a record ABSENT from the declared-vintage
   // roll takes `situsForRetiredBake` -- the last-known claim, trimmed, never
   // gated (CTX-RETIRE). Getting this wrong is not academic: the first run of
@@ -182,6 +213,16 @@ function afterLeaf(input: {
   const propId = input.parcelNodeId.split(":")[1] ?? "";
   const rollAbsent =
     input.cadPropertyRoll.consulted && !input.cadPropertyRoll.byPropId.has(propId);
+  // CTX-B7: the SAME same-parcel gate the bake CLI applies, from the SAME
+  // inputs. Reimplementing it here would let the instrument certify a bake that
+  // had stopped gating.
+  const trust = resolveDeclaredRollTrust({
+    rollAbsent,
+    claimTaxYear: input.claimTaxYear,
+    declaredTaxYear: input.cadPropertyRoll.declaredTaxYear,
+    claimSitusZip: input.claimSitusZip,
+    rollSitusZip: input.rollSitusZip,
+  });
   // The SAME resolver the bake CLI calls, with the SAME inputs -- the claim's
   // raw situs and the declared-vintage roll's own situs. Reimplementing the
   // preference here would let the instrument agree with a bake that had
@@ -189,7 +230,22 @@ function afterLeaf(input: {
   const resolved = resolveConformantSitusAddress({
     claimRaw: input.rawClaimSitus,
     rollRaw: input.rollSitus,
-    rollAbsent,
+    trust,
+  });
+  const cityResolved = resolveConformantSitusLocality({
+    claimRaw: input.claimSitusCity,
+    rollRaw: input.rollSitusCity,
+    trust,
+  });
+  const zipResolved = resolveConformantSitusLocality({
+    claimRaw: input.claimSitusZip,
+    rollRaw: input.rollSitusZip,
+    trust,
+  });
+  const acreageResolved = resolveConformantAcreageWithoutRing({
+    claimLandAcres: input.claimLandAcres,
+    rollLandAcres: input.rollLandAcres,
+    trust,
   });
   const payload = buildConformantTier1Payload({
     body: { ...input.claim, parcelNodeId: input.parcelNodeId },
@@ -200,6 +256,10 @@ function afterLeaf(input: {
     situsAddressUnusable: resolved.unusable,
     situsAddressOrigin: resolved.origin,
     situsAddressSupersededClaim: resolved.supersededClaimValue,
+    situsAddressRefusedRoll: resolved.refusedRollValue,
+    declaredRollTrust: trust,
+    situsLocality: { city: cityResolved, zip: zipResolved },
+    acreageWithoutRing: acreageResolved,
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
     publishRunId: undefined,
@@ -227,6 +287,14 @@ function afterLeaf(input: {
     retired,
     servesOk,
     origin: payload.provenance.situsAddressSource,
+    trust: payload.provenance.declaredRollTrust,
+    cityLeaf: payload.baseFacts.situsCity,
+    zipLeaf: payload.baseFacts.situsZip,
+    acreageLeaf: payload.baseFacts.acreage,
+    citySource: payload.provenance.situsCitySource,
+    zipSource: payload.provenance.situsZipSource,
+    acreageSource: payload.provenance.acreageSource,
+    refused: payload.provenance.declaredRollRefused as unknown as Record<string, unknown>,
   };
 }
 
@@ -291,6 +359,39 @@ function selfTest(): number {
   );
   // Non-vacuous: an unusable leaf must NOT be built without the discriminator.
   void emptyRoll;
+
+  // CTX-B7: the same-parcel gate, self-tested in BOTH directions on the SAME
+  // inputs. A gate observed only refusing is as untrustworthy as one observed
+  // only passing.
+  const gateCases: Array<{ name: string; trust: DeclaredRollTrust; claim: string | null; want: string }> = [
+    { name: "zip-conflict refuses a usable-claim swap", trust: "zip-conflict", claim: "121 KRISTEN DR", want: "claim" },
+    { name: "zip-corroborated takes the same swap", trust: "zip-corroborated", claim: "121 KRISTEN DR", want: "declared-roll" },
+    { name: "same-vintage takes the same swap", trust: "same-vintage", claim: "121 KRISTEN DR", want: "declared-roll" },
+    { name: "uncorroborated REFUSES a swap", trust: "uncorroborated", claim: "121 KRISTEN DR", want: "claim" },
+    { name: "uncorroborated TAKES a gain", trust: "uncorroborated", claim: null, want: "declared-roll" },
+    { name: "zip-conflict refuses even a gain", trust: "zip-conflict", claim: null, want: "none" },
+    { name: "no-roll-row keeps the retired claim ungated", trust: "no-roll-row", claim: "121 KRISTEN DR", want: "retired-claim" },
+  ];
+  for (const c of gateCases) {
+    const got = resolveConformantSitusAddress({
+      claimRaw: c.claim,
+      rollRaw: "250 STAGECOACH TRL",
+      trust: c.trust,
+    }).origin;
+    const ok = got === c.want;
+    if (!ok) failures += 1;
+    console.log(`[self-test] ${ok ? "OK  " : "FAIL"} gate: ${c.name}: origin=${got} expected=${c.want}`);
+  }
+  // And the predicate itself, asserted directly so a resolver bug and a gate bug
+  // are distinguishable rather than one compound failure.
+  const asym =
+    declaredRollMayOverride("uncorroborated", false) === true &&
+    declaredRollMayOverride("uncorroborated", true) === false;
+  if (!asym) failures += 1;
+  console.log(
+    `[self-test] ${asym ? "OK  " : "FAIL"} gate asymmetry: uncorroborated takes a GAIN and refuses a SWAP`,
+  );
+
   console.log(`[self-test] failures=${failures}`);
   return failures === 0 ? 0 : 1;
 }
@@ -334,6 +435,20 @@ async function main(): Promise<void> {
     //                   would refuse it; this one must not.
     "48309:103600", // McLennan real street: "2072 WASHINGTON LN , WACO, TX 76708"
   ];
+  // CTX-B7 GATE-REFUSED: the claim carries a perfectly good street, city and ZIP,
+  // and the declared-vintage roll row on the same prop_id is A DIFFERENT PARCEL --
+  // different street, different city, different ZIP. CTX-B6's rule as merged
+  // ("the roll wins even over a usable claim") would replace all three. These
+  // parcels must come out of the AFTER build UNCHANGED, with
+  // provenance.declaredRollTrust = "zip-conflict" and the refused roll values
+  // recorded. 29,539 street overwrites and 29,472 city overwrites are in this
+  // class across the six counties, almost all of them Hays.
+  const gateRefused: string[] = [
+    "48209:100039", // claim "121 KRISTEN DR, KYLE, TX 78640" / roll "250 STAGECOACH TRL, APT #638, SAN MARCOS"
+    "48209:100047", // claim "828 SIEBERT DR, KYLE, TX 78640"  / roll "171 S LBJ ST, SAN MARCOS, TX 786.."
+    "48209:100053", // claim "670 SIEBERT DR, KYLE, TX 78640"  / roll "2550 SPRING VALLEY DR, DRIPPING .."
+    "48209:100062", // claim "245 RAYMOND DR, KYLE, TX 78640"  / roll "1404 CLAREWOOD DR, STE #107, SAN.."
+  ];
   const retiredControl = "48055:1"; // CTX-B1 regression control
 
   // VERIFY THE INSTRUMENT BY VIOLATING IT. `--violate` swaps the two sets, so
@@ -349,7 +464,7 @@ async function main(): Promise<void> {
     console.log("[violate] expectation sets swapped; this run MUST exit 1");
   }
 
-  const wanted = [...recoverable, ...streetLess, ...controls, retiredControl];
+  const wanted = [...recoverable, ...streetLess, ...controls, ...gateRefused, retiredControl];
   const { rows } = await pool.query<{ place_key: string; payload_json: Record<string, unknown> }>(
     `SELECT place_key, payload_json FROM place_layer_snapshots
       WHERE adapter_key = $1 AND place_key = ANY($2::text[])`,
@@ -421,10 +536,11 @@ async function main(): Promise<void> {
       situs_city: string | null;
       situs_zip: string | null;
       situs_address: string | null;
+      land_acres: string | null;
     }>(
       `SELECT prop_id, tax_year, source_vintage, market_value, assessed_value, land_value,
               improvement_value, living_area_sqft, year_built, legal_description,
-              exemption_codes, situs_city, situs_zip, situs_address
+              exemption_codes, situs_city, situs_zip, situs_address, land_acres
          FROM cad_property WHERE county_fips=$1 AND prop_id=$2
         ORDER BY tax_year DESC`,
       [countyFips, propId],
@@ -460,6 +576,9 @@ async function main(): Promise<void> {
         legalDescription: declaredRow.legal_description,
         exemptionCodes: declaredRow.exemption_codes,
         situsAddress: declaredRow.situs_address,
+        situsCity: declaredRow.situs_city,
+        situsZip: declaredRow.situs_zip,
+        landAcres: declaredRow.land_acres == null ? null : Number(declaredRow.land_acres),
       } as never);
     }
     const cadPropertyRoll: CountyCadPropertyRoll = {
@@ -468,12 +587,46 @@ async function main(): Promise<void> {
       consulted: true,
     };
 
+    // CTX-B7 INSTRUMENT FIX, and it is the reason this file could not be reused
+    // unmodified. As CTX-B6 wrote it, this block synthesised the CLAIM's
+    // situsCity and situsZip FROM THE DECLARED ROLL (`declaredRow?.situs_city`).
+    // For B6's own question that was harmless: neither field was the leaf under
+    // test. For CTX-B7 it is fatal -- it makes claim and roll agree BY
+    // CONSTRUCTION on exactly the two leaves being decided, so every before/
+    // after would show no movement and the instrument would certify a
+    // no-op. Worse, it would have made the same-parcel gate read
+    // `zip-corroborated` on every parcel, including the 29,404 Hays rows whose
+    // ZIPs actually conflict.
+    //
+    // The claim's own values are recovered from the STORED payload instead, the
+    // same way B6 recovers the claim's raw situsAddress: a string leaf IS the
+    // claim value (the assembler is a passthrough), an earned absence means the
+    // claim carried nothing, and `provenance.parcelVintage` is the claim's own
+    // taxYear (NOT the declared vintage -- see the comment at its assignment).
+    const storedStr = (v: unknown): string | null =>
+      typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+    const claimSitusCity = storedStr(baseFacts.situsCity);
+    const claimSitusZip = storedStr(baseFacts.situsZip);
+    const storedProvenance = (payload.provenance ?? {}) as Record<string, unknown>;
+    const claimTaxYearRaw = storedProvenance.parcelVintage;
+    const claimTaxYear =
+      claimTaxYearRaw == null || Number.isNaN(Number(claimTaxYearRaw))
+        ? null
+        : Number(claimTaxYearRaw);
+    const storedAcreage = baseFacts.acreage as { value?: unknown; method?: unknown } | null;
+    const claimLandAcres =
+      storedAcreage && storedAcreage.method === "cad-roll-land-acres" &&
+      typeof storedAcreage.value === "number"
+        ? storedAcreage.value
+        : null;
+
     const claim: Record<string, unknown> = {
       sourceIdentifiers: { prop_id: propId, county_fips: countyFips },
       situsAddress: rawClaimSitus,
-      situsCity: declaredRow?.situs_city ?? null,
-      situsZip: declaredRow?.situs_zip ?? null,
-      taxYear: declaredTaxYear,
+      situsCity: claimSitusCity,
+      situsZip: claimSitusZip,
+      landAcres: claimLandAcres,
+      taxYear: claimTaxYear,
     };
 
     const rollSitus = declaredRow?.situs_address ?? null;
@@ -482,6 +635,14 @@ async function main(): Promise<void> {
       countyFips,
       rawClaimSitus,
       rollSitus,
+      claimTaxYear,
+      claimSitusCity,
+      claimSitusZip,
+      claimLandAcres,
+      rollSitusCity: declaredRow?.situs_city ?? null,
+      rollSitusZip: declaredRow?.situs_zip ?? null,
+      rollLandAcres:
+        declaredRow?.land_acres == null ? null : Number(declaredRow.land_acres),
       claim,
       cadPropertyRoll,
       nowIso,
@@ -503,9 +664,11 @@ async function main(): Promise<void> {
     const afterG = grade(after);
     const expectation: Verdict["expectation"] = recoverable.includes(parcelNodeId)
       ? "recovered-from-declared-roll"
-      : streetLess.includes(parcelNodeId)
-        ? "defective-before-clean-after"
-        : "untouched";
+      : gateRefused.includes(parcelNodeId)
+        ? "gate-refused-keeps-claim"
+        : streetLess.includes(parcelNodeId)
+          ? "defective-before-clean-after"
+          : "untouched";
 
     let pass: boolean;
     let why: string;
@@ -547,6 +710,26 @@ async function main(): Promise<void> {
         `${before.content.ok ? "ok" : "REJECT"} sentinel=${before.sentinel} ` +
         `-> factory caught it=${isDefective(before)}`;
       if (!isDefective(before)) factoryMissed += 1;
+    } else if (expectation === "gate-refused-keeps-claim") {
+      // CTX-B7. The row the declared roll offers is a DIFFERENT PARCEL, proven
+      // by its own situs ZIP disagreeing with the claim's. Every leaf must keep
+      // the claim, the trust verdict must say zip-conflict, and the refused
+      // roll values must be recorded rather than silently dropped.
+      const unchanged = after === beforeLeaf;
+      const conflicted = built.trust === "zip-conflict";
+      const refusedRecorded = typeof built.refused?.situsAddress === "string";
+      const cityKeptClaim = built.citySource === "claim";
+      pass = gradeStored
+        ? // In the BEFORE run these rows are already correct (the old bake read
+          // the claim), so grading them against the new contract must PASS --
+          // and that is exactly why they are not in the street-less set.
+          typeof beforeLeaf === "string"
+        : unchanged && conflicted && refusedRecorded && cityKeptClaim;
+      why =
+        `gate-refused: leaf unchanged=${unchanged}, trust=${built.trust}, ` +
+        `refusedRoll=${JSON.stringify(built.refused)}, situsCitySource=${built.citySource}, ` +
+        `situsZipSource=${built.zipSource}, acreageSource=${built.acreageSource}; ` +
+        `the declared roll offered ${JSON.stringify(rollSitus)} for this prop_id`;
     } else if (parcelNodeId === retiredControl) {
       // CTX-B1 / CTX-RETIRE: 48055:1 must keep serving its last-known situs
       // AND its retirement. Never converted to an absence by this change.
