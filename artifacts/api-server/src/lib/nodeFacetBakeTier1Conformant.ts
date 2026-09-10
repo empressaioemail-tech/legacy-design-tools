@@ -50,17 +50,43 @@
  * from whether the parcel-join geometry was genuinely checked — see
  * `buildAcreageAbsence` below the EARNED LEAF STATES block.
  *
- * A FIFTH LEAF, NARROWER (P-124 CTX-SITUS-SKIP, 2026-09-09).
- * `baseFacts.situsAddress` can ALSO now carry an earned absence, but is
- * deliberately NOT in `BAKE_OWNED_REQUIRED_LEAF_PATHS` alongside the four
- * above: those four earn an absence for EVERY null input, this one earns an
- * absence ONLY when `assertSitusNotPunctuationOnly` refused a claim that
- * carried something unusable (see the SITUS ADDRESS block below). The old
- * defect was not that this leaf could be null — a genuinely blank claim
- * writing `situsAddress: null` is correct and stays untouched — it was that
- * the CLI's per-row loop used to `continue` on the refusal and never write
- * the row at all. `assertSitusAddressAbsenceEarned` guards only the shape of
- * what IS written, never the pre-existing blank-claim null.
+ * A SEVENTH LEAF, AND THE ONE NOBODY GRADED (P-124 CTX-B6, 2026-09-10).
+ * `baseFacts.situsAddress` is now the sixth entry in
+ * `BAKE_OWNED_REQUIRED_LEAF_PATHS`. It got there the long way, and the route
+ * is the finding:
+ *
+ *   - CTX-SITUS-SKIP (2026-09-09) taught this leaf to earn an absence, but
+ *     ONLY when `assertSitusNotPunctuationOnly` refused the claim, and left
+ *     it out of the owned set on the reasoning that a genuinely blank claim
+ *     writing `situsAddress: null` was correct and untouched.
+ *   - It was not correct. `null` is none of
+ *     `value | absent-verified | not-applicable | refused`, the walk's
+ *     BP-CONTENT-01 requires this leaf as a four-state, and Hays failed on
+ *     exactly that. 22,805 rows across the six CTX counties carry the bare
+ *     null (measured 2026-09-10, staging `place_layer_snapshots`).
+ *   - Worse, `PUNCTUATION_ONLY_RE` only ever answered "is EVERY character
+ *     punctuation". `", TX 78756"` is not, so it passed the guard and was
+ *     served to a paying customer as their address on 146,494 Travis parcels
+ *     and 696 McLennan ones, with `facetCoverage.baseFacts` true and a
+ *     well-formed `absent-verified` sitting on `situsCity` right beside it.
+ *
+ * So this leaf now has THREE populations and THREE shapes, decided by the one
+ * shared predicate `classifyRawSitusAddress` in `./serveGuards`:
+ *
+ *   claim carries an address with a street  -> the trimmed string
+ *   claim carries nothing                   -> `claimLeafAbsence("situsAddress")`
+ *   claim carries something with no street  -> `situsAddressUnusableAbsence`,
+ *     which quotes the raw value verbatim and names WHICH way it was
+ *     unusable (punctuation-only vs no-street-component), so the two stay
+ *     tellable apart in the served payload.
+ *
+ * `null` is no longer reachable at this path, and
+ * `assertRequiredLeafStatesEarned` refuses the write if it ever is again.
+ * The one deliberate exception is a RETIRED record, whose situs is read
+ * ungated by `situsForRetiredBake` (CTX-RETIRE) and may still be a string
+ * with no street: that string is the account's LAST-KNOWN claim and the
+ * retirement declaration beside it already says the payload is not current.
+ * Caldwell `48055:1` is the regression control for that (CTX-B1 #650).
  *
  * Kept from the conformant shape: `shapeSource`, `baked`, `source`, `access`
  * (canonical pair, A-023), `accessNormalizedFrom` when serve translation
@@ -116,6 +142,7 @@ import {
   isEarnedRecordRetirement,
   type Tier1RecordRetirement,
 } from "./recordRetirement";
+import type { SitusAddressUnusableReason } from "./serveGuards";
 
 export const CONFORMANT_SHAPE_SOURCE = "conformant-v1";
 export const CONFORMANT_TIER1_SOURCE = "conformant-v1-cad-parcel-roll";
@@ -594,13 +621,42 @@ function buildAcreageAbsence(input: {
   };
 }
 
-/** The five leaves this bake owns the cell state of. `zoning`/`zoningSource` are the serve's. */
+/**
+ * The six leaves this bake owns the cell state of. `zoning`/`zoningSource`
+ * are the serve's.
+ *
+ * `baseFacts.situsAddress` joined this list in CTX-B6 (2026-09-10). Read the
+ * SEVENTH LEAF block at the top of this file for why it was out of it and
+ * what admitting it costs: the bare-null population it makes unwritable is
+ * 22,805 rows, which is why the blank-claim branch of `situsAddressLeaf` had
+ * to be built in the same change. Adding a path here without giving its null
+ * population a shape turns this control into a bake-wide refusal.
+ *
+ * THE GAP THIS LIST SITS IN, and it is bigger than any one leaf. Three lists
+ * govern tier-1 content and only one of them fails a write:
+ *
+ *   `REQUIRED_TIER1_FACET_PATHS` (this file, 36 paths) -- PRESENCE predicate.
+ *      Does the key exist. A key holding null satisfies it.
+ *   hauska-factory `verify-walk.mjs` `REQUIRED_TIER1_FACET_PATHS` (28 paths)
+ *      -- a HAND-COPIED mirror of the above, eight paths short, applying a
+ *      FOUR-STATE predicate to the SERVED payload on a ~180-parcel sample.
+ *   this list (6 paths) -- the FOUR-STATE predicate applied AT THE WRITE.
+ *
+ * Every leaf in the walk's list and not in this one is required by the grader
+ * and owned by nobody at bake time; that difference is the mechanism behind
+ * `situsCity`, `situsZip`, `landUse`, `landUseSource`, `acreage` and now
+ * `situsAddress` each being found, one at a time, by a sampled walk. Growing
+ * this list one leaf per lane is the symptom, not the cure; the cure is a
+ * single source of truth the two repos both read, which this repo cannot
+ * build alone. Filed as a leave-behind, not silently left.
+ */
 export const BAKE_OWNED_REQUIRED_LEAF_PATHS: readonly string[] = [
   "baseFacts.situsCity",
   "baseFacts.situsZip",
   "baseFacts.landUse",
   "provenance.landUseSource",
   "baseFacts.acreage",
+  "baseFacts.situsAddress",
 ];
 
 // ---------------------------------------------------------------------------
@@ -697,17 +753,17 @@ export interface ConformantBaseFacts
   /** A resolved acreage, or the earned absence (CTX-LEAVES2) when neither the ring nor the claim carries one. */
   acreage: NonNullable<BaseFacts["acreage"]> | Tier1LeafAbsence;
   /**
-   * `string` when the claim carries a usable address; the EARNED absence
-   * (CTX-SITUS-SKIP, 2026-09-09) when the on-roll claim's raw situsAddress is
-   * punctuation-only and `assertSitusNotPunctuationOnly` refused it; `null`
-   * ONLY for the pre-existing, unrelated case where the claim carries no
-   * situsAddress at all (raw is null/empty — never guard-refused). That third
-   * case is deliberately left a bare null: it is not this card's population,
-   * changing it would touch the 1.5M rows this card must leave byte-identical,
-   * and `baseFacts.situsAddress` is NOT in `BAKE_OWNED_REQUIRED_LEAF_PATHS` for
-   * that reason. See `situsAddressPunctuationOnlyAbsence` below.
+   * `string` when the claim carries an address with a street component (and,
+   * for a RETIRED record only, whatever the last-known claim carried, read
+   * ungated by `situsForRetiredBake`); otherwise an EARNED absence.
+   *
+   * `null` is NOT in this union any more (CTX-B6, 2026-09-10). Both null
+   * populations now earn an absence: a claim carrying nothing gets
+   * `claimLeafAbsence("situsAddress")`, and a claim carrying something with
+   * no street gets `situsAddressUnusableAbsence` with the raw value quoted.
+   * `assertRequiredLeafStatesEarned` refuses the write on a bare null here.
    */
-  situsAddress: string | Tier1LeafAbsence | null;
+  situsAddress: string | Tier1LeafAbsence;
 }
 
 export interface ConformantTier1Payload extends Omit<
@@ -748,19 +804,31 @@ export interface ConformantTier1BuildInput {
   parcelNodeId: string;
   countyFips: string;
   countyName?: string;
-  /** Situs already passed `assertSitusNotPunctuationOnly` (null when absent). */
+  /**
+   * The situs the rest of the payload is built from: a claim address that
+   * `classifyRawSitusAddress` returned `usable`, or a retired record's
+   * ungated last-known value. `null` whenever the claim was blank or
+   * unusable -- it must never reach `facets.base.situsAddress`, the address
+   * join key, or the serve guard.
+   */
   situsAddress: string | null;
   /**
-   * CTX-SITUS-SKIP (2026-09-09): set ONLY when the on-roll claim's raw
-   * situsAddress existed but `assertSitusNotPunctuationOnly` refused it
-   * (punctuation-only, e.g. `", ,"`). The CLI must not `continue` past that
-   * refusal -- it must still write the row -- so the raw value is threaded
-   * through here to build the earned absence's basis. `undefined`/`null` for
-   * every other case (a usable address, or the claim carrying none at all);
-   * the two must stay tellable apart, which is why this is a distinct field
-   * from `situsAddress` rather than a sentinel on it.
+   * Set ONLY when the on-roll claim carried SOMETHING that
+   * `classifyRawSitusAddress` refused. `raw` is verbatim (quoted in the
+   * absence basis, never paraphrased) and `reason` says which way it was
+   * unusable.
+   *
+   * CTX-SITUS-SKIP (2026-09-09) introduced this as
+   * `situsAddressPunctuationOnlyRaw`, a bare string carrying one reason
+   * implicitly in its name. CTX-B6 (2026-09-10) widened the population to
+   * street-less strings, so the reason had to become a value rather than a
+   * field name -- otherwise the served basis could not say which of the two
+   * shapes a given parcel hit. `undefined`/`null` for a usable address AND
+   * for a claim carrying nothing at all: those two must stay tellable apart
+   * from each other and from this one, which is why this is a distinct field
+   * rather than a sentinel on `situsAddress`.
    */
-  situsAddressPunctuationOnlyRaw?: string | null;
+  situsAddressUnusable?: { raw: string; reason: SitusAddressUnusableReason } | null;
   access: { discoverability: string; entitlement: string };
   accessNormalizedFrom: string | null;
   publishRunId: string | undefined;
@@ -1051,7 +1119,7 @@ export function buildConformantTier1Payload(
   // The shared assembler, and therefore the legacy bake that also calls it,
   // are untouched by this.
   const { placement } = conformantClaimRecord(input.body);
-  const claimAbsence = (field: "situsCity" | "situsZip"): Tier1LeafAbsence =>
+  const claimAbsence = (field: ClaimAbsenceField): Tier1LeafAbsence =>
     claimLeafAbsence({
       parcelNodeId,
       countyFips,
@@ -1070,25 +1138,33 @@ export function buildConformantTier1Payload(
       : // VERBATIM mirror, basis byte-identical, so the twin cannot state
         // anything the leaf it mirrors does not state.
         { ...(landUseLeaf as Tier1LeafAbsence), mirrors: "baseFacts.landUse" };
-  // CTX-SITUS-SKIP: `assembleTier1Payload` was called with `input.situsAddress`
-  // (already null in the refused case -- see the call above), so
-  // `tier1.baseFacts.situsAddress` is null both when the claim genuinely
-  // carries nothing AND when the guard refused it. Only the latter earns an
-  // absence here; the former stays a bare null on purpose (see
-  // `ConformantBaseFacts.situsAddress`'s doc comment).
+  // `assembleTier1Payload` was called with `input.situsAddress`, which is
+  // already null for BOTH null populations (see the call above), so
+  // `tier1.baseFacts.situsAddress` cannot tell them apart on its own.
+  // `input.situsAddressUnusable` is the discriminator the CLI threads through:
+  // set means the claim carried something and it was refused; unset means the
+  // claim carried nothing.
+  //
+  // CTX-B6 (2026-09-10): the second branch is NEW. Until this change it was
+  // `: null`, and that bare null was the state 22,805 rows in the six CTX
+  // counties served -- required by BP-CONTENT-01 as a four-state, owned by
+  // nobody at bake time, and the exact thing Hays's walk failed on. There is
+  // no third outcome now: every path out of this expression is a string or a
+  // well-formed `Tier1LeafAbsence`.
   const situsAddressLeaf: ConformantBaseFacts["situsAddress"] =
     tier1.baseFacts.situsAddress ??
-    (input.situsAddressPunctuationOnlyRaw != null
-      ? situsAddressPunctuationOnlyAbsence({
+    (input.situsAddressUnusable != null
+      ? situsAddressUnusableAbsence({
           parcelNodeId,
           countyFips,
           countyName,
           placement,
           access: input.access,
-          rawValue: input.situsAddressPunctuationOnlyRaw,
+          rawValue: input.situsAddressUnusable.raw,
+          reason: input.situsAddressUnusable.reason,
           nowIso,
         })
-      : null);
+      : claimAbsence("situsAddress"));
   // CTX-LEAVES2: `row` reflects whether a parcel-join geometry source was
   // actually available (non-null on `joined`/accepted `joined-situs`, null on
   // `no-row`/`gate-blocked`/an unmatched situs recovery) -- the same variable
@@ -1287,9 +1363,17 @@ export function leafAbsenceFromLandUseAbsence(
 }
 
 /** Human label for a claim field, used only inside a basis string. */
-const CLAIM_FIELD_LABEL: Record<"situsCity" | "situsZip", string> = {
+/** The claim-carried situs fields whose blank case earns an absence here. */
+export type ClaimAbsenceField = "situsCity" | "situsZip" | "situsAddress";
+
+const CLAIM_FIELD_LABEL: Record<ClaimAbsenceField, string> = {
   situsCity: "situs city",
   situsZip: "situs ZIP",
+  // CTX-B6: the label a reader sees on the served absence. "street address"
+  // rather than "address", because `situsZip` on the same parcel may well be
+  // populated and this leaf must not read as a claim that the parcel has no
+  // location on record.
+  situsAddress: "situs street address",
 };
 
 /**
@@ -1313,7 +1397,7 @@ export function claimLeafAbsence(input: {
   parcelNodeId: string;
   countyFips: string;
   countyName: string;
-  field: "situsCity" | "situsZip";
+  field: ClaimAbsenceField;
   placement: "nested" | "flat";
   access: { discoverability: string; entitlement: string };
   nowIso: string;
@@ -1374,28 +1458,51 @@ export function claimLeafAbsence(input: {
 
 /**
  * The earned absence for an on-roll claim's situsAddress when
- * `assertSitusNotPunctuationOnly` refused the raw value. Unlike
- * `claimLeafAbsence` above (which fires whenever the claim carries nothing),
- * this fires only for a claim that carried SOMETHING and it was refused as
- * unusable -- so the raw offending value is quoted verbatim in the basis
- * rather than paraphrased, and the scope names the guard by its exact
- * predicate so a reader can reproduce the refusal.
+ * `classifyRawSitusAddress` refused the raw value. Unlike `claimLeafAbsence`
+ * above (which fires whenever the claim carries NOTHING), this fires only for
+ * a claim that carried SOMETHING and it was refused as unusable -- so the raw
+ * offending value is quoted verbatim in the basis rather than paraphrased,
+ * and the scope names the predicate by its exact rule so a reader can
+ * reproduce the refusal.
+ *
+ * `reason` is carried, not flattened. `punctuation-only` and
+ * `no-street-component` are two different upstream facts -- a claim of `", ,"`
+ * says the roll row is a placeholder, a claim of `", TX 78756"` says the roll
+ * row has a real ZIP and lost its street -- and a served basis that could not
+ * distinguish them would be a ceremony. CTX-B6 added the second; CTX-SITUS-SKIP
+ * (2026-09-09) shipped the first as `situsAddressPunctuationOnlyAbsence`,
+ * which this replaces.
  *
  * `absent-verified` for the same reason `claimLeafAbsence` uses it: the claim
  * is not a join that can miss, it is the record this bake projects from, read
  * for every parcel by construction. Never fabricated, never inferred from
- * geometry or a neighbour -- the raw value is quoted, not replaced.
+ * geometry or a neighbour -- the raw value is quoted, not replaced, and no
+ * sibling leaf is touched (ruling A1: a ZIP that is really on record stays on
+ * `baseFacts.situsZip`).
  */
-export function situsAddressPunctuationOnlyAbsence(input: {
+export function situsAddressUnusableAbsence(input: {
   parcelNodeId: string;
   countyFips: string;
   countyName: string;
   placement: "nested" | "flat";
   access: { discoverability: string; entitlement: string };
   rawValue: string;
+  reason: SitusAddressUnusableReason;
   nowIso: string;
 }): Tier1LeafAbsence {
-  const { parcelNodeId, countyFips, countyName, placement, rawValue, nowIso } = input;
+  const { parcelNodeId, countyFips, countyName, placement, rawValue, reason, nowIso } =
+    input;
+  const rule =
+    reason === "punctuation-only"
+      ? "assertSitusNotPunctuationOnly (serveGuards.ts PUNCTUATION_ONLY_RE)"
+      : "situsCarriesStreetComponent (serveGuards.ts: the segment before the " +
+        "first comma holds no alphanumeric character)";
+  const finding =
+    reason === "punctuation-only"
+      ? `is punctuation-only (${JSON.stringify(rawValue)}) and carries no usable address content`
+      : `carries no street component (${JSON.stringify(rawValue)}): everything ` +
+        "before its first comma is empty or punctuation, so what remains is a " +
+        "locality, state or ZIP fragment and not an address";
   return {
     status: "absent",
     verdict: "absent-verified",
@@ -1404,16 +1511,16 @@ export function situsAddressPunctuationOnlyAbsence(input: {
       `cad-parcel-roll claim for county_fips ${countyFips}`,
     scopeSearched:
       `claim.situsAddress on the cad-parcel-roll atom body for ${parcelNodeId} ` +
-      `(${placement} claim placement), guarded by assertSitusNotPunctuationOnly ` +
-      `(serveGuards.ts PUNCTUATION_ONLY_RE); entitlement bound ` +
+      `(${placement} claim placement), classified by classifyRawSitusAddress ` +
+      `and refused by ${rule}; entitlement bound ` +
       `${input.access.discoverability}/${input.access.entitlement}`,
     asOf: nowIso,
     basis:
-      `${parcelNodeId}: the cad-parcel-roll claim's situsAddress is ` +
-      `punctuation-only (${JSON.stringify(rawValue)}) and carries no usable ` +
-      "address content. The claim field was read and is present, not blank " +
-      "-- this is a verified absence of a USABLE CAD-carried address, not a " +
-      "finding that the parcel has no address",
+      `${parcelNodeId}: the cad-parcel-roll claim's situsAddress ${finding}. ` +
+      "The claim field was read and is present, not blank -- this is a " +
+      "verified absence of a USABLE CAD-carried address, not a finding that " +
+      "the parcel has no address, and any situs city or ZIP this parcel does " +
+      "carry is unaffected and stays on its own leaf",
   };
 }
 
@@ -1474,16 +1581,21 @@ export function assertRequiredLeafStatesEarned(payload: unknown): void {
 /**
  * Refuse (throw, code SITUS_ADDRESS_ABSENCE_UNEARNED) a payload whose
  * `baseFacts.situsAddress` is an object that is not a well-formed earned
- * absence. Unlike `assertRequiredLeafStatesEarned` above, this does NOT
- * refuse a bare null at this path -- a genuinely blank claim (raw situsAddress
- * null/empty, never guard-refused) is a legitimate, pre-existing null that
- * this card leaves untouched (see `ConformantBaseFacts.situsAddress`). It
- * exists to catch the one new failure mode this card introduces: a
- * punctuation-only refusal reaching a payload as a malformed object instead
- * of a complete `Tier1LeafAbsence`, which is exactly how the four leaves in
- * `assertRequiredLeafStatesEarned` stayed silently broken until a walk found
- * them (CTX-LEAVES). A string or a bare null both pass; an object must be
- * well-formed and must name this parcel in its basis.
+ * absence, or whose basis does not name the parcel.
+ *
+ * It is the PER-PARCEL half of the contract that `assertRequiredLeafStatesEarned`
+ * cannot express: that list refuses a bare null and a malformed object at any
+ * owned path, but it does not check that an absence names the parcel it is
+ * about, and a basis identical across parcels is a ceremony rather than a
+ * justification.
+ *
+ * CTX-B6 (2026-09-10): this used to state, in words, that a bare null at this
+ * path is legitimate and passes. It is not and it does not -- 22,805 rows
+ * proved it, and the leaf is now in `BAKE_OWNED_REQUIRED_LEAF_PATHS`. Both
+ * asserts now refuse a null here, which is deliberate redundancy at one call
+ * site rather than two implementations of one rule in two places: they are
+ * invoked back to back on the same payload in the bake CLI, so they cannot
+ * drift apart unobserved, and each names a different reason in its error.
  */
 export function assertSitusAddressAbsenceEarned(payload: unknown): void {
   const refuse = (why: string): never => {
@@ -1501,7 +1613,15 @@ export function assertSitusAddressAbsenceEarned(payload: unknown): void {
     return refuse(`${parcelNodeId} is missing the key baseFacts.situsAddress entirely`);
   }
   const value = baseFacts.situsAddress;
-  if (value === null || typeof value === "string") return;
+  if (value === null || value === undefined) {
+    return refuse(
+      `${parcelNodeId} carries a bare null at baseFacts.situsAddress; null is ` +
+        "not value|absent-verified|not-applicable|refused (BP-CONTENT-01). A " +
+        "claim carrying no situsAddress earns claimLeafAbsence; a claim " +
+        "carrying an unusable one earns situsAddressUnusableAbsence",
+    );
+  }
+  if (typeof value === "string") return;
   if (!isEarnedLeafAbsence(value)) {
     return refuse(
       `${parcelNodeId} carries an object at baseFacts.situsAddress that is ` +

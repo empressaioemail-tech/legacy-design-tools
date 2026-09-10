@@ -72,6 +72,105 @@ export function assertSitusNotPunctuationOnly(situs: unknown): string | null {
   return s;
 }
 
+// ---------------------------------------------------------------------------
+// SITUS ADDRESS QUALITY (P-124 CTX-B6, 2026-09-10).
+//
+// `PUNCTUATION_ONLY_RE` above answers ONE question -- is every character in
+// this string punctuation -- and CTX-SENTINEL already recorded that the real
+// world carries a THIRD and now a FOURTH shape poorer than the two the
+// 2026-09-03 refusal-contract split named. `", TX 78756"` contains
+// alphanumerics, passes that regex, and is served to a paying customer as
+// their address. Measured on staging 2026-09-10: 147,199 stored tier-1 rows
+// across the six CTX counties carry a street-less situs STRING -- 146,494 in
+// Travis alone, of which 123,120 are the `", TX <zip>"` shape and 16,010 are
+// the bare `", TX"` -- plus 696 in McLennan such as `", WACO, TX 76705"`.
+// Every one of them carries a real locality or ZIP and no street whatsoever.
+//
+// THE RULE, and it is the only one this file owns: an address string carries
+// a STREET COMPONENT when the segment before its first comma holds at least
+// one alphanumeric character. `"4709 SHOALWOOD AVE"` does. `"908 PINE ,
+// BASTROP, TX 78602"` (the live Bastrop roll form) does. `", TX 78756"`,
+// `", ,"` and `",,AUSTIN, TX 78756"` do not.
+//
+// WHY HERE. The bake, the bake CLI and this serve guard were three places
+// that each decided independently what an unusable situs is, and they
+// disagreed -- which is how a shape the Factory's own S1 grade
+// (`hauska-factory src/stages/grade/s-rules.mjs` `isSentinelSitus`,
+// `/^,\s*,/` and `/^,\s*TX\s+\d{5}/i`) has detected all along still reached
+// the store on six figures of rows. One predicate, one module, imported by
+// every producer. `classifyRawSitusAddress` is a SUPERSET of both factory
+// sentinel regexes by construction and
+// `__tests__/serveGuardsSitusAddress.test.ts` proves the containment against
+// those two regexes carried as fixtures; the cross-repo single source is a
+// leave-behind item, because this repo cannot edit hauska-factory.
+//
+// NOT ARMED AT SERVE, DELIBERATELY. `refusePayloadAtServe` below still
+// refuses only the punctuation-only shape. Arming the street rule there in
+// the same change would 422 the 147,199 rows already baked on the old rule
+// the instant it deployed, before the re-bake the integration seat owns --
+// turning an invisible defect into a visible outage, which is the ordering
+// ENFORCEMENT.md's retirement rule exists to prevent. The WRITE is the
+// control that lands here (`assertRequiredLeafStatesEarned` in
+// `nodeFacetBakeTier1Conformant.ts`); the serve backstop is a named
+// leave-behind, not a claim of coverage.
+// ---------------------------------------------------------------------------
+
+/** Why a raw claim situs address cannot be presented as the value of the leaf. */
+export type SitusAddressUnusableReason = "punctuation-only" | "no-street-component";
+
+export type RawSitusAddressClass =
+  /** The claim carries no situsAddress at all (null, empty, or whitespace). */
+  | { kind: "blank" }
+  /** The claim carries an address with a street component; `value` is trimmed. */
+  | { kind: "usable"; value: string }
+  /** The claim carries SOMETHING, and it is not presentable. `raw` is verbatim. */
+  | { kind: "unusable"; reason: SitusAddressUnusableReason; raw: string };
+
+/**
+ * The segment of an address before its first comma, trimmed. Exported so a
+ * test can show the predicate reading what it claims to read rather than a
+ * whole-string regex that happens to correlate.
+ */
+export function situsStreetSegment(address: string): string {
+  const [first = ""] = String(address).split(",");
+  return first.trim();
+}
+
+/** True when the pre-comma segment holds at least one alphanumeric character. */
+export function situsCarriesStreetComponent(address: string): boolean {
+  return /[A-Za-z0-9]/.test(situsStreetSegment(address));
+}
+
+/**
+ * The ONE classification every producer of `baseFacts.situsAddress` runs.
+ *
+ * `blank` and `unusable` are deliberately different kinds rather than one
+ * "bad" bucket: the first is a claim that was read and carries nothing, the
+ * second is a claim that carries something that must not be shown. They earn
+ * different absences with different bases, and collapsing them would make the
+ * served answer unable to say which happened.
+ *
+ * The punctuation-only branch delegates to `assertSitusNotPunctuationOnly`
+ * rather than re-testing `PUNCTUATION_ONLY_RE`, so that rule keeps exactly
+ * one implementation.
+ */
+export function classifyRawSitusAddress(
+  raw: string | null | undefined,
+): RawSitusAddressClass {
+  if (raw == null) return { kind: "blank" };
+  const s = String(raw).trim();
+  if (s === "") return { kind: "blank" };
+  try {
+    assertSitusNotPunctuationOnly(s);
+  } catch {
+    return { kind: "unusable", reason: "punctuation-only", raw: String(raw) };
+  }
+  if (!situsCarriesStreetComponent(s)) {
+    return { kind: "unusable", reason: "no-street-component", raw: String(raw) };
+  }
+  return { kind: "usable", value: s };
+}
+
 export function refusePayloadAtServe(payload: unknown): void {
   if (!payload || typeof payload !== "object") return;
   const p = payload as Record<string, unknown>;

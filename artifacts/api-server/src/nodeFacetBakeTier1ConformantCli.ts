@@ -38,7 +38,11 @@ import pg from "pg";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
-import { normalizeAccessPair, assertSitusNotPunctuationOnly } from "./lib/serveGuards.js";
+import {
+  normalizeAccessPair,
+  classifyRawSitusAddress,
+  type SitusAddressUnusableReason,
+} from "./lib/serveGuards.js";
 import {
   fetchCountyCadPropertyRoll,
   fetchCountyLandUseByAddress,
@@ -101,21 +105,33 @@ function rawClaimSitusAddress(body: Record<string, unknown>): string | null {
 }
 
 /**
- * `raw` is always the claim's own trimmed-or-null situsAddress, independent of
- * `refuse` -- CTX-SITUS-SKIP threads it through so a caller whose guard
- * refusal it is can quote the offending value in an earned absence, rather
- * than dropping the row (see the per-row loop below).
+ * The claim's situs, classified by the ONE shared predicate
+ * (`classifyRawSitusAddress` in lib/serveGuards.ts).
+ *
+ * `situs` is the value the rest of the payload is built from and is null for
+ * BOTH null populations, so it can never carry an unusable string into
+ * `facets.base.situsAddress`, the address join key, or the serve guard.
+ * `unusable` is the discriminator: set means the claim carried something and
+ * it was refused (with the raw value and which rule refused it, so the earned
+ * absence can quote it verbatim); null means the claim carried nothing at all.
+ *
+ * CTX-SITUS-SKIP (2026-09-09) built this to thread a punctuation-only
+ * refusal. CTX-B6 (2026-09-10) widened it to street-less strings and moved
+ * the predicate out of this file, because the bake, this CLI and the serve
+ * guard were three independent answers to one question and the widest of the
+ * three was still narrow enough to admit `", TX 78756"` on 146,494 Travis
+ * rows.
  */
-function situsForBake(
-  body: Record<string, unknown>,
-): { situs: string | null; refuse: boolean; raw: string | null } {
-  const raw = rawClaimSitusAddress(body);
-  if (raw == null || raw === "") return { situs: null, refuse: false, raw: null };
-  try {
-    return { situs: assertSitusNotPunctuationOnly(raw), refuse: false, raw };
-  } catch {
-    return { situs: null, refuse: true, raw };
+function situsForBake(body: Record<string, unknown>): {
+  situs: string | null;
+  unusable: { raw: string; reason: SitusAddressUnusableReason } | null;
+} {
+  const cls = classifyRawSitusAddress(rawClaimSitusAddress(body));
+  if (cls.kind === "usable") return { situs: cls.value, unusable: null };
+  if (cls.kind === "unusable") {
+    return { situs: null, unusable: { raw: cls.raw, reason: cls.reason } };
   }
+  return { situs: null, unusable: null };
 }
 
 /**
@@ -284,8 +300,13 @@ async function main() {
       ...new Set(
         work
           .map((w) => {
-            const { situs, refuse } = situsForBake(w.body);
-            if (refuse) return null;
+            // CTX-B6: `situs` is already null for every claim the predicate
+            // refused, so an unusable value can no longer become a join key.
+            // That matters: normalizeSitusAddress(", TX 78756") is "TX78756",
+            // a key every parcel in that ZIP would collide on, and the
+            // situs join keeps the FIRST feature_index on a collision.
+            const { situs, unusable } = situsForBake(w.body);
+            if (unusable) return null;
             return addressJoinKey(county, situs, blockedSet);
           })
           .filter((k): k is string => k != null),
@@ -311,12 +332,20 @@ async function main() {
   let written = 0;
   let retired = 0;
   // CTX-SITUS-SKIP (2026-09-09): no longer a skip. An on-roll row whose CAD
-  // claim's situsAddress is punctuation-only is now WRITTEN, with an earned
-  // absence on baseFacts.situsAddress -- this counts those rows so the
-  // outcome stays countable and visible, never silently absorbed the way
-  // `skippedBadSitus` (this counter's old name) was: it incremented for
-  // 18,037 rows and was never read by anything that would have caught them.
+  // claim's situsAddress is unusable is now WRITTEN, with an earned absence on
+  // baseFacts.situsAddress -- these count those rows so the outcome stays
+  // countable and visible, never silently absorbed the way `skippedBadSitus`
+  // (this counter's old name) was: it incremented for 18,037 rows and was
+  // never read by anything that would have caught them.
+  //
+  // CTX-B6 (2026-09-10): THREE counters, not one. The three populations earn
+  // three different absences and a single total would hide which one moved --
+  // in particular `situsBlankClaimAbsence` is the population that used to be
+  // a bare null and was counted nowhere at all, so a run that turns 22,805
+  // silent nulls into 22,805 declared absences must be able to say so.
   let situsPunctuationOnlyAbsence = 0;
+  let situsNoStreetAbsence = 0;
+  let situsBlankClaimAbsence = 0;
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
@@ -350,27 +379,32 @@ async function main() {
     // the stale claim happens to carry a well-formed address.
     const rollAbsent = cadPropertyRoll.consulted && !cadPropertyRoll.byPropId.has(propId);
     let situs: string | null;
-    // CTX-SITUS-SKIP (2026-09-09): the raw offending value when the guard
-    // refuses an on-roll claim's situsAddress; null in every other case
-    // (usable address, blank claim, or a retired/roll-absent record, whose
-    // situs is never guard-gated -- see situsForRetiredBake). Threaded to
+    // The raw offending value and WHICH rule refused it, when the on-roll
+    // claim carried something unusable; null in every other case (a usable
+    // address, a claim carrying nothing, or a retired/roll-absent record,
+    // whose situs is never gated -- see situsForRetiredBake). Threaded to
     // buildConformantTier1Payload so it can earn the absence, never to fill
-    // `situs` itself: `assertSitusNotPunctuationOnly` still refused this
-    // value and it must never reach `facets.base.situsAddress` or the serve
+    // `situs` itself: the predicate refused this value and it must never
+    // reach `facets.base.situsAddress`, the address join key, or the serve
     // guard verbatim.
-    let situsPunctuationOnlyRaw: string | null = null;
+    let situsUnusable: { raw: string; reason: SitusAddressUnusableReason } | null = null;
     if (rollAbsent) {
       situs = situsForRetiredBake(body);
     } else {
-      const { situs: s, refuse: refuseSitus, raw } = situsForBake(body);
-      if (refuseSitus) {
+      const { situs: s, unusable } = situsForBake(body);
+      if (unusable) {
         // Previously: skippedBadSitus += 1; continue -- the row was never
         // written and its snapshot stayed frozen forever. Now: write it, with
         // an earned absence on baseFacts.situsAddress naming why (P-124
         // CTX-SITUS-SKIP). A bad situs is a fact about one leaf, not a reason
         // to discard every other correct fact this row carries.
-        situsPunctuationOnlyAbsence += 1;
-        situsPunctuationOnlyRaw = raw;
+        if (unusable.reason === "punctuation-only") situsPunctuationOnlyAbsence += 1;
+        else situsNoStreetAbsence += 1;
+        situsUnusable = unusable;
+      } else if (s == null) {
+        // CTX-B6: the claim carries no situsAddress at all. This wrote a bare
+        // null until 2026-09-10 and now earns claimLeafAbsence in the builder.
+        situsBlankClaimAbsence += 1;
       }
       situs = s;
     }
@@ -401,7 +435,7 @@ async function main() {
       countyFips: county,
       countyName,
       situsAddress: situs,
-      situsAddressPunctuationOnlyRaw: situsPunctuationOnlyRaw,
+      situsAddressUnusable: situsUnusable,
       access,
       accessNormalizedFrom,
       publishRunId,
@@ -510,11 +544,17 @@ async function main() {
   // county. This line makes the count impossible to miss in the bake's own
   // log, matching the visibility the cadPropertyRoll/landUseRoll lines above
   // already give their own counts.
-  if (situsPunctuationOnlyAbsence > 0) {
+  const situsAbsenceTotal =
+    situsPunctuationOnlyAbsence + situsNoStreetAbsence + situsBlankClaimAbsence;
+  if (situsAbsenceTotal > 0) {
     console.log(
-      `[node-facet-bake-t1-conformant] situs-punctuation-only earned absence for ${county}: ` +
-        `${situsPunctuationOnlyAbsence} of ${cadRows.length} rows (on-roll, CAD claim ` +
-        "situsAddress punctuation-only; written with baseFacts.situsAddress earned absence, not skipped)",
+      `[node-facet-bake-t1-conformant] baseFacts.situsAddress earned absences for ${county}: ` +
+        `${situsAbsenceTotal} of ${cadRows.length} rows -- ` +
+        `punctuation-only=${situsPunctuationOnlyAbsence}, ` +
+        `no-street-component=${situsNoStreetAbsence}, ` +
+        `blank-claim=${situsBlankClaimAbsence} ` +
+        "(all on-roll; written with an earned absence on baseFacts.situsAddress, " +
+        "never skipped and never a bare null)",
     );
   }
   console.log(
@@ -528,6 +568,8 @@ async function main() {
       retired,
       skippedNoNode,
       situsPunctuationOnlyAbsence,
+      situsNoStreetAbsence,
+      situsBlankClaimAbsence,
       skippedBadAccess,
       parcelTable: parcelTable?.table ?? null,
       joinGateBlocked,
