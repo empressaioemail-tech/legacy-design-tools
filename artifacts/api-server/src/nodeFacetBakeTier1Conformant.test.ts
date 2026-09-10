@@ -48,7 +48,8 @@ import {
   parcelNodeIdFromBody,
   readConformantCadClaim,
   REQUIRED_TIER1_FACET_PATHS,
-  situsAddressPunctuationOnlyAbsence,
+  resolveConformantSitusAddress,
+  situsAddressUnusableAbsence,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
   type ConformantTier1BuildInput,
   type Tier1LeafAbsence,
@@ -154,7 +155,9 @@ function newPayload(
     countyName?: string;
     parcelNodeId?: string;
     situsAddress?: string | null;
-    situsAddressPunctuationOnlyRaw?: string | null;
+    situsAddressUnusable?: ConformantTier1BuildInput["situsAddressUnusable"];
+    situsAddressOrigin?: ConformantTier1BuildInput["situsAddressOrigin"];
+    situsAddressSupersededClaim?: ConformantTier1BuildInput["situsAddressSupersededClaim"];
     situsRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
@@ -170,8 +173,14 @@ function newPayload(
     // means null, not "fall back to the default" -- `??` cannot distinguish
     // "the caller wants null" from "the caller omitted this".
     situsAddress: "situsAddress" in opts ? (opts.situsAddress ?? null) : "908 PINE , BASTROP, TX 78602",
-    ...(opts.situsAddressPunctuationOnlyRaw !== undefined
-      ? { situsAddressPunctuationOnlyRaw: opts.situsAddressPunctuationOnlyRaw }
+    ...(opts.situsAddressUnusable !== undefined
+      ? { situsAddressUnusable: opts.situsAddressUnusable }
+      : {}),
+    ...(opts.situsAddressOrigin !== undefined
+      ? { situsAddressOrigin: opts.situsAddressOrigin }
+      : {}),
+    ...(opts.situsAddressSupersededClaim !== undefined
+      ? { situsAddressSupersededClaim: opts.situsAddressSupersededClaim }
       : {}),
     access: CANONICAL_ACCESS,
     accessNormalizedFrom: null,
@@ -418,7 +427,7 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
   });
 
-  it("the situs the guard validated is what both facets.base and baseFacts carry (null when absent)", () => {
+  it("the situs the predicate validated is what facets.base carries; baseFacts earns an absence when the claim is blank (CTX-B6)", () => {
     const n = buildConformantTier1Payload({
       body: conformantBody({ claim: { situsAddress: null } }),
       parcelNodeId: "48021:34137",
@@ -430,8 +439,14 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
       parcelJoin: { table: "txgio_parcel", row: txgioRow(), gateBlocked: false },
       nowIso: NOW,
     });
+    // The legacy mirror still carries an address or nothing -- never an
+    // absence object. It is what refusePayloadAtServe and the Factory walk
+    // read, and both expect a string-or-null.
     expect(n.facets.base.situsAddress).toBeNull();
-    expect(n.baseFacts.situsAddress).toBeNull();
+    // The LEAF, however, is no longer a bare null: until 2026-09-10 this
+    // asserted toBeNull(), and that null is exactly what Hays's staging walk
+    // failed BP-CONTENT-01 on across 22,805 rows in the six CTX counties.
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
     expect(n.facetCoverage.baseFacts).toBe(true); // apn still present
     expect(n).not.toHaveProperty("publishRunId");
     expect(n.countyName).toBe("Bastrop");
@@ -627,6 +642,13 @@ describe("the divergence instrument fails when it should", () => {
         // CTX-situs (2026-09-08): situsState is derived, not join-sourced;
         // same new-shape-only treatment as the two above.
         "provenance.situsStateSource",
+        // CTX-B6 (2026-09-10, reopened): which upstream supplied the situs, and
+        // the claim value the declared roll overrode. This pin FIRED when the
+        // two keys were added, which is the control working: widening the
+        // allowlist is a deliberate act with a reason, never a silent one. The
+        // old bake had no concept of a situs SOURCE because it had only one.
+        "provenance.situsAddressSource",
+        "provenance.situsAddressSupersededClaim",
         "baseFacts.cadRoll",
         "baseFacts.yearBuilt",
         "baseFacts.legalDescription",
@@ -1575,13 +1597,14 @@ describe("CTX-LEAVES: the controls are proven able to FIRE", () => {
     return n;
   };
 
-  it("assertRequiredLeafStatesEarned REFUSES a bare null at each of the five leaves", () => {
+  it("assertRequiredLeafStatesEarned REFUSES a bare null at each of the SIX leaves (situsAddress joined 2026-09-10, CTX-B6)", () => {
     expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
       "baseFacts.situsCity",
       "baseFacts.situsZip",
       "baseFacts.landUse",
       "provenance.landUseSource",
       "baseFacts.acreage",
+      "baseFacts.situsAddress",
     ]);
     for (const path of BAKE_OWNED_REQUIRED_LEAF_PATHS) {
       let code: string | undefined;
@@ -1961,7 +1984,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       }),
       parcelNodeId: "48021:999001",
       situsAddress: null, // the guard already refused it -- this mirrors the CLI
-      situsAddressPunctuationOnlyRaw: ", ,",
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
     });
     // It was WRITTEN (the builder returned a payload at all) -- the old
     // defect was that the CLI never reached buildConformantTier1Payload for
@@ -1988,7 +2011,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       }),
       parcelNodeId: "48021:999001",
       situsAddress: null,
-      situsAddressPunctuationOnlyRaw: ", ,",
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
     });
     // The legacy mirror stays null -- never the punctuation-only literal.
     expect(n.facets.base.situsAddress).toBeNull();
@@ -2006,7 +2029,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       }),
       parcelNodeId: "48021:999002",
       situsAddress: null,
-      situsAddressPunctuationOnlyRaw: ", ,",
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
     });
     expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
     // situsCity/situsZip are read straight from the claim, never derived from
@@ -2024,7 +2047,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       }),
       parcelNodeId: "48021:999003",
       situsAddress: null,
-      situsAddressPunctuationOnlyRaw: ", ,",
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
     });
     for (const field of ["situsCity", "situsZip"] as const) {
       expect(isEarnedLeafAbsence(n.baseFacts[field])).toBe(true);
@@ -2036,7 +2059,16 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
     }
   });
 
-  it("the pre-existing, genuinely blank claim (raw null, never guard-refused) stays a bare null: NOT this card's population, byte-identical to before", () => {
+  it("CTX-B6 SUPERSEDES: the genuinely blank claim no longer stays a bare null -- it earns claimLeafAbsence", () => {
+    // This test asserted the OPPOSITE until 2026-09-10: that a blank claim
+    // writing `situsAddress: null` was correct and deliberately untouched.
+    // It was not. `null` is none of value|absent-verified|not-applicable|
+    // refused, BP-CONTENT-01 requires this leaf as a four-state, Hays failed
+    // its 2026-09-10 staging walk on exactly this, and 22,805 rows across the
+    // six CTX counties carried it (Bastrop 2,979 / Caldwell 15,289 / Hays
+    // 2,973 / Travis 1,545 / Williamson 19 / McLennan 0, measured read-only
+    // on staging place_layer_snapshots). Keeping the old expectation would
+    // have made the fix read as the regression.
     const n = newPayload(null, {
       body: flatProductionBody("48453", "999004", 2026, {
         situsAddress: null,
@@ -2047,14 +2079,98 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       countyFips: "48453",
       countyName: "Travis",
       situsAddress: null,
-      // situsAddressPunctuationOnlyRaw NOT set -- the CLI never sets it unless
-      // the guard actually refused something.
+      // situsAddressUnusable NOT set -- the CLI never sets it unless the
+      // claim actually carried something that was refused.
     });
-    expect(n.baseFacts.situsAddress).toBeNull();
-    // Not required, not earning an absence: `assertRequiredLeafStatesEarned`
-    // does not know this path and must not start refusing it.
+    expect(n.baseFacts.situsAddress).not.toBeNull();
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    const wire = n.baseFacts.situsAddress as Tier1LeafAbsence;
+    expect(wire.verdict).toBe("absent-verified");
+    expect(wire.basis).toContain("48453:999004");
+    // The BLANK basis must be distinguishable from the UNUSABLE one: it says
+    // the claim carries nothing, and quotes no raw value because there is none.
+    expect(wire.basis).toContain("carries no situsAddress");
+    expect(wire.basis).not.toContain("no street component");
+    expect(wire.scopeSearched).toContain("claim.situsAddress");
     expect(() => assertRequiredLeafStatesEarned(n)).not.toThrow();
     expect(() => assertSitusAddressAbsenceEarned(n)).not.toThrow();
+    // facets.base stays null: the legacy mirror carries an address or nothing,
+    // never an absence object.
+    expect(n.facets.base.situsAddress).toBeNull();
+  });
+
+  /**
+   * CTX-B6 (P-124, 2026-09-10). THE FOURTH SHAPE. `PUNCTUATION_ONLY_RE` asks
+   * "is EVERY character punctuation". `", TX 78756"` is not, so it passed
+   * every guard in this repo and was served as a paying customer's address on
+   * 146,494 Travis parcels and 696 McLennan ones, with facetCoverage.baseFacts
+   * true and a well-formed absent-verified sitting on situsCity right beside
+   * it (live: node:48453:224793, bakedAt 2026-09-10T05:59:22.982Z).
+   *
+   * It is not composed here. Travis's 2026 PACS roll carries
+   * "4709 SHOALWOOD AVE" for that same prop_id; the defective string is the
+   * raw SITUS_ADDR of the 2025 StratMap land-parcels drop, which is the
+   * county's declared vintage. So the fix is not to stop assembling (nothing
+   * assembles) -- it is to stop PRESENTING a street-less claim as the value.
+   */
+  describe("CTX-B6: a claim with no street component earns an absence too, and says which way it was unusable", () => {
+    const noStreetPayload = () =>
+      newPayload(null, {
+        body: flatProductionBody("48453", "224793", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: "78756",
+        }),
+        parcelNodeId: "48453:224793",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: null, // the predicate refused it -- this mirrors the CLI
+        situsAddressUnusable: { raw: ", TX 78756", reason: "no-street-component" },
+      });
+
+    it("the worked example bakes an earned absence, not a sentinel string", () => {
+      const n = noStreetPayload();
+      expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+      const wire = n.baseFacts.situsAddress as Tier1LeafAbsence;
+      expect(wire.verdict).toBe("absent-verified");
+      expect(wire.basis).toContain("48453:224793");
+      expect(wire.basis).toContain(JSON.stringify(", TX 78756"));
+      expect(wire.basis).toContain("no street component");
+      expect(wire.scopeSearched).toContain("situsCarriesStreetComponent");
+      expect(classifyRequiredLeafVerbatim(wire, { path: "baseFacts.situsAddress" })).toMatchObject(
+        { state: "absent-verified", ok: true },
+      );
+    });
+
+    it("ruling A1: the ZIP that IS on record survives on its own leaf, untouched", () => {
+      const n = noStreetPayload();
+      expect(n.baseFacts.situsZip).toBe("78756");
+      // and the raw string is not destroyed either -- it is quoted verbatim.
+      expect((n.baseFacts.situsAddress as Tier1LeafAbsence).basis).toContain("78756");
+    });
+
+    it("the two unusable reasons produce DIFFERENT bases: a reader can tell a placeholder from a lost street", () => {
+      const noStreet = (noStreetPayload().baseFacts.situsAddress as Tier1LeafAbsence).basis;
+      const punct = (
+        newPayload(null, {
+          body: flatProductionBody("48021", "999006", 2025, {
+            situsAddress: ", ,",
+            situsCity: null,
+            situsZip: null,
+          }),
+          parcelNodeId: "48021:999006",
+          situsAddress: null,
+          situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+        }).baseFacts.situsAddress as Tier1LeafAbsence
+      ).basis;
+      expect(noStreet).not.toBe(punct);
+      expect(punct).toContain("punctuation-only");
+      expect(noStreet).toContain("no street component");
+    });
+
+    it("facets.base.situsAddress is null, so the S1 sentinel family cannot fire on the served row", () => {
+      expect(noStreetPayload().facets.base.situsAddress).toBeNull();
+    });
   });
 
   it("a normal, usable situsAddress bakes IDENTICALLY to today: the 1.5M healthy rows are untouched", () => {
@@ -2064,31 +2180,201 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
     expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(false);
   });
 
-  it("situsAddressPunctuationOnlyAbsence never fabricates: the raw value is quoted verbatim, and it is a well-formed leaf on its own", () => {
-    const wire = situsAddressPunctuationOnlyAbsence({
-      parcelNodeId: "48309:103671",
-      countyFips: "48309",
-      countyName: "McLennan",
-      placement: "flat",
-      access: CANONICAL_ACCESS,
-      rawValue: ", ,",
-      nowIso: NOW,
-    });
-    expect(isEarnedLeafAbsence(wire)).toBe(true);
-    expect(wire.verdict).toBe("absent-verified");
-    expect(wire.basis).toContain("48309:103671");
-    expect(wire.basis).toContain(JSON.stringify(", ,"));
+  it("situsAddressUnusableAbsence never fabricates: the raw value is quoted verbatim for BOTH reasons, and each is a well-formed leaf on its own", () => {
+    for (const [rawValue, reason] of [
+      [", ,", "punctuation-only"],
+      [", TX 76574", "no-street-component"],
+    ] as const) {
+      const wire = situsAddressUnusableAbsence({
+        parcelNodeId: "48309:103671",
+        countyFips: "48309",
+        countyName: "McLennan",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        rawValue,
+        reason,
+        nowIso: NOW,
+      });
+      expect(isEarnedLeafAbsence(wire)).toBe(true);
+      expect(wire.verdict).toBe("absent-verified");
+      expect(wire.basis).toContain("48309:103671");
+      expect(wire.basis).toContain(JSON.stringify(rawValue));
+    }
   });
 
-  it("BAKE_OWNED_REQUIRED_LEAF_PATHS is deliberately unchanged: situsAddress's absence is narrower than the owned leaves", () => {
-    expect(BAKE_OWNED_REQUIRED_LEAF_PATHS).not.toContain("baseFacts.situsAddress");
+  /**
+   * CTX-B6 REOPENED (2026-09-10). The first pass had the shape right and the
+   * SOURCE wrong. It read `provenance.parcelVintage` (which is the CLAIM's
+   * taxYear) as the county's declared CAD vintage, concluded the stale
+   * StratMap situs was correct-by-declaration, and was about to convert
+   * 139,256 Travis addresses that exist in the declared 2026 roll into
+   * "verified absent". Travis is declared 2026 in DECLARED_CAD_VINTAGES;
+   * 48453:224793 carries "4709 SHOALWOOD AVE" there.
+   *
+   * Measured per county against each county's OWN declared vintage:
+   * Travis 139,256 of 146,494 street-less rows recoverable (95.1%), Hays 27 of
+   * its 2,973 bare nulls, and zero in Bastrop, Caldwell, McLennan and
+   * Williamson.
+   */
+  describe("CTX-B6 reopened: the declared-vintage roll is preferred over the claim", () => {
+    const resolve = resolveConformantSitusAddress;
+
+    it("the declared roll wins when it carries a street: the Travis worked example recovers", () => {
+      const r = resolve({
+        claimRaw: ", TX 78756", // the 2025 StratMap drop
+        rollRaw: "4709 SHOALWOOD AVE", // cad_property at the declared 2026 vintage
+        rollAbsent: false,
+      });
+      expect(r.situs).toBe("4709 SHOALWOOD AVE");
+      expect(r.origin).toBe("declared-roll");
+      expect(r.unusable).toBeNull();
+      // The overridden claim is RECORDED, not discarded silently.
+      expect(r.supersededClaimValue).toBe(", TX 78756");
+    });
+
+    it("the claim is used only when the declared roll carries nothing usable", () => {
+      expect(resolve({ claimRaw: "12 OAK ST", rollRaw: null, rollAbsent: false })).toEqual({
+        situs: "12 OAK ST",
+        origin: "claim",
+        unusable: null,
+        supersededClaimValue: null,
+      });
+      expect(
+        resolve({ claimRaw: "12 OAK ST", rollRaw: ", TX 78701", rollAbsent: false }),
+      ).toMatchObject({ situs: "12 OAK ST", origin: "claim" });
+    });
+
+    it("both sources unusable earns the absence, quoting the DECLARED ROLL's value", () => {
+      const r = resolve({ claimRaw: ", ,", rollRaw: ", TX 78612", rollAbsent: false });
+      expect(r.situs).toBeNull();
+      expect(r.origin).toBe("none");
+      // The roll is the authority the rest of the payload reports, so its
+      // refusal is the one shown -- not the claim's.
+      expect(r.unusable).toEqual({ raw: ", TX 78612", reason: "no-street-component" });
+    });
+
+    it("both sources empty earns the blank-claim absence, with nothing to quote", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, rollAbsent: false })).toEqual({
+        situs: null,
+        origin: "none",
+        unusable: null,
+        supersededClaimValue: null,
+      });
+    });
+
+    it("ORDERING: the retired branch is reached BEFORE the roll is consulted at all", () => {
+      // A roll-absent record has no declared-roll row by construction, so a
+      // rollRaw here is a contradiction -- and the resolver must still take the
+      // retired branch. This is the test that keeps CTX-RETIRE and CTX-B1
+      // working: if the preference ever ran first, 48055:1 would stop serving
+      // its last-known situs.
+      const r = resolve({ claimRaw: ", ,", rollRaw: "999 SHOULD NOT WIN", rollAbsent: true });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.situs).toBe(", ,");
+      expect(r.unusable).toBeNull();
+    });
+
+    it("a retired record with no claim situs resolves null, and the builder earns its absence", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, rollAbsent: true })).toMatchObject({
+        situs: null,
+        origin: "retired-claim",
+      });
+    });
+
+    it("a claim that AGREES with the roll supersedes nothing", () => {
+      expect(
+        resolve({ claimRaw: "4709 SHOALWOOD AVE", rollRaw: "4709 SHOALWOOD AVE", rollAbsent: false }),
+      ).toMatchObject({ origin: "declared-roll", supersededClaimValue: null });
+    });
+
+    it("the payload records the source, so a re-bake that stopped preferring the roll is visible", () => {
+      const recovered = newPayload(null, {
+        body: flatProductionBody("48453", "224793", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: "78756",
+        }),
+        parcelNodeId: "48453:224793",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: "4709 SHOALWOOD AVE",
+        situsAddressOrigin: "declared-roll",
+        situsAddressSupersededClaim: ", TX 78756",
+      });
+      expect(recovered.baseFacts.situsAddress).toBe("4709 SHOALWOOD AVE");
+      expect(recovered.facets.base.situsAddress).toBe("4709 SHOALWOOD AVE");
+      expect(recovered.provenance.situsAddressSource).toBe("declared-roll");
+      expect(recovered.provenance.situsAddressSupersededClaim).toBe(", TX 78756");
+      // and it is a plain value, not an absence
+      expect(isEarnedLeafAbsence(recovered.baseFacts.situsAddress)).toBe(false);
+    });
+
+    it("an absence still records source \"none\", never a missing key", () => {
+      const absent = newPayload(null, {
+        body: flatProductionBody("48453", "999007", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: null,
+        }),
+        parcelNodeId: "48453:999007",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: null,
+        situsAddressUnusable: { raw: ", TX 78756", reason: "no-street-component" },
+        situsAddressOrigin: "none",
+      });
+      expect(isEarnedLeafAbsence(absent.baseFacts.situsAddress)).toBe(true);
+      expect(absent.provenance.situsAddressSource).toBe("none");
+      expect(absent.provenance.situsAddressSupersededClaim).toBeNull();
+    });
+  });
+
+  it("CTX-B6 SUPERSEDES: baseFacts.situsAddress IS in BAKE_OWNED_REQUIRED_LEAF_PATHS, and the list is exactly six", () => {
+    // This asserted `not.toContain` until 2026-09-10, on the reasoning that
+    // this leaf's absence was narrower than the owned leaves. That was true of
+    // the CTX-SITUS-SKIP absence and irrelevant to the question the list
+    // answers, which is "does a bare null here fail the write". It did not,
+    // and the walk required the leaf as a four-state the whole time.
+    expect(BAKE_OWNED_REQUIRED_LEAF_PATHS).toContain("baseFacts.situsAddress");
     expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
       "baseFacts.situsCity",
       "baseFacts.situsZip",
       "baseFacts.landUse",
       "provenance.landUseSource",
       "baseFacts.acreage",
+      "baseFacts.situsAddress",
     ]);
+  });
+
+  it("verify by violating: assertRequiredLeafStatesEarned FIRES on a bare null at baseFacts.situsAddress", () => {
+    // The membership above is only a control if it can fail. A correctly built
+    // payload cannot reach that state any more, so the violation is
+    // constructed by hand from a good one.
+    const good = newPayload(txgioRow());
+    expect(() => assertRequiredLeafStatesEarned(good)).not.toThrow();
+
+    const violated = JSON.parse(JSON.stringify(good)) as Record<string, unknown>;
+    (violated.baseFacts as Record<string, unknown>).situsAddress = null;
+    let code: string | undefined;
+    let message = "";
+    try {
+      assertRequiredLeafStatesEarned(violated);
+    } catch (err) {
+      code = (err as { code?: string }).code;
+      message = (err as Error).message;
+    }
+    expect(code).toBe("REQUIRED_LEAF_BARE_NULL");
+    expect(message).toContain("baseFacts.situsAddress");
+
+    // And the per-parcel assert refuses it too, with its own code -- both are
+    // invoked back to back in the bake CLI on the same payload.
+    let situsCode: string | undefined;
+    try {
+      assertSitusAddressAbsenceEarned(violated);
+    } catch (err) {
+      situsCode = (err as { code?: string }).code;
+    }
+    expect(situsCode).toBe("SITUS_ADDRESS_ABSENCE_UNEARNED");
   });
 
   it("the divergence instrument answers the old bake's null situsAddress leaf with the new earned absence, not a missing leaf", () => {
@@ -2101,7 +2387,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
         situsZip: "78602",
       }),
       situsAddress: null,
-      situsAddressPunctuationOnlyRaw: ", ,",
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
     }) as unknown as Record<string, unknown>;
     const diff = diffTier1KeyPaths(o, n);
     expect(diff.missing.filter((p) => p.startsWith("baseFacts.situsAddress"))).toEqual([]);
@@ -2117,7 +2403,7 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
       }),
       parcelNodeId: "48021:999005",
       situsAddress: null,
-      situsAddressPunctuationOnlyRaw: ", ,",
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
     });
     expect(() => assertSitusAddressAbsenceEarned(good)).not.toThrow();
 

@@ -318,6 +318,18 @@ export interface PropIdCadPropertyEntry {
   propId: string;
   taxYear: number;
   sourceVintage: string;
+  /**
+   * The DECLARED-vintage roll's own situs address (P-124 CTX-B6, 2026-09-10).
+   *
+   * This column was already sitting in the row this query loads and was not
+   * selected, which is the whole mechanism behind CTX-B6: the bake took its
+   * dollars from this declared-vintage row and its situs from the atom
+   * CLAIM, so one Travis payload served marketValue at vintage 2026 and
+   * situsAddress from the 2025 StratMap drop. 139,256 Travis parcels had a
+   * real street sitting here the whole time. Adding the column costs no
+   * extra query -- the row is already loaded and already keyed by prop_id.
+   */
+  situsAddress: string | null;
   marketValue: number | null;
   assessedValue: number | null;
   landValue: number | null;
@@ -370,10 +382,12 @@ export async function fetchCountyCadPropertyRoll(
     year_built: unknown;
     legal_description: string | null;
     exemption_codes: string[] | null;
+    situs_address: string | null;
   }>(
     `SELECT prop_id, tax_year, source_vintage,
             market_value, assessed_value, land_value, improvement_value,
-            living_area_sqft, year_built, legal_description, exemption_codes
+            living_area_sqft, year_built, legal_description, exemption_codes,
+            situs_address
        FROM cad_property
       WHERE county_fips = $1
         AND tax_year = $2`,
@@ -399,6 +413,10 @@ export async function fetchCountyCadPropertyRoll(
             (c): c is string => typeof c === "string" && c.trim() !== "",
           )
         : null,
+      situsAddress:
+        typeof row.situs_address === "string" && row.situs_address.trim()
+          ? row.situs_address.trim()
+          : null,
     });
   }
   return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
