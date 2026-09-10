@@ -47,8 +47,10 @@ import {
   storeListLoadState,
 } from "../txgio/ingest";
 import {
+  isParcelShapedPropId,
   normalizeStatLandUse,
   normalizeStratMapLandUse,
+  NOT_A_PARCEL_PROP_ID_REASON,
 } from "../txgio/landuse";
 import {
   isTexasCountyFips,
@@ -421,6 +423,59 @@ describe("normalizeStratMapLandUse -> cad_property row", () => {
     expect(noYear).toBeNull();
     expect(counters.rowsSkipped).toBe(2);
     expect(counters.skipSamples[0]).toContain("feature 3");
+  });
+
+  // P-124 CTX-LEAVES2: 48491:PRIVATE ROAD -- a StratMap "leftover farm"
+  // lineage artifact (P-78 family) where a right-of-way attribute value
+  // landed in the Prop_ID column of one feature and was written verbatim
+  // as though it were a taxable account. Live-confirmed 2026-09-09/10: one
+  // Williamson (48491) cad_property/landing_cad_property row, source_file
+  // stratmap25-landparcels_48491_lp.zip.
+  it("admits a real numeric prop_id and Williamson's own R-account convention", () => {
+    const counters = newCounters();
+    const numeric = normalizeStratMapLandUse("48029", 0, BEXAR_ROW, counters);
+    expect(numeric!.propId).toBe("105294");
+    const rAccount = normalizeStratMapLandUse(
+      "48491",
+      1,
+      { ...BEXAR_ROW, Prop_ID: "R062578" },
+      counters,
+    );
+    expect(rAccount!.propId).toBe("R062578"); // non-numeric: kept verbatim, never stripped
+    const rAccountLower = normalizeStratMapLandUse(
+      "48491",
+      2,
+      { ...BEXAR_ROW, Prop_ID: "r062578" },
+      counters,
+    );
+    expect(rAccountLower!.propId).toBe("r062578");
+    expect(counters.rowsSkipped).toBe(0);
+  });
+
+  it("REFUSES a non-parcel Prop_ID (the literal PRIVATE ROAD lineage defect), never writing it as an account", () => {
+    const counters = newCounters();
+    const rec = normalizeStratMapLandUse(
+      "48491",
+      7,
+      { ...BEXAR_ROW, Prop_ID: "PRIVATE ROAD" },
+      counters,
+    );
+    expect(rec).toBeNull();
+    expect(counters.rowsSkipped).toBe(1);
+    expect(counters.skipSamples[0]).toContain("feature 7");
+    expect(counters.skipSamples[0]).toContain("PRIVATE ROAD");
+    expect(counters.skipSamples[0]).toContain(NOT_A_PARCEL_PROP_ID_REASON);
+  });
+
+  it("isParcelShapedPropId: the guard is neither too strict (real ids pass) nor too loose (PRIVATE ROAD fails)", () => {
+    expect(isParcelShapedPropId("105294")).toBe(true);
+    expect(isParcelShapedPropId("0000105294")).toBe(true);
+    expect(isParcelShapedPropId("R062578")).toBe(true);
+    expect(isParcelShapedPropId("r062578")).toBe(true);
+    expect(isParcelShapedPropId("PRIVATE ROAD")).toBe(false);
+    expect(isParcelShapedPropId("")).toBe(false);
+    expect(isParcelShapedPropId("R")).toBe(false);
+    expect(isParcelShapedPropId("ROW")).toBe(false);
   });
 });
 

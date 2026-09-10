@@ -40,6 +40,7 @@ import {
   hasKeyPath,
   isEarnedLeafAbsence,
   isEarnedRecordRetirement,
+  isResolvedAcreageFacet,
   isResolvedLandUseFacet,
   keyPathValue,
   leafKeyPaths,
@@ -364,7 +365,7 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(req.unexpectedRoots).toEqual([]);
   });
 
-  it("no txgio row and no landAcres and no use code: the land-use leaf carries an EARNED state, not a bare null (CTX-LEAVES)", () => {
+  it("no txgio row and no landAcres and no use code: the land-use AND acreage leaves carry an EARNED state, not a bare null (CTX-LEAVES / CTX-LEAVES2)", () => {
     const n = newPayload(null, {
       body: conformantBody({ claim: { landAcres: null, propertyUseCode: null } }),
     });
@@ -380,8 +381,16 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     expect(lu.basis).toContain("48021:34137");
     // The twin is a VERBATIM mirror and cannot disagree with it.
     expect(n.provenance.landUseSource).toEqual({ ...lu, mirrors: "baseFacts.landUse" });
-    // Everything the old assertion protected is still protected.
-    expect(n.baseFacts.acreage).toBeNull();
+    // CTX-LEAVES2 (P-124): this test asserted `acreage: null`, the missed
+    // sibling -- no parcel-join row resolved (`row` is null: `newPayload(null)`)
+    // so the ring was never looked up at all; `refused`, never `absent-verified`,
+    // since the ring half of the pair was not genuinely checked.
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(true);
+    const ac = n.baseFacts.acreage as Tier1LeafAbsence;
+    expect(ac.verdict).toBe("refused");
+    expect(ac.lookupVerdict).toBe("lookup-failed");
+    expect(ac.basis).toContain("48021:34137");
+    expect(ac.basis).toContain("no parcel-join row resolved");
     expect(n.zoning).toBeNull();
     expect(n.envelope).toBeNull();
     expect(n.facetCoverage.landUse).toBe(false);
@@ -396,8 +405,11 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     // CTX-situs: derived from countyFips regardless of the gate-blocked
     // (dropped) row, so this stays a value, never null.
     expect(n.baseFacts.situsState).toBe("TX");
-    // Acreage comes from the claim, not the (refused) ring.
-    expect(n.baseFacts.acreage?.method).toBe("cad-roll-land-acres");
+    // Acreage comes from the claim, not the (refused) ring. baseFacts.acreage
+    // is now a union with Tier1LeafAbsence (CTX-LEAVES2), so a resolved value
+    // must be narrowed rather than optional-chained.
+    expect(isResolvedAcreageFacet(n.baseFacts.acreage)).toBe(true);
+    expect((n.baseFacts.acreage as { method: string }).method).toBe("cad-roll-land-acres");
     expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
     expect(n.provenance.parcelJoin.basis).toMatch(/unmeasured/);
     // Land use is the claim's own field: the join gate does not strip it.
@@ -1558,12 +1570,13 @@ describe("CTX-LEAVES: the controls are proven able to FIRE", () => {
     return n;
   };
 
-  it("assertRequiredLeafStatesEarned REFUSES a bare null at each of the four leaves", () => {
+  it("assertRequiredLeafStatesEarned REFUSES a bare null at each of the five leaves", () => {
     expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
       "baseFacts.situsCity",
       "baseFacts.situsZip",
       "baseFacts.landUse",
       "provenance.landUseSource",
+      "baseFacts.acreage",
     ]);
     for (const path of BAKE_OWNED_REQUIRED_LEAF_PATHS) {
       let code: string | undefined;
@@ -1628,6 +1641,93 @@ describe("CTX-LEAVES: the controls are proven able to FIRE", () => {
       },
     };
     expect(diffTier1KeyPaths(o, half).missing).toContain("baseFacts.situsCity");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-124 CTX-LEAVES2 (2026-09-10): `baseFacts.acreage` is a missed sibling of
+// the four CTX-LEAVES leaves -- same bare-null defect, same earned-absence
+// machinery, added to BAKE_OWNED_REQUIRED_LEAF_PATHS above. Two sources feed
+// it (parcel-join geometry, claim.landAcres); the verdict is decided PER
+// PARCEL from whether the ring was genuinely checked, never by a blanket rule.
+// ---------------------------------------------------------------------------
+
+describe("CTX-LEAVES2: baseFacts.acreage classifies as a four-state, never a bare null", () => {
+  it("POPULATED case is untouched: a real ring still bakes a plain value", () => {
+    const n = newPayload(txgioRow());
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(false);
+    expect(n.baseFacts.acreage).toEqual({
+      value: expect.any(Number),
+      sqft: expect.any(Number),
+      method: "shoelace-wgs84",
+    });
+    expect(n.facetCoverage.acreage).toBe(true);
+  });
+
+  it("gate-blocked county with no usable claim acreage: refused, not absent-verified -- the ring was never looked up", () => {
+    const n = newPayload(txgioRow(), {
+      gateBlocked: true,
+      body: conformantBody({ claim: { landAcres: null } }),
+    });
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(true);
+    const ac = n.baseFacts.acreage as Tier1LeafAbsence;
+    expect(ac.verdict).toBe("refused");
+    expect(ac.lookupVerdict).toBe("lookup-failed");
+    expect(ac.basis).toContain("no parcel-join row resolved");
+    expect(classifyRequiredLeafVerbatim(ac, { path: "baseFacts.acreage" })).toEqual({
+      state: "refused",
+      ok: true,
+    });
+  });
+
+  it("a REAL parcel-join row with degenerate geometry and no usable claim acreage: absent-verified -- the ring WAS genuinely checked", () => {
+    // A non-polygon geometry: firstRing returns null, but a row genuinely
+    // existed and was examined -- the branch `no-row`/`gate-blocked` never
+    // reaches, proving the pair CAN be genuinely earned when it is.
+    const n = newPayload(
+      txgioRow({ geometry: { type: "Point", coordinates: [-97.31, 30.11] } }),
+      { body: conformantBody({ claim: { landAcres: null } }) },
+    );
+    expect(n.provenance.parcelJoin.state).toBe("joined");
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(true);
+    const ac = n.baseFacts.acreage as Tier1LeafAbsence;
+    expect(ac.verdict).toBe("absent-verified");
+    expect(ac.lookupVerdict).toBeUndefined();
+    expect(ac.basis).toContain("did not yield a usable ring");
+    expect(ac.basis).toContain("48021:34137");
+    expect(classifyRequiredLeafVerbatim(ac, { path: "baseFacts.acreage" })).toMatchObject({
+      state: "absent-verified",
+      ok: true,
+    });
+  });
+
+  it("acreage from the claim alone (no ring) is a resolved value, never treated as absent", () => {
+    const n = newPayload(null);
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(false);
+    expect(n.baseFacts.acreage).toEqual({
+      value: 0.3815,
+      sqft: Math.round(0.3815 * 43560),
+      method: "cad-roll-land-acres",
+    });
+  });
+
+  it("assertRequiredLeafStatesEarned REFUSES a half-built acreage wire", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    (n.baseFacts as Record<string, unknown>).acreage = {
+      status: "absent",
+      verdict: "absent-verified",
+    };
+    expect(() => assertRequiredLeafStatesEarned(n)).toThrow(
+      /neither a resolved value nor a well-formed earned absence/,
+    );
+  });
+
+  it("a resolved acreage object is never mistaken for a malformed absence wire", () => {
+    // rollConsultedButMisses() bakes acreage from the claim's real landAcres
+    // (0.3815, no ring): a resolved VALUE object, not an absence.
+    expect(() => assertRequiredLeafStatesEarned(rollConsultedButMisses())).not.toThrow();
+    expect(isResolvedAcreageFacet(rollConsultedButMisses().baseFacts.acreage)).toBe(true);
   });
 });
 
@@ -1975,13 +2075,14 @@ describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an ea
     expect(wire.basis).toContain(JSON.stringify(", ,"));
   });
 
-  it("BAKE_OWNED_REQUIRED_LEAF_PATHS is deliberately unchanged: situsAddress's absence is narrower than the four owned leaves", () => {
+  it("BAKE_OWNED_REQUIRED_LEAF_PATHS is deliberately unchanged: situsAddress's absence is narrower than the owned leaves", () => {
     expect(BAKE_OWNED_REQUIRED_LEAF_PATHS).not.toContain("baseFacts.situsAddress");
     expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
       "baseFacts.situsCity",
       "baseFacts.situsZip",
       "baseFacts.landUse",
       "provenance.landUseSource",
+      "baseFacts.acreage",
     ]);
   });
 

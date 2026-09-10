@@ -21,6 +21,21 @@ export const LAYER_ABSENCE_VERDICTS = [
   "lookup-failed",
   "not-applicable",
   /**
+   * P-124 CTX-LEAVES2 (2026-09-10): one of the serve contract's own four
+   * canonical states (`_decisions/2026-09-01_serve_path_never_emits_pipeline_
+   * state.md`: value | absent-verified | not-applicable | refused), not a
+   * pipeline-internal word. Already constructed at runtime by
+   * `zoningSourceMirror` (structuralFactToFacetsWire.ts, the "a district with
+   * no recorded citation" branch) before this card -- that call site was
+   * untyped against `LayerAbsenceWire` and so never surfaced the gap.
+   * `zoningVerdictFromCityLimits` below now also returns it, for its own two
+   * `unmeasured`-emitting branches. This is completing the four canonical
+   * states this type must be able to carry, not adding a fifth
+   * pipeline-internal one -- `unmeasured` below stays for exactly that
+   * distinction.
+   */
+  "refused",
+  /**
    * CTX card F (2026-08-28): the parcel sits inside an incorporated place and
    * carries no zoning stamp. The stamp is missing; authority is not absent.
    */
@@ -29,6 +44,13 @@ export const LAYER_ABSENCE_VERDICTS = [
    * CTX card F: whether municipal zoning authority applies could not be
    * measured (no usable query point, empty city-limits index, or a county with
    * no declared unincorporated doctrine). Never collapsed into not-applicable.
+   *
+   * P-124 CTX-LEAVES2 (2026-09-10): kept in this vocabulary for other
+   * internal Doc-19 consumers, but `zoningVerdictFromCityLimits` below no
+   * longer RETURNS it -- per
+   * `_decisions/2026-09-01_serve_path_never_emits_pipeline_state.md`, the
+   * serve boundary's four-state contract (BP-CONTENT-01) does not permit a
+   * fifth state, and both branches that used to emit it now emit `refused`.
    */
   "unmeasured",
 ] as const;
@@ -344,7 +366,14 @@ export function zoningVerdictFromCityLimits(
     }
     return {
       ...common,
-      verdict: "unmeasured",
+      // P-124 CTX-LEAVES2: _decisions/2026-09-01_serve_path_never_emits_pipeline_state.md
+      // rules this exact leak must convert to `refused` at serve; `unmeasured`
+      // is not one of the four states BP-CONTENT-01 permits, so it never
+      // reached this wire. The authority/scopeSearched/basis already computed
+      // (and the word "unmeasured" inside the basis prose) are unchanged --
+      // only the CONTRACT-level verdict token changes, same substitution
+      // `leafAbsenceFromLandUseAbsence` makes for a leaf's `lookup-failed`.
+      verdict: "refused",
       authority: "unresolved",
       scopeSearched,
       basis:
@@ -356,7 +385,10 @@ export function zoningVerdictFromCityLimits(
 
   return {
     ...common,
-    verdict: "unmeasured",
+    // Same conversion as above: `cityLimits.status` is itself unmeasured
+    // (empty index or no usable query point) -- never verified, so `refused`
+    // is what the serve boundary's four-state contract reads.
+    verdict: "refused",
     authority: "unresolved",
     scopeSearched: `incorporated-place polygons in tx_city_boundary; ${pointText(queryPoint)}`,
     basis: cityLimits.basis,

@@ -43,6 +43,13 @@
  * among them: its state belongs to the zoning rail, which the SERVE earns, and
  * the twin is mirrored there — see the EARNED LEAF STATES block below.
  *
+ * A SIXTH LEAF, A MISSED SIBLING (P-124 CTX-LEAVES2, 2026-09-10).
+ * `baseFacts.acreage` handed a required cell the same bare `null` under the
+ * same missing-input condition and was never added here when the machinery
+ * above was built. It now carries an earned absence too, per-parcel decided
+ * from whether the parcel-join geometry was genuinely checked — see
+ * `buildAcreageAbsence` below the EARNED LEAF STATES block.
+ *
  * A FIFTH LEAF, NARROWER (P-124 CTX-SITUS-SKIP, 2026-09-09).
  * `baseFacts.situsAddress` can ALSO now carry an earned absence, but is
  * deliberately NOT in `BAKE_OWNED_REQUIRED_LEAF_PATHS` alongside the four
@@ -466,12 +473,130 @@ export function isResolvedLandUseFacet(
   return !!rec && typeof rec.code === "string" && rec.code.trim() !== "";
 }
 
-/** The four leaves this bake owns the cell state of. `zoning`/`zoningSource` are the serve's. */
+/**
+ * An acreage that actually RESOLVED (shoelace or claimed), as opposed to the
+ * earned absence that now shares that key. Same narrowing discipline
+ * `isResolvedLandUseFacet` established: `!= null` no longer means "has an
+ * acreage" once `baseFacts.acreage` can also carry a `Tier1LeafAbsence`.
+ */
+export function isResolvedAcreageFacet(
+  value: unknown,
+): value is NonNullable<BaseFacts["acreage"]> {
+  const rec = asRecord(value);
+  return (
+    !!rec &&
+    typeof rec.value === "number" &&
+    Number.isFinite(rec.value) &&
+    typeof rec.sqft === "number" &&
+    Number.isFinite(rec.sqft) &&
+    typeof rec.method === "string"
+  );
+}
+
+/**
+ * A SIXTH LEAF (P-124 CTX-LEAVES2, 2026-09-10). `baseFacts.acreage` is a
+ * MISSED SIBLING of the four above: it handed a required cell a bare null
+ * under the exact same condition (input genuinely missing) and was never
+ * added to `BAKE_OWNED_REQUIRED_LEAF_PATHS` when CTX-LEAVES built this
+ * machinery. Measured live 2026-09-09/10: 291,231 of 1,516,110 baked cells
+ * across the six CTX counties.
+ *
+ * Two independent sources feed acreage: the parcel-join geometry (the same
+ * `row`/`provenance.parcelJoin` the ring comes from) and the claim's own
+ * `landAcres` (read directly off the atom body — not a join that can miss,
+ * same as `claimLeafAbsence`'s situsCity/situsZip). CTX-ACREAGE proposed
+ * `absent-verified` on the reasoning that both were genuinely checked and
+ * found unusable. That reasoning is only honest when the RING half was
+ * actually checked: `firstRing(row.geometry)` returning null on a REAL row
+ * is a genuine check; `row` itself being null (`no-row`, `gate-blocked`, or
+ * `joined-situs` with no matched row) means geometry was never looked up at
+ * all — the parcel join's own basis text says so verbatim ("geometry
+ * unavailable" / "zoning stamp and geometry unavailable"), the same
+ * lookup-failed shape `buildLandUseAbsence` already recognizes for a
+ * gate-blocked or unconsulted land-use join.
+ *
+ * `buildAcreageAbsence` below decides this PER PARCEL from the real join
+ * state, never by a blanket rule. Live-verified 2026-09-10 (read-only,
+ * CORTEX_DATABASE_URL): every one of today's 291,231 null-acreage cells
+ * carries `provenance.parcelJoin.state` of `no-row` or `gate-blocked` —
+ * Bastrop/Caldwell/Travis 100% `no-row` (15,542 / 23,660 / 119,389), Hays/
+ * Williamson 100% `gate-blocked` (41,619 / 91,021), McLennan zero. Zero rows
+ * anywhere carry `joined`/`joined-situs` with a genuinely degenerate ring.
+ * The verified-absence pair CTX-ACREAGE proposed is therefore NOT present for
+ * a single row in today's population: `refused` is the honest state for all
+ * 291,231, not because the code says so unconditionally, but because the
+ * per-parcel check it runs never finds the ring-checked branch in real data.
+ * A future row that DOES reach a real `joined` row with unusable geometry
+ * still earns `absent-verified` correctly — proven able to fire in
+ * `../nodeFacetBakeTier1Conformant.test.ts`.
+ */
+function buildAcreageAbsence(input: {
+  parcelNodeId: string;
+  countyFips: string;
+  countyName: string;
+  placement: "nested" | "flat";
+  access: { discoverability: string; entitlement: string };
+  /** True when a parcel-join row existed to examine (state `joined`/`joined-situs` with a matched row). */
+  ringRowAvailable: boolean;
+  claimLandAcres: number | null;
+  nowIso: string;
+}): Tier1LeafAbsence {
+  const {
+    parcelNodeId,
+    countyFips,
+    countyName,
+    placement,
+    ringRowAvailable,
+    claimLandAcres,
+    nowIso,
+  } = input;
+  const entitlement = `${input.access.discoverability}/${input.access.entitlement}`;
+  const authority =
+    `${countyName} County parcel-join geometry (see provenance.parcelJoin) and the ` +
+    `conformant-v1 cad-parcel-roll claim for county_fips ${countyFips}`;
+  const scopeSearched =
+    `parcel-join geometry for ${parcelNodeId} (see provenance.parcelJoin); ` +
+    `claim.landAcres on the cad-parcel-roll atom body (${placement} claim placement); ` +
+    `entitlement bound ${entitlement}`;
+  const claimText =
+    claimLandAcres == null
+      ? "the claim carries no landAcres"
+      : `the claim's landAcres (${claimLandAcres}) is not a usable positive number`;
+
+  if (!ringRowAvailable) {
+    return {
+      status: "absent",
+      verdict: "refused",
+      authority,
+      scopeSearched,
+      asOf: nowIso,
+      basis:
+        `${parcelNodeId}: no parcel-join row resolved (see provenance.parcelJoin.state), so ` +
+        `geometry was never looked up for this parcel — unmeasured, not verified absent — and ` +
+        claimText,
+      lookupVerdict: "lookup-failed",
+    };
+  }
+
+  return {
+    status: "absent",
+    verdict: "absent-verified",
+    authority,
+    scopeSearched,
+    asOf: nowIso,
+    basis:
+      `${parcelNodeId}: the parcel-join row's geometry did not yield a usable ring, and ` +
+      `${claimText} — both the ring and the claim were genuinely checked and carry nothing`,
+  };
+}
+
+/** The five leaves this bake owns the cell state of. `zoning`/`zoningSource` are the serve's. */
 export const BAKE_OWNED_REQUIRED_LEAF_PATHS: readonly string[] = [
   "baseFacts.situsCity",
   "baseFacts.situsZip",
   "baseFacts.landUse",
   "provenance.landUseSource",
+  "baseFacts.acreage",
 ];
 
 // ---------------------------------------------------------------------------
@@ -591,10 +716,15 @@ function buildRecordRetirement(input: {
 }
 
 export interface ConformantBaseFacts
-  extends Omit<BaseFacts, "situsCity" | "situsZip" | "landUse" | "situsAddress"> {
+  extends Omit<
+    BaseFacts,
+    "situsCity" | "situsZip" | "landUse" | "situsAddress" | "acreage"
+  > {
   situsCity: string | Tier1LeafAbsence;
   situsZip: string | Tier1LeafAbsence;
   landUse: NonNullable<BaseFacts["landUse"]> | Tier1LeafAbsence;
+  /** A resolved acreage, or the earned absence (CTX-LEAVES2) when neither the ring nor the claim carries one. */
+  acreage: NonNullable<BaseFacts["acreage"]> | Tier1LeafAbsence;
   /**
    * `string` when the claim carries a usable address; the EARNED absence
    * (CTX-SITUS-SKIP, 2026-09-09) when the on-roll claim's raw situsAddress is
@@ -988,6 +1118,23 @@ export function buildConformantTier1Payload(
           nowIso,
         })
       : null);
+  // CTX-LEAVES2: `row` reflects whether a parcel-join geometry source was
+  // actually available (non-null on `joined`/accepted `joined-situs`, null on
+  // `no-row`/`gate-blocked`/an unmatched situs recovery) -- the same variable
+  // `ring` above is derived from, so this asks exactly "was the ring genuinely
+  // checked" rather than re-deriving that from `parcelJoin.state` text.
+  const acreageLeaf: ConformantBaseFacts["acreage"] =
+    tier1.baseFacts.acreage ??
+    buildAcreageAbsence({
+      parcelNodeId,
+      countyFips,
+      countyName,
+      placement,
+      access: input.access,
+      ringRowAvailable: row != null,
+      claimLandAcres: claim.landAcres,
+      nowIso,
+    });
 
   const { facetCoverage, provenance, baseFacts: assembledBaseFacts, ...rest } = tier1;
   const baseFacts: ConformantBaseFacts = {
@@ -996,6 +1143,7 @@ export function buildConformantTier1Payload(
     situsCity: assembledBaseFacts.situsCity ?? claimAbsence("situsCity"),
     situsZip: assembledBaseFacts.situsZip ?? claimAbsence("situsZip"),
     landUse: landUseLeaf,
+    acreage: acreageLeaf,
   };
   const payload: ConformantTier1Payload = {
     shapeSource: CONFORMANT_SHAPE_SOURCE,
@@ -1338,7 +1486,12 @@ export function assertRequiredLeafStatesEarned(payload: unknown): void {
       );
     }
     const rendered = asRecord(value);
-    if (rendered && !isEarnedLeafAbsence(value) && !isResolvedLandUseFacet(value)) {
+    if (
+      rendered &&
+      !isEarnedLeafAbsence(value) &&
+      !isResolvedLandUseFacet(value) &&
+      !isResolvedAcreageFacet(value)
+    ) {
       return refuse(
         `${parcelNodeId} carries an object at ${path} that is neither a ` +
           "resolved value nor a well-formed earned absence",
