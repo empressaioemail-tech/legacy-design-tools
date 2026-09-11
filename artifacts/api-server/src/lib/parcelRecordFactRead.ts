@@ -8,20 +8,25 @@
  * parcel_record directly. This module is the flood rail's read path. There is no
  * "drainage" rail in parcel_record's rail set; the drainage section is untouched.
  *
- * A THIRD store: FACTORY_DATABASE_URL_RO, never DATABASE_URL (deployment),
- * ATOMS_DATABASE_URL (flood-hazard-fact atoms, floodHazardFactRead.ts's own
- * store), or FACTORY_DATABASE_URL (the writer credential every Factory job
- * uses). SELECT-only, TWO ways (PARCEL-RO-ROLE, 2026-09-02): this module
- * only ever builds a SELECT, and the credential itself authenticates as
+ * REPOINTED (P-152, `_dispatches/2026-09-11_p152-reader_dispatch.md`): this
+ * module no longer opens its own connection to the Factory store.
+ * `factoryQueryableFromEnv` below is a `ParcelRecordQueryable`-shaped
+ * adapter over the SAME `parcelRecordReaderClient.ts` HTTP client
+ * `parcelRecordCellRead.ts` uses for the Hauska retrieval service's
+ * `GET /property-nodes/:id/record` -- this was a genuinely separate direct
+ * connection to FACTORY_DATABASE_URL_RO (a "third store" by this module's
+ * own original doc, distinct from its sibling reader) discovered and
+ * repointed in the same lane. `interpretFloodCellRow`'s interpretation
+ * logic and `loadParcelRecordFloodFact`'s public contract are UNCHANGED.
+ * `FACTORY_DATABASE_URL_RO` is no longer read anywhere in this repo (R-8).
+ *
+ * Was: A THIRD store, FACTORY_DATABASE_URL_RO, never DATABASE_URL
+ * (deployment), ATOMS_DATABASE_URL (flood-hazard-fact atoms,
+ * floodHazardFactRead.ts's own store), or FACTORY_DATABASE_URL (the writer
+ * credential every Factory job uses). SELECT-only, TWO ways
+ * (PARCEL-RO-ROLE, 2026-09-02): the credential authenticated as
  * `parcel_record_ro`, a Postgres role granted SELECT alone on
- * parcel_record / parcel_record_cell / parcel_record_companion_row --
- * verified by violation, an INSERT through this credential fails with
- * "permission denied for table parcel_record_cell" at the database. This
- * closes the asymmetry PARCEL-B-READER's close flagged: this module used to
- * be code-convention-only where its sibling parcelRecordCellRead.ts also
- * enforced `SET default_transaction_read_only = on`; both readers now share
- * the same role-level guarantee, the strongest of the three per the ruling
- * (role beats connection-level beats convention).
+ * parcel_record / parcel_record_cell / parcel_record_companion_row.
  *
  * Cell-state vocabulary mirrors parcel_record's own five states exactly (never
  * translated here): value / absent-verified / not-applicable / unaccounted /
@@ -39,8 +44,8 @@
  * verified-for-current-data fact, not a structural guarantee).
  */
 
-import pg from "pg";
 import { parseParcelNodeId } from "./parcelNodeId";
+import { fetchParcelRecord } from "./parcelRecordReaderClient.js";
 
 export const PARCEL_RECORD_FLOOD_SOURCE = "parcel_record" as const;
 export const FLOOD_RAIL_KEY = "flood" as const;
@@ -114,7 +119,6 @@ SELECT c.cell_state, cr.payload
 `;
 
 let injectedQueryable: ParcelRecordQueryable | null | undefined;
-let sharedPool: pg.Pool | null = null;
 
 /** Test seam. `null` means store not configured. `undefined` (reset) means env. */
 export function setParcelRecordQueryableForTests(
@@ -127,29 +131,39 @@ export function resetParcelRecordQueryableForTests(): void {
   injectedQueryable = undefined;
 }
 
+/**
+ * A query that cannot be answered -- the upstream fetch failed, or the
+ * parcel is crosswalk-ambiguous -- THROWS, matching what a real Postgres
+ * connection failure already did here before P-152 (this module's own
+ * `loadParcelRecordFloodFact` does not wrap its query call in a try/catch).
+ */
 function factoryQueryableFromEnv(): ParcelRecordQueryable | null {
-  const url = process.env.FACTORY_DATABASE_URL_RO?.trim();
-  if (!url) return null;
-  if (!sharedPool) {
-    sharedPool = new pg.Pool({
-      connectionString: url,
-      ssl: url.includes("sslmode=") ? undefined : { rejectUnauthorized: false },
-      max: 2,
-    });
-    // Belt-and-suspenders, matching this module's sibling
-    // parcelRecordCellRead.ts: the role grant alone already refuses a write
-    // at the database, but a protocol-level session flag costs nothing and
-    // closes the guarantee-asymmetry PARCEL-B-READER's close flagged.
-    sharedPool.on("connect", (client) => {
-      client.query("SET default_transaction_read_only = on").catch(() => {
-        // If this SET itself fails, every subsequent query on this client
-        // fails too, surfacing as a query error -- already handled by this
-        // module's refusal path. Swallow only to avoid an unhandled
-        // rejection on the pool's own connect event.
-      });
-    });
-  }
-  return sharedPool;
+  const key =
+    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() || process.env.RETRIEVAL_API_KEY?.trim();
+  if (!key) return null;
+  return {
+    async query<T extends Record<string, unknown> = Record<string, unknown>>(
+      _text: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
+      const [placeKey, railKey] = params as [string, string];
+      const record = await fetchParcelRecord(placeKey);
+      if (record === null) {
+        throw new Error(
+          `parcel_record flood cell read via the retrieval service failed for ${placeKey}/${railKey}`,
+        );
+      }
+      if (record.refused) {
+        throw new Error(
+          `parcel_record refuses ${placeKey} (${record.refused.reason}); cannot serve flood`,
+        );
+      }
+      const rail = record.rails[railKey];
+      if (!rail || rail.cell === null) return { rows: [] as unknown as T[] };
+      const payload = (rail.companions[0] as { payload?: unknown } | undefined)?.payload ?? null;
+      return { rows: [{ cell_state: rail.cell, payload }] as unknown as T[] };
+    },
+  };
 }
 
 function resolveQueryable(): ParcelRecordQueryable | null {
@@ -281,7 +295,7 @@ export async function loadParcelRecordFloodFact(
       source: PARCEL_RECORD_FLOOD_SOURCE,
       placeKey,
       reason:
-        "parcel_record lives in the Factory store, read via the SELECT-only FACTORY_DATABASE_URL_RO credential. That credential is not configured. Refusing rather than emitting a silent null.",
+        "parcel_record is read via the Hauska retrieval service (P-152); no RETRIEVAL_API_KEY/HAUSKA_RETRIEVAL_API_KEY is configured in this process. Refusing rather than emitting a silent null.",
     };
   }
   const result = await factory.query<CellRow>(SELECT_FLOOD_CELL, [placeKey, FLOOD_RAIL_KEY]);
