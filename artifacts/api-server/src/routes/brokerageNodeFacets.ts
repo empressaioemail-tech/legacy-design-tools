@@ -170,6 +170,21 @@
  * verdict has yet been computed for this rail. Never SELECT bake /
  * place_layer_snapshots / CAD / GIS for this field.
  *
+ * FIVE MORE ROOT SIBLINGS, PARCEL_RECORD-ONLY, NO LEGACY PATH (OPS-21 S5,
+ * P-148, 2026-09-11) -- the "written but no consumer" gap S4/P-135 found:
+ * `setbackRulesFact`, `parcelAreaSqFtFact`, `maxHeightFtFact`,
+ * `maxLotCoveragePctFact`, `maxFootprintSqFtFact` are read from parcel_record
+ * via their own loadXFactForServe wrappers, same pattern as
+ * utilityServiceFact/overlayDistrictsFact/etc. above. Only parcelAreaSqFt is
+ * slated (5 counties, Hays excluded); the other four ship wired but
+ * permanently inert until a future lane slates them (blocked on the
+ * 3,376-parcel zoningDistrict residual Z1/P-147 owns) -- resolving to a typed
+ * not-cut-over refusal for every parcel today, by construction. setbackRules
+ * is READ FROM A COMPANION ROW, not the cell's own value field (live-verified
+ * distinct from its Ft-suffixed siblings setbackFrontFt/SideFt/RearFt/
+ * CornerFt -- see setbackRulesFactRead.ts's own module doc). Never SELECT
+ * bake / place_layer_snapshots / CAD / GIS for any of these five fields.
+ *
  * ZONING LEDGER PARITY (PE/MCP-vs-facets parity audit, 2026-09-07, finding
  * D5). `facets.zoning` above (attachVerdictLayersToFacets) now also takes a
  * `parcelRecordZoningFact` read via loadZoningFactForServe -- the SAME
@@ -242,6 +257,11 @@ import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCover
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
 import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
 import { loadSetbacksFactForServe } from "../lib/setbacksFactServeCutover";
+import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
+import { loadParcelAreaSqFtFactForServe } from "../lib/parcelAreaSqFtFactServeCutover";
+import { loadMaxHeightFtFactForServe } from "../lib/maxHeightFtFactServeCutover";
+import { loadMaxLotCoveragePctFactForServe } from "../lib/maxLotCoveragePctFactServeCutover";
+import { loadMaxFootprintSqFtFactForServe } from "../lib/maxFootprintSqFtFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -748,6 +768,11 @@ brokerageNodeFacetsRouter.get(
     let valueHistoryFact;
     let setbacksFact;
     let parcelRecordZoningFact;
+    let setbackRulesFact;
+    let parcelAreaSqFtFact;
+    let maxHeightFtFact;
+    let maxLotCoveragePctFact;
+    let maxFootprintSqFtFact;
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
@@ -770,6 +795,11 @@ brokerageNodeFacetsRouter.get(
         valueHistoryFact,
         setbacksFact,
         parcelRecordZoningFact,
+        setbackRulesFact,
+        parcelAreaSqFtFact,
+        maxHeightFtFact,
+        maxLotCoveragePctFact,
+        maxFootprintSqFtFact,
       ] = await Promise.all([
         loadBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
@@ -805,6 +835,11 @@ brokerageNodeFacetsRouter.get(
         loadValueHistoryFactForServe(parcelNodeId),
         loadSetbacksFactForServe(parcelNodeId),
         loadZoningFactForServe(parcelNodeId),
+        loadSetbackRulesFactForServe(parcelNodeId),
+        loadParcelAreaSqFtFactForServe(parcelNodeId),
+        loadMaxHeightFtFactForServe(parcelNodeId),
+        loadMaxLotCoveragePctFactForServe(parcelNodeId),
+        loadMaxFootprintSqFtFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -949,6 +984,25 @@ brokerageNodeFacetsRouter.get(
       // Resolves to a typed not-cut-over refusal until a gate evaluation for
       // this rail lands.
       setbacksFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). Read from a
+      // companion row, not the cell's own value field (see module doc).
+      // Resolves to a typed not-cut-over refusal until this rail is slated.
+      setbackRulesFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). The ONE rail
+      // this card slates (5 counties, Hays excluded). Independent of
+      // zoningDistrict, unlike its four siblings below.
+      parcelAreaSqFtFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). NOT slated --
+      // blocked on the zoningDistrict residual. Resolves to a typed
+      // not-cut-over refusal for every parcel today, by construction.
+      maxHeightFtFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). NOT slated --
+      // same zoningDistrict-residual block as maxHeightFt.
+      maxLotCoveragePctFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). NOT slated --
+      // derived from parcelAreaSqFt x maxLotCoveragePct, so it inherits
+      // maxLotCoveragePct's own block.
+      maxFootprintSqFtFact,
       }),
     );
   },
