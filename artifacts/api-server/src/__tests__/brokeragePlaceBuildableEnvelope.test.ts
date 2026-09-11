@@ -173,6 +173,11 @@ let parcelSitusAddress = "1209 Main St";
 // simulate a provider failure vs. an empty-coverage (no parcel) throw,
 // or record the point it was called with.
 let pinQueryThrow: unknown = null;
+// P-151: when true, the pin-query mock returns a promise that never settles
+// -- simulating a stuck/orphaned query (e.g. DB pool contention) so the
+// route's POINT_RESOLUTION_TIMEOUT_MS race can be exercised deterministically
+// (with fake timers) instead of sleeping for real.
+let pinQueryHang = false;
 let lastPinQueryPoint: { latitude?: number; longitude?: number } | null = null;
 vi.mock("../lib/brokerageGisLayers", async () => {
   const actual =
@@ -187,6 +192,7 @@ vi.mock("../lib/brokerageGisLayers", async () => {
           latitude: input.latitude,
           longitude: input.longitude,
         };
+        if (pinQueryHang) return new Promise(() => {});
         if (pinQueryThrow) throw pinQueryThrow;
         return {
           layer: "parcels",
@@ -301,6 +307,15 @@ const { resetBrokerageApiKeysForTests } = await import(
 const { __resetServiceApiKeyCacheForTests } = await import(
   "../lib/serviceToken"
 );
+// P-151: dynamic, like the imports above — a static top-level import of the
+// route module here would resolve (and trigger the mocked module graph,
+// including the "../lib/buildableEnvelope/roads" factory referencing
+// BASTROP_LAT below) before BASTROP_LAT's own `const` initializes, a TDZ
+// ReferenceError. Every other import that reaches the route module in this
+// file is dynamic and placed after the mocks/consts for the same reason.
+const { POINT_RESOLUTION_TIMEOUT_MS } = await import(
+  "../routes/brokeragePlaceBuildableEnvelope"
+);
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -325,6 +340,7 @@ import { beforeEach } from "vitest";
 beforeEach(() => {
   // Reset F4d/F4e controls so each test starts from the point-path baseline.
   pinQueryThrow = null;
+  pinQueryHang = false;
   lastPinQueryPoint = null;
   situsOutcome = { hit: null, reason: "no-situs-match" };
   rooftopHit = null;
@@ -636,6 +652,68 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     expect(res.status).toBe(200);
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
     expect(res.body.derivePath).toBe("labelEdges+derive");
+  });
+});
+
+describe("POST /place/buildable-envelope — P-151 bounded point-resolution timeout", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  afterEach(() => {
+    // In case a test fails before reaching its own cleanup, never leak fake
+    // timers into a later test.
+    vi.useRealTimers();
+  });
+
+  it("declares a bounded 503 refusal when a bare {lat,lng} pin-query never settles within the time budget", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    // Simulate the reported failure shape directly: the point-resolution
+    // query hangs (e.g. orphaned under DB pool contention) instead of
+    // erroring or returning. Fake timers let the test assert the bounded
+    // refusal without actually waiting POINT_RESOLUTION_TIMEOUT_MS of real
+    // wall-clock time.
+    pinQueryHang = true;
+    vi.useFakeTimers();
+    try {
+      // Bare {lat,lng}, no address -- the exact 2026-09-11 repro shape.
+      const resPromise = postWith({ lat: 30.2672, lng: -97.7431 });
+      await vi.advanceTimersByTimeAsync(POINT_RESOLUTION_TIMEOUT_MS);
+      const res = await resPromise;
+      expect(res.status).toBe(503);
+      expect(res.body.status).toBe("resolution-timeout");
+      expect(res.body.errorClass).toBe("resolution_timeout");
+      expect(res.body.parcel_node_id).toBeNull();
+      expect(typeof res.body.message).toBe("string");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still resolves normally (no 503, no added latency) for a bare {lat,lng} request that answers promptly", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    pinQueryHang = false;
+    const res = await postWith({ lat: 30.2672, lng: -97.7431 });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(lastPinQueryPoint).toEqual({ latitude: 30.2672, longitude: -97.7431 });
+  });
+
+  it("a genuine provider error on the explicit-coordinates branch still 502s (timeout classification does not swallow real errors)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    pinQueryThrow = new AdapterRunError(
+      "upstream-error",
+      "county ArcGIS service returned HTTP 500",
+    );
+    const res = await postWith({ lat: 30.2672, lng: -97.7431 });
+    expect(res.status).toBe(502);
+    expect(res.body.status).toBe("parcel-unavailable");
   });
 });
 
