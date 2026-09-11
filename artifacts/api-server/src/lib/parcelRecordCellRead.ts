@@ -419,10 +419,33 @@ export async function loadParcelRecordCell(
         "parcel_record is read via the Hauska retrieval service (P-152); no RETRIEVAL_API_KEY/HAUSKA_RETRIEVAL_API_KEY is configured in this process. Refusing rather than reading a legacy store under this name.",
     };
   }
-  const [cellResult, companionResult] = await Promise.all([
-    store.query<CellRow>(SELECT_CELL, [placeKey, railKey]),
-    store.query<CompanionRow>(SELECT_COMPANION_ROWS, [placeKey, railKey]),
-  ]);
+  let cellResult: { rows: CellRow[] };
+  let companionResult: { rows: CompanionRow[] };
+  try {
+    [cellResult, companionResult] = await Promise.all([
+      store.query<CellRow>(SELECT_CELL, [placeKey, railKey]),
+      store.query<CompanionRow>(SELECT_COMPANION_ROWS, [placeKey, railKey]),
+    ]);
+  } catch (err) {
+    // LIVE FINDING (P-152, 2026-09-11): this call was never wrapped before
+    // the retrieval-service swap because a live Postgres connection
+    // essentially never threw mid-query in practice; an HTTP call to
+    // another service fails far more routinely (a 404 during this exact
+    // traffic-shift transition crashed the whole facets route with an
+    // uncaught exception here, discovered live via resolveValueBasisFrom
+    // ParcelRecord's own unconditional, unguarded call into this
+    // function). A declared refusal, never a crash -- and never a
+    // fabricated absence either: this is honestly "the read failed", not
+    // "no such row".
+    return {
+      state: "refused",
+      source: PARCEL_RECORD_SOURCE,
+      placeKey,
+      railKey,
+      code: "store-not-configured",
+      reason: `parcel_record read via the retrieval service failed for ${placeKey}/${railKey}: ${err instanceof Error ? err.message : String(err)}. Refusing rather than crashing or fabricating an absence.`,
+    };
+  }
   const cellRow = cellResult.rows[0];
   if (!cellRow) {
     return {

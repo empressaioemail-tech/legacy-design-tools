@@ -229,6 +229,26 @@ describe("loadParcelRecordCell — async, fake store", () => {
     expect(result.code).toBe("no-such-parcel-or-rail");
   });
 
+  it("LIVE FINDING regression guard: a query() that throws declares a refusal, never an uncaught crash", async () => {
+    // P-152, 2026-09-11: this call was never wrapped before the
+    // retrieval-service swap because a live Postgres connection
+    // essentially never threw mid-query. An HTTP-backed store throws far
+    // more routinely (a 404 during the traffic-shift transition crashed
+    // the whole facets route with an uncaught exception here, surfaced via
+    // cadRollServeCutover.ts's resolveValueBasisFromParcelRecord calling
+    // this function with no try/catch of its own).
+    setParcelRecordQueryableForTests({
+      async query() {
+        throw new Error("simulated retrieval-service read failure");
+      },
+    });
+    const result = await loadParcelRecordCell("48021", "34137", "apn");
+    expect(result.state).toBe("refused");
+    if (result.state !== "refused") throw new Error("unreachable");
+    expect(result.code).toBe("store-not-configured");
+    expect(result.reason).toContain("simulated retrieval-service read failure");
+  });
+
   it("reads a real present value cell end to end through the fake store", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({

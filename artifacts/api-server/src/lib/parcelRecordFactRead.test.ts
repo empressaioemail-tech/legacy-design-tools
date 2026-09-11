@@ -144,6 +144,19 @@ describe("loadParcelRecordFloodFact", () => {
     expect(read.placeKey).toBeNull();
   });
 
+  it("LIVE FINDING regression guard: a query() that throws declares a refusal, never an uncaught crash", async () => {
+    setParcelRecordQueryableForTests({
+      async query() {
+        throw new Error("simulated retrieval-service read failure");
+      },
+    });
+    const read = await loadParcelRecordFloodFact(GOLD);
+    expect(read.state).toBe("refused");
+    if (read.state !== "refused") return;
+    expect(read.code).toBe("factory-store-not-configured");
+    expect(read.reason).toContain("simulated retrieval-service read failure");
+  });
+
   it("serves a value read end to end through the in-memory store", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordFlood([

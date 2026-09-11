@@ -298,7 +298,24 @@ export async function loadParcelRecordFloodFact(
         "parcel_record is read via the Hauska retrieval service (P-152); no RETRIEVAL_API_KEY/HAUSKA_RETRIEVAL_API_KEY is configured in this process. Refusing rather than emitting a silent null.",
     };
   }
-  const result = await factory.query<CellRow>(SELECT_FLOOD_CELL, [placeKey, FLOOD_RAIL_KEY]);
+  let result: { rows: CellRow[] };
+  try {
+    result = await factory.query<CellRow>(SELECT_FLOOD_CELL, [placeKey, FLOOD_RAIL_KEY]);
+  } catch (err) {
+    // LIVE FINDING (P-152, 2026-09-11): same class of gap as
+    // parcelRecordCellRead.ts's loadParcelRecordCell -- never wrapped
+    // because a live Postgres connection essentially never threw
+    // mid-query; an HTTP call to another service fails far more
+    // routinely. A declared refusal, never a crash, never a fabricated
+    // absence: this is honestly "the read failed", not "no such row".
+    return {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason: `parcel_record flood cell read via the retrieval service failed for ${placeKey}: ${err instanceof Error ? err.message : String(err)}. Refusing rather than crashing or fabricating an absence.`,
+    };
+  }
   return interpretFloodCellRow(placeKey, result.rows[0]);
 }
 
