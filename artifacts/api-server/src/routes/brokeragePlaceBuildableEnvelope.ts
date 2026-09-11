@@ -64,8 +64,6 @@ import {
 } from "../lib/brokerageTxParcels";
 import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
 import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
-import { deriveBuildableEnvelope } from "../lib/buildableEnvelope/derive";
-import { reconcileWithAtomEnvelope } from "../lib/buildableEnvelope/reconcileAtomEnvelope";
 import {
   fetchPropertyAtomChain,
   type PropertyAtomChainWire,
@@ -86,10 +84,24 @@ import {
 import { fetchNearbyRoads, namedRoadsToCandidates } from "../lib/buildableEnvelope/roads";
 import {
   resolveSpineZoningWhenGisAbsent,
-  spineZoningProvenanceNote,
   type SpineZoningResolution,
 } from "../lib/buildableEnvelope/spineZoningDistrict";
 import type { Ring } from "../lib/buildableEnvelope/geometry";
+// P-153 Step A: moved out of THIS file so the get_smart_site draw-block
+// orchestration (parcelDrawEnvelopeModel.ts) can reuse both without pulling
+// in this route's own resolvePlace/txgioAddressResolve/brokerageTxParcels/
+// txgioParcelStore import graph (all @workspace/db-coupled at module load —
+// see that lib file's own doc comment for why this move happened). Both
+// re-exported below so THIS file's own public surface (and its own
+// deriveLabelAndRespond call site, unchanged) still work exactly as before.
+import {
+  composeBuildableEnvelopeDerivation,
+  firstParcelRing,
+} from "../lib/buildableEnvelope/composeBuildableEnvelopeDerivation";
+export {
+  composeBuildableEnvelopeDerivation,
+  firstParcelRing,
+} from "../lib/buildableEnvelope/composeBuildableEnvelopeDerivation";
 
 export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
 
@@ -152,58 +164,6 @@ function reqLog(req: Request): typeof logger {
 function decodePlaceKeyParam(raw: string | string[] | undefined): string {
   const value = Array.isArray(raw) ? raw[0] : raw;
   return decodeURIComponent(value ?? "").trim();
-}
-
-/** Pull the first Polygon outer ring out of a parcel FeatureCollection, plus
- *  the parcel's zoningCode/situsAddress properties. Null when no polygon.
- *
- *  `parcelNodeId` is the canonical tile-matching parcel identity
- *  (`{county_fips}:{normalizeCadPropId(prop_id)}`). It is NOT re-derived here:
- *  both parcel emit paths â€” the live county-GIS provider
- *  (`brokerageTxParcels.ts`) and the self-hosted TxGIO store
- *  (`txgioParcelStore.ts`) â€” already stamp `parcel_node_id` onto each feature's
- *  properties via the shared `parcelNodeId()` helper (the same helper the
- *  PMTiles bake uses), so reading it straight off the feature guarantees the
- *  value byte-matches the tile `promoteId`. Null when the parcel source did not
- *  stamp one (e.g. the dormant Cotality fallback, or a county parcel with no
- *  appraisal prop id) â€” a mismatching id would glow the wrong parcel or
- *  nothing, so null is the honest answer. */
-function firstParcelRing(geojson: unknown): {
-  ring: Ring;
-  zoningCode: string | null;
-  situsAddress: string | null;
-  apn: string | null;
-  parcelNodeId: string | null;
-} | null {
-  const fc = geojson as { features?: unknown[] } | null;
-  if (!fc || !Array.isArray(fc.features)) return null;
-  for (const f of fc.features) {
-    const feat = f as {
-      geometry?: { type?: string; coordinates?: unknown };
-      properties?: Record<string, unknown> | null;
-    };
-    const geom = feat?.geometry;
-    if (!geom) continue;
-    let ring: unknown = null;
-    if (geom.type === "Polygon" && Array.isArray(geom.coordinates)) {
-      ring = geom.coordinates[0];
-    } else if (geom.type === "MultiPolygon" && Array.isArray(geom.coordinates)) {
-      const first = geom.coordinates[0];
-      ring = Array.isArray(first) ? first[0] : null;
-    }
-    if (!Array.isArray(ring) || ring.length < 4) continue;
-    const props = feat.properties ?? {};
-    const str = (v: unknown): string | null =>
-      typeof v === "string" && v.trim() ? v : null;
-    return {
-      ring: ring as Ring,
-      zoningCode: str(props.zoningCode),
-      situsAddress: str(props.situsAddress),
-      apn: str(props.apn),
-      parcelNodeId: str(props.parcel_node_id),
-    };
-  }
-  return null;
 }
 
 interface EnvelopeContext {
@@ -980,59 +940,17 @@ async function deriveLabelAndRespond(args: {
     return;
   }
 
-  const rawDerived = deriveBuildableEnvelope({
+  const { derived, wireStatus, honesty, derivePath } = composeBuildableEnvelopeDerivation({
     ring: parcel.ring,
     table: resolved.table,
     district: resolved.district,
     labeling,
+    atomChain,
+    spineZoning,
+    resolvedSourceKind: resolved.sourceKind,
+    resolvedSourceLabel: resolved.sourceLabel,
+    resolvedEffectiveDate: resolved.effectiveDate,
   });
-  const derived = reconcileWithAtomEnvelope(
-    rawDerived,
-    atomChain?.buildableEnvelope?.outcome ?? null,
-  );
-  const atomReconciled = derived !== rawDerived;
-
-  const estimate =
-    atomChain?.buildableEnvelope?.readContract?.axes?.assertedConfidence
-      ?.estimate;
-  const confidenceValue =
-    typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
-
-  const derivePath = atomReconciled ? "labelEdges+derive+atom-reconciled" : "labelEdges+derive";
-  const provenanceNote = spineZoning
-    ? spineZoningProvenanceNote(spineZoning)
-    : `Setbacks from ${resolved.sourceKind} (${resolved.sourceLabel}, effective ${resolved.effectiveDate}). ${
-        atomReconciled
-          ? "Buildable area reconciled against the property atom chain (map/export parity)."
-          : "Geometry from labelEdges+derive (map/export parity)."
-      }`;
-
-  const honesty: EngineHonesty = {
-    confidence: { value: confidenceValue, kind: "asserted" },
-    dataVintage: new Date().toISOString().slice(0, 10),
-    coverage: {
-      degraded: true,
-      reason: derived.approximate
-        ? `${provenanceNote} Geometry approximate — verify with survey + city.`
-        : provenanceNote,
-    },
-    source: {
-      adapter: spineZoning
-        ? `brokerage:buildable-envelope:derive+${spineZoning.source}`
-        : `brokerage:buildable-envelope:derive+${resolved.sourceKind}`,
-      citationIds: derived.citationUrl ? [derived.citationUrl] : [],
-    },
-  };
-
-  // P60b reason split: "no-buildable-area" is a consume-lot MEASUREMENT and
-  // is only claimed when the boolean clip itself returned empty. A geometry
-  // gate decline is a distinct machine-readable status — silent degradation
-  // (a validation failure masquerading as a measurement) is prohibited.
-  const wireStatus = !derived.empty
-    ? "ok"
-    : derived.emptyKind === "consumed"
-      ? "no-buildable-area"
-      : "geometry-validation-failed";
 
   const zoningAtomDid = atomChain?.zoningFact?.atomDid;
   const setbackAtomDid = atomChain?.setbackRule?.atomDid;

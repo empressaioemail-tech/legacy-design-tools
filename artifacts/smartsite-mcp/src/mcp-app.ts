@@ -450,6 +450,22 @@ export function envelopeHuman(reason: string | undefined): string | undefined {
   return reason;
 }
 
+/**
+ * P-153 sibling of `envelopeHuman`, for a `state: "present"` envelope
+ * overlay's `basis` (never its `reason` — a present overlay carries no
+ * `reason`, so `envelopeHuman` never applies to it; see tool-honesty.ts's
+ * `honestOverlay`). Mirrors hauska-map's equivalent panel copy for the
+ * same underlying state: the buildable-envelope polygon is drawn from a
+ * real district + setback table, while the buildable-AREA figure stays
+ * withheld pending an atom.
+ */
+export function envelopeBasisHuman(basis: string | undefined): string | undefined {
+  if (basis === "modelled-figure-withheld") {
+    return "Buildable envelope modelled from setbacks — area withheld pending an atom";
+  }
+  return basis;
+}
+
 export function ringFromDraw(draw: Record<string, unknown>): RingPt[] {
   if (!Array.isArray(draw.ring)) return [];
   const out: RingPt[] = [];

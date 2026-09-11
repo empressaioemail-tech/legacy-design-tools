@@ -23,6 +23,7 @@
 import {
   CITATION_DEGRADED,
   EDGE_WORDS,
+  envelopeBasisHuman,
   envelopeHuman,
   NO_BAKED_SNAPSHOT_PREFIX,
   NOT_IMPLEMENTED_PREFIX,
@@ -106,6 +107,23 @@ const ATOM_PATH_PENDING_DISPLAY_TEXT = requireString(
 );
 
 /**
+ * P-153 (Ruling B reversed for the polygon only). `modelled-figure-withheld`
+ * is the sibling of `atom_path_pending` for a `state: "present"` envelope
+ * overlay: the buildable-envelope polygon is drawn from a real district +
+ * setback table, while the buildable-area FIGURE stays withheld pending an
+ * atom (DERIVED_FIGURES_POLICY below denies `buildable_area`
+ * unconditionally, on every draw, regardless of this token). Read through
+ * `envelopeBasisHuman`, the panel's own function for a present overlay's
+ * `basis` field — same requireString-at-load-time posture as
+ * ATOM_PATH_PENDING_DISPLAY_TEXT above, and the same card wording
+ * hauska-map's equivalent fix shows for the same underlying state.
+ */
+const MODELLED_FIGURE_WITHHELD_DISPLAY_TEXT = requireString(
+  envelopeBasisHuman("modelled-figure-withheld"),
+  'envelopeBasisHuman("modelled-figure-withheld")',
+);
+
+/**
  * V1. 19 entries: the disposition enum, the panel-only paint additions
  * (absent-verified, unknown), the two Open failure sentences (kept
  * distinct, checked by tests/vocabulary.test.ts), citationsDegraded,
@@ -182,6 +200,18 @@ export const VOCABULARY: readonly VocabularyEntry[] = [
     displayText: ATOM_PATH_PENDING_DISPLAY_TEXT,
     meaning:
       "Setbacks and the buildable envelope have not been ruled or baked for this jurisdiction yet; no distance or polygon exists to report.",
+  },
+  /**
+   * P-153 (Ruling B reversed for the polygon only). A draw overlay's
+   * `basis`, not `reason` — this token names a `state: "present"` overlay,
+   * never a refused one. Mirrors hauska-map's equivalent panel state for
+   * the same parcels: the polygon draws, the area figure stays withheld.
+   */
+  {
+    token: "modelled-figure-withheld",
+    displayText: MODELLED_FIGURE_WITHHELD_DISPLAY_TEXT,
+    meaning:
+      "draw overlay basis (present-state envelope only): the buildable-envelope polygon is drawn from a real, resolved district + setback table, but the buildable-area figure (sq ft or percent) stays withheld pending an atom. DERIVED_FIGURES_POLICY denies buildable_area regardless of this token.",
   },
   {
     token: "upgrade_required",

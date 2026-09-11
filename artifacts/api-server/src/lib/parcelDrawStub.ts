@@ -19,10 +19,25 @@ export type DrawOverlay = {
   label: string;
   draw: string;
   state: DrawOverlayState;
-  geom?: "none";
+  /**
+   * P-153: `"none"` (the honest default — no geometry) or a real polygon
+   * ring in the SAME local frame as the top-level `ring` (feet, centroid-
+   * relative, true-north y-axis), closed (first point repeats as last).
+   * Only a `state: "present"` overlay carries the array form.
+   */
+  geom?: "none" | [number, number][];
   scope?: string;
   sfha?: boolean;
   reason?: string;
+  /**
+   * P-153: a short caveat token for a `state: "present"` overlay whose
+   * geometry is modelled rather than measured (e.g. `"modelled-figure-withheld"`
+   * for the buildable envelope — see smartsite-mcp's `envelopeBasisHuman`
+   * for the customer-facing text). Distinct from `reason`, which stays
+   * reserved for non-present (refused/unknown) overlays — `basis` never
+   * implies the overlay was refused.
+   */
+  basis?: string;
   provenance?: string;
   vintage?: string;
   citations?: string[];
@@ -145,6 +160,27 @@ export type AssembleParcelDrawInput = {
       }
     | { state: "refused" | "absent"; sourceVintage?: string | null };
   envelopeRefusalReason: string | null;
+  /**
+   * P-153: when the atom-chain path is pending but a real district + setback
+   * table + geometry resolved (the SAME derivation the map/export route
+   * runs — see `../lib/buildableEnvelope/parcelDrawEnvelopeModel.ts`), the
+   * caller threads the modelled polygon + applied setbacks + disclosure
+   * through here so `assembleParcelDraw` can draw it. `null`/absent (or a
+   * ring with fewer than 4 vertices, or no `anchor` to project against)
+   * keeps TODAY'S hardcoded refused envelope overlay unchanged.
+   */
+  envelopeModelled?: {
+    /** WGS84 [lng, lat] outer-ring vertices. */
+    ringLngLat: [number, number][];
+    setbacks: {
+      front_ft: number;
+      side_ft: number;
+      rear_ft: number;
+      side_corner_ft?: number;
+      district: string;
+    };
+    disclosure: string;
+  } | null;
   pipeline:
     | {
         state: "present";
@@ -182,6 +218,54 @@ export function feetLabelFromMetres(metres: number): string {
     Math.pow(10, -metreDecimals) * US_SURVEY_FEET_PER_METRE;
   const feetDecimals = Math.max(0, Math.floor(-Math.log10(resolutionFeet)));
   return `${(metres * US_SURVEY_FEET_PER_METRE).toFixed(feetDecimals)} ft`;
+}
+
+/**
+ * P-153. Equirectangular metres-per-degree approximation, anchored at the
+ * PARCEL's own `anchor` (not the envelope polygon's own centroid) so the
+ * envelope overlay's points land in the SAME local frame as the parcel's
+ * existing `ring`/`edges`. Mirrors `projectRing` in
+ * `buildableEnvelope/geometry.ts` (same `EARTH_RADIUS_M`, same formula),
+ * anchored differently on purpose — that module anchors at the ring's own
+ * centroid, which is right for computing the envelope in isolation, but
+ * wrong here: this frame must align with a point the caller already fixed.
+ */
+const ENVELOPE_EARTH_RADIUS_M = 6_378_137;
+
+function projectRelativeToAnchor(
+  lngLat: [number, number],
+  anchor: DrawFrameAnchor,
+): { x: number; y: number } {
+  const latRad = (anchor.lat * Math.PI) / 180;
+  const mPerDegLat = (Math.PI / 180) * ENVELOPE_EARTH_RADIUS_M;
+  const mPerDegLng = mPerDegLat * Math.cos(latRad);
+  return {
+    x: (lngLat[0] - anchor.lng) * mPerDegLng,
+    y: (lngLat[1] - anchor.lat) * mPerDegLat,
+  };
+}
+
+/**
+ * WGS84 envelope ring -> this draw frame's local feet (US survey foot,
+ * centroid-relative to the parcel's own `anchor`, true-north y-axis).
+ * Closes the ring (repeats the first point as the last) per this field's
+ * own convention — see the doc comment on `DrawOverlay.geom`.
+ */
+export function envelopeRingToLocalFeet(
+  ringLngLat: readonly [number, number][],
+  anchor: DrawFrameAnchor,
+): [number, number][] {
+  const points: [number, number][] = ringLngLat.map((lngLat) => {
+    const { x, y } = projectRelativeToAnchor(lngLat, anchor);
+    return [metresToSurveyFeet(x), metresToSurveyFeet(y)];
+  });
+  if (points.length === 0) return points;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    points.push([first[0], first[1]]);
+  }
+  return points;
 }
 
 function knownVintage(value: unknown): string | null {
@@ -315,14 +399,29 @@ function countyFipsFromNode(parcelNodeId: string): string | null {
   return fips && /^\d{5}$/.test(fips) ? fips : null;
 }
 
-function zoningAttrs(zoning: unknown): Record<string, unknown> | null {
+/**
+ * The district/zone/code string off a baked zoning facet, in that priority
+ * order. Exported (P-153) so the get_smart_site draw-block orchestration
+ * (`propertyExplorer.ts` / `buildableEnvelope/parcelDrawEnvelopeModel.ts`)
+ * can test "is a zoning code resolvable" with the SAME extraction
+ * `zoningAttrs` below uses for the draw's own `attrs.zoning`, rather than a
+ * second, driftable copy.
+ */
+export function districtCodeFromZoningFacet(zoning: unknown): string | null {
   const rec = asRecord(zoning);
   if (!rec) return null;
-  const district =
+  return (
     (typeof rec.district === "string" && rec.district) ||
     (typeof rec.zone === "string" && rec.zone) ||
     (typeof rec.code === "string" && rec.code) ||
-    null;
+    null
+  );
+}
+
+function zoningAttrs(zoning: unknown): Record<string, unknown> | null {
+  const rec = asRecord(zoning);
+  if (!rec) return null;
+  const district = districtCodeFromZoningFacet(zoning);
   if (!district) return null;
   const jurisdiction =
     (typeof rec.cityKey === "string" && rec.cityKey) ||
@@ -430,6 +529,41 @@ function floodOverlay(
     draw: "tint-ring",
     state: "present",
     ...citations,
+  };
+}
+
+/**
+ * P-153: the polygon-only reversal of Ruling B. When a real, modelled
+ * envelope resolved (see `envelopeModelled`'s own doc comment on
+ * `AssembleParcelDrawInput`) AND there is an `anchor` to project it against
+ * AND the ring carries at least a triangle's worth of vertices, draw it
+ * (`state: "present"`, real `geom`, no `reason`). Any other case — no
+ * modelled envelope, no anchor, or too few vertices — keeps TODAY'S
+ * hardcoded refused overlay, byte-for-byte unchanged (regression guard: see
+ * parcelDrawStub.test.ts).
+ */
+function envelopeOverlay(
+  envelopeRefusalReason: string | null,
+  envelopeModelled: AssembleParcelDrawInput["envelopeModelled"],
+  anchor: DrawFrameAnchor | null,
+): DrawOverlay {
+  if (envelopeModelled && anchor && envelopeModelled.ringLngLat.length >= 3) {
+    return {
+      id: "envelope",
+      label: "Buildable envelope (modelled from setbacks)",
+      geom: envelopeRingToLocalFeet(envelopeModelled.ringLngLat, anchor),
+      draw: "inset-fill",
+      state: "present",
+      basis: "modelled-figure-withheld",
+    };
+  }
+  return {
+    id: "envelope",
+    label: "Buildable envelope not computed",
+    geom: "none",
+    draw: "suppress-setback-line",
+    state: "refused",
+    reason: envelopeRefusalReason ?? "atom_path_pending",
   };
 }
 
@@ -612,14 +746,9 @@ export function assembleParcelDraw(
     state: "unknown",
   });
 
-  overlays.push({
-    id: "envelope",
-    label: "Buildable envelope not computed",
-    geom: "none",
-    draw: "suppress-setback-line",
-    state: "refused",
-    reason: input.envelopeRefusalReason ?? "atom_path_pending",
-  });
+  overlays.push(
+    envelopeOverlay(input.envelopeRefusalReason, input.envelopeModelled, input.anchor),
+  );
 
   if (input.pipeline.state === "present" && input.pipeline.nearPipeline === false) {
     const metres = input.pipeline.bufferMeters;

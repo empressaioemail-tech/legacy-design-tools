@@ -3,6 +3,7 @@ import {
   assembleParcelDraw,
   assertDrawStub,
   disposeDrawEdgeNeighbor,
+  envelopeRingToLocalFeet,
   metresToSurveyFeet,
   type AssembleParcelDrawInput,
   type DrawBoundaryEdgeIn,
@@ -651,5 +652,236 @@ describe("feetLabelFromMetres prints no more precision than the source", () => {
     expect(mod.feetLabelFromMetres!(100)).toBe("328 ft");
     expect(mod.feetLabelFromMetres!(30.48)).toBe("100.0 ft");
     expect(mod.feetLabelFromMetres!(0.5)).toBe("2 ft");
+  });
+});
+
+const ENVELOPE_RING: [number, number][] = [
+  [-97.3153, 30.1099],
+  [-97.3147, 30.1099],
+  [-97.3147, 30.1105],
+  [-97.3153, 30.1105],
+];
+
+describe("envelope overlay: present + real geom when envelopeModelled resolves (P-153)", () => {
+  it("draws state present with real geom points, a basis token, and no reason", () => {
+    const draw = assembleParcelDraw(
+      goldInput({
+        envelopeModelled: {
+          ringLngLat: ENVELOPE_RING,
+          setbacks: { front_ft: 25, side_ft: 7.5, rear_ft: 20, district: "SF-1" },
+          disclosure: "Approximate buildable area; not survey grade.",
+        },
+      }),
+    );
+    const envelope = draw.overlays.find((o) => o.id === "envelope");
+    expect(envelope?.state).toBe("present");
+    expect(envelope?.label).toBe("Buildable envelope (modelled from setbacks)");
+    expect(envelope?.draw).toBe("inset-fill");
+    expect(envelope?.basis).toBe("modelled-figure-withheld");
+    expect(envelope).not.toHaveProperty("reason");
+    expect(Array.isArray(envelope?.geom)).toBe(true);
+    const geom = envelope!.geom as [number, number][];
+    // Closed ring: first point repeats as last.
+    expect(geom.length).toBe(ENVELOPE_RING.length + 1);
+    expect(geom[0]).toEqual(geom[geom.length - 1]);
+    expect(geom.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y))).toBe(true);
+  });
+
+  it("regression (non-vacuity guard): with no envelopeModelled, the refused overlay is UNCHANGED from today", () => {
+    const draw = assembleParcelDraw(goldInput());
+    const envelope = draw.overlays.find((o) => o.id === "envelope");
+    expect(envelope).toEqual({
+      id: "envelope",
+      label: "Buildable envelope not computed",
+      geom: "none",
+      draw: "suppress-setback-line",
+      state: "refused",
+      reason: "atom_path_pending",
+    });
+  });
+
+  it("falls back to the refused overlay when envelopeModelled is explicitly null", () => {
+    const draw = assembleParcelDraw(goldInput({ envelopeModelled: null }));
+    const envelope = draw.overlays.find((o) => o.id === "envelope");
+    expect(envelope?.state).toBe("refused");
+    expect(envelope?.geom).toBe("none");
+  });
+
+  it("falls back to the refused overlay when there is no anchor to project against", () => {
+    const draw = assembleParcelDraw(
+      goldInput({
+        anchor: null,
+        envelopeModelled: {
+          ringLngLat: ENVELOPE_RING,
+          setbacks: { front_ft: 25, side_ft: 7.5, rear_ft: 20, district: "SF-1" },
+          disclosure: "x",
+        },
+      }),
+    );
+    const envelope = draw.overlays.find((o) => o.id === "envelope");
+    expect(envelope?.state).toBe("refused");
+  });
+
+  it("falls back to the refused overlay when the modelled ring has fewer than 3 vertices", () => {
+    const draw = assembleParcelDraw(
+      goldInput({
+        envelopeModelled: {
+          ringLngLat: [ENVELOPE_RING[0]!, ENVELOPE_RING[1]!],
+          setbacks: { front_ft: 25, side_ft: 7.5, rear_ft: 20, district: "SF-1" },
+          disclosure: "x",
+        },
+      }),
+    );
+    const envelope = draw.overlays.find((o) => o.id === "envelope");
+    expect(envelope?.state).toBe("refused");
+  });
+});
+
+describe("envelopeRingToLocalFeet (P-153 coordinate conversion)", () => {
+  const EARTH_RADIUS_M = 6_378_137;
+  const US_SURVEY_FEET_PER_METRE = 3937 / 1200;
+
+  /**
+   * Independent re-implementation of the SAME equirectangular-approximation
+   * formula, written separately from parcelDrawStub.ts's own
+   * `envelopeRingToLocalFeet` / `projectRelativeToAnchor`, so this test is
+   * not just replaying the production code's own output back at itself.
+   */
+  function referenceLocalFeet(
+    ringLngLat: [number, number][],
+    anchor: { lat: number; lng: number },
+  ): [number, number][] {
+    const latRad = (anchor.lat * Math.PI) / 180;
+    const mPerDegLat = (Math.PI / 180) * EARTH_RADIUS_M;
+    const mPerDegLng = mPerDegLat * Math.cos(latRad);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const pts: [number, number][] = ringLngLat.map(([lng, lat]) => {
+      const xM = (lng - anchor.lng) * mPerDegLng;
+      const yM = (lat - anchor.lat) * mPerDegLat;
+      return [
+        round2(xM * US_SURVEY_FEET_PER_METRE),
+        round2(yM * US_SURVEY_FEET_PER_METRE),
+      ];
+    });
+    if (pts.length) {
+      const first = pts[0]!;
+      const last = pts[pts.length - 1]!;
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        pts.push([first[0], first[1]]);
+      }
+    }
+    return pts;
+  }
+
+  it("matches an independent re-implementation of the same equirectangular formula", () => {
+    const anchor = { lat: 30.11, lng: -97.31 };
+    const ring: [number, number][] = [
+      [-97.3105, 30.1095],
+      [-97.3095, 30.1095],
+      [-97.3095, 30.1105],
+      [-97.3105, 30.1105],
+    ];
+    expect(envelopeRingToLocalFeet(ring, anchor)).toEqual(
+      referenceLocalFeet(ring, anchor),
+    );
+  });
+
+  it("the anchor point itself projects to (0, 0), and the ring closes (first repeats as last)", () => {
+    const anchor = { lat: 30.11, lng: -97.31 };
+    const ring: [number, number][] = [
+      [-97.31, 30.11],
+      [-97.3095, 30.1095],
+      [-97.3095, 30.1105],
+    ];
+    const out = envelopeRingToLocalFeet(ring, anchor);
+    expect(out[0]).toEqual([0, 0]);
+    expect(out[out.length - 1]).toEqual(out[0]);
+    expect(out.length).toBe(ring.length + 1);
+  });
+
+  it("does not double-close a ring whose input already repeats its first point", () => {
+    const anchor = { lat: 30.11, lng: -97.31 };
+    const closedRing: [number, number][] = [
+      [-97.3105, 30.1095],
+      [-97.3095, 30.1095],
+      [-97.3095, 30.1105],
+      [-97.3105, 30.1095],
+      [-97.3105, 30.1095],
+    ];
+    // Force an exact closing duplicate (last === first) independent of any
+    // rounding, then confirm the function does not append a second one.
+    closedRing[closedRing.length - 1] = closedRing[0]!;
+    const out = envelopeRingToLocalFeet(closedRing, anchor);
+    expect(out.length).toBe(closedRing.length);
+    expect(out[0]).toEqual(out[out.length - 1]);
+  });
+});
+
+describe("falsifier: envelopeRingToLocalFeet preserves area (map/MCP polygon parity sanity check)", () => {
+  it("shoelace area of the converted local-frame ring matches deriveBuildableEnvelope's own buildableAreaSqFt within 1% (test-only; never put on the wire)", async () => {
+    const { deriveBuildableEnvelope } = await import("../buildableEnvelope/derive");
+    const { labelEdges } = await import("../buildableEnvelope/edgeLabeling");
+    const { mapDistrict } = await import("../buildableEnvelope/districtMapping");
+    const { feetToMeters } = await import("../buildableEnvelope/geometry");
+
+    const LNG0 = -97.31;
+    const LAT0 = 30.11;
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const mPerDegLng = mPerDegLat * Math.cos((LAT0 * Math.PI) / 180);
+    const halfW = feetToMeters(100) / 2 / mPerDegLng;
+    const halfH = feetToMeters(200) / 2 / mPerDegLat;
+    const ring: [number, number][] = [
+      [LNG0 - halfW, LAT0 - halfH],
+      [LNG0 + halfW, LAT0 - halfH],
+      [LNG0 + halfW, LAT0 + halfH],
+      [LNG0 - halfW, LAT0 + halfH],
+      [LNG0 - halfW, LAT0 - halfH],
+    ];
+    const roadLat = LAT0 - feetToMeters(120) / mPerDegLat;
+    const road: [number, number][] = [
+      [LNG0 - 0.002, roadLat],
+      [LNG0 + 0.002, roadLat],
+    ];
+    const table = {
+      jurisdictionKey: "test-tx",
+      jurisdictionDisplayName: "Test, TX",
+      districts: [
+        {
+          district_name: "R-MD Residential Medium Density",
+          front_ft: 25,
+          rear_ft: 20,
+          side_ft: 7.5,
+          side_corner_ft: 15,
+          max_height_ft: 35,
+          max_lot_coverage_pct: 40,
+          max_impervious_pct: 55,
+          citation_url: "https://library.municode.com/tx/test",
+        },
+      ],
+    };
+    const labeling = labelEdges({ ring, road })!;
+    const district = mapDistrict(table, "R-MD")!;
+    const derived = deriveBuildableEnvelope({ ring, table, district, labeling });
+    const envelopeRing = derived.geojson.features[0]!.geometry!.coordinates[0] as [
+      number,
+      number,
+    ][];
+
+    const anchor = { lat: LAT0, lng: LNG0 };
+    const localFeet = envelopeRingToLocalFeet(envelopeRing, anchor);
+
+    // Shoelace formula in ft^2 -- a TEST-ONLY geometry sanity check. This
+    // figure is never put on the draw wire (smartsite-mcp's
+    // DERIVED_FIGURES_POLICY denies `buildable_area` unconditionally).
+    let twiceArea = 0;
+    for (let i = 0; i < localFeet.length - 1; i++) {
+      const [x1, y1] = localFeet[i]!;
+      const [x2, y2] = localFeet[i + 1]!;
+      twiceArea += x1 * y2 - x2 * y1;
+    }
+    const shoelaceAreaFt2 = Math.abs(twiceArea) / 2;
+    const officialAreaFt2 = derived.geojson.features[0]!.properties.buildableAreaSqFt;
+    const relativeDiff = Math.abs(shoelaceAreaFt2 - officialAreaFt2) / officialAreaFt2;
+    expect(relativeDiff).toBeLessThan(0.01);
   });
 });

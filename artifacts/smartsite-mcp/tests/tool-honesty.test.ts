@@ -909,6 +909,64 @@ describe("P-91 v3 V3/V6: overlay reasonDisplayText and the unknown-state finding
     expect(draw.overlays[0]?.finding).toBeNull();
   });
 
+  it("P-153: a present-state envelope overlay's basis carries basisDisplayText (mirrors reason/reasonDisplayText), and no reason/reasonDisplayText at all", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34049",
+        overlays: [
+          {
+            id: "envelope",
+            label: "Buildable envelope (modelled from setbacks)",
+            draw: "inset-fill",
+            state: "present",
+            geom: [
+              [10, 10],
+              [-10, 10],
+              [-10, -10],
+              [10, -10],
+              [10, 10],
+            ],
+            basis: "modelled-figure-withheld",
+          },
+        ],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]?.basis).toBe("modelled-figure-withheld");
+    expect(draw.overlays[0]?.basisDisplayText).toBe(
+      "Buildable envelope modelled from setbacks — area withheld pending an atom",
+    );
+    expect(draw.overlays[0]).not.toHaveProperty("reason");
+    expect(draw.overlays[0]).not.toHaveProperty("reasonDisplayText");
+  });
+
+  it("an overlay basis with no special mapping still gets basisDisplayText, equal to the raw basis (envelopeBasisHuman's pass-through)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34049",
+        overlays: [
+          { id: "envelope", label: "x", state: "present", basis: "some_future_basis" },
+        ],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]?.basisDisplayText).toBe("some_future_basis");
+  });
+
+  it("an overlay with no basis at all gets no basisDisplayText key (additive, never a fabricated one)", () => {
+    const body = normalizeR1BodyForExternal({
+      brief: { sections: [{ id: "zoning", data: { district: "SF-1" } }] },
+      draw: {
+        node: "48021:34137",
+        overlays: [{ id: "flood", label: "Zone X", state: "present", citations: [], citationsDegraded: true }],
+      },
+    });
+    const draw = body.draw as { overlays: Array<Record<string, unknown>> };
+    expect(draw.overlays[0]).not.toHaveProperty("basisDisplayText");
+  });
+
   it("V6 is scoped to state unknown only: a present-state overlay gets no finding key at all", () => {
     const body = normalizeR1BodyForExternal({
       brief: { sections: [{ id: "flood", data: { floodZone: "X" } }] },

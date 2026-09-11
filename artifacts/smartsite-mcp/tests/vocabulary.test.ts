@@ -34,6 +34,7 @@ const REQUIRED_TOKENS = [
   "seed",
   "side_corner",
   "atom_path_pending",
+  "modelled-figure-withheld",
   "upgrade_required",
   "parcel_not_found",
   "baked_snapshot_not_found",
@@ -103,6 +104,20 @@ describe("VOCABULARY (V1)", () => {
     const tokens = new Set(withoutSideCorner.map((e) => e.token));
     const missing = REQUIRED_TOKENS.filter((t) => !tokens.has(t));
     expect(missing).toEqual(["side_corner"]);
+  });
+
+  it("P-153: modelled-figure-withheld is a distinct token from atom_path_pending, with its own hardcoded display text mirroring hauska-map's card copy", () => {
+    // Hardcoded literal (not re-derived from envelopeBasisHuman), same
+    // falsifiable-comparison posture as the byte-matches check below: a test
+    // that only imports and echoes the source constant back at itself cannot
+    // fail when the source is wrong.
+    expect(entryFor("modelled-figure-withheld").displayText).toBe(
+      "Buildable envelope modelled from setbacks — area withheld pending an atom",
+    );
+    expect(entryFor("modelled-figure-withheld").displayText).not.toBe(
+      entryFor("atom_path_pending").displayText,
+    );
+    expect(entryFor("modelled-figure-withheld").meaning).toContain("present-state");
   });
 
   it("the two Open failure sentences stay distinct sentences (V1)", () => {

@@ -58,11 +58,26 @@ function yearBuiltFromStructural(
   return null;
 }
 
-function envelopeReason(refusal: EnvelopeBriefRefusal | null | undefined): string {
+/**
+ * Exported (P-153) so callers deciding whether to attempt the modelled-
+ * envelope derivation (`../lib/buildableEnvelope/parcelDrawEnvelopeModel.ts`,
+ * wired from `propertyExplorer.ts`) can test the SAME predicate this file
+ * already uses for the refused overlay's `reason`, rather than a second,
+ * driftable copy of "is this atom-pending". `atomPathPending(refusal)` below
+ * is the boolean form of that same test.
+ */
+export function envelopeReason(refusal: EnvelopeBriefRefusal | null | undefined): string {
   if (!refusal) return "atom_path_pending";
   if (refusal.declineReason?.trim()) return refusal.declineReason.trim();
   if (refusal.code === "declined-in-bake") return "atom_path_pending";
   return refusal.code;
+}
+
+/** True exactly when `envelopeReason` would resolve to `"atom_path_pending"`. */
+export function atomPathPending(
+  refusal: EnvelopeBriefRefusal | null | undefined,
+): boolean {
+  return envelopeReason(refusal) === "atom_path_pending";
 }
 
 function vintageFromRead(read: {
@@ -210,6 +225,13 @@ export function tryAssembleParcelDrawFromReads(args: {
   facets: unknown;
   bakedAt: string | null;
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
+  /**
+   * P-153: the modelled buildable-envelope polygon + setbacks, when the
+   * caller already resolved one (see `envelopeModelled`'s doc comment on
+   * `AssembleParcelDrawInput`). Passed straight through to
+   * `assembleParcelDraw`; `null`/absent keeps the refused overlay.
+   */
+  envelopeModelled?: AssembleParcelDrawInput["envelopeModelled"];
   queryPoint?: { latitude: number; longitude: number } | null;
   boundary: BoundaryEdgeFactRead;
   flood: FloodHazardFactRead;
@@ -240,6 +262,7 @@ export function tryAssembleParcelDrawFromReads(args: {
       boundary: boundaryInput(args.boundary),
       flood: floodInput(args.flood),
       envelopeRefusalReason: envelopeReason(args.envelopeBriefRefusal),
+      envelopeModelled: args.envelopeModelled ?? null,
       pipeline: pipelineInput(args.pipeline),
       well: wellInput(args.well),
       specialDistrict: specialDistrictInput(args.specialDistrict),
