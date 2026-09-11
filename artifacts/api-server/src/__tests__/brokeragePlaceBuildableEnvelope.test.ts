@@ -663,36 +663,35 @@ describe("POST /place/buildable-envelope — P-151 bounded point-resolution time
       .send(body);
   }
 
-  afterEach(() => {
-    // In case a test fails before reaching its own cleanup, never leak fake
-    // timers into a later test.
-    vi.useRealTimers();
-  });
-
-  it("declares a bounded 503 refusal when a bare {lat,lng} pin-query never settles within the time budget", async () => {
-    parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
-    // Simulate the reported failure shape directly: the point-resolution
-    // query hangs (e.g. orphaned under DB pool contention) instead of
-    // erroring or returning. Fake timers let the test assert the bounded
-    // refusal without actually waiting POINT_RESOLUTION_TIMEOUT_MS of real
-    // wall-clock time.
-    pinQueryHang = true;
-    vi.useFakeTimers();
-    try {
+  it(
+    "declares a bounded 503 refusal when a bare {lat,lng} pin-query never settles within the time budget",
+    async () => {
+      parcelZoning = "R-MD";
+      parcelNodeIdStamped = null;
+      // Simulate the reported failure shape directly: the point-resolution
+      // query hangs (e.g. orphaned under DB pool contention) instead of
+      // erroring or returning.
+      //
+      // REAL timers, deliberately: `vi.useFakeTimers()` does not reliably
+      // drive `supertest`'s actual HTTP round-trip through an Express app
+      // (its socket I/O has its own event-loop scheduling that
+      // `vi.advanceTimersByTimeAsync` does not fully virtualize) -- that
+      // combination hung this exact test past Vitest's own 20s default
+      // test timeout in CI. A real (but bounded, and explicitly extended
+      // via this test's own timeout below) wait is the reliable way to
+      // exercise a `setTimeout`-based race against a real request/response
+      // cycle here.
+      pinQueryHang = true;
       // Bare {lat,lng}, no address -- the exact 2026-09-11 repro shape.
-      const resPromise = postWith({ lat: 30.2672, lng: -97.7431 });
-      await vi.advanceTimersByTimeAsync(POINT_RESOLUTION_TIMEOUT_MS);
-      const res = await resPromise;
+      const res = await postWith({ lat: 30.2672, lng: -97.7431 });
       expect(res.status).toBe(503);
       expect(res.body.status).toBe("resolution-timeout");
       expect(res.body.errorClass).toBe("resolution_timeout");
       expect(res.body.parcel_node_id).toBeNull();
       expect(typeof res.body.message).toBe("string");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    },
+    POINT_RESOLUTION_TIMEOUT_MS + 10_000,
+  );
 
   it("still resolves normally (no 503, no added latency) for a bare {lat,lng} request that answers promptly", async () => {
     parcelZoning = "R-MD";
