@@ -75,6 +75,11 @@ import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover"
 import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
+import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
+import { loadParcelAreaSqFtFactForServe } from "../lib/parcelAreaSqFtFactServeCutover";
+import { loadMaxHeightFtFactForServe } from "../lib/maxHeightFtFactServeCutover";
+import { loadMaxLotCoveragePctFactForServe } from "../lib/maxLotCoveragePctFactServeCutover";
+import { loadMaxFootprintSqFtFactForServe } from "../lib/maxFootprintSqFtFactServeCutover";
 import { loadOwnerFactAtom, studioGatedOwnerFactRefusal } from "../lib/ownerFactRead";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
@@ -219,6 +224,16 @@ async function assembleNodeBriefBody(
     // fetched and served by brokerageNodeFacets.ts's facets route but never
     // fetched here at all -- same loader, reused rather than re-derived.
     valueHistoryFact,
+    // OPS-21 S5 (P-148): the five wrapper-less rails S4/P-135 found written
+    // but never consumed -- same loaders brokerageNodeFacets.ts's own
+    // node-facets route now uses, reused rather than re-derived. Only
+    // parcelAreaSqFt is slated; the other four resolve to a typed
+    // not-cut-over refusal for every parcel until a future lane slates them.
+    setbackRulesFact,
+    parcelAreaSqFtFact,
+    maxHeightFtFact,
+    maxLotCoveragePctFact,
+    maxFootprintSqFtFact,
     // PE/MCP-vs-facets parity audit (2026-09-07, D3): ownerFact was checked
     // first, not just added -- confirmed the SAME gate already flows into
     // this function. `grantsCadRollValuation` (this function's own
@@ -269,6 +284,11 @@ async function assembleNodeBriefBody(
     loadMaxImperviousCoverPctFactForServe(parcelNodeId),
     loadBuildingFootprintFactAtom(parcelNodeId),
     loadValueHistoryFactForServe(parcelNodeId),
+    loadSetbackRulesFactForServe(parcelNodeId),
+    loadParcelAreaSqFtFactForServe(parcelNodeId),
+    loadMaxHeightFtFactForServe(parcelNodeId),
+    loadMaxLotCoveragePctFactForServe(parcelNodeId),
+    loadMaxFootprintSqFtFactForServe(parcelNodeId),
     grantsCadRollValuation
       ? loadOwnerFactAtom(parcelNodeId)
       : Promise.resolve(null),
@@ -364,6 +384,16 @@ async function assembleNodeBriefBody(
     // brokerageNodeFacets.ts's facets route already uses; this response
     // never fetched or carried it at all before.
     valueHistoryFact,
+    // OPS-21 S5 (P-148): same five loaders brokerageNodeFacets.ts's own
+    // node-facets route now uses; this response never fetched or carried
+    // them at all before. Only parcelAreaSqFt is slated; the other four
+    // resolve to a typed not-cut-over refusal until a future lane slates
+    // them.
+    setbackRulesFact,
+    parcelAreaSqFtFact,
+    maxHeightFtFact,
+    maxLotCoveragePctFact,
+    maxFootprintSqFtFact,
     // PE/MCP-vs-facets parity audit (2026-09-07, D4): these four were
     // already being fetched above (Promise.all) to feed `draw` but were
     // never exposed as their own typed fields the way

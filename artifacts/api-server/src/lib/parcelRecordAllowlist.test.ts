@@ -57,14 +57,34 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     }
   });
 
-  it("the slate has exactly 97 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(97);
+  it("the slate has exactly 102 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt + 5 parcelAreaSqFt (OPS-21 S5, P-148)", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(102);
   });
 
   it("OPS-16 A-096/A-097/A-098: all six counties, INCLUDING Caldwell, are slated for zoningDistrict and setbackFrontFt -- the representative keys for the zoning and setbacks not-applicable fix, no per-county exclusion documented in rail-keys.js/instantiate.js", () => {
     for (const county of ALL_SIX_COUNTIES) {
       expect(PARCEL_RECORD_SLATE.has(`${county}:zoningDistrict`)).toBe(true);
       expect(PARCEL_RECORD_SLATE.has(`${county}:setbackFrontFt`)).toBe(true);
+    }
+  });
+
+  it("OPS-21 S5 (P-148): the five in-scope non-Hays counties are slated for parcelAreaSqFt -- the one rail S4/P-135 found passing the gate with no consuming wrapper; this card builds the wrapper so the entry is non-vacuous", () => {
+    const nonHaysCounties = ["48021", "48055", "48309", "48453", "48491"];
+    for (const county of nonHaysCounties) {
+      expect(PARCEL_RECORD_SLATE.has(`${county}:parcelAreaSqFt`)).toBe(true);
+    }
+  });
+
+  it("Hays is deliberately excluded from parcelAreaSqFt -- P-145 has not landed, not an oversight", () => {
+    expect(PARCEL_RECORD_SLATE.has("48209:parcelAreaSqFt")).toBe(false);
+  });
+
+  it("the four other OPS-21 S5 wrapper-covered rails (setbackRules, maxHeightFt, maxLotCoveragePct, maxFootprintSqFt) are NOT slated for any county -- they fail the gate on every in-scope county, blocked on the zoningDistrict residual", () => {
+    const neverSlatedRails = ["setbackRules", "maxHeightFt", "maxLotCoveragePct", "maxFootprintSqFt"];
+    for (const county of ALL_SIX_COUNTIES) {
+      for (const rail of neverSlatedRails) {
+        expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(false);
+      }
     }
   });
 
@@ -145,12 +165,12 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the ninety-seven real slated entries", () => {
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the 102 real slated entries", () => {
     const rails = [
       "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
       "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
       "utilityService", "overlayDistricts", "agValuation", "schoolDistrict",
-      "maxImperviousCoverPct", "zoningDistrict", "setbackFrontFt",
+      "maxImperviousCoverPct", "zoningDistrict", "setbackFrontFt", "parcelAreaSqFt",
     ];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -165,13 +185,24 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
     }
-    // Falsifier's own falsifier: this loop must actually skip the
-    // ninety-seven real slated pairs (every one PARCEL_RECORD_SLATE holds,
-    // since this rail list now covers all of them), not silently cover zero
-    // cases because the skip branch is unreachable -- fails loudly if
-    // PARCEL_RECORD_SLATE ever changes without this test being updated.
+    // Falsifier's own falsifier: this loop must actually skip the 102 real
+    // slated pairs (every one PARCEL_RECORD_SLATE holds, since this rail
+    // list now covers all of them), not silently cover zero cases because
+    // the skip branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE
+    // ever changes without this test being updated.
     expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
-    expect(uncheckedSlatedPairs).toBe(97);
+    expect(uncheckedSlatedPairs).toBe(102);
+  });
+
+  it("FALSIFIER: the five slated parcelAreaSqFt pairs (OPS-21 S5, P-148) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
+    for (const county of ["48021", "48055", "48309", "48453", "48491"]) {
+      expect(resolveAllowlistState(county, "parcelAreaSqFt", { verdict: "pass" })).toBe("record");
+      expect(resolveAllowlistState(county, "parcelAreaSqFt", { verdict: "refuse" })).toBe("refused");
+      expect(resolveAllowlistState(county, "parcelAreaSqFt", { verdict: "excluded" })).toBe("refused");
+      expect(resolveAllowlistState(county, "parcelAreaSqFt", null)).toBe("legacy");
+    }
+    // Hays is deliberately unslated for this rail -- resolves to legacy even on a fabricated pass.
+    expect(resolveAllowlistState("48209", "parcelAreaSqFt", { verdict: "pass" })).toBe("legacy");
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {

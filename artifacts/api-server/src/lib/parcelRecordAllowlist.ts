@@ -178,6 +178,26 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * valueHistory lands. Slating ahead of the verdict is fail-closed by
  * construction, per this file's own PARCEL-B-READER precedent.
  *
+ * parcelAreaSqFt, FIVE counties -- Bastrop/Caldwell/McLennan/Travis/
+ * Williamson, Hays EXCLUDED (OPS-21 S5, P-148, 2026-09-11): the one rail
+ * S4/P-135 measured passing the gate with zero wrapper to consume it --
+ * "textually compliant and functionally inert," the exact defect class this
+ * program exists to close. This card builds parcelAreaSqFtFactServeCutover.ts
+ * (resolveAllowlist call site now exists, grep-confirmed) so this entry is
+ * non-vacuous. Hays excluded per this dispatch's own standing fact (P-145
+ * has not landed) -- not measured here, not assumed passing. Gate verdict
+ * re-verified live immediately before this edit (2026-09-11T12:20:42Z,
+ * FACTORY host ep-round-base-au0jofwp/neondb): all 5 pass, unaccounted_count
+ * 0, fresh run_ids on every county (some newer than this card's own CP1
+ * read, e.g. 48453 run 448bb019 at 12:16:32Z) -- no drift in OUTCOME despite
+ * the scheduler re-evaluating mid-session, matching S4's own documented
+ * behavior on this exact rail. The other four rails S5 also builds wrappers
+ * for (setbackRules, maxHeightFt, maxLotCoveragePct, maxFootprintSqFt) are
+ * deliberately NOT added here -- they fail the gate on every in-scope county
+ * (blocked on the 3,376-parcel zoningDistrict residual Z1/P-147 is
+ * characterising) and adding them would slate a rail with no genuine
+ * passing verdict, the opposite failure mode from the one this card fixes.
+ *
  * zoningDistrict + setbackFrontFt, ALL SIX counties including Caldwell
  * (F-01, PARCEL-B-SLATE3, OPS-16 A-096/A-097/A-098, 2026-09-04): the
  * specific defect this card fixes. Unlike every rail above, zoning
@@ -321,6 +341,11 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:setbackFrontFt",
   "48453:setbackFrontFt",
   "48491:setbackFrontFt",
+  "48021:parcelAreaSqFt",
+  "48055:parcelAreaSqFt",
+  "48309:parcelAreaSqFt",
+  "48453:parcelAreaSqFt",
+  "48491:parcelAreaSqFt",
 ]);
 
 /**
