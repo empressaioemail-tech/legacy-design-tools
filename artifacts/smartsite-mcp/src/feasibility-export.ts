@@ -47,19 +47,36 @@ const FEASIBILITY_KIND = "feasibility";
 /** Budget for ACKNOWLEDGING a request (status read or refresh accept) — the
  * engine answers these in well under a second now that composition never
  * runs inline; generous headroom over that, never a budget for composition
- * itself. */
-const ACK_TIMEOUT_MS = 15_000;
+ * itself. Kept well under FEASIBILITY_POLL_BUDGET_MS so the two ack calls
+ * (status, then refresh when one is needed) plus the poll loop still land
+ * comfortably inside a calling host's own tool-invocation timeout in the
+ * worst case, not just the typical sub-second case. */
+const ACK_TIMEOUT_MS = 10_000;
 /** Budget for streaming the finished PDF once the job is ready. */
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 /**
  * Total wall time THIS call spends polling before returning a declared
- * in-progress result instead of the PDF. Comparable to the old single
- * REFRESH_TIMEOUT_MS=55_000 this connector used to budget for composition,
- * so a caller unaware of the async change sees roughly the same latency
- * envelope on the common case (Bastrop, 38-85s) and a DECLARED wait rather
- * than a bare abort on the long case (Travis, 85-154s).
+ * in-progress result instead of the PDF.
+ *
+ * MEASURED LIVE 2026-09-11 against the deployed async engine (P-155):
+ * `export_instrument feasibility 48021:33223` through this exact
+ * MCP tool returned "The operation timed out" — the CALLING HOST's own
+ * tool-invocation timeout fired before this function's original 55s poll
+ * budget (matching the old REFRESH_TIMEOUT_MS) had even elapsed, even
+ * though the underlying engine job kept running and settled to `ready`
+ * moments later (confirmed by a direct engine status read: started
+ * 22:56:54Z, completed 22:57:48Z, 54s total). A host-side timeout shows
+ * ITS OWN generic error, never this function's declared envelope — which
+ * defeats the entire point of P-155 item 3 ("every error path on the MCP
+ * side carries the same envelope; the bare abort text goes away"). No
+ * budget value can guarantee catching every real job before it finishes
+ * (jobs range 38-215s, also measured live 2026-09-11) -- the "call again"
+ * pattern is unavoidable for most jobs regardless. The budget's real job
+ * is staying safely under a calling host's own cap so THIS function's
+ * response -- ready, failed, or the declared in-progress envelope -- is
+ * what the host actually sees. Shortened from 55s to 20s accordingly.
  */
-const FEASIBILITY_POLL_BUDGET_MS = 55_000;
+const FEASIBILITY_POLL_BUDGET_MS = 20_000;
 const POLL_MIN_INTERVAL_MS = 3_000;
 const POLL_MAX_INTERVAL_MS = 8_000;
 
