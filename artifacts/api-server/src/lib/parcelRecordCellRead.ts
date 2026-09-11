@@ -2,22 +2,27 @@
  * Serve-layer reader for the Factory's parcel_record store (F-01, decision
  * `_decisions/2026-09-02_step7_consumer_c_then_b.md`, PARCEL-B-READER).
  *
+ * REPOINTED (P-152, `_dispatches/2026-09-11_p152-reader_dispatch.md`):
+ * this module no longer opens a connection to the Factory store itself.
+ * `parcelRecordQueryableFromEnv` below is now a `ParcelRecordQueryable`-
+ * shaped adapter over `parcelRecordReaderClient.ts`'s HTTP client for the
+ * Hauska retrieval service's `GET /property-nodes/:id/record` (and the
+ * companion `/parcel-record-gate-verdict/:county/:rail` for
+ * `parcelGateVerdictRead.ts`'s county-scoped verdict lookups). Every other
+ * export in this file -- the types, `interpretParcelRecordCell`'s
+ * interpretation logic, `loadParcelRecordCell`'s public contract, the
+ * in-memory test fixtures -- is UNCHANGED, so every one of the 18
+ * `<rail>FactFromParcelRecord.ts` call sites and their existing tests
+ * (which inject their own store via `setParcelRecordQueryableForTests` and
+ * never reach this function) needed no edits. `FACTORY_DATABASE_URL_RO` is
+ * no longer read anywhere in this repo (R-8: cortex holds no factory
+ * credential) -- the adapter's "not configured" check below now looks for
+ * `HAUSKA_RETRIEVAL_API_KEY`/`RETRIEVAL_API_KEY` instead.
+ *
  * Per-parcel reads ONLY -- one (place_key, rail_key) pair per call. County
  * materialization is a named dead-end (the cell-ledger close measured
  * 101.5s to materialize the SMALLEST county's cells; a Travis single-shot
  * would run 25+ minutes). This module never issues a county-scoped query.
- *
- * Structurally read-only, TWO layers deep (PARCEL-RO-ROLE, 2026-09-02):
- * the connection authenticates as `parcel_record_ro`, a Postgres role
- * granted SELECT only on parcel_record / parcel_record_cell /
- * parcel_record_companion_row (verified by violation: an INSERT through
- * this credential fails with "permission denied for table
- * parcel_record_cell" at the database, before any application code runs).
- * Every pooled connection ALSO runs `SET default_transaction_read_only =
- * on` immediately on connect, so a write is refused twice over -- role
- * grant first, protocol-level session flag second. Credential lives in
- * Secret Manager as FACTORY_DATABASE_URL_RO, never FACTORY_DATABASE_URL
- * (the writer credential every Factory job uses).
  *
  * `unaccounted` never reaches the wire as a word. It is a REFUSAL (code
  * "unaccounted"), matching this repo's own house convention in every
@@ -53,7 +58,7 @@
  * unchanged, and no existing adapter reads `raw`.
  */
 
-import pg from "pg";
+import { fetchGateVerdict, fetchParcelRecord } from "./parcelRecordReaderClient.js";
 
 export const PARCEL_RECORD_SOURCE = "parcel_record" as const;
 
@@ -135,7 +140,6 @@ SELECT row_index, payload, source, vintage
 `;
 
 let injectedQueryable: ParcelRecordQueryable | null | undefined;
-let sharedPool: pg.Pool | null = null;
 
 /** Test seam. `null` means store not configured. `undefined` (reset) means env. */
 export function setParcelRecordQueryableForTests(
@@ -149,37 +153,102 @@ export function resetParcelRecordQueryableForTests(): void {
 }
 
 /**
- * Exported for reuse by parcelGateVerdictRead.ts: parcel_record_ro (this
- * pool's credential) also carries SELECT on parcel_gate_verdict
- * (PARCEL-B-SLATE1, migration 0010) -- same database, same credential, no
- * reason for a second connection pool. This is the RAW env-resolved store
- * only, with no test-injection seam of its own; callers apply their own
- * injection override first.
+ * Exported for reuse by parcelGateVerdictRead.ts: this one adapter answers
+ * both the per-parcel cell/companion-row queries (via `fetchParcelRecord`)
+ * and the county-scoped verdict query (via `fetchGateVerdict`) by
+ * inspecting the query text, exactly as the in-memory test fixtures below
+ * already dispatch by text. This is the RAW env-resolved store only, with
+ * no test-injection seam of its own; callers apply their own injection
+ * override first.
+ *
+ * A query that cannot be answered -- the upstream fetch failed (network,
+ * non-200, missing credential) or the parcel is crosswalk-ambiguous --
+ * THROWS, matching what a real Postgres connection failure already did
+ * here before P-152: `loadParcelRecordCell` does not wrap its `store.query`
+ * calls in a try/catch, so this is not a new failure mode for its callers.
  */
 export function parcelRecordQueryableFromEnv(): ParcelRecordQueryable | null {
-  const url = process.env.FACTORY_DATABASE_URL_RO?.trim();
-  if (!url) return null;
-  if (!sharedPool) {
-    sharedPool = new pg.Pool({
-      connectionString: url,
-      ssl: url.includes("sslmode=") ? undefined : { rejectUnauthorized: false },
-      max: 2,
-    });
-    // Structural read-only: refuse at the Postgres protocol level, not just
-    // by omission of write code. Fires on every physical connection, so a
-    // pooled connection reused across requests stays read-only for its
-    // whole lifetime.
-    sharedPool.on("connect", (client) => {
-      client.query("SET default_transaction_read_only = on").catch(() => {
-        // If this SET itself fails, every subsequent query on this client
-        // fails too (a broken connection surfaces as a query error, which
-        // resolveCellRead below already converts to a refusal). No
-        // separate handling needed -- swallow here only to avoid an
-        // unhandled promise rejection on the pool's own connect event.
-      });
-    });
-  }
-  return sharedPool;
+  const key =
+    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() || process.env.RETRIEVAL_API_KEY?.trim();
+  if (!key) return null;
+
+  return {
+    async query<T extends Record<string, unknown> = Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
+      if (text.includes("FROM parcel_record_cell")) {
+        const [placeKey, railKey] = params as [string, string];
+        const record = await fetchParcelRecord(placeKey);
+        if (record === null) {
+          throw new Error(
+            `parcel_record cell read via the retrieval service failed for ${placeKey}/${railKey}`,
+          );
+        }
+        if (record.refused) {
+          throw new Error(
+            `parcel_record refuses ${placeKey} (${record.refused.reason}); cannot serve any rail`,
+          );
+        }
+        const rail = record.rails[railKey];
+        if (!rail || rail.cell === null) return { rows: [] as unknown as T[] };
+        return { rows: [{ cell_state: rail.cell }] as unknown as T[] };
+      }
+      if (text.includes("FROM parcel_record_companion_row")) {
+        const [placeKey, railKey] = params as [string, string];
+        const record = await fetchParcelRecord(placeKey);
+        if (record === null) {
+          throw new Error(
+            `parcel_record companion-row read via the retrieval service failed for ${placeKey}/${railKey}`,
+          );
+        }
+        if (record.refused) {
+          throw new Error(
+            `parcel_record refuses ${placeKey} (${record.refused.reason}); cannot serve any rail`,
+          );
+        }
+        const companions = record.rails[railKey]?.companions ?? [];
+        return {
+          rows: (
+            companions as Array<{ rowIndex: number; payload: unknown; source: string; vintage: string }>
+          ).map((c) => ({
+            row_index: c.rowIndex,
+            payload: c.payload,
+            source: c.source,
+            vintage: c.vintage,
+          })) as unknown as T[],
+        };
+      }
+      if (text.includes("FROM parcel_gate_verdict")) {
+        const [countyFips, railKey] = params as [string, string];
+        const verdict = await fetchGateVerdict(countyFips, railKey);
+        if (verdict === undefined) {
+          throw new Error(
+            `parcel_gate_verdict read via the retrieval service failed for ${countyFips}/${railKey}`,
+          );
+        }
+        if (verdict === null) return { rows: [] as unknown as T[] };
+        return {
+          rows: [
+            {
+              county_fips: countyFips,
+              rail_key: railKey,
+              verdict: verdict.verdict,
+              // Not surfaced by the retrieval service's gate-verdict
+              // endpoint today; unused by resolveAllowlistState (which
+              // reads only .verdict) and by every current caller.
+              unaccounted_count: 0,
+              evaluated_at: verdict.evaluatedAt,
+              run_id: "hauska-retrieval-api",
+            },
+          ] as unknown as T[],
+        };
+      }
+      throw new Error(
+        `parcelRecordQueryableFromEnv adapter: unrecognized query shape: ${text.slice(0, 80)}`,
+      );
+    },
+  };
 }
 
 function resolveQueryable(): ParcelRecordQueryable | null {
@@ -347,7 +416,7 @@ export async function loadParcelRecordCell(
       railKey,
       code: "store-not-configured",
       reason:
-        "parcel_record lives in the Factory store, read via the SELECT-only FACTORY_DATABASE_URL_RO credential. That credential is not configured. Refusing rather than reading a legacy store under this name.",
+        "parcel_record is read via the Hauska retrieval service (P-152); no RETRIEVAL_API_KEY/HAUSKA_RETRIEVAL_API_KEY is configured in this process. Refusing rather than reading a legacy store under this name.",
     };
   }
   const [cellResult, companionResult] = await Promise.all([

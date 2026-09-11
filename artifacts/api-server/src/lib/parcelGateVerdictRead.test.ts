@@ -24,13 +24,17 @@ describe("resolveVerdictStore", () => {
     expect(resolveVerdictStore(null)).toBeNull();
   });
 
-  it("undefined (the production default, no test override) resolves via the env-connected pool, which is null when FACTORY_DATABASE_URL_RO is unset in this process", () => {
+  it("undefined (the production default, no test override) resolves via the env-connected adapter, which is null when no retrieval API key is set in this process", () => {
     // Load-bearing regression guard for the exact defect this function
     // fixes: the wrapper's own default MUST NOT be a hardcoded null --
-    // it must actually attempt env resolution. This process has no
-    // FACTORY_DATABASE_URL_RO set, so the honest, correct answer here is
-    // still null, but via the real code path, not a bypassed one.
-    expect(process.env.FACTORY_DATABASE_URL_RO).toBeUndefined();
+    // it must actually attempt env resolution. P-152 repointed the real
+    // resolver from a Postgres pool (FACTORY_DATABASE_URL_RO) to an HTTP
+    // adapter over the Hauska retrieval service (RETRIEVAL_API_KEY /
+    // HAUSKA_RETRIEVAL_API_KEY); this process has neither set, so the
+    // honest, correct answer here is still null, but via the real code
+    // path, not a bypassed one.
+    expect(process.env.RETRIEVAL_API_KEY).toBeUndefined();
+    expect(process.env.HAUSKA_RETRIEVAL_API_KEY).toBeUndefined();
     expect(resolveVerdictStore(undefined)).toBeNull();
   });
 });
