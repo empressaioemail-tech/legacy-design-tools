@@ -1,8 +1,36 @@
 /**
- * Feasibility Study export (P-119 / OPS-16 A-103). Two-hop refresh-then-
- * download, mirroring export-instrument.ts's shape exactly — but against
- * hauska-engine-api directly (see engine-client.ts for why there is no
- * hauska-mcp-server tool to proxy here instead).
+ * Feasibility Study export (P-119 / OPS-16 A-103). Against hauska-engine-api
+ * directly (see engine-client.ts for why there is no hauska-mcp-server tool
+ * to proxy here instead).
+ *
+ * P-155 (OPS-23 FEASIBILITY, 2026-09-11): the engine's refresh route is now
+ * ASYNCHRONOUS (hauska-engine PR #420) — it accepts a job (202) instead of
+ * composing inline, because composition takes 85-154s for Travis parcels
+ * (F7) while this connector's old REFRESH_TIMEOUT_MS=55_000 aborted first
+ * and reported a bare, undeclared "aborted" text with no way for a caller
+ * to tell a real failure from a report that was still cooking.
+ *
+ * The new shape, in one call:
+ *   1. Read job STATUS first (never blindly re-refresh — a job already
+ *      `ready` from a prior call must be served straight from that job,
+ *      not recomposed from scratch on every poll).
+ *   2. If nothing has ever been requested (or the prior job failed), POST
+ *      refresh to start one.
+ *   3. Poll status on the engine's own `pollAfterMs` inside THIS call's own
+ *      budget (FEASIBILITY_POLL_BUDGET_MS) until `ready` or `failed`.
+ *   4. Ready within budget -> download and return the PDF, exactly the old
+ *      success shape. Not ready by budget's end -> a DECLARED in-progress
+ *      result (`status: "in_progress"`, `isError: false` — this is a
+ *      genuine answer, not a failure) carrying `{ tool, kind, state,
+ *      jobRef, pollAfterMs }`, so a second call for the SAME parcel can
+ *      check again and will find the job ready without starting another.
+ *
+ * EVERY outcome — not-configured, a thrown network error at any leg, a
+ * non-OK HTTP response, a settled `failed` job — carries the same
+ * `{ status, tool, kind, reason, message }` envelope now. The old bare
+ * abort text (`engineThrewResult`) is retired: an agent caller could not
+ * classify it as retryable, and there is nothing to retry manually now
+ * that this function itself polls.
  */
 
 import type { ToolResult } from "./tools-types.js";
@@ -13,8 +41,27 @@ import {
 } from "./engine-client.js";
 
 const FEASIBILITY_PACKAGE_ID = "feasibility-export";
-const REFRESH_TIMEOUT_MS = 55_000;
+const FEASIBILITY_TOOL = "export_instrument";
+const FEASIBILITY_KIND = "feasibility";
+
+/** Budget for ACKNOWLEDGING a request (status read or refresh accept) — the
+ * engine answers these in well under a second now that composition never
+ * runs inline; generous headroom over that, never a budget for composition
+ * itself. */
+const ACK_TIMEOUT_MS = 15_000;
+/** Budget for streaming the finished PDF once the job is ready. */
 const DOWNLOAD_TIMEOUT_MS = 30_000;
+/**
+ * Total wall time THIS call spends polling before returning a declared
+ * in-progress result instead of the PDF. Comparable to the old single
+ * REFRESH_TIMEOUT_MS=55_000 this connector used to budget for composition,
+ * so a caller unaware of the async change sees roughly the same latency
+ * envelope on the common case (Bastrop, 38-85s) and a DECLARED wait rather
+ * than a bare abort on the long case (Travis, 85-154s).
+ */
+const FEASIBILITY_POLL_BUDGET_MS = 55_000;
+const POLL_MIN_INTERVAL_MS = 3_000;
+const POLL_MAX_INTERVAL_MS = 8_000;
 
 export type FeasibilityExportArgs = {
   parcelNodeId: string;
@@ -23,6 +70,10 @@ export type FeasibilityExportArgs = {
 export type FeasibilityExportDeps = {
   loadConfig?: () => EngineApiConfig | null;
   fetchImpl?: typeof fetch;
+  /** Overrides FEASIBILITY_POLL_BUDGET_MS — test-only knob so a
+   * still-running-at-budget-end test exercises the real branch in
+   * milliseconds instead of the production 55s. */
+  pollBudgetMs?: number;
 };
 
 /**
@@ -39,12 +90,12 @@ export function feasibilityNotConfiguredResult(): ToolResult {
         type: "text",
         text: JSON.stringify({
           status: "degraded",
-          tool: "export_instrument",
-          kind: "feasibility",
+          tool: FEASIBILITY_TOOL,
+          kind: FEASIBILITY_KIND,
           reason: "engine_api_not_configured",
           dependency: "hauska-engine-api",
           message:
-            "Feasibility Study export is not configured on this server: engine-api gate credentials are missing (set HAUSKA_ENGINE_API_KEY and HAUSKA_ENGINE_API_URL). The upstream engine-api route already exists (hauska-engine PR #380, P-32 wave 1) — this is a deploy-configuration gap on smartsite-mcp, not a missing capability upstream.",
+            "Feasibility Study export is not configured on this server: engine-api gate credentials are missing (set HAUSKA_ENGINE_API_KEY and HAUSKA_ENGINE_API_URL). The upstream engine-api route already exists (hauska-engine PR #420, P-155 async refresh) — this is a deploy-configuration gap on smartsite-mcp, not a missing capability upstream.",
         }),
       },
     ],
@@ -58,12 +109,37 @@ function asRecord(v: unknown): Record<string, unknown> {
     : {};
 }
 
-function engineThrewResult(err: unknown): ToolResult {
-  const message = err instanceof Error ? err.message : String(err);
+/** Every error/degraded/in-progress outcome from this file goes through
+ * here — ONE envelope shape, per P-155 item 3 ("every error path on the
+ * MCP side carries the same envelope"). */
+function declaredResult(input: {
+  status: "error" | "in_progress";
+  isError: boolean;
+  reason?: string;
+  message?: string;
+  extra?: Record<string, unknown>;
+}): ToolResult {
   return {
-    content: [{ type: "text", text: message }],
-    isError: true,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          status: input.status,
+          tool: FEASIBILITY_TOOL,
+          kind: FEASIBILITY_KIND,
+          ...(input.reason ? { reason: input.reason } : {}),
+          ...(input.message ? { message: input.message } : {}),
+          ...input.extra,
+        }),
+      },
+    ],
+    isError: input.isError,
   };
+}
+
+function engineThrewDeclaredResult(err: unknown): ToolResult {
+  const message = err instanceof Error ? err.message : String(err);
+  return declaredResult({ status: "error", isError: true, reason: "engine_unreachable", message });
 }
 
 /**
@@ -77,6 +153,145 @@ function timeoutSignal(ms: number): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clampPollInterval(pollAfterMs: unknown): number {
+  const ms = typeof pollAfterMs === "number" && Number.isFinite(pollAfterMs) ? pollAfterMs : POLL_MIN_INTERVAL_MS;
+  return Math.min(POLL_MAX_INTERVAL_MS, Math.max(POLL_MIN_INTERVAL_MS, ms));
+}
+
+type JobState = "never-requested" | "queued" | "running" | "ready" | "failed";
+
+interface StatusRead {
+  state: JobState;
+  jobRef?: string;
+  pollAfterMs?: number;
+  errorClass?: string;
+  errorMessage?: string;
+  result?: Record<string, unknown>;
+}
+
+async function readStatus(
+  parcelPath: string,
+  headers: Record<string, string>,
+  config: EngineApiConfig,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true; status: StatusRead } | { ok: false; result: ToolResult }> {
+  let res: Response;
+  const t = timeoutSignal(ACK_TIMEOUT_MS);
+  try {
+    res = await fetchImpl(`${config.baseUrl}${parcelPath}`, { headers, signal: t.signal });
+  } catch (err) {
+    return { ok: false, result: engineThrewDeclaredResult(err) };
+  } finally {
+    t.clear();
+  }
+  const body = asRecord(await res.json().catch(() => ({})));
+  if (!res.ok) {
+    return {
+      ok: false,
+      result: declaredResult({
+        status: "error",
+        isError: true,
+        reason: typeof body.error === "string" ? body.error : "upstream_error",
+        message: typeof body.message === "string" ? body.message : `engine ${res.status}`,
+      }),
+    };
+  }
+  const state = typeof body.state === "string" ? (body.state as JobState) : "never-requested";
+  return {
+    ok: true,
+    status: {
+      state,
+      jobRef: typeof body.jobRef === "string" ? body.jobRef : undefined,
+      pollAfterMs: typeof body.pollAfterMs === "number" ? body.pollAfterMs : undefined,
+      errorClass: typeof body.errorClass === "string" ? body.errorClass : undefined,
+      errorMessage: typeof body.errorMessage === "string" ? body.errorMessage : undefined,
+      result: typeof body.result === "object" && body.result ? asRecord(body.result) : undefined,
+    },
+  };
+}
+
+async function downloadReady(
+  parcelNodeId: string,
+  parcelPath: string,
+  headers: Record<string, string>,
+  config: EngineApiConfig,
+  fetchImpl: typeof fetch,
+  result: Record<string, unknown> | undefined,
+): Promise<ToolResult> {
+  let downloadRes: Response;
+  const t = timeoutSignal(DOWNLOAD_TIMEOUT_MS);
+  try {
+    downloadRes = await fetchImpl(`${config.baseUrl}${parcelPath}/download`, {
+      headers,
+      signal: t.signal,
+    });
+  } catch (err) {
+    return engineThrewDeclaredResult(err);
+  } finally {
+    t.clear();
+  }
+
+  if (downloadRes.status === 404 || downloadRes.status === 410 || downloadRes.status === 422) {
+    const body = asRecord(await downloadRes.json().catch(() => ({})));
+    return declaredResult({
+      status: "error",
+      isError: true,
+      reason:
+        typeof body.error === "string"
+          ? body.error
+          : downloadRes.status === 410
+            ? "artifact_evicted"
+            : "artifact_unavailable",
+      message: typeof body.message === "string" ? body.message : undefined,
+    });
+  }
+  if (!downloadRes.ok) {
+    const text = await downloadRes.text().catch(() => "");
+    return declaredResult({
+      status: "error",
+      isError: true,
+      reason: "upstream_error",
+      message: text || `engine ${downloadRes.status}`,
+    });
+  }
+
+  const arrayBuffer = await downloadRes.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          status: "ok",
+          tool: FEASIBILITY_TOOL,
+          kind: FEASIBILITY_KIND,
+          parcelNodeId,
+          format: "pdf-feasibility",
+          download: {
+            format: "pdf-feasibility",
+            contentType: "application/pdf",
+            base64,
+            byteCount: arrayBuffer.byteLength,
+          },
+          pageCount: result?.pageCount,
+          feasibilityPageCount: result?.feasibilityPageCount,
+          sitePlanAppended: result?.sitePlanAppended,
+          sitePlanUnavailableReason: result?.sitePlanUnavailableReason,
+          sectionCount: result?.sectionCount,
+          openItemCount: result?.openItemCount,
+          narrativeIsDeterministicSkeleton: result?.narrativeIsDeterministicSkeleton,
+        }),
+      },
+    ],
+    isError: false,
+  };
 }
 
 export async function executeFeasibilityExport(
@@ -95,9 +310,18 @@ export async function executeFeasibilityExport(
     ...buildEngineGateHeaders({ packageId: FEASIBILITY_PACKAGE_ID }),
   };
 
-  let refreshRes: Response;
-  {
-    const t = timeoutSignal(REFRESH_TIMEOUT_MS);
+  // 1) Check status FIRST — a job already `ready` from a prior call (this
+  // is exactly the "second call" the customer-facing predicate depends on)
+  // must be served from that job, never recomposed.
+  const first = await readStatus(parcelPath, headers, config, fetchImpl);
+  if (!first.ok) return first.result;
+  let current = first.status;
+
+  // 2) Nothing in flight and nothing to serve -> start a job. A `failed`
+  // job is also re-tried here rather than reported stale forever.
+  if (current.state === "never-requested" || current.state === "failed") {
+    let refreshRes: Response;
+    const t = timeoutSignal(ACK_TIMEOUT_MS);
     try {
       refreshRes = await fetchImpl(`${config.baseUrl}${parcelPath}/refresh`, {
         method: "POST",
@@ -106,136 +330,76 @@ export async function executeFeasibilityExport(
         signal: t.signal,
       });
     } catch (err) {
-      return engineThrewResult(err);
+      return engineThrewDeclaredResult(err);
     } finally {
       t.clear();
     }
-  }
-
-  if (refreshRes.status === 422) {
-    // The engine's own honest refresh failure (e.g. no resolvable site
-    // plan for this parcel) — pass the real reason through verbatim,
-    // mirroring hauska-map's own handling of this exact status. Never a
-    // fabricated report, never mapped onto a generic error.
-    const body = await refreshRes.text();
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            body ||
-            JSON.stringify({
-              status: "error",
-              tool: "export_instrument",
-              kind: "feasibility",
-              reason: "feasibility_export_failed",
-              message: "Feasibility study could not be produced for this parcel.",
-            }),
-        },
-      ],
-      isError: true,
-    };
-  }
-  const refreshBody = await refreshRes.text();
-  if (!refreshRes.ok) {
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            refreshBody ||
-            JSON.stringify({ status: "error", upstreamStatus: refreshRes.status }),
-        },
-      ],
-      isError: true,
-    };
-  }
-  const refreshed = asRecord((() => {
-    try {
-      return JSON.parse(refreshBody);
-    } catch {
-      return {};
-    }
-  })());
-
-  let downloadRes: Response;
-  {
-    const t = timeoutSignal(DOWNLOAD_TIMEOUT_MS);
-    try {
-      downloadRes = await fetchImpl(`${config.baseUrl}${parcelPath}/download`, {
-        headers,
-        signal: t.signal,
+    if (refreshRes.status === 422) {
+      // The engine's own honest, SYNCHRONOUS refusal (e.g. no resolvable
+      // site plan for this parcel at all) — never mapped onto a generic
+      // error, never a fabricated report.
+      const body = asRecord(await refreshRes.json().catch(() => ({})));
+      return declaredResult({
+        status: "error",
+        isError: true,
+        reason: "feasibility_export_failed",
+        message:
+          typeof body.message === "string"
+            ? body.message
+            : "Feasibility study could not be produced for this parcel.",
       });
-    } catch (err) {
-      return engineThrewResult(err);
-    } finally {
-      t.clear();
     }
-  }
-
-  if (downloadRes.status === 404 || downloadRes.status === 410) {
-    // Pinned contract (per hauska-map's own handler): 404 artifact_
-    // unavailable, 410 artifact_evicted — honest cache-miss states, never
-    // a fabricated download.
-    const body = await downloadRes.text();
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            body ||
-            JSON.stringify({
-              status: "error",
-              reason:
-                downloadRes.status === 404 ? "artifact_unavailable" : "artifact_evicted",
-            }),
-        },
-      ],
-      isError: true,
-    };
-  }
-  if (!downloadRes.ok) {
-    const text = await downloadRes.text().catch(() => "");
-    return {
-      content: [
-        {
-          type: "text",
-          text: text || JSON.stringify({ status: "error", upstreamStatus: downloadRes.status }),
-        },
-      ],
-      isError: true,
+    if (!refreshRes.ok) {
+      const text = await refreshRes.text().catch(() => "");
+      return declaredResult({
+        status: "error",
+        isError: true,
+        reason: "upstream_error",
+        message: text || `engine ${refreshRes.status}`,
+      });
+    }
+    const body = asRecord(await refreshRes.json().catch(() => ({})));
+    current = {
+      state: body.state === "queued" || body.state === "running" ? (body.state as JobState) : "queued",
+      jobRef: typeof body.jobRef === "string" ? body.jobRef : undefined,
+      pollAfterMs: typeof body.pollAfterMs === "number" ? body.pollAfterMs : undefined,
     };
   }
 
-  const arrayBuffer = await downloadRes.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  // 3) Poll inside this call's own budget.
+  const deadline = Date.now() + (deps.pollBudgetMs ?? FEASIBILITY_POLL_BUDGET_MS);
+  while (current.state !== "ready" && current.state !== "failed" && Date.now() < deadline) {
+    await sleep(clampPollInterval(current.pollAfterMs));
+    const next = await readStatus(parcelPath, headers, config, fetchImpl);
+    if (!next.ok) return next.result;
+    current = next.status;
+  }
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          status: "ok",
-          tool: "export_instrument",
-          kind: "feasibility",
-          parcelNodeId: args.parcelNodeId,
-          format: "pdf-feasibility",
-          download: {
-            format: "pdf-feasibility",
-            contentType: "application/pdf",
-            base64,
-            byteCount: arrayBuffer.byteLength,
-          },
-          pageCount: refreshed.pageCount,
-          feasibilityPageCount: refreshed.feasibilityPageCount,
-          sitePlanAppended: refreshed.sitePlanAppended,
-          sitePlanUnavailableReason: refreshed.sitePlanUnavailableReason,
-          sectionCount: refreshed.sectionCount,
-          openItemCount: refreshed.openItemCount,
-          narrativeIsDeterministicSkeleton: refreshed.narrativeIsDeterministicSkeleton,
-        }),
-      },
-    ],
+  if (current.state === "ready") {
+    return downloadReady(args.parcelNodeId, parcelPath, headers, config, fetchImpl, current.result);
+  }
+  if (current.state === "failed") {
+    return declaredResult({
+      status: "error",
+      isError: true,
+      reason: current.errorClass ?? "compose_failed",
+      message: current.errorMessage ?? "Feasibility study could not be produced for this parcel.",
+    });
+  }
+
+  // 4) Still queued/running at the budget's end — a DECLARED in-progress
+  // answer (isError: false: the call itself succeeded at learning the
+  // state), never a bare abort. Call again with the same parcelNodeId to
+  // pick it up once ready.
+  return declaredResult({
+    status: "in_progress",
     isError: false,
-  };
+    extra: {
+      state: current.state,
+      jobRef: current.jobRef,
+      pollAfterMs: current.pollAfterMs ?? POLL_MIN_INTERVAL_MS,
+      message:
+        "Feasibility Study is still being generated. Call export_instrument again with the same parcelNodeId to check.",
+    },
+  });
 }
