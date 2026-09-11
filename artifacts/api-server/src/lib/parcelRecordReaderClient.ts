@@ -65,17 +65,37 @@ export function resetParcelRecordFetcherForTests(): void {
   cache.clear();
 }
 
+/**
+ * LIVE FINDING (P-152, 2026-09-11): cortex's own `.github/workflows/
+ * cloud-run-deploy.yml` mounts the retrieval-api URL/key as
+ * `BRIEF_RETRIEVAL_API_URL`/`BRIEF_RETRIEVAL_API_KEY` -- confirmed via
+ * `gcloud run services describe cortex-api` against the actually-serving
+ * revision. Neither `HAUSKA_RETRIEVAL_API_URL`/`RETRIEVAL_API_URL` nor
+ * `HAUSKA_RETRIEVAL_API_KEY`/`RETRIEVAL_API_KEY` (the names
+ * `fetchPropertyAtomChain.ts` checks, and this module originally copied)
+ * are ever set in production. Caught by diffing this lane's own canary
+ * deploy against a pre-capture baseline before any traffic shift: every
+ * gate-verdict lookup silently failed, cascading through resolveAllowlist's
+ * fail-closed default into a mass "legacy"/"not-cut-over" regression on
+ * the live facets response. This means fetchPropertyAtomChain.ts's own
+ * existing calls have likely NEVER reached the retrieval service in
+ * production either (same dead code path, same missing names) -- flagged
+ * for the operator/overseer, out of this dispatch's scope to fix there.
+ */
 function resolveBaseUrl(): string {
   return (
     process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
     process.env.RETRIEVAL_API_URL?.trim() ||
+    process.env.BRIEF_RETRIEVAL_API_URL?.trim() ||
     DEFAULT_RETRIEVAL
   ).replace(/\/$/, "");
 }
 
 function resolveApiKey(): string | undefined {
   return (
-    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() || process.env.RETRIEVAL_API_KEY?.trim()
+    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
+    process.env.RETRIEVAL_API_KEY?.trim() ||
+    process.env.BRIEF_RETRIEVAL_API_KEY?.trim()
   );
 }
 
