@@ -198,6 +198,44 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * characterising) and adding them would slate a rail with no genuine
  * passing verdict, the opposite failure mode from the one this card fixes.
  *
+ * setbackRules, maxHeightFt, maxLotCoveragePct, maxFootprintSqFt, FIVE
+ * counties -- Bastrop/Caldwell/McLennan/Travis/Williamson, Hays EXCLUDED
+ * (OPS-21 S6, P-150, 2026-09-11): the four rails S5/P-148 built wrappers for
+ * but deliberately did not slate, because at that time all four failed the
+ * gate everywhere -- blocked on the same 3,376-parcel (5-county)
+ * zoningDistrict residual as setbackFrontFt itself (see below). Z2/P-149
+ * closed that residual (taught both writers to propagate zoningDistrict
+ * not-applicable to their eight dependent rails); this card re-verified live
+ * immediately before writing (2026-09-11, FACTORY host
+ * ep-round-base-au0jofwp/neondb): all 20 of these (county,rail) pairs read
+ * verdict=pass, unaccounted_count=0, no drift between the CP1 read and the
+ * write-time read. Hays excluded per this dispatch's own standing fact
+ * (P-145 has not landed) -- confirmed live at verdict=excluded for all 8
+ * dependent rails, not merely assumed. Each of these four rails has NO
+ * legacy serve path (confirmed by S5's repo-wide grep before it built the
+ * wrappers) -- nothing to retire, matching parcelAreaSqFt's own contract.
+ * setbackRules is the one companion-row rail in this group (S5's own live
+ * finding: its cell's value field is null on all present rows; the real
+ * content lives in parcel_record_companion_row) -- its wrapper already
+ * handles that; this card only adds the slate entry.
+ *
+ * NOT ADDED as independent entries, deliberately: setbackSideFt,
+ * setbackRearFt, setbackCornerFt for these same five counties. Unlike the
+ * four rails above, these three have NO resolveAllowlist call site of their
+ * own anywhere in this repo (grep-confirmed) -- setbacksFactServeCutover.ts
+ * gates the whole four-key group on setbackFrontFt's OWN entry alone (see
+ * that rail's own comment below; this is PARCEL-B-SLATE3's original
+ * representative-key design, not a gap this card introduces). A slate entry
+ * literally spelled "<county>:setbackSideFt" would never be read by any
+ * code -- adding one would be the textually-compliant-but-inert defect this
+ * whole program exists to close. Because setbackFrontFt was already slated
+ * for these five counties (below) and its gate just flipped to pass, the
+ * three sibling values are, as of Z2's merge, already being served live
+ * from parcel_record for every parcel in this group -- live-probed before
+ * this card made any edit (48491:R638791 returned frontFt/sideFt/rearFt/
+ * cornerFt = 20/5/10/15, all parcel_record-sourced) and re-probed after
+ * deploy, per this card's own close.
+ *
  * zoningDistrict + setbackFrontFt, ALL SIX counties including Caldwell
  * (F-01, PARCEL-B-SLATE3, OPS-16 A-096/A-097/A-098, 2026-09-04): the
  * specific defect this card fixes. Unlike every rail above, zoning
@@ -346,6 +384,26 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:parcelAreaSqFt",
   "48453:parcelAreaSqFt",
   "48491:parcelAreaSqFt",
+  "48021:setbackRules",
+  "48055:setbackRules",
+  "48309:setbackRules",
+  "48453:setbackRules",
+  "48491:setbackRules",
+  "48021:maxHeightFt",
+  "48055:maxHeightFt",
+  "48309:maxHeightFt",
+  "48453:maxHeightFt",
+  "48491:maxHeightFt",
+  "48021:maxLotCoveragePct",
+  "48055:maxLotCoveragePct",
+  "48309:maxLotCoveragePct",
+  "48453:maxLotCoveragePct",
+  "48491:maxLotCoveragePct",
+  "48021:maxFootprintSqFt",
+  "48055:maxFootprintSqFt",
+  "48309:maxFootprintSqFt",
+  "48453:maxFootprintSqFt",
+  "48491:maxFootprintSqFt",
 ]);
 
 /**

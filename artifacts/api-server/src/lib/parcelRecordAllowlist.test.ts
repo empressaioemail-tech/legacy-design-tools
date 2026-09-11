@@ -57,8 +57,8 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     }
   });
 
-  it("the slate has exactly 102 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt + 5 parcelAreaSqFt (OPS-21 S5, P-148)", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(102);
+  it("the slate has exactly 122 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt + 5 parcelAreaSqFt (OPS-21 S5, P-148) + 20 (5 in-scope counties x setbackRules/maxHeightFt/maxLotCoveragePct/maxFootprintSqFt, OPS-21 S6, P-150)", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(122);
   });
 
   it("OPS-16 A-096/A-097/A-098: all six counties, INCLUDING Caldwell, are slated for zoningDistrict and setbackFrontFt -- the representative keys for the zoning and setbacks not-applicable fix, no per-county exclusion documented in rail-keys.js/instantiate.js", () => {
@@ -79,12 +79,14 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     expect(PARCEL_RECORD_SLATE.has("48209:parcelAreaSqFt")).toBe(false);
   });
 
-  it("the four other OPS-21 S5 wrapper-covered rails (setbackRules, maxHeightFt, maxLotCoveragePct, maxFootprintSqFt) are NOT slated for any county -- they fail the gate on every in-scope county, blocked on the zoningDistrict residual", () => {
-    const neverSlatedRails = ["setbackRules", "maxHeightFt", "maxLotCoveragePct", "maxFootprintSqFt"];
-    for (const county of ALL_SIX_COUNTIES) {
-      for (const rail of neverSlatedRails) {
-        expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(false);
+  it("OPS-21 S6 (P-150): the five in-scope non-Hays counties are slated for the four other OPS-21 S5 wrapper-covered rails (setbackRules, maxHeightFt, maxLotCoveragePct, maxFootprintSqFt) -- Z2/P-149 closed the zoningDistrict residual that held these at refuse everywhere; Hays stays unslated, not an oversight (P-145 has not landed)", () => {
+    const nowSlatedRails = ["setbackRules", "maxHeightFt", "maxLotCoveragePct", "maxFootprintSqFt"];
+    const nonHaysCounties = ["48021", "48055", "48309", "48453", "48491"];
+    for (const rail of nowSlatedRails) {
+      for (const county of nonHaysCounties) {
+        expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(true);
       }
+      expect(PARCEL_RECORD_SLATE.has(`48209:${rail}`)).toBe(false);
     }
   });
 
@@ -165,12 +167,13 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the 102 real slated entries", () => {
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the 122 real slated entries", () => {
     const rails = [
       "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
       "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
       "utilityService", "overlayDistricts", "agValuation", "schoolDistrict",
       "maxImperviousCoverPct", "zoningDistrict", "setbackFrontFt", "parcelAreaSqFt",
+      "setbackRules", "maxHeightFt", "maxLotCoveragePct", "maxFootprintSqFt",
     ];
     const counties = ["48021", "48055", "48209", "48309", "48453", "48491"];
     let uncheckedSlatedPairs = 0;
@@ -185,13 +188,13 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
     }
-    // Falsifier's own falsifier: this loop must actually skip the 102 real
+    // Falsifier's own falsifier: this loop must actually skip the 122 real
     // slated pairs (every one PARCEL_RECORD_SLATE holds, since this rail
     // list now covers all of them), not silently cover zero cases because
     // the skip branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE
     // ever changes without this test being updated.
     expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
-    expect(uncheckedSlatedPairs).toBe(102);
+    expect(uncheckedSlatedPairs).toBe(122);
   });
 
   it("FALSIFIER: the five slated parcelAreaSqFt pairs (OPS-21 S5, P-148) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -203,6 +206,18 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     }
     // Hays is deliberately unslated for this rail -- resolves to legacy even on a fabricated pass.
     expect(resolveAllowlistState("48209", "parcelAreaSqFt", { verdict: "pass" })).toBe("legacy");
+  });
+
+  it("FALSIFIER: the 20 newly-slated (OPS-21 S6, P-150) setbackRules/maxHeightFt/maxLotCoveragePct/maxFootprintSqFt pairs resolve to record on a real pass verdict, refused on refuse/excluded, legacy on no verdict -- Hays stays legacy even on a fabricated pass", () => {
+    for (const rail of ["setbackRules", "maxHeightFt", "maxLotCoveragePct", "maxFootprintSqFt"]) {
+      for (const county of ["48021", "48055", "48309", "48453", "48491"]) {
+        expect(resolveAllowlistState(county, rail, { verdict: "pass" })).toBe("record");
+        expect(resolveAllowlistState(county, rail, { verdict: "refuse" })).toBe("refused");
+        expect(resolveAllowlistState(county, rail, { verdict: "excluded" })).toBe("refused");
+        expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
+      }
+      expect(resolveAllowlistState("48209", rail, { verdict: "pass" })).toBe("legacy");
+    }
   });
 
   it("FALSIFIER: the five slated wells pairs resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
