@@ -96,6 +96,55 @@ export const brokeragePlaceBuildableEnvelopeRouter: IRouter = Router();
 const PLACE_KEY_PARAM = z.string().min(1);
 export { POST_BODY } from "../lib/buildableEnvelope/envelopePostBody";
 
+/**
+ * P-151: bounds the point-resolution pin-query (`queryGisLayerGeoJson`) in
+ * the explicit-coordinates branch of `handleBuildableEnvelope` so a slow or
+ * stuck query surfaces as a DECLARED 503 refusal comfortably inside the
+ * ~10s window that was otherwise surfacing as a bare platform 504 (observed
+ * 2026-09-11, Travis County, `POST .../buildable-envelope` with a bare
+ * `{lat,lng}` body). Named/exported per this file family's existing
+ * timeout-constant convention (see `RADIUS_SEARCH_*` in `txgioRadiusSearch.ts`).
+ *
+ * IMPORTANT: this is a client-side race, NOT query cancellation. On timeout
+ * the underlying DB query is left running server-side; this constant only
+ * bounds how long THIS request waits on it. It relieves the user-facing
+ * bare-504 symptom, not any underlying DB/pool contention.
+ */
+export const POINT_RESOLUTION_TIMEOUT_MS = 8_000;
+
+/**
+ * Marker error thrown by `withPointResolutionTimeout` when the wrapped
+ * promise does not settle within `POINT_RESOLUTION_TIMEOUT_MS`. Distinguished
+ * from a genuine `AdapterRunError` in the catch block below so a timeout and
+ * a real provider failure produce different, honest responses.
+ */
+class PointResolutionTimeoutError extends Error {
+  constructor() {
+    super("buildable-envelope: point resolution exceeded time budget");
+    this.name = "PointResolutionTimeoutError";
+  }
+}
+
+/**
+ * Races `promise` against a `ms` timer. Does NOT cancel `promise` on
+ * timeout -- see the `POINT_RESOLUTION_TIMEOUT_MS` doc comment above.
+ */
+function withPointResolutionTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new PointResolutionTimeoutError()), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 function reqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
 }
@@ -766,12 +815,58 @@ async function handleBuildableEnvelope(
       return;
     }
     // (b) point pin-query at the (rooftop-grade or explicit) point.
-    parcelGeo = await queryGisLayerGeoJson({
-      layer: "parcels",
-      latitude: ctx.lat,
-      longitude: ctx.lng,
-    });
+    //
+    // P-151: race the query against POINT_RESOLUTION_TIMEOUT_MS ONLY on the
+    // explicit-coordinates rung (pointConfidence === "coordinates" -- caller
+    // supplied lat/lng directly, no situs/rooftop upgrade involved). This is
+    // exactly the bare-{lat,lng}-no-address shape that produced the
+    // 2026-09-11 bare 504. The address-driven rungs that also reach this
+    // call ("geocode-high" / "authoritative") are left unwrapped -- they
+    // already work and are out of scope for this mission.
+    parcelGeo =
+      ctx.pointConfidence === "coordinates"
+        ? await withPointResolutionTimeout(
+            queryGisLayerGeoJson({
+              layer: "parcels",
+              latitude: ctx.lat,
+              longitude: ctx.lng,
+            }),
+            POINT_RESOLUTION_TIMEOUT_MS,
+          )
+        : await queryGisLayerGeoJson({
+            layer: "parcels",
+            latitude: ctx.lat,
+            longitude: ctx.lng,
+          });
   } catch (err) {
+    if (err instanceof PointResolutionTimeoutError) {
+      // DECLARED refusal, not a provider failure: the query may still be
+      // running server-side (see POINT_RESOLUTION_TIMEOUT_MS doc comment) --
+      // this only bounds how long the CALLER waits on it.
+      log.warn(
+        {
+          placeKey: ctx.placeKey,
+          pointConfidence: ctx.pointConfidence,
+          timeoutMs: POINT_RESOLUTION_TIMEOUT_MS,
+        },
+        "buildable-envelope: point resolution exceeded time budget; declaring a bounded refusal (P-151)",
+      );
+      res.status(503).json(
+        withPlace(
+          {
+            status: "resolution-timeout",
+            reason:
+              "Could not resolve a parcel for this point within the time budget.",
+            parcel_node_id: null,
+            errorClass: "resolution_timeout",
+            message:
+              "Could not resolve a parcel for this point within the time budget.",
+          },
+          ctx,
+        ),
+      );
+      return;
+    }
     // ERROR CLASSIFICATION (F4d). The store/provider readers throw a
     // named `AdapterRunError`: `no-coverage` means the query SUCCEEDED but
     // no parcel matched (an honest "no parcel here" â€” 404), whereas
