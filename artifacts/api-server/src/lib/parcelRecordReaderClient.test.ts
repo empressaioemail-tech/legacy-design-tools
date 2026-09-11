@@ -110,6 +110,35 @@ describe("parcelRecordReaderClient", () => {
     setGateVerdictFetcherForTests(async () => null);
     expect(await fetchGateVerdict("48021", "wells")).toBeNull();
   });
+
+  it("LIVE FINDING regression guard: falls back to BRIEF_RETRIEVAL_API_KEY/URL when neither HAUSKA_RETRIEVAL_API_KEY nor RETRIEVAL_API_KEY is set", async () => {
+    // cortex's own cloud-run-deploy.yml (before this lane's fix) mounted
+    // ONLY BRIEF_RETRIEVAL_API_KEY/BRIEF_RETRIEVAL_API_URL -- neither name
+    // this module (or fetchPropertyAtomChain.ts) originally checked. Caught
+    // by diffing a live canary deploy against a pre-capture baseline before
+    // any traffic shift: every request silently found no key and every
+    // gate-verdict lookup fell back to "no usable verdict". This test
+    // proves the fallback exists; it does not (and cannot, without hitting
+    // the network) prove the deployed BRIEF_RETRIEVAL_API_KEY value itself
+    // is correct -- see the CLOSE artifact for that live verification.
+    vi.stubEnv("BRIEF_RETRIEVAL_API_KEY", "brief-key");
+    vi.stubEnv("BRIEF_RETRIEVAL_API_URL", "https://brief.example.com");
+    let capturedUrl = "";
+    let capturedAuth = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: { headers: Record<string, string> }) => {
+        capturedUrl = String(url);
+        capturedAuth = init.headers.Authorization;
+        return new Response(JSON.stringify(FIXTURE_RECORD), { status: 200 });
+      }),
+    );
+    await fetchParcelRecord("48021:34049");
+    expect(capturedUrl).toBe("https://brief.example.com/property-nodes/48021%3A34049/record");
+    expect(capturedAuth).toBe("Bearer brief-key");
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 });
 
 describe("parcelRecordQueryableFromEnv adapter (P-152 repointed)", () => {
