@@ -54,9 +54,17 @@ steps:
         esac
         echo "pinning ldt-cad-ingest to $$DIGEST"
 
+        # memory=16Gi/cpu=4 (not 2Gi/1): Cloud Run Jobs' default writable
+        # filesystem is memory-backed, and a real PACS county's extracted
+        # working set can run several GB (TCAD's 2026 certified export:
+        # PROP.TXT 4.9GB + IMP_DET.TXT 2.1GB + the 557MB zip itself, ~7.4GB
+        # peak). P-157 resumption-1/2 hand-bumped this via `gcloud run jobs
+        # update` for the Travis load and it ran clean; folded into the
+        # declared spec here so the next large-export county does not
+        # depend on a manual bump (P-157 leave_behind, for P-169's owner).
         gcloud run jobs deploy ldt-cad-ingest \
           --project=hauska-prod-497015 --region=${_REGION} --image="$$DIGEST" \
-          --task-timeout=21600 --max-retries=0 --memory=2Gi --cpu=1 \
+          --task-timeout=21600 --max-retries=0 --memory=16Gi --cpu=4 \
           --set-secrets=STAGING_NEONDB_URL=STAGING_NEONDB_URL:latest,PRODUCTION_NEONDB_URL=PRODUCTION_NEONDB_URL:latest \
           --set-env-vars=IMAGE_DIGEST=$$DIGEST,CLOUD_RUN_REGION=${_REGION}
 
