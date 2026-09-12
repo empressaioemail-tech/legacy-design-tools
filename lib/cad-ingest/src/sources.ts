@@ -142,15 +142,36 @@ export interface PacsExportDeclaration {
   /** Improvement-detail entry name, or absent if this county's declared
    *  export has none. */
   improvementDetailEntry?: string;
+  /**
+   * Improvement-detail segment `typeCd` values (see pacs/layout.ts
+   * IMPROVEMENT_DETAIL.typeCd) that count as living area for THIS
+   * county's export — exact match, case-insensitive (A-133,
+   * `_decisions/2026-09-12` resumption 2: "the parser learns TCAD's
+   * segment vocabulary"). This is a per-county SOURCE VOCABULARY, not a
+   * universal rule: the generic PACS default (no declaration, or this
+   * field absent) is "typeDesc starts with MAIN AREA" — Bastrop's and
+   * Caldwell's live exports both use that shape and are unaffected.
+   * TCAD's live export instead types every living-area segment `1ST` /
+   * `2ND` / `3RD` (typeDesc "1st Floor" / "2nd Floor" / "3rd Floor");
+   * it carries no "MAIN AREA" segment at all (verified: 0 occurrences
+   * of the literal string across the full 2026 certified IMP_DET.TXT).
+   * A segment matches if EITHER its typeCd is in this list OR its
+   * typeDesc starts with "MAIN AREA" — the MAIN AREA check always
+   * applies, as a fallback net, on top of any per-county declaration.
+   */
+  livingAreaSegmentTypeCds?: string[];
 }
 
 export const PACS_EXPORT_DECLARATIONS: Record<string, PacsExportDeclaration> = {
   // Travis / TCAD — 2026 Certified Appraisal Export, Supp 0 (07182026):
   // entries are PROP.TXT / IMP_DET.TXT, not the generic
-  // APPRAISAL_INFO.TXT / APPRAISAL_IMPROVEMENT_DETAIL.TXT shape.
+  // APPRAISAL_INFO.TXT / APPRAISAL_IMPROVEMENT_DETAIL.TXT shape, and its
+  // living-area segments are typeCd 1ST/2ND/3RD ("1st/2nd/3rd Floor"),
+  // not "MAIN AREA" (P-157 resumption 2 / A-133).
   "48453": {
     infoEntry: "PROP.TXT",
     improvementDetailEntry: "IMP_DET.TXT",
+    livingAreaSegmentTypeCds: ["1ST", "2ND", "3RD"],
   },
 };
 
@@ -158,6 +179,14 @@ export function resolvePacsExportDeclaration(
   fips: string,
 ): PacsExportDeclaration | undefined {
   return PACS_EXPORT_DECLARATIONS[fips.trim()];
+}
+
+/** This county's declared living-area typeCd vocabulary, or undefined for
+ *  the generic "MAIN AREA" default (see PacsExportDeclaration doc above). */
+export function resolveLivingAreaSegmentTypeCds(
+  fips: string,
+): string[] | undefined {
+  return resolvePacsExportDeclaration(fips)?.livingAreaSegmentTypeCds;
 }
 
 export class PacsEntryNotFoundError extends Error {

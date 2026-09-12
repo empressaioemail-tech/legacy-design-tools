@@ -74,11 +74,12 @@ describe("CAD bulk-source registry", () => {
 });
 
 describe("PACS export entry declaration (P-169 / A-132)", () => {
-  it("declares TCAD (48453) as PROP.TXT / IMP_DET.TXT", () => {
+  it("declares TCAD (48453) as PROP.TXT / IMP_DET.TXT, living area typeCd 1ST/2ND/3RD", () => {
     const declaration = resolvePacsExportDeclaration("48453");
     expect(declaration).toEqual({
       infoEntry: "PROP.TXT",
       improvementDetailEntry: "IMP_DET.TXT",
+      livingAreaSegmentTypeCds: ["1ST", "2ND", "3RD"],
     });
   });
 

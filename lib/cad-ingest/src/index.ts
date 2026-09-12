@@ -21,7 +21,9 @@ export {
   parsePacsExport,
   parsePacsInfoLine,
   readImprovementRollups,
+  ImprovementVocabularyMismatchError,
 } from "./pacs/parser";
+export type { ImprovementRollup, ImprovementSegmentTypeSample } from "./pacs/parser";
 export {
   APPRAISAL_INFO,
   APPRAISAL_INFO_MIN_LEN,
