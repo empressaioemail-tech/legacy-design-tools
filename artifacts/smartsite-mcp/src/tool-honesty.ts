@@ -1,5 +1,5 @@
 import type { EntitlementGateRefusal } from "./entitlement.js";
-import { envelopeHuman } from "./mcp-app.js";
+import { envelopeBasisHuman, envelopeHuman } from "./mcp-app.js";
 import {
   DERIVED_FIGURES_POLICY,
   VOCABULARY,
@@ -434,6 +434,14 @@ function presentCitationDishonest(rail: Record<string, unknown>): boolean {
  * `finding` before treating a value as a result can mistake one for the
  * other. Scoped to "unknown" only, per the v3 build plan: every other state
  * already prints an unambiguous state word next to its label.
+ *
+ * P-153. `basisDisplayText` is `reasonDisplayText`'s exact sibling for a
+ * `state: "present"` overlay's `basis` (read through `envelopeBasisHuman`,
+ * the panel's own function, same pairing as `reason`/envelopeHuman above).
+ * A present envelope overlay carries `basis`, never `reason` — see
+ * parcelDrawStub.ts's `envelopeOverlay` — so the two display-text keys never
+ * collide on one overlay in practice, but the attachment is independent
+ * either way (each keyed off its own raw field, additive only).
  */
 function honestOverlay(overlay: Record<string, unknown>): Record<string, unknown> {
   const reason = typeof overlay.reason === "string" ? overlay.reason : undefined;
@@ -441,10 +449,15 @@ function honestOverlay(overlay: Record<string, unknown>): Record<string, unknown
     reason !== undefined
       ? { ...overlay, reasonDisplayText: envelopeHuman(reason) ?? reason }
       : overlay;
-  if (withReason.state === "unknown") {
-    return { ...withReason, finding: null };
+  const basis = typeof overlay.basis === "string" ? overlay.basis : undefined;
+  const withBasis: Record<string, unknown> =
+    basis !== undefined
+      ? { ...withReason, basisDisplayText: envelopeBasisHuman(basis) ?? basis }
+      : withReason;
+  if (withBasis.state === "unknown") {
+    return { ...withBasis, finding: null };
   }
-  return withReason;
+  return withBasis;
 }
 
 /**

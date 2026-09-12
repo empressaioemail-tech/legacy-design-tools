@@ -85,7 +85,12 @@ import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead"
 import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
 import { attachCadRollOverlaysToFacets } from "../lib/structuralFactToFacetsWire";
 import { parseParcelNodeId } from "../lib/parcelNodeId";
-import { tryAssembleParcelDrawFromReads } from "../lib/parcelDrawFromReads";
+import {
+  tryAssembleParcelDrawFromReads,
+  atomPathPending,
+} from "../lib/parcelDrawFromReads";
+import { districtCodeFromZoningFacet } from "../lib/parcelDrawStub";
+import { tryComposeEnvelopeModelForDraw } from "../lib/buildableEnvelope/parcelDrawEnvelopeModel";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import { buildR1Brief } from "../lib/r1BriefCompose";
@@ -335,11 +340,30 @@ async function assembleNodeBriefBody(
       yearBuilt: null,
     },
   );
+  // P-153: the polygon-only reversal of Ruling B. When the baked envelope
+  // is atom-pending (the same "atom_path_pending" test the refused overlay
+  // itself already uses) AND a baked zoning code is resolvable, attempt the
+  // SAME setback-geometry derivation the map/export route runs (real
+  // extra I/O -- see parcelDrawEnvelopeModel.ts's own doc comment). Any
+  // refusal or failure resolves to `null`, and `tryAssembleParcelDrawFromReads`
+  // below keeps today's hardcoded refused envelope overlay unchanged.
+  const bakedZoningCode = districtCodeFromZoningFacet(
+    (facetsWithCadRollOverlay as Record<string, unknown>).zoning,
+  );
+  const envelopeModelled =
+    atomPathPending(snapshot.envelopeBriefRefusal) && bakedZoningCode
+      ? await tryComposeEnvelopeModelForDraw({
+          parcelNodeId,
+          zoningCode: bakedZoningCode,
+          queryPoint: snapshot.queryPoint ?? null,
+        })
+      : null;
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
     facets: facetsWithCadRollOverlay,
     bakedAt,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
+    envelopeModelled,
     queryPoint: snapshot.queryPoint ?? null,
     boundary: boundaryFact,
     flood: floodHazardFact,

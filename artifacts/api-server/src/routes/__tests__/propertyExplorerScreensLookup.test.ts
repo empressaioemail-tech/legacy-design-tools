@@ -31,6 +31,22 @@ vi.mock("@workspace/db", () => ({
   peWorkbenchState: {},
   peScreens: {},
   peScreenRows: {},
+  // P-153: propertyExplorer.ts's draw-block orchestration now transitively
+  // reaches the real parcel-fetch/setback-jurisdiction machinery
+  // (brokerageGisLayers -> brokerageTxParcels/brokerageGisCache ->
+  // txgioParcelStore; @workspace/codes -> orchestrator.ts) at MODULE LOAD,
+  // even though none of it is ever queried by this test (the atom-pending
+  // draw path this test never exercises is the only caller). Stub tables
+  // only, never real Drizzle handles.
+  txgioParcel: {},
+  cadProperty: {},
+  cotalitySpatialTileCache: {},
+  cotalityPropertyAttrCache: {},
+  cotalityGeocodeCache: {},
+  txParcelTileCache: {},
+  codeAtomSources: {},
+  codeAtoms: {},
+  codeAtomFetchQueue: {},
 }));
 
 /**
