@@ -1589,6 +1589,9 @@ importers:
 
   lib/cad-ingest:
     dependencies:
+      '@google-cloud/storage':
+        specifier: ^7.19.0
+        version: 7.19.0
       '@workspace/adapters':
         specifier: workspace:*
         version: link:../adapters

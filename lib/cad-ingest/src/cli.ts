@@ -5,14 +5,15 @@
  * Usage:
  *   pnpm --filter @workspace/cad-ingest cad-ingest -- \
  *     --county=48055 \
- *     [--file=<local file | directory | zip | https URL>] \
+ *     [--file=<local file | directory | zip | https URL | gs://bucket/obj>] \
  *                                  # OMIT for open-fetch CADs (e.g. 48491
  *                                  #   WCAD, 48439 TAD, 48113 DCAD): the
  *                                  #   per-CAD bulk source is resolved and
  *                                  #   fetched automatically.
  *                                  #   REQUIRED for manual-download CADs
  *                                  #   (e.g. 48209 Hays — WAF-gated ZIP)
- *                                  #   and PACS counties.
+ *                                  #   and PACS counties. gs:// is the
+ *                                  #   Cloud Run job's own input path.
  *     [--tax-year=2026]            # REQUIRED for Orion counties (48209/48491)
  *     [--vintage=<label>]          # default: derived from the file name
  *     [--owner-file=<path>]        # Orion owner file override
@@ -20,8 +21,16 @@
  *     [--segment-file=<path>]      # Orion segment file override
  *     [--improvement-file=<path>]  # PACS improvement-detail override
  *     [--batch-size=1000] [--limit=N] [--dry-run]
+ *     [--target=staging|production] # REQUIRED for any non-dry-run
  *
- * DATABASE_URL must point at the target Postgres unless --dry-run.
+ * A non-dry-run (a real write) is Cloud Run Job only (job `ldt-cad-ingest`,
+ * us-east4) — no break-glass laptop run, per the 2026-09-12 ruling
+ * (`_decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md`, P-169).
+ * --target selects STAGING_NEONDB_URL or PRODUCTION_NEONDB_URL; running
+ * outside the job (CLOUD_RUN_JOB unset) refuses LAPTOP_WRITE_FROZEN before
+ * any file is even downloaded. --dry-run always works anywhere (parse-only,
+ * no store write, no target needed). Every write leaves a `cad_ingest_run`
+ * row naming every input file with its sha256 and byte size.
  *
  * Counties: 48453 Travis (PACS), 48021 Bastrop (PACS), 48055 Caldwell
  * (PACS), 48209 Hays (Orion CSV), 48491 Williamson (Orion CSV),
@@ -33,7 +42,7 @@
  *
  * The run is exit-bounded: parse + upsert + summary, then exit. Exit
  * code 0 on success (even with skipped malformed rows), 1 on fatal
- * errors or when zero rows parsed.
+ * errors or when zero rows parsed, 2 when refused (LAPTOP_WRITE_FROZEN).
  */
 
 import { parseArgs } from "node:util";
@@ -43,7 +52,7 @@ import { basename, join } from "node:path";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { resolveCounty, CAD_COUNTIES, type CadFormat } from "./counties";
-import { resolveCadBulkSource } from "./sources";
+import { resolveCadBulkSource, resolvePacsEntries, PacsEntryNotFoundError } from "./sources";
 import { resolveCadRollRoute } from "./routing";
 import { formatSourceVintage } from "./tier";
 import type { CadPropertyRecord, ParseCounters } from "./types";
@@ -54,14 +63,16 @@ import { parseTadPropertyExport } from "./vendors/tad-propertydata/parser";
 import { parseDcadCertifiedExport } from "./vendors/dcad-certified/parser";
 import { HeaderIndex, readCsvRows } from "./csv";
 import { upsertCadProperties, DEFAULT_BATCH_SIZE } from "./ingest";
-import { deriveVintage, downloadToFile, isUrl } from "./download";
+import { deriveVintage, downloadFromGcs, downloadToFile, isGcsUri, isUrl } from "./download";
 import {
   extractCadDrop,
   ORION_ENTRY_FILTER,
-  PACS_ENTRY_FILTER,
+  pacsEntryFilterFor,
   TAD_ENTRY_FILTER,
   DCAD_ENTRY_FILTER,
 } from "./zip";
+import { resolveTargetDatabaseUrl } from "./targetEnv";
+import { finishCadIngestRun, hashInputFile, startCadIngestRun, type InputFileRecord } from "./runRecord";
 
 const { Pool } = pg;
 
@@ -109,8 +120,8 @@ interface ResolvedInputs {
   apprlYearFile?: string;
 }
 
-function zipEntryFilter(format: CadFormat) {
-  if (format === "pacs") return PACS_ENTRY_FILTER;
+function zipEntryFilter(format: CadFormat, fips?: string) {
+  if (format === "pacs") return pacsEntryFilterFor(fips);
   if (format === "tad-propertydata") return TAD_ENTRY_FILTER;
   if (format === "dcad-certified") return DCAD_ENTRY_FILTER;
   return ORION_ENTRY_FILTER;
@@ -119,8 +130,23 @@ function zipEntryFilter(format: CadFormat) {
 async function discoverFiles(
   format: CadFormat,
   files: string[],
+  fips?: string,
 ): Promise<ResolvedInputs> {
   if (format === "pacs") {
+    if (fips) {
+      try {
+        const declared = resolvePacsEntries(files, fips);
+        if (declared) {
+          return {
+            propertyFile: declared.infoFile,
+            improvementFile: declared.improvementDetailFile,
+          };
+        }
+      } catch (err) {
+        if (err instanceof PacsEntryNotFoundError) fail(err.message);
+        throw err;
+      }
+    }
     const info = files.find((f) => /APPRAISAL_INFO\.TXT$/i.test(f));
     if (!info) {
       fail(
@@ -214,6 +240,7 @@ async function main(): Promise<void> {
       "batch-size": { type: "string" },
       limit: { type: "string" },
       "dry-run": { type: "boolean", default: false },
+      target: { type: "string" },
     },
   });
 
@@ -251,9 +278,37 @@ async function main(): Promise<void> {
   }
 
   const dryRun = values["dry-run"] ?? false;
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!dryRun && !databaseUrl) {
-    fail("DATABASE_URL must be set (or pass --dry-run to parse only)");
+
+  // P-169 / A-132 (no break-glass, 2026-09-12): a write (anything that is
+  // not --dry-run) is Cloud Run Job only. CLOUD_RUN_JOB is GCP's own Cloud
+  // Run Jobs environment marker, set automatically on the job's execution
+  // environment and never something a caller's flag can supply — the same
+  // class of detection hauska-factory's own FACTORY_CLOUD gate uses. This
+  // refuses BEFORE any file is downloaded, extracted, or parsed for a
+  // write run.
+  let databaseUrl: string | undefined;
+  if (!dryRun) {
+    if (!values.target) {
+      fail(
+        "--target=staging|production is required for a write run " +
+          "(pass --dry-run to parse locally without one).",
+      );
+    }
+    if (!process.env.CLOUD_RUN_JOB) {
+      console.error(
+        JSON.stringify({
+          event: "cad-ingest.refused",
+          code: "LAPTOP_WRITE_FROZEN",
+          message:
+            "cad-ingest writes are Cloud Run (us-east4, job ldt-cad-ingest) only — " +
+            "no break-glass (2026-09-12 ruling, _decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md). " +
+            "CLOUD_RUN_JOB is unset: this process is not running inside the job. " +
+            "Pass --dry-run to parse locally, or run this from the Cloud Run job.",
+        }),
+      );
+      process.exit(2);
+    }
+    databaseUrl = resolveTargetDatabaseUrl(process.env, values.target);
   }
 
   const startedAt = Date.now();
@@ -294,16 +349,21 @@ async function main(): Promise<void> {
       const extracted = await extractCadDrop(
         localZip,
         workDir,
-        zipEntryFilter(county.format),
+        zipEntryFilter(county.format, county.fips),
         log,
       );
-      inputs = await discoverFiles(county.format, extracted);
+      inputs = await discoverFiles(county.format, extracted, county.fips);
     } else {
       bulkPrimaryFailure(county.name, county.fips);
     }
   } else {
     let input = values.file;
-    if (isUrl(input)) {
+    if (isGcsUri(input)) {
+      // P-169: the Cloud Run job's only input path. No laptop path into
+      // the database — the job downloads the operator/lane-uploaded
+      // export from GCS using its attached service account's ADC.
+      input = await downloadFromGcs(input, workDir, log);
+    } else if (isUrl(input)) {
       try {
         input = await downloadToFile(input, workDir, log);
       } catch (err) {
@@ -322,15 +382,16 @@ async function main(): Promise<void> {
       const extracted = await extractCadDrop(
         input,
         workDir,
-        zipEntryFilter(county.format),
+        zipEntryFilter(county.format, county.fips),
         log,
       );
-      inputs = await discoverFiles(county.format, extracted);
+      inputs = await discoverFiles(county.format, extracted, county.fips);
     } else if (kind === "dir") {
       const names = await readdir(input);
       inputs = await discoverFiles(
         county.format,
         names.map((n) => join(input, n)),
+        county.fips,
       );
     } else {
       inputs = { propertyFile: input };
@@ -442,6 +503,32 @@ async function main(): Promise<void> {
     }
   } else {
     const pool = new Pool({ connectionString: databaseUrl });
+    // P-169 load manifest: every input file this run reads, named with its
+    // sha256 and byte size, in a queryable row (see runRecord.ts header —
+    // P-171 is exactly the class of investigation this closes off).
+    const roleByFile: Array<[string | undefined, string]> = [
+      [inputs.propertyFile, "property"],
+      [inputs.improvementFile, "improvement-detail"],
+      [inputs.ownerFile, "owner"],
+      [inputs.landFile, "land"],
+      [inputs.segmentFile, "segment"],
+      [inputs.resDetailFile, "res-detail"],
+      [inputs.apprlYearFile, "apprl-year"],
+    ];
+    const files: InputFileRecord[] = [];
+    for (const [path, role] of roleByFile) {
+      if (!path) continue;
+      const { sha256, bytes } = await hashInputFile(path);
+      files.push({ role, name: basename(path), sha256, bytes });
+    }
+    const runId = await startCadIngestRun(pool, {
+      countyFips: county.fips,
+      target: values.target as string,
+      files,
+      taxYear: taxYearArg,
+      sourceVintage,
+    });
+    log(`run record: ${runId} (${files.length} input file(s) hashed)`);
     try {
       const db = drizzle(pool);
       const summary = await upsertCadProperties(db, records, {
@@ -456,6 +543,22 @@ async function main(): Promise<void> {
         },
       });
       rowsUpserted = summary.rowsUpserted;
+      await finishCadIngestRun(pool, runId, {
+        status: "success",
+        rowsRead: counters.rowsRead,
+        rowsParsed: counters.rowsParsed,
+        rowsUpserted,
+        rowsSkipped: counters.rowsSkipped,
+      });
+    } catch (err) {
+      await finishCadIngestRun(pool, runId, {
+        status: "error",
+        rowsRead: counters.rowsRead,
+        rowsParsed: counters.rowsParsed,
+        rowsSkipped: counters.rowsSkipped,
+        error: String((err as Error)?.message ?? err),
+      });
+      throw err;
     } finally {
       await pool.end();
     }

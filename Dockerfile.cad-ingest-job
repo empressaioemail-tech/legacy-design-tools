@@ -1,0 +1,31 @@
+# P-169 / A-132 (_decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md):
+# the CAD loader's Cloud Run Job image. Build context = monorepo root (the
+# pnpm workspace requires root package.json + pnpm-lock.yaml +
+# pnpm-workspace.yaml at install time; same constraint the api-server
+# Dockerfile documents). Deliberately NOT the api-server image: cad-ingest
+# needs no Chrome/puppeteer/hydrology deps, so this stays a plain, light
+# node:20-slim rather than inheriting that image's much larger surface.
+FROM node:20-slim
+
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@10 --activate
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+
+# No `tsc --build` here deliberately: @workspace/db (and every other
+# workspace lib cad-ingest touches) exports raw .ts source
+# (package.json "exports": "./src/index.ts"), so tsx resolves and
+# transpiles it directly at runtime with no dist/ output required. A
+# whole-monorepo `tsc --build` inside a from-scratch container (no
+# incremental .tsbuildinfo/dist cache, which .gcloudignore's `dist` /
+# `**/dist` exclusion strips from the build context) surfaces hundreds of
+# PRE-EXISTING strict-mode errors in unrelated packages (lib/codes,
+# lib/engine-core, lib/eval, lib/codewarm, ...) that have nothing to do
+# with cad-ingest and are out of this lane's scope — confirmed by the
+# first build attempt of this image, and by lib/cad-ingest's own
+# package-level `tsc -p tsconfig.json --noEmit` passing cleanly locally.
+ENTRYPOINT ["pnpm", "--filter", "@workspace/cad-ingest", "exec", "tsx", "src/cli.ts", "--"]
+CMD []

@@ -17,6 +17,8 @@
  * column.
  */
 
+import { basename } from "node:path";
+
 import type { OrionFileKind } from "./orion/parser";
 
 /** One open-HTTP dataset within a CAD's bulk drop, tagged by role. */
@@ -119,4 +121,102 @@ export const CAD_BULK_SOURCES: Record<string, CadBulkSource> = {
 
 export function resolveCadBulkSource(fips: string): CadBulkSource | undefined {
   return CAD_BULK_SOURCES[fips.trim()];
+}
+
+/**
+ * Per-county PACS export entry-name declaration (P-169 / A-132,
+ * `_decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md`).
+ *
+ * The generic PACS shape assumes `*APPRAISAL_INFO.TXT` /
+ * `*APPRAISAL_IMPROVEMENT_DETAIL.TXT` entry names (see zip.ts's
+ * PACS_ENTRY_FILTER and cli.ts's discoverFiles). TCAD's live certified
+ * export (2026 Certified Appraisal Export, Supp 0, 07182026) instead
+ * names its entries `PROP.TXT` / `IMP_DET.TXT` — a per-county SOURCE
+ * SHAPE, not a defect to paper over by widening the generic regex or
+ * renaming the county's files. A county with no declaration here keeps
+ * today's generic pattern exactly as before; this registry is additive.
+ */
+export interface PacsExportDeclaration {
+  /** Base-roll entry name, exact basename, matched case-insensitively. */
+  infoEntry: string;
+  /** Improvement-detail entry name, or absent if this county's declared
+   *  export has none. */
+  improvementDetailEntry?: string;
+}
+
+export const PACS_EXPORT_DECLARATIONS: Record<string, PacsExportDeclaration> = {
+  // Travis / TCAD — 2026 Certified Appraisal Export, Supp 0 (07182026):
+  // entries are PROP.TXT / IMP_DET.TXT, not the generic
+  // APPRAISAL_INFO.TXT / APPRAISAL_IMPROVEMENT_DETAIL.TXT shape.
+  "48453": {
+    infoEntry: "PROP.TXT",
+    improvementDetailEntry: "IMP_DET.TXT",
+  },
+};
+
+export function resolvePacsExportDeclaration(
+  fips: string,
+): PacsExportDeclaration | undefined {
+  return PACS_EXPORT_DECLARATIONS[fips.trim()];
+}
+
+export class PacsEntryNotFoundError extends Error {
+  constructor(
+    public readonly fips: string,
+    public readonly entryName: string,
+    public readonly role: "info" | "improvement-detail",
+  ) {
+    super(
+      `declared PACS ${role} entry "${entryName}" for county ${fips} was not found in ` +
+        "this export. The county's registered source shape " +
+        "(lib/cad-ingest/src/sources.ts PACS_EXPORT_DECLARATIONS) does not match what this " +
+        "archive actually contains — refusing rather than falling back to the generic pattern.",
+    );
+    this.name = "PacsEntryNotFoundError";
+  }
+}
+
+export interface ResolvedPacsEntries {
+  infoFile: string;
+  improvementDetailFile?: string;
+}
+
+/**
+ * Resolve which extracted file plays which PACS role for `fips`, using its
+ * declared entry names. Returns `null` when the county has no declaration
+ * (caller falls back to the generic `*APPRAISAL_INFO.TXT` pattern, unchanged).
+ * Throws PacsEntryNotFoundError when a declared entry is absent from the
+ * given file list — never a silent fallback to the generic pattern.
+ */
+export function resolvePacsEntries(
+  files: string[],
+  fips: string,
+): ResolvedPacsEntries | null {
+  const declaration = resolvePacsExportDeclaration(fips);
+  if (!declaration) return null;
+
+  const info = files.find(
+    (f) => basename(f).toLowerCase() === declaration.infoEntry.toLowerCase(),
+  );
+  if (!info) {
+    throw new PacsEntryNotFoundError(fips, declaration.infoEntry, "info");
+  }
+
+  let improvementDetailFile: string | undefined;
+  if (declaration.improvementDetailEntry) {
+    improvementDetailFile = files.find(
+      (f) =>
+        basename(f).toLowerCase() ===
+        declaration.improvementDetailEntry!.toLowerCase(),
+    );
+    if (!improvementDetailFile) {
+      throw new PacsEntryNotFoundError(
+        fips,
+        declaration.improvementDetailEntry,
+        "improvement-detail",
+      );
+    }
+  }
+
+  return { infoFile: info, improvementDetailFile };
 }

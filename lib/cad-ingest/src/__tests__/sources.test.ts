@@ -6,7 +6,10 @@ import { describe, expect, it } from "vitest";
 import {
   CAD_BULK_SOURCES,
   DCAD_CERTIFIED_OPEN_FETCH_URL,
+  PacsEntryNotFoundError,
   resolveCadBulkSource,
+  resolvePacsEntries,
+  resolvePacsExportDeclaration,
 } from "../sources";
 
 describe("CAD bulk-source registry", () => {
@@ -67,5 +70,66 @@ describe("CAD bulk-source registry", () => {
       "48439",
       "48491",
     ]);
+  });
+});
+
+describe("PACS export entry declaration (P-169 / A-132)", () => {
+  it("declares TCAD (48453) as PROP.TXT / IMP_DET.TXT", () => {
+    const declaration = resolvePacsExportDeclaration("48453");
+    expect(declaration).toEqual({
+      infoEntry: "PROP.TXT",
+      improvementDetailEntry: "IMP_DET.TXT",
+    });
+  });
+
+  it("resolves TCAD's declared entries from a real-shaped file list, case-insensitively", () => {
+    const files = [
+      "/tmp/work/PROP.TXT",
+      "/tmp/work/IMP_DET.TXT",
+      "/tmp/work/IMP_INFO.TXT",
+      "/tmp/work/LAND_DET.TXT",
+      "/tmp/work/IMP_ATR.TXT",
+    ];
+    const resolved = resolvePacsEntries(files, "48453");
+    expect(resolved).toEqual({
+      infoFile: "/tmp/work/PROP.TXT",
+      improvementDetailFile: "/tmp/work/IMP_DET.TXT",
+    });
+
+    const lowercased = files.map((f) => f.toLowerCase());
+    expect(resolvePacsEntries(lowercased, "48453")).toEqual({
+      infoFile: "/tmp/work/prop.txt",
+      improvementDetailFile: "/tmp/work/imp_det.txt",
+    });
+  });
+
+  it("a made-up county with no declaration returns null (caller falls back unchanged)", () => {
+    expect(resolvePacsExportDeclaration("99999")).toBeUndefined();
+    expect(resolvePacsEntries(["/tmp/APPRAISAL_INFO.TXT"], "99999")).toBeNull();
+  });
+
+  it("a declared but missing entry refuses naming the entry, never a silent fallback", () => {
+    expect(() => resolvePacsEntries(["/tmp/work/IMP_DET.TXT"], "48453")).toThrowError(
+      PacsEntryNotFoundError,
+    );
+    try {
+      resolvePacsEntries(["/tmp/work/IMP_DET.TXT"], "48453");
+      expect.fail("expected PacsEntryNotFoundError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(PacsEntryNotFoundError);
+      expect((err as PacsEntryNotFoundError).entryName).toBe("PROP.TXT");
+      expect((err as PacsEntryNotFoundError).role).toBe("info");
+    }
+  });
+
+  it("a declared but missing improvement-detail entry refuses naming that entry", () => {
+    try {
+      resolvePacsEntries(["/tmp/work/PROP.TXT"], "48453");
+      expect.fail("expected PacsEntryNotFoundError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(PacsEntryNotFoundError);
+      expect((err as PacsEntryNotFoundError).entryName).toBe("IMP_DET.TXT");
+      expect((err as PacsEntryNotFoundError).role).toBe("improvement-detail");
+    }
   });
 });

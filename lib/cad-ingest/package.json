@@ -28,6 +28,7 @@
     "nfhl-ingest": "tsx src/nfhl/cli.ts"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
     "@workspace/adapters": "workspace:*",
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
