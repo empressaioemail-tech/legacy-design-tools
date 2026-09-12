@@ -17,11 +17,25 @@
 -- WHAT THIS DOES. For Travis only (county_fips = '48453'), for every
 -- txgio_parcel row whose normalized street expression is blank (the same
 -- expression migration 0058's functional index is built on, so "blank" here
--- means precisely what the search's index already treats as blank), pull the
--- MOST RECENT tax_year cad_property row for the same prop_id and copy its
--- situs_address / situs_city across -- but ONLY when the CAD row's OWN
--- street line is non-blank. A CAD row that is itself blank contributes
--- nothing (this is an honest backfill, not a fabrication).
+-- means precisely what the search's index already treats as blank), pull
+-- Travis's DECLARED CAD vintage row for the same prop_id and copy its
+-- situs_address / situs_city across -- but ONLY when that row's OWN street
+-- line is non-blank. A CAD row that is itself blank contributes nothing
+-- (this is an honest backfill, not a fabrication).
+--
+-- DECLARED VINTAGE, NOT max(tax_year) (CI ci-vintage-predicate). Travis's
+-- declared CAD vintage is tax_year 2026, tier "cad-export"
+-- (DECLARED_CAD_VINTAGES["48453"], lib/cad-ingest/src/vintage.ts,
+-- resolveDeclaredCadVintage / tryResolveDeclaredCadVintage). That file's own
+-- doc comment: "Fail-closed: unknown FIPS or missing declaration throws --
+-- never invent a year from max(tax_year)." An early draft of this migration
+-- picked `ORDER BY tax_year DESC` per prop_id, which happens to agree with
+-- the declared vintage for Travis today but is the wrong MECHANISM (a
+-- county can carry a newer, not-yet-declared preliminary/supplemental year
+-- that should not be trusted) -- this SQL migration cannot import the
+-- resolver a TS caller would use, so the declared year is hardcoded here
+-- with this comment as its citation, and pinned to `county_fips = '48453'`
+-- so it can never silently apply the wrong year to another county.
 --
 -- NEVER OVERWRITES a txgio_parcel row that already carries a non-blank
 -- street (the mission's explicit guard) -- the WHERE clause on the UPDATE
@@ -35,43 +49,46 @@
 -- close.
 --
 -- ONE-SHOT, RUNS THROUGH THE DEPLOY PATH ONLY. Never applied ad hoc from a
--- laptop against production -- staging first, then production, both via the
--- normal migration runner (per lib/db/drizzle/README.md: applied migrations
--- are tracked by filename in `_schema_migrations`). Dry-run tested against
--- the f06-staging-neondb branch 2026-09-12 before this file was committed.
+-- laptop against production -- staging then production, both via the normal
+-- migrate:prod deploy step (lib/db/drizzle/README.md: applied migrations
+-- are tracked by filename in `_schema_migrations`).
 --
--- PERFORMANCE NOTE (2026-09-12): the FIRST version of this migration
--- reused migration 0058's full normalized-street expression to test
--- `cad_property.situs_address` for blankness too. `cad_property` (7.6M
--- rows, 3.6 GB, 2026-09-12 catalog read) carries NO functional index
+-- PERFORMANCE NOTE (2026-09-12). The first cut of this migration reused
+-- migration 0058's full ~30-call regexp_replace normalization expression to
+-- test `cad_property.situs_address` for blankness too. `cad_property` (7.6M
+-- rows / 3.6 GB, 2026-09-12 catalog read) carries NO functional index
 -- matching that expression -- only `txgio_parcel` / `txgio_address` do
--- (migration 0058) -- so that predicate forced a per-row evaluation of the
--- ~30-call regexp_replace chain across every Travis cad_property row
--- (measured: still running past 25 minutes on staging, aborted). The
--- SEMANTIC goal on the CAD side is only "does this row have ANY real
--- street text", which a plain blank/sentinel check answers just as
--- correctly without the regex chain -- rewritten below. The txgio_parcel
--- side keeps the full expression: THAT table has the matching index
--- (confirmed via EXPLAIN 2026-09-12: Index Scan on
--- txgio_parcel_situs_norm_idx, not Seq Scan) and correctness there must
--- stay byte-identical to what the search route treats as "blank".
+-- (migration 0058) -- so it forced a per-row regex evaluation across every
+-- Travis cad_property row and ran roughly 25-40 minutes on staging (the
+-- local client that launched it was killed at 25 minutes for looking stuck;
+-- the query kept running SERVER-SIDE past that -- killing a local psql
+-- client does not reliably cancel an in-flight remote query -- and had, in
+-- fact, already committed correctly by the time this was investigated).
+-- Rewritten below to a plain blank/sentinel check on the CAD side, which
+-- answers the same question ("does this row have real street text")
+-- without the regex chain. Validated equivalent to the full expression on
+-- staging 2026-09-12: 0 disagreements across a 20,000-row sample, and 0
+-- rows in a full Travis table scan for a non-comma-prefixed, all-
+-- punctuation street value (the one shape the cheap check could have
+-- missed). Full run after the rewrite: 6m1s wall clock, 0 rows filled
+-- because the earlier (correct, slow) run had already applied them --
+-- confirmed by direct row reads, not by this count alone. The txgio_parcel
+-- side of the UPDATE keeps the full expression unchanged, since that table
+-- has the supporting index and correctness there must stay byte-identical
+-- to what the search route itself treats as blank.
 SET statement_timeout = 0;
 
--- Most-recent-tax_year cad_property row per Travis prop_id, restricted to
--- rows whose OWN street line is non-blank. Cheap predicate on purpose (see
--- PERFORMANCE NOTE above) -- this only needs to answer "is there real
--- street text here", not produce the normalized comparison key.
 WITH latest_cad AS (
-  SELECT DISTINCT ON (prop_id)
+  SELECT
     prop_id,
     situs_address,
     situs_city
   FROM cad_property
   WHERE county_fips = '48453'
+    AND tax_year = 2026 -- Travis's DECLARED vintage; see note above
     AND situs_address IS NOT NULL
     AND btrim(situs_address) <> ''
     AND btrim(situs_address) NOT LIKE ',%'
-  ORDER BY prop_id, tax_year DESC
 ),
 updated AS (
   UPDATE txgio_parcel t
