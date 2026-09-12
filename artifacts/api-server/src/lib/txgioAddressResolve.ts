@@ -78,6 +78,7 @@ import {
   situsSearchStreetKeys,
   texasCountyFipsList,
   isOutOfCoverageStateCode,
+  normalizeLocalityToken,
   type PlaceSearchLocality,
 } from "./txgioAddressNormalize";
 import { allStoreCounties } from "./brokerageTxParcels";
@@ -190,6 +191,17 @@ function normalizedColumnExpr(columnName: string) {
  * not used here: Bastrop is still live-ArcGIS in that list while
  * 74k rows sit in `txgio_parcel`; node-id lookup already ignores the
  * tag. The table is the second derivation.
+ *
+ * NOT used by {@link searchSitusByStreetKeys} any more (P-172): that
+ * function pushes NO locality predicate into SQL at all, so a unique
+ * street-key hit can never be discarded by a locality mismatch (a
+ * county whose roll leaves `situs_city` null on most rows -- Travis,
+ * measured 2026-09-12 -- would otherwise silently drop its own
+ * unique, correct hit). Still used by
+ * {@link searchSitusByPrefixWithLocality}, the ILIKE fallback that
+ * only runs when the exact street-key search already returned no row
+ * at all, where over-matching many prefix hits across every store
+ * county is the real risk locality narrowing is guarding against.
  */
 function storedSitusLocalitySql(locality: PlaceSearchLocality) {
   const filters: ReturnType<typeof sql>[] = [];
@@ -202,6 +214,52 @@ function storedSitusLocalitySql(locality: PlaceSearchLocality) {
     );
   }
   return filters;
+}
+
+/**
+ * Locality for a stored `txgio_parcel` row, preferring the row's OWN
+ * `situs_city` / `situs_state` / `situs_zip` columns over parsing them out
+ * of the composed `situs_address` string (P-172 step 4). A county roll can
+ * carry a full, correct street line while leaving `situs_city` null on most
+ * rows (Travis, measured 2026-09-12: sampled rows including one with a
+ * populated street line all had `situs_city` null) -- and separately, a
+ * backfilled row's `situs_address` never has the city folded into it (the
+ * CAD export keeps them in separate columns), so `localityFromStoredAddress`
+ * parsing the composed string would never find a city there either. Falling
+ * back to the parsed string ONLY when the row's own columns are blank keeps
+ * counties that DO fold the city into `situs_address` (the pre-existing
+ * comma-composed shape) working exactly as before.
+ */
+function localityFromStoredRow(row: {
+  situsAddress: string;
+  situsCity?: string | null;
+  situsState?: string | null;
+  situsZip?: string | null;
+}): PlaceSearchLocality {
+  const ownCity = row.situsCity?.trim();
+  const ownState = row.situsState?.trim();
+  const ownZip = row.situsZip?.trim();
+  // `localityFromStoredAddress` is built for the historical COMMA-COMPOSED
+  // shape ("908 PINE ST, BASTROP, TX 78602") and reads everything after the
+  // first comma as the locality tail. A CAD-backfilled row's street line
+  // (P-172 migration 0100) is a BARE street with no comma at all ("414
+  // SPILLER LN") -- the city lives only in the separate situs_city column.
+  // Feeding a comma-less string to a function that expects a locality TAIL
+  // misparses the street tokens themselves as a bogus city/state, which
+  // then reads as a false CONTRADICTION against a query's real city
+  // instead of the true "no locality on record" absence. Only parse the
+  // address string when it actually has the composed, comma-bearing shape.
+  const parsedFromAddress = row.situsAddress.includes(",")
+    ? localityFromStoredAddress(row.situsAddress)
+    : { city: null, state: null, zip: null };
+  if (ownCity || ownState || ownZip) {
+    return {
+      city: ownCity ? normalizeLocalityToken(ownCity) : parsedFromAddress.city,
+      state: ownState ? ownState.toUpperCase() : parsedFromAddress.state,
+      zip: ownZip || parsedFromAddress.zip,
+    };
+  }
+  return parsedFromAddress;
 }
 
 /** Leading column of `txgio_parcel_situs_norm_idx` / address twin. */
@@ -599,6 +657,31 @@ const SITUS_SEARCH_MAX_LIMIT = 10;
  */
 export const SITUS_SEARCH_BUDGET_MS = 20_000;
 
+/**
+ * Shorter budget for a BARE query (P-172 step 3): no city/state/ZIP was
+ * parsed at all, so `searchPlaceByPrefix` cannot narrow to one county and
+ * runs its ladder (exact street key, then an ILIKE prefix fallback, then a
+ * `txgio_address` address-point fallback) across every store county. Live
+ * 2026-09-12: the Property Explorer BFF proxy that is this route's most
+ * common caller aborts its own fetch at 5000ms (`pe-situs-search.ts`,
+ * `UPSTREAM_TIMEOUT_MS`) — nowhere near the 20 s this route budgets for
+ * itself. When the query actually needs the full ladder, the SAME 5.0-5.4 s
+ * duration reproduces on every run, which is the proxy's abort firing, not
+ * this route's `SET LOCAL statement_timeout`; the proxy manufactures a bare
+ * 502 `situs_search_unreachable` and this route's own honest
+ * `SITUS_SEARCH_BUDGET_ERROR` never gets a chance to be the answer, because
+ * the connection is gone before this budget would ever trip.
+ *
+ * A 4 s ceiling for the bare case answers (hit or a declared
+ * `situs-search-budget-exceeded` miss) comfortably inside that 5 s window
+ * every time, turning an unlabelled transport failure into the labelled
+ * refuse this module already has a name for. Locality-qualified queries
+ * (a caller that already knows a city/state/ZIP) keep the full budget —
+ * they are the common MCP shape (30 s abort) and were not the queries
+ * timing out live.
+ */
+export const BARE_SITUS_SEARCH_BUDGET_MS = 4_000;
+
 /** Named refuse when a situs-search query is canceled for budget. */
 export const SITUS_SEARCH_BUDGET_ERROR = "situs-search-budget-exceeded";
 
@@ -748,38 +831,51 @@ export async function searchSitusByStreetKeys(input: {
   const database = input.database ?? defaultDb;
   const locality = input.locality ?? { city: null, state: null, zip: null };
 
+  // P-172: NO locality predicate in SQL here (contrast searchSitusByPrefix-
+  // WithLocality below, which still pushes one). An exact street-key match
+  // is already narrow -- the risk this used to guard against (over-matching
+  // many prefix hits) does not apply to an equality match -- and pushing the
+  // filter into SQL is exactly what let a real, correct, UNIQUE row get
+  // discarded before it ever reached JS: Travis leaves `situs_city` null on
+  // most of its roll (measured 2026-09-12) and never folds a city into
+  // `situs_address` for a CAD-backfilled row, so `strpos(situs_address,
+  // city) > 0` can be false for the one and only parcel a street key
+  // matches. Locality is applied in JS below, and ONLY narrows when there is
+  // more than one candidate to narrow among.
   const rows = (await database
     .select({
       countyFips: txgioParcel.countyFips,
       propId: txgioParcel.propId,
       situsAddress: txgioParcel.situsAddress,
+      situsCity: txgioParcel.situsCity,
+      situsState: txgioParcel.situsState,
+      situsZip: txgioParcel.situsZip,
     })
     .from(txgioParcel)
     .where(
       and(
         storeCountyFipsBound(txgioParcel.countyFips),
         inArray(normalizedColumnExpr("situs_address"), keys),
-        ...storedSitusLocalitySql(locality),
       ),
     )
     .limit(limit * 16)) as {
     countyFips: string | null;
     propId: string | null;
     situsAddress: string | null;
+    situsCity: string | null;
+    situsState: string | null;
+    situsZip: string | null;
   }[];
 
-  const byParcel = new Map<string, SitusSearchHit>();
+  const byParcel = new Map<
+    string,
+    SitusSearchHit & { locality: PlaceSearchLocality }
+  >();
   for (const r of rows) {
     const fips = r.countyFips?.trim();
     const propId = r.propId?.trim();
     const situs = r.situsAddress?.trim();
     if (!fips || !propId || !situs) continue;
-    if (
-      hasPlaceSearchLocality(locality) &&
-      !placeSearchLocalityMatches(localityFromStoredAddress(situs), locality)
-    ) {
-      continue;
-    }
     const nodeId = parcelNodeId(fips, propId);
     if (!nodeId) continue;
     if (!byParcel.has(nodeId)) {
@@ -787,12 +883,77 @@ export async function searchSitusByStreetKeys(input: {
         parcelNodeId: nodeId,
         situsAddress: situs,
         countyFips: fips,
+        locality: localityFromStoredRow({
+          situsAddress: situs,
+          situsCity: r.situsCity,
+          situsState: r.situsState,
+          situsZip: r.situsZip,
+        }),
       });
     }
-    if (byParcel.size >= limit) break;
   }
 
-  return [...byParcel.values()];
+  const candidates = [...byParcel.values()];
+  if (candidates.length === 0) return [];
+
+  // UNIQUE street-key match: locality can only fail this hit closed when the
+  // CANDIDATE'S OWN recorded locality actively contradicts the query (real
+  // evidence of a homonym street in a different place — "908 Pine" is a
+  // genuine Bastrop AND a genuine Georgetown parcel, and a query asking for
+  // Bastrop must never silently resolve to the Georgetown row just because
+  // it was the only row a particular mock/search happened to return).
+  // A candidate whose OWN locality is UNKNOWN (situs_city null AND no city
+  // segment in situs_address — the measured Travis shape) carries no such
+  // evidence: an absence is not a contradiction, so it never filters out
+  // the one parcel this street key can mean (P-172 step 4 + step 5
+  // non-vacuity: "a locality that matches nothing never filters out a
+  // unique street-key hit" — read as "matches nothing" = the record has
+  // nothing to match against, not "the record names somewhere else").
+  if (candidates.length === 1) {
+    const [only] = candidates;
+    // Field-by-field: a contradiction requires BOTH sides to carry a value
+    // for the SAME field and disagree. `placeSearchLocalityMatches` is not
+    // reused here on purpose -- it fails closed when the STORED side is
+    // merely missing a field the query supplied (its job, disambiguating
+    // several real candidates), which would wrongly read "candidate has no
+    // recorded state" as a contradiction against "query said TX" even when
+    // the one field both sides DO know (city) matches perfectly.
+    const knownContradiction =
+      (Boolean(locality.city) &&
+        Boolean(only!.locality.city) &&
+        locality.city !== only!.locality.city) ||
+      (Boolean(locality.state) &&
+        Boolean(only!.locality.state) &&
+        locality.state !== only!.locality.state) ||
+      (Boolean(locality.zip) &&
+        Boolean(only!.locality.zip) &&
+        locality.zip !== only!.locality.zip);
+    if (knownContradiction) return [];
+    return [
+      {
+        parcelNodeId: only!.parcelNodeId,
+        situsAddress: only!.situsAddress,
+        countyFips: only!.countyFips,
+      },
+    ];
+  }
+
+  // AMBIGUOUS (several distinct parcels share this street key): locality
+  // narrows among them when supplied. An empty result here is an honest
+  // "none of these match that city/zip", not a reason to fall back to the
+  // full ambiguous set.
+  const strip = (c: (typeof candidates)[number]): SitusSearchHit => ({
+    parcelNodeId: c.parcelNodeId,
+    situsAddress: c.situsAddress,
+    countyFips: c.countyFips,
+  });
+  if (!hasPlaceSearchLocality(locality)) {
+    return candidates.slice(0, limit).map(strip);
+  }
+  const filtered = candidates.filter((c) =>
+    placeSearchLocalityMatches(c.locality, locality),
+  );
+  return filtered.slice(0, limit).map(strip);
 }
 
 /**
@@ -1098,7 +1259,17 @@ export async function searchPlaceByPrefix(input: {
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
     SITUS_SEARCH_MAX_LIMIT,
   );
-  const budgetMs = input.budgetMs ?? SITUS_SEARCH_BUDGET_MS;
+  const locality = parsePlaceSearchLocality(input.query);
+  // P-172 step 3: a BARE query (no city/state/ZIP parsed at all) cannot be
+  // narrowed to one county and runs the full ladder across every store
+  // county; measured live 2026-09-12, this is exactly the shape that raced
+  // past the Property Explorer proxy's 5000ms abort and came back as a bare,
+  // unlabelled 502 (see BARE_SITUS_SEARCH_BUDGET_MS). A locality-qualified
+  // query keeps the caller's own budget (or the 20 s default) since it was
+  // not the one timing out and MCP callers can wait longer.
+  const budgetMs = hasPlaceSearchLocality(locality)
+    ? (input.budgetMs ?? SITUS_SEARCH_BUDGET_MS)
+    : Math.min(input.budgetMs ?? SITUS_SEARCH_BUDGET_MS, BARE_SITUS_SEARCH_BUDGET_MS);
   const started = Date.now();
   const remainingMs = () => Math.max(0, budgetMs - (Date.now() - started));
   let budgetExhausted = false;
@@ -1113,8 +1284,6 @@ export async function searchPlaceByPrefix(input: {
     }
     return { hits: [], missClass: "no-hit" };
   };
-
-  const locality = parsePlaceSearchLocality(input.query);
 
   /**
    * P-107 / OPS-16 A-072. An explicit, recognised out-of-state token means

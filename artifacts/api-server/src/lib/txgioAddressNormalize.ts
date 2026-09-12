@@ -308,7 +308,10 @@ export type PlaceSearchLocality = {
   zip: string | null;
 };
 
-function normalizeLocalityToken(value: string | null | undefined): string | null {
+/** Fold a locality token (city name) the same way every parsed locality
+ *  does, so a value read straight from a stored column (P-172:
+ *  `situs_city`) compares equal to one parsed out of a query string. */
+export function normalizeLocalityToken(value: string | null | undefined): string | null {
   if (!value) return null;
   const folded = value.trim().toUpperCase().replace(/\s+/g, " ");
   return folded.length > 0 ? folded : null;
