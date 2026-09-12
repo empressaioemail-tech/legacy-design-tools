@@ -6,6 +6,57 @@
  * that keeps the two shapes in step is PANEL_ANCHOR_ACCEPTS_WIRE below. */
 import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
 
+/*
+ * P-167 (OPS-23 R-6). These ten were this module's own literals until this
+ * row; they are now read from the one display vocabulary module every
+ * surface (Property Explorer, the feasibility PDF, this connector) shares.
+ *
+ * Imported under a `_PKG` suffix and re-declared as genuinely local consts
+ * immediately below, NEVER referenced by the bare package-import name
+ * anywhere else in this module. Reason: three of these (EDGE_WORDS,
+ * NOT_ON_FILE_PREFIX, NO_BAKED_SNAPSHOT_PREFIX) are read inside edgeWord /
+ * notOnFileSentence / noBakedSnapshotSentence, which are embedded into the
+ * served script BY SOURCE (INLINE_SHARED, same hazard the file-header
+ * comment above names for parcel-anchor.js) -- and Vite's SSR module
+ * transform (the one vitest's runner uses) rewrites a bare reference to an
+ * IMPORTED name into `__vite_ssr_import_N__.NAME` wherever it appears,
+ * INCLUDING inside a function whose .toString() later gets extracted and
+ * run standalone in a browser/jsdom scope where that binding does not
+ * exist (confirmed: importing these directly broke all 48
+ * mcp-app-served.test.ts cases with "__vite_ssr_import_0__ is not
+ * defined"). A fresh local `const NAME = NAME_PKG` is not an import
+ * specifier, so nothing rewrites bare `NAME` references inside an
+ * INLINE_SHARED function's body; the served `var NAME=${JSON.stringify(NAME)}`
+ * lines (grep past line 3474) keep working exactly as before, now sourced
+ * from the package instead of a hand-typed literal.
+ */
+import {
+  CITATION_DEGRADED as CITATION_DEGRADED_PKG,
+  EDGE_WORDS as EDGE_WORDS_PKG,
+  envelopeBasisHuman as envelopeBasisHuman_PKG,
+  envelopeHuman as envelopeHuman_PKG,
+  NO_BAKED_SNAPSHOT_PREFIX as NO_BAKED_SNAPSHOT_PREFIX_PKG,
+  NOT_IMPLEMENTED_PREFIX as NOT_IMPLEMENTED_PREFIX_PKG,
+  NOT_ON_FILE_PREFIX as NOT_ON_FILE_PREFIX_PKG,
+  OPEN_DID_NOT_REACH_ME as OPEN_DID_NOT_REACH_ME_PKG,
+  STATE_WORDS as STATE_WORDS_PKG,
+  UPGRADE_TO_OPEN as UPGRADE_TO_OPEN_PKG,
+} from "@empressaio/atom-contract/display";
+export const CITATION_DEGRADED = CITATION_DEGRADED_PKG;
+export const EDGE_WORDS: Record<string, string> = EDGE_WORDS_PKG;
+export const NO_BAKED_SNAPSHOT_PREFIX = NO_BAKED_SNAPSHOT_PREFIX_PKG;
+export const NOT_IMPLEMENTED_PREFIX = NOT_IMPLEMENTED_PREFIX_PKG;
+export const NOT_ON_FILE_PREFIX = NOT_ON_FILE_PREFIX_PKG;
+export const OPEN_DID_NOT_REACH_ME = OPEN_DID_NOT_REACH_ME_PKG;
+export const UPGRADE_TO_OPEN = UPGRADE_TO_OPEN_PKG;
+export function envelopeHuman(reason: string | undefined): string | undefined {
+  return envelopeHuman_PKG(reason);
+}
+export function envelopeBasisHuman(basis: string | undefined): string | undefined {
+  return envelopeBasisHuman_PKG(basis);
+}
+export const STATE_WORDS: Record<CellState, string> = STATE_WORDS_PKG;
+
 export const APP_RESOURCE_URI = "ui://smartsite/app-p562.html";
 export const APP_MIME = "text/html;profile=mcp-app";
 
@@ -301,10 +352,7 @@ function railState(value: unknown): CellState {
 
 /** Plan 4.4 sentences. One state, one sentence; unknown, refused, and unread never share one. */
 export const OPEN_SENT = "Sent to chat. Press Send to open.";
-export const NOT_ON_FILE_PREFIX = "Not on file in";
-export const NO_BAKED_SNAPSHOT_PREFIX = "No baked snapshot yet for";
 export const NOT_RETURNED = "Not returned";
-export const UPGRADE_TO_OPEN = "Upgrade to open this parcel";
 /* P-101 item 10. UPGRADE_TO_OPEN is about a PARCEL and is not reused for a
  * screen: a user told "Upgrade to open this parcel" after clicking Add to
  * screen is told about the wrong thing. This is its sibling, keyed off the
@@ -330,7 +378,6 @@ export const DUP_SAME_PARCEL = "is the same parcel as";
 export const DUP_NOT_ADDED = "not added twice.";
 export const TIMED_OUT_NOTE = "did not resolve in time; unresolved for now.";
 export const REFUSED_PREFIX = "Refused";
-export const NOT_IMPLEMENTED_PREFIX = "Not implemented";
 export const NOT_READY_INFIX = "is not ready";
 export const UPSTREAM_KEY = "upstream";
 export const SORT_COMPLETENESS_LABEL = "by completeness";
@@ -445,27 +492,6 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-export function envelopeHuman(reason: string | undefined): string | undefined {
-  if (reason === "atom_path_pending") return "Withheld, setbacks unruled";
-  return reason;
-}
-
-/**
- * P-153 sibling of `envelopeHuman`, for a `state: "present"` envelope
- * overlay's `basis` (never its `reason` — a present overlay carries no
- * `reason`, so `envelopeHuman` never applies to it; see tool-honesty.ts's
- * `honestOverlay`). Mirrors hauska-map's equivalent panel copy for the
- * same underlying state: the buildable-envelope polygon is drawn from a
- * real district + setback table, while the buildable-AREA figure stays
- * withheld pending an atom.
- */
-export function envelopeBasisHuman(basis: string | undefined): string | undefined {
-  if (basis === "modelled-figure-withheld") {
-    return "Buildable envelope modelled from setbacks — area withheld pending an atom";
-  }
-  return basis;
-}
-
 export function ringFromDraw(draw: Record<string, unknown>): RingPt[] {
   if (!Array.isArray(draw.ring)) return [];
   const out: RingPt[] = [];
@@ -535,17 +561,6 @@ export function edgeHasRoad(edge: DrawEdge): boolean {
   return Boolean(edge.roadNode || edge.road);
 }
 
-/** D1: adjacency and role words. Keys are the wire enum; any other value prints verbatim. */
-export const EDGE_WORDS: Record<string, string> = {
-  front: "front",
-  side: "side",
-  rear: "rear",
-  side_corner: "corner side",
-  alley: "alley",
-  ROW: "right of way",
-  "neighbor-parcel": "neighbor",
-  unmapped: "unmapped",
-};
 /** D2 / O3: a neighbor across a ROW is named, never opened. */
 export const ACROSS_ROW = "across the right of way";
 /** Tip at rest. UI copy, not a parcel fact. */
@@ -562,8 +577,6 @@ export const ZONE_TINT: Record<ZoneFamily, string> = {
   public: "--ss-t5",
 };
 
-/** F1: a section or overlay that claims a fact without an https citation says so; the text, never a link. */
-export const CITATION_DEGRADED = "citation degraded";
 /** F6: a present claim with no as-of paints unknown and says why. Panel copy, not a wire field. */
 export const AS_OF_MISSING = "as-of missing";
 /** F5: an absence claim with neither provenance nor a known vintage paints unknown; only when the wire carries no reason of its own. */
@@ -587,14 +600,6 @@ export const ADD_TO_SCREEN_LABEL = "Add to screen";
 /** R1: the local toggle and the empty report. */
 export const REPORT_TOGGLE = "Report";
 export const NO_BRIEF = "No brief sections on this result.";
-/** The five-state legend words, one per paint state. */
-export const STATE_WORDS: Record<CellState, string> = {
-  present: "present",
-  "absent-verified": "absent, verified",
-  unknown: "unknown",
-  refused: "refused",
-  unread: "unread",
-};
 /** P1: an overlay borrows the refusal of the brief section on the same subject, when the wire carries one. */
 export const SECTION_FOR_OVERLAY: Record<string, string> = {
   envelope: "setbacks-envelope",
@@ -3036,7 +3041,6 @@ export const OPEN_TURN_INSTRUCTION =
 export const EMPTY_BOARD_TITLE = "No screen yet";
 export const EMPTY_BOARD_BODY = "Paste addresses in the chat. This panel does not search.";
 export const NOTHING_TO_OPEN = "Nothing to open until this resolves";
-export const OPEN_DID_NOT_REACH_ME = "Open did not reach me";
 /** Host silence after Open click. Late tool results still replace this. */
 export const OPEN_DEAD_MS = 12000;
 
@@ -3894,7 +3898,7 @@ ${inlineSharedSource()}
     return ${JSON.stringify(OPEN_TURN_OPENER)}+" "+node+". "+${JSON.stringify(OPEN_TURN_INSTRUCTION)};
   }
   function envelopeHuman(reason){
-    if(reason===["atom","path","pending"].join("_")) return "Withheld, setbacks unruled";
+    if(reason===["atom","path","pending"].join("_")) return ${JSON.stringify(envelopeHuman("atom_path_pending"))};
     return reason;
   }
   function openLink(url){

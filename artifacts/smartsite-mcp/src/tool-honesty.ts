@@ -1,5 +1,5 @@
 import type { EntitlementGateRefusal } from "./entitlement.js";
-import { envelopeBasisHuman, envelopeHuman } from "./mcp-app.js";
+import { envelopeBasisHuman, envelopeHuman } from "@empressaio/atom-contract/display";
 import {
   DERIVED_FIGURES_POLICY,
   VOCABULARY,

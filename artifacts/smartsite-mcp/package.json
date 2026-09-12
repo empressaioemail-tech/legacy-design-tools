@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@empressaio/atom-contract": "^1.33.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@workspace/db": "workspace:*",
     "dotenv": "^16.4.5",
