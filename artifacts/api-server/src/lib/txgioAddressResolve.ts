@@ -58,12 +58,14 @@
 
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { db as defaultDb, txgioParcel, txgioAddress } from "@workspace/db";
+import { db as defaultDb, txgioParcel, txgioAddress, cadProperty } from "@workspace/db";
 import {
   pointInGeometry,
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
+import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
+import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
 import { isPunctuationOnlySitus } from "./situsCompose";
 import {
   normalizeStreetLine,
@@ -810,6 +812,107 @@ function escapeIlikeLiteral(prefix: string): string {
 }
 
 /**
+ * GATE-BLOCKED SITUS CROSSWALK (P-175, 2026-09-12).
+ *
+ * For most counties `parcelNodeId(fips, txgioPropId)` is correct: TxGIO's
+ * `prop_id` and `cad_property.prop_id` are the same appraisal-account
+ * number. For a county whose prop_id join is gate-BLOCKED (Hays 48209,
+ * Williamson 48491 -- `LANDUSE_JOIN_DISABLED_FIPS_SEED` in
+ * ./joinNormalize), the two are DIFFERENT published identifiers that
+ * coincidentally collide as bare numbers (CTX-HAYS-REBIND, P-124
+ * 2026-09-10). A situs hit built from the raw TxGIO prop_id can silently
+ * land on an unrelated CAD account's node -- the Sturgeon/Mesa Verde
+ * chimera this card exists to fix (node `48209:97658` carrying lot 11's
+ * geometry under an unrelated Austin account's label). This resolves the
+ * SAME crosswalk the tier-1 bake uses
+ * (`nodeFacetBakeTier1ConformantCli.ts`): `cad_property.property_number`
+ * matched against `txgio_parcel.geo_id`, at the county's DECLARED CAD
+ * vintage only. A `geo_id` claimed by more than one account at that vintage
+ * is refused (never guessed), mirroring the bake's own ambiguity rule.
+ *
+ * Batched: one query for every candidate `geo_id` across every blocked
+ * county present in a result set, not one query per row.
+ */
+async function loadSitusCrosswalk(
+  candidates: { countyFips: string; geoId: string | null }[],
+  database: TxgioAddressResolveDb,
+): Promise<Map<string, string>> {
+  const declaredByCounty = new Map<string, number>();
+  const geoIds = new Set<string>();
+  for (const c of candidates) {
+    const fips = c.countyFips.trim();
+    const geoId = c.geoId?.trim();
+    if (!geoId || !LANDUSE_JOIN_DISABLED_FIPS_SEED.has(fips)) continue;
+    if (!declaredByCounty.has(fips)) {
+      const declared = tryResolveDeclaredCadVintage(fips);
+      if (declared) declaredByCounty.set(fips, declared.taxYear);
+    }
+    if (declaredByCounty.has(fips)) geoIds.add(geoId);
+  }
+  if (declaredByCounty.size === 0 || geoIds.size === 0) return new Map();
+
+  const rows = (await database
+    .select({
+      countyFips: cadProperty.countyFips,
+      propId: cadProperty.propId,
+      propertyNumber: cadProperty.propertyNumber,
+      taxYear: cadProperty.taxYear,
+    })
+    .from(cadProperty)
+    .where(
+      and(
+        inArray(cadProperty.countyFips, [...declaredByCounty.keys()]),
+        inArray(cadProperty.propertyNumber, [...geoIds]),
+      ),
+    )
+    .limit(geoIds.size * 4)) as {
+    countyFips: string | null;
+    propId: string | null;
+    propertyNumber: string | null;
+    taxYear: number | null;
+  }[];
+
+  // Bucket by (county, geo_id) so a geo_id claimed by >1 account in the same
+  // county is detectable; the declared-vintage filter runs in the same pass.
+  const byKey = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const fips = r.countyFips?.trim();
+    const propertyNumber = r.propertyNumber?.trim();
+    const propId = r.propId?.trim();
+    if (!fips || !propertyNumber || !propId) continue;
+    if (declaredByCounty.get(fips) !== r.taxYear) continue;
+    const key = `${fips}:${propertyNumber}`;
+    if (!byKey.has(key)) byKey.set(key, new Set());
+    byKey.get(key)!.add(propId);
+  }
+  const resolved = new Map<string, string>();
+  for (const [key, propIds] of byKey) {
+    if (propIds.size === 1) resolved.set(key, [...propIds][0]!);
+    // >1 owner: ambiguous, refuse -- never guess between them.
+  }
+  return resolved;
+}
+
+/**
+ * Mint a situs hit's parcel node id, applying {@link loadSitusCrosswalk}'s
+ * result for a gate-blocked county. Falls back to the raw TxGIO-keyed node
+ * (today's behaviour) when the county is not blocked, or when no crosswalk
+ * resolution exists for this row -- unresolved is not worse than today.
+ */
+function situsNodeId(
+  fips: string,
+  txgioPropId: string,
+  geoId: string | null,
+  crosswalk: Map<string, string>,
+): string | null {
+  if (geoId && LANDUSE_JOIN_DISABLED_FIPS_SEED.has(fips)) {
+    const cadPropId = crosswalk.get(`${fips}:${geoId}`);
+    if (cadPropId) return parcelNodeId(fips, cadPropId);
+  }
+  return parcelNodeId(fips, txgioPropId);
+}
+
+/**
  * Exact street-key situs lookup across store counties, optionally filtered by
  * parsed city/state/ZIP. Used when the MCP/FE sends a full address so prefix
  * ILIKE does not return the wrong county's homonym street.
@@ -846,6 +949,7 @@ export async function searchSitusByStreetKeys(input: {
     .select({
       countyFips: txgioParcel.countyFips,
       propId: txgioParcel.propId,
+      geoId: txgioParcel.geoId,
       situsAddress: txgioParcel.situsAddress,
       situsCity: txgioParcel.situsCity,
       situsState: txgioParcel.situsState,
@@ -861,11 +965,17 @@ export async function searchSitusByStreetKeys(input: {
     .limit(limit * 16)) as {
     countyFips: string | null;
     propId: string | null;
+    geoId: string | null;
     situsAddress: string | null;
     situsCity: string | null;
     situsState: string | null;
     situsZip: string | null;
   }[];
+
+  const crosswalk = await loadSitusCrosswalk(
+    rows.map((r) => ({ countyFips: r.countyFips ?? "", geoId: r.geoId })),
+    database,
+  );
 
   const byParcel = new Map<
     string,
@@ -876,7 +986,7 @@ export async function searchSitusByStreetKeys(input: {
     const propId = r.propId?.trim();
     const situs = r.situsAddress?.trim();
     if (!fips || !propId || !situs) continue;
-    const nodeId = parcelNodeId(fips, propId);
+    const nodeId = situsNodeId(fips, propId, r.geoId, crosswalk);
     if (!nodeId) continue;
     if (!byParcel.has(nodeId)) {
       byParcel.set(nodeId, {
@@ -1045,6 +1155,7 @@ async function searchSitusByPrefixWithLocality(input: {
     .select({
       countyFips: txgioParcel.countyFips,
       propId: txgioParcel.propId,
+      geoId: txgioParcel.geoId,
       situsAddress: txgioParcel.situsAddress,
     })
     .from(txgioParcel)
@@ -1058,8 +1169,14 @@ async function searchSitusByPrefixWithLocality(input: {
     .limit(limit * 8)) as {
     countyFips: string | null;
     propId: string | null;
+    geoId: string | null;
     situsAddress: string | null;
   }[];
+
+  const crosswalk = await loadSitusCrosswalk(
+    rows.map((r) => ({ countyFips: r.countyFips ?? "", geoId: r.geoId })),
+    database,
+  );
 
   const byParcel = new Map<string, SitusSearchHit>();
   for (const r of rows) {
@@ -1075,7 +1192,7 @@ async function searchSitusByPrefixWithLocality(input: {
     ) {
       continue;
     }
-    const nodeId = parcelNodeId(fips, propId);
+    const nodeId = situsNodeId(fips, propId, r.geoId, crosswalk);
     if (!nodeId) continue;
     if (!byParcel.has(nodeId)) {
       byParcel.set(nodeId, {
@@ -1099,9 +1216,28 @@ export interface AddressPointSearchHit {
   source: "address-point";
 }
 
+/**
+ * P-175 (2026-09-12). An address point the parcel-situs ladder found no hit
+ * for, but whose rooftop coordinate falls inside exactly one TxGIO parcel
+ * (bound by {@link bindAddressPointByContainment}). The common shape: a city
+ * has assigned the house number, the appraisal district has not yet written
+ * it onto the roll, so no situs string matches, but the parcel geometry
+ * (and its account, once crosswalked for a gate-blocked county) already
+ * exists.
+ */
+export interface AddressPointContainmentHit {
+  parcelNodeId: string;
+  situsAddress: string;
+  countyFips: string;
+  latitude: number;
+  longitude: number;
+  source: "address-point-containment";
+}
+
 export type PlaceSearchHit =
   | (SitusSearchHit & { source: "parcel-situs" })
-  | AddressPointSearchHit;
+  | AddressPointSearchHit
+  | AddressPointContainmentHit;
 
 /**
  * Empty hits carry a class so a budget refuse is not a "not a place", and
@@ -1235,6 +1371,69 @@ export async function searchAddressPointsByPrefix(input: {
   }
 
   return [...byLabel.values()];
+}
+
+/**
+ * ADDRESS-POINT CONTAINMENT BIND (P-175, 2026-09-12).
+ *
+ * `txgio_address` carries a rooftop point for an address the CAD roll has
+ * not yet written a house number for -- the common shape is a newly platted,
+ * still-vacant lot: the city assigns the number before the appraisal
+ * district does. Today such a point resolves with no `parcelNodeId` at all
+ * (an {@link AddressPointSearchHit}) and reads `located-unbound` downstream
+ * (smartsite-mcp's `splitFindParcelHits`): the address is known, no parcel
+ * string matches it, and the geometry that actually contains the point is
+ * never consulted. It is right there, though -- `txgio_parcel.geom` is
+ * PostGIS-native and GIST-indexed (`txgio_parcel_geom_gist_idx`, migration
+ * 0095) over the SAME county. One `ST_Contains` query, county-scoped, binds
+ * the point directly. Zero or more than one containing parcel (a genuine
+ * miss, or overlapping slivers) leaves the hit unbound rather than
+ * guessing, per this file's standing commitment #1. A gate-blocked county's
+ * bind is crosswalked through {@link loadSitusCrosswalk} exactly like a
+ * parcel-situs hit, so the returned node is the one the tier-1 bake
+ * actually populates, not a raw TxGIO id the bake never wrote facets for.
+ */
+async function bindAddressPointByContainment(
+  hit: AddressPointSearchHit,
+  database: TxgioAddressResolveDb,
+): Promise<PlaceSearchHit> {
+  const rows = (await database
+    .select({ propId: txgioParcel.propId, geoId: txgioParcel.geoId })
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, hit.countyFips),
+        sql`${txgioParcel.geom} is not null`,
+        sql`${txgioParcel.geom} && ST_SetSRID(ST_MakePoint(${hit.longitude}, ${hit.latitude}), 4326)`,
+        sql`ST_Contains(${txgioParcel.geom}, ST_SetSRID(ST_MakePoint(${hit.longitude}, ${hit.latitude}), 4326))`,
+      ),
+    )
+    .limit(3)) as { propId: string | null; geoId: string | null }[];
+
+  const byPropId = new Map<string, string | null>();
+  for (const r of rows) {
+    const propId = r.propId?.trim();
+    if (!propId) continue;
+    if (!byPropId.has(propId)) byPropId.set(propId, r.geoId);
+  }
+  if (byPropId.size !== 1) return hit; // none or ambiguous (overlap): leave unbound, honest.
+
+  const [[txgioPropId, geoId]] = [...byPropId.entries()];
+  const crosswalk = await loadSitusCrosswalk(
+    [{ countyFips: hit.countyFips, geoId }],
+    database,
+  );
+  const nodeId = situsNodeId(hit.countyFips, txgioPropId!, geoId, crosswalk);
+  if (!nodeId) return hit;
+
+  return {
+    parcelNodeId: nodeId,
+    situsAddress: hit.situsAddress,
+    countyFips: hit.countyFips,
+    latitude: hit.latitude,
+    longitude: hit.longitude,
+    source: "address-point-containment",
+  };
 }
 
 /**
@@ -1376,8 +1575,30 @@ export async function searchPlaceByPrefix(input: {
         )
       : [];
 
+  // P-175: the parcel-situs ladder found nothing at all (the CAD roll has
+  // no house number for this address yet, e.g. a just-platted vacant lot),
+  // so an address point's rooftop coordinate is worth binding by
+  // containment. Bounded to the same remaining budget; a timeout or a
+  // query error fails open to the unbound hit (today's behaviour), never
+  // blocks the response.
+  const boundAddressHits =
+    situsHits.length === 0 && addressHits.length > 0 && !budgetExhausted
+      ? await runBoundedSitusQuery(
+          remainingMs(),
+          input.database,
+          async (database) =>
+            Promise.all(
+              addressHits.map((hit) =>
+                bindAddressPointByContainment(hit, database),
+              ),
+            ),
+          addressHits,
+          onBudget,
+        )
+      : addressHits;
+
   const merged: PlaceSearchHit[] = [...situsHits];
-  for (const hit of addressHits) {
+  for (const hit of boundAddressHits) {
     const key = hit.situsAddress.trim().toLowerCase();
     if (seenLookup.has(key)) continue;
     seenLookup.add(key);
