@@ -1,0 +1,69 @@
+# P-169 / A-132 (_decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md):
+# the CAD loader's Cloud Run Job, us-east4. Named ldt-cad-ingest (not
+# factory-cad-ingest): this image is built from legacy-design-tools, not
+# hauska-factory, and the factory-* prefix in this project names jobs
+# whose image and job-control-plane code live in the hauska-factory repo.
+# Pattern mirrors hauska-factory's own per-job cloudbuild files and
+# hauska-engine's cloudbuild.atoms-writer.yaml: build, push, pin by digest,
+# deploy. TARGET is per-execution (--args=--target=staging|production),
+# never baked — both secret pairs are mounted so the job can serve either.
+#
+#   gcloud builds submit --config=cloudbuild.cad-ingest.yaml --project=hauska-prod-497015
+#
+# EXECUTE FORMS. County/target/file are supplied at execute time:
+#   dry run (no store write, no target needed):
+#     gcloud run jobs execute ldt-cad-ingest --project=hauska-prod-497015 --region=us-east4 \
+#       --wait --args=--county=48453,--dry-run,--file=gs://hauska-prod-497015-cad-ingest-drops/<obj>
+#   staging apply:
+#     ...,--args=--county=48453,--target=staging,--file=gs://hauska-prod-497015-cad-ingest-drops/<obj>
+#   production apply:
+#     ...,--args=--county=48453,--target=production,--file=gs://hauska-prod-497015-cad-ingest-drops/<obj>
+#
+# A laptop run of the same CLI with a non-dry-run flag refuses
+# LAPTOP_WRITE_FROZEN (cli.ts) before any file is even downloaded —
+# CLOUD_RUN_JOB is set by the Cloud Run Jobs platform itself, never by a
+# caller-supplied flag.
+substitutions:
+  _REGION: "us-east4"
+  _IMAGE: "us-east4-docker.pkg.dev/hauska-prod-497015/hauska-factory/cad-ingest"
+  _IMAGE_TAG: "cad-ingest"
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_IMAGE}:${_IMAGE_TAG}-$BUILD_ID
+      - -f
+      - Dockerfile.cad-ingest-job
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_IMAGE}:${_IMAGE_TAG}-$BUILD_ID"]
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        DIGEST="$$(gcloud artifacts docker images describe ${_IMAGE}:${_IMAGE_TAG}-$BUILD_ID --format='value(image_summary.fully_qualified_digest)')"
+        case "$$DIGEST" in
+          *@sha256:*) ;;
+          *) echo "REFUSE: describe did not return a digest: $$DIGEST" >&2; exit 2 ;;
+        esac
+        echo "pinning ldt-cad-ingest to $$DIGEST"
+
+        gcloud run jobs deploy ldt-cad-ingest \
+          --project=hauska-prod-497015 --region=${_REGION} --image="$$DIGEST" \
+          --task-timeout=21600 --max-retries=0 --memory=2Gi --cpu=1 \
+          --set-secrets=STAGING_NEONDB_URL=STAGING_NEONDB_URL:latest,PRODUCTION_NEONDB_URL=PRODUCTION_NEONDB_URL:latest \
+          --set-env-vars=IMAGE_DIGEST=$$DIGEST,CLOUD_RUN_REGION=${_REGION}
+
+images:
+  - ${_IMAGE}:${_IMAGE_TAG}-$BUILD_ID
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+timeout: 1800s

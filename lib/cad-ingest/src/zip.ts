@@ -17,11 +17,32 @@ import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import yauzl from "yauzl";
 
+import { resolvePacsExportDeclaration } from "./sources";
+
 export type EntryFilter = (entryName: string) => boolean;
 
 export const PACS_ENTRY_FILTER: EntryFilter = (name) =>
   /APPRAISAL_INFO\.TXT$/i.test(name) ||
   /APPRAISAL_IMPROVEMENT_DETAIL\.TXT$/i.test(name);
+
+/**
+ * PACS zip-extraction filter, county-aware (P-169). A county with a
+ * declared PACS export shape (sources.ts PACS_EXPORT_DECLARATIONS) is
+ * matched by its declared entry basenames instead of the generic
+ * APPRAISAL_INFO.TXT / APPRAISAL_IMPROVEMENT_DETAIL.TXT regex — without
+ * this, the generic filter discards a declared county's real entries
+ * (e.g. TCAD's PROP.TXT / IMP_DET.TXT) during extraction, before
+ * discoverFiles ever sees them. A county with no declaration gets the
+ * unchanged generic filter.
+ */
+export function pacsEntryFilterFor(fips?: string): EntryFilter {
+  const declaration = fips ? resolvePacsExportDeclaration(fips) : undefined;
+  if (!declaration) return PACS_ENTRY_FILTER;
+  const names = [declaration.infoEntry, declaration.improvementDetailEntry]
+    .filter((n): n is string => Boolean(n))
+    .map((n) => n.toLowerCase());
+  return (name) => names.includes(basename(name).toLowerCase());
+}
 
 export const ORION_ENTRY_FILTER: EntryFilter = (name) =>
   /\.(zip|txt|csv)$/i.test(name);
