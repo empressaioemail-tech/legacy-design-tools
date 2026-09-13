@@ -1060,8 +1060,24 @@ export function registerTools(server: McpServer): void {
                   return upgradeRequiredResult(refuseStudioReport(entitlement));
                 }
               }
+              // P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13):
+              // this line is reached ONLY after the Studio-or-unlock check
+              // above already passed (by subscription OR by unlock — either
+              // one), so callerTier is always "public-paid" here. Passed
+              // explicitly, never a hardcoded default inside
+              // buildEngineGateHeaders, so a future call site that skips
+              // the check above sends "public-free" and the engine's own
+              // independent tier check refuses it — defense in depth.
+              // `entitlement` is carried too so a refusal from the ENGINE's
+              // own gate (an outcome this local check did not expect,
+              // since it already said yes) surfaces in the same
+              // upgrade_required vocabulary as every other refusal here.
               return ensureDeclaredError(
-                await executeFeasibilityExport({ parcelNodeId }),
+                await executeFeasibilityExport({
+                  parcelNodeId,
+                  callerTier: "public-paid",
+                  entitlement,
+                }),
               );
             }
             if (isPropertyExportKind(kind)) {

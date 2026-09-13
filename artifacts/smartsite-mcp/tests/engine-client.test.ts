@@ -59,7 +59,7 @@ describe("engine-client (P-119 / OPS-16 A-103)", () => {
   });
 
   it("buildEngineGateHeaders carries the pinned gate-front header shape with a stable connector credential id", () => {
-    const headers = buildEngineGateHeaders({ packageId: "feasibility-export" });
+    const headers = buildEngineGateHeaders({ packageId: "feasibility-export", callerTier: "public-paid" });
     expect(headers).toMatchObject({
       "x-hauska-product": "cortex",
       "x-hauska-tenant-id": "public-catalog",
@@ -70,17 +70,29 @@ describe("engine-client (P-119 / OPS-16 A-103)", () => {
     expect(headers["x-hauska-request-id"]).toBeTruthy();
   });
 
+  // P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13): the header
+  // is no longer a hardcoded constant -- it must carry WHATEVER tier the
+  // caller passes, including the refusing value. No production call site
+  // passes "public-free" today (feasibility-export.ts only reaches this
+  // function after its own local gate has passed), but the function itself
+  // must not silently coerce a refusing tier into a granting one.
+  it("buildEngineGateHeaders carries a caller-supplied public-free tier verbatim -- never coerced to public-paid", () => {
+    const headers = buildEngineGateHeaders({ packageId: "feasibility-export", callerTier: "public-free" });
+    expect(headers["x-hauska-access-tier"]).toBe("public-free");
+  });
+
   it("a supplied requestId is used verbatim instead of generating one", () => {
     const headers = buildEngineGateHeaders({
       packageId: "feasibility-export",
+      callerTier: "public-paid",
       requestId: "req-fixed-1",
     });
     expect(headers["x-hauska-request-id"]).toBe("req-fixed-1");
   });
 
   it("two calls with no requestId supplied generate distinct ids", () => {
-    const a = buildEngineGateHeaders({ packageId: "feasibility-export" });
-    const b = buildEngineGateHeaders({ packageId: "feasibility-export" });
+    const a = buildEngineGateHeaders({ packageId: "feasibility-export", callerTier: "public-paid" });
+    const b = buildEngineGateHeaders({ packageId: "feasibility-export", callerTier: "public-paid" });
     expect(a["x-hauska-request-id"]).not.toBe(b["x-hauska-request-id"]);
   });
 });
