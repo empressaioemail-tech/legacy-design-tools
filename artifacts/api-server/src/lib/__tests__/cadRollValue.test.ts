@@ -18,6 +18,7 @@ import {
   positiveSqftOrNull,
   studioGatedCadRollValuationRefusal,
   valueBasisFromRow,
+  vintageLabelFromCadPropertyRow,
   CAD_ROLL_DOLLAR_FIELDS,
   COUNTY_ASSESSED_VALUE_BASIS,
   ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP,
@@ -93,6 +94,52 @@ describe("P-178 (2026-09-13): a row marked absent-from-declared-drop is never se
       source: "cad_property",
       vintage: "2026",
       basis: "48209:117412: cad_property.marketValue is absent",
+    });
+  });
+});
+
+describe("P-178 (2026-09-13): vintageLabelFromCadPropertyRow -- the card's label, not a load timestamp", () => {
+  it("FALSIFIER: Hays' current preliminary source_vintage maps to the exact operator-required label, so a customer comparing to hayscad.com is not misled -- _decisions/2026-09-13_hays_declared_2026_roll_is_the_8_26_export.md", () => {
+    expect(
+      vintageLabelFromCadPropertyRow({
+        taxYear: 2026,
+        sourceVintage: "2026-preliminary-data-export-files",
+      }),
+    ).toBe("2026 preliminary (notice values)");
+  });
+
+  it("every OTHER source_vintage (every other county, every vintage this repo has not named) falls back to the bare tax year -- byte-identical to pre-P-178 behaviour", () => {
+    expect(
+      vintageLabelFromCadPropertyRow({ taxYear: 2025, sourceVintage: "tier:cad-export;2025-supp0" }),
+    ).toBe("2025");
+    expect(vintageLabelFromCadPropertyRow({ taxYear: 2026, sourceVintage: null })).toBe("2026");
+    expect(vintageLabelFromCadPropertyRow({ taxYear: 2026, sourceVintage: undefined })).toBe("2026");
+    expect(vintageLabelFromCadPropertyRow({ taxYear: null, sourceVintage: "anything" })).toBeNull();
+  });
+
+  it("cadRollFromCadProperty and cadPropertyFactsFromRow both thread the label, not the bare year, onto every field that carries a vintage", () => {
+    const preliminaryRow = {
+      taxYear: 2026,
+      sourceVintage: "2026-preliminary-data-export-files",
+      marketValue: 50390,
+      assessedValue: 50390,
+      landValue: 50390,
+      improvementValue: 0,
+      livingAreaSqft: null,
+      yearBuilt: null,
+      legalDescription: "LOT 4 BLK B STURGEON",
+      exemptionCodes: null,
+    };
+    const baked = cadRollFromCadProperty(preliminaryRow);
+    expect(baked.marketValue?.vintage).toBe("2026 preliminary (notice values)");
+    const facts = cadPropertyFactsFromRow(preliminaryRow);
+    expect(facts.cadRoll.marketValue?.vintage).toBe("2026 preliminary (notice values)");
+    expect(facts.legalDescription?.vintage).toBe("2026 preliminary (notice values)");
+    const wire = cadRollToWire(facts.cadRoll, "48209:97651", null);
+    expect(wire.marketValue).toMatchObject({
+      state: "present",
+      v: 50390,
+      vintage: "2026 preliminary (notice values)",
     });
   });
 });
