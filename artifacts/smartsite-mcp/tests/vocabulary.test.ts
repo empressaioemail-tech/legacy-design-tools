@@ -35,6 +35,7 @@ const REQUIRED_TOKENS = [
   "side_corner",
   "atom_path_pending",
   "modelled-figure-withheld",
+  "no-zoning-stamp",
   "upgrade_required",
   "parcel_not_found",
   "baked_snapshot_not_found",
@@ -58,17 +59,21 @@ function entryFor(token: string): VocabularyEntry {
 }
 
 describe("VOCABULARY (V1)", () => {
-  it("has between 15 and 35 entries", () => {
+  it("has between 15 and 40 entries", () => {
     // P-91 v3 Q1 added the five closed place-search refusal codes
     // (radius_invalid, radius_exceeds_max, radius_unbounded,
     // bare_street_unbounded, bare_street_not_a_street), 19 -> 24. The
     // upper bound moved from 20 to 25 to admit that and leave one slot.
     // P-106 added the nine find_parcels refusal codes, 24 -> 33, and the
-    // ceiling moved 25 -> 35 to admit those and leave two slots. It is
+    // ceiling moved 25 -> 35 to admit those and leave two slots. OPS-23
+    // P-167 wave 5 added no-zoning-stamp (its own real row, not just a
+    // mention inside declined-in-bake's meaning), 34 -> 36 (P-153's
+    // modelled-figure-withheld landed between P-106 and this wave), and
+    // the ceiling moved 35 -> 40 to admit it and leave a few slots. It is
     // still not re-derived from VOCABULARY.length itself (that would make
     // this check unable to fail on an unbounded table).
     expect(VOCABULARY.length).toBeGreaterThanOrEqual(15);
-    expect(VOCABULARY.length).toBeLessThanOrEqual(35);
+    expect(VOCABULARY.length).toBeLessThanOrEqual(40);
   });
 
   it("every token is unique", () => {

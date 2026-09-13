@@ -178,8 +178,8 @@ importers:
   artifacts/api-server:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@empressaio/cortex-client':
         specifier: workspace:*
         version: link:../../packages/cortex-client
@@ -1394,8 +1394,8 @@ importers:
   artifacts/smartsite-mcp:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -1829,8 +1829,8 @@ importers:
   lib/engine-core:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/codes':
         specifier: workspace:*
         version: link:../codes
@@ -1968,8 +1968,8 @@ importers:
   lib/knowledge-atoms:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/db':
         specifier: workspace:*
         version: link:../db
@@ -2055,8 +2055,8 @@ importers:
   lib/portal-ui:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.90.21(react@19.1.0)
@@ -2165,8 +2165,8 @@ importers:
   lib/submission-classifier:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../api-zod
@@ -2324,8 +2324,8 @@ importers:
   scripts:
     dependencies:
       '@empressaio/atom-contract':
-        specifier: ^1.33.1
-        version: 1.33.1(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: ^1.34.0
+        version: 1.34.0(@types/pg@8.18.0)(pg@8.20.0)
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
@@ -2479,8 +2479,8 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
-  '@empressaio/atom-contract@1.33.1':
-    resolution: {integrity: sha512-vSbxmTSBObrMaTYifp1FVRYGyKcEJB8+BOnpNrc73meaJ5t4gYFWzr4xye0wo0035vv2l6f97FQTAg5RJp+sRA==}
+  '@empressaio/atom-contract@1.34.0':
+    resolution: {integrity: sha512-BAzrMGRPk2Cgpkpmrf02X/n7wjcgzmhSFTQhBX9FXUkjI6n5/dFu2C7JepmblRN9c9lt4yiqJ2PAwp3y9GeG+w==}
     engines: {node: '>=18.18.0'}
 
   '@empressaio/setback-corpus@1.2.0':
@@ -7313,7 +7313,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@empressaio/atom-contract@1.33.1(@types/pg@8.18.0)(pg@8.20.0)':
+  '@empressaio/atom-contract@1.34.0(@types/pg@8.18.0)(pg@8.20.0)':
     dependencies:
       drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
       zod: 3.25.76
