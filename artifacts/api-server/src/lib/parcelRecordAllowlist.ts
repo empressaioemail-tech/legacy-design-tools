@@ -247,26 +247,53 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * content lives in parcel_record_companion_row) -- its wrapper already
  * handles that; this card only adds the slate entry.
  *
- * NOT ADDED as independent entries, deliberately: setbackSideFt,
- * setbackRearFt, setbackCornerFt for these same five counties. Unlike the
- * four rails above, these three have NO resolveAllowlist call site of their
- * own anywhere in this repo (grep-confirmed) -- setbacksFactServeCutover.ts
- * gates the whole four-key group on setbackFrontFt's OWN entry alone (see
- * that rail's own comment below; this is PARCEL-B-SLATE3's original
- * representative-key design, not a gap this card introduces). A slate entry
- * literally spelled "<county>:setbackSideFt" would never be read by any
- * code -- adding one would be the textually-compliant-but-inert defect this
- * whole program exists to close. Because setbackFrontFt was already slated
- * for these five counties (below) and its gate just flipped to pass, the
- * three sibling values are, as of Z2's merge, already being served live
- * from parcel_record for every parcel in this group -- live-probed before
- * this card made any edit (48491:R638791 returned frontFt/sideFt/rearFt/
- * cornerFt = 20/5/10/15, all parcel_record-sourced) and re-probed after
- * deploy, per this card's own close.
+ * RETIRED (P-152 lane 6, OPS-23, ruling A-140, overseer 2026-09-13):
+ * setbackSideFt, setbackRearFt, setbackCornerFt (five counties, Hays
+ * EXCLUDED) and zoningJurisdictionKey, zoningProvenance (all six counties)
+ * NOW HAVE independent slate entries below, superseding the
+ * representative-key design this comment used to document. The prior
+ * reasoning ("these have NO resolveAllowlist call site of their own
+ * anywhere in this repo, so a literal entry would never be read by any
+ * code") is still true of THIS repo's own consumers
+ * (setbacksFactServeCutover.ts / zoningFactServeCutover.ts still gate the
+ * whole group on their representative key alone, unchanged by this card --
+ * see those files' own module docs) but is NOT true of hauska-engine's
+ * services/retrieval-api parcel-record-reader.ts, which iterates every rail
+ * key in this slate independently with no group/representative-key concept
+ * of its own (R-9, OPS-23: one reader). That second, newer consumer reads
+ * and acts on a literal "<county>:setbackSideFt"-shaped entry, so leaving
+ * these five ungated there was a genuine slate gap for it, not an inert
+ * no-op -- confirmed live before this card's edit: parcel_gate_verdict
+ * reads verdict=pass, unaccounted_count=0 for all five siblings in
+ * 48021/48055/48309/48453/48491 (setbackSideFt/RearFt/CornerFt EXCLUDED
+ * only in Hays 48209; zoningJurisdictionKey/zoningProvenance pass in all
+ * six including Hays), and parcel_record_cell for the Bastrop probe parcel
+ * (48021:34049) carries real, non-null, earned values for every one of
+ * them (setbackSideFt=10, setbackRearFt=30, setbackCornerFt=20, source
+ * "@empressaio/setback-corpus@1.1.0:bastrop-development-code";
+ * zoningJurisdictionKey="bastrop-tx", zoningProvenance a real ArcGIS
+ * FeatureServer citation URL) -- re-verified live at edit time
+ * (2026-09-13), not assumed from the prior card's read. The divergence test
+ * (parcelRecordAllowlist.test.ts) is extended so a sibling missing its own
+ * entry for a county where the gate already passes fails loudly, rather
+ * than silently reading legacy there.
+ *
+ * acreageAcres (all six counties) and acreageMethod (Bastrop/Travis/
+ * Williamson only -- Caldwell/Hays REFUSE, McLennan EXCLUDED) (P-152 lane 6):
+ * two more rails with no resolveAllowlist call site in THIS repo (grep-
+ * confirmed, same shape as the siblings above) but read independently by
+ * the retrieval-api reader and composed onto the panel's baseFacts.acreage
+ * by hauska-map's own BFF. Verdict re-checked live 2026-09-13: acreageAcres
+ * passes everywhere with unaccounted_count 0; acreageMethod passes only in
+ * 48021/48453/48491 (48055 and 48209 REFUSE with real unaccounted counts,
+ * 48309 EXCLUDED -- not slated for those three, not an oversight).
+ * acreageSqft has NO earned cell in ANY county (verdict=excluded
+ * everywhere) and stays unslated -- adding it would violate "do not widen a
+ * check to admit a value it does not satisfy."
  *
  * zoningDistrict + setbackFrontFt, ALL SIX counties including Caldwell
  * (F-01, PARCEL-B-SLATE3, OPS-16 A-096/A-097/A-098, 2026-09-04): the
- * specific defect this card fixes. Unlike every rail above, zoning
+ * specific defect that card fixed. Unlike every rail above, zoning
  * (zoningDistrict/zoningJurisdictionKey/zoningProvenance) and setbacks
  * (setbackFrontFt/setbackSideFt/setbackRearFt/setbackCornerFt) DO have a
  * live legacy serve path (r1BriefCompose.ts's zoningDisposition and
@@ -278,19 +305,18 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * seven rail keys when they should read NOT_APPLICABLE, matching what
  * hauska-factory's parcel-record-engine already writes at row-creation time
  * (rail-keys.js's UNINCORPORATED_NOT_APPLICABLE_RAIL_KEYS, instantiate.js).
- * Operator ruling (OPS-16 A-096): "it should be not applicable." Each
- * three/four-key group is gated on ONE representative rail key
- * (zoningDistrict for the zoning group, setbackFrontFt for the setbacks
- * group) rather than seven independent slate entries -- the sibling keys
- * in each group are metadata about / siblings of the SAME determination,
- * written together by instantiate.js, not independent facts the way the
- * six dollar/structural rails are (see zoningFactFromParcelRecord.ts's and
- * setbacksFactFromParcelRecord.ts's own module docs). All six counties are
- * slated with no per-county exclusion -- rail-keys.js/instantiate.js apply
- * this logic statewide with no documented geographic restriction, matching
- * overlayDistricts'/schoolDistrict's own "all six, no exclusion documented"
- * reasoning, not wells'/specialDistricts' Caldwell exclusion. No gate
- * verdict exists for either representative rail key as of this card
+ * Operator ruling (OPS-16 A-096): "it should be not applicable." zoningDistrict
+ * and setbackFrontFt are the representative keys THIS repo's own
+ * setbacksFactServeCutover.ts / zoningFactServeCutover.ts still gate their
+ * whole group on (unchanged by P-152 lane 6 -- see RETIRED note above for
+ * why that remains correct for this repo's own consumers even though the
+ * siblings now also carry their own independent entries for the
+ * retrieval-api reader). All six counties are slated with no per-county
+ * exclusion -- rail-keys.js/instantiate.js apply this logic statewide with
+ * no documented geographic restriction, matching overlayDistricts'/
+ * schoolDistrict's own "all six, no exclusion documented" reasoning, not
+ * wells'/specialDistricts' Caldwell exclusion. No gate verdict exists for
+ * either representative rail key as of this card
  * (gate-rail-cli.mjs evaluation is a separate, out-of-repo process per
  * OPS-16 A-098); every entry resolves to 'legacy' until one does -- the
  * same accepted, zero-regression-risk initial state utilityService,
@@ -426,6 +452,46 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48309:maxFootprintSqFt",
   "48453:maxFootprintSqFt",
   "48491:maxFootprintSqFt",
+  // P-152 lane 6 (OPS-23, ruling A-140, 2026-09-13): the five representative-key
+  // siblings, independent entries where parcel_gate_verdict passes.
+  "48021:zoningJurisdictionKey",
+  "48055:zoningJurisdictionKey",
+  "48209:zoningJurisdictionKey",
+  "48309:zoningJurisdictionKey",
+  "48453:zoningJurisdictionKey",
+  "48491:zoningJurisdictionKey",
+  "48021:zoningProvenance",
+  "48055:zoningProvenance",
+  "48209:zoningProvenance",
+  "48309:zoningProvenance",
+  "48453:zoningProvenance",
+  "48491:zoningProvenance",
+  "48021:setbackSideFt",
+  "48055:setbackSideFt",
+  "48309:setbackSideFt",
+  "48453:setbackSideFt",
+  "48491:setbackSideFt",
+  "48021:setbackRearFt",
+  "48055:setbackRearFt",
+  "48309:setbackRearFt",
+  "48453:setbackRearFt",
+  "48491:setbackRearFt",
+  "48021:setbackCornerFt",
+  "48055:setbackCornerFt",
+  "48309:setbackCornerFt",
+  "48453:setbackCornerFt",
+  "48491:setbackCornerFt",
+  // P-152 lane 6 (OPS-23, 2026-09-13): the nine safe-to-add acreage pairs
+  // lane 4 identified (parcel_gate_verdict pass, unaccounted_count 0).
+  "48021:acreageAcres",
+  "48055:acreageAcres",
+  "48209:acreageAcres",
+  "48309:acreageAcres",
+  "48453:acreageAcres",
+  "48491:acreageAcres",
+  "48021:acreageMethod",
+  "48453:acreageMethod",
+  "48491:acreageMethod",
 ]);
 
 /**
