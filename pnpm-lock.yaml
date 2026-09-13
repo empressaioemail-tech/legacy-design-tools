@@ -183,6 +183,9 @@ importers:
       '@empressaio/cortex-client':
         specifier: workspace:*
         version: link:../../packages/cortex-client
+      '@empressaio/setback-corpus':
+        specifier: ^1.2.0
+        version: 1.2.0
       '@gltf-transform/core':
         specifier: ^4.3.0
         version: 4.3.0
@@ -2478,6 +2481,10 @@ packages:
 
   '@empressaio/atom-contract@1.33.1':
     resolution: {integrity: sha512-vSbxmTSBObrMaTYifp1FVRYGyKcEJB8+BOnpNrc73meaJ5t4gYFWzr4xye0wo0035vv2l6f97FQTAg5RJp+sRA==}
+    engines: {node: '>=18.18.0'}
+
+  '@empressaio/setback-corpus@1.2.0':
+    resolution: {integrity: sha512-EGqPFUhociTX41lhrGECGXFANQGT5CcajRLeY6ahz1Y3dcRIoU/hUycm6P8PEOncDchgIY8mJTd39XuIPQKSTQ==}
     engines: {node: '>=18.18.0'}
 
   '@esbuild/linux-x64@0.27.3':
@@ -7340,6 +7347,8 @@ snapshots:
       - prisma
       - sql.js
       - sqlite3
+
+  '@empressaio/setback-corpus@1.2.0': {}
 
   '@esbuild/linux-x64@0.27.3':
     optional: true
