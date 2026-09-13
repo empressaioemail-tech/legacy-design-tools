@@ -203,23 +203,17 @@ describe("gate-blocked situs hits resolve through the crosswalk (P-175)", () => 
 });
 
 describe("address-point containment bind (P-175)", () => {
-  it("a located-but-unbound address point resolves through containment when exactly one TxGIO parcel contains it", async () => {
+  it("a located-but-unbound address point resolves through containment to the RAW TxGIO id -- deliberately not crosswalked", async () => {
     const db = fakeDb({
       // First .from(txgioParcel) call is the (empty) situs lookup; the
       // second is the containment query. Both share the same canned rows
       // fixture keyed by table identity, so return the containment hit --
       // the situs path finds nothing regardless (no matching keys/prefix).
-      txgioParcelRows: [
-        { propId: "97651", geoId: "11-2011-0001-00400-3" },
-      ],
-      cadPropertyRows: [
-        {
-          countyFips: "48209",
-          propId: "84632",
-          propertyNumber: "11-2011-0001-00400-3",
-          taxYear: 2026,
-        },
-      ],
+      // cad_property is deliberately "unreachable": an address-point
+      // containment bind must never query the crosswalk (no competing
+      // account to collide with here, unlike a parcel-situs hit).
+      txgioParcelRows: [{ propId: "97651" }],
+      cadPropertyRows: "unreachable",
     });
 
     // searchAddressPointsByPrefix is exercised through searchPlaceByPrefix
@@ -257,7 +251,7 @@ describe("address-point containment bind (P-175)", () => {
     expect(result.hits).toHaveLength(1);
     const hit = result.hits[0]!;
     expect(hit.source).toBe("address-point-containment");
-    expect(hit.parcelNodeId).toBe("48209:84632");
+    expect(hit.parcelNodeId).toBe("48209:97651");
   });
 
   it("no containing parcel: the address point stays unbound (today's behaviour, located-unbound downstream)", async () => {

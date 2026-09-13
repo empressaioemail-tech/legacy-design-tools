@@ -1388,17 +1388,34 @@ export async function searchAddressPointsByPrefix(input: {
  * 0095) over the SAME county. One `ST_Contains` query, county-scoped, binds
  * the point directly. Zero or more than one containing parcel (a genuine
  * miss, or overlapping slivers) leaves the hit unbound rather than
- * guessing, per this file's standing commitment #1. A gate-blocked county's
- * bind is crosswalked through {@link loadSitusCrosswalk} exactly like a
- * parcel-situs hit, so the returned node is the one the tier-1 bake
- * actually populates, not a raw TxGIO id the bake never wrote facets for.
+ * guessing, per this file's standing commitment #1.
+ *
+ * DELIBERATELY NOT CROSSWALKED, unlike a parcel-situs hit. An earlier
+ * version of this function routed the bound TxGIO id through
+ * {@link loadSitusCrosswalk} on the theory that the tier-1 bake serves
+ * parcel_record_cell under the crosswalked (CAD-account) node id. Live-
+ * verified false: `parcel_record`/`parcel_record_cell` is keyed by
+ * `txgio_parcel.prop_id` VERBATIM for every county, gate-blocked or not
+ * (confirmed 2026-09-12 against production -- the crosswalk-target nodes
+ * for all four vacant Sturgeon lots carry ZERO parcel_record_cell rows,
+ * while their raw TxGIO nodes already carry a real flood cell). The
+ * crosswalk exists to resolve a NUMBER COLLISION between two different
+ * accounts sharing one bare-numeric id (the 629/Mesa-Verde chimera, where
+ * TxGIO prop_id 97658 happens to equal an unrelated CAD PropertyID) --
+ * it does not apply here: an address point with no parcel-situs hit at
+ * all has no competing account to collide with. Binding to the raw TxGIO
+ * id keeps this parcel on the node the bake actually serves (flood,
+ * zoning, situs already present); the house number itself is not yet on
+ * the CAD roll under any key, crosswalked or not, and stays a known gap
+ * in the served card's OWN label (find_parcel's hit still carries the
+ * correct house-numbered address from the address point itself).
  */
 async function bindAddressPointByContainment(
   hit: AddressPointSearchHit,
   database: TxgioAddressResolveDb,
 ): Promise<PlaceSearchHit> {
   const rows = (await database
-    .select({ propId: txgioParcel.propId, geoId: txgioParcel.geoId })
+    .select({ propId: txgioParcel.propId })
     .from(txgioParcel)
     .where(
       and(
@@ -1408,22 +1425,17 @@ async function bindAddressPointByContainment(
         sql`ST_Contains(${txgioParcel.geom}, ST_SetSRID(ST_MakePoint(${hit.longitude}, ${hit.latitude}), 4326))`,
       ),
     )
-    .limit(3)) as { propId: string | null; geoId: string | null }[];
+    .limit(3)) as { propId: string | null }[];
 
-  const byPropId = new Map<string, string | null>();
+  const propIds = new Set<string>();
   for (const r of rows) {
     const propId = r.propId?.trim();
-    if (!propId) continue;
-    if (!byPropId.has(propId)) byPropId.set(propId, r.geoId);
+    if (propId) propIds.add(propId);
   }
-  if (byPropId.size !== 1) return hit; // none or ambiguous (overlap): leave unbound, honest.
+  if (propIds.size !== 1) return hit; // none or ambiguous (overlap): leave unbound, honest.
 
-  const [[txgioPropId, geoId]] = [...byPropId.entries()];
-  const crosswalk = await loadSitusCrosswalk(
-    [{ countyFips: hit.countyFips, geoId }],
-    database,
-  );
-  const nodeId = situsNodeId(hit.countyFips, txgioPropId!, geoId, crosswalk);
+  const [txgioPropId] = [...propIds];
+  const nodeId = parcelNodeId(hit.countyFips, txgioPropId!);
   if (!nodeId) return hit;
 
   return {
