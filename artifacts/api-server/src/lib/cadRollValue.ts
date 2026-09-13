@@ -219,10 +219,22 @@ export function applyCadPropertyFactsToPayload(
   };
 }
 
+/**
+ * True when a row's own prop_id fell off the declared roll (P-178). A marked
+ * row's stale dollar/legal/exemption columns are never certified values --
+ * see cadPropertyFactsFromRow, the single choke point every reader of a
+ * cad_property row passes through for these facts.
+ */
+export function isAbsentFromDeclaredDrop(
+  row: Pick<CadPropertyRollSlice, "rollMembership">,
+): boolean {
+  return row.rollMembership === ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP;
+}
+
 export function cadPropertyFactsFromRow(
   row: CadPropertyRollSlice | null | undefined,
 ): CadPropertyBakedFacts {
-  if (!row) {
+  if (!row || isAbsentFromDeclaredDrop(row)) {
     return {
       cadRoll: emptyCadRoll(),
       yearBuilt: null,
@@ -273,6 +285,15 @@ export function bakedExemptionCodes(
   return { v: codes, source: CAD_PROPERTY_SOURCE, vintage };
 }
 
+/**
+ * P-178 (2026-09-13). The one recognised `cad_property.roll_membership`
+ * value today: this row's own prop_id was present on a prior drop of this
+ * tax_year and is absent from the DECLARED drop. See the migration
+ * (drizzle/0101_cad_property_roll_membership.sql) for the write side.
+ */
+export const ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP =
+  "absent-from-declared-drop" as const;
+
 export interface CadPropertyRollSlice {
   taxYear: number | null;
   marketValue: unknown;
@@ -283,6 +304,8 @@ export interface CadPropertyRollSlice {
   yearBuilt?: unknown;
   legalDescription?: unknown;
   exemptionCodes?: unknown;
+  /** P-178: a marked row's stale dollar/text columns are never served as present. See cadPropertyFactsFromRow. */
+  rollMembership?: unknown;
 }
 
 /** Empty cadRoll: every key present, every value null. Used when CAD was not consulted or the row missed. */

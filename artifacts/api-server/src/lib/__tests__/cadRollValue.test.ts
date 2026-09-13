@@ -11,6 +11,7 @@ import {
   emptyCadRoll,
   gateBakedCadRollRecord,
   gateCadRollWireValuation,
+  isAbsentFromDeclaredDrop,
   isGenuineCadExportRow,
   nonNegativeDollarOrNull,
   positiveDollarOrNull,
@@ -19,10 +20,82 @@ import {
   valueBasisFromRow,
   CAD_ROLL_DOLLAR_FIELDS,
   COUNTY_ASSESSED_VALUE_BASIS,
+  ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP,
   STRATMAP_REDISTRIBUTED_VALUE_BASIS,
   type CadRollWire,
 } from "../cadRollValue";
 import { serializeTwinOnRecord } from "../twinOnRecordSerialize";
+
+describe("P-178 (2026-09-13): a row marked absent-from-declared-drop is never served as present", () => {
+  it("isAbsentFromDeclaredDrop reads the one recognised roll_membership value, nothing else", () => {
+    expect(isAbsentFromDeclaredDrop({ rollMembership: ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP })).toBe(true);
+    expect(isAbsentFromDeclaredDrop({ rollMembership: "absent-from-declared-drop" })).toBe(true);
+    expect(isAbsentFromDeclaredDrop({ rollMembership: null })).toBe(false);
+    expect(isAbsentFromDeclaredDrop({ rollMembership: undefined })).toBe(false);
+    expect(isAbsentFromDeclaredDrop({ rollMembership: "" })).toBe(false);
+    expect(isAbsentFromDeclaredDrop({ rollMembership: "some-other-disposition" })).toBe(false);
+  });
+
+  it("FALSIFIER: a marked row with real, present-shaped dollar/legal/exemption values still certifies as empty -- the marker overrides whatever stale data sits in the row's own columns", () => {
+    const marked = {
+      taxYear: 2026,
+      marketValue: 636690,
+      assessedValue: 636690,
+      landValue: 177000,
+      improvementValue: 459690,
+      livingAreaSqft: 2867,
+      yearBuilt: 2012,
+      legalDescription: "S7350 MESA VERDE PH 2 BLK B LOT 12",
+      exemptionCodes: ["HS"],
+      rollMembership: ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP,
+    };
+    const facts = cadPropertyFactsFromRow(marked);
+    expect(facts.cadRoll).toEqual(emptyCadRoll());
+    expect(facts.yearBuilt).toBeNull();
+    expect(facts.legalDescription).toBeNull();
+    expect(facts.exemptionCodes).toBeNull();
+  });
+
+  it("an unmarked row with the identical values serves normally -- the marker, not the presence of data, is what refuses", () => {
+    const unmarked = {
+      taxYear: 2026,
+      marketValue: 636690,
+      assessedValue: 636690,
+      landValue: 177000,
+      improvementValue: 459690,
+      livingAreaSqft: 2867,
+      yearBuilt: 2012,
+      legalDescription: "S7350 MESA VERDE PH 2 BLK B LOT 12",
+      exemptionCodes: ["HS"],
+      rollMembership: null,
+    };
+    const facts = cadPropertyFactsFromRow(unmarked);
+    expect(facts.cadRoll.marketValue?.v).toBe(636690);
+    expect(facts.yearBuilt?.v).toBe(2012);
+    expect(facts.legalDescription?.v).toBe("S7350 MESA VERDE PH 2 BLK B LOT 12");
+    expect(facts.exemptionCodes?.v).toEqual(["HS"]);
+  });
+
+  it("a marked row reads absent all the way to the wire, with the ordinary generic absence reason (vintage labelling is a separate card)", () => {
+    const marked = {
+      taxYear: 2026,
+      marketValue: 636690,
+      assessedValue: 636690,
+      landValue: 177000,
+      improvementValue: 0,
+      livingAreaSqft: null,
+      rollMembership: ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP,
+    };
+    const facts = cadPropertyFactsFromRow(marked);
+    const wire = cadRollToWire(facts.cadRoll, "48209:117412", "2026");
+    expect(wire.marketValue).toEqual({
+      state: "absent",
+      source: "cad_property",
+      vintage: "2026",
+      basis: "48209:117412: cad_property.marketValue is absent",
+    });
+  });
+});
 
 describe("cadRollValue", () => {
   it("cadRollFromCadProperty is the bake mapper; source is cad_property", () => {

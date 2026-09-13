@@ -118,6 +118,30 @@ export const cadProperty = pgTable(
      */
     quickRefId: text("quick_ref_id"),
     propertyNumber: text("property_number"),
+    /**
+     * A declared disposition for an account present on a prior drop of this
+     * tax_year and absent from the DECLARED drop (P-178, 2026-09-13).
+     *
+     * `upsertCadProperties` writes a whole row and never deletes, so a
+     * re-ingest of a fresher export only ever touches rows the new export
+     * still names -- an account that fell off the roll is otherwise left at
+     * its stale values with nothing to say so. NULL means "no disposition
+     * needed" (this row IS on its own declared drop), never a default
+     * absence. The one recognised value today is
+     * `'absent-from-declared-drop'` (see cadRollValue.ts's
+     * ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP) -- a typed string column
+     * rather than a Postgres enum so a future disposition never requires a
+     * migration to add.
+     *
+     * Written by whichever load step lands the declared drop, never by this
+     * schema. Consumed by cadRollValue.ts's cadPropertyFactsFromRow, which
+     * refuses to serve a marked row's cadRoll/yearBuilt/legalDescription/
+     * exemptionCodes as present regardless of what stale values still sit in
+     * the row's own dollar/text columns.
+     */
+    rollMembership: text("roll_membership"),
+    /** The export this row was marked against, when rollMembership is set. Provenance only; not read by any join. */
+    declaredSourceFile: text("declared_source_file"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.countyFips, t.propId, t.taxYear] }),
