@@ -73,6 +73,7 @@ import {
 } from "./zip";
 import { resolveTargetDatabaseUrl } from "./targetEnv";
 import { finishCadIngestRun, hashInputFile, startCadIngestRun, type InputFileRecord } from "./runRecord";
+import { createFileRecordWriter, markAbsentFromDeclaredDrop } from "./rollMembership";
 
 const { Pool } = pg;
 
@@ -497,6 +498,7 @@ async function main(): Promise<void> {
   }
 
   let rowsUpserted = 0;
+  let rowsMarkedAbsent: number | undefined;
   if (dryRun) {
     for await (const _rec of records) {
       // parse-only
@@ -543,12 +545,36 @@ async function main(): Promise<void> {
         },
       });
       rowsUpserted = summary.rowsUpserted;
+
+      // P-178: the declared-roll marking step. Runs POST-UPSERT, never
+      // inside upsertCadProperties -- see rollMembership.ts's own header.
+      // Scoped by tax_year, so only for formats that resolve one (Orion
+      // counties always do, enforced above; others skip this step
+      // unchanged, matching every county's pre-P-178 behaviour).
+      let markedAbsentPropIds: string[] | undefined;
+      if (taxYearArg !== undefined) {
+        const recordPath = join(await mkdtemp(join(tmpdir(), "cad-roll-membership-")), `${runId}.jsonl`);
+        const record = createFileRecordWriter(recordPath);
+        const marked = await markAbsentFromDeclaredDrop(pool, {
+          countyFips: county.fips,
+          taxYear: taxYearArg,
+          declaredSourceFile: sourceFile,
+          record,
+        });
+        markedAbsentPropIds = marked.markedPropIds;
+        rowsMarkedAbsent = markedAbsentPropIds.length;
+        log(
+          `roll membership: ${markedAbsentPropIds.length} account(s) marked absent-from-declared-drop (record: ${recordPath})`,
+        );
+      }
+
       await finishCadIngestRun(pool, runId, {
         status: "success",
         rowsRead: counters.rowsRead,
         rowsParsed: counters.rowsParsed,
         rowsUpserted,
         rowsSkipped: counters.rowsSkipped,
+        markedAbsentPropIds,
       });
     } catch (err) {
       await finishCadIngestRun(pool, runId, {
@@ -573,6 +599,9 @@ async function main(): Promise<void> {
   log(`rows parsed:     ${counters.rowsParsed}`);
   log(`rows upserted:   ${dryRun ? "0 (dry-run)" : rowsUpserted}`);
   log(`rows skipped:    ${counters.rowsSkipped} (malformed)`);
+  log(
+    `rows marked absent: ${dryRun ? "0 (dry-run)" : (rowsMarkedAbsent ?? "n/a (no tax-year scope)")}`,
+  );
   log(`duplicate rows:  ${counters.duplicateRows} (same prop+year in file)`);
   log(`duration:        ${seconds}s`);
   if (counters.skipSamples.length > 0) {
