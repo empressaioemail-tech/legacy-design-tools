@@ -41,6 +41,7 @@ minimumReleaseAgeExclude:
   - stripe-replit-sync
   - '@hauska/map-renderer'
   - '@empressaio/atom-contract'
+  - '@empressaio/setback-corpus'
 
 onlyBuiltDependencies:
   - '@swc/core'
