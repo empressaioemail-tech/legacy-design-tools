@@ -330,3 +330,68 @@ export function crosswalkBindCorroborated(
   if (accountStemFeature == null) return true;
   return accountStemFeature === geoIdFeature;
 }
+
+/**
+ * ACCOUNT-ATTRIBUTE CROSSWALK -- the REVERSE direction (P-177, 2026-09-13).
+ *
+ * `parcelCrosswalkJoinKey`/`crosswalkBindCorroborated` above answer "which
+ * TxGIO geometry does this CAD account's published Geographic ID name" --
+ * used to pick a node's RING. This answers the opposite question: "which CAD
+ * ACCOUNT does THIS node's own published Geographic ID name" -- used to pick
+ * a TxGIO-keyed node's ACCOUNT-DERIVED ATTRIBUTES (situs, dollars,
+ * structural, land use).
+ *
+ * WHY THIS EXISTS. A TxGIO-keyed node's bare prop_id can coincidentally
+ * equal a REAL, UNRELATED CAD PropertyID (the Sturgeon/Mesa-Verde block,
+ * P-175 overseer review 2026-09-13: every one of
+ * 97651/97652/97653/97657/97658 is also a real Mesa Verde or Catalina Ln
+ * account). Reading `cad_property` by that bare number -- what the bake did
+ * through P-175 -- silently serves the colliding account's dollars under
+ * the Sturgeon lot's geometry. The correct account is the one THIS node's
+ * own `txgio_parcel.geo_id` names via `cad_property.property_number`,
+ * corroborated the same way the geometry bind is: by the account's
+ * `quick_ref_id` R-stem agreeing with the node's OWN bare prop_id, never
+ * disagreeing.
+ *
+ * FAIL CLOSED, two ways, both distinguishable in the caller's counters.
+ * No geo_id on this node, or no account publishes it: `accountPropId: null`,
+ * reason `no-crosswalk-account` -- an honest absence, never the colliding
+ * account's data. Two published identifiers naming DIFFERENT accounts:
+ * `accountPropId: null`, reason `corroboration-refused` -- positive evidence
+ * of a bad bind, not resolved by picking one.
+ *
+ * `geoIdToAccountPropId` and `accountStemByPropId` are the SAME maps the
+ * geometry crosswalk already builds (inverted / reused, no new query): a
+ * geo_id key in `geoIdToAccountPropId` is unique by construction (an
+ * ambiguous property_number was already dropped when that map's forward
+ * direction, `crosswalkKeyByPropId`, was built), so inverting it here is
+ * safe.
+ */
+export type AccountCrosswalkReason =
+  | "crosswalk"
+  | "no-crosswalk-account"
+  | "corroboration-refused";
+
+export interface AccountCrosswalkResult {
+  accountPropId: string | null;
+  reason: AccountCrosswalkReason;
+}
+
+export function accountCrosswalkForNode(
+  nodePropId: string,
+  nodeGeoId: string | null | undefined,
+  geoIdToAccountPropId: ReadonlyMap<string, string>,
+  accountStemByPropId: ReadonlyMap<string, string>,
+): AccountCrosswalkResult {
+  const geoId = nodeGeoId?.trim();
+  if (!geoId) return { accountPropId: null, reason: "no-crosswalk-account" };
+  const accountPropId = geoIdToAccountPropId.get(geoId) ?? null;
+  if (accountPropId == null) {
+    return { accountPropId: null, reason: "no-crosswalk-account" };
+  }
+  const stem = accountStemByPropId.get(accountPropId) ?? null;
+  if (stem != null && stem !== nodePropId) {
+    return { accountPropId: null, reason: "corroboration-refused" };
+  }
+  return { accountPropId, reason: "crosswalk" };
+}
