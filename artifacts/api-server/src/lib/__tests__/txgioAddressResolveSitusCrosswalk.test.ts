@@ -1,24 +1,20 @@
 /**
- * P-175 (2026-09-12). Two failures in the parcel-situs / address-point
- * ladder, both regressions against today's behaviour before this card:
+ * P-175 (2026-09-12) / P-177 (2026-09-13).
  *
- * 1. A parcel-situs hit for a GATE-BLOCKED county (Hays 48209, Williamson
- *    48491) is minted from TxGIO's raw `prop_id`, which is a DIFFERENT
- *    published identifier than `cad_property.prop_id` for those two
- *    counties and can collide with an unrelated CAD account -- the
- *    Sturgeon/Mesa Verde chimera (`48209:97658` carrying lot 11's
- *    geometry under an unrelated Austin account's label). The fix
- *    resolves through the same crosswalk the tier-1 bake uses
- *    (`property_number` -> `txgio_parcel.geo_id`) before minting the node.
+ * A parcel-situs hit is minted from TxGIO's raw `prop_id`, for every county,
+ * gate-blocked or not. P-175 briefly routed a gate-blocked county's hit
+ * through a `cad_property` crosswalk instead (on the theory that the
+ * TxGIO-keyed node's own account attributes were unreachable any other
+ * way); the P-175 overseer review (2026-09-13) found the served customer
+ * card never changed, because the crosswalk fix P-175 actually needed lived
+ * in the tier-1 BAKE (`nodeFacetBakeTier1ConformantCli.ts`, see
+ * `joinNormalizeCrosswalk.test.ts`'s `accountCrosswalkForNode` suite), not
+ * in the situs RESOLVER. P-177 reverted the resolver half: the tests below
+ * prove a parcel-situs hit resolves to the plain TxGIO node again, and that
+ * this file no longer queries `cad_property` at all for that path.
  *
- * 2. An address point with no parcel-situs hit (a just-platted vacant lot
- *    the appraisal district has not written a house number for yet)
- *    resolves with `parcelNodeId: null` and reads `located-unbound`
- *    downstream, even when its rooftop point falls inside exactly one
- *    TxGIO parcel already in the store. The fix binds it by containment.
- *
- * Both tests are written to FAIL on the pre-card code (raw `parcelNodeId`,
- * no containment query) and pass after it.
+ * The address-point containment bind (the OTHER half of P-175/#668/#669) was
+ * never crosswalked and is unaffected by P-177; its tests are unchanged.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -33,13 +29,6 @@ const TXGIO_PARCEL = {
   situsZip: "situs_zip",
   geom: "geom",
 };
-const CAD_PROPERTY = {
-  countyFips: "county_fips",
-  propId: "prop_id",
-  taxYear: "tax_year",
-  quickRefId: "quick_ref_id",
-  propertyNumber: "property_number",
-};
 const TXGIO_ADDRESS = {
   countyFips: "county_fips",
   fullAddr: "full_addr",
@@ -53,7 +42,6 @@ const TXGIO_ADDRESS = {
 vi.mock("@workspace/db", () => ({
   db: {},
   txgioParcel: TXGIO_PARCEL,
-  cadProperty: CAD_PROPERTY,
   txgioAddress: TXGIO_ADDRESS,
 }));
 
@@ -70,30 +58,16 @@ const {
  * A fake drizzle handle whose `.select().from(table).where(...).limit(n)`
  * returns canned rows keyed by WHICH table object `.from()` was called
  * with (identity, matching how the real module always passes the actual
- * imported table const). `cadPropertyRows` defaults to a throwing stub so
- * a test that expects NO crosswalk query (a non-blocked county) fails
- * loudly if one happens anyway.
+ * imported table const).
  */
-function fakeDb(opts: {
-  txgioParcelRows?: unknown[];
-  cadPropertyRows?: unknown[] | "unreachable";
-}) {
+function fakeDb(opts: { txgioParcelRows?: unknown[] }) {
   const txgioParcelRows = opts.txgioParcelRows ?? [];
-  const cadPropertyRows = opts.cadPropertyRows ?? "unreachable";
   return {
     select: () => ({
       from: (table: unknown) => ({
         where: () => ({
           limit: async () => {
             if (table === TXGIO_PARCEL) return txgioParcelRows;
-            if (table === CAD_PROPERTY) {
-              if (cadPropertyRows === "unreachable") {
-                throw new Error(
-                  "must not query cad_property for a non-blocked county",
-                );
-              }
-              return cadPropertyRows;
-            }
             return [];
           },
         }),
@@ -102,8 +76,8 @@ function fakeDb(opts: {
   };
 }
 
-describe("gate-blocked situs hits resolve through the crosswalk (P-175)", () => {
-  it("Hays 48209: a situs hit keyed by TxGIO prop_id 97658 resolves to CAD account 84639, not 97658", async () => {
+describe("gate-blocked situs hits resolve to the plain TxGIO node -- no crosswalk (P-177)", () => {
+  it("Hays 48209: a situs hit keyed by TxGIO prop_id 97658 resolves to 48209:97658, never a CAD account id", async () => {
     const db = fakeDb({
       txgioParcelRows: [
         {
@@ -116,14 +90,6 @@ describe("gate-blocked situs hits resolve through the crosswalk (P-175)", () => 
           situsZip: null,
         },
       ],
-      cadPropertyRows: [
-        {
-          countyFips: "48209",
-          propId: "84639",
-          propertyNumber: "11-2011-0001-01100-3",
-          taxYear: 2026,
-        },
-      ],
     });
 
     const hits = await searchSitusByStreetKeys({
@@ -132,51 +98,10 @@ describe("gate-blocked situs hits resolve through the crosswalk (P-175)", () => 
     });
 
     expect(hits).toHaveLength(1);
-    expect(hits[0]!.parcelNodeId).toBe("48209:84639");
-    expect(hits[0]!.parcelNodeId).not.toBe("48209:97658");
-  });
-
-  it("Hays 48209: an ambiguous property_number (claimed by 2 accounts) refuses the crosswalk and falls back to the raw TxGIO id", async () => {
-    const db = fakeDb({
-      txgioParcelRows: [
-        {
-          countyFips: "48209",
-          propId: "97658",
-          geoId: "11-2011-0001-01100-3",
-          situsAddress: "629 STURGEON DR",
-          situsCity: null,
-          situsState: null,
-          situsZip: null,
-        },
-      ],
-      cadPropertyRows: [
-        {
-          countyFips: "48209",
-          propId: "84639",
-          propertyNumber: "11-2011-0001-01100-3",
-          taxYear: 2026,
-        },
-        {
-          countyFips: "48209",
-          propId: "99999",
-          propertyNumber: "11-2011-0001-01100-3",
-          taxYear: 2026,
-        },
-      ],
-    });
-
-    const hits = await searchSitusByStreetKeys({
-      keys: ["629STURGEONDR"],
-      database: db as never,
-    });
-
-    expect(hits).toHaveLength(1);
-    // Refused as ambiguous: falls back to raw TxGIO-keyed node (not worse
-    // than today), never guesses between the two claimants.
     expect(hits[0]!.parcelNodeId).toBe("48209:97658");
   });
 
-  it("a non-blocked county (Bastrop 48021) never queries cad_property and keeps the raw TxGIO id", async () => {
+  it("a non-blocked county (Bastrop 48021) resolves to the plain TxGIO node the same way", async () => {
     const db = fakeDb({
       txgioParcelRows: [
         {
@@ -189,7 +114,6 @@ describe("gate-blocked situs hits resolve through the crosswalk (P-175)", () => 
           situsZip: null,
         },
       ],
-      cadPropertyRows: "unreachable",
     });
 
     const hits = await searchSitusByStreetKeys({
@@ -200,20 +124,42 @@ describe("gate-blocked situs hits resolve through the crosswalk (P-175)", () => 
     expect(hits).toHaveLength(1);
     expect(hits[0]!.parcelNodeId).toBe("48021:34137");
   });
+
+  it("never queries cad_property: a database with no cad_property mock at all still resolves (proves no crosswalk lookup exists on this path)", async () => {
+    // No `cadProperty` export in the @workspace/db mock above at all (unlike
+    // the pre-P-177 version of this file). If searchSitusByStreetKeys still
+    // referenced the crosswalk, importing txgioAddressResolve would throw at
+    // module load (cadProperty would be undefined) rather than failing here
+    // -- so this suite passing at all is itself part of the proof.
+    const db = fakeDb({
+      txgioParcelRows: [
+        {
+          countyFips: "48209",
+          propId: "97652",
+          geoId: "11-2011-0001-00500-3",
+          situsAddress: "617 STURGEON DR",
+          situsCity: null,
+          situsState: null,
+          situsZip: null,
+        },
+      ],
+    });
+    const hits = await searchSitusByStreetKeys({
+      keys: ["617STURGEONDR"],
+      database: db as never,
+    });
+    expect(hits[0]!.parcelNodeId).toBe("48209:97652");
+  });
 });
 
-describe("address-point containment bind (P-175)", () => {
+describe("address-point containment bind (P-175, unaffected by P-177)", () => {
   it("a located-but-unbound address point resolves through containment to the RAW TxGIO id -- deliberately not crosswalked", async () => {
     const db = fakeDb({
       // First .from(txgioParcel) call is the (empty) situs lookup; the
       // second is the containment query. Both share the same canned rows
       // fixture keyed by table identity, so return the containment hit --
       // the situs path finds nothing regardless (no matching keys/prefix).
-      // cad_property is deliberately "unreachable": an address-point
-      // containment bind must never query the crosswalk (no competing
-      // account to collide with here, unlike a parcel-situs hit).
       txgioParcelRows: [{ propId: "97651" }],
-      cadPropertyRows: "unreachable",
     });
 
     // searchAddressPointsByPrefix is exercised through searchPlaceByPrefix
@@ -313,8 +259,8 @@ describe("address-point containment bind (P-175)", () => {
               }
               if (table === TXGIO_PARCEL) {
                 return [
-                  { propId: "97653", geoId: "a" },
-                  { propId: "97999", geoId: "b" },
+                  { propId: "97653" },
+                  { propId: "97999" },
                 ];
               }
               return [];

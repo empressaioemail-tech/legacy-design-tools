@@ -47,13 +47,16 @@ import {
   resolveAddressLandUse,
   type CountyCadPropertyRoll,
   type CountyLandUseRoll,
+  type PropIdCadPropertyEntry,
 } from "./lib/joinIntegrityGate.js";
 import {
+  accountCrosswalkForNode,
   addressJoinKey,
   cadAccountNumberStem,
   crosswalkBindCorroborated,
   normalizeSitusAddress,
   parcelCrosswalkJoinKey,
+  type AccountCrosswalkReason,
 } from "./lib/joinNormalize.js";
 import { ringCentroid } from "./lib/nodeFacetBakeTier1.js";
 import { COUNTY_NAMES, effectiveBlockedFips, firstRing } from "./lib/nodeFacetTier1Assemble.js";
@@ -468,6 +471,83 @@ async function main() {
         `${crosswalkAmbiguousKeys} Geographic IDs refused as ambiguous`,
     );
   }
+
+  // P-177 (2026-09-13). ACCOUNT-ATTRIBUTE CROSSWALK, the reverse of the
+  // geometry bind above. THE DEFECT THIS CLOSES: every downstream read of
+  // `cadPropertyRoll.byPropId.get(propId)` in this file used the ATOM'S OWN
+  // bare TxGIO prop_id as the CAD lookup key. For a gate-blocked county that
+  // key can coincidentally equal a REAL, UNRELATED CAD PropertyID (P-175
+  // overseer review, 2026-09-13: every one of Hays 97651/97652/97653/97657/
+  // 97658 is also a real Mesa Verde or Catalina Ln account), so the bake
+  // silently served that colliding account's dollars, structural facts and
+  // situs under the TxGIO node's own geometry. P-175's own crosswalk fix
+  // (above) only ever affected which RING a node draws; it never touched
+  // this lookup, which is why the served label and dollars never changed.
+  //
+  // THE FIX. `effectiveCadPropertyRoll` is `cadPropertyRoll` UNCHANGED for a
+  // non-blocked county (this is a strict no-op there: same object
+  // reference, zero behaviour change on Bastrop/Caldwell/McLennan/Travis).
+  // For a gate-blocked county it is a REMAPPED view, still keyed by the
+  // atom's own bare prop_id (so every existing `.byPropId.get(propId)` call
+  // site downstream -- the situs-key prepass below, this function's own
+  // per-atom loop, and `buildConformantTier1Payload`'s internal lookup --
+  // keeps working unmodified), but each key now points at the CAD account
+  // the node's OWN published Geographic ID names via the crosswalk, never
+  // the bare-number coincidence. A node whose geo_id resolves no account, or
+  // whose resolved account's own QuickRefID stem disagrees, gets NO entry:
+  // an honest absence downstream (the same "no-roll-row" shape a genuinely
+  // retired account already earns), never the colliding account's data.
+  let effectiveCadPropertyRoll: CountyCadPropertyRoll = cadPropertyRoll;
+  let accountAttrBound = 0;
+  let accountAttrNoAccount = 0;
+  let accountAttrCorroborationRefused = 0;
+  const accountJoinByPropId = new Map<string, AccountCrosswalkReason>();
+  if (joinGateBlocked && parcelTable && cadPropertyRoll.consulted) {
+    const geoIdToAccountPropId = new Map<string, string>();
+    for (const [cadPropId, key] of crosswalkKeyByPropId) {
+      geoIdToAccountPropId.set(key, cadPropId);
+    }
+    const allPropIds = [
+      ...new Set(work.map((w) => w.parcelNodeId.split(":")[1] ?? "").filter(Boolean)),
+    ];
+    const { byPropId: ownGeoIdRows } = await joinParcelRows(
+      neondb,
+      county,
+      parcelTable,
+      allPropIds,
+      pageSize,
+    );
+    const remapped = new Map<string, PropIdCadPropertyEntry>();
+    for (const propId of allPropIds) {
+      const ownGeoId = ownGeoIdRows.get(propId)?.geo_id ?? null;
+      const { accountPropId, reason } = accountCrosswalkForNode(
+        propId,
+        ownGeoId,
+        geoIdToAccountPropId,
+        accountStemByPropId,
+      );
+      accountJoinByPropId.set(propId, reason);
+      if (reason === "crosswalk") accountAttrBound += 1;
+      else if (reason === "no-crosswalk-account") accountAttrNoAccount += 1;
+      else accountAttrCorroborationRefused += 1;
+      const entry = accountPropId ? (cadPropertyRoll.byPropId.get(accountPropId) ?? null) : null;
+      if (entry) remapped.set(propId, entry);
+    }
+    effectiveCadPropertyRoll = {
+      byPropId: remapped,
+      declaredTaxYear: cadPropertyRoll.declaredTaxYear,
+      consulted: cadPropertyRoll.consulted,
+    };
+    console.log(
+      `[node-facet-bake-t1-conformant] account-attribute crosswalk for ${county}: ` +
+        `bound=${accountAttrBound}, no-crosswalk-account=${accountAttrNoAccount}, ` +
+        `corroboration-refused=${accountAttrCorroborationRefused} ` +
+        "(a bound row takes its situs, dollars, structural facts and legal/exemption data " +
+        "from the account its own published Geographic ID names; a node with no bound " +
+        "account earns an honest absence, never the bare-prop_id-matched account)",
+    );
+  }
+
   if (joinGateBlocked && parcelTable) {
     const situsKeys = [
       ...new Set(
@@ -484,7 +564,11 @@ async function main() {
             // then looks up, or the recovery join silently misses every parcel
             // whose situs changed source. Same resolver, same inputs.
             const propId = w.parcelNodeId.split(":")[1] ?? "";
-            const rollEntry = cadPropertyRoll.byPropId.get(propId) ?? null;
+            // P-177: effectiveCadPropertyRoll, not cadPropertyRoll -- this key
+            // building must use the same crosswalk-corrected entry the main
+            // loop below will look up, or the recovery join is keyed off the
+            // colliding account's own (wrong) situs address.
+            const rollEntry = effectiveCadPropertyRoll.byPropId.get(propId) ?? null;
             const { situs, unusable } = situsForBake(
               w.body,
               rollEntry?.situsAddress ?? null,
@@ -623,8 +707,15 @@ async function main() {
     // being provably THIS parcel. `rollAbsent` folded into the trust verdict --
     // `no-roll-row` IS the retired state, so there is one verdict rather than a
     // boolean beside an enum that could disagree with it.
-    const rollEntry = cadPropertyRoll.consulted
-      ? (cadPropertyRoll.byPropId.get(propId) ?? null)
+    //
+    // P-177 (2026-09-13): effectiveCadPropertyRoll, not cadPropertyRoll. See
+    // the account-attribute crosswalk block above this loop -- on a
+    // non-blocked county this is the identical object (no behaviour change);
+    // on a gate-blocked county `.byPropId.get(propId)` now returns the
+    // account the node's own published Geographic ID names via the
+    // crosswalk, never the bare-number coincidence.
+    const rollEntry = effectiveCadPropertyRoll.consulted
+      ? (effectiveCadPropertyRoll.byPropId.get(propId) ?? null)
       : null;
     const declaredRollTrust = declaredRollTrustFor(
       body,
@@ -779,7 +870,12 @@ async function main() {
           }
         : {}),
       ...(landUseRoll ? { landUseRoll } : {}),
-      cadPropertyRoll,
+      // P-177: effectiveCadPropertyRoll, not cadPropertyRoll. The builder's
+      // own internal `cadPropertyRoll.byPropId.get(apn)` lookup (cadRoll
+      // dollars, structural, legal description, exemption codes, record
+      // retirement) is unmodified; it now simply reads a roll that is
+      // already keyed correctly for a gate-blocked county.
+      cadPropertyRoll: effectiveCadPropertyRoll,
       blockedFips: blockedSet,
       nowIso,
       onSitusFallback: ({ cityKey, situsCity }) => {
@@ -933,6 +1029,9 @@ async function main() {
       crosswalkAmbiguousKeys,
       crosswalkAccountsWithKey: crosswalkKeyByPropId.size,
       crosswalkParcelsIndexed: crosswalkByGeoId.size,
+      accountAttrBound,
+      accountAttrNoAccount,
+      accountAttrCorroborationRefused,
       propIds,
       schemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
       declaredRollTrust: trustCounts,

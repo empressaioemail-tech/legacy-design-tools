@@ -58,14 +58,12 @@
 
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { db as defaultDb, txgioParcel, txgioAddress, cadProperty } from "@workspace/db";
+import { db as defaultDb, txgioParcel, txgioAddress } from "@workspace/db";
 import {
   pointInGeometry,
   type GeoJsonGeometry,
 } from "@workspace/cad-ingest/txgio-geo";
-import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
-import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
 import { isPunctuationOnlySitus } from "./situsCompose";
 import {
   normalizeStreetLine,
@@ -812,105 +810,22 @@ function escapeIlikeLiteral(prefix: string): string {
 }
 
 /**
- * GATE-BLOCKED SITUS CROSSWALK (P-175, 2026-09-12).
+ * REVERTED (P-177, 2026-09-13). P-175 briefly resolved a gate-blocked
+ * county's parcel-situs hit to the CAD-account-keyed node its published
+ * Geographic ID names (`loadSitusCrosswalk`/`situsNodeId`, removed here).
+ * Live-verified wrong the same day, by the P-175 overseer review: the
+ * account-keyed node has no `parcel_record`/`parcel_record_cell` rows at
+ * all (that store is keyed by TxGIO prop_id verbatim, everywhere), so the
+ * "fixed" resolver was routing the customer to a hollow card with no flood
+ * cell, while the actual defect -- the TxGIO-keyed node serving the WRONG
+ * account's dollars and label -- went untouched (P-177 fixes THAT, in
+ * `nodeFacetBakeTier1ConformantCli.ts`, not here).
  *
- * For most counties `parcelNodeId(fips, txgioPropId)` is correct: TxGIO's
- * `prop_id` and `cad_property.prop_id` are the same appraisal-account
- * number. For a county whose prop_id join is gate-BLOCKED (Hays 48209,
- * Williamson 48491 -- `LANDUSE_JOIN_DISABLED_FIPS_SEED` in
- * ./joinNormalize), the two are DIFFERENT published identifiers that
- * coincidentally collide as bare numbers (CTX-HAYS-REBIND, P-124
- * 2026-09-10). A situs hit built from the raw TxGIO prop_id can silently
- * land on an unrelated CAD account's node -- the Sturgeon/Mesa Verde
- * chimera this card exists to fix (node `48209:97658` carrying lot 11's
- * geometry under an unrelated Austin account's label). This resolves the
- * SAME crosswalk the tier-1 bake uses
- * (`nodeFacetBakeTier1ConformantCli.ts`): `cad_property.property_number`
- * matched against `txgio_parcel.geo_id`, at the county's DECLARED CAD
- * vintage only. A `geo_id` claimed by more than one account at that vintage
- * is refused (never guessed), mirroring the bake's own ambiguity rule.
- *
- * Batched: one query for every candidate `geo_id` across every blocked
- * county present in a result set, not one query per row.
+ * The TxGIO-keyed node IS the Hays node: it has the polygon and the cells.
+ * A parcel-situs hit resolves to it exactly like any other county's, via
+ * plain `parcelNodeId(fips, propId)` below -- no crosswalk lookup at this
+ * layer, ever again. See P-177's overseer ruling (option A).
  */
-async function loadSitusCrosswalk(
-  candidates: { countyFips: string; geoId: string | null }[],
-  database: TxgioAddressResolveDb,
-): Promise<Map<string, string>> {
-  const declaredByCounty = new Map<string, number>();
-  const geoIds = new Set<string>();
-  for (const c of candidates) {
-    const fips = c.countyFips.trim();
-    const geoId = c.geoId?.trim();
-    if (!geoId || !LANDUSE_JOIN_DISABLED_FIPS_SEED.has(fips)) continue;
-    if (!declaredByCounty.has(fips)) {
-      const declared = tryResolveDeclaredCadVintage(fips);
-      if (declared) declaredByCounty.set(fips, declared.taxYear);
-    }
-    if (declaredByCounty.has(fips)) geoIds.add(geoId);
-  }
-  if (declaredByCounty.size === 0 || geoIds.size === 0) return new Map();
-
-  const rows = (await database
-    .select({
-      countyFips: cadProperty.countyFips,
-      propId: cadProperty.propId,
-      propertyNumber: cadProperty.propertyNumber,
-      taxYear: cadProperty.taxYear,
-    })
-    .from(cadProperty)
-    .where(
-      and(
-        inArray(cadProperty.countyFips, [...declaredByCounty.keys()]),
-        inArray(cadProperty.propertyNumber, [...geoIds]),
-      ),
-    )
-    .limit(geoIds.size * 4)) as {
-    countyFips: string | null;
-    propId: string | null;
-    propertyNumber: string | null;
-    taxYear: number | null;
-  }[];
-
-  // Bucket by (county, geo_id) so a geo_id claimed by >1 account in the same
-  // county is detectable; the declared-vintage filter runs in the same pass.
-  const byKey = new Map<string, Set<string>>();
-  for (const r of rows) {
-    const fips = r.countyFips?.trim();
-    const propertyNumber = r.propertyNumber?.trim();
-    const propId = r.propId?.trim();
-    if (!fips || !propertyNumber || !propId) continue;
-    if (declaredByCounty.get(fips) !== r.taxYear) continue;
-    const key = `${fips}:${propertyNumber}`;
-    if (!byKey.has(key)) byKey.set(key, new Set());
-    byKey.get(key)!.add(propId);
-  }
-  const resolved = new Map<string, string>();
-  for (const [key, propIds] of byKey) {
-    if (propIds.size === 1) resolved.set(key, [...propIds][0]!);
-    // >1 owner: ambiguous, refuse -- never guess between them.
-  }
-  return resolved;
-}
-
-/**
- * Mint a situs hit's parcel node id, applying {@link loadSitusCrosswalk}'s
- * result for a gate-blocked county. Falls back to the raw TxGIO-keyed node
- * (today's behaviour) when the county is not blocked, or when no crosswalk
- * resolution exists for this row -- unresolved is not worse than today.
- */
-function situsNodeId(
-  fips: string,
-  txgioPropId: string,
-  geoId: string | null,
-  crosswalk: Map<string, string>,
-): string | null {
-  if (geoId && LANDUSE_JOIN_DISABLED_FIPS_SEED.has(fips)) {
-    const cadPropId = crosswalk.get(`${fips}:${geoId}`);
-    if (cadPropId) return parcelNodeId(fips, cadPropId);
-  }
-  return parcelNodeId(fips, txgioPropId);
-}
 
 /**
  * Exact street-key situs lookup across store counties, optionally filtered by
@@ -949,7 +864,6 @@ export async function searchSitusByStreetKeys(input: {
     .select({
       countyFips: txgioParcel.countyFips,
       propId: txgioParcel.propId,
-      geoId: txgioParcel.geoId,
       situsAddress: txgioParcel.situsAddress,
       situsCity: txgioParcel.situsCity,
       situsState: txgioParcel.situsState,
@@ -965,17 +879,11 @@ export async function searchSitusByStreetKeys(input: {
     .limit(limit * 16)) as {
     countyFips: string | null;
     propId: string | null;
-    geoId: string | null;
     situsAddress: string | null;
     situsCity: string | null;
     situsState: string | null;
     situsZip: string | null;
   }[];
-
-  const crosswalk = await loadSitusCrosswalk(
-    rows.map((r) => ({ countyFips: r.countyFips ?? "", geoId: r.geoId })),
-    database,
-  );
 
   const byParcel = new Map<
     string,
@@ -986,7 +894,9 @@ export async function searchSitusByStreetKeys(input: {
     const propId = r.propId?.trim();
     const situs = r.situsAddress?.trim();
     if (!fips || !propId || !situs) continue;
-    const nodeId = situsNodeId(fips, propId, r.geoId, crosswalk);
+    // P-177: plain parcelNodeId, no crosswalk -- see the block comment above
+    // searchSitusByStreetKeys.
+    const nodeId = parcelNodeId(fips, propId);
     if (!nodeId) continue;
     if (!byParcel.has(nodeId)) {
       byParcel.set(nodeId, {
@@ -1155,7 +1065,6 @@ async function searchSitusByPrefixWithLocality(input: {
     .select({
       countyFips: txgioParcel.countyFips,
       propId: txgioParcel.propId,
-      geoId: txgioParcel.geoId,
       situsAddress: txgioParcel.situsAddress,
     })
     .from(txgioParcel)
@@ -1169,14 +1078,8 @@ async function searchSitusByPrefixWithLocality(input: {
     .limit(limit * 8)) as {
     countyFips: string | null;
     propId: string | null;
-    geoId: string | null;
     situsAddress: string | null;
   }[];
-
-  const crosswalk = await loadSitusCrosswalk(
-    rows.map((r) => ({ countyFips: r.countyFips ?? "", geoId: r.geoId })),
-    database,
-  );
 
   const byParcel = new Map<string, SitusSearchHit>();
   for (const r of rows) {
@@ -1192,7 +1095,9 @@ async function searchSitusByPrefixWithLocality(input: {
     ) {
       continue;
     }
-    const nodeId = situsNodeId(fips, propId, r.geoId, crosswalk);
+    // P-177: plain parcelNodeId, no crosswalk -- see the block comment above
+    // searchSitusByStreetKeys.
+    const nodeId = parcelNodeId(fips, propId);
     if (!nodeId) continue;
     if (!byParcel.has(nodeId)) {
       byParcel.set(nodeId, {
@@ -1390,15 +1295,15 @@ export async function searchAddressPointsByPrefix(input: {
  * miss, or overlapping slivers) leaves the hit unbound rather than
  * guessing, per this file's standing commitment #1.
  *
- * DELIBERATELY NOT CROSSWALKED, unlike a parcel-situs hit. An earlier
- * version of this function routed the bound TxGIO id through
- * {@link loadSitusCrosswalk} on the theory that the tier-1 bake serves
- * parcel_record_cell under the crosswalked (CAD-account) node id. Live-
- * verified false: `parcel_record`/`parcel_record_cell` is keyed by
- * `txgio_parcel.prop_id` VERBATIM for every county, gate-blocked or not
- * (confirmed 2026-09-12 against production -- the crosswalk-target nodes
- * for all four vacant Sturgeon lots carry ZERO parcel_record_cell rows,
- * while their raw TxGIO nodes already carry a real flood cell). The
+ * DELIBERATELY NOT CROSSWALKED, unlike a parcel-situs hit ever was again
+ * after P-177 (2026-09-13): an earlier version of THIS function routed the
+ * bound TxGIO id through a per-county crosswalk on the theory that the
+ * tier-1 bake serves parcel_record_cell under the crosswalked (CAD-account)
+ * node id. Live-verified false: `parcel_record`/`parcel_record_cell` is
+ * keyed by `txgio_parcel.prop_id` VERBATIM for every county, gate-blocked
+ * or not (confirmed 2026-09-12 against production -- the crosswalk-target
+ * nodes for all four vacant Sturgeon lots carry ZERO parcel_record_cell
+ * rows, while their raw TxGIO nodes already carry a real flood cell). The
  * crosswalk exists to resolve a NUMBER COLLISION between two different
  * accounts sharing one bare-numeric id (the 629/Mesa-Verde chimera, where
  * TxGIO prop_id 97658 happens to equal an unrelated CAD PropertyID) --

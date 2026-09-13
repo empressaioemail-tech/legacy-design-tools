@@ -26,6 +26,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  accountCrosswalkForNode,
   addressJoinKey,
   cadAccountNumberStem,
   crosswalkBindCorroborated,
@@ -178,5 +179,99 @@ describe("crosswalkBindCorroborated", () => {
     // the first feature of a county's shapefile.
     expect(crosswalkBindCorroborated(0, 0)).toBe(true);
     expect(crosswalkBindCorroborated(0, 1)).toBe(false);
+  });
+});
+
+describe("accountCrosswalkForNode (P-177, 2026-09-13)", () => {
+  // Real Sturgeon-block fixtures from the P-175 overseer review: TxGIO prop_id
+  // 97658 (lot 11, geo_id 11-2011-0001-01100-3) collides with the real, UNRELATED
+  // CAD PropertyID 97658 (13669 Mesa Verde Dr). The correct account for THIS
+  // node's geometry is 84639, whose own PropertyNumber matches the node's own
+  // geo_id and whose QuickRefID stem is 97658.
+  const geoIdToAccountPropId = new Map([
+    ["11-2011-0001-01100-3", "84639"], // lot 11 (629 Sturgeon)
+    ["11-2011-0001-00400-3", "84632"], // lot 4 (615 Sturgeon)
+  ]);
+  const accountStemByPropId = new Map([
+    ["84639", "97658"],
+    ["84632", "97651"],
+    // 84633 publishes a PropertyNumber but no readable QuickRefID stem in
+    // this fixture -- the "found nothing" branch below.
+  ]);
+
+  it("BINDS to the crosswalk account when the node's own geo_id resolves one, corroborated", () => {
+    expect(
+      accountCrosswalkForNode("97658", "11-2011-0001-01100-3", geoIdToAccountPropId, accountStemByPropId),
+    ).toEqual({ accountPropId: "84639", reason: "crosswalk" });
+  });
+
+  it("THE CHIMERA CASE: never falls back to the node's own bare prop_id as a CAD account", () => {
+    // 97658 IS a real, different CAD PropertyID (Mesa Verde). This function
+    // must never return "97658" as the account for node "97658" -- that IS
+    // the P-175 defect. It returns the crosswalk-resolved 84639 instead.
+    const result = accountCrosswalkForNode(
+      "97658",
+      "11-2011-0001-01100-3",
+      geoIdToAccountPropId,
+      accountStemByPropId,
+    );
+    expect(result.accountPropId).not.toBe("97658");
+    expect(result.accountPropId).toBe("84639");
+  });
+
+  it("BINDS when the account publishes no corroborating stem -- absence is not evidence against the bind", () => {
+    const geoIdIndex = new Map([["11-2011-0001-00500-3", "84633"]]);
+    const stemIndex = new Map<string, string>(); // 84633 has no recorded stem
+    expect(accountCrosswalkForNode("97652", "11-2011-0001-00500-3", geoIdIndex, stemIndex)).toEqual({
+      accountPropId: "84633",
+      reason: "crosswalk",
+    });
+  });
+
+  it("NO-CROSSWALK-ACCOUNT: the node carries no geo_id at all", () => {
+    expect(accountCrosswalkForNode("12345", null, geoIdToAccountPropId, accountStemByPropId)).toEqual({
+      accountPropId: null,
+      reason: "no-crosswalk-account",
+    });
+    expect(accountCrosswalkForNode("12345", undefined, geoIdToAccountPropId, accountStemByPropId)).toEqual({
+      accountPropId: null,
+      reason: "no-crosswalk-account",
+    });
+    expect(accountCrosswalkForNode("12345", "  ", geoIdToAccountPropId, accountStemByPropId)).toEqual({
+      accountPropId: null,
+      reason: "no-crosswalk-account",
+    });
+  });
+
+  it("NO-CROSSWALK-ACCOUNT: the node's geo_id resolves no account (the 58,015 no-key population)", () => {
+    expect(
+      accountCrosswalkForNode("99999", "11-9999-9999-99999-9", geoIdToAccountPropId, accountStemByPropId),
+    ).toEqual({ accountPropId: null, reason: "no-crosswalk-account" });
+  });
+
+  it("CORROBORATION-REFUSED: the resolved account's own stem names a DIFFERENT node -- positive evidence, not resolved by picking one", () => {
+    // Node "11111" resolves via geo_id to account 84639, but 84639's own
+    // QuickRefID stem is "97658", not "11111": the two published identifiers
+    // disagree about which node this account belongs to.
+    expect(
+      accountCrosswalkForNode("11111", "11-2011-0001-01100-3", geoIdToAccountPropId, accountStemByPropId),
+    ).toEqual({ accountPropId: null, reason: "corroboration-refused" });
+  });
+
+  it("NON-VACUITY: refusal and success are both reachable from the same index, decided by the node id alone", () => {
+    const forTheAccount = accountCrosswalkForNode(
+      "97658",
+      "11-2011-0001-01100-3",
+      geoIdToAccountPropId,
+      accountStemByPropId,
+    );
+    const forAnImposter = accountCrosswalkForNode(
+      "00000",
+      "11-2011-0001-01100-3",
+      geoIdToAccountPropId,
+      accountStemByPropId,
+    );
+    expect(forTheAccount.reason).toBe("crosswalk");
+    expect(forAnImposter.reason).toBe("corroboration-refused");
   });
 });
