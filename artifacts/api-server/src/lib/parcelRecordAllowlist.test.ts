@@ -49,16 +49,20 @@ describe("PARCEL_RECORD_SLATE — wells + specialDistricts (5 counties) + cityLi
     expect(PARCEL_RECORD_SLATE.has("48055:flood")).toBe(true);
   });
 
-  it("PARCEL-B-SLATE2: all six counties, INCLUDING Caldwell, are slated for all six dollar/structural rails -- these rails have no txgio-geometry dependency, so Caldwell's known gap does not apply here", () => {
-    for (const county of ALL_SIX_COUNTIES) {
+  it("PARCEL-B-SLATE2: all six counties, INCLUDING Caldwell but Hays EXCLUDED (P-177 holdback), are slated for all six dollar/structural rails -- these rails have no txgio-geometry dependency, so Caldwell's known gap does not apply here", () => {
+    const nonHaysCounties = ["48021", "48055", "48309", "48453", "48491"];
+    for (const county of nonHaysCounties) {
       for (const rail of SLATE2_RAIL_KEYS) {
         expect(PARCEL_RECORD_SLATE.has(`${county}:${rail}`)).toBe(true);
       }
     }
+    for (const rail of SLATE2_RAIL_KEYS) {
+      expect(PARCEL_RECORD_SLATE.has(`48209:${rail}`)).toBe(false);
+    }
   });
 
-  it("the slate has exactly 122 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 36 (6 counties x 6 dollar/structural rails) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt + 5 parcelAreaSqFt (OPS-21 S5, P-148) + 20 (5 in-scope counties x setbackRules/maxHeightFt/maxLotCoveragePct/maxFootprintSqFt, OPS-21 S6, P-150)", () => {
-    expect(PARCEL_RECORD_SLATE.size).toBe(122);
+  it("the slate has exactly 116 entries: 5 wells + 5 specialDistricts + 6 cityLimits + 6 flood + 30 (5 non-Hays counties x 6 dollar/structural rails, P-177 holdback) + 6 utilityService + 6 overlayDistricts + 2 agValuation + 6 schoolDistrict + 1 maxImperviousCoverPct + 6 valueHistory + 6 zoningDistrict + 6 setbackFrontFt + 5 parcelAreaSqFt (OPS-21 S5, P-148) + 20 (5 in-scope counties x setbackRules/maxHeightFt/maxLotCoveragePct/maxFootprintSqFt, OPS-21 S6, P-150)", () => {
+    expect(PARCEL_RECORD_SLATE.size).toBe(116);
   });
 
   it("OPS-16 A-096/A-097/A-098: all six counties, INCLUDING Caldwell, are slated for zoningDistrict and setbackFrontFt -- the representative keys for the zoning and setbacks not-applicable fix, no per-county exclusion documented in rail-keys.js/instantiate.js", () => {
@@ -167,7 +171,7 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     expect(result).toBe("legacy");
   });
 
-  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the 122 real slated entries", () => {
+  it("FALSIFIER: every UNSLATED (county, rail) pair resolves to legacy regardless of verdict -- covers every rail for every county except the 116 real slated entries", () => {
     const rails = [
       "cityLimits", "flood", "wells", "specialDistricts", "valueHistory", "apn",
       "marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt",
@@ -188,13 +192,13 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
     }
-    // Falsifier's own falsifier: this loop must actually skip the 122 real
+    // Falsifier's own falsifier: this loop must actually skip the 116 real
     // slated pairs (every one PARCEL_RECORD_SLATE holds, since this rail
     // list now covers all of them), not silently cover zero cases because
     // the skip branch is unreachable -- fails loudly if PARCEL_RECORD_SLATE
     // ever changes without this test being updated.
     expect(uncheckedSlatedPairs).toBe(PARCEL_RECORD_SLATE.size);
-    expect(uncheckedSlatedPairs).toBe(122);
+    expect(uncheckedSlatedPairs).toBe(116);
   });
 
   it("FALSIFIER: the five slated parcelAreaSqFt pairs (OPS-21 S5, P-148) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
@@ -256,14 +260,21 @@ describe("resolveAllowlistState — pure decision, every branch", () => {
     }
   });
 
-  it("FALSIFIER: all SIX slated pairs for each of the six PARCEL-B-SLATE2 dollar/structural rails (INCLUDING Caldwell) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
+  it("FALSIFIER: all FIVE slated pairs for each of the six PARCEL-B-SLATE2 dollar/structural rails (INCLUDING Caldwell, Hays EXCLUDED) resolve to record on a real pass verdict, refused on refuse, legacy on no verdict", () => {
     for (const rail of ["marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt"]) {
-      for (const county of ["48021", "48055", "48209", "48309", "48453", "48491"]) {
+      for (const county of ["48021", "48055", "48309", "48453", "48491"]) {
         expect(resolveAllowlistState(county, rail, { verdict: "pass" })).toBe("record");
         expect(resolveAllowlistState(county, rail, { verdict: "refuse" })).toBe("refused");
         expect(resolveAllowlistState(county, rail, { verdict: "excluded" })).toBe("refused");
         expect(resolveAllowlistState(county, rail, null)).toBe("legacy");
       }
+    }
+  });
+
+  it("FALSIFIER (P-177, 2026-09-13): Hays is held back from all six PARCEL-B-SLATE2 dollar/structural rails -- resolves to legacy even on a fabricated pass, because the record-sourced cells for these rails predate the crosswalk protection and were live-verified serving a bare-prop_id CAD-account collision (Mesa Verde/Austin dollars and living area on Sturgeon's own vacant lots)", () => {
+    for (const rail of ["marketValue", "assessedValue", "landValue", "improvementValue", "livingAreaSqft", "yearBuilt"]) {
+      expect(PARCEL_RECORD_SLATE.has(`48209:${rail}`)).toBe(false);
+      expect(resolveAllowlistState("48209", rail, { verdict: "pass" })).toBe("legacy");
     }
   });
 
