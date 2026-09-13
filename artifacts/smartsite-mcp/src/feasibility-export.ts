@@ -14,8 +14,9 @@
  *   1. Read job STATUS first (never blindly re-refresh — a job already
  *      `ready` from a prior call must be served straight from that job,
  *      not recomposed from scratch on every poll).
- *   2. If nothing has ever been requested (or the prior job failed), POST
- *      refresh to start one.
+ *   2. If nothing has ever been requested, the prior job failed, or the
+ *      prior job is `ready` but STALE (see below), POST refresh to start
+ *      a new one.
  *   3. Poll status on the engine's own `pollAfterMs` inside THIS call's own
  *      budget (FEASIBILITY_POLL_BUDGET_MS) until `ready` or `failed`.
  *   4. Ready within budget -> download and return the PDF, exactly the old
@@ -31,6 +32,32 @@
  * abort text (`engineThrewResult`) is retired: an agent caller could not
  * classify it as retryable, and there is nothing to retry manually now
  * that this function itself polls.
+ *
+ * P-155 WAVE-5 ADDENDUM (F23, overseer 2026-09-13): "read status first,
+ * skip refresh on ready" above was correct for the case it was built for
+ * (a caller re-invoking to continue polling a job it JUST started) but had
+ * no way to tell that apart from "this ready job is hours/days old and
+ * unrelated" — the engine's own feasibility_export_jobs row has NO TTL
+ * (one row per parcelNodeId, permanent once ready; see
+ * hauska-engine/packages/storage/migrations/013_feasibility_export_jobs.sql).
+ * The result, confirmed live in production for 48021:34049 (CP1,
+ * _inbox/2026-09-13_p155-refresh_cp1.json): once a job first reaches
+ * `ready`, export_instrument could NEVER produce a new document for that
+ * parcel again, no matter how much time passed or how many engine deploys
+ * landed — POST refresh was simply never called again. Fixed by treating a
+ * `ready` job as needing a fresh refresh when its `completedAt` is older
+ * than FEASIBILITY_READY_REUSE_WINDOW_MS (see below) — recent-enough-to-be-
+ * a-continuation is still served straight from the job (unchanged, still
+ * covered by this file's existing tests); genuinely stale triggers real
+ * recomposition, same as `failed`. A `ready` job with NO completedAt at all
+ * (the one legacy case: a pre-P-155 atom with an artifact on file but no
+ * job row) is treated as not-stale — vanishingly rare in practice, and
+ * consistent with this file's existing "no entitlement marker at all ->
+ * backward compatible, never a crash" posture. `generatedAt` now rides
+ * beside the bytes in the success envelope (sourced from the engine's
+ * `X-Feasibility-Generated-At` download header when present, else the
+ * status read's own completedAt) so a caller can see the served document's
+ * actual age without guessing.
  */
 
 import type { ToolResult } from "./tools-types.js";
@@ -80,6 +107,22 @@ const DOWNLOAD_TIMEOUT_MS = 30_000;
 const FEASIBILITY_POLL_BUDGET_MS = 20_000;
 const POLL_MIN_INTERVAL_MS = 3_000;
 const POLL_MAX_INTERVAL_MS = 8_000;
+/**
+ * P-155 wave-5 (F23). A `ready` job whose `completedAt` is within this
+ * window of "now" is treated as a live continuation of a job THIS caller
+ * (or one moments before it) just triggered, and is served straight from
+ * the job with no new refresh — the original, still-correct P-155 intent.
+ * Older than this, it is treated as stale and a fresh refresh is issued
+ * instead of silently re-serving old bytes.
+ *
+ * Set well above the slowest composition observed live (629.6s / ~10.5 min,
+ * 48453:113408, wave-1 P-155 close profiling) so a caller genuinely still
+ * polling a real in-flight-turned-ready job is never mistaken for asking
+ * for a fresh one, while anything on the order of hours/days (the actual
+ * F23 symptom: PDFs served identically 4+ hours and 7+ separate call pairs
+ * after the one job that ever produced them) is unambiguously stale.
+ */
+const FEASIBILITY_READY_REUSE_WINDOW_MS = 15 * 60_000;
 
 export type FeasibilityExportArgs = {
   parcelNodeId: string;
@@ -223,6 +266,23 @@ interface StatusRead {
   errorMessage?: string;
   result?: Record<string, unknown>;
   entitlement?: EngineEntitlementMarker;
+  /** P-155 wave-5 (F23). When present on a `ready` job, this is when THAT
+   * job's composition finished (the engine's job row completedAt) — used
+   * both to decide staleness (see FEASIBILITY_READY_REUSE_WINDOW_MS) and,
+   * on success, surfaced to the caller as `generatedAt`. Absent only for
+   * the legacy no-job-row case. */
+  completedAt?: string;
+}
+
+/** P-155 wave-5 (F23). True exactly when a `ready` job's own completedAt is
+ * old enough that serving it without a fresh refresh would be presenting
+ * stale bytes as current. A `ready` job with no completedAt at all (the
+ * legacy no-job-row case) is NOT stale — see the module doc. */
+function isStaleReadyJob(status: StatusRead, now: number = Date.now()): boolean {
+  if (status.state !== "ready" || !status.completedAt) return false;
+  const completedAtMs = Date.parse(status.completedAt);
+  if (!Number.isFinite(completedAtMs)) return false;
+  return now - completedAtMs > FEASIBILITY_READY_REUSE_WINDOW_MS;
 }
 
 /** Mirrors tools.ts's own `upgradeRequiredResult` exactly (duplicated
@@ -288,6 +348,7 @@ async function readStatus(
       errorMessage: typeof body.errorMessage === "string" ? body.errorMessage : undefined,
       result: typeof body.result === "object" && body.result ? asRecord(body.result) : undefined,
       entitlement,
+      completedAt: typeof body.completedAt === "string" ? body.completedAt : undefined,
     },
   };
 }
@@ -299,6 +360,10 @@ async function downloadReady(
   config: EngineApiConfig,
   fetchImpl: typeof fetch,
   result: Record<string, unknown> | undefined,
+  /** P-155 wave-5 (F23). Fallback source for `generatedAt` when the
+   * download response carries no X-Feasibility-Generated-At header (e.g.
+   * an older engine deploy) — the last status read's own completedAt. */
+  knownCompletedAt?: string,
 ): Promise<ToolResult> {
   let downloadRes: Response;
   const t = timeoutSignal(DOWNLOAD_TIMEOUT_MS);
@@ -339,6 +404,13 @@ async function downloadReady(
 
   const arrayBuffer = await downloadRes.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
+  // P-155 wave-5 (F23): the download response itself is the freshest,
+  // most authoritative source for the served document's age (read at the
+  // exact moment the bytes were fetched, not from an earlier separate
+  // status call that could theoretically race a concurrent refresh). Fall
+  // back to the status leg's own completedAt only when the header is
+  // absent (e.g. an older engine deploy that predates this header).
+  const generatedAt = downloadRes.headers.get("x-feasibility-generated-at") ?? knownCompletedAt ?? undefined;
 
   return {
     content: [
@@ -363,6 +435,7 @@ async function downloadReady(
           sectionCount: result?.sectionCount,
           openItemCount: result?.openItemCount,
           narrativeIsDeterministicSkeleton: result?.narrativeIsDeterministicSkeleton,
+          ...(generatedAt ? { generatedAt } : {}),
         }),
       },
     ],
@@ -394,8 +467,13 @@ export async function executeFeasibilityExport(
   let current = first.status;
 
   // 2) Nothing in flight and nothing to serve -> start a job. A `failed`
-  // job is also re-tried here rather than reported stale forever.
-  if (current.state === "never-requested" || current.state === "failed") {
+  // job is also re-tried here rather than reported stale forever. P-155
+  // wave-5 (F23): a `ready` job past FEASIBILITY_READY_REUSE_WINDOW_MS is
+  // ALSO re-tried here -- without this, once any job for a parcel first
+  // reaches ready, refresh is never called again and the same bytes are
+  // served forever, no matter how old (the exact production symptom this
+  // fix addresses; see CP1 for the live log trail).
+  if (current.state === "never-requested" || current.state === "failed" || isStaleReadyJob(current)) {
     let refreshRes: Response;
     const t = timeoutSignal(ACK_TIMEOUT_MS);
     try {
@@ -468,7 +546,7 @@ export async function executeFeasibilityExport(
     if (current.entitlement && current.entitlement.granted === false) {
       return engineUpgradeRequiredResult(args.entitlement);
     }
-    return downloadReady(args.parcelNodeId, parcelPath, headers, config, fetchImpl, current.result);
+    return downloadReady(args.parcelNodeId, parcelPath, headers, config, fetchImpl, current.result, current.completedAt);
   }
   if (current.state === "failed") {
     return declaredResult({
