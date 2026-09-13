@@ -39,6 +39,7 @@ import {
   loadEngineApiConfig,
   type EngineApiConfig,
 } from "./engine-client.js";
+import { refuseStudioReport, type SmartsiteEntitlementSnapshot } from "./entitlement.js";
 
 const FEASIBILITY_PACKAGE_ID = "feasibility-export";
 const FEASIBILITY_TOOL = "export_instrument";
@@ -82,6 +83,25 @@ const POLL_MAX_INTERVAL_MS = 8_000;
 
 export type FeasibilityExportArgs = {
   parcelNodeId: string;
+  /**
+   * P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13). REQUIRED,
+   * never defaulted inside this file: the caller (tools.ts) already ran
+   * the local Studio/property-unlock gate before ever reaching this
+   * function, so it always passes "public-paid" here today -- but the
+   * value must be threaded explicitly rather than assumed, so a future
+   * call site that skips that gate sends "public-free" and the engine's
+   * own independent tier check refuses it (defense in depth).
+   */
+  callerTier: "public-free" | "public-paid";
+  /**
+   * The caller's local entitlement snapshot -- carried only so a refusal
+   * from the ENGINE'S OWN gate (an outcome the local gate above did not
+   * expect, since it already said yes) can be surfaced in the SAME
+   * upgrade_required/EntitlementGateRefusal shape every other refusal in
+   * this connector uses, per the mission's "surface the engine's typed
+   * refusal as the MCP's own refused with upgrade_required" requirement.
+   */
+  entitlement: SmartsiteEntitlementSnapshot;
 };
 
 export type FeasibilityExportDeps = {
@@ -183,6 +203,18 @@ function clampPollInterval(pollAfterMs: unknown): number {
 
 type JobState = "never-requested" | "queued" | "running" | "ready" | "failed";
 
+/** P152-ENTITLEMENT (OPS-23 wave 4): the engine's own typed marker (CP1 Q4)
+ * -- present on the GET status response regardless of job state, reflecting
+ * the CURRENT request's tier as the engine resolved it (not necessarily the
+ * tier the artifact was originally composed under; see this lane's close
+ * for the cache-hit caveat). */
+interface EngineEntitlementMarker {
+  tier?: string;
+  granted: boolean;
+  requiredTier?: string;
+  gatedSections?: readonly string[];
+}
+
 interface StatusRead {
   state: JobState;
   jobRef?: string;
@@ -190,6 +222,20 @@ interface StatusRead {
   errorClass?: string;
   errorMessage?: string;
   result?: Record<string, unknown>;
+  entitlement?: EngineEntitlementMarker;
+}
+
+/** Mirrors tools.ts's own `upgradeRequiredResult` exactly (duplicated
+ * rather than imported, matching this codebase's established per-file
+ * pattern for this same tiny helper -- see recordsExtraction.ts's own
+ * copy). Used only for the ENGINE's OWN refusal, an outcome the local gate
+ * in tools.ts did not expect since it already said yes; every OTHER
+ * refusal in this file keeps its existing `declaredResult` shape. */
+function engineUpgradeRequiredResult(entitlement: SmartsiteEntitlementSnapshot): ToolResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify(refuseStudioReport(entitlement)) }],
+    isError: true,
+  };
 }
 
 async function readStatus(
@@ -220,6 +266,18 @@ async function readStatus(
     };
   }
   const state = typeof body.state === "string" ? (body.state as JobState) : "never-requested";
+  const rawEntitlement = asRecord(body.entitlement);
+  const entitlement: EngineEntitlementMarker | undefined =
+    typeof rawEntitlement.granted === "boolean"
+      ? {
+          tier: typeof rawEntitlement.tier === "string" ? rawEntitlement.tier : undefined,
+          granted: rawEntitlement.granted,
+          requiredTier: typeof rawEntitlement.requiredTier === "string" ? rawEntitlement.requiredTier : undefined,
+          gatedSections: Array.isArray(rawEntitlement.gatedSections)
+            ? (rawEntitlement.gatedSections as string[])
+            : undefined,
+        }
+      : undefined;
   return {
     ok: true,
     status: {
@@ -229,6 +287,7 @@ async function readStatus(
       errorClass: typeof body.errorClass === "string" ? body.errorClass : undefined,
       errorMessage: typeof body.errorMessage === "string" ? body.errorMessage : undefined,
       result: typeof body.result === "object" && body.result ? asRecord(body.result) : undefined,
+      entitlement,
     },
   };
 }
@@ -324,7 +383,7 @@ export async function executeFeasibilityExport(
   const parcelPath = `/v1/property-nodes/${encodeURIComponent(args.parcelNodeId)}/feasibility-export`;
   const headers = {
     Authorization: `Bearer ${config.gateToken}`,
-    ...buildEngineGateHeaders({ packageId: FEASIBILITY_PACKAGE_ID }),
+    ...buildEngineGateHeaders({ packageId: FEASIBILITY_PACKAGE_ID, callerTier: args.callerTier }),
   };
 
   // 1) Check status FIRST — a job already `ready` from a prior call (this
@@ -393,6 +452,22 @@ export async function executeFeasibilityExport(
   }
 
   if (current.state === "ready") {
+    // P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13): the
+    // engine's own gate is the SOURCE OF TRUTH here, checked independently
+    // of this connector's own local Studio/property-unlock gate in
+    // tools.ts (which already passed by the time this function was ever
+    // called -- reaching `granted: false` here means the two disagree,
+    // which should not happen in normal operation and is exactly the
+    // defense-in-depth case this lane exists for). Surfaced in the SAME
+    // upgrade_required/EntitlementGateRefusal vocabulary every other
+    // refusal in this connector already publishes, per the mission's own
+    // "surface the engine's typed refusal as the MCP's own refused with
+    // upgrade_required" requirement -- never the PDF, never a bare
+    // upstream error, never a silent pass-through of an already-redacted
+    // body as if it were an ordinary success.
+    if (current.entitlement && current.entitlement.granted === false) {
+      return engineUpgradeRequiredResult(args.entitlement);
+    }
     return downloadReady(args.parcelNodeId, parcelPath, headers, config, fetchImpl, current.result);
   }
   if (current.state === "failed") {

@@ -4,9 +4,22 @@ import {
   executeFeasibilityExport,
   feasibilityNotConfiguredResult,
 } from "../src/feasibility-export.js";
+import type { SmartsiteEntitlementSnapshot } from "../src/entitlement.js";
 
 const CONFIG = { baseUrl: "https://hauska-engine.test", gateToken: "gate-key" };
 const PARCEL = "48021:34137";
+// P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13): every call
+// site below is reached only after tools.ts's own Studio/property-unlock
+// gate already passed, so `callerTier` is always "public-paid" and this
+// entitlement snapshot is representative of a real Studio caller — see
+// the dedicated "P152-ENTITLEMENT" describe block below for the NEW
+// granted:false refusal-surfacing behavior this lane adds.
+const ENTITLED_SNAPSHOT: SmartsiteEntitlementSnapshot = {
+  tier: "paid",
+  subscriptionTier: "studio",
+  devRole: false,
+};
+const ARGS = { parcelNodeId: PARCEL, callerTier: "public-paid" as const, entitlement: ENTITLED_SNAPSHOT };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
@@ -66,7 +79,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       throw new Error("fetch must not run when engine-api is not configured");
     };
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => null, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -109,7 +122,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
     }) as typeof fetch;
 
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
 
@@ -144,6 +157,9 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
     expect(calls[0]!.method).toBe("GET");
     expect(calls[0]!.headers.authorization).toBe("Bearer gate-key");
     expect(calls[0]!.headers["x-hauska-package-id"]).toBe("feasibility-export");
+    // P152-ENTITLEMENT (OPS-23 wave 4): the header now carries the CALLER's
+    // resolved tier (ARGS.callerTier) rather than a hardcoded constant.
+    expect(calls[0]!.headers["x-hauska-access-tier"]).toBe("public-paid");
     const refreshCall = calls.find((c) => c.url.endsWith("/refresh"));
     expect(refreshCall?.method).toBe("POST");
     const downloadCall = calls.find((c) => c.url.endsWith("/download"));
@@ -166,7 +182,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
         }),
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(false);
@@ -185,7 +201,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       download: () => new Response(new Uint8Array([9]), { status: 200 }),
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(false);
@@ -198,7 +214,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       refresh: () => jsonResponse({ message: "No resolvable site plan for this parcel." }, 422),
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -217,7 +233,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       refresh: () => new Response("gateway timeout", { status: 504 }),
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -235,7 +251,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       refresh: () => ({ state: "queued", jobRef: "job-3", pollAfterMs: 1 }),
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -257,7 +273,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
         download: () => jsonResponse({ error: reason }, status),
       });
       const result = await executeFeasibilityExport(
-        { parcelNodeId: PARCEL },
+        ARGS,
         { loadConfig: () => CONFIG, fetchImpl },
       );
       expect(result.isError).toBe(true);
@@ -276,7 +292,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       download: () => new Response("bad gateway", { status: 502 }),
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -291,7 +307,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
     }) as typeof fetch;
 
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -313,7 +329,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       },
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -332,7 +348,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       },
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       { loadConfig: () => CONFIG, fetchImpl },
     );
     expect(result.isError).toBe(true);
@@ -354,7 +370,7 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       },
     });
     const result = await executeFeasibilityExport(
-      { parcelNodeId: PARCEL },
+      ARGS,
       // Test-only short budget (see FeasibilityExportDeps.pollBudgetMs) so
       // this exercises the real "still not done" branch in milliseconds
       // rather than the production 55s.
@@ -370,5 +386,61 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
       jobRef: "job-4",
     });
     expect(typeof parsed.pollAfterMs).toBe("number");
+  });
+
+  // P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13). This lane's
+  // core smartsite-mcp requirement: "on refusal, surface the engine's
+  // typed refusal as the MCP's own refused with upgrade_required." This is
+  // the DEFENSE-IN-DEPTH case — tools.ts's own local gate already said
+  // this caller is entitled (that is the only way this function is ever
+  // called), so the engine independently disagreeing is an unexpected
+  // discrepancy this connector must still handle honestly, never by
+  // silently serving an already-redacted body as an ordinary success.
+  describe("P152-ENTITLEMENT: the engine's own refusal (defense in depth)", () => {
+    it("a ready job with entitlement.granted:false is surfaced as upgrade_required, never the PDF", async () => {
+      const fetchImpl = router({
+        status: () => ({
+          state: "ready",
+          result: { sectionCount: 11 },
+          entitlement: { tier: "public-free", granted: false, requiredTier: "studio-or-property-unlock" },
+        }),
+        download: () => {
+          throw new Error("download must not run when the engine's own gate refused");
+        },
+      });
+      const result = await executeFeasibilityExport(ARGS, { loadConfig: () => CONFIG, fetchImpl });
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(result.content[0]!.text);
+      expect(parsed).toMatchObject({
+        status: "upgrade_required",
+        reason: "studio_report",
+        tier: ENTITLED_SNAPSHOT.tier,
+        subscriptionTier: ENTITLED_SNAPSHOT.subscriptionTier,
+      });
+    });
+
+    it("a ready job with entitlement.granted:true (the expected case) downloads normally", async () => {
+      const fetchImpl = router({
+        status: () => ({
+          state: "ready",
+          result: { sectionCount: 11 },
+          entitlement: { tier: "public-paid", granted: true },
+        }),
+        download: () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      });
+      const result = await executeFeasibilityExport(ARGS, { loadConfig: () => CONFIG, fetchImpl });
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "ok" });
+    });
+
+    it("a ready job with NO entitlement marker at all (an older engine deploy, or a legacy fixture) downloads normally -- backward compatible, never a crash", async () => {
+      const fetchImpl = router({
+        status: () => ({ state: "ready", result: { sectionCount: 11 } }),
+        download: () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      });
+      const result = await executeFeasibilityExport(ARGS, { loadConfig: () => CONFIG, fetchImpl });
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "ok" });
+    });
   });
 });

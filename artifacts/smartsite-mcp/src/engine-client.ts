@@ -52,17 +52,28 @@ export function loadEngineApiConfig(): EngineApiConfig | null {
  * hauska-map's `buildFeasibilityEngineGateHeaders` / `buildSitePlanEngine
  * GateHeaders` shape with this connector's own credential id so gate-front
  * logging can tell the two callers (BFF vs. MCP connector) apart.
+ *
+ * P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13): `callerTier`
+ * is now a REQUIRED caller-supplied value, never a hardcoded constant. The
+ * one production call site (`feasibility-export.ts`) only reaches this
+ * function after its own local Studio/property-unlock gate has already
+ * passed, so it always passes `"public-paid"` today -- but the value is
+ * threaded explicitly rather than baked in here so a FUTURE call site that
+ * skips that local gate sends `"public-free"` and the engine's own
+ * independent tier check (P152-ENTITLEMENT, hauska-engine) refuses it —
+ * defense in depth, not merely trust in this file's own caller discipline.
  */
 export function buildEngineGateHeaders(opts: {
   packageId: string;
   requestId?: string;
+  callerTier: "public-free" | "public-paid";
 }): Record<string, string> {
   const requestId = opts.requestId?.trim() || randomUUID();
   return {
     "x-hauska-product": "cortex",
     "x-hauska-tenant-id": "public-catalog",
     "x-hauska-package-id": opts.packageId,
-    "x-hauska-access-tier": "public-paid",
+    "x-hauska-access-tier": opts.callerTier,
     "x-hauska-gate-credential-id": "smartsite-mcp-feasibility",
     "x-hauska-request-id": requestId,
   };
