@@ -77,17 +77,45 @@ export type ParcelAllowlistState = "record" | "legacy" | "refused";
  * state), flood deliberately includes it to make that distinction real.
  *
  * marketValue, assessedValue, landValue, improvementValue, livingAreaSqft,
- * yearBuilt, ALL SIX counties including Caldwell (F-01, PARCEL-B-SLATE2,
- * 2026-09-03): every one of the 36 (county, rail) pairs passes the gate
- * live (gate-rail-cli.mjs, unaccountedCount=0 for all 36 -- these six rails
- * have no txgio-geometry dependency at all, sourced from cad_property via a
- * CAD-attribute join, not spatial containment, so Caldwell's known geometry
- * gap does not apply here the way it does for wells/specialDistricts/flood).
- * No excluded/refused pair exists in this set. Unlike wells/specialDistricts/
- * cityLimits/flood (each a whole-function legacy-loader swap), these six
- * rails are served via a request-time OVERLAY onto the legacy value
- * (cadRollServeCutover.ts) -- the legacy bake/live-read path is never
- * modified, only overlaid where the allowlist resolves to 'record'.
+ * yearBuilt, FIVE counties -- Bastrop/Caldwell/McLennan/Travis/Williamson,
+ * Hays EXCLUDED (F-01, PARCEL-B-SLATE2, 2026-09-03; Hays holdback added
+ * P-177, 2026-09-13): every one of the 36 (county, rail) pairs originally
+ * passed the gate live (gate-rail-cli.mjs, unaccountedCount=0 for all 36 --
+ * these six rails have no txgio-geometry dependency at all, sourced from
+ * cad_property via a CAD-attribute join, not spatial containment, so
+ * Caldwell's known geometry gap does not apply here the way it does for
+ * wells/specialDistricts/flood). No excluded/refused pair exists in this
+ * set. Unlike wells/specialDistricts/cityLimits/flood (each a whole-function
+ * legacy-loader swap), these six rails are served via a request-time OVERLAY
+ * onto the legacy value (cadRollServeCutover.ts) -- the legacy bake/live-read
+ * path is never modified, only overlaid where the allowlist resolves to
+ * 'record'.
+ *
+ * HAYS HOLDBACK (P-177, 2026-09-13): `parcel_gate_verdict`'s 'pass' means
+ * only "every cell is populated" (unaccounted_count=0) -- it has never
+ * checked whether a populated cell is CORRECT. Hays' record-sourced cells
+ * for these six rails were populated before the crosswalk protection
+ * (`LANDUSE_JOIN_HOLD_FIPS`, hauska-engine `fact-writer-ids.ts`) existed:
+ * live-read via get_smart_site, 2026-09-13, all five Sturgeon nodes
+ * (48209:97658/97651/97652/97653/97657) served a bare-prop_id CAD-account
+ * COLLISION under this overlay -- Mesa Verde/Austin house dollars and
+ * living-area square footage on vacant Sturgeon lots (landValue identically
+ * 177000 on all five distinct parcels; improvementValue/livingAreaSqft each
+ * a real neighbouring house's, not the served parcel's) -- the exact defect
+ * class P-177's own bake fix (`nodeFacetBakeTier1ConformantCli.ts`) closed,
+ * reproduced independently in a second, unrelated pipeline this dispatch
+ * never named. The legacy path (the tier-1 bake) is P-177-fixed and
+ * live-verified correct (629 STURGEON DR / 50,390) on both stores; holding
+ * Hays back from the 'record' overlay for exactly these six rails restores
+ * that correct value to the customer immediately, without touching
+ * hauska-engine's ledger data (a live, separately-governed store this repo
+ * does not write to). Williamson is NOT held back: its TxGIO/CAD key spaces
+ * are lexically DISJOINT (R-prefixed vs six-digit, per
+ * `_inbox/2026-09-10_ctx-hays-key_close.json`), so a bare-prop_id collision
+ * of this kind cannot occur there -- live-spot-read 48491:R638791 the same
+ * day shows no sign of the collision shape Hays does. Un-holding Hays is a
+ * ledger-side card's job (re-ingest/refresh `parcel_record_cell` for these
+ * six rails under the existing join-hold protection), not this repo's.
  *
  * utilityService, ALL SIX counties including Caldwell (F-01, serve/prod
  * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04): sourced from
@@ -306,37 +334,31 @@ export const PARCEL_RECORD_SLATE: ReadonlySet<string> = new Set<string>([
   "48491:flood",
   "48021:marketValue",
   "48055:marketValue",
-  "48209:marketValue",
   "48309:marketValue",
   "48453:marketValue",
   "48491:marketValue",
   "48021:assessedValue",
   "48055:assessedValue",
-  "48209:assessedValue",
   "48309:assessedValue",
   "48453:assessedValue",
   "48491:assessedValue",
   "48021:landValue",
   "48055:landValue",
-  "48209:landValue",
   "48309:landValue",
   "48453:landValue",
   "48491:landValue",
   "48021:improvementValue",
   "48055:improvementValue",
-  "48209:improvementValue",
   "48309:improvementValue",
   "48453:improvementValue",
   "48491:improvementValue",
   "48021:livingAreaSqft",
   "48055:livingAreaSqft",
-  "48209:livingAreaSqft",
   "48309:livingAreaSqft",
   "48453:livingAreaSqft",
   "48491:livingAreaSqft",
   "48021:yearBuilt",
   "48055:yearBuilt",
-  "48209:yearBuilt",
   "48309:yearBuilt",
   "48453:yearBuilt",
   "48491:yearBuilt",
