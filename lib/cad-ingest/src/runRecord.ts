@@ -45,8 +45,24 @@ CREATE TABLE IF NOT EXISTS cad_ingest_run (
   finished_at timestamptz
 )`;
 
+/**
+ * P-178. The declared-roll marking step's own record, on the SAME run row
+ * the ingest itself already writes -- one record per run, not two. `ADD
+ * COLUMN IF NOT EXISTS` on the same idempotent-at-job-start table this
+ * file already uses, for the same reason stated in this file's own header:
+ * no numbered-migration-ledger collision with the many concurrently active
+ * LDT lanes. `rows_marked_absent` is a denominator-carrying count;
+ * `marked_absent_prop_ids` is the account list itself -- the record naming
+ * the accounts, queryable without depending on Cloud Logging retention.
+ */
+export const CAD_INGEST_RUN_ROLL_MEMBERSHIP_DDL = `
+ALTER TABLE cad_ingest_run
+  ADD COLUMN IF NOT EXISTS rows_marked_absent integer,
+  ADD COLUMN IF NOT EXISTS marked_absent_prop_ids jsonb`;
+
 export async function ensureCadIngestRunTable(pool: pg.Pool): Promise<void> {
   await pool.query(CAD_INGEST_RUN_TABLE_DDL);
+  await pool.query(CAD_INGEST_RUN_ROLL_MEMBERSHIP_DDL);
 }
 
 /** Streamed sha256 + byte count — never buffers a whole file in memory. */
@@ -104,6 +120,8 @@ export interface FinishRunFields {
   rowsUpserted?: number;
   rowsSkipped?: number;
   error?: string;
+  /** P-178: the declared-roll marking step's own outcome, when it ran. */
+  markedAbsentPropIds?: string[];
 }
 
 export async function finishCadIngestRun(
@@ -115,6 +133,7 @@ export async function finishCadIngestRun(
     `UPDATE cad_ingest_run
         SET status = $2, rows_read = $3, rows_parsed = $4,
             rows_upserted = $5, rows_skipped = $6, error = $7,
+            rows_marked_absent = $8, marked_absent_prop_ids = $9::jsonb,
             finished_at = now()
       WHERE id = $1`,
     [
@@ -125,6 +144,8 @@ export async function finishCadIngestRun(
       fields.rowsUpserted ?? null,
       fields.rowsSkipped ?? null,
       fields.error ?? null,
+      fields.markedAbsentPropIds ? fields.markedAbsentPropIds.length : null,
+      fields.markedAbsentPropIds ? JSON.stringify(fields.markedAbsentPropIds) : null,
     ],
   );
 }
