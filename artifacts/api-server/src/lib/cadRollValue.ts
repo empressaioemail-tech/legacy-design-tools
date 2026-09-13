@@ -242,7 +242,7 @@ export function cadPropertyFactsFromRow(
       exemptionCodes: null,
     };
   }
-  const vintage = row.taxYear != null ? String(row.taxYear) : null;
+  const vintage = vintageLabelFromCadPropertyRow(row);
   return {
     cadRoll: cadRollFromCadProperty(row),
     yearBuilt: bakedYear(row.yearBuilt, vintage),
@@ -306,6 +306,41 @@ export interface CadPropertyRollSlice {
   exemptionCodes?: unknown;
   /** P-178: a marked row's stale dollar/text columns are never served as present. See cadPropertyFactsFromRow. */
   rollMembership?: unknown;
+  /** P-178: the row's own cad_property.source_vintage, read for vintageLabelFromCadPropertyRow. */
+  sourceVintage?: unknown;
+}
+
+/**
+ * P-178 (2026-09-13). "The dollar rows' vintage label becomes the drop's
+ * name and date, not the load timestamp" and, until a fresher drop lands,
+ * "the card's vintage label must say `2026 preliminary` so a customer
+ * comparing to hayscad.com is not misled"
+ * (`_decisions/2026-09-13_hays_declared_2026_roll_is_the_8_26_export.md`).
+ *
+ * A small, explicit, GROWABLE map from `cad_property.source_vintage` (the
+ * parser's own machine label for an export drop) to the human-readable label
+ * a customer reads. Add the 8-26-2026 certified export's own entry once its
+ * load step (P-178 item 4/5) fixes the exact `source_vintage` string it
+ * writes -- deliberately not guessed here.
+ *
+ * Every source_vintage NOT in this map (every other county, every vintage
+ * this repo has not named) falls back to the bare tax year, byte-identical
+ * to the behaviour before this card. This map growing is the only way this
+ * function's OUTPUT for an unnamed vintage can ever change.
+ */
+const KNOWN_SOURCE_VINTAGE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  "2026-preliminary-data-export-files": "2026 preliminary (notice values)",
+});
+
+export function vintageLabelFromCadPropertyRow(
+  row: Pick<CadPropertyRollSlice, "taxYear" | "sourceVintage">,
+): string | null {
+  const known =
+    typeof row.sourceVintage === "string"
+      ? KNOWN_SOURCE_VINTAGE_LABELS[row.sourceVintage]
+      : undefined;
+  if (known) return known;
+  return row.taxYear != null ? String(row.taxYear) : null;
 }
 
 /** Empty cadRoll: every key present, every value null. Used when CAD was not consulted or the row missed. */
@@ -321,7 +356,7 @@ export function emptyCadRoll(): CadRollBaked {
 
 /** Map a `cad_property` row to baked `baseFacts.cadRoll`. Never an atom claim. */
 export function cadRollFromCadProperty(row: CadPropertyRollSlice): CadRollBaked {
-  const vintage = row.taxYear != null ? String(row.taxYear) : null;
+  const vintage = vintageLabelFromCadPropertyRow(row);
   const valueBasis = valueBasisFromRow(row);
   return {
     marketValue: bakedDollar(row.marketValue, vintage, valueBasis),
