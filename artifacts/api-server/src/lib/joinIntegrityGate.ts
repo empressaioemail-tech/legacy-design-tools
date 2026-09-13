@@ -367,6 +367,16 @@ export interface PropIdCadPropertyEntry {
    */
   propertyNumber: string | null;
   quickRefId: string | null;
+  /**
+   * P-178 (2026-09-13): the row's own `roll_membership`/`declared_source_file`.
+   * Same "already loaded, costs no extra query" pattern as every field above.
+   * `null` (the common case) means no disposition -- this row IS present on
+   * its own declared drop. cadRollValue.ts's cadPropertyFactsFromRow is the
+   * one place that reads rollMembership to refuse serving a marked row's
+   * facts as present; this entry only carries the raw value through.
+   */
+  rollMembership: string | null;
+  declaredSourceFile: string | null;
   marketValue: number | null;
   assessedValue: number | null;
   landValue: number | null;
@@ -425,12 +435,14 @@ export async function fetchCountyCadPropertyRoll(
     land_acres: unknown;
     property_number: string | null;
     quick_ref_id: string | null;
+    roll_membership: string | null;
+    declared_source_file: string | null;
   }>(
     `SELECT prop_id, tax_year, source_vintage,
             market_value, assessed_value, land_value, improvement_value,
             living_area_sqft, year_built, legal_description, exemption_codes,
             situs_address, situs_city, situs_zip, land_acres,
-            property_number, quick_ref_id
+            property_number, quick_ref_id, roll_membership, declared_source_file
        FROM cad_property
       WHERE county_fips = $1
         AND tax_year = $2`,
@@ -484,6 +496,13 @@ export async function fetchCountyCadPropertyRoll(
         typeof row.quick_ref_id === "string" && row.quick_ref_id.trim()
           ? row.quick_ref_id.trim()
           : null,
+      // P-178. No trim-to-null: roll_membership is written by the marking
+      // step as the exact literal ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP
+      // string, never free text, so it is either exactly that value or it is
+      // absent -- a whitespace variant is not a real disposition this repo's
+      // writer would ever produce.
+      rollMembership: row.roll_membership,
+      declaredSourceFile: row.declared_source_file,
     });
   }
   return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
