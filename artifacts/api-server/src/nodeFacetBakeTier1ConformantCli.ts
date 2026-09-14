@@ -38,7 +38,10 @@ import pg from "pg";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
-import { isAccountKeyedNodeId } from "./lib/accountKeyedWork.js";
+import {
+  partitionAccountKeyedWork,
+  planAccountKeyedRetirements,
+} from "./lib/accountKeyedWork.js";
 import { normalizeAccessPair } from "./lib/serveGuards.js";
 import {
   fetchCountyCadPropertyRoll,
@@ -75,6 +78,8 @@ import {
   assertRequiredLeafStatesEarned,
   assertSitusAddressAbsenceEarned,
   buildConformantTier1Payload,
+  CONFORMANT_SHAPE_SOURCE,
+  CONFORMANT_TIER1_SOURCE,
   parcelNodeIdFromBody,
   readConformantCadClaim,
   resolveConformantAcreageWithoutRing,
@@ -375,7 +380,20 @@ async function main() {
   // P-180 (2026-09-13): durable retirement of the hollow account-keyed nodes.
   // See isAccountKeyedNodeId. Drop them from the work list BEFORE any prepass
   // so nothing keyed off the account's own (wrong) identity is ever built.
+  //
+  // P-180 wave 6 (2026-09-14): the dropped items are KEPT here, not discarded.
+  // They are retired with the current run id after the fact build, in the pass
+  // below -- an excluded node is never rewritten, so without that pass it
+  // keeps a stale publishRunId the factory verify-walk refuses.
   let excludedAccountKeyed = 0;
+  const excludedWork: Array<{ body: Record<string, unknown>; parcelNodeId: string }> = [];
+  // P-183 (2026-09-14). The same prepass fetch already reads every work id's
+  // row from the parcel table's prop_id column -- the membership test the
+  // account-keyed exclusion uses. Those rows are the NODES' OWN parcels, so
+  // they are kept rather than dropped after their keys are read: they are the
+  // geometry source for the coordinate index and for the ring on a
+  // gate-blocked county. No extra query, no extra scan.
+  let ownPropIdRows = new Map<string, ParcelJoinRow>();
   if (joinGateBlocked && parcelTable) {
     const workIds = [
       ...new Set(
@@ -389,16 +407,11 @@ async function main() {
       workIds,
       pageSize,
     );
+    ownPropIdRows = txgioPresent.byPropId;
     const txgioPropIds = new Set(txgioPresent.byPropId.keys());
-    const kept: typeof work = [];
-    for (const item of work) {
-      const propId = item.parcelNodeId.split(":")[1] ?? "";
-      if (isAccountKeyedNodeId(propId, txgioPropIds)) {
-        excludedAccountKeyed += 1;
-        continue;
-      }
-      kept.push(item);
-    }
+    const { kept, excluded } = partitionAccountKeyedWork(work, txgioPropIds);
+    excludedAccountKeyed = excluded.length;
+    excludedWork.push(...excluded);
     work.length = 0;
     work.push(...kept);
   }
@@ -686,6 +699,11 @@ async function main() {
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
+  // P-183. How many gate-blocked rows took their geometry from the node's OWN
+  // row rather than from a CAD-keyed one. Zero on every non-blocked county by
+  // construction, and on a blocked county it is the number that must be
+  // non-zero for the records to be drawing their own parcels.
+  let ownPropIdGeometry = 0;
   // CTX-HAYS-REBIND. Four counters, not one, because a single "crosswalk
   // worked" number could not tell a run that bound 115,035 parcels from one
   // that bound none and refused none because the column was never ingested.
@@ -857,12 +875,25 @@ async function main() {
       const hit = resolveAddressLandUse(addrKey, txgioOwner, addressLandUse);
       situsRow = hit ? offered : null;
     }
-    // CTX-HAYS-REBIND. The crosswalk row wins the geometry when it exists;
-    // the situs recovery remains the fallback, so nothing is withdrawn.
-    const row = joinGateBlocked ? (crosswalkRow ?? situsRow) : propIdRow;
+    // P-183 (2026-09-14). The node's OWN row, when the node id is present in
+    // the parcel table's prop_id column (measured above, never assumed). This
+    // is the parcel the node IS; the crosswalk and the situs recovery below
+    // both name a parcel from the CAD account, whose numbering is the one that
+    // diverges on a gate-blocked county.
+    const ownPropIdRow = joinGateBlocked ? (ownPropIdRows.get(propId) ?? null) : null;
+    // CTX-HAYS-REBIND, re-ranked by P-183. The node's own row wins the
+    // geometry; the crosswalk row is the next fallback and the situs recovery
+    // the last, so nothing is withdrawn.
+    const row = joinGateBlocked
+      ? (ownPropIdRow ?? crosswalkRow ?? situsRow)
+      : propIdRow;
     if (joinGateBlocked) {
-      if (row) txgioJoined += 1;
-      else txgioNoRow += 1;
+      if (row) {
+        if (row === ownPropIdRow) ownPropIdGeometry += 1;
+        txgioJoined += 1;
+      } else {
+        txgioNoRow += 1;
+      }
     } else if (propIdRow) {
       txgioJoined += 1;
     } else {
@@ -889,7 +920,7 @@ async function main() {
         table: joinTable,
         row: propIdRow,
         gateBlocked: joinGateBlocked,
-        ...(joinGateBlocked ? { situsRow, crosswalkRow } : {}),
+        ...(joinGateBlocked ? { situsRow, crosswalkRow, ownRow: ownPropIdRow } : {}),
       },
       ...(joinGateBlocked && addressLandUse
         ? {
@@ -989,6 +1020,108 @@ async function main() {
     written += 1;
     if (payload.recordRetirement) retired += 1;
   }
+
+  // -------------------------------------------------------------------------
+  // P-180 WAVE 6 (2026-09-14, operator ruling A-146 option B): RETIREMENT PASS
+  // OVER THE WORK-LIST EXCLUSIONS, WITH THE CURRENT RUN ID.
+  //
+  // The fact build above deliberately builds nothing for the hollow
+  // account-keyed nodes (they are accounts, not parcels). But an excluded node
+  // is also never rewritten, so it keeps the PREVIOUS run's publishRunId --
+  // and the factory verify-walk requires the CURRENT id on every swept parcel,
+  // including an earned retirement (verify-walk.mjs gradeParcelResponse: the
+  // RECORD_RETIRED branch checks responseCarriesPublishRunId first). The
+  // street sweep samples whatever shares a street with the anchors, so a Hays
+  // republish always fails BP-PUBLISH-RUN-01 on an excluded node until this
+  // pass exists. Measured: run factory-bastrop-publish-fwv5s failed on
+  // 48209:84629..84639.
+  //
+  // Both invariants are preserved: the exclusion stands (no facts for a
+  // hollow node), and the node is retired with the CURRENT run id in a cheap
+  // pass -- no joins, no prepass, no facet derivation, one upsert per node.
+  // The payload carries identity, access, the run stamp and the earned
+  // retirement and NO facts; the mission's falsifier is that an excluded node
+  // serving facts after this step would mean the pass wrote more than a
+  // retirement.
+  //
+  // Writes only when a real bake runs (`!dryRun`), exactly like the fact
+  // build. A node whose atom access pair cannot be normalized is counted and
+  // skipped rather than given an invented pair -- the fact build skips it for
+  // the same reason (`skippedBadAccess`).
+  let excludedAccountKeyedRetired = 0;
+  let excludedAccountKeyedAccessRefused = 0;
+  if (excludedWork.length > 0) {
+    const retirementPlan = planAccountKeyedRetirements({
+      excluded: excludedWork,
+      countyFips: county,
+      countyName,
+      facetSchemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
+      shapeSource: CONFORMANT_SHAPE_SOURCE,
+      source: CONFORMANT_TIER1_SOURCE,
+      publishRunId,
+      asOf: nowIso,
+      // The same access normalizer the fact build runs, and the same refusal:
+      // a node whose atom pair cannot be normalized gets no invented pair.
+      resolveAccess: (input) => {
+        try {
+          const { access, normalizedFrom } = normalizeAccessPair(input);
+          return { ok: true, access, accessNormalizedFrom: normalizedFrom };
+        } catch {
+          return { ok: false };
+        }
+      },
+      readLastSeenTaxYear: (body) => readConformantCadClaim(body).taxYear,
+    });
+    excludedAccountKeyedAccessRefused = retirementPlan.accessRefused;
+    for (const write of retirementPlan.writes) {
+      assertNoOwnerKey(write.payload);
+      const contentHash = contentHashForPayload(
+        write.payload as unknown as Record<string, unknown>,
+      );
+      if (!dryRun) {
+        // The 0,0 sentinel plus the same CASE the fact build uses: a retirement
+        // never overwrites a real prior coordinate, because the serve's
+        // city-limits query point reads it.
+        await neondb.query(
+          `INSERT INTO place_layer_snapshots
+             (place_key, adapter_key, lat_rounded, lng_rounded, ll_uuid, payload_json, content_hash, snapshot_at, updated_at)
+           VALUES ($1, $2, $3::numeric, $4::numeric, NULL, $5::jsonb, $6, now(), now())
+           ON CONFLICT (adapter_key, place_key) DO UPDATE
+             SET payload_json = EXCLUDED.payload_json,
+                 content_hash = EXCLUDED.content_hash,
+                 snapshot_at = EXCLUDED.snapshot_at,
+                 updated_at = EXCLUDED.updated_at,
+                 lat_rounded = CASE
+                   WHEN EXCLUDED.lat_rounded = 0 AND EXCLUDED.lng_rounded = 0
+                     THEN place_layer_snapshots.lat_rounded
+                   ELSE EXCLUDED.lat_rounded END,
+                 lng_rounded = CASE
+                   WHEN EXCLUDED.lat_rounded = 0 AND EXCLUDED.lng_rounded = 0
+                     THEN place_layer_snapshots.lng_rounded
+                   ELSE EXCLUDED.lng_rounded END`,
+          [
+            placeKeyForNode(write.parcelNodeId),
+            TIER1_ADAPTER_KEY,
+            PLACE_COORD_SENTINEL,
+            PLACE_COORD_SENTINEL,
+            JSON.stringify(write.payload),
+            contentHash,
+          ],
+        );
+      }
+      excludedAccountKeyedRetired += 1;
+    }
+    // On stdout for every run that excluded anything, for the same reason the
+    // situs and crosswalk counters are: a pass that quietly stopped running
+    // would be invisible from the outside, and the walk would then fail on a
+    // stamp nobody could explain.
+    console.log(
+      `[node-facet-bake-t1-conformant] P-180 retirement pass for ${county}: ` +
+        `${excludedAccountKeyedRetired} of ${excludedWork.length} excluded account-keyed ` +
+        `node(s) retired with publishRunId=${publishRunId ?? "none"} and no facts ` +
+        `(access-refused=${excludedAccountKeyedAccessRefused}, dryRun=${dryRun})`,
+    );
+  }
   // CTX-SITUS-SKIP: visible on stdout for every run, not only in the tail
   // summary line -- the old `skippedBadSitus` counter existed but nothing
   // ever surfaced it where it would have been noticed at 16,104 rows for one
@@ -1048,6 +1181,17 @@ async function main() {
         "(a bound row takes its ring, centroid and zoning stamp from the parcel " +
         "its own published Geographic ID names; land use is untouched by this path)",
     );
+    // P-183. Beside the crosswalk line, for the same reason: a geometry source
+    // that stops being used produces no complaint. This is the count of rows
+    // whose ring and coordinate index came from the parcel table's own prop_id
+    // -- the node's own parcel -- ahead of both CAD-keyed sources above.
+    console.log(
+      `[node-facet-bake-t1-conformant] node's own parcel row for ${county}: ` +
+        `geometry-from-own-prop-id=${ownPropIdGeometry} of ${txgioJoined} ` +
+        `geometry-bearing rows (the coordinate index and the ring both come from ` +
+        `it; the CAD-keyed crosswalk and situs recovery remain the fallbacks ` +
+        `for a node id that is absent from the parcel table's prop_id column)`,
+    );
   }
   console.log(
     JSON.stringify({
@@ -1058,6 +1202,7 @@ async function main() {
       crosswalkKeyNoParcel,
       crosswalkCorroborationRefused,
       crosswalkAmbiguousKeys,
+      ownPropIdGeometry,
       crosswalkAccountsWithKey: crosswalkKeyByPropId.size,
       crosswalkParcelsIndexed: crosswalkByGeoId.size,
       accountAttrBound,
@@ -1079,6 +1224,12 @@ async function main() {
       written,
       retired,
       excludedAccountKeyed,
+      // P-180 wave 6: the exclusions retired with the current run id, and the
+      // ones that could not be (an unnormalizable access pair -- the fact build
+      // skips exactly those too). `excludedAccountKeyed` must equal
+      // retired + accessRefused, or the pass dropped a population.
+      excludedAccountKeyedRetired,
+      excludedAccountKeyedAccessRefused,
       skippedNoNode,
       situsPunctuationOnlyAbsence,
       situsNoStreetAbsence,
