@@ -1509,6 +1509,13 @@ const PeCheckoutBodySchema = z
     uiMode: z.enum(["hosted", "custom", "embedded", "elements"]).optional(),
     /** Custom / Embedded return URL. Ignored on the hosted path. */
     returnUrl: z.string().url().optional(),
+    /**
+     * OPS-16 P-185: PromoteKit affiliate referral id from a `?via=` visit.
+     * `z.unknown()` ON PURPOSE — a malformed token is DROPPED by
+     * `normalizePromotekitReferral` in `lib/promotekitReferral.ts`, never a 400. A bad
+     * attribution token must not be able to block a purchase.
+     */
+    promotekitReferral: z.unknown().optional(),
   })
   .refine((body) => body.seats === undefined || body.tier === "team", {
     message: "seats is only valid with tier=team",
@@ -1563,6 +1570,9 @@ router.post(
         cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
         returnUrl: parsed.data.returnUrl,
         uiMode: parsed.data.uiMode,
+        promotekitReferral: parsed.data.promotekitReferral as
+          | string
+          | undefined,
       });
       res.json({
         ...session,
@@ -1872,6 +1882,12 @@ const PePropertyUnlockCheckoutBodySchema = z.object({
   cancelUrl: z.string().url().optional(),
   returnUrl: z.string().url().optional(),
   uiMode: z.enum(["hosted", "custom", "embedded", "elements"]).optional(),
+  /**
+   * OPS-16 P-185: PromoteKit affiliate referral id from a `?via=` visit.
+   * `z.unknown()` ON PURPOSE — a malformed token is DROPPED by
+   * `normalizePromotekitReferral` in `lib/promotekitReferral.ts`, never a 400.
+   */
+  promotekitReferral: z.unknown().optional(),
 });
 
 /**
@@ -1914,6 +1930,9 @@ router.post(
         cancelUrl: parsed.data.cancelUrl ?? defaultPeCheckoutCancelUrl(),
         returnUrl: parsed.data.returnUrl,
         uiMode: parsed.data.uiMode,
+        promotekitReferral: parsed.data.promotekitReferral as
+          | string
+          | undefined,
       });
       res.json({
         ...session,
