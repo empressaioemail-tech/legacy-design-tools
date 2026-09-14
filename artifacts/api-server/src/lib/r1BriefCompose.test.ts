@@ -166,3 +166,58 @@ describe("buildR1Brief — zoning/setbacks OPS-16 A-096/A-097/A-098 wiring", () 
     expect(envelopeSection?.disposition).toBe("present");
   });
 });
+
+describe("buildR1Brief — P-154 wave 6 conflict row (R-1, A-148)", () => {
+  /** The live Bastrop shape: ONE current layer, unrefreshed numeric shortcut columns. */
+  const CONFLICT = {
+    shape: "stale-numeric-columns",
+    secondSourceLabel: "One Click card",
+    numeric: { front: 25, side: 5, rear: 25 },
+    text: { front: 30, side: 10, rear: 30, corner: 20 },
+    ordinance: "2026-06",
+    confirmedWith: "the City of Bastrop",
+    confirmedOn: "2026-09-14",
+  } as const;
+
+  it("prints the A-148 sentence beside the raw rail when the two sources disagree", () => {
+    const facets = {
+      envelope: {
+        status: "ok",
+        setbacks: { front_ft: 30, side_ft: 10, rear_ft: 30, side_corner_ft: 20 },
+        secondSource: { source: "One Click card", note: "raw technical disclosure", conflict: CONFLICT },
+      },
+    };
+    const brief = buildR1Brief(facets, null);
+    const envelopeSection = brief.sections.find((s) => s.id === "setbacks-envelope");
+    expect(envelopeSection?.disposition).toBe("present");
+    // Character for character the sentence the wave-6 dispatch fixes: the
+    // panel, this MCP read and the PDF must all print it identically.
+    expect((envelopeSection?.data as { conflictNote?: string }).conflictNote).toBe(
+      "The city's One Click card shows 25/5/25 from unrefreshed numeric columns of its zoning layer; the same layer's text and Ordinance 2026-06 say 30/10/30/20 (confirmed with the City of Bastrop 2026-09-14)",
+    );
+    // The raw rail is left untouched beside the composed sentence.
+    expect(
+      (envelopeSection?.data as { secondSource?: { note?: string } }).secondSource?.note,
+    ).toBe("raw technical disclosure");
+  });
+
+  it("FALSIFIER: a second source that agrees adds no note at all", () => {
+    const facets = {
+      envelope: {
+        status: "ok",
+        setbacks: { front_ft: 30, side_ft: 10, rear_ft: 30 },
+        secondSource: { source: "Zoned Parcels layer", note: "agrees with the ordinance text" },
+      },
+    };
+    const brief = buildR1Brief(facets, null);
+    const envelopeSection = brief.sections.find((s) => s.id === "setbacks-envelope");
+    expect(Object.keys(envelopeSection?.data as object)).not.toContain("conflictNote");
+  });
+
+  it("GRACEFUL ABSENCE: an envelope with no second source is returned unchanged", () => {
+    const envelope = { status: "ok", setbacks: { front_ft: 30, side_ft: 10, rear_ft: 30 } };
+    const brief = buildR1Brief({ envelope }, null);
+    const envelopeSection = brief.sections.find((s) => s.id === "setbacks-envelope");
+    expect(envelopeSection?.data).toEqual(envelope);
+  });
+});

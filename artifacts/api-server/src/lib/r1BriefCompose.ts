@@ -11,6 +11,11 @@
  * the predicates below are the one derivation both depths share.
  */
 
+import {
+  setbackConflictNote,
+  type SetbackConflictSecondSourceInput,
+} from "@empressaio/atom-contract/display";
+
 import type {
   FloodHazardFactPresent,
   FloodHazardFactRead,
@@ -601,7 +606,7 @@ function composeSetbacksEnvelopeBriefSection(
   const disposition = envelopeDisposition(envelope, envelopeBriefRefusal);
   if (disposition === "present") {
     return withCitationPosture({
-      data: envelope,
+      data: withSetbackConflictNote(envelope),
       citations: urlsFrom(envelope),
       asOf: asOfFrom(envelope) ?? bakedAt ?? null,
       disposition,
@@ -625,8 +630,37 @@ function composeSetbacksEnvelopeBriefSection(
   });
 }
 
-function composeDrainageBriefSection(
-  drainage: unknown,
+/**
+ * P-154 wave 6 (R-1) — the conflict row on the MCP surface. When the
+ * setbacks-envelope facet carries a disagreement between two of the city's
+ * own sources (`secondSource.conflict`), the model read gets ONE sentence
+ * from `@empressaio/atom-contract/display`, the same function the panel and
+ * the PDF call, so all three print the same characters (OPS-23 R-6; the
+ * `reasonDisplayText`/`envelopeHuman` pairing in smartsite-mcp's
+ * tool-honesty.ts is this same pattern).
+ *
+ * Additive and dormant: no `conflict` on the rail means the envelope is
+ * returned UNCHANGED, never with a note — a note where the sources agree
+ * would mean the detector is wrong (wave-6 falsifier). The raw rail is left
+ * untouched beside the composed sentence.
+ */
+export function withSetbackConflictNote(envelope: unknown): unknown {
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return envelope;
+  }
+  const rail = envelope as JsonRecord;
+  const second = asRecord(rail.secondSource);
+  const conflict = second ? asRecord(second.conflict) : null;
+  if (!conflict) return envelope;
+  return {
+    ...rail,
+    conflictNote: setbackConflictNote(
+      conflict as unknown as SetbackConflictSecondSourceInput,
+    ),
+  };
+}
+
+function composeDrainageBriefSection(  drainage: unknown,
   bakedAt: string | null,
 ): BriefSectionParts {
   const disposition = drainageDisposition(drainage);
