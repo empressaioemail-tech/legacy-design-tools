@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertAccessPair, assertF06BakeAccessPair, assertSitusNotPunctuationOnly, normalizeAccessPair, refusePayloadAtServe, LEGACY_ACCESS_PAIRS } from "../serveGuards";
+import { assertAccessPair, assertF06BakeAccessPair, assertSitusNotPunctuationOnly, normalizeAccessPair, refusePayloadAtServe, shouldDeclineRetiredRecordAtServe, LEGACY_ACCESS_PAIRS } from "../serveGuards";
 
 describe("serveGuards", () => {
   it("refuses access without both fields", () => {
@@ -118,5 +118,69 @@ describe("refusePayloadAtServe / A3 (operator ruling, 2026-09-10): earned retire
         facets: { base: { situsAddress: "308 W San Antonio St" } },
       }),
     ).not.toThrow();
+  });
+});
+
+describe("P-180 shouldDeclineRetiredRecordAtServe (the missing retirement consumer)", () => {
+  const wellFormedRetirement = {
+    status: "retired",
+    verdict: "absent-verified",
+    authority: "48209 Hays CAD, declared vintage 2026",
+    scopeSearched: "cad_property at the declared tax year",
+    asOf: "2026-09-13T00:00:00.000Z",
+    basis: "hollow account-keyed node; not a TxGIO parcel node",
+    lastSeenTaxYear: 2026,
+  };
+
+  it("declines a retired record in a gate-blocked county (48209:84639)", () => {
+    expect(
+      shouldDeclineRetiredRecordAtServe("48209:84639", {
+        recordRetirement: wellFormedRetirement,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeclineRetiredRecordAtServe("48491:1", {
+        recordRetirement: wellFormedRetirement,
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT decline the same retirement outside the gate-blocked set (control: non-blocked county unchanged)", () => {
+    expect(
+      shouldDeclineRetiredRecordAtServe("48055:1", {
+        recordRetirement: wellFormedRetirement,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeclineRetiredRecordAtServe("48021:34137", {
+        recordRetirement: wellFormedRetirement,
+      }),
+    ).toBe(false);
+  });
+
+  it("does NOT decline a live (non-retired) gate-blocked node", () => {
+    expect(
+      shouldDeclineRetiredRecordAtServe("48209:97658", {
+        recordRetirement: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("a half-built retirement object buys no decline", () => {
+    expect(
+      shouldDeclineRetiredRecordAtServe("48209:84639", {
+        recordRetirement: { status: "retired" },
+      }),
+    ).toBe(false);
+  });
+
+  it("honours a caller-supplied ledger set rather than a hardcoded county", () => {
+    expect(
+      shouldDeclineRetiredRecordAtServe(
+        "48999:1",
+        { recordRetirement: wellFormedRetirement },
+        new Set(["48999"]),
+      ),
+    ).toBe(true);
   });
 });

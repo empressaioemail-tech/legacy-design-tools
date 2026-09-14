@@ -7,6 +7,7 @@ import {
   type AccessPair,
 } from "@empressaio/atom-contract/access";
 import { isEarnedRecordRetirement } from "./recordRetirement";
+import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
 
 const PUNCTUATION_ONLY_RE = /^[\s,.\-;:'"`]+$/;
 
@@ -195,4 +196,39 @@ export function refusePayloadAtServe(payload: unknown): void {
   const facets = p.facets as Record<string, unknown> | undefined;
   const base = facets?.base as Record<string, unknown> | undefined;
   if (base?.situsAddress != null) assertSitusNotPunctuationOnly(base.situsAddress);
+}
+
+/**
+ * P-180 (2026-09-13). SERVE-TIME DECLINE FOR A RETIRED RECORD in a
+ * gate-blocked county.
+ *
+ * P-177 wrote a well-formed `recordRetirement` marker for the hollow
+ * account-keyed nodes (48209:84639 and siblings) but found that NO code path
+ * turned that marker into a declined response -- a direct read kept serving a
+ * hollow card that describes a CAD account, not the parcel (no geometry, no
+ * cells). `refusePayloadAtServe` above deliberately EXEMPTS an earned
+ * retirement from the situs punctuation guard; it does not decline. This is
+ * the missing consumer.
+ *
+ * SCOPED TO THE GATE-BLOCKED COUNTIES, where the account-keyed hollow nodes
+ * live. A non-blocked county's retirement is left exactly as it is served
+ * today, so the change is a strict no-op outside Hays/Williamson. The
+ * well-formedness gate is `isEarnedRecordRetirement`, the same predicate
+ * every other retirement consumer uses -- a half-built object buys nothing.
+ *
+ * Callers treat `true` as "no baked snapshot": the brokerage node-facets
+ * route answers its existing `404 no_coverage/not_baked`, which is the
+ * decline the P-177 close asked for.
+ */
+export function shouldDeclineRetiredRecordAtServe(
+  parcelNodeId: string,
+  payload: unknown,
+  blockedFips: ReadonlySet<string> = LANDUSE_JOIN_DISABLED_FIPS_SEED,
+): boolean {
+  const countyFips = String(parcelNodeId).split(":")[0]?.trim() ?? "";
+  if (!blockedFips.has(countyFips)) return false;
+  if (!payload || typeof payload !== "object") return false;
+  return isEarnedRecordRetirement(
+    (payload as Record<string, unknown>).recordRetirement,
+  );
 }

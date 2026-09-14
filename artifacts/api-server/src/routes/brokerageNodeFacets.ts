@@ -241,7 +241,7 @@ import { db, placeLayerSnapshots } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { refusePayloadAtServe } from "../lib/serveGuards";
+import { refusePayloadAtServe, shouldDeclineRetiredRecordAtServe } from "../lib/serveGuards";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
@@ -694,6 +694,11 @@ export async function loadBakedNodeFacetSnapshot(
 
   const row = rows.find((r) => r.adapterKey === TIER1_ADAPTER_KEY);
   if (!row) return null;
+  // P-180: a retired record in a gate-blocked county declines at serve rather
+  // than presenting a hollow account-keyed card (48209:84639 and siblings).
+  if (shouldDeclineRetiredRecordAtServe(parcelNodeId, row.payloadJson)) {
+    return null;
+  }
   try {
     refusePayloadAtServe(row.payloadJson);
   } catch (err) {
