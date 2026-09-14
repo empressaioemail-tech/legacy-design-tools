@@ -631,7 +631,7 @@ function composeSetbacksEnvelopeBriefSection(
 }
 
 /**
- * P-154 wave 6 (R-1) — the conflict row on the MCP surface. When the
+ * P-154 wave 6 (R-1): the conflict row on the MCP surface. When the
  * setbacks-envelope facet carries a disagreement between two of the city's
  * own sources (`secondSource.conflict`), the model read gets ONE sentence
  * from `@empressaio/atom-contract/display`, the same function the panel and
@@ -640,7 +640,7 @@ function composeSetbacksEnvelopeBriefSection(
  * tool-honesty.ts is this same pattern).
  *
  * Additive and dormant: no `conflict` on the rail means the envelope is
- * returned UNCHANGED, never with a note — a note where the sources agree
+ * returned UNCHANGED, never with a note. A note where the sources agree
  * would mean the detector is wrong (wave-6 falsifier). The raw rail is left
  * untouched beside the composed sentence.
  */
