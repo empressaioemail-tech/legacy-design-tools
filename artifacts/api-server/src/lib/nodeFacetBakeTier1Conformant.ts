@@ -324,6 +324,36 @@ export type ParcelJoinRecord =
     }
   | {
       /**
+       * P-183 (2026-09-14). The NODE'S OWN ROW supplied the geometry: the
+       * parcel-table row whose `prop_id` IS this node's identity (the second
+       * component of the node id), read from the same table and the same
+       * column the prop_id join reads.
+       *
+       * A DISTINCT state rather than `joined`, because the two make different
+       * claims: `joined` says the county's prop_id join is OPEN and this row
+       * came through it; this says the join is still refused and the row was
+       * taken anyway, on the one prop_id that cannot be a collision -- the
+       * node's own. A census that folded them together could not report that
+       * a gate-blocked county had started drawing its own parcels, and a
+       * consumer reading `joined` as "the gate is open here" would be wrong.
+       *
+       * It takes precedence over `joined-crosswalk` and `joined-situs` because
+       * both of those identify a parcel from the CAD side (a published
+       * Geographic ID, an address string), and for a gate-blocked county the
+       * CAD side is exactly the numbering that diverges: node
+       * `48209:97658`'s claim carries CAD account 97658's situs (13669 Mesa
+       * Verde Dr) while `txgio_parcel.prop_id = 97658` is the Sturgeon Dr lot
+       * the node is named after. Preferring a CAD-derived row over the node's
+       * own is how the record point came to sit 34.8 km away.
+       */
+      table: string;
+      state: "joined-own-prop-id";
+      basis: string;
+      featureIndex: number;
+      sourceVintage: string | null;
+    }
+  | {
+      /**
        * Bound by the county's own published CROSSWALK (P-124
        * CTX-HAYS-REBIND): `cad_property.property_number` matched against
        * `txgio_parcel.geo_id`, corroborated by the CAD account number against
@@ -1032,9 +1062,33 @@ export interface ConformantTier1BuildInput {
      * vintage, a row ingested before the parser read the column), so this
      * change is a rebind and never a withdrawal.
      *
+     * P-183 (2026-09-14) ranks it BELOW `ownRow`: both this row and the
+     * address recovery are keyed off the CAD account, and on a gate-blocked
+     * county the CAD account is the numbering that diverges from the parcel
+     * table's. It is still preferred over the address recovery, exactly as
+     * written above.
+     *
      * Optional, so a pre-CTX-HAYS-REBIND caller keeps its exact behaviour.
      */
     crosswalkRow?: ParcelJoinRow | null;
+    /**
+     * P-183 (2026-09-14). The NODE'S OWN ROW for a gate-blocked county: the
+     * parcel-table row whose `prop_id` equals this node's identity (the second
+     * component of `parcelNodeId`). The caller supplies it only when the node
+     * id is present in the county's parcel table on that column -- i.e. when
+     * the membership has been MEASURED, not assumed -- so an id that is an
+     * account number or a CAD prop_id of a differently-numbered parcel never
+     * reaches this key and the row cannot be a collision.
+     *
+     * PREFERRED over `crosswalkRow` and `situsRow` when present: it is the
+     * only one of the three that identifies the parcel from the node's own
+     * identity rather than from the CAD account's numbers or address. Land use
+     * is untouched by this key -- it supplies geometry and the zoning stamp
+     * that rides with it, and nothing else.
+     *
+     * Optional, so every pre-P-183 caller keeps its exact behaviour.
+     */
+    ownRow?: ParcelJoinRow | null;
   };
   /**
    * Owner-gated situs recovery for a gate-blocked county. When present,
@@ -1111,6 +1165,14 @@ export interface ConformantTier1BuildInput {
  * from nothing else, so the five counties that are not Hays cannot move a
  * land-use code through this path, and a county whose roll publishes no
  * Geographic ID keeps today's behaviour exactly.
+ *
+ * P-183 (2026-09-14) adds a SIXTH state AHEAD of that one: `joined-own-prop-id`,
+ * the parcel-table row whose `prop_id` IS the node's identity. Both states
+ * above it in the old order are keyed off the CAD account (a Geographic ID, an
+ * address string) and on a gate-blocked county the CAD account is the
+ * numbering that diverges; the node's own prop_id is the one key that cannot
+ * be a collision. Supplied only by a caller that measured the membership, so
+ * every earlier caller and every other county is byte-for-byte unchanged.
  */
 export function buildConformantTier1Payload(
   input: ConformantTier1BuildInput,
@@ -1166,6 +1228,10 @@ export function buildConformantTier1Payload(
   // corroborated it (`crosswalkBindCorroborated`), so this site does not
   // re-derive the verdict and cannot disagree with the caller's counters.
   const crosswalkRow = gateBlocked ? (input.parcelJoin.crosswalkRow ?? null) : null;
+  // P-183 (2026-09-14). The node's OWN row, same gate as `crosswalkRow`: only
+  // a caller that fetched it can offer it, and the caller offers it only for a
+  // node id present in the parcel table's prop_id column.
+  const ownRow = gateBlocked ? (input.parcelJoin.ownRow ?? null) : null;
   // Read for the BASIS TEXT only -- never to decide the bind. `unknown` in the
   // structural roll type, so it is narrowed to a string here rather than
   // asserted, and a non-string reads as absent instead of as "[object Object]".
@@ -1224,7 +1290,18 @@ export function buildConformantTier1Payload(
   // the same edit: `row` would be set before `resolveAddressLandUse` had a
   // chance to null it, and a refused land-use recovery would start shipping a
   // ring it did not ship yesterday for a reason nobody asked for.
-  if (crosswalkRow) row = crosswalkRow;
+  // P-183 (2026-09-14). THE NODE'S OWN ROW WINS. A node's identity in a
+  // gate-blocked county is a parcel-table prop_id, and the row bearing it is
+  // the parcel itself; every other row this function can reach is keyed off
+  // the CAD account (an address string, a published Geographic ID), which is
+  // the numbering that diverges. Measured on the five Sturgeon Dr lots:
+  // preferring the CAD-derived row put the record point 34.8 km away, on the
+  // different parcel that shares the CAD account's number.
+  //
+  // `crosswalkRow` remains preferred over the situs recovery, exactly as it
+  // was; this adds a source ahead of both and withdraws neither.
+  if (ownRow) row = ownRow;
+  else if (crosswalkRow) row = crosswalkRow;
 
   const landUseAbsence: LandUseAbsence | null = landUse
     ? null
@@ -1350,9 +1427,26 @@ export function buildConformantTier1Payload(
   // violation: disabling `row = crosswalkRow` makes this evaluate false and
   // the state falls back to what actually happened.
   const crosswalkBound = crosswalkRow != null && row === crosswalkRow;
+  // P-183. Same discipline, same derivation: from `row`, never from `ownRow`
+  // on its own. If the land-use recovery below nulls `row`, this evaluates
+  // false and the state reports what actually happened.
+  const ownRowBound = ownRow != null && row === ownRow;
 
   const parcelJoin: ParcelJoinRecord = gateBlocked
-    ? crosswalkBound && crosswalkRow
+    ? ownRowBound && ownRow
+      ? {
+          table,
+          state: "joined-own-prop-id",
+          basis:
+            `${table} row feature_index ${ownRow.feature_index} matched on ` +
+            `(county_fips ${countyFips}, prop_id ${apn ?? "?"}) -- this node's ` +
+            `own identity. The prop_id join stays gate-blocked for the CAD ` +
+            `account's numbering; this row is the node's, not the account's, ` +
+            `so no collision can produce it.`,
+          featureIndex: ownRow.feature_index,
+          sourceVintage: sourceVintageOf(ownRow),
+        }
+      : crosswalkBound && crosswalkRow
       ? {
           table,
           state: "joined-crosswalk",
