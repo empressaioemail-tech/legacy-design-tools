@@ -189,6 +189,99 @@ describe("feasibility-export (P-119 / OPS-16 A-103, async since P-155)", () => {
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "ok", sectionCount: 5 });
   });
 
+  it("ready with a RECENT completedAt (a live continuation, e.g. the caller's own prior call finished moments ago) downloads immediately, no refresh", async () => {
+    const recentCompletedAt = new Date(Date.now() - 5_000).toISOString();
+    const fetchImpl = router({
+      status: () => ({
+        state: "ready",
+        result: { sectionCount: 5 },
+        completedAt: recentCompletedAt,
+      }),
+      refresh: () => {
+        throw new Error("refresh must not run for a ready job well inside the reuse window");
+      },
+      download: () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "application/pdf", "x-feasibility-generated-at": recentCompletedAt },
+        }),
+    });
+    const result = await executeFeasibilityExport(ARGS, { loadConfig: () => CONFIG, fetchImpl });
+    expect(result.isError).toBe(false);
+    const parsed = JSON.parse(result.content[0]!.text);
+    expect(parsed).toMatchObject({ status: "ok", sectionCount: 5, generatedAt: recentCompletedAt });
+  });
+
+  // P-155 WAVE-5 (F23, overseer 2026-09-13): the production bug this lane
+  // fixes. Live evidence (CP1, _inbox/2026-09-13_p155-refresh_cp1.json): a
+  // job for 48021:34049 completed once at 19:12:15Z and, because
+  // feasibility_export_jobs has no TTL, was still being served
+  // byte-identical 4+ hours and 7+ call-pairs later — refresh was NEVER
+  // called again. This test fails against the pre-fix code (it would hit
+  // the router's `refresh must not run` guard from the two tests above,
+  // because the pre-fix condition only re-refreshes on never-requested/
+  // failed) and passes against the fix (a `ready` job older than
+  // FEASIBILITY_READY_REUSE_WINDOW_MS is treated like `failed` — re-tried,
+  // never silently re-served).
+  it("ready with a STALE completedAt (older than the reuse window) triggers a fresh refresh and returns the NEW document, never the old bytes", async () => {
+    const staleCompletedAt = new Date(Date.now() - 2 * 60 * 60_000).toISOString(); // 2h old
+    const freshCompletedAt = new Date().toISOString();
+    let refreshCalled = false;
+    let statusCallsAfterRefresh = 0;
+    const fetchImpl = router({
+      status: () => {
+        if (!refreshCalled) {
+          return { state: "ready", result: { sectionCount: 5, pageCount: 9 }, completedAt: staleCompletedAt };
+        }
+        statusCallsAfterRefresh += 1;
+        // First poll after the new refresh: still cooking. Second: ready
+        // with a BRAND NEW completedAt and a different result summary —
+        // proof this is a genuinely new document, not the stale one.
+        if (statusCallsAfterRefresh === 1) {
+          return { state: "running", jobRef: "job-fresh", pollAfterMs: 1 };
+        }
+        return {
+          state: "ready",
+          jobRef: "job-fresh",
+          result: { sectionCount: 6, pageCount: 11 },
+          completedAt: freshCompletedAt,
+        };
+      },
+      refresh: () => {
+        refreshCalled = true;
+        return { state: "queued", jobRef: "job-fresh", pollAfterMs: 1 };
+      },
+      download: () =>
+        new Response(new Uint8Array([9, 9, 9]), {
+          status: 200,
+          headers: { "content-type": "application/pdf", "x-feasibility-generated-at": freshCompletedAt },
+        }),
+    });
+
+    const result = await executeFeasibilityExport(ARGS, { loadConfig: () => CONFIG, fetchImpl });
+
+    expect(refreshCalled).toBe(true);
+    expect(result.isError).toBe(false);
+    const parsed = JSON.parse(result.content[0]!.text);
+    // The NEW result summary (sectionCount 6, not the stale job's 5) and a
+    // generatedAt matching the fresh completion — never the stale bytes.
+    expect(parsed).toMatchObject({ status: "ok", sectionCount: 6, pageCount: 11, generatedAt: freshCompletedAt });
+    expect(parsed.generatedAt).not.toBe(staleCompletedAt);
+  }, 15_000);
+
+  it("ready with NO completedAt at all (legacy pre-P-155 atom, no job row) is treated as not-stale — backward compatible, no refresh", async () => {
+    const fetchImpl = router({
+      status: () => ({ state: "ready", result: { sectionCount: 5 } }),
+      refresh: () => {
+        throw new Error("refresh must not run when completedAt is simply unknown (legacy no-job-row case)");
+      },
+      download: () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+    });
+    const result = await executeFeasibilityExport(ARGS, { loadConfig: () => CONFIG, fetchImpl });
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "ok", sectionCount: 5 });
+  });
+
   it("running on the first read waits (no refresh) and settles to ready on a later poll", async () => {
     const fetchImpl = router({
       status: (call) =>
