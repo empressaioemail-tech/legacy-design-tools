@@ -782,3 +782,129 @@ describe("session-exchange claims install history (WDLL item 6)", () => {
     expect(res.body.claimedInstallHistory).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// OPS-16 P-185 — PROMOTEKIT AFFILIATE REFERRAL, the route-wiring half.
+//
+// The pure rule lives in lib/promotekitReferral.ts and is pinned DB-free in
+// promotekit-referral.test.ts. THIS block proves the two PE checkout routes
+// actually forward `promotekitReferral` from the request body onto the Stripe
+// Checkout Session form — the hop a pure rule test cannot see. Both directions
+// per route: with the field the form carries the key(s), without it the keys
+// are ABSENT.
+//
+// NOTE: these are DB-backed (route + entitlement row) and run in CI's Postgres
+// service. They are not runnable on the workstation (no local database).
+// ---------------------------------------------------------------------------
+
+const REFERRAL_METADATA_KEY = "metadata[promotekit_referral]";
+const REFERRAL_SUBSCRIPTION_KEY =
+  "subscription_data[metadata][promotekit_referral]";
+
+describe("PromoteKit referral forwarded by the PE checkout routes (OPS-16 P-185)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("billing/checkout: the referral rides metadata AND subscription_data, and allow_promotion_codes stays on", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_sub",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_sub",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({
+      tier: "solo",
+      interval: "month",
+      promotekitReferral: "aff_abc123",
+    });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get(REFERRAL_METADATA_KEY)).toBe("aff_abc123");
+    expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBe("aff_abc123");
+    expect(form.get("allow_promotion_codes")).toBe("true");
+  });
+
+  it("billing/checkout: no referral -> NEITHER key appears (no stale cached value)", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_sub_plain",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_sub_plain",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month" });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get(REFERRAL_METADATA_KEY)).toBeNull();
+    expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBeNull();
+  });
+
+  it("entitlement/checkout: the referral rides the unlock session; allow_promotion_codes is on", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_unlock",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_unlock",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", promotekitReferral: "aff_abc123" });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get(REFERRAL_METADATA_KEY)).toBe("aff_abc123");
+    expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBeNull();
+    expect(form.get("allow_promotion_codes")).toBe("true");
+    expect(form.get("metadata[checkout_kind]")).toBe("property_unlock");
+  });
+
+  it("entitlement/checkout: no referral -> the key is absent", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_unlock_plain",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_unlock_plain",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068" });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    expect(checkoutBodies[0]!.get(REFERRAL_METADATA_KEY)).toBeNull();
+  });
+
+  it("a malformed referral is DROPPED at the route, never a 400 — the purchase still opens", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    for (const bad of ["has whitespace", "x".repeat(129), 42, { a: 1 }]) {
+      vi.restoreAllMocks();
+      const { checkoutBodies } = mockStripeCheckoutSession({
+        id: "cs_test_pk_bad",
+        url: "https://checkout.stripe.com/c/pay/cs_test_pk_bad",
+      });
+      const res = await asUser(
+        request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+        USER_A,
+      ).send({ tier: "solo", interval: "month", promotekitReferral: bad });
+      expect(res.status).toBe(200);
+      const form = checkoutBodies[0]!;
+      expect(form.get(REFERRAL_METADATA_KEY)).toBeNull();
+      expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBeNull();
+    }
+  });
+});

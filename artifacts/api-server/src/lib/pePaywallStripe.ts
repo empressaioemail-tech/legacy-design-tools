@@ -47,6 +47,7 @@ import {
   PE_TEAM_INCLUDED_SEATS,
   type StripePriceItem,
 } from "./peTeamSeatsFromStripe";
+import { applyPromotekitReferral } from "./promotekitReferral";
 
 export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
@@ -396,6 +397,12 @@ export async function createPeSubscriptionCheckoutSession(input: {
   returnUrl?: string;
   /** Absent defaults to hosted (today's checkoutUrl redirect). */
   uiMode?: PeCheckoutUiMode;
+  /**
+   * OPS-16 P-185: PromoteKit affiliate referral id, if any. Normalized by
+   * `promotekitReferral.ts`; an id that does not look like one is dropped,
+   * never an error.
+   */
+  promotekitReferral?: string | null;
 }): Promise<StripeCheckoutResult> {
   const { tier } = input;
   const interval: PeBillingInterval = input.interval ?? "month";
@@ -505,6 +512,12 @@ export async function createPeSubscriptionCheckoutSession(input: {
   if (input.installId) {
     params["metadata[install_id]"] = input.installId;
   }
+  // OPS-16 P-185: the affiliate referral rides the session AND the
+  // subscription, so renewals attribute too (PromoteKit's Subscription tab).
+  // Absent when the id was missing or malformed — never a placeholder.
+  applyPromotekitReferral(params, input.promotekitReferral, {
+    subscription: true,
+  });
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, {
     custom,
@@ -532,6 +545,12 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   returnUrl?: string;
   /** Absent defaults to hosted (today's checkoutUrl redirect). */
   uiMode?: PeCheckoutUiMode;
+  /**
+   * OPS-16 P-185: PromoteKit affiliate referral id, if any. Normalized by
+   * `promotekitReferral.ts`; an id that does not look like one is dropped,
+   * never an error.
+   */
+  promotekitReferral?: string | null;
 }): Promise<StripeCheckoutResult> {
   const publishableKey = stripePublishableKey();
   const custom = isCustomPeCheckoutUiMode(input.uiMode);
@@ -576,6 +595,10 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   const params: Record<string, string> = {
     mode: "payment",
     customer: customerId,
+    // OPS-16 P-185: PromoteKit tracks by promo code as well as by `?via=`
+    // link, and a promo code can only be entered if Checkout offers the field.
+    // The subscription path already carried this; the $15 unlock did not.
+    allow_promotion_codes: "true",
     "metadata[pe_user_id]": input.userId,
     "metadata[parcel_node_id]": input.parcelNodeId,
     "metadata[checkout_kind]": "property_unlock" satisfies PeCheckoutKind,
@@ -586,6 +609,7 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   if (input.installId) {
     params["metadata[install_id]"] = input.installId;
   }
+  applyPromotekitReferral(params, input.promotekitReferral);
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, { custom, publishableKey });
 }
