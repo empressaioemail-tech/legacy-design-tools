@@ -38,6 +38,7 @@ import pg from "pg";
 import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
+import { isAccountKeyedNodeId } from "./lib/accountKeyedWork.js";
 import { normalizeAccessPair } from "./lib/serveGuards.js";
 import {
   fetchCountyCadPropertyRoll,
@@ -371,6 +372,36 @@ async function main() {
   const blockedSet = effectiveBlockedFips(ledgerBlocked);
   const joinGateBlocked = blockedSet.has(county);
   const parcelTable = await resolveParcelTableForCounty(neondb, county);
+  // P-180 (2026-09-13): durable retirement of the hollow account-keyed nodes.
+  // See isAccountKeyedNodeId. Drop them from the work list BEFORE any prepass
+  // so nothing keyed off the account's own (wrong) identity is ever built.
+  let excludedAccountKeyed = 0;
+  if (joinGateBlocked && parcelTable) {
+    const workIds = [
+      ...new Set(
+        work.map((w) => w.parcelNodeId.split(":")[1] ?? "").filter(Boolean),
+      ),
+    ];
+    const txgioPresent = await joinParcelRows(
+      neondb,
+      county,
+      parcelTable,
+      workIds,
+      pageSize,
+    );
+    const txgioPropIds = new Set(txgioPresent.byPropId.keys());
+    const kept: typeof work = [];
+    for (const item of work) {
+      const propId = item.parcelNodeId.split(":")[1] ?? "";
+      if (isAccountKeyedNodeId(propId, txgioPropIds)) {
+        excludedAccountKeyed += 1;
+        continue;
+      }
+      kept.push(item);
+    }
+    work.length = 0;
+    work.push(...kept);
+  }
   let parcelRows = new Map<string, ParcelJoinRow>();
   let situsRows = new Map<string, ParcelJoinRow>();
   let txgioMultiFeature = 0;
@@ -1047,6 +1078,7 @@ async function main() {
       conformantCadRows: cadRows.length,
       written,
       retired,
+      excludedAccountKeyed,
       skippedNoNode,
       situsPunctuationOnlyAbsence,
       situsNoStreetAbsence,
