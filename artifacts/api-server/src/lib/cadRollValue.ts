@@ -330,6 +330,13 @@ export interface CadPropertyRollSlice {
  */
 const KNOWN_SOURCE_VINTAGE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   "2026-preliminary-data-export-files": "2026 preliminary (notice values)",
+  /**
+   * The 8-26-2026 certified export's own source_vintage string, fixed by
+   * the staging pilot load (cli.ts's own machine label: `tier:cad-export;
+   * adapter:orion;drop:hays_20260826_certified`, live-read 2026-09-13).
+   * Not guessed ahead of the load, per this map's own header.
+   */
+  "tier:cad-export;adapter:orion;drop:hays_20260826_certified": "2026-08-26 certified export",
 });
 
 export function vintageLabelFromCadPropertyRow(

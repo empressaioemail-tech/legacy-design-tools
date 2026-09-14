@@ -108,6 +108,15 @@ describe("P-178 (2026-09-13): vintageLabelFromCadPropertyRow -- the card's label
     ).toBe("2026 preliminary (notice values)");
   });
 
+  it("FALSIFIER: the 8-26-2026 certified export's own source_vintage (fixed by the staging pilot load) maps to the drop's name and date, not the load timestamp", () => {
+    expect(
+      vintageLabelFromCadPropertyRow({
+        taxYear: 2026,
+        sourceVintage: "tier:cad-export;adapter:orion;drop:hays_20260826_certified",
+      }),
+    ).toBe("2026-08-26 certified export");
+  });
+
   it("every OTHER source_vintage (every other county, every vintage this repo has not named) falls back to the bare tax year -- byte-identical to pre-P-178 behaviour", () => {
     expect(
       vintageLabelFromCadPropertyRow({ taxYear: 2025, sourceVintage: "tier:cad-export;2025-supp0" }),
