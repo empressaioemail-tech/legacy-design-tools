@@ -58,6 +58,7 @@ import {
   situsAddressUnusableAbsence,
   TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
   type ConformantTier1BuildInput,
+  type ConformantTier1Payload,
   type Tier1LeafAbsence,
   type Tier1RecordRetirement,
 } from "./lib/nodeFacetBakeTier1Conformant";
@@ -174,6 +175,8 @@ function newPayload(
     situsRow?: ParcelJoinRow | null;
     /** CTX-HAYS-REBIND: the published-identifier crosswalk row. */
     crosswalkRow?: ParcelJoinRow | null;
+    /** P-183: the node's own parcel-table row (prop_id = the node's identity). */
+    ownRow?: ParcelJoinRow | null;
     situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
     cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
     landUseRoll?: ConformantTier1BuildInput["landUseRoll"];
@@ -216,6 +219,7 @@ function newPayload(
       gateBlocked: opts.gateBlocked ?? false,
       ...(opts.situsRow !== undefined ? { situsRow: opts.situsRow } : {}),
       ...(opts.crosswalkRow !== undefined ? { crosswalkRow: opts.crosswalkRow } : {}),
+      ...(opts.ownRow !== undefined ? { ownRow: opts.ownRow } : {}),
     },
     ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
     ...(opts.cadPropertyRoll ? { cadPropertyRoll: opts.cadPropertyRoll } : {}),
@@ -3286,3 +3290,241 @@ describe("CTX-HAYS-REBIND: geometry binds on the published crosswalk", () => {
     expect(retired.zoning?.district).toBe("SF-2");
   });
 });
+
+/**
+ * P-183 (2026-09-14) — GEOCODED CELLS THROUGH THE CROSSWALK.
+ *
+ * The five Sturgeon Dr lots, read off production on 2026-09-14 (the probe's
+ * P-175 address set; `ADDRESSES` in scripts/surface-probe.mjs carries the same
+ * three ids per address: the CAD account, the parcel-table prop_id, the
+ * published Geographic ID):
+ *
+ *   `txgio_parcel`, county_fips 48209, keyed on the node's OWN identity -- the
+ *   parcel-table `prop_id` column, which is the second component of the node id:
+ *     prop_id 97651  feature 43809  geo_id 11-2011-0001-00400-3
+ *       situs "STURGEON DR, SAN MARCOS, TX 78666"   centre 29.87113, -97.92674
+ *     617/619/627/629 are prop_ids 97652/97653/97657/97658 = features
+ *       31908/87644/24392/31435, the same block of Conway Addition Sec IV.
+ *     Every CAPCOG address point the probe carries for those five falls inside
+ *     the node's OWN row (each row's centre is under 5 m from the point).
+ *
+ *   Hays CAD numbers the same lots 84632..84639. CAD account 97651 is a
+ *   DIFFERENT Hays parcel: 476 Catalina Ln, Austin 78737 = txgio feature 39514,
+ *   geo_id 11-0362-000E-00800-4, centre 30.18153, -97.97639 -- 34.8 km north of
+ *   the node's lot. That is the collision the bare number makes.
+ *
+ * Production's tier-1 bake selected the CAD-keyed row, so the ring whose
+ * centroid it writes into place_layer_snapshots.lat_rounded/lng_rounded (the
+ * column the served `cityLimitsFact.queryPoint` is read from) was 476 Catalina
+ * Ln's, and node 48209:97651's served record point sat on a parcel 34.8 km away.
+ */
+describe("P-183: a gate-blocked county draws the node's OWN parcel row", () => {
+  // ~0.24 acre, centred on the node's own lot (production bbox centre above).
+  const STURGEON_LOT: Ring = [
+    [-97.9268, 29.87105],
+    [-97.92668, 29.87105],
+    [-97.92668, 29.87122],
+    [-97.9268, 29.87122],
+    [-97.9268, 29.87105],
+  ];
+  // ~1.45 acre, centred on the colliding CAD account's lot.
+  const CATALINA_LOT: Ring = [
+    [-97.9765, 30.18145],
+    [-97.97625, 30.18145],
+    [-97.97625, 30.18168],
+    [-97.9765, 30.18168],
+    [-97.9765, 30.18145],
+  ];
+
+  const STURGEON_BODY = () =>
+    conformantBody({
+      nodeId: "48209:97651",
+      claim: {
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "97651", taxYear: 2026 },
+        // The declared roll's own situs for this lot: no house number on the
+        // roll (the probe's P-160 label leg reads exactly this).
+        situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+        situsCity: "SAN MARCOS",
+        situsZip: "78666",
+        propertyUseCode: "A1",
+      },
+    });
+
+  /** txgio feature 43809: the parcel-table row whose prop_id IS node 48209:97651. */
+  const sturgeonOwnRow = () =>
+    txgioRow({
+      feature_index: 43809,
+      prop_id: "97651",
+      geo_id: "11-2011-0001-00400-3",
+      situs_address: "STURGEON DR, SAN MARCOS, TX 78666",
+      situs_city: "SAN MARCOS",
+      situs_state: "TX",
+      situs_zip: "78666",
+      zoning_district: "SF-6",
+      zoning_jurisdiction: "san-marcos-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      geometry: { type: "Polygon", coordinates: [STURGEON_LOT] },
+      // The membership prepass reads the prop_id column only; it is not the
+      // owner-carrying fetch, so this row can never lift the owner gate.
+      txgio_owner_for_gate: null,
+    });
+
+  /**
+   * txgio feature 39514: the parcel CAD account 97651's number names. Its
+   * zoning stamp is a discriminator for the test, not a measured value -- what
+   * is measured is the feature, the geo_id and the 34.8 km displacement.
+   */
+  const catalinaCadKeyedRow = () =>
+    txgioRow({
+      feature_index: 39514,
+      prop_id: "128069",
+      geo_id: "11-0362-000E-00800-4",
+      situs_address: "476 CATALINA LN, AUSTIN, TX 78737",
+      situs_city: "AUSTIN",
+      situs_state: "TX",
+      situs_zip: "78737",
+      zoning_district: "RR",
+      zoning_jurisdiction: "hays-county-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      geometry: { type: "Polygon", coordinates: [CATALINA_LOT] },
+      txgio_owner_for_gate: "OWNER OF CATALINA",
+    });
+
+  const shared = () => ({
+    gateBlocked: true as const,
+    body: STURGEON_BODY(),
+    countyFips: "48209",
+    countyName: "Hays",
+    parcelNodeId: "48209:97651",
+    situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+  });
+
+  const featureIndexOf = (p: ConformantTier1Payload) =>
+    (p.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex;
+
+  it("VIOLATION, BEFORE: with no own row the CAD-keyed crosswalk draws 476 Catalina Ln", () => {
+    // Production's behaviour for this node today, reproduced. Nothing here
+    // goes through the own row: this is what the bake does when the only
+    // geometry it can reach is keyed off the CAD account's numbering.
+    const before = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+    });
+    expect(before.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(featureIndexOf(before)).toBe(39514);
+    // And the stamp and the ring follow the wrong polygon: that is the class.
+    expect(before.zoning?.district).toBe("RR");
+    expect(before.baseFacts.acreage).toMatchObject({ method: "shoelace-wgs84" });
+  });
+
+  it("AFTER: the node's own row wins, and the ring, the stamp and the acreage follow it", () => {
+    const ownRow = sturgeonOwnRow();
+    const after = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+      situsRow: catalinaCadKeyedRow(),
+      ownRow,
+    });
+    expect(after.provenance.parcelJoin.state).toBe("joined-own-prop-id");
+    expect(featureIndexOf(after)).toBe(43809);
+    // The zoning stamp is a fact about the polygon, so it moves with it.
+    expect(after.zoning?.district).toBe("SF-6");
+    // The acreage METHOD is the discriminator: only a payload whose ring was
+    // actually read can carry a shoelace value, and the own row's ring is a
+    // different shape from the CAD-keyed row's.
+    const control = newPayload(ownRow, {
+      body: STURGEON_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:97651",
+      situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+    });
+    const cadKeyed = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+    });
+    expect(after.baseFacts.acreage).toEqual(control.baseFacts.acreage);
+    expect(after.baseFacts.acreage).not.toEqual(cadKeyed.baseFacts.acreage);
+    // The basis can be re-run from the basis alone: it names the column, the
+    // node's own identity, and the gate it did not lift.
+    expect(after.provenance.parcelJoin.basis).toContain("prop_id 97651");
+    expect(after.provenance.parcelJoin.basis).toContain("feature_index 43809");
+    expect(after.provenance.parcelJoin.basis).toContain("gate-blocked");
+    expect(
+      (after.provenance.parcelJoin as { sourceVintage?: string | null }).sourceVintage,
+    ).toBe("stratmap25-landparcels_48209_hays_202503");
+  });
+
+  it("the CAD-keyed rows remain the fallback for a node id the parcel table does not carry", () => {
+    // No own row: the crosswalk still binds, and with neither, the situs
+    // recovery still binds. Nothing is withdrawn -- this is a re-ranking.
+    const crosswalkOnly = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+    });
+    expect(crosswalkOnly.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(featureIndexOf(crosswalkOnly)).toBe(39514);
+
+    const situsOnly = newPayload(null, {
+      ...shared(),
+      situsRow: catalinaCadKeyedRow(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("STURGEON DR, SAN MARCOS, TX 78666"),
+          "OWNER OF CATALINA",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF CATALINA",
+      },
+    });
+    expect(situsOnly.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(featureIndexOf(situsOnly)).toBe(39514);
+  });
+
+  it("a NON-blocked county ignores an own row entirely", () => {
+    // Scope discipline: on a county whose prop_id join is open, the own row
+    // changes nothing -- there is no divergence to re-rank.
+    const open = newPayload(sturgeonOwnRow(), {
+      body: STURGEON_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:97651",
+      situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+      ownRow: catalinaCadKeyedRow(),
+    });
+    expect(open.provenance.parcelJoin.state).toBe("joined");
+    expect(featureIndexOf(open)).toBe(43809);
+    expect(open.zoning?.district).toBe("SF-6");
+  });
+
+  it("a refused land-use recovery does not withdraw the node's own row", () => {
+    // The own row supplies GEOMETRY only. With no address recovery offered at
+    // all (the Hays owner gate refuses these lots), the ring is still read and
+    // the state reports the bind the geometry took.
+    const bound = newPayload(null, {
+      ...shared(),
+      ownRow: sturgeonOwnRow(),
+    });
+    expect(bound.provenance.parcelJoin.state).toBe("joined-own-prop-id");
+    expect(featureIndexOf(bound)).toBe(43809);
+    // Land use is untouched by this key: the identical payload with no own row
+    // resolves the identical land use (the claim's own use code is served on a
+    // gate-blocked county; the owner-gated recovery is what decides recovery).
+    const withoutOwnRow = newPayload(null, { ...shared() });
+    expect(resolvedLandUse(bound)).toEqual(resolvedLandUse(withoutOwnRow));
+    expect(bound.provenance.landUseOrigin).toBe(withoutOwnRow.provenance.landUseOrigin);
+    expect(bound.provenance.landUseAddressRecovered).toBe(false);
+    // The ring WAS looked at, so acreage is measured rather than "never looked".
+    expect(bound.facetCoverage.acreage).toBe(true);
+    expect(bound.baseFacts.acreage).toMatchObject({ method: "shoelace-wgs84" });
+  });
+});
+
+// P-183: the duplicate describe block that stood here was removed. Its
+// coverage is superseded by "P-183: a gate-blocked county draws the node's OWN
+// parcel row" above, which carries the measured Sturgeon/Catalina fixtures
+// (production place_layer_snapshots, 2026-09-14) and the acreage leg as well.
+// It had been written against helpers scoped to the CTX-HAYS-REBIND describe
+// (LEAR_BODY / learParcel / windmillParcel / learRoll) and could not compile.
+export {};

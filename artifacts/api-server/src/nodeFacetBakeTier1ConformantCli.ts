@@ -387,6 +387,13 @@ async function main() {
   // keeps a stale publishRunId the factory verify-walk refuses.
   let excludedAccountKeyed = 0;
   const excludedWork: Array<{ body: Record<string, unknown>; parcelNodeId: string }> = [];
+  // P-183 (2026-09-14). The same prepass fetch already reads every work id's
+  // row from the parcel table's prop_id column -- the membership test the
+  // account-keyed exclusion uses. Those rows are the NODES' OWN parcels, so
+  // they are kept rather than dropped after their keys are read: they are the
+  // geometry source for the coordinate index and for the ring on a
+  // gate-blocked county. No extra query, no extra scan.
+  let ownPropIdRows = new Map<string, ParcelJoinRow>();
   if (joinGateBlocked && parcelTable) {
     const workIds = [
       ...new Set(
@@ -400,6 +407,7 @@ async function main() {
       workIds,
       pageSize,
     );
+    ownPropIdRows = txgioPresent.byPropId;
     const txgioPropIds = new Set(txgioPresent.byPropId.keys());
     const { kept, excluded } = partitionAccountKeyedWork(work, txgioPropIds);
     excludedAccountKeyed = excluded.length;
@@ -691,6 +699,11 @@ async function main() {
   let skippedBadAccess = 0;
   let txgioJoined = 0;
   let txgioNoRow = 0;
+  // P-183. How many gate-blocked rows took their geometry from the node's OWN
+  // row rather than from a CAD-keyed one. Zero on every non-blocked county by
+  // construction, and on a blocked county it is the number that must be
+  // non-zero for the records to be drawing their own parcels.
+  let ownPropIdGeometry = 0;
   // CTX-HAYS-REBIND. Four counters, not one, because a single "crosswalk
   // worked" number could not tell a run that bound 115,035 parcels from one
   // that bound none and refused none because the column was never ingested.
@@ -862,12 +875,25 @@ async function main() {
       const hit = resolveAddressLandUse(addrKey, txgioOwner, addressLandUse);
       situsRow = hit ? offered : null;
     }
-    // CTX-HAYS-REBIND. The crosswalk row wins the geometry when it exists;
-    // the situs recovery remains the fallback, so nothing is withdrawn.
-    const row = joinGateBlocked ? (crosswalkRow ?? situsRow) : propIdRow;
+    // P-183 (2026-09-14). The node's OWN row, when the node id is present in
+    // the parcel table's prop_id column (measured above, never assumed). This
+    // is the parcel the node IS; the crosswalk and the situs recovery below
+    // both name a parcel from the CAD account, whose numbering is the one that
+    // diverges on a gate-blocked county.
+    const ownPropIdRow = joinGateBlocked ? (ownPropIdRows.get(propId) ?? null) : null;
+    // CTX-HAYS-REBIND, re-ranked by P-183. The node's own row wins the
+    // geometry; the crosswalk row is the next fallback and the situs recovery
+    // the last, so nothing is withdrawn.
+    const row = joinGateBlocked
+      ? (ownPropIdRow ?? crosswalkRow ?? situsRow)
+      : propIdRow;
     if (joinGateBlocked) {
-      if (row) txgioJoined += 1;
-      else txgioNoRow += 1;
+      if (row) {
+        if (row === ownPropIdRow) ownPropIdGeometry += 1;
+        txgioJoined += 1;
+      } else {
+        txgioNoRow += 1;
+      }
     } else if (propIdRow) {
       txgioJoined += 1;
     } else {
@@ -894,7 +920,7 @@ async function main() {
         table: joinTable,
         row: propIdRow,
         gateBlocked: joinGateBlocked,
-        ...(joinGateBlocked ? { situsRow, crosswalkRow } : {}),
+        ...(joinGateBlocked ? { situsRow, crosswalkRow, ownRow: ownPropIdRow } : {}),
       },
       ...(joinGateBlocked && addressLandUse
         ? {
@@ -1155,6 +1181,17 @@ async function main() {
         "(a bound row takes its ring, centroid and zoning stamp from the parcel " +
         "its own published Geographic ID names; land use is untouched by this path)",
     );
+    // P-183. Beside the crosswalk line, for the same reason: a geometry source
+    // that stops being used produces no complaint. This is the count of rows
+    // whose ring and coordinate index came from the parcel table's own prop_id
+    // -- the node's own parcel -- ahead of both CAD-keyed sources above.
+    console.log(
+      `[node-facet-bake-t1-conformant] node's own parcel row for ${county}: ` +
+        `geometry-from-own-prop-id=${ownPropIdGeometry} of ${txgioJoined} ` +
+        `geometry-bearing rows (the coordinate index and the ring both come from ` +
+        `it; the CAD-keyed crosswalk and situs recovery remain the fallbacks ` +
+        `for a node id that is absent from the parcel table's prop_id column)`,
+    );
   }
   console.log(
     JSON.stringify({
@@ -1165,6 +1202,7 @@ async function main() {
       crosswalkKeyNoParcel,
       crosswalkCorroborationRefused,
       crosswalkAmbiguousKeys,
+      ownPropIdGeometry,
       crosswalkAccountsWithKey: crosswalkKeyByPropId.size,
       crosswalkParcelsIndexed: crosswalkByGeoId.size,
       accountAttrBound,
