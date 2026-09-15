@@ -189,29 +189,115 @@ function xyFromClipRing(ring: polygonClipping.Ring): XY[] {
 }
 
 /**
- * Inward setback strip for one edge: the band between the boundary segment and
- * its parallel offset at distance d (metres) inside the parcel.
+ * Quarter-arc subdivision for a setback end cap. 15 segments over 90 degrees
+ * (6 degrees per chord) puts the worst-case inscription shortfall at
+ * d*(1-cos(3 deg)) = 0.00137*d — about 1 cm on a 25 ft setback, three orders of
+ * magnitude below the defect it removes (P-235 measured a full-depth, 7.6 m
+ * incursion) and far below any figure a consumer acts on.
  */
-function setbackStrip(a: XY, b: XY, nrm: XY, distM: number): polygonClipping.Polygon | null {
+const SETBACK_JOIN_SEGMENTS = 15;
+
+/**
+ * Inward setback region for ONE edge: every point of the plane within `distM`
+ * of the SEGMENT a->b, restricted to the inward half.
+ *
+ * This is the rectangular band between the segment and its parallel offset,
+ * PLUS a quarter-arc end cap of radius `distM` at each endpoint. The caps are
+ * not decoration: without them the per-edge regions are finite rectangles
+ * whose end faces are perpendicular to their OWN edge direction, so wherever
+ * consecutive ring edges differ in direction the two rectangles do not meet
+ * (see `buildForbiddenStrips`).
+ *
+ * The arc is INSCRIBED (vertices exactly on the circle of radius `distM`), not
+ * circumscribed. That matters: a circumscribed cap would reach `distM/cos` deep
+ * at the normal direction and so bulge PAST the neighbouring rectangle on a
+ * perfectly straight boundary, moving every straight-frontage envelope by a few
+ * centimetres. Inscribed, the cap is a subset of the true disc and therefore a
+ * provable no-op wherever the rectangles already meet or overlap.
+ */
+function setbackStadium(
+  a: XY,
+  b: XY,
+  nrm: XY,
+  distM: number,
+): polygonClipping.Polygon | null {
   if (distM <= 1e-9) return null;
-  const aOff: XY = { x: a.x + nrm.x * distM, y: a.y + nrm.y * distM };
-  const bOff: XY = { x: b.x + nrm.x * distM, y: b.y + nrm.y * distM };
-  return [
-    [
-      [a.x, a.y],
-      [b.x, b.y],
-      [bOff.x, bOff.y],
-      [aOff.x, aOff.y],
-      [a.x, a.y],
-    ],
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+
+  const ring: [number, number][] = [
+    [a.x, a.y],
+    [b.x, b.y],
   ];
+  // Cap at b: sweep from the edge direction (+u) round to the inward normal.
+  for (let k = 1; k < SETBACK_JOIN_SEGMENTS; k++) {
+    const t = (k * Math.PI) / 2 / SETBACK_JOIN_SEGMENTS;
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    ring.push([
+      b.x + distM * (ux * c + nrm.x * s),
+      b.y + distM * (uy * c + nrm.y * s),
+    ]);
+  }
+  ring.push([b.x + nrm.x * distM, b.y + nrm.y * distM]);
+  ring.push([a.x + nrm.x * distM, a.y + nrm.y * distM]);
+  // Cap at a: sweep from the inward normal round to the reverse direction (-u).
+  for (let k = 1; k < SETBACK_JOIN_SEGMENTS; k++) {
+    const t = (k * Math.PI) / 2 / SETBACK_JOIN_SEGMENTS;
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    ring.push([
+      a.x + distM * (nrm.x * c - ux * s),
+      a.y + distM * (nrm.y * c - uy * s),
+    ]);
+  }
+  ring.push([a.x, a.y]);
+  return [ring];
 }
 
 /**
- * Union of the per-edge inward setback strips. Returns null when every edge
+ * Union of the per-edge inward setback regions. Returns null when every edge
  * has a zero setback (no forbidden area at all). May throw when the boolean
  * union throws; callers convert that to an explicit clip-error, never to a
  * consume-lot verdict.
+ *
+ * === Why each edge contributes a capped stadium and not a bare rectangle ===
+ *
+ * P-235, parcel 48453:289990 (2407 Princeton Dr, Travis). Each edge used to
+ * contribute only the rectangle between the segment and its parallel offset.
+ * A rectangle's end faces are perpendicular to ITS OWN edge direction, so at a
+ * shared ring vertex the two rectangles are mitred only by accident:
+ *
+ *   - at a CONVEX vertex (CCW left turn) they OVERLAP and the corner is
+ *     covered, which is why this went unnoticed for so long;
+ *   - at a REFLEX vertex (CCW right turn, interior angle > 180 deg — the shape
+ *     a frontage takes when the parcel sits on the OUTSIDE of a street curve)
+ *     they splay apart, leaving an uncovered wedge whose APEX IS ON THE
+ *     PARCEL BOUNDARY and which extends the full setback depth.
+ *
+ * The parcel-minus-forbidden difference then emits that wedge as part of the
+ * buildable region, so the drawn envelope runs all the way back to the front
+ * property line. Measured on 48453:289990 with Austin SF-3 (25/5/10):
+ * 0.052 m² uncovered in two slivers, each touching the boundary (0.0000 m),
+ * the larger 7.62 m deep at the frontage — the whole front setback.
+ *
+ * `stripReversalSpikes` below was built for this shape and does not catch it:
+ * it removes ONE vertex per pass and tests the mouth between that vertex's
+ * immediate neighbours, so a sliver carrying an intermediate vertex on either
+ * leg reads as a 6-7 m mouth and is preserved. It is a draw-time cosmetic and
+ * was never the fix; this is.
+ *
+ * The forbidden region is now exactly `{p : dist(p, edge_i) <= d_i}` unioned
+ * over edges — the literal reading of "no structure within d feet of the
+ * property line" — rather than an approximation of it that happens to be
+ * right only at convex corners. Round (not mitred) joins are what that
+ * definition produces: a mitre would forbid points MORE than d from every
+ * boundary segment, which the ordinance permits, and is unbounded at a sharp
+ * reflex notch.
  */
 function buildForbiddenStrips(
   pts: XY[],
@@ -224,7 +310,7 @@ function buildForbiddenStrips(
     const b = pts[(i + 1) % n]!;
     const nrm = inwardNormal(a, b);
     if (!nrm) continue;
-    const strip = setbackStrip(a, b, nrm, insetMetersPerEdge[i]!);
+    const strip = setbackStadium(a, b, nrm, insetMetersPerEdge[i]!);
     if (!strip) continue;
     forbidden = forbidden ? polygonClipping.union(forbidden, strip) : [strip];
   }
