@@ -762,8 +762,27 @@ export function buildR1Brief(
     options?.parcelRecordFloodFact,
   );
   const landUseFactOpt = options?.landUseFact;
-  const landUseSection =
-    landUseFactOpt && landUseFactOpt.state !== "refused"
+  // P-207: the land-use-fact atom writer has no address-join recovery of its
+  // own -- it always writes a join-hold absence for a gate-blocked county
+  // (LANDUSE_JOIN_DISABLED_FIPS_SEED), even on a node where the Tier-1 bake's
+  // OWN independent, owner-gated situs-address join (buildTier1Payload's
+  // resolveAddressLandUse) has already recovered a real code from the same
+  // CAD roll (`provenance.landUseAddressRecovered`). That recovery is a
+  // second, independently-sourced positive determination the atom cannot see,
+  // not a re-derivation of the disabled prop_id join -- it must win over the
+  // atom's absence the same way a genuinely earned atom determination wins
+  // over the legacy value in every other case. Scoped to exactly this signal:
+  // every other absent/refused shape is unchanged.
+  const landUseAddressRecovered =
+    (asRecord(root.provenance)?.landUseAddressRecovered ?? false) === true;
+  const landUseSection = landUseAddressRecovered
+    ? withCitationPosture({
+        data: baseFacts.landUse ?? null,
+        citations: urlsFrom(baseFacts.landUse),
+        asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
+        disposition: landUseDisposition(baseFacts.landUse),
+      })
+    : landUseFactOpt && landUseFactOpt.state !== "refused"
       ? composeLandUseBriefSectionFromAtom(landUseFactOpt, bakedAt)
       : withCitationPosture({
           data: baseFacts.landUse ?? null,

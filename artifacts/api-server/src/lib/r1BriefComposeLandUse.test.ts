@@ -134,3 +134,77 @@ describe("buildR1Brief land-use precedence", () => {
     });
   });
 });
+
+/**
+ * P-207 (2026-09-14): the payload-contradiction fixture. `get_smart_site`
+ * depth-node for 48209:97658 returned brief.sections[land-use] absent/
+ * join-hold in the same response as draw.attrs.landUse present "C1" -- both
+ * built from the SAME baked payload. Live-verified (`place_layer_snapshots`,
+ * legacy-design-tools-prod neondb, adapter_key node-facets:tier1, place_key
+ * node:48209:97658): `baseFacts.landUse` carries `source:
+ * "cad-roll-address-join"` and `provenance.landUseAddressRecovered: true` --
+ * a REAL, owner-gated situs-address recovery (buildTier1Payload's
+ * resolveAddressLandUse) from the certified 2026-08-26 Hays CAD drop, not the
+ * disabled prop_id join (LANDUSE_JOIN_DISABLED_FIPS_SEED). The land-use-fact
+ * atom (evaluated 2026-08-12, `cad-property-land-use-v1`) predates that
+ * recovery and has no address-join mechanism of its own -- it always reports
+ * join-hold for a gate-blocked county regardless of what the bake later
+ * recovers. Root cause (LANDUSE_JOIN_DISABLED_FIPS_SEED, the join being
+ * disabled) is P-180's finding, not re-derived here; this fixture is about
+ * the disagreement between the two readers of one bake, not the join itself.
+ */
+describe("buildR1Brief P-207: address-join recovery vs a join-hold atom absence", () => {
+  const HAYS_BASE_FACTS = {
+    landUse: {
+      code: "C1",
+      description: "Vacant lot or tract",
+      source: "cad-roll-address-join",
+      vintage: "tier:cad-export;adapter:orion;drop:hays_20260826_certified",
+    },
+  };
+  const HAYS_JOIN_HOLD_ATOM: LandUseFactTypedAbsence = {
+    state: "absent",
+    source: "land-use-fact",
+    boundAs: "48209:97658:2026",
+    tried: ["48209:97658", "48209:97658.00000000"],
+    entityId: "48209:97658:2026",
+    taxYear: 2026,
+    absence: {
+      kind: "join-hold",
+      reason:
+        "LANDUSE_JOIN_HOLD county 48209 — TxGIO prop_id does not join CAD property_use_code",
+    },
+    verifiedAbsence: null,
+    sourceTier: "cad-authoritative",
+    sourceAdapter: "cad-property-land-use-v1",
+  };
+
+  it("FALSIFIER control: a join-hold absence with NO address recovery is unaffected -- absence still wins", () => {
+    const brief = buildR1Brief(
+      {
+        baseFacts: HAYS_BASE_FACTS,
+        provenance: { landUseGateBlocked: true, landUseAddressRecovered: false },
+      },
+      null,
+      { landUseFact: HAYS_JOIN_HOLD_ATOM },
+    );
+    expect(landUseSectionOf(brief)?.disposition).toBe("absent");
+    expect(landUseSectionOf(brief)?.data).toEqual(HAYS_JOIN_HOLD_ATOM);
+  });
+
+  it("the real P-207 case: an address-recovered baked value outranks the atom's join-hold absence", () => {
+    const brief = buildR1Brief(
+      {
+        baseFacts: HAYS_BASE_FACTS,
+        provenance: { landUseGateBlocked: true, landUseAddressRecovered: true },
+      },
+      null,
+      { landUseFact: HAYS_JOIN_HOLD_ATOM },
+    );
+    expect(landUseSectionOf(brief)?.disposition).toBe("present");
+    expect(landUseSectionOf(brief)?.data).toEqual(HAYS_BASE_FACTS.landUse);
+    // This is what draw.attrs.landUse already independently reads
+    // (parcelDrawFromReads.ts: `landUse: baseFacts.landUse ?? null`) --
+    // brief and draw now agree on the same recovered value.
+  });
+});
