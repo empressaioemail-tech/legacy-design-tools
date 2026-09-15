@@ -240,10 +240,64 @@ function districtFromScalars(
 }
 
 /**
+ * Build a DistrictMappingResult from the winning candidate when the codified
+ * table has no row for this district at all (WDLL P-232: the atom candidate
+ * becomes REACHABLE, not automatically the winner — R-1 in
+ * `resolveMostCurrentSetback` still decides that upstream of this call).
+ * There is no codified `mapped` row to overlay onto here, unlike
+ * `districtFromScalars` above.
+ *
+ * `max_height_ft` / `max_lot_coverage_pct` / `max_impervious_pct` are not
+ * part of a setback rule's wire shape (`AtomChainSetbackWire`) — marked
+ * `not_specified` rather than given an invented bulk-standards number,
+ * the same convention the codified tables already use for a genuinely
+ * absent scalar (e.g. bastrop-development-code.json's own
+ * `max_lot_coverage_pct` rows).
+ */
+function districtFromAtomOnly(
+  districtCode: string,
+  winner: SetbackCandidate,
+): DistrictMappingResult {
+  const cornerKnown = typeof winner.scalars.side_corner_ft === "number";
+  return {
+    district: {
+      district_name: districtCode,
+      front_ft: winner.scalars.front_ft,
+      side_ft: winner.scalars.side_ft,
+      rear_ft: winner.scalars.rear_ft,
+      side_corner_ft: cornerKnown ? winner.scalars.side_corner_ft! : 0,
+      max_height_ft: 0,
+      max_lot_coverage_pct: 0,
+      max_impervious_pct: 0,
+      citation_url: winner.citationUrl ?? "",
+      provenance: {
+        ...(cornerKnown ? {} : { side_corner_ft: { not_specified: true } }),
+        max_height_ft: { not_specified: true },
+        max_lot_coverage_pct: { not_specified: true },
+        max_impervious_pct: { not_specified: true },
+      },
+    },
+    kind: "atom-sourced",
+    confidence: 0.85,
+    note:
+      `Zoning "${districtCode}" has no row in the codified ordinance table; ` +
+      `served from ${winner.sourceLabel} (property atom chain / per-parcel ` +
+      `GIS), not the ordinance chart.`,
+    zoningCode: districtCode,
+  };
+}
+
+/**
  * Resolve setbacks for derive: codified table vs atom-chain/GIS, under R-1
  * (most-current source wins), same rule for every municipality — the
  * tier-first ranking this function used to run is deleted, not kept as a
  * fallback path.
+ *
+ * WDLL P-232: the atom candidate is built BEFORE the codified-row gate can
+ * return, so a district the codified table has no row for still reaches the
+ * resolver when the atom chain carries a usable dated rule. A district with
+ * no usable candidate on EITHER side still returns null — this makes an
+ * existing value reachable, it does not manufacture one.
  */
 export function resolveAuthoritativeSetbacks(args: {
   jurisdictionKey: string | null;
@@ -259,10 +313,17 @@ export function resolveAuthoritativeSetbacks(args: {
   if (!table?.districts.length) return null;
 
   const mapped = mapDistrict(table, districtCode);
-  if (!mapped || mapped.kind === "fallback-conservative") return null;
+  const hasCodifiedRow = !!mapped && mapped.kind !== "fallback-conservative";
 
-  const candidates: SetbackCandidate[] = [codifiedCandidate(table, mapped)];
   const atomC = args.atomRule ? atomCandidate(args.atomRule) : null;
+
+  // Neither side has a usable candidate: the honest decline this row must
+  // not disturb (falsifier 1 — a district unusable on both sides still
+  // refuses).
+  if (!hasCodifiedRow && !atomC) return null;
+
+  const candidates: SetbackCandidate[] = [];
+  if (hasCodifiedRow && mapped) candidates.push(codifiedCandidate(table, mapped));
   if (atomC) candidates.push(atomC);
 
   const resolution = resolveMostCurrentSetback(candidates);
@@ -272,7 +333,10 @@ export function resolveAuthoritativeSetbacks(args: {
       ? resolution.winner
       : tierHighest(resolution.candidates);
 
-  const districtWithScalars = districtFromScalars(mapped, winnerCandidate.scalars);
+  const districtWithScalars =
+    hasCodifiedRow && mapped
+      ? districtFromScalars(mapped, winnerCandidate.scalars)
+      : districtFromAtomOnly(districtCode, winnerCandidate);
 
   return {
     scalars: winnerCandidate.scalars,
