@@ -15,7 +15,10 @@ import type { SetbackDistrict, SetbackTable } from "@workspace/adapters";
 export type DistrictMatchKind =
   | "matched" // zoningCode matched a district code
   | "fallback-conservative" // no zoning stamp; used the most-conservative district
-  | "single"; // table has one district; used it
+  | "single" // table has one district; used it
+  | "atom-sourced"; // codified table has no row for this code; built by
+  // authoritativeSetbackSource.ts from a winning atom-chain/GIS-per-parcel
+  // candidate, never by this file's own mapDistrict (WDLL P-232).
 
 export interface DistrictMappingResult {
   district: SetbackDistrict;
