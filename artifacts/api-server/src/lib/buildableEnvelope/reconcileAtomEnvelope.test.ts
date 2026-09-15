@@ -204,4 +204,100 @@ describe("reconcileWithAtomEnvelope", () => {
     });
     expect(res).toBe(derived);
   });
+
+  describe("P-214: a raw hauska-engine mechanical-verify diagnostic must never reach a customer string", () => {
+    // Live 48021:8723767, 2026-09-15 — the exact `outcome.reason` served by
+    // the property atom chain for this parcel (honest-decline-promote.ts's
+    // `verifyReasons.slice(0, 3).join("; ")`). Fails on the pre-fix code:
+    // it clobbers a good, currently-computed envelope with a false
+    // no-buildable-area/0-sqft result and prints this raw text as the
+    // customer-facing disclosure.
+    const LIVE_R32_DIAGNOSTIC =
+      "edge 1: R32 35.02831192164916ft != expected 5ft for role side; " +
+      "edge 4: R32 53.60964475445567ft != expected 25ft for role rear";
+
+    it("keeps a good live-derived envelope instead of clobbering it with the engine's stale cert failure", () => {
+      const derived = buildableFixture();
+      expect(derived.empty).toBe(false);
+
+      const res = reconcileWithAtomEnvelope(derived, {
+        kind: "no-buildable-area",
+        reason: LIVE_R32_DIAGNOSTIC,
+      });
+
+      // The defect: pre-fix, this became empty/consumed/0 sqft, discarding a
+      // real, currently-computed envelope over a stale engine diagnostic.
+      expect(res).toBe(derived);
+      expect(res.empty).toBe(false);
+    });
+
+    it("never prints the raw diagnostic when the live pass has nothing to fall back on either", () => {
+      // Hand-built rather than derived: exercises the string-sanitization
+      // half of the fix independent of the "keep the live envelope" half
+      // above, for a local result that is empty but not already "consumed"
+      // (so it is not intercepted by the pre-existing top-of-function guard
+      // that never touches a "validation-failed" local result at all).
+      const derived: ReturnType<typeof buildableFixture> = {
+        geojson: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: null,
+              properties: {
+                kind: "buildable-envelope",
+                approximate: true,
+                notSurveyGrade: true,
+                disclosure: "placeholder",
+                setbacks: { front_ft: 30, side_ft: 10, rear_ft: 30, district: "SF-1" },
+                edgeSignal: "road",
+                edgeNote: "",
+                districtNote: "",
+                parcelAreaSqFt: 10_000,
+                buildableAreaSqFt: 0,
+                buildableAreaPct: 0,
+                maxLotCoveragePct: null,
+                maxHeightFt: null,
+                maxFootprintSqFt: null,
+                citationUrl: "https://example.test",
+              },
+            },
+          ],
+        },
+        confidence: null,
+        approximate: true,
+        empty: true,
+        citationUrl: "https://example.test",
+        district: "SF-1",
+      };
+
+      const res = reconcileWithAtomEnvelope(derived, {
+        kind: "no-buildable-area",
+        reason: LIVE_R32_DIAGNOSTIC,
+      });
+
+      expect(res).not.toBe(derived);
+      expect(res.emptyKind).toBe("validation-failed");
+      const props = res.geojson.features[0]!.properties;
+      // No internal identifier (R32), no unrounded float, no assertion
+      // syntax (!=) anywhere in what the customer is shown.
+      expect(props.disclosure).not.toMatch(/R32/);
+      expect(props.disclosure).not.toMatch(/!=/);
+      expect(props.disclosure).not.toMatch(/\d+\.\d{4,}/);
+      expect(props.emptyReason).not.toMatch(/R32/);
+      expect(props.emptyReason).not.toMatch(/!=/);
+    });
+
+    it("still serves a genuine, human-authored engine reason unchanged (falsifier: must not over-fire)", () => {
+      const derived = buildableFixture();
+      const res = reconcileWithAtomEnvelope(derived, {
+        kind: "no-buildable-area",
+        reason: "Setbacks consume the lot per engine calculation.",
+      });
+      expect(res.emptyKind).toBe("consumed");
+      expect(res.geojson.features[0]!.properties.emptyReason).toMatch(
+        /engine calculation/i,
+      );
+    });
+  });
 });

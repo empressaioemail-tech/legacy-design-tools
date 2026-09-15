@@ -21,6 +21,7 @@
  * already treats this class as fail-closed for the same reason).
  */
 
+import type { InsetEmptyKind } from "./geometry";
 import type { BuildableEnvelopeProps, BuildableEnvelopeResult } from "./derive";
 
 export interface AtomBuildableEnvelopeOutcome {
@@ -32,6 +33,30 @@ export interface AtomBuildableEnvelopeOutcome {
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
+
+/**
+ * hauska-engine's honest-decline atoms (packages/engine-core/src/depth-warm/
+ * honest-decline-promote.ts, `buildHonestVerifyDeclineAtom`) sometimes carry
+ * a RAW mechanical-verify diagnostic as `outcome.reason` — internal
+ * per-edge/per-road gate text joined with "; ", full-precision floats
+ * included. It was written for an engineer reading a cert-failure log, never
+ * for a customer (P-214, live 2026-09-15 on 48021:8723767: "edge 1: R32
+ * 35.02831192164916ft != expected 5ft for role side; edge 4: R32
+ * 53.60964475445567ft != expected 25ft for role rear"). Detect that shape so
+ * it never reaches a served string. The three signals below are independent
+ * of any one gate's wording (R32 is only one of several mechanical gates
+ * that feed this same field) and match how `honest-decline-promote.ts`
+ * actually assembles the string: `verifyReasons.slice(0, 3).join("; ")`.
+ */
+function isMachineVerifyDiagnostic(reason: string): boolean {
+  if (reason.includes("; ")) return true;
+  if (/\b(edge|road)\s+\S+:/i.test(reason)) return true;
+  if (/\d+\.\d{4,}/.test(reason)) return true;
+  return false;
+}
+
+const ENVELOPE_UNVERIFIED_DISCLOSURE =
+  "The property atom chain's last geometry certification for this parcel failed its own mechanical checks and could not confirm a buildable envelope. Withheld rather than shown as a possibly-stale figure — verify with a survey and the city.";
 
 function withoutEmptyFields(
   props: BuildableEnvelopeProps,
@@ -119,10 +144,29 @@ export function reconcileWithAtomEnvelope(
     const alreadyAgrees = derived.empty && props.emptyKind === "consumed";
     if (alreadyAgrees) return derived;
 
-    const reason = atomOutcome.reason ?? "Setbacks consume the lot — no buildable area remains.";
-    const disclosure =
-      `No buildable area: ${reason} (property atom chain, engine source of truth). ` +
-      `Approximate — verify with a survey and the city.`;
+    const rawReason = atomOutcome.reason ?? null;
+    const isDiagnostic = rawReason != null && isMachineVerifyDiagnostic(rawReason);
+
+    // A mechanical-verify failure is a fact about the ENGINE's own stale
+    // certification, never a genuine "setbacks consume the lot" geometric
+    // finding (P-214). When derive.ts's own live pass already produced a
+    // real, drawable envelope, that live result is the more-current answer
+    // (it consumes today's setback table, the same one this route already
+    // served) — the atom has nothing trustworthy to correct it WITH, so
+    // treat it the same as the pending/unknown-kind case below and keep the
+    // live result rather than clobbering a good envelope with a false zero.
+    if (isDiagnostic && !derived.empty) return derived;
+
+    const emptyKind: InsetEmptyKind = isDiagnostic
+      ? "validation-failed"
+      : "consumed";
+    const reason = isDiagnostic
+      ? ENVELOPE_UNVERIFIED_DISCLOSURE
+      : (rawReason ?? "Setbacks consume the lot — no buildable area remains.");
+    const disclosure = isDiagnostic
+      ? reason
+      : `No buildable area: ${reason} (property atom chain, engine source of truth). ` +
+        `Approximate — verify with a survey and the city.`;
 
     const newProps: BuildableEnvelopeProps = {
       ...withoutEmptyFields(props),
@@ -132,13 +176,13 @@ export function reconcileWithAtomEnvelope(
       maxFootprintSqFt: 0,
       disclosure,
       emptyReason: reason,
-      emptyKind: "consumed",
+      emptyKind,
     };
 
     return {
       ...derived,
       empty: true,
-      emptyKind: "consumed",
+      emptyKind,
       geojson: {
         type: "FeatureCollection",
         features: [{ type: "Feature", geometry: null, properties: newProps }],
