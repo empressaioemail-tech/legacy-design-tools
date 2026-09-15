@@ -271,6 +271,77 @@ function invalidParcelNodeIdResult(parcelNodeId: unknown): ToolResult {
   );
 }
 
+/**
+ * P-242. artifactId is a `uuid("id")` primary key (see
+ * lib/db/src/schema/recordsRequestArtifacts.ts). A value that does not
+ * parse as a UUID must never reach the driver: passing it through
+ * `eq(recordsRequestArtifacts.id, artifactId)` throws a raw
+ * `invalid input syntax for type uuid` error whose message (via drizzle's
+ * postgres-js wrapping) carries the full query text, every selected column
+ * name, and the table name verbatim — a live-confirmed schema disclosure to
+ * an authenticated caller. Refused here, BEFORE any query runs, as its own
+ * reason distinct from artifact_not_found: a malformed id is the caller's
+ * own input error (Known trap: "artifactId values that do not parse and
+ * ones that parse but do not exist are different states"), never conflated
+ * with the ownership-safe not-found answer below.
+ */
+const ARTIFACT_ID_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function malformedArtifactIdResult(
+  parcelNodeId: string,
+  artifactId: string,
+): ToolResult {
+  return textResult(
+    {
+      status: "refused",
+      reason: "artifact_id_malformed",
+      message: "artifactId must be a UUID.",
+      parcelNodeId,
+      artifactId,
+    },
+    true,
+  );
+}
+
+type QueryOutcome<T> = { ok: true; value: T } | { ok: false };
+
+/**
+ * P-242 defense in depth, for every remaining call site in this module. A
+ * malformed artifactId is refused before it can reach the driver (above),
+ * but any OTHER unexpected driver failure (a dropped connection, a
+ * statement timeout) must not reach the caller as a raw error either —
+ * drizzle's postgres-js errors carry the query text and bound params in
+ * their own `.message`, and some carry the original driver error again on
+ * `.cause`. Logged server-side only (never returned); the caller gets a
+ * declared, schema-free refusal from {@link queryFailedResult}.
+ */
+async function runQuery<T>(
+  label: string,
+  fn: () => Promise<T>,
+): Promise<QueryOutcome<T>> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    console.error(
+      `[smartsite-mcp] recordsExtraction: ${label} query failed`,
+      error,
+    );
+    return { ok: false };
+  }
+}
+
+function queryFailedResult(): ToolResult {
+  return textResult(
+    {
+      status: "refused",
+      reason: "records_lookup_failed",
+      message: "Could not read purchased-records data right now.",
+    },
+    true,
+  );
+}
+
 export interface ListPurchasedRecordsArgs {
   parcelNodeId: string;
 }
@@ -302,24 +373,32 @@ export async function listPurchasedRecords(
   const dbClient = deps?.db ?? defaultDb;
   const parcelKey = parcelKeyFromParcelNodeId(parcelNodeId);
 
-  const jobs = await dbClient
-    .select()
-    .from(recordsRequestJobs)
-    .where(
-      and(
-        eq(recordsRequestJobs.userId, userId),
-        eq(recordsRequestJobs.parcelKey, parcelKey),
-      ),
-    )
-    .orderBy(desc(recordsRequestJobs.createdAt));
+  const jobsOutcome = await runQuery("jobs-by-parcel", () =>
+    dbClient
+      .select()
+      .from(recordsRequestJobs)
+      .where(
+        and(
+          eq(recordsRequestJobs.userId, userId),
+          eq(recordsRequestJobs.parcelKey, parcelKey),
+        ),
+      )
+      .orderBy(desc(recordsRequestJobs.createdAt)),
+  );
+  if (!jobsOutcome.ok) return queryFailedResult();
+  const jobs = jobsOutcome.value;
 
   const jobsOut = [];
   for (const job of jobs as RecordsRequestJob[]) {
-    const artifacts = await dbClient
-      .select()
-      .from(recordsRequestArtifacts)
-      .where(eq(recordsRequestArtifacts.jobId, job.id))
-      .orderBy(desc(recordsRequestArtifacts.createdAt));
+    const artifactsOutcome = await runQuery("artifacts-by-job", () =>
+      dbClient
+        .select()
+        .from(recordsRequestArtifacts)
+        .where(eq(recordsRequestArtifacts.jobId, job.id))
+        .orderBy(desc(recordsRequestArtifacts.createdAt)),
+    );
+    if (!artifactsOutcome.ok) return queryFailedResult();
+    const artifacts = artifactsOutcome.value;
     jobsOut.push({
       ...jobSummary(job),
       documents: (artifacts as RecordsRequestArtifact[]).map(documentSummary),
@@ -369,16 +448,22 @@ export async function readPurchasedRecord(
       true,
     );
   }
+  if (!ARTIFACT_ID_UUID_RE.test(artifactId)) {
+    return malformedArtifactIdResult(parcelNodeId, artifactId);
+  }
 
   const dbClient = deps?.db ?? defaultDb;
   const parcelKey = parcelKeyFromParcelNodeId(parcelNodeId);
 
-  const artifactRows = await dbClient
-    .select()
-    .from(recordsRequestArtifacts)
-    .where(eq(recordsRequestArtifacts.id, artifactId))
-    .limit(1);
-  const artifact = (artifactRows as RecordsRequestArtifact[])[0];
+  const artifactOutcome = await runQuery("artifact-by-id", () =>
+    dbClient
+      .select()
+      .from(recordsRequestArtifacts)
+      .where(eq(recordsRequestArtifacts.id, artifactId))
+      .limit(1),
+  );
+  if (!artifactOutcome.ok) return queryFailedResult();
+  const artifact = (artifactOutcome.value as RecordsRequestArtifact[])[0];
   if (!artifact) {
     return textResult(
       {
@@ -392,12 +477,15 @@ export async function readPurchasedRecord(
     );
   }
 
-  const jobRows = await dbClient
-    .select()
-    .from(recordsRequestJobs)
-    .where(eq(recordsRequestJobs.id, artifact.jobId))
-    .limit(1);
-  const job = (jobRows as RecordsRequestJob[])[0];
+  const jobOutcome = await runQuery("job-by-id", () =>
+    dbClient
+      .select()
+      .from(recordsRequestJobs)
+      .where(eq(recordsRequestJobs.id, artifact.jobId))
+      .limit(1),
+  );
+  if (!jobOutcome.ok) return queryFailedResult();
+  const job = (jobOutcome.value as RecordsRequestJob[])[0];
 
   if (!job || job.userId !== userId || job.parcelKey !== parcelKey) {
     // Same refusal as "not found" — ownership/parcel mismatch never
