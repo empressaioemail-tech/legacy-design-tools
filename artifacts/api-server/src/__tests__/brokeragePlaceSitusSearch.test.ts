@@ -171,4 +171,53 @@ describe("GET /api/brokerage/v1/place/situs-search", () => {
     expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
     expect(res.body).not.toHaveProperty("outOfCoverageState");
   });
+
+  it("county-out-of-coverage empty carries missClass county_out_of_coverage plus outOfCoverageCounty (P-205 / P-210)", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "county_out_of_coverage",
+      outOfCoverageCounty: { countyFips: "48027", countyName: "Bell", state: "TX" },
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "301 W Avenue B, Killeen, TX 76541" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "county_out_of_coverage",
+      outOfCoverageCounty: { countyFips: "48027", countyName: "Bell", state: "TX" },
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("coverage-check-unavailable empty carries missClass coverage_check_unavailable plus coverageCheckUnavailableReason (P-205 / P-210)", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "coverage_check_unavailable",
+      coverageCheckUnavailableReason: "retrieval-api key not configured",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "301 W Avenue B, Killeen, TX 76541" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "coverage_check_unavailable",
+      coverageCheckUnavailableReason: "retrieval-api key not configured",
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("does not attach outOfCoverageCounty or coverageCheckUnavailableReason to a plain no-hit (no cross-contamination)", async () => {
+    searchMock.mockResolvedValueOnce({ hits: [], missClass: "no-hit" });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "zzzz-not-a-situs-99999" });
+
+    expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
+    expect(res.body).not.toHaveProperty("outOfCoverageCounty");
+    expect(res.body).not.toHaveProperty("coverageCheckUnavailableReason");
+  });
 });

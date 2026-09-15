@@ -152,10 +152,17 @@ describe("situs-search miss budget (P-91 O7)", () => {
   });
 
   it("completed empty is no-hit, not a budget miss", async () => {
+    // P-205 / P-210 (2026-09-14): this test's concern is the budget/no-hit
+    // distinction, not county coverage — the query has no locality at all,
+    // so a real coverage source would have nothing to check anyway. A
+    // fixed `covered` verdict isolates that variable; see
+    // txgioAddressResolveCoverage.test.ts for the fail-closed coverage
+    // behavior itself.
     const result = await searchPlaceByPrefix({
       query: "zzzz-not-a-situs-99999",
       database: hangDb(UNBOUNDED_MISS_QUERY_MS) as never,
       budgetMs: HTTP_BUDGET_STAND_IN_MS,
+      coverageSource: { checkCoverage: async () => ({ status: "covered" as const }) },
     });
     expect(result).toEqual({ hits: [], missClass: "no-hit" });
   });
