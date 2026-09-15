@@ -394,15 +394,36 @@ describe("insetPerEdge — P60b false-empty regressions (digitized/curved rings)
     assertGatePass(ring, res.ring!, feet);
   });
 
-  it("REGRESSION: real Simsbrook 48453:280239, as-is per-edge setbacks -> ~3,798 sqft", () => {
+  /**
+   * RESTATED at P-235, from ~3,798 sqft to ~3,243 sqft. Read the reason before
+   * "restoring" the old number.
+   *
+   * The 3,740..3,860 bound was asserted against what this function produced at
+   * the time, and what it produced was wrong: the per-edge forbidden region was
+   * a bare rectangle with no join at ring vertices, so at every REFLEX joint of
+   * this curved frontage the rectangles splayed apart and left the buildable
+   * region running back to the property line. Audited by pure trigonometry
+   * (point-to-segment distance on a 3 cm grid, no boolean op, so it shares no
+   * machinery with the code under test): of the old 3,797.1 sqft envelope,
+   * 555.1 sqft lay INSIDE a setback and the worst vertex sat 25.00 ft inside
+   * the 25 ft front setback — i.e. ON the front property line. The same audit
+   * of the current output finds 1.1 sqft (the inscribed-arc residual) and a
+   * worst intrusion of 0.03 ft. 3,797.1 - 555.1 = 3,242.0, which is the figure
+   * below.
+   *
+   * The authority for the new number is the ordinance rule itself (no buildable
+   * area within d feet of boundary edge d applies to), not this function's
+   * output. `setbackJoinCoverage.test.ts` holds that rule as a standing check.
+   */
+  it("REGRESSION: real Simsbrook 48453:280239, as-is per-edge setbacks -> ~3,243 sqft", () => {
     const proj = projectRing(SIMSBROOK_280239)!;
     expect(proj.points.length).toBe(11);
     const feet = simsbrookAsIsFeet();
     const res = insetPerEdge(SIMSBROOK_280239, feet);
     expect(res.empty, res.emptyReason).toBe(false);
     expect(res.ring).not.toBeNull();
-    expect(res.areaSqFt).toBeGreaterThan(3_740);
-    expect(res.areaSqFt).toBeLessThan(3_860);
+    expect(res.areaSqFt).toBeGreaterThan(3_200);
+    expect(res.areaSqFt).toBeLessThan(3_290);
     assertGatePass(SIMSBROOK_280239, res.ring!, feet);
   });
 
