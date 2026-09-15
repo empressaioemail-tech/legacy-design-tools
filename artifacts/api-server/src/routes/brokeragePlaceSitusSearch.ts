@@ -65,6 +65,14 @@ brokeragePlaceSitusSearchRouter.get(
             ...(result.outOfCoverageState
               ? { outOfCoverageState: result.outOfCoverageState }
               : {}),
+            // P-205 / P-210: carried only on county_out_of_coverage.
+            ...(result.outOfCoverageCounty
+              ? { outOfCoverageCounty: result.outOfCoverageCounty }
+              : {}),
+            // P-205 / P-210: carried only on coverage_check_unavailable.
+            ...(result.coverageCheckUnavailableReason
+              ? { coverageCheckUnavailableReason: result.coverageCheckUnavailableReason }
+              : {}),
           }
         : { hits: result.hits },
     );
