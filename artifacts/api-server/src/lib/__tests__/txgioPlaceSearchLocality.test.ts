@@ -32,6 +32,19 @@ vi.mock("../brokerageTxParcels", () => ({
 
 const { searchPlaceByPrefix } = await import("../txgioAddressResolve");
 
+/**
+ * P-205 / P-210 (2026-09-14). `searchPlaceByPrefix` now asks a
+ * {@link CoverageSource} before returning `no-hit` for an empty result
+ * (fail-closed default: `coverage_check_unavailable` absent a real
+ * answer — see `txgioAddressResolveCoverage.test.ts`). This file's own
+ * concern is the LOCALITY fail-closed mechanism (no unfiltered fallback
+ * across counties), which is orthogonal to county-level coverage — every
+ * query below is for Bastrop, a known onboarded county — so tests that
+ * assert the locality guard's `no-hit` outcome inject a fixed `covered`
+ * verdict to isolate that variable rather than assert on it.
+ */
+const COVERED = { checkCoverage: async () => ({ status: "covered" as const }) };
+
 describe("searchPlaceByPrefix locality filter (B1)", () => {
   function mockDb(parcelRows: unknown[], addressRows: unknown[] = []) {
     let call = 0;
@@ -138,6 +151,7 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
           situsAddress: "908 PINE ST, GEORGETOWN, TX 78626",
         },
       ]) as never,
+      coverageSource: COVERED,
     });
     expect(hits).toEqual({ hits: [], missClass: "no-hit" });
   });
@@ -241,6 +255,7 @@ describe("searchPlaceByPrefix locality filter (B1)", () => {
             situsCity: "GEORGETOWN",
           },
         ]) as never,
+        coverageSource: COVERED,
       });
       expect(hits).toEqual({ hits: [], missClass: "no-hit" });
     });

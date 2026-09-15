@@ -66,6 +66,10 @@ import {
 import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
 import { isPunctuationOnlySitus } from "./situsCompose";
 import {
+  retrievalApiCoverageSource,
+  type CoverageSource,
+} from "./placeCoverageSource";
+import {
   normalizeStreetLine,
   normalizeStreetLineCandidates,
   normalizeSitusSearchPrefix,
@@ -1150,10 +1154,33 @@ export type PlaceSearchHit =
  * covers is not a "not a place" either. `out_of_coverage` and `no-hit` are
  * honest opposites: the first means Smart Site never had any business
  * looking, the second means it looked, in coverage, and found nothing.
+ *
+ * P-205 / P-210 (OPS-24) add a THIRD and FOURTH class, one county-scoped
+ * rather than state-scoped:
+ *
+ *   - `county_out_of_coverage`: the honest county-level analogue of
+ *     `out_of_coverage` — a real, confirmed answer that this Texas county
+ *     is not in the serving ledger. Only ever returned when an injected
+ *     {@link CoverageSource} positively confirms it; see
+ *     `placeCoverageSource.ts`. Unreachable with today's default source
+ *     (no such source exists yet; P-210 is still open) but the type exists
+ *     now so a follow-on lane's answer has somewhere to land without a
+ *     second round of type plumbing.
+ *   - `coverage_check_unavailable`: the FAIL-CLOSED decline. Returned
+ *     whenever a coverage answer was needed (hits empty, budget not
+ *     exhausted, not already caught by the state-level check) and the
+ *     injected source could not produce `covered` or `not-covered`. This is
+ *     NOT `no-hit` — `no-hit` is a positive claim ("looked, in coverage,
+ *     found nothing") and this lane must never make that claim without a
+ *     real coverage answer backing it (operator ruling, 2026-09-14: a
+ *     stub/absent source must fail closed, never fall through to `no-hit`
+ *     and never assume covered).
  */
 export type SitusSearchMissClass =
   | "no-hit"
   | "out_of_coverage"
+  | "county_out_of_coverage"
+  | "coverage_check_unavailable"
   | typeof SITUS_SEARCH_BUDGET_ERROR;
 
 export type PlaceSearchResult = {
@@ -1165,6 +1192,10 @@ export type PlaceSearchResult = {
    * P-107 / OPS-16 A-072.
    */
   outOfCoverageState?: string;
+  /** Present only when `missClass` is `"county_out_of_coverage"`. P-205/P-210. */
+  outOfCoverageCounty?: { countyFips: string; countyName: string; state: string };
+  /** Present only when `missClass` is `"coverage_check_unavailable"`: why the coverage source could not answer. P-205/P-210. */
+  coverageCheckUnavailableReason?: string;
 };
 
 function formatAddressPointLabel(row: {
@@ -1370,6 +1401,15 @@ export async function searchPlaceByPrefix(input: {
   database?: TxgioAddressResolveDb;
   /** Test override. Production uses {@link SITUS_SEARCH_BUDGET_MS}. */
   budgetMs?: number;
+  /**
+   * P-205 / P-210. Test/injection seam for the county-coverage decision on
+   * an otherwise-empty result. Production default is
+   * {@link retrievalApiCoverageSource}, which calls an endpoint that does
+   * not exist server-side yet and therefore always resolves
+   * `indeterminate` today — see `placeCoverageSource.ts`'s header for why
+   * that is the correct default rather than a gap to paper over.
+   */
+  coverageSource?: CoverageSource;
 }): Promise<PlaceSearchResult> {
   const limit = Math.min(
     Math.max(Math.floor(input.limit ?? SITUS_SEARCH_MAX_LIMIT), 1),
@@ -1393,12 +1433,64 @@ export async function searchPlaceByPrefix(input: {
     budgetExhausted = true;
   };
 
-  const finish = (hits: PlaceSearchHit[]): PlaceSearchResult => {
-    if (hits.length > 0) return { hits };
-    if (budgetExhausted) {
-      return { hits: [], missClass: SITUS_SEARCH_BUDGET_ERROR };
+  const coverageSource = input.coverageSource ?? retrievalApiCoverageSource;
+
+  /**
+   * P-205 / P-210. Reached only when the ordinary search found nothing and
+   * the budget was not the reason. `no-hit` is a POSITIVE claim ("looked,
+   * in coverage, found nothing") — this lane may not make that claim
+   * without a real coverage answer backing it, per the operator's
+   * fail-closed ruling (2026-09-14). The three verdict branches below are
+   * exhaustive and each maps to exactly one outcome; there is no default
+   * case that falls through to `no-hit`.
+   */
+  const resolveCoverageMiss = async (): Promise<PlaceSearchResult> => {
+    let verdict: Awaited<ReturnType<CoverageSource["checkCoverage"]>>;
+    try {
+      verdict = await coverageSource.checkCoverage({
+        city: locality.city,
+        state: locality.state,
+        zip: locality.zip,
+        rawQuery: input.query,
+      });
+    } catch (err) {
+      // Defense in depth: the default source never throws (it fails closed
+      // internally), but a misbehaving injected source must not be able to
+      // crash the request — that would be a WORSE failure mode than the
+      // decline this whole mechanism exists to produce.
+      return {
+        hits: [],
+        missClass: "coverage_check_unavailable",
+        coverageCheckUnavailableReason: `coverage source threw: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
-    return { hits: [], missClass: "no-hit" };
+    if (verdict.status === "covered") {
+      return { hits: [], missClass: "no-hit" };
+    }
+    if (verdict.status === "not-covered") {
+      return {
+        hits: [],
+        missClass: "county_out_of_coverage",
+        outOfCoverageCounty: {
+          countyFips: verdict.countyFips,
+          countyName: verdict.countyName,
+          state: verdict.state,
+        },
+      };
+    }
+    return {
+      hits: [],
+      missClass: "coverage_check_unavailable",
+      coverageCheckUnavailableReason: verdict.reason,
+    };
+  };
+
+  const finish = (hits: PlaceSearchHit[]): Promise<PlaceSearchResult> => {
+    if (hits.length > 0) return Promise.resolve({ hits });
+    if (budgetExhausted) {
+      return Promise.resolve({ hits: [], missClass: SITUS_SEARCH_BUDGET_ERROR });
+    }
+    return resolveCoverageMiss();
   };
 
   /**
@@ -1522,7 +1614,7 @@ export async function searchPlaceByPrefix(input: {
     merged.push(hit);
     if (merged.length >= limit) break;
   }
-  return finish(merged);
+  return await finish(merged);
 }
 
 /**
