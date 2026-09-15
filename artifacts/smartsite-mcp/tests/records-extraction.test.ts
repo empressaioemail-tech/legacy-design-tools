@@ -61,6 +61,20 @@ const FREE: SmartsiteEntitlementSnapshot = {
   subscriptionTier: null,
   devRole: false,
 };
+/**
+ * P-242. "Sub-Studio" is not only the free tier: a PAID Solo subscriber is
+ * below the Studio ceiling too, and is arguably the more realistic
+ * sub-Studio caller this gate exists to refuse (a real paying customer who
+ * has not bought up, not merely a signed-out visitor). canRunStudioReport
+ * checks `subscriptionTier`, never the coarser `tier` field, so this case
+ * exercises a genuinely different branch than FREE above: proves the gate
+ * does not mistake "paid" for "Studio".
+ */
+const SOLO: SmartsiteEntitlementSnapshot = {
+  tier: "paid",
+  subscriptionTier: "solo",
+  devRole: false,
+};
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -106,6 +120,36 @@ describe("recordsExtraction — Studio gate (never a silent empty result, never 
     expect(body.status).toBe("upgrade_required");
   });
 
+  // P-242 falsifier 1: the earlier live measurement could only reach a
+  // Studio-or-above account, so nobody had observed the gate refuse a
+  // genuinely sub-Studio caller. A free account is one such caller; a PAID
+  // Solo subscriber (below Studio, but not the degenerate null/free case)
+  // is another, and is the case most likely to be mistakenly let through by
+  // a gate that checks `tier === "paid"` instead of the subscription rung.
+  // This is a live, first-hand demonstration at the level where the
+  // entitlement snapshot is resolved — the live account path (a real
+  // sub-Studio API key against production `mcp.smartsite.cloud`) remains
+  // UNEXERCISED by this suite; see the close for why.
+  it("refuses a PAID Solo (sub-Studio, non-free) caller on both tools", async () => {
+    const listResult = await listPurchasedRecords(SOLO, USER_A, {
+      parcelNodeId: PARCEL_NODE_ID,
+    });
+    expect(listResult.isError).toBe(true);
+    const listBody = JSON.parse(listResult.content[0]!.text);
+    expect(listBody.status).toBe("upgrade_required");
+    expect(listBody.reason).toBe("studio_report");
+    expect(listBody.subscriptionTier).toBe("solo");
+
+    const readResult = await readPurchasedRecord(SOLO, USER_A, {
+      parcelNodeId: PARCEL_NODE_ID,
+      artifactId: "00000000-0000-0000-0000-000000000000",
+    });
+    expect(readResult.isError).toBe(true);
+    const readBody = JSON.parse(readResult.content[0]!.text);
+    expect(readBody.status).toBe("upgrade_required");
+    expect(readBody.reason).toBe("studio_report");
+  });
+
   it("a Studio caller is NOT refused (positive case — not vacuous)", async () => {
     const engagementId = await seedEngagement("gate-positive");
     await testDb.insert(recordsRequestJobs).values({
@@ -124,6 +168,64 @@ describe("recordsExtraction — Studio gate (never a silent empty result, never 
     expect(result.isError).toBe(false);
     const body = JSON.parse(result.content[0]!.text);
     expect(body.status).toBe("ok");
+  });
+});
+
+describe("recordsExtraction — P-242: a bad artifactId never reaches the driver", () => {
+  // The live-confirmed defect (2026-09-15, mcp.smartsite.cloud production):
+  // a non-UUID artifactId threw a raw postgres-js error whose message
+  // disclosed the full query text, every column name, and the
+  // records_request_artifacts table name verbatim. Before this fix, this
+  // exact call rejected instead of returning a ToolResult.
+  it("a malformed (non-UUID) artifactId is refused before any query runs, distinctly from artifact_not_found", async () => {
+    const result = await readPurchasedRecord(
+      STUDIO,
+      USER_A,
+      { parcelNodeId: PARCEL_NODE_ID, artifactId: "not-a-real-uuid" },
+      { db: testDb },
+    );
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!.text;
+    const body = JSON.parse(text);
+    expect(body.status).toBe("refused");
+    expect(body.reason).toBe("artifact_id_malformed");
+    expect(body.reason).not.toBe("artifact_not_found");
+    // Falsifier 4: grep the served payload for the table/column names a raw
+    // driver error would have carried.
+    expect(text).not.toMatch(/records_request_artifacts/i);
+    expect(text).not.toMatch(/select|invalid input syntax/i);
+  });
+
+  it("a well-formed but nonexistent UUID artifactId still reads as artifact_not_found, not a lookup failure", async () => {
+    const result = await readPurchasedRecord(
+      STUDIO,
+      USER_A,
+      {
+        parcelNodeId: PARCEL_NODE_ID,
+        artifactId: "11111111-1111-1111-1111-111111111111",
+      },
+      { db: testDb },
+    );
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(result.content[0]!.text);
+    expect(body.reason).toBe("artifact_not_found");
+  });
+
+  it("the same malformed id is refused for list_purchased_records' underlying parcelNodeId path too (belt check: invalid shape never reaches the DB)", async () => {
+    // list_purchased_records has no artifactId argument; its own
+    // caller-controlled DB-bound value is parcelNodeId, already guarded by
+    // looksLikeParcelNodeId before this fix existed. Re-asserted here in
+    // the same suite as the artifactId fix so both of this tool pair's
+    // caller-controlled DB inputs are proven guarded side by side.
+    const result = await listPurchasedRecords(
+      STUDIO,
+      USER_A,
+      { parcelNodeId: "; drop table records_request_artifacts;" },
+      { db: testDb },
+    );
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(result.content[0]!.text);
+    expect(body.reason).toBe("parcel_node_id_invalid");
   });
 });
 
