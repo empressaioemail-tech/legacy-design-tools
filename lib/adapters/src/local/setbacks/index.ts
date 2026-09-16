@@ -46,6 +46,7 @@ import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" 
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
 import lulingTx from "./luling-tx.json" with { type: "json" };
+import martindaleTx from "./martindale-tx.json" with { type: "json" };
 import smithvilleTx from "./smithville-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
@@ -185,6 +186,13 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // the two historic overlay districts are omitted (PUD refusal / no
   // independent dimensional schedule).
   "smithville-tx": smithvilleTx as SetbackTable,
+  // P-258 lane-f (2026-09-16): Caldwell County. Martindale Ch. 155 district
+  // standards. The authoritative host (codelibrary.amlegal.com) returns 403
+  // to this lane's fetches, so the text was read from the City's own zoning
+  // page; the wall and the resulting currency caveat are in the file note.
+  // MU is carried with every dimension not_specified because the district's
+  // standard is per-parcel context, not a scalar.
+  "martindale-tx": martindaleTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
