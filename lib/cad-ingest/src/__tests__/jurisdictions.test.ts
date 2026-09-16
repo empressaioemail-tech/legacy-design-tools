@@ -93,7 +93,11 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     ]);
 
     // Cedar Park's GIS-mappable districts carry ordinance-backed dimensions.
-    // Taylor and Liberty Hill are cited honest-empty tables (WDLL item 5).
+    // Taylor and Liberty Hill are cited tables (WDLL item 5) -- cited, not
+    // empty: Taylor ships 6 place-type rows and Liberty Hill 14 rows.
+    // P-258 lane-c (2026-09-16) moved Cedar Park 16 -> 17 districts (UR,
+    // conservative envelope) and Pflugerville 10 -> 13 (CL3/CL4/CL5), so the
+    // count assertions below carry this lane's numbers.
     expect(j.setbackTables).toEqual(
       expectedCities
         .map((c) => getSetbackTable(c.cityKey))
@@ -109,7 +113,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       getSetbackTable("liberty-hill-tx"),
     ]);
     const cedarPark = getSetbackTable("cedar-park-tx");
-    expect(cedarPark?.districts).toHaveLength(16);
+    expect(cedarPark?.districts).toHaveLength(17);
     expect(cedarPark?.districts.map((district) => district.district_name)).toEqual(
       expect.arrayContaining([
         "DR Development Reserve",
@@ -120,7 +124,16 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
         "LI Light Industrial",
       ]),
     );
-    expect(cedarPark?.note).toMatch(/UR is omitted/i);
+    // P-258 lane-c: UR is no longer omitted. The note keeps the original
+    // omission reasoning as history and points at the conservative-envelope
+    // row, so both halves are asserted.
+    expect(cedarPark?.note).toMatch(/UR was originally omitted/i);
+    expect(cedarPark?.note).toMatch(
+      /NOW ROWED AS A DOCUMENTED CONSERVATIVE ENVELOPE/i,
+    );
+    expect(
+      cedarPark?.districts.some((d) => d.district_name.startsWith("UR ")),
+    ).toBe(true);
     expect(getSetbackTable("taylor-tx")?.districts).toHaveLength(6);
     expect(getSetbackTable("taylor-tx")?.note).toMatch(/WDLL 51/i);
     expect(getSetbackTable("liberty-hill-tx")?.districts).toHaveLength(14);
@@ -148,7 +161,8 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     );
     const pflugerville = getSetbackTable("pflugerville-tx");
     const austin = getSetbackTable("austin-tx");
-    expect(pflugerville?.districts).toHaveLength(10);
+    // P-258 lane-c (2026-09-16): 10 -> 13 with the corridor rows CL3/CL4/CL5.
+    expect(pflugerville?.districts).toHaveLength(13);
     expect(pflugerville?.note).toMatch(/GB1.*omitted/i);
     expect(austin?.districts.length).toBeGreaterThan(0);
     expect(j.setbackTables).toEqual(

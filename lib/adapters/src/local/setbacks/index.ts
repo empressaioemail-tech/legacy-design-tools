@@ -93,6 +93,18 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "austin-tx": austinTx as SetbackTable,
   // Tables contain only code-backed scalar rules. A conditional rule that the
   // envelope cannot evaluate is explicitly omitted in the table note.
+  // P-258 lane-c (2026-09-16, OPS-24 setback acquisition): 61 district-miss
+  // rows added across nine existing tables in ONE pass, largest-parcel-count
+  // first, one commit per city — san-marcos +19, round-rock +14,
+  // dripping-springs +9, kyle +7, georgetown +4, buda +4, pflugerville +3,
+  // cedar-park +1, bastrop +0 (note only; see the Bastrop entries below for
+  // why its five lane-c codes are not rowed). Every added value was read off a
+  // live primary source and is `primary-source-verified` with NO atom_did
+  // (the belton precedent — this corpus has a fabricated-atom_did history, so
+  // no atom id is asserted that was not round-tripped). Each file's note
+  // carries a dated P-258 LANE-C ADDENDUM with the instrument, the effective
+  // date actually read, the sources tried, and every conditional alternative
+  // that was quoted instead of codified.
   "san-marcos-tx": sanMarcosTx as SetbackTable,
   // Hays County batch (F4k) — citation-backed from live ordinances, carry
   // per-value provenance. Dripping Springs from Municode Ch. 30 Exhibit A
@@ -104,21 +116,31 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "buda-tx": budaTx as SetbackTable,
   // F4l batch (Municode + city-PDF, citation-backed from live ordinances,
   // carry per-value provenance). Georgetown from UDC Ch. 6 §6.02 / Ch. 7 Table
-  // 7.02.020 (Supp. 15, Ord. 2025-54; UDC rewrite pending ~mid-2026 — re-verify
-  // when it lands); Round Rock from Pt. III Ch. 2 §2-26 (Supp. 25); Leander
-  // from Ch. 14 Exhibit A Art. VI §6 (Supp. 4 U1); Hutto from UDC §10.403.4.2
-  // (city PDF, Mar 2024 — NOT on Municode); New Braunfels from Ch. 144 §144-3.4
-  // (Supp. 36 U3). Synthesized keys `georgetown_tx`/`round_rock_tx`/
-  // `leander_tx`/`hutto_tx`/`new_braunfels_tx`, normalized to hyphen form here.
+  // 7.02.020 (Supp. 15, Ord. 2025-54). The UDC REWRITE HAS LANDED since that
+  // comment was written: adopted 2026-08-11, effective 2026-11-01, and P-258
+  // lane-c added its AG/MH/PF/MU-DT rows on 2026-09-16 (so those four are
+  // adopted-but-not-yet-in-force on that date, and the file says so). RL is a
+  // SUPERSEDED pre-rewrite single-family code whose land the rewrite's
+  // Section 4.02 Equivalency Table maps onto RT; there is still no RL row —
+  // land stamped RL is covered only through RT's row. Round Rock from
+  // Pt. III Ch. 2 §2-26 (Supp. 25); Leander from Ch. 14 Exhibit A Art. VI §6
+  // (Supp. 4 U1); Hutto from UDC §10.403.4.2 (city PDF, Mar 2024 — NOT on
+  // Municode); New Braunfels from Ch. 144 §144-3.4 (Supp. 36 U3). Synthesized
+  // keys `georgetown_tx`/`round_rock_tx`/`leander_tx`/`hutto_tx`/
+  // `new_braunfels_tx`, normalized to hyphen form here.
   "georgetown-tx": georgetownTx as SetbackTable,
   "round-rock-tx": roundRockTx as SetbackTable,
   "leander-tx": leanderTx as SetbackTable,
   "hutto-tx": huttoTx as SetbackTable,
   "new-braunfels-tx": newBraunfelsTx as SetbackTable,
-  // WDLL item 5, Wave 1 batch 1: both cities have published ordinance
-  // sources, but no local source-atom corpus or complete expected-district
-  // set. Register explicit empty tables rather than inventing values; see
-  // each file's note for the cited source and gate blocker.
+  // WDLL item 5, Wave 1 batch 1. Both tables ARE populated and cited (this
+  // comment's earlier "register explicit empty tables" claim went stale as the
+  // tables filled); each file's note names its source and the codes that
+  // remain honest gaps. P-258 lane-c added cedar-park UR (conservative
+  // envelope) and pflugerville CL3/CL4/CL5 on 2026-09-16 and re-confirmed the
+  // gaps: cedar-park TC is form-based (four TC development areas, per-lot-type
+  // standards, no required setbacks in Area 1), and pflugerville's
+  // conventional districts R/MF-10/O/CI/NS/PF/GI/SF-E are still unrowed.
   "cedar-park-tx": cedarParkTx as SetbackTable,
   "pflugerville-tx": pflugervilleTx as SetbackTable,
   // WDLL 5, Wave 1 batch 3. These jurisdictions must resolve to an explicit,
@@ -132,6 +154,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // getSetbackTableForZoning MUST NOT serve these as current law (WDLL STEP 3).
   "bastrop-city-tx": bastropCityTx as SetbackTable,
   // CURRENT City of Bastrop Euclidean setbacks (BDC Sec. 14.02.003 / Ord. 2026-06).
+  // Rows ONLY for the scalar Euclidean districts (SF-1/SF-2/SF-3/RR); MU/GC/PI/
+  // IND/P-OS/PDD are deliberately ABSENT (CORRECTION C honest-decline) and this
+  // file is hash-locked against a mirror lock in hauska-engine — so do NOT add
+  // rows here without moving both locks. P-258 lane-c (2026-09-16) read the
+  // adopted ordinance's Dimensional Standards Charts and found BASE SCALARS for
+  // all five of those codes (GC/MU/PI/IND/P-OS), which falsifies part of the
+  // "no chart rows" rationale; it recorded the values as evidence in
+  // bastrop-tx.json's note rather than writing unreachable rows. See that note.
   "bastrop-development-code": bastropDevelopmentCode as SetbackTable,
   // RATIFIED 2026-08-04 (doc_repo _decisions/2026-08-04_elgin_setback_table_ratified.md).
   // All 8 Euclidean districts per Elgin Code of Ordinances Ch. 46 Zoning.
