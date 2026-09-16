@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "cedar-park-tx",
   "jurisdictionDisplayName": "City of Cedar Park, TX",
-  "note": "Codified from City of Cedar Park Code of Ordinances, Ch. 11, Art. 11.03: residential dimensional standards at https://ecode360.com/38612844 (sec 11.03.061, Tables 11.03.061A and 11.03.061B) and nonresidential standards at https://ecode360.com/38612863 (sec 11.03.091, Table 11.03.091), accessed 2026-07-21. SHIPPED rows (GIS ZoningAbbrev mappable without variant collision): DR, SR, SU, MF, NB, LB, PO. OMITTED - ES is omitted: no ZoningAbbrev in the Cedar Park GIS layer. OMITTED - UR is omitted: one GIS code cannot distinguish front-entry vs rear-entry townhomes, and street-side setback varies by street class (15/20/25 ft). OMITTED - other live GIS codes seen in the layer (including GB, LI, HC, HI, H, PS, OG, OR, MU, TC, PD and any PD/overlay variants): not yet extracted from the ordinance tables into this file; they remain honest setback-table gaps (envelope declines) until a citation-backed row lands. max_lot_coverage_pct and max_impervious_pct are not specified by these tables; both carry 100 only as the established non-binding sentinel with per-value provenance (not_specified). ADDED 2026-07-23: Table 11.03.091 scalar rows for GB, HC, LI, HI, H, PS, OG, OR, and MU. PA remains omitted because its standards require master-development-plan review. The source table?s residential-boundary buffer, major-corridor, bufferyard, and mixed-use addenda remain conditional and are not asserted by this scalar envelope.",
+  "note": "Codified from City of Cedar Park Code of Ordinances, Ch. 11, Art. 11.03: residential dimensional standards at https://ecode360.com/38612844 (sec 11.03.061, Tables 11.03.061A and 11.03.061B) and nonresidential standards at https://ecode360.com/38612863 (sec 11.03.091, Table 11.03.091), accessed 2026-07-21. SHIPPED rows (GIS ZoningAbbrev mappable without variant collision): DR, SR, SU, MF, NB, LB, PO. OMITTED - ES is omitted: no ZoningAbbrev in the Cedar Park GIS layer. OMITTED - UR is omitted: one GIS code cannot distinguish front-entry vs rear-entry townhomes, and street-side setback varies by street class (15/20/25 ft). OMITTED - other live GIS codes seen in the layer (including GB, LI, HC, HI, H, PS, OG, OR, MU, TC, PD and any PD/overlay variants): not yet extracted from the ordinance tables into this file; they remain honest setback-table gaps (envelope declines) until a citation-backed row lands. max_lot_coverage_pct and max_impervious_pct are not specified by these tables; both carry 100 only as the established non-binding sentinel with per-value provenance (not_specified). ADDED 2026-07-23: Table 11.03.091 scalar rows for GB, HC, LI, HI, H, PS, OG, OR, and MU. PA remains omitted because its standards require master-development-plan review. The source table?s residential-boundary buffer, major-corridor, bufferyard, and mixed-use addenda remain conditional and are not asserted by this scalar envelope. P-258 LANE-C ADDENDUM (2026-09-16, acquisition campaign, branch seat/p258-lane-c): 1 row added -- UR Urban Residential -- plus the TC finding recorded below. Sources: the same eCode360 divisions this file already cites, re-read at source this pass (residential: https://ecode360.com/38612844 = Sec. 11.03.061 with Tables 11.03.061A/11.03.061B; nonresidential: https://ecode360.com/38612863 = Sec. 11.03.091). UR (1,107 of this city's lane-c parcels) WAS PREVIOUSLY OMITTED HERE ON THE GROUNDS THAT 'one GIS code cannot distinguish front-entry vs rear-entry townhomes, and street-side setback varies by street class (15/20/25 ft)'. THAT REASONING IS STILL TRUE AND IS NOW HANDLED RATHER THAN DEFERRED: the row codifies the CONSERVATIVE ENVELOPE (front 25, interior side 15, street side 25, rear 20, height 35) and quotes every alternative it was chosen from, following this corpus's existing conservative-envelope precedent for lockhart-tx RMD/RHD. The row is explicitly labelled a conservative envelope, not a development-type election. TC (Town Center, 947 parcels) IS RECORDED BLOCKED, NOT ROWED, AND THE EVIDENCE IS SPECIFIC: TC is governed by its own Town Center Code -- Article 11.02, Division 2, with an adopted Regulating Plan (read this pass at source: https://ecode360.com/38612018) -- which divides the district into FOUR development areas (Mixed Residential Area, Town Center Area 1, Town Center Area 2, Neighborhood Commercial Area) and assigns standards per area and per housing/lot type. Sec. 11.02's site-development regulations state that 'Except as set forth in subsection (C)(2), Residential Buffer Areas, below there shall be no required setbacks in Town Center Area 1', while the district's only scalar table, Table 11.02.035 Lot Size and Setback Regulations, is keyed by LOT TYPE (Single-Family Detached Lot: front 15 ft., street side 10 ft., interior side 5 ft., rear 5 ft., height 35 ft.; Side Yard Lot: interior side '0 ft./10 ft.'; Townhouse: front 10 ft., interior side 'None'; Condominium: front 10 ft., interior side 10 ft.) with a 40 ft. building setback plus 15 ft. landscape buffer in residential buffer areas. A district whose Area 1 requires NO setbacks and whose only table is per-lot-type cannot be reduced to one honest scalar row, so TC gets none; the citations above are the evidence and the alternatives are recorded here so the next pass can map them per-lot if the layer ever carries lot type. ALSO NOTED, NOT CODED: Sec. 11.03.091's chart (which this file already uses for GB/HC/LI/HI/H/PS/OG/OR/MU) confirms the nonresidential and mixed-use roster as NB, LB, GB, PO, HC, LI, HI, H, PS, OG, OR, MU and PA, and states PA's dimensional standards are established by master development plan -- consistent with this file's existing PA omission, no change needed.",
   "districts": [
     {
       "district_name": "DR Development Reserve",
@@ -1072,6 +1072,64 @@
           "not_specified": true
         }
       }
+    },
+    {
+      "district_name": "UR Urban Residential District (townhome) - conservative envelope",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 15,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://ecode360.com/38612844",
+      "provenance": {
+        "front_ft": {
+          "section_number": "11.03.061.D / Table 11.03.061B",
+          "quote": "Table 11.03.061B Urban Residential (UR), Townhome, 'Front' row: 'Front entry 25'' / 'Rear entry 10''. The table splits UR by lot access and the GIS code 'UR' cannot distinguish them, so the LARGER (front-entry, 25 ft.) is codified as a documented conservative envelope rather than picking the smaller; this mirrors the established conservative-envelope convention already used in this corpus for lockhart-tx RMD/RHD.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Table 11.03.061B",
+          "quote": "UR Townhome, 'Rear' row: 20' (single value, same for front-entry and rear-entry).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Table 11.03.061B",
+          "quote": "UR Townhome, 'Interior Side' row: \"0'/15'\" with note 9 'The second number represents the minimum separation between townhome buildings consisting of three (3) or more contiguous dwelling units.' The 15 ft. figure is codified as the conservative envelope; the 0 ft. common-wall case is a real alternative and is quoted here rather than dropped.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Table 11.03.061B",
+          "quote": "UR Townhome, 'Street Side' row: '15'20'25'' with note 5 'The minimum street side setback shall be 15' on local streets, 20' on collector streets, and 25' on arterial streets.' 25 ft. (arterial, the largest) is codified as the conservative envelope; all three street-class values are quoted and none is dropped.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Table 11.03.061B",
+          "quote": "UR Townhome, 'Maximum Building Height' column: 35' (note 6 adds a one-storey limit within 100 ft. of a single-family district -- a conditional reduction, quoted here and not codified as the base).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "11.03.061",
+          "quote": "Sec. 11.03.061 and Table 11.03.061B state no building lot-coverage cap for UR (the table's columns are density, lot area/width, setbacks, height and minimum living area). 100 is the established non-binding sentinel and must be treated as not_specified.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "11.03.061",
+          "quote": "Sec. 11.03.061 and Table 11.03.061B state no impervious-cover cap for UR. 100 is the established non-binding sentinel and must be treated as not_specified.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "envelope_note": "CONSERVATIVE ENVELOPE, NOT A DEVELOPMENT-TYPE ELECTION: UR parcels in the GIS layer carry only the district code, while the ordinance splits UR townhomes by lot access (front-entry vs rear-entry) and by street class (local/collector/arterial). This row codifies the most restrictive of each stated alternative; it is not a claim about any specific lot's access or street class, and each alternative is quoted in provenance."
     }
   ]
 }
