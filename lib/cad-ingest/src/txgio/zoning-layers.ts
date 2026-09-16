@@ -19,11 +19,19 @@
  * Single-Family" -> leading token "RS"; Georgetown's zoning GIS `ZONE`
  * field is "RS". So the RAW `ZONE` value stamped verbatim -> normalized
  * "RS" -> exact-matches the "RS ..." setback row. Verified live
- * 2026-07-20 for all 12 setback districts (RE/RL/RS/TF/TH/MF-1/MF-2/
- * CN/C-1/C-3/OF/IN); the 5 GIS-only codes (AG/BP/MH/MU-DT/PF) have no
- * setback row and correctly hit the conservative fallback (AG and MU are
- * deliberately excluded from the setback table as form-based /
- * no-simple-setback districts). DO NOT transform the code before
+ * 2026-07-20 for the rows that existed then (RE/RS/TF/TH/MF-1/MF-2/
+ * CN/C-1/C-3/OF/IN); the 5 GIS-only codes (AG/BP/MH/MU-DT/PF) had no
+ * setback row at that time and correctly hit the conservative fallback.
+ * CORRECTED 2026-09-16 (P-258 lane-c): that verification list named RL as
+ * covered, which was never true — Georgetown's single-family rows are
+ * RE/RT/RS/RM and no row's leading token normalizes to "RL", so an
+ * "RL"-stamped parcel correctly falls back. The rewrite's Section 4.02
+ * Equivalency Table maps previous-UDC "RL Residential Low Density" onto
+ * current-UDC "RT Residential Traditional", so RL land is covered only
+ * through its successor's row. AG/MH/PF/MU-DT are now rowed (adopted
+ * 2026-08-11, effective 2026-11-01 rewrite vintage, so they are NOT in
+ * force on 2026-09-16); BP and RL remain genuine gaps. See
+ * georgetown-tx.json's note for both. DO NOT transform the code before
  * stamping — the leading-token contract does the alignment.
  *
  * The stamp is county-scoped (it updates `txgio_parcel` rows for one
