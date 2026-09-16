@@ -165,6 +165,19 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // packages/adapters/src/local/setbacks/ copy (identical to the corpus
   // package's waco-tx.json) rather than re-authored; see that file's own
   // note for the full source trail.
+  // P-258 lane-b, 2026-09-16: that port covered 5 of the layer's 21 codes
+  // (R-E, R-1A, R-1B, R-1C, R-2). This branch researched and appended the
+  // other 16 district-miss codes -- R-3A/R-3B/R-3C/R-3D/R-3E, O-1/O-2/O-3,
+  // C-1/C-2/C-3/C-4/C-5, M-1/M-2/M-3 -- from Chapter 28 Article IV
+  // Divisions 7-22 (yard sections 28-401 through 28-776, height sections
+  // 28-400 through 28-775), cross-checked against the City's own Chart 1 /
+  // Chart 2 / Chart 3 and against the live zoning layer's distinct-code
+  // query, so every Euclidean code the layer stamps now has a row. Four of
+  // them state no height limit (R-3E, O-2, C-4, M-3) and carry the
+  // canonical not_specified sentinel 999. See the file's note (EXTENDED
+  // 2026-09-16) for the source trail, the reduced-confidence codings and
+  // the one open thread (section 28-216's R-district impervious figure
+  // versus the five pre-existing rows' 100 sentinel).
   "waco-tx": wacoTx as SetbackTable,
 };
 
