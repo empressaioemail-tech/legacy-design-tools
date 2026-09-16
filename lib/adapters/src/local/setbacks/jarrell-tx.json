@@ -1,0 +1,864 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "jarrell-tx",
+  "jurisdictionDisplayName": "City of Jarrell, TX",
+  "effectiveDate": "2024-02-06",
+  "note": "City of Jarrell, Williamson County, TX. INSTRUMENT: Unified Development Code (UDC) Chapter 4.00, \"Zoning District Use Regulations and Lot Design Standards\", Sec. 4.11 \"Lot Design Standards\", Table 4-11, adopted as part of the revised UDC by Ordinance 2018-03-27-01 (adopted 3/27/18) and replaced/updated by Ordinance 2024-0206-01 (adopted 2/6/2024) -- both dates read from the chapter's own ordinance-history parenthetical \"(Ordinance 2018-03-27-01 adopted 3/27/18; Ordinance 2024-0206-01 adopted 2/6/2024)\" that closes each Chapter 4 section. effectiveDate is the 2024 amendment, 2024-02-06. The city's own development page separately publishes Ordinance No. 2024-0206-01 'Updating Zoning Districts UDC Chapter 4.00' with the 'City of Jarrell Zoning Map Adopted 03.05.2024', which corroborates the same 2024 revision cycle (the page date reads March 13, 2024; the ordinance's own history line reads 2/6/2024). ROUTE, STATED PLAINLY. The authoritative host is eCode360 (https://ecode360.com/JA6361), the platform whose bucket the 2026-08-04 decision (eCode360 partnership retired; zoning is public record, acquire by scrape) moves to the engineering track. This lane verified eCode360 live on 2026-09-16: GET https://ecode360.com/JA6361 returned HTTP 200 stating \"Includes legislation through Ord. No. 2026-0407-07 adopted April 7, 2026\", and GET https://ecode360.com/JA6361/laws returned HTTP 200 (ledger rows carry data-scan-date=\"2026-08-14\"). eCode360's section BODY is client-rendered: those fetches return the shell and the ledger, not the section text, so the TABLE 4-11 text quoted here was read from the Zoneomics mirror of the Jarrell ordinance (https://www.zoneomics.com/code/jarrell-TX/chapter_4, fetched 2026-09-16), which reproduces the eCode360 Jarrell text verbatim, chapter history parentheticals included. That mirror is the single route for the verbatim quotes in this file, so values are coded at confidence 0.85: the numbers are read from a faithful mirror of the primary host, not from the primary host's own rendered page. A reader who can render eCode360's JA6361 Section 4.11 should reconcile against this table. The city's own site (cityofjarrell.com/documents/ordinance-no-2024-0206-01-updating-zoning-districts-udc-chapter-4-00/) exposes only a document landing page with no downloadable exhibit at the URL fetched on 2026-09-16. MODELING. (1) Table 4-11 is a city-limit table: Sec. 4.11 states that because zoning only applies inside the City limits, these lot standards \"are nonbinding guidelines for development in the ETJ\" until land is annexed and zoned. The values below are therefore binding only within the City limits; ETJ parcels are not governed by them (a non-binding case the planner should route accordingly). (2) Table 4-11 carries two \"adjacent to residential\" columns (Min. Rear Setback Adjacent to Residential, Min. Side Setback Adjacent to Residential). The corpus has no field for a residential-adjacency buffer, so the general minimum is coded in rear_ft/side_ft and the adjacency figure from the same table is carried in that field's quote plus this note. (3) Table 4-11 states no impervious-cover and no lot-coverage limit, and Sec. 4.11 directs readers to Chapter 6.00 'Site Development and Design Standards' for additional standards; this lane did not extract Chapter 6.00, so max_impervious_pct and max_lot_coverage_pct are coded not_specified rather than guessed. (4) Sec. 4.05 states the city has 19 zoning district classifications: Table 4-1 lists 16 base districts (SF-1, SF-2, SF-3, MF-1, MF-2, MH, C-1, C-2, C-3, BP, I-1, I-2, AG, PF, PUD, MU) plus three overlay districts (I-35, Downtown, Old Town) that were Reserved at the mirrored revision. Table 4-11 carries 15 of the 16 base districts; the sixteenth, Planned Unit Development (PUD), is deliberately absent because Sec. 4.08 states a PUD “requires a specific PUD ordinance and a General Development Plan from the property owner” (see Sec. 3.07.05). A PUD parcel therefore routes to the PUD refusal, not to this table; no PUD row is present and none should be inferred from Table 4-11. (5) Zero setbacks are real zeros in the source (e.g. SF-3 min. side setback 0, C-1/C-2 min. rear setback 0), not missing values. SENTINELS: not_specified carries 100 for the coverage fields and 999 for a missing height, per the corpus gate's G7 rule; no such sentinel is used for any setback above, because Table 4-11 states every one. No value in this table is converted or interpolated. DEMAND: the P-255 census records all 2,817 Jarrell parcels in the no-table row with the zoning stamp refused (withDistrictOnRecord 0, zoningRefused 2,817), so the row set here is the ordinance's own district list, not a stamp vocabulary.",
+  "districts": [
+    {
+      "district_name": "AG Agriculture",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the AG cell is 50.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the AG cell is 50.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the AG cell is 50.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the AG cell is 50.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the AG cell is 35.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 50,
+      "rear_ft": 50,
+      "side_ft": 50,
+      "side_corner_ft": 50,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "SF-1 Single-Family Rural",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-1 cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-1 cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-1 cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-1 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-1 cell is 35.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "SF-2 Single-Family Suburban",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-2 cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-2 cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-2 cell is 5.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-2 cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-2 cell is 35.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "SF-3 Single-Family Small Lot Residential",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-3 cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-3 cell is 5.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-3 cell is 0.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-3 cell is 5.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the SF-3 cell is 40.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 5,
+      "side_ft": 0,
+      "side_corner_ft": 5,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MF-1 Medium Density Residential",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-1 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-1 cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-1 cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-1 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-1 cell is 35.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MF-2 High Density Residential",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-2 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-2 cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-2 cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-2 cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MF-2 cell is 45.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MH Manufactured Housing",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MH cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MH cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for MH is 20 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MH cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for MH is 15 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MH cell is 20.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MH cell is 35.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 20,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-1 Neighborhood Commercial",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-1 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-1 cell is 0. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for C-1 is 20 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-1 cell is 5. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for C-1 is 15 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-1 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-1 cell is 40.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 0,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-2 General Commercial",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-2 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-2 cell is 0. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for C-2 is 20 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-2 cell is 5. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for C-2 is 15 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-2 cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-2 cell is 60.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 0,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-3 Highway Commercial",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-3 cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-3 cell is 15. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for C-3 is 25 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-3 cell is 15. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for C-3 is 15 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-3 cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the C-3 cell is 90.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 25,
+      "max_height_ft": 90,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MU Mixed Use",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MU cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MU cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for MU is 25 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MU cell is 15. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for MU is 20 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MU cell is 15.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the MU cell is 90.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 90,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "BP Business Park",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the BP cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the BP cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for BP is 25 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the BP cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for BP is 20 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the BP cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the BP cell is 60.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "I-1 Light Industrial/Warehousing",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-1 cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-1 cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for I-1 is 35 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-1 cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for I-1 is 25 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-1 cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-1 cell is 60.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "I-2 General Industrial",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-2 cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-2 cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for I-2 is 50 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-2 cell is 15. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for I-2 is 50 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-2 cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the I-2 cell is 60.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 15,
+      "side_corner_ft": 25,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "PF Public Facilities",
+      "citation_url": "https://ecode360.com/JA6361",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Front Setback (feet)\" read verbatim as \"Min. Front Setback (feet) | 50 | 20 | 20 | 20 | 15 | 15 | 25 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 25\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the PF cell is 25.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Rear Setback (feet)\" read verbatim as \"Min. Rear Setback (feet) | 50 | 20 | 10 | 5 | 10 | 10 | 10 | 0 | 0 | 15 | 10 | 10 | 10 | 10 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the PF cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Rear Setback Adjacent to Residential (feet)\" for PF is 10 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Side Setback (feet)\" read verbatim as \"Min. Side Setback (feet) | 50 | 10 | 5 | 0 | 10 | 20 | 10 | 5 | 5 | 15 | 15 | 10 | 10 | 15 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the PF cell is 10. Where the lot abuts a residential district the larger figure in the same table applies: \"Min. Side Setback Adjacent to Residential (feet)\" for PF is 10 feet.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Min. Street Side Setback (feet)\" read verbatim as \"Min. Street Side Setback (feet) | 50 | 15 | 10 | 5 | 15 | 20 | 20 | 15 | 15 | 25 | 15 | 25 | 25 | 25 | 10\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the PF cell is 10.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\", row \"Max. Height (feet)\" read verbatim as \"Max. Height (feet) | 35 | 35 | 35 | 40 | 35 | 45 | 35 | 40 | 60 | 90 | 90 | 60 | 60 | 60 | 60\" for the columns AG | SF-1 | SF-2 | SF-3 | MF-1 | MF-2 | MH | C-1 | C-2 | C-3 | MU | BP | I-1 | I-2 | PF; the PF cell is 60.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 4.11",
+          "quote": "§ 4.11, Table 4-11 \"Lot Design Standards\": the table's rows are Min. Lot Area, Min. Lot Width, Min. Front Setback, Min. Rear Setback, Min. Rear Setback Adjacent to Residential, Min. Side Setback, Min. Side Setback Adjacent to Residential, Min. Street Side Setback, Max. Density and Max. Height -- it states no lot-coverage or impervious-cover limit, and Sec. 4.11 directs readers to Chapter 6.00 \"Site Development and Design Standards\" for additional standards, which this lane did not extract. No value asserted.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    }
+  ]
+}

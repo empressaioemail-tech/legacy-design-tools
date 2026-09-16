@@ -46,6 +46,12 @@ import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" 
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
 import lulingTx from "./luling-tx.json" with { type: "json" };
+import jarrellTx from "./jarrell-tx.json" with { type: "json" };
+// P-258 lane-f (2026-09-16): Williamson County. Jarrell UDC Chapter 4.00
+// Sec. 4.11 Table 4-11 (Lot Design Standards). eCode360 (JA6361) is the
+// authoritative host; its section body is client-rendered, so the quotes come
+// from a mirror of the same text, disclosed in the file note. PUD is outside
+// Table 4-11 by design and routes to the PUD refusal.
 import martindaleTx from "./martindale-tx.json" with { type: "json" };
 import smithvilleTx from "./smithville-tx.json" with { type: "json" };
 
@@ -193,6 +199,7 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // MU is carried with every dimension not_specified because the district's
   // standard is per-parcel context, not a scalar.
   "martindale-tx": martindaleTx as SetbackTable,
+  "jarrell-tx": jarrellTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
