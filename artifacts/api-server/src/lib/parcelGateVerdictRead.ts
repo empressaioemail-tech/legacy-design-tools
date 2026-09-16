@@ -17,6 +17,17 @@
  *     PRIMARY KEY (county_fips, rail_key)
  *   );
  *
+ * P-293 (2026-09-16): that CHECK is no longer the whole story. hauska-factory
+ * migration 0011a (P-201) re-wrote it to ALSO admit
+ * 'excluded-not-applicable', 'excluded-mid-cutover' and
+ * 'excluded-no-acquisition-path' -- alongside the original three, not in
+ * place of them (existing rows still carry a bare 'excluded'). The set of
+ * strings this reader accepts now lives in exactly ONE place,
+ * `parcelGateVerdictVocabulary.ts`, pinned to the factory commit that
+ * widened it; it is not restated here. A string outside that set is logged
+ * loudly and then treated as no-usable-verdict, so the next factory
+ * widening is a finding rather than a silence.
+ *
  * Semantics: 'pass' = this rail is live program-wide AND this county has
  * zero unaccounted cells on it. 'refuse' = this rail is live AND this
  * county has >=1 unaccounted cell on it. 'excluded' = this rail is
@@ -24,7 +35,10 @@
  * reader can distinguish "checked and excluded" from "never evaluated",
  * satisfying "the excludedDeclaredAhead list publishes with every
  * evaluation" at (county, rail) grain even though liveness is itself a
- * global property.
+ * global property. The P-201 `excluded-*` kinds refine that same state with
+ * the reason it was excluded; this reader does not branch on which one,
+ * because the allowlist resolves every recognised non-pass verdict the same
+ * way (see `resolveAllowlistState`).
  *
  * This reader treats a MISSING row and a query ERROR (including "relation
  * parcel_gate_verdict does not exist" if the scheduler has not run its
@@ -34,6 +48,11 @@
  */
 
 import { parcelRecordQueryableFromEnv, type ParcelRecordQueryable } from "./parcelRecordCellRead";
+import {
+  classifyParcelGateVerdictKind,
+  PARCEL_GATE_VERDICT_VOCABULARY_PIN,
+  type ParcelGateVerdictKind,
+} from "./parcelGateVerdictVocabulary";
 
 /**
  * PARCEL-B-SLATE1 (F-01): resolves the real verdict-store connection for a
@@ -60,7 +79,13 @@ export function resolveVerdictStore(
   return parcelRecordQueryableFromEnv();
 }
 
-export type ParcelGateVerdictKind = "pass" | "refuse" | "excluded";
+/**
+ * The vocabulary this reader accepts, and the pin it comes from, are defined
+ * in `parcelGateVerdictVocabulary.ts` -- one list, consumed here, never
+ * restated. Re-exported so a consumer of the reader (and the reader's own
+ * tests) has a single import for "what a verdict is".
+ */
+export type { ParcelGateVerdictKind };
 
 export type ParcelGateVerdict = {
   countyFips: string;
@@ -90,8 +115,42 @@ type VerdictRow = {
   run_id: string;
 };
 
-function isVerdictKind(v: string): v is ParcelGateVerdictKind {
-  return v === "pass" || v === "refuse" || v === "excluded";
+/**
+ * P-293. An unrecognised verdict string must be LOUD, not silent -- before
+ * this it collapsed into the same `null` a missing row and a query error
+ * produce, so a factory vocabulary widening was indistinguishable from "no
+ * verdict written yet". That is how migration 0011a's three new strings
+ * became a serve-state change nobody decided.
+ *
+ * The log fires once per (county, rail, string) per process: the first
+ * occurrence carries the whole message, and a public hot path does not
+ * repeat the same line on every request until whoever is reading the logs
+ * filters the noise out. The tracked keys are bounded by what the store can
+ * hold for the pairs this reader is asked about.
+ */
+const loggedUnrecognisedVerdicts = new Set<string>();
+
+/** Test seam: makes the first-occurrence log observable deterministically. */
+export function resetUnrecognisedVerdictLogForTests(): void {
+  loggedUnrecognisedVerdicts.clear();
+}
+
+function logUnrecognisedVerdict(countyFips: string, railKey: string, raw: string): void {
+  const key = `${countyFips}:${railKey}:${raw}`;
+  if (loggedUnrecognisedVerdicts.has(key)) return;
+  loggedUnrecognisedVerdicts.add(key);
+  console.warn(
+    "parcel_gate_verdict carries a verdict string this reader does not recognise; treating it as no usable verdict, so the allowlist reads legacy (fail-closed).",
+    "countyFips:",
+    countyFips,
+    "railKey:",
+    railKey,
+    "verdict:",
+    JSON.stringify(raw),
+    "accepted vocabulary is pinned at",
+    `${PARCEL_GATE_VERDICT_VOCABULARY_PIN.factoryRepo}@${PARCEL_GATE_VERDICT_VOCABULARY_PIN.factoryShaShort}`,
+    `(re-read ${PARCEL_GATE_VERDICT_VOCABULARY_PIN.factoryPaths.join(", ")} and refresh the pin if the factory widened it)`,
+  );
 }
 
 /**
@@ -109,11 +168,15 @@ export async function loadParcelGateVerdict(
     const result = await store.query<VerdictRow>(SELECT_VERDICT, [countyFips, railKey]);
     const row = result.rows[0];
     if (!row) return null;
-    if (!isVerdictKind(row.verdict)) return null;
+    const classification = classifyParcelGateVerdictKind(row.verdict);
+    if (classification.state === "unrecognised") {
+      logUnrecognisedVerdict(countyFips, railKey, classification.raw);
+      return null;
+    }
     return {
       countyFips: row.county_fips,
       railKey: row.rail_key,
-      verdict: row.verdict,
+      verdict: classification.kind,
       unaccountedCount: row.unaccounted_count,
       evaluatedAt: row.evaluated_at,
       runId: row.run_id,
@@ -128,9 +191,20 @@ export async function loadParcelGateVerdict(
   }
 }
 
+/**
+ * A row for the in-memory store. `verdict` is deliberately `string`, not
+ * `ParcelGateVerdictKind`: the real column is `text`, and a double whose
+ * type only permits strings the vocabulary already accepts could not
+ * exercise the unrecognised branch at all (P-293) -- which is exactly the
+ * branch that silently swallowed migration 0011a.
+ */
+export type MemoryParcelGateVerdictRow = Omit<ParcelGateVerdict, "verdict"> & {
+  verdict: string;
+};
+
 /** In-memory verdict store for tests. */
 export function memoryParcelGateVerdicts(
-  rows: ReadonlyArray<ParcelGateVerdict>,
+  rows: ReadonlyArray<MemoryParcelGateVerdictRow>,
 ): ParcelRecordQueryable {
   return {
     async query<T extends Record<string, unknown> = Record<string, unknown>>(

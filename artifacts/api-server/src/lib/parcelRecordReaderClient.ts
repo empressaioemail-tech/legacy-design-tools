@@ -19,6 +19,8 @@
  * contract `parcelRecordCellRead.ts` already had for "store not configured".
  */
 
+import type { ParcelGateVerdictKind } from "./parcelGateVerdictVocabulary";
+
 const DEFAULT_RETRIEVAL = "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
 
 /** Coalescing/cache window. Generous enough to cover one facets request's rail fan-out, short enough that staleness is negligible against a read-replica of already-committed values. */
@@ -28,7 +30,17 @@ export type ParcelRecordServeState = "record" | "refused" | "legacy-transitional
 
 export interface ParcelRecordRailWire {
   cell: Record<string, unknown> | null;
-  gate: { verdict: "pass" | "refuse" | "excluded" | null; evaluatedAt: string | null };
+  /**
+   * P-293: widened from `"pass" | "refuse" | "excluded"`. This is the
+   * retrieval service's `/record` response, whose `gate.verdict` is the same
+   * `parcel_gate_verdict.verdict` column the rest of this lane reads, so
+   * migration 0011a's `excluded-*` kinds can arrive here too. Type-only:
+   * nothing in this repo switches on this field, and no runtime narrowing
+   * happens at the parse below either, so the old, narrower union was a
+   * claim the wire could not keep rather than a filter that protected
+   * anything.
+   */
+  gate: { verdict: ParcelGateVerdictKind | null; evaluatedAt: string | null };
   serve: ParcelRecordServeState;
   atom: { did: string; entityType: string; body: unknown } | null;
   atomBacked: boolean;
@@ -139,8 +151,9 @@ export async function fetchParcelRecord(placeKey: string): Promise<ParcelRecordW
   return result;
 }
 
+/** P-293: widened alongside `ParcelRecordRailWire.gate.verdict` above -- same column, same reason. */
 export type ParcelGateVerdictWire = {
-  verdict: "pass" | "refuse" | "excluded";
+  verdict: ParcelGateVerdictKind;
   evaluatedAt: string;
 } | null;
 
