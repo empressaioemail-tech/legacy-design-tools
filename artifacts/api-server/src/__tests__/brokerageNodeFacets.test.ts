@@ -2937,6 +2937,23 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     };
 
     async function seedValueHistoryPresent(placeKey: string) {
+      // The route 404s "not_baked" before it ever reaches valueHistoryFact
+      // unless a Tier-1 baked snapshot row exists for this parcel -- same
+      // requirement seedCadRollGoldSnapshot above already satisfies for its
+      // own gold parcel.
+      await dbMod.db.insert(placeLayerSnapshots).values({
+        placeKey: placeKeyForNode(placeKey),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: "30.11000",
+        lngRounded: "-97.31500",
+        payloadJson: {
+          ...bakedPayload,
+          parcelNodeId: placeKey,
+          countyFips: "48021",
+          countyName: "Bastrop",
+        },
+        contentHash: `test-hash-valuehistory-${placeKey}`,
+      });
       setValueHistoryVerdictStoreForTests(
         memoryParcelGateVerdicts([
           {
