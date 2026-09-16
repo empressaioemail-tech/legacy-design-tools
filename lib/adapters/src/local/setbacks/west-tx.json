@@ -1,0 +1,585 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "west-tx",
+  "jurisdictionDisplayName": "City of West, TX",
+  "note": "West, TX -- all ten districts in the 'Schedule of District Regulations', Section 20 of the City of West Zoning Ordinance (Exhibit 14A to Chapter 14 of the West Code of Ordinances). ROUTE: read directly from the city's published codification on eCode360 at the citation_url (General Code's eCode360 product carries the City of West's own Code of Ordinances and Exhibit 14A as attachments). The page returns the schedule as an HTML table and rendered cell text, not as a JavaScript shell, so the read is reproducible from a plain fetch of that URL. No Municode, mirror or PDF route was needed; the city's own ordinance list page (cityofwest.com/city-ordinances) links the same code. VINTAGE: Section 20's own foot reads '(Ordinance 210406 adopted 4/6/2021)', read at source. Section 27 (Repealer, Severability, Engrossment and Enrollment Clause) is printed in the same document and this table assumes the Ordinance 210406 text is the version in force; no later amending ordinance appears in the codified Exhibit 14A as read. WHAT THIS SCHEDULE DOES NOT GIVE: (1) No lot-coverage column exists at all -- Section 20 regulates 'Maximum Impervious Cover' instead. max_lot_coverage_pct is therefore a not_specified sentinel for all ten rows and max_impervious_pct carries the real figure; do not read the impervious figure as a building-footprint cap, they are different metrics. (2) The schedule states no corner-lot side yard: its own note defers corner lots, street-adjacency and more-restrictive-adjacency to the ordinance text. side_corner_ft is a not_specified sentinel for all ten rows. (3) MF's front yard cell reads 'Variable', and C-2's and M-1's rear and side yard cells read 'Depends on Bldg. Ht.' -- none of those is a scalar, so they are coded as sentinels with the cell quoted. (4) MH-1's side yard cell reads 'Min. 14 ft. between units' and MH-2's reads '14 Ft./7 Ft.' -- unit separation, not a lot-line setback, and the MH-2 cell is not self-describing; both are coded as flagged non-scalars at the stated figure. (5) AG and SF-E take their district-level yard rules from the ordinance text (Sections 9 and 10) in addition to this schedule; only the schedule cells are coded here. Height: every height cell states stories AND feet ('2.5 stories/36 Ft.'), so max_height_ft is a stated feet figure for all ten rows, not a stories conversion. AG's '3 stories/45 Ft.', M-1's '3 stories/45 Ft.' and MF's '3 stories/45 Ft.' are the tallest.",
+  "districts": [
+    {
+      "district_name": "AG Agricultural District",
+      "front_ft": 50,
+      "rear_ft": 50,
+      "side_ft": 20,
+      "side_corner_ft": 100,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 30,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 50 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: AG | 1 Acre | 2,000 Sq. Ft. | 200 Ft. | 200 Ft. | 50 Ft. | 50 Ft. | 20 Ft. | 3 stories/45 Ft. | 30%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 50 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: AG | 1 Acre | 2,000 Sq. Ft. | 200 Ft. | 200 Ft. | 50 Ft. | 50 Ft. | 20 Ft. | 3 stories/45 Ft. | 30% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 20 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: AG | 1 Acre | 2,000 Sq. Ft. | 200 Ft. | 200 Ft. | 50 Ft. | 50 Ft. | 20 Ft. | 3 stories/45 Ft. | 30% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: AG | 1 Acre | 2,000 Sq. Ft. | 200 Ft. | 200 Ft. | 50 Ft. | 50 Ft. | 20 Ft. | 3 stories/45 Ft. | 30%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 3 stories/45 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: AG | 1 Acre | 2,000 Sq. Ft. | 200 Ft. | 200 Ft. | 50 Ft. | 50 Ft. | 20 Ft. | 3 stories/45 Ft. | 30%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (30% for AG) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 30% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: AG | 1 Acre | 2,000 Sq. Ft. | 200 Ft. | 200 Ft. | 50 Ft. | 50 Ft. | 20 Ft. | 3 stories/45 Ft. | 30%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "SF-E Single-Family Estate Residential District",
+      "front_ft": 40,
+      "rear_ft": 35,
+      "side_ft": 15,
+      "side_corner_ft": 100,
+      "max_height_ft": 36,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 50,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 40 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-E | 24,000 Sq. Ft. | 2,400 Sq. Ft. | 150 Ft. | 160 Ft. | 40 Ft. | 35 Ft. | 15 Ft. | 2.5 stories/36 Ft. | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 35 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-E | 24,000 Sq. Ft. | 2,400 Sq. Ft. | 150 Ft. | 160 Ft. | 40 Ft. | 35 Ft. | 15 Ft. | 2.5 stories/36 Ft. | 50% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 15 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-E | 24,000 Sq. Ft. | 2,400 Sq. Ft. | 150 Ft. | 160 Ft. | 40 Ft. | 35 Ft. | 15 Ft. | 2.5 stories/36 Ft. | 50% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-E | 24,000 Sq. Ft. | 2,400 Sq. Ft. | 150 Ft. | 160 Ft. | 40 Ft. | 35 Ft. | 15 Ft. | 2.5 stories/36 Ft. | 50%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 2.5 stories/36 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-E | 24,000 Sq. Ft. | 2,400 Sq. Ft. | 150 Ft. | 160 Ft. | 40 Ft. | 35 Ft. | 15 Ft. | 2.5 stories/36 Ft. | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (50% for SF-E) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 50% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-E | 24,000 Sq. Ft. | 2,400 Sq. Ft. | 150 Ft. | 160 Ft. | 40 Ft. | 35 Ft. | 15 Ft. | 2.5 stories/36 Ft. | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "SF-1 Single-Family Residential District",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 7,
+      "side_corner_ft": 100,
+      "max_height_ft": 36,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-1 | 6,000 Sq. Ft. | 1,200 Sq. Ft. | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-1 | 6,000 Sq. Ft. | 1,200 Sq. Ft. | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-1 | 6,000 Sq. Ft. | 1,200 Sq. Ft. | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-1 | 6,000 Sq. Ft. | 1,200 Sq. Ft. | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 2.5 stories/36 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-1 | 6,000 Sq. Ft. | 1,200 Sq. Ft. | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (60% for SF-1) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 60% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: SF-1 | 6,000 Sq. Ft. | 1,200 Sq. Ft. | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "TF Two-Family Residential (Duplex) District",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 7,
+      "side_corner_ft": 100,
+      "max_height_ft": 36,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: TF | 6,000 Sq. Ft. | 1,200 Sq. Ft./Unit | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: TF | 6,000 Sq. Ft. | 1,200 Sq. Ft./Unit | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: TF | 6,000 Sq. Ft. | 1,200 Sq. Ft./Unit | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: TF | 6,000 Sq. Ft. | 1,200 Sq. Ft./Unit | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 2.5 stories/36 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: TF | 6,000 Sq. Ft. | 1,200 Sq. Ft./Unit | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (60% for TF) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 60% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: TF | 6,000 Sq. Ft. | 1,200 Sq. Ft./Unit | 60 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2.5 stories/36 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "MF Multiple-Family Residential District",
+      "front_ft": 0,
+      "rear_ft": 7,
+      "side_ft": 7,
+      "side_corner_ft": 100,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 75,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | Variable Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MF | 1 Acre | 550 sf-Effic'y. 650 sf-1 B.R. 780 sf-2 B.R. 930 sf-3 B.R. | 100 Ft. | 100 Ft. | Variable | 7 Ft. | 7 Ft. | 3 stories/45 Ft. | 75% The cell is not a scalar; 0 is coded as a not_specified sentinel, not as a front-yard entitlement.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MF | 1 Acre | 550 sf-Effic'y. 650 sf-1 B.R. 780 sf-2 B.R. 930 sf-3 B.R. | 100 Ft. | 100 Ft. | Variable | 7 Ft. | 7 Ft. | 3 stories/45 Ft. | 75% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MF | 1 Acre | 550 sf-Effic'y. 650 sf-1 B.R. 780 sf-2 B.R. 930 sf-3 B.R. | 100 Ft. | 100 Ft. | Variable | 7 Ft. | 7 Ft. | 3 stories/45 Ft. | 75% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MF | 1 Acre | 550 sf-Effic'y. 650 sf-1 B.R. 780 sf-2 B.R. 930 sf-3 B.R. | 100 Ft. | 100 Ft. | Variable | 7 Ft. | 7 Ft. | 3 stories/45 Ft. | 75%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 3 stories/45 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MF | 1 Acre | 550 sf-Effic'y. 650 sf-1 B.R. 780 sf-2 B.R. 930 sf-3 B.R. | 100 Ft. | 100 Ft. | Variable | 7 Ft. | 7 Ft. | 3 stories/45 Ft. | 75%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (75% for MF) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 75% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MF | 1 Acre | 550 sf-Effic'y. 650 sf-1 B.R. 780 sf-2 B.R. 930 sf-3 B.R. | 100 Ft. | 100 Ft. | Variable | 7 Ft. | 7 Ft. | 3 stories/45 Ft. | 75%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "MH-1 Manufactured Home Park District",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 14,
+      "side_corner_ft": 100,
+      "max_height_ft": 18,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-1 | Min. - 2.5 Ac Max. - 25 Ac 4,500 Sq. Ft. Per D/U Unit | 1,200 Sq. Ft. | N/A | N/A | 25 Ft. | 7 Ft. | Min. 14 ft. between units | 1 story/18 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-1 | Min. - 2.5 Ac Max. - 25 Ac 4,500 Sq. Ft. Per D/U Unit | 1,200 Sq. Ft. | N/A | N/A | 25 Ft. | 7 Ft. | Min. 14 ft. between units | 1 story/18 Ft. | 60% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | Min. 14 ft. between units Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-1 | Min. - 2.5 Ac Max. - 25 Ac 4,500 Sq. Ft. Per D/U Unit | 1,200 Sq. Ft. | N/A | N/A | 25 Ft. | 7 Ft. | Min. 14 ft. between units | 1 story/18 Ft. | 60% The cell states unit-to-unit separation, not a lot-line side setback; 14 is coded as a flagged non-scalar.",
+          "confidence": 0.65,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-1 | Min. - 2.5 Ac Max. - 25 Ac 4,500 Sq. Ft. Per D/U Unit | 1,200 Sq. Ft. | N/A | N/A | 25 Ft. | 7 Ft. | Min. 14 ft. between units | 1 story/18 Ft. | 60%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 1 story/18 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-1 | Min. - 2.5 Ac Max. - 25 Ac 4,500 Sq. Ft. Per D/U Unit | 1,200 Sq. Ft. | N/A | N/A | 25 Ft. | 7 Ft. | Min. 14 ft. between units | 1 story/18 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (60% for MH-1) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 60% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-1 | Min. - 2.5 Ac Max. - 25 Ac 4,500 Sq. Ft. Per D/U Unit | 1,200 Sq. Ft. | N/A | N/A | 25 Ft. | 7 Ft. | Min. 14 ft. between units | 1 story/18 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "MH-2 Manufactured Home Subdivision District",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 14,
+      "side_corner_ft": 100,
+      "max_height_ft": 18,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-2 | Min. - 5 Ac Max. - 50 AC 4,500 Sq. Ft. | 1,200 Sq. Ft. | 45 Ft./72 Ft. | 100 Ft./64 Ft. | 25 Ft. | 7 Ft. | 14 Ft./7 Ft. | 1 story/18 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-2 | Min. - 5 Ac Max. - 50 AC 4,500 Sq. Ft. | 1,200 Sq. Ft. | 45 Ft./72 Ft. | 100 Ft./64 Ft. | 25 Ft. | 7 Ft. | 14 Ft./7 Ft. | 1 story/18 Ft. | 60% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 14 Ft./7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-2 | Min. - 5 Ac Max. - 50 AC 4,500 Sq. Ft. | 1,200 Sq. Ft. | 45 Ft./72 Ft. | 100 Ft./64 Ft. | 25 Ft. | 7 Ft. | 14 Ft./7 Ft. | 1 story/18 Ft. | 60% The two-figure cell is not self-describing (it appears to distinguish a unit-separation case from a lot-line case without a key); 14 is coded as a flagged non-scalar rather than resolved by guess.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-2 | Min. - 5 Ac Max. - 50 AC 4,500 Sq. Ft. | 1,200 Sq. Ft. | 45 Ft./72 Ft. | 100 Ft./64 Ft. | 25 Ft. | 7 Ft. | 14 Ft./7 Ft. | 1 story/18 Ft. | 60%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 1 story/18 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-2 | Min. - 5 Ac Max. - 50 AC 4,500 Sq. Ft. | 1,200 Sq. Ft. | 45 Ft./72 Ft. | 100 Ft./64 Ft. | 25 Ft. | 7 Ft. | 14 Ft./7 Ft. | 1 story/18 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (60% for MH-2) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 60% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: MH-2 | Min. - 5 Ac Max. - 50 AC 4,500 Sq. Ft. | 1,200 Sq. Ft. | 45 Ft./72 Ft. | 100 Ft./64 Ft. | 25 Ft. | 7 Ft. | 14 Ft./7 Ft. | 1 story/18 Ft. | 60%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "C-1 Commercial District-1",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 7,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 90,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-1 | 8,000 Sq. Ft. | N/A | 80 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-1 | 8,000 Sq. Ft. | N/A | 80 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2 stories/35 Ft. | 90% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | 7 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-1 | 8,000 Sq. Ft. | N/A | 80 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2 stories/35 Ft. | 90% Section 21's note to the schedule reads '* Note: See text of the Ordinance for additional or supplemental requirements. Additional setback distance for side and rear yards is required for corner lots, when adjacent to a street, or adjacent to another more restrictive district, etc.', so the schedule itself states no separate corner-lot figure.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-1 | 8,000 Sq. Ft. | N/A | 80 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 2 stories/35 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-1 | 8,000 Sq. Ft. | N/A | 80 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (90% for C-1) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 90% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-1 | 8,000 Sq. Ft. | N/A | 80 Ft. | 100 Ft. | 25 Ft. | 7 Ft. | 7 Ft. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "C-2 General Commercial District",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 7,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 90,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-2 | 10,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | Depends on Bldg. Ht. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-2 | 10,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 2 stories/35 Ft. | 90% The cell is not a scalar; 7 is coded as a not_specified sentinel carrying the same number as the neighbouring districts' flat rear yard, and is NOT the C-2 rule.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | Depends on Bldg. Ht. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-2 | 10,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 2 stories/35 Ft. | 90% The cell is not a scalar; 7 is coded as a not_specified sentinel carrying the same number as the neighbouring districts' flat side yard, and is NOT the C-2 rule.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-2 | 10,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 2 stories/35 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-2 | 10,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (90% for C-2) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 90% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: C-2 | 10,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 2 stories/35 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "M-1 Light Manufacturing/Industrial District",
+      "front_ft": 25,
+      "rear_ft": 7,
+      "side_ft": 7,
+      "side_corner_ft": 100,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 90,
+      "citation_url": "https://ecode360.com/40777551",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20",
+          "quote": "Minimum Front Yard | 25 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: M-1 | 20,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 3 stories/45 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20",
+          "quote": "Minimum Rear Yard* | Depends on Bldg. Ht. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: M-1 | 20,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 3 stories/45 Ft. | 90% The cell is not a scalar; 7 is coded as a not_specified sentinel carrying the same number as the neighbouring districts' flat rear yard, and is NOT the M-1 rule.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "20",
+          "quote": "Minimum Side Yard* | Depends on Bldg. Ht. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: M-1 | 20,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 3 stories/45 Ft. | 90% The cell is not a scalar; 7 is coded as a not_specified sentinel carrying the same number as the neighbouring districts' flat side yard, and is NOT the M-1 rule.",
+          "confidence": 0.6,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "20",
+          "quote": "The Section 20 schedule states no corner-lot side yard; its own note defers corner lots, street-adjacency and more-restrictive-district adjacency to the ordinance text. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: M-1 | 20,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 3 stories/45 Ft. | 90%",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "20",
+          "quote": "Max. Height of Building | 3 stories/45 Ft. Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: M-1 | 20,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 3 stories/45 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20",
+          "quote": "Section 20 has no lot-coverage column; it regulates 'Maximum Impervious Cover' (90% for M-1) instead. No building-footprint coverage cap is stated in this schedule.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20",
+          "quote": "Maximum Impervious Cover | 90% Column order of the schedule, as printed: District | Minimum Frontage Based on Address | Minimum Dwelling Unit Size | Minimum Lot Width | Minimum Lot Depth | Minimum Front Yard | Minimum Rear Yard* | Minimum Side Yard* | Max. Height of Building | Maximum Impervious Cover. Verbatim row: M-1 | 20,000 Sq. Ft. | N/A | 100 Ft. | 100 Ft. | 25 Ft. | Depends on Bldg. Ht. | Depends on Bldg. Ht. | 3 stories/45 Ft. | 90%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,633 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "hewitt-tx",
+  "jurisdictionDisplayName": "City of Hewitt, TX",
+  "note": "Hewitt, TX -- the eleven base districts for which the Zoning Ordinance states a numeric dimensional block, read from Appendix A (ZONING) of the Hewitt Code of Ordinances on Municode. ROUTE: the Municode Appendix A page at the citation_url returned full server-rendered ordinance text to a plain fetch on this pass (the same URL shape the batch-1 post-mortem warns can be a JavaScript shell for other cities) -- no browser render was needed for Hewitt and the read is reproducible by re-fetching that URL. A Zoneomics mirror of the same ordinance (.../hewitt-TX/chapter_2 = Sections 2.x, .../hewitt-TX/chapter_6 = Section 6.101) was used only as a cross-check on the R-1/R-1-G split and on the §6.101 yard clause; every value coded here comes from the Municode text. VINTAGE: the yard and height sections carry '(Ord. No. 11-15-99, 11-15-99)' at their foot, and Section 7.101 (lot area and maximum coverage) carries '(Ord. No. 11-15-99, 11-15-99; Ord. No. 2006-04-03, Sec. 11, 4-3-06)'. So the dimensional provisions as read were last amended 4-3-06 and date to a base ordinance of 11-15-99. The codified Appendix A itself carries no single effective date on the page, and no adoption date is asserted here beyond those amendment stamps read at source. NOT THE SOURCE OF ANY VALUE: Table I in Part 16 ('TABLES') of the same Appendix prints a one-page summary of height/side/rear/front/coverage by district, but it says of itself 'This chart is not part of the zoning ordinance. Refer to the full text for complete requirements.' No value in this table is taken from it; every figure is taken from the operative section quoted in its own provenance. Where Table I and the ordinance text disagree in shape (Table I omits R-1-G entirely), the text governs here. OMITTED AND WHY: (1) MH manufactured home park -- Section 2.107 regulates the park as a whole (minimum park size 3 acres, width/depth 250 ft, maximum coverage 30% of park area, height 35 ft) and states yard figures only for individual spaces in existing nonconforming parks (Section 2.107.1: five feet on all sides). There is no lot-level front/side/rear block for the district, so coding one would be invention. (2) P-R planned residential, P-C planned commercial, M-P planned industrial and BP business park -- planned/overlay-style districts whose standards are set with the approving plan rather than in a Euclidian block; Section 2.115 ('Special regulations are made for the planned districts') defers them. (3) C-2, C-O and M are INCLUDED, but note that their yard standards are stated as 'no side or rear yard minimums shall be required' (C-2), 'no rear yard minimums shall be required' (C-O) and 'no minimum yard requirements ... except that where a lot abuts a lot in an R district, the side or rear yard required in that R district must be provided along the boundary line' (M) -- so their coded 0 means 'no yard required', which is a real standard, not a gap. M's residential-adjacency condition is preserved verbatim in the quote and is NOT collapsed into the 0. NO IMPERVIOUS STANDARD EXISTS in this ordinance (full-text search, cited per field); the coverage column is 'maximum lot coverage ... covered by buildings' only, and C-2/C-O/M state no coverage cap at all (Section 7.101(G): 'there are no minimum lot dimensions or maximum lot coverage for the C-2, C-O or M districts'). R-1-G's coverage is likewise not stated: Section 2.101.1(F) is headed 'Maximum lot coverage' but its only content is a minimum living-area figure (1,750 sq ft), an apparent drafting defect -- coded not_specified with the heading and text quoted. C-OD's corner-lot side yard is not stated in Section 2.108(C)(3) (front and rear 25 ft, side yards at least 10 ft, no corner clause) and is coded not_specified rather than mirrored. R-1-G's dimensional block comes from Section 2.101.1, a separate section that Hewitt's own Table I omits; its height is stated as 'Maximum two stories or 37 feet six inches', coded 37.5 ft.",
+  "districts": [
+    {
+      "district_name": "R-1 Single-Family District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "5.101(A)(1)",
+          "quote": "Two stories or 35 feet in R-1, R-2, R-3, R-4, and R-5 Districts to include accessory buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(A)(4)",
+          "quote": "Maximum coverage. No more than 40 percent of the total area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(A)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-1-G Garden Home District",
+      "front_ft": 20,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 37.5,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "2.101.1(E)",
+          "quote": "Minimum yard sizes are established. 1. Front and rear yards shall have a minimum of 20 feet measured from the property line.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "2.101.1(E)",
+          "quote": "Minimum yard sizes are established. 1. Front and rear yards shall have a minimum of 20 feet measured from the property line.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "2.101.1(E)",
+          "quote": "2. Interior lots shall have a minimum five-foot side yards as measured from the side property lines with a minimum separation between buildings of ten feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "2.101.1(E)",
+          "quote": "3. On a corner lot there shall be a side yard along the side street of not less than ten feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "2.101.1(G)(2)",
+          "quote": "Maximum two stories or 37 feet six inches in height.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "2.101.1(F)",
+          "quote": "Section 2.101.1(F) is headed 'Maximum lot coverage' but its only content is '1. No residential living unit shall contain less than 1,750 square feet in living area.' -- a minimum dwelling-size rule under a coverage heading, an apparent drafting defect. No numeric coverage cap is stated for R-1-G.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "2.101.1",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-2 Duplex District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "5.101(A)(1)",
+          "quote": "Two stories or 35 feet in R-1, R-2, R-3, R-4, and R-5 Districts to include accessory buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(B)(5)",
+          "quote": "Maximum coverage. No more than 40 percent of the total area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(B)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-3 Multiple-Family Residential Low Density District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "5.101(A)(1)",
+          "quote": "Two stories or 35 feet in R-1, R-2, R-3, R-4, and R-5 Districts to include accessory buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(C)(5)",
+          "quote": "Maximum coverage. No more than 50 percent of the total area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(C)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-4 Multiple-Family Residential High Density District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "5.101(A)(1)",
+          "quote": "Two stories or 35 feet in R-1, R-2, R-3, R-4, and R-5 Districts to include accessory buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(D)(5)",
+          "quote": "Maximum coverage. No more than 50 percent of the total area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(D)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-5 Single-Family Attached Dwelling District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(A)(1)",
+          "quote": "R-1, R-2, R-3, R-4 and R-5 districts. 1. Dwellings shall have: (a) Minimum front yard of 25 feet measured from the property line. (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet. (c) Minimum rear yard of at least 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "5.101(A)(1)",
+          "quote": "Two stories or 35 feet in R-1, R-2, R-3, R-4, and R-5 Districts to include accessory buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(E)(5)",
+          "quote": "No more than 50 percent of the total area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(E)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-OD Commercial Office District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "2.108(C)(3)",
+          "quote": "Yard requirements: (a) Every lot within this district shall have front and rear yards of at least 25 feet;",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "2.108(C)(3)",
+          "quote": "Yard requirements: (a) Every lot within this district shall have front and rear yards of at least 25 feet;",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "2.108(C)(3)",
+          "quote": "Yard requirements: (b) Every lot within this district shall have side yards of at least ten feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "2.108(C)(3)",
+          "quote": "Section 2.108(C)(3) states only front/rear (25 ft) and side (10 ft) yards for C-OD and states no separate corner-lot or street-side side yard figure.",
+          "confidence": 0.65,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "2.108(C)(4)",
+          "quote": "Height restrictions: No building shall exceed 35 feet in height.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "2.108(C)(1)(c)",
+          "quote": "Maximum coverage: No more than 40 percent of the total lot area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "2.108",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-1 Restricted Commercial District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 100,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(B)(1)",
+          "quote": "Except as provided in sections 6.102 and 6.103, no structure or use in the C-1 district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than 15 feet each; and a rear yard of not less than 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(B)(1)",
+          "quote": "Except as provided in sections 6.102 and 6.103, no structure or use in the C-1 district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than 15 feet each; and a rear yard of not less than 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(B)(1)",
+          "quote": "Except as provided in sections 6.102 and 6.103, no structure or use in the C-1 district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than 15 feet each; and a rear yard of not less than 25 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(B)(1)",
+          "quote": "Section 6.101(B)(1) states front, two side and rear yards for C-1 and no separate corner-lot or street-side side yard. Section 6.101(C) is a corner-lot VISIBILITY clause (nothing may impede vision between 2.5 and 10 ft above centerline grades within the sight triangle), not a corner side-yard standard, and is not coded as one.",
+          "confidence": 0.65,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "5.101(B)(1)",
+          "quote": "C-1 district. 1. Any building may be erected to a height of 45 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(F)",
+          "quote": "C-1 district. For each lot within the C-1 district the minimum lot area shall be 6,000 square feet. The minimum lot width shall be 60 feet and the minimum depth shall be 100 feet. No more than 50 percent of the total area shall be covered by buildings.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(F)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-2 General Commercial District",
+      "front_ft": 25,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 100,
+      "max_height_ft": 50,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(B)(2)",
+          "quote": "Except as provided in sections 6.102 and 6.103, no structure or use in the C-2 district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet; no side or rear yard minimums shall be required.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(B)(2)",
+          "quote": "... For all permitted uses: A front yard of not less than 25 feet; no side or rear yard minimums shall be required. -- 0 is coded for 'no rear yard required' (a real standard), not as a gap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(B)(2)",
+          "quote": "... For all permitted uses: A front yard of not less than 25 feet; no side or rear yard minimums shall be required. -- 0 is coded for 'no side yard required' (a real standard), not as a gap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(B)(2)",
+          "quote": "Section 6.101(B)(2) requires no side yard at all in C-2, so it states no separate corner-lot or street-side figure either.",
+          "confidence": 0.65,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "5.101(C)(1)",
+          "quote": "C-2, C-O districts. 1. Any building may be erected to a height of 50 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(G)",
+          "quote": "C-2, C-O and M districts. Except as provided under special conditions as stated within this ordinance and subject to parking requirements there are no minimum lot dimensions or maximum lot coverage for the C-2, C-O or M districts.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(G)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-O Outdoor Commercial District",
+      "front_ft": 25,
+      "rear_ft": 0,
+      "side_ft": 10,
+      "side_corner_ft": 100,
+      "max_height_ft": 50,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(B)(3)",
+          "quote": "Except as provided in sections 6.102 and 6.103, no structure or use in the C-O district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than ten feet each; no rear yard minimums shall be required.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(B)(3)",
+          "quote": "... For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than ten feet each; no rear yard minimums shall be required. -- 0 is coded for 'no rear yard required' (a real standard), not as a gap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(B)(3)",
+          "quote": "... For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than ten feet each; no rear yard minimums shall be required.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(B)(3)",
+          "quote": "Section 6.101(B)(3) states front, two side and no rear yard for C-O, with no separate corner-lot or street-side side yard figure.",
+          "confidence": 0.65,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "5.101(C)(1)",
+          "quote": "C-2, C-O districts. 1. Any building may be erected to a height of 50 feet.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(G)",
+          "quote": "C-2, C-O and M districts. Except as provided under special conditions as stated within this ordinance and subject to parking requirements there are no minimum lot dimensions or maximum lot coverage for the C-2, C-O or M districts.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(G)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "M Industrial District",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 100,
+      "max_height_ft": 70,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://library.municode.com/tx/hewitt/codes/code_of_ordinances?nodeId=PTIICOOR_APXAZO_PT12DE_S12.102DE",
+      "provenance": {
+        "front_ft": {
+          "section_number": "6.101(B)(4)",
+          "quote": "Except as provided in sections 6.102 and 6.103, there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district, the side or rear yard required in that R district must be provided along the boundary line. -- 0 is coded for 'no yard required' (a real standard), not as a gap; the residential-adjacency condition quoted here is a real additional requirement and is not collapsed into the 0.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "6.101(B)(4)",
+          "quote": "Except as provided in sections 6.102 and 6.103, there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district, the side or rear yard required in that R district must be provided along the boundary line. -- 0 is coded for 'no yard required' (a real standard), not as a gap; the residential-adjacency condition quoted here is a real additional requirement and is not collapsed into the 0.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "6.101(B)(4)",
+          "quote": "Except as provided in sections 6.102 and 6.103, there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district, the side or rear yard required in that R district must be provided along the boundary line. -- 0 is coded for 'no yard required' (a real standard), not as a gap; the residential-adjacency condition quoted here is a real additional requirement and is not collapsed into the 0.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "6.101(B)(4)",
+          "quote": "Section 6.101(B)(4) states no yards at all in M apart from the R-district-adjacency condition, and so states no separate corner-lot or street-side figure.",
+          "confidence": 0.65,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "5.101(D)(1)",
+          "quote": "M districts. 1. Any building may be erected to a height of 70 feet provided that the building is set back at least one foot for every foot exceeding 35 feet. -- 70 ft is coded as the stated maximum; the one-foot-per-foot-of-excess setback trade above 35 ft is a real additional condition quoted here.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "7.101(G)",
+          "quote": "C-2, C-O and M districts. Except as provided under special conditions as stated within this ordinance and subject to parking requirements there are no minimum lot dimensions or maximum lot coverage for the C-2, C-O or M districts.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "7.101(G)",
+          "quote": "A full-text search of Hewitt's Appendix A (Parts 1-16 of the Zoning Ordinance, as read on Municode) returns no 'impervious' coverage standard anywhere; the ordinance regulates 'maximum lot coverage ... covered by buildings' only, and only for some districts. No impervious-cover figure exists to cite for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}
