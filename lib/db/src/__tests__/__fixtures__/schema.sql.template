@@ -2293,6 +2293,48 @@ CREATE TABLE @@SCHEMA@@.tx_county_boundary (
 );
 
 
+-- Name: tx_etj_boundary; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_etj_boundary (
+    etj_id text NOT NULL,
+    city_key text NOT NULL,
+    city_name text NOT NULL,
+    city_geo_id text,
+    ring_label text NOT NULL,
+    geometry jsonb NOT NULL,
+    west_lng double precision NOT NULL,
+    south_lat double precision NOT NULL,
+    east_lng double precision NOT NULL,
+    north_lat double precision NOT NULL,
+    source text NOT NULL,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: tx_etj_source; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.tx_etj_source (
+    city_key text NOT NULL,
+    city_name text NOT NULL,
+    city_geo_id text,
+    mode text NOT NULL,
+    layer_url text,
+    layer_name text,
+    has_etj_rings boolean NOT NULL,
+    west_lng double precision,
+    south_lat double precision,
+    east_lng double precision,
+    north_lat double precision,
+    etj_ring_count integer DEFAULT 0 NOT NULL,
+    layer_last_edit_at timestamp with time zone,
+    source_vintage text NOT NULL,
+    source_citation text NOT NULL,
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: tx_fema_nfhl_flood_zone; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.tx_fema_nfhl_flood_zone (
@@ -3333,6 +3375,18 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_city_boundary
 
 ALTER TABLE ONLY @@SCHEMA@@.tx_county_boundary
     ADD CONSTRAINT tx_county_boundary_county_fips_pk PRIMARY KEY (county_fips);
+
+
+-- Name: tx_etj_boundary tx_etj_boundary_etj_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_etj_boundary
+    ADD CONSTRAINT tx_etj_boundary_etj_id_pk PRIMARY KEY (etj_id);
+
+
+-- Name: tx_etj_source tx_etj_source_city_key_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.tx_etj_source
+    ADD CONSTRAINT tx_etj_source_city_key_pk PRIMARY KEY (city_key);
 
 
 -- Name: tx_fema_nfhl_flood_zone tx_fema_nfhl_flood_zone_zone_row_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4464,6 +4518,21 @@ CREATE INDEX tx_city_boundary_bbox_idx ON @@SCHEMA@@.tx_city_boundary USING btre
 -- Name: tx_county_boundary_bbox_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX tx_county_boundary_bbox_idx ON @@SCHEMA@@.tx_county_boundary USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_etj_boundary_bbox_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_etj_boundary_bbox_idx ON @@SCHEMA@@.tx_etj_boundary USING btree (west_lng, south_lat, east_lng, north_lat);
+
+
+-- Name: tx_etj_boundary_city_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_etj_boundary_city_idx ON @@SCHEMA@@.tx_etj_boundary USING btree (city_key);
+
+
+-- Name: tx_etj_source_extent_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_etj_source_extent_idx ON @@SCHEMA@@.tx_etj_source USING btree (west_lng, south_lat, east_lng, north_lat);
 
 
 -- Name: tx_fema_nfhl_flood_zone_bbox_idx; Type: INDEX; Schema: public; Owner: -
