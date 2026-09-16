@@ -195,9 +195,14 @@ async function callGetSmartSite(
   let out: { isError: boolean; parsed: Record<string, unknown> } | null = null;
   await withTestClient(async (client) => {
     const result = await client.callTool({ name: "get_smart_site", arguments: args });
+    // P-243: a single-id node read shapes content[0] and moves the full
+    // record to structuredContent, byte-identical to the old content[0].
+    // A stub/batch/error read is untouched and has no structuredContent,
+    // so this helper serves both this file's single-id and array callers.
+    const structured = (result as { structuredContent?: Record<string, unknown> }).structuredContent;
     out = {
       isError: result.isError === true,
-      parsed: JSON.parse((result.content?.[0] as { text: string }).text),
+      parsed: structured ?? JSON.parse((result.content?.[0] as { text: string }).text),
     };
   });
   return out!;
@@ -306,7 +311,9 @@ describe("M-1 anchor: the three live parcels", () => {
       expect(releaseBrief, "brief never reached the mock").not.toBeNull();
       releaseBrief!();
       const result = await pending;
-      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      const parsed = (result as { structuredContent?: Record<string, unknown> }).structuredContent as {
+        anchorRead?: unknown;
+      };
       expect(issuedWhileBriefPending, "anchor waited for the brief").toBe(true);
       expect(parsed.anchorRead).toEqual({ status: "ok" });
     });
